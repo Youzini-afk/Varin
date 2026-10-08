@@ -62,6 +62,9 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
           setFrameUrl(`data:${event.frame.mime};base64,${event.frame.base64}`);
           setStreamError(null);
         } else if (event.type === 'control') {
+          // The next gesture may arrive in this same SSE batch, before React
+          // commits the new control owner. Update the imperative fence now.
+          feedback.current?.setEnabled(event.control.owner === 'agent');
           setControl(event.control);
         } else if (event.type === 'gesture') {
           feedback.current?.show(event.gesture);

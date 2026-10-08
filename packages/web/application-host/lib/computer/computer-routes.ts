@@ -200,6 +200,8 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
           ? { window: body.window } : {}),
         ...(typeof body.includeScreenshot === "boolean" ? { includeScreenshot: body.includeScreenshot } : {}),
         ...(typeof body.textLimit === "number" || body.textLimit === "max" ? { textLimit: body.textLimit } : {}),
+        ...(typeof body.observationId === 'string' ? { observationId: body.observationId } : {}),
+        ...(typeof body.offset === 'number' ? { offset: body.offset } : {}),
         ...(typeof body.maxTreeNodes === "number" ? { maxTreeNodes: body.maxTreeNodes } : {}),
         ...(typeof body.maxTreeDepth === "number" ? { maxTreeDepth: body.maxTreeDepth } : {}),
       });

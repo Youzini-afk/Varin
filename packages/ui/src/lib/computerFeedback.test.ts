@@ -19,6 +19,9 @@ it('maps negative desktop origins into the viewer, preserves dispatch feedback, 
   expect(document.querySelectorAll('.ripple')).toHaveLength(1);
   window.computerFeedback({ gesture: { id: 'type', kind: 'type', phase: 'target', target: { x: -1700, y: 100, width: 400, height: 100 } } });
   expect(document.getElementById('badge')!.textContent).toBe('Typing');
+  window.computerFeedback({ gesture: { id: 'type', kind: 'type', phase: 'failed' } });
+  expect(document.getElementById('badge')!.textContent).toBe('×');
+  expect(document.querySelectorAll('.ripple')).toHaveLength(1);
   window.computerFeedback({ gesture: { id: '*', kind: 'move', phase: 'cancelled' } });
   expect(document.getElementById('cursor')!.style.opacity).toBe('0');
   expect(document.querySelectorAll('.ripple')).toHaveLength(0);

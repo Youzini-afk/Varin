@@ -15,9 +15,9 @@
 #   - release_input, which lifts any held buttons/keys after a cancel.
 #   - capabilities, reporting the honest driver feature table.
 #
-# Background-capable operations deliberately avoid stealing foreground focus
-# by default, matching the product rule that local-console work should prefer
-# semantic and directed input over seizing the user's pointer.
+# The Host admits a single desktop controller before mutations reach here.
+# Auto uses semantic element actions and real pointer/keyboard input; app_post
+# remains an explicit background-message path for compatible native controls.
 
 $ErrorActionPreference = "Stop"
 $script:VarinComputerDriverVersion = "0.1.0"
@@ -148,6 +148,18 @@ public static class VarinWin32 {
 
     [DllImport("user32.dll")]
     public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindowAsync(IntPtr hWnd, int command);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder name, int maxCount);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
+    public static extern int GetWindowLong(IntPtr hWnd, int index);
+
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out int value, int size);
 
     [DllImport("user32.dll")]
     public static extern bool IsIconic(IntPtr hWnd);
@@ -442,8 +454,8 @@ function Send-TextToEditHandle([IntPtr]$hwnd, [string]$text, $element) {
 
 # ---------------------------------------------------------------------------
 # Real global input (SendInput). Unlike the PostMessage paths above these act
-# on the session's shared pointer and keyboard state, so they are used only
-# when the caller explicitly requests the `global` input path.
+# on the session's shared pointer and keyboard state. The Host's exclusive
+# desktop assignment admits both automatic and explicit global input.
 # ---------------------------------------------------------------------------
 
 $script:HeldInputs = @{}
@@ -478,8 +490,58 @@ function Send-ManagedInput($input) {
     }
 }
 
-function Send-GlobalMouseInput([int]$screenX, [int]$screenY, [uint[]]$flags) {
-    [void][VarinWin32]::SetCursorPos($screenX, $screenY)
+function Move-GlobalPointer([int]$screenX, [int]$screenY) {
+    Assert-NotCancelled "before pointer input"
+    if ($script:InputWindow -ne [IntPtr]::Zero -and [VarinWin32]::GetForegroundWindow() -ne $script:InputWindow) {
+        throw "The target window lost foreground focus; input was stopped"
+    }
+    if ($script:InputWindow -ne [IntPtr]::Zero) {
+        $point = New-Object VarinWin32+POINT
+        $point.X = $screenX; $point.Y = $screenY
+        $owner = [VarinWin32]::WindowFromPoint($point)
+        if ($owner -ne $script:InputWindow -and -not [VarinWin32]::IsChild($script:InputWindow, $owner)) {
+            throw "The pointer target is covered by another window; input was stopped"
+        }
+    }
+    if (-not [VarinWin32]::SetCursorPos($screenX, $screenY)) { throw "Windows did not accept pointer movement" }
+}
+
+function Use-GlobalInputWindow([IntPtr]$hwnd, $rootElement) {
+    Assert-NotCancelled "before activating the target window"
+    if ([VarinWin32]::GetForegroundWindow() -ne $hwnd) {
+        if ([VarinWin32]::IsIconic($hwnd)) { [void][VarinWin32]::ShowWindowAsync($hwnd, 9) }
+        [void][VarinWin32]::SetForegroundWindow($hwnd)
+        if ([VarinWin32]::GetForegroundWindow() -ne $hwnd -and $null -ne $rootElement) {
+            try { $rootElement.SetFocus() } catch { }
+        }
+        # Share the driver's existing 120ms input-settle allowance. Do not
+        # inject ALT or attach another application's input queue to force focus.
+        $until = [DateTime]::UtcNow.AddMilliseconds(120)
+        while ([VarinWin32]::GetForegroundWindow() -ne $hwnd -and [DateTime]::UtcNow -lt $until) {
+            Assert-NotCancelled "waiting for the target window to activate"
+            Start-Sleep -Milliseconds 10
+        }
+        if ([VarinWin32]::GetForegroundWindow() -ne $hwnd) {
+            $failure = New-Object System.InvalidOperationException "Windows could not activate the target window; bring it to the foreground and retry"
+            $failure.Data["VarinRejected"] = $true
+            throw $failure
+        }
+    }
+    if ($null -ne $script:GestureOperation.expected_bounds) {
+        $bounds = Get-WindowRectFrame $hwnd
+        foreach ($axis in @("x", "y", "width", "height")) {
+            if ($null -eq $bounds -or [double]$bounds.$axis -ne [double]$script:GestureOperation.expected_bounds.$axis) {
+                $failure = New-Object System.InvalidOperationException "Window geometry changed while activating; observe again"
+                $failure.Data["VarinRejected"] = $true
+                throw $failure
+            }
+        }
+    }
+    $script:InputWindow = $hwnd
+}
+
+function Send-GlobalMouseInput([int]$screenX, [int]$screenY, [uint32[]]$flags) {
+    Move-GlobalPointer $screenX $screenY
     Start-Sleep -Milliseconds 15
     foreach ($flag in $flags) {
         $input = [VarinWin32]::MouseInput($screenX, $screenY, $flag, 0)
@@ -507,7 +569,7 @@ function Send-GlobalMouseClick([int]$screenX, [int]$screenY, [string]$button, [i
 }
 
 function Send-GlobalDrag([int]$fromX, [int]$fromY, [int]$toX, [int]$toY) {
-    [void][VarinWin32]::SetCursorPos($fromX, $fromY)
+    Move-GlobalPointer $fromX $fromY
     Start-Sleep -Milliseconds 30
     $down = [VarinWin32]::MouseInput($fromX, $fromY, [VarinWin32]::MOUSEEVENTF_LEFTDOWN, 0)
     Send-ManagedInput $down
@@ -516,9 +578,7 @@ function Send-GlobalDrag([int]$fromX, [int]$fromY, [int]$toX, [int]$toY) {
         Assert-NotCancelled ("dragged $i of $steps steps; the button is still held")
         $x = [int][math]::Round($fromX + (($toX - $fromX) * $i / $steps))
         $y = [int][math]::Round($fromY + (($toY - $fromY) * $i / $steps))
-        $move = [VarinWin32]::MouseInput($x, $y, ([VarinWin32]::MOUSEEVENTF_MOVE -bor [VarinWin32]::MOUSEEVENTF_ABSOLUTE), 0)
-        # Absolute moves need 0..65535-normalized coordinates; use relative here.
-        [void][VarinWin32]::SetCursorPos($x, $y)
+        Move-GlobalPointer $x $y
         Send-ComputerGesture "dispatched" @{ x = $x; y = $y }
         Start-Sleep -Milliseconds 20
     }
@@ -527,7 +587,7 @@ function Send-GlobalDrag([int]$fromX, [int]$fromY, [int]$toX, [int]$toY) {
 }
 
 function Send-GlobalScroll([int]$screenX, [int]$screenY, [string]$direction, [double]$pages) {
-    [void][VarinWin32]::SetCursorPos($screenX, $screenY)
+    Move-GlobalPointer $screenX $screenY
     $delta = [int][math]::Round(120 * $pages)
     $flag = [VarinWin32]::MOUSEEVENTF_WHEEL
     if ($direction -eq "down" -or $direction -eq "left") {
@@ -675,6 +735,10 @@ function Get-WindowProcessMap {
             $titleLength = [VarinWin32]::GetWindowTextLength($callbackHwnd)
             $builder = New-Object System.Text.StringBuilder ([math]::Max(1, $titleLength + 1))
             [void][VarinWin32]::GetWindowText($callbackHwnd, $builder, $builder.Capacity)
+            $class = New-Object System.Text.StringBuilder 256
+            [void][VarinWin32]::GetClassName($callbackHwnd, $class, $class.Capacity)
+            $cloaked = 0
+            try { [void][VarinWin32]::DwmGetWindowAttribute($callbackHwnd, 14, [ref]$cloaked, 4) } catch { }
             if (-not $map.ContainsKey([int]$procId)) {
                 $map[[int]$procId] = New-Object System.Collections.Generic.List[object]
             }
@@ -684,6 +748,9 @@ function Get-WindowProcessMap {
                 bounds = (Get-WindowRectFrame $callbackHwnd)
                 visible = [bool][VarinWin32]::IsWindowVisible($callbackHwnd)
                 minimized = [bool][VarinWin32]::IsIconic($callbackHwnd)
+                cloaked = $cloaked -ne 0
+                auxiliary = (([VarinWin32]::GetWindowLong($callbackHwnd, -20) -band 0x80) -ne 0) -or
+                    $class.ToString() -in @("Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd")
             })
         }
         return $true
@@ -707,7 +774,17 @@ function Get-WindowDpiScale([IntPtr]$hwnd) {
     return $null
 }
 
+function Get-AppWindows($windows) {
+    @($windows | Where-Object {
+        $_.visible -and -not $_.cloaked -and -not $_.auxiliary -and $_.bounds.width -gt 1 -and $_.bounds.height -gt 1
+    } | Sort-Object @{ Expression = { $_.handle -eq [int64][VarinWin32]::GetForegroundWindow() }; Descending = $true },
+        @{ Expression = { -not $_.minimized }; Descending = $true },
+        @{ Expression = { -not [string]::IsNullOrWhiteSpace($_.title) }; Descending = $true },
+        @{ Expression = { $_.bounds.width * $_.bounds.height }; Descending = $true })
+}
+
 function Resolve-App([string]$query) {
+    $script:ResolvedWindowQuery = $null
     $normalized = $query.Trim()
     $processQuery = $normalized
     if ($processQuery.EndsWith(".exe", [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -728,15 +805,16 @@ function Resolve-App([string]$query) {
     # Same-name Electron helpers may own hidden zero-area windows. Prefer
     # processes with an actual visible window before choosing a name match.
     $processes = @($processes | Sort-Object @{ Expression = {
-        @($script:ProcessWindows[[int]$_.Id] | Where-Object {
-            $_.visible -and $_.bounds.width -gt 0 -and $_.bounds.height -gt 0
-        }).Count -gt 0
+        @(Get-AppWindows $script:ProcessWindows[[int]$_.Id]).Count -gt 0
+    }; Descending = $true }, @{ Expression = {
+        @($script:ProcessWindows[[int]$_.Id] | Where-Object { $_.handle -eq [int64][VarinWin32]::GetForegroundWindow() }).Count -gt 0
     }; Descending = $true })
 
     # Prefer the app identity before titles: an Explorer window showing a
     # Varin folder must not win over the running Varin process.
     $match = $processes | Where-Object { $_.ProcessName -ieq $processQuery } | Select-Object -First 1
     if ($null -eq $match) {
+        $script:ResolvedWindowQuery = $normalized
         $match = $processes | Where-Object {
             $candidate = $_
             $_.MainWindowTitle -ieq $normalized -or
@@ -762,6 +840,7 @@ function Resolve-App([string]$query) {
                 Start-Sleep -Milliseconds 250
                 $candidate = Get-Process -Id $started.Id -ErrorAction SilentlyContinue
                 if ($null -ne $candidate -and $candidate.MainWindowHandle -ne 0) {
+                    $script:ResolvedWindowQuery = $null
                     return $candidate
                 }
             }
@@ -775,12 +854,12 @@ function Resolve-App([string]$query) {
 }
 
 # Resolve which of the process's top-level windows an operation targets:
-# a hwnd number, a window title (exact then contains), or absent = the main
-# window when it exists, else the first visible window.
+# a hwnd number, a unique window title, or the best visible application window.
 function Resolve-AppWindow($process, $selector) {
     $windows = ConvertTo-ObjectArray $script:ProcessWindows[[int]$process.Id]
     if ($windows.Count -eq 0) { $windows = ConvertTo-ObjectArray (Get-ProcessWindows ([int]$process.Id)) }
     $handle = [int64]0
+    if (($null -eq $selector -or "$selector" -eq "") -and $script:ResolvedWindowQuery) { $selector = $script:ResolvedWindowQuery }
     if ($null -ne $selector -and "$selector" -ne "") {
         if ([int64]::TryParse("$selector", [ref]$handle)) {
             $match = $windows | Where-Object { $_.handle -eq $handle } | Select-Object -First 1
@@ -788,20 +867,15 @@ function Resolve-AppWindow($process, $selector) {
             return [IntPtr]$match.handle
         }
         $title = "$selector"
-        $match = $windows | Where-Object { $_.title -ieq $title } | Select-Object -First 1
-        if ($null -eq $match) { $match = $windows | Where-Object { $_.title -ilike "*$title*" } | Select-Object -First 1 }
-        if ($null -eq $match) { throw "no window of $($process.ProcessName) matches title `"$title`"" }
-        return [IntPtr]$match.handle
+        $matchingWindows = @($windows | Where-Object { $_.title -ieq $title })
+        if ($matchingWindows.Count -eq 0) { $matchingWindows = @($windows | Where-Object { $_.title -ilike "*$title*" }) }
+        if ($matchingWindows.Count -eq 0) { throw "no window of $($process.ProcessName) matches title `"$title`"" }
+        if ($matchingWindows.Count -gt 1) { throw "Multiple windows match `"$title`"; choose a window handle from apps" }
+        return [IntPtr]$matchingWindows[0].handle
     }
-    $visible = $windows | Where-Object {
-        $_.visible -and $_.bounds.width -gt 0 -and $_.bounds.height -gt 0
-    } | Sort-Object @{ Expression = { -not $_.minimized }; Descending = $true },
-        @{ Expression = { $_.handle -eq $process.MainWindowHandle }; Descending = $true },
-        @{ Expression = { -not [string]::IsNullOrWhiteSpace($_.title) }; Descending = $true } | Select-Object -First 1
+    $visible = Get-AppWindows $windows | Select-Object -First 1
     if ($null -ne $visible) { return [IntPtr]$visible.handle }
-    if ($process.MainWindowHandle -ne 0) { return [IntPtr]$process.MainWindowHandle }
-    if ($windows.Count -gt 0) { return [IntPtr]$windows[0].handle }
-    return [IntPtr]::Zero
+    throw "No visible application window for $($process.ProcessName); select an explicit window from apps"
 }
 
 function Get-MainElement($process, [IntPtr]$hwnd = [IntPtr]::Zero) {
@@ -1220,7 +1294,7 @@ function Get-SelectedText($processId, $TextLimit = $script:DefaultTextLimit) {
     return $null
 }
 
-function Build-Snapshot([string]$query, $TextLimit = $script:DefaultTextLimit, [int]$MaxTreeNodes = $script:AccessibilityTreeMaxNodeCount, [int]$MaxTreeDepth = $script:AccessibilityTreeMaxDepth, [bool]$Screenshot = $true, $WindowSelector = $null) {
+function Build-Snapshot([string]$query, $TextLimit = $script:DefaultTextLimit, [int]$MaxTreeNodes = $script:AccessibilityTreeMaxNodeCount, [int]$MaxTreeDepth = $script:AccessibilityTreeMaxDepth, [bool]$Screenshot = $false, $WindowSelector = $null) {
     $process = Resolve-App $query
     if ($script:LastInputTimes.ContainsKey($process.Id)) {
         $remaining = 120 - ([DateTime]::UtcNow - $script:LastInputTimes[$process.Id]).TotalMilliseconds
@@ -1437,9 +1511,6 @@ function Invoke-SecondaryAction($element, [string]$action) {
             if ($null -ne $pattern) { $pattern.ScrollIntoView(); return }
         }
         "setfocus" {
-            if (-not (Test-EnvFlagEnabled "VARIN_COMPUTER_ALLOW_FOCUS_ACTIONS")) {
-                throw "SetFocus is disabled by default to avoid stealing user focus; set VARIN_COMPUTER_ALLOW_FOCUS_ACTIONS=1 to enable it."
-            }
             $element.SetFocus()
             return
         }
@@ -1566,9 +1637,6 @@ function Invoke-TypeText($process, [string]$text, $rootOverride = $null) {
     if ($null -ne $element) {
         $valuePattern = Get-CurrentPatternOrNull $element ([Windows.Automation.ValuePattern]::Pattern)
         if ($null -ne $valuePattern -and -not $valuePattern.Current.IsReadOnly) {
-            if (-not (Test-EnvFlagEnabled "VARIN_COMPUTER_ALLOW_UIA_TEXT_FALLBACK")) {
-                throw "UIA ValuePattern text fallback is disabled by default because it may bring the target app to the foreground; set VARIN_COMPUTER_ALLOW_UIA_TEXT_FALLBACK=1 to enable it."
-            }
             $current = ""
             try { $current = [string]$valuePattern.Current.Value } catch {}
             $valuePattern.SetValue($current + $text)
@@ -1641,7 +1709,7 @@ function Invoke-ComputerOperation($operation) {
         return [pscustomobject]@{ ok = $true; pid = $launched.Id }
     }
     if ($tool -eq "get_app_state") {
-        $includeScreenshot = $true
+        $includeScreenshot = $false
         if ($null -ne $operation.screenshot) {
             $includeScreenshot = [bool]$operation.screenshot
         }
@@ -1689,12 +1757,6 @@ function Invoke-ComputerOperation($operation) {
     }
     $inputPath = [string]$operation.input
     if ([string]::IsNullOrWhiteSpace($inputPath)) { $inputPath = "auto" }
-    if ($inputPath -eq "global" -or $operation.click_method -eq "global") {
-        if ([VarinWin32]::GetForegroundWindow() -ne $hwnd) { [void][VarinWin32]::SetForegroundWindow($hwnd) }
-        if ([VarinWin32]::GetForegroundWindow() -ne $hwnd) { throw "Windows could not activate the target window for global input" }
-        $script:InputWindow = $hwnd
-    }
-
     if ($operation.visual_feedback) {
         $target = $windowBounds
         if ($null -ne $element) {
@@ -1727,6 +1789,9 @@ function Invoke-ComputerOperation($operation) {
                     throw "click_method 'accessibility' could not click the requested element"
                 }
             } elseif ($clickMethod -eq "global") {
+                Use-GlobalInputWindow $hwnd $rootElement
+                $windowBounds = Get-WindowBounds $process $rootElement $hwnd
+                if ($null -ne $element) { $operation.element.frame = Get-ElementFrame $element $windowBounds }
                 if ($null -ne $operation.element -and $null -ne $operation.element.frame) {
                     $point = Get-ScreenPoint $operation.element.frame $windowBounds
                 } else {
@@ -1735,6 +1800,7 @@ function Invoke-ComputerOperation($operation) {
                         y = [int][math]::Round($windowBounds.y + [double]$operation.y)
                     }
                 }
+                Send-ComputerGesture "target" $point
                 Send-GlobalMouseClick $point.x $point.y $operation.mouse_button ([int]$operation.click_count)
             } elseif ($clickMethod -eq "app_post" -or $clickMethod -eq "auto") {
                 $handled = $false
@@ -1742,6 +1808,11 @@ function Invoke-ComputerOperation($operation) {
                     $handled = Invoke-PreferredClick $element
                 }
                 if (-not $handled) {
+                    if ($clickMethod -ne "app_post") {
+                        Use-GlobalInputWindow $hwnd $rootElement
+                        $windowBounds = Get-WindowBounds $process $rootElement $hwnd
+                        if ($null -ne $element) { $operation.element.frame = Get-ElementFrame $element $windowBounds }
+                    }
                     if ($null -ne $operation.element -and $null -ne $operation.element.frame) {
                         $point = Get-ScreenPoint $operation.element.frame $windowBounds
                     } else {
@@ -1750,7 +1821,12 @@ function Invoke-ComputerOperation($operation) {
                             y = [int][math]::Round($windowBounds.y + [double]$operation.y)
                         }
                     }
-                    Send-MouseClick $postHwnd $point.x $point.y $operation.mouse_button ([int]$operation.click_count)
+                    if ($clickMethod -eq "app_post") {
+                        Send-MouseClick $postHwnd $point.x $point.y $operation.mouse_button ([int]$operation.click_count)
+                    } else {
+                        Send-ComputerGesture "target" $point
+                        Send-GlobalMouseClick $point.x $point.y $operation.mouse_button ([int]$operation.click_count)
+                    }
                 }
             } else {
                 throw "Invalid click_method '$clickMethod'"
@@ -1766,7 +1842,10 @@ function Invoke-ComputerOperation($operation) {
                 $handled = Invoke-Scroll $element $operation.direction ([double]$operation.pages)
             }
             if (-not $handled) {
-                if ($inputPath -eq "global") {
+                if ($inputPath -ne "app_post") {
+                    Use-GlobalInputWindow $hwnd $rootElement
+                    $windowBounds = Get-WindowBounds $process $rootElement $hwnd
+                    if ($null -ne $element) { $operation.element.frame = Get-ElementFrame $element $windowBounds }
                     $point = Get-ScreenPoint $operation.element.frame $windowBounds
                     if ($null -eq $point) {
                         $point = [pscustomobject]@{
@@ -1774,6 +1853,7 @@ function Invoke-ComputerOperation($operation) {
                             y = [int][math]::Round($windowBounds.y + [double]$operation.y)
                         }
                     }
+                    Send-ComputerGesture "target" $point
                     Send-GlobalScroll $point.x $point.y $operation.direction ([double]$operation.pages)
                 } else {
                     $point = Get-ScreenPoint $operation.element.frame $windowBounds
@@ -1792,21 +1872,24 @@ function Invoke-ComputerOperation($operation) {
             $fromY = [int][math]::Round($windowBounds.y + [double]$operation.from_y)
             $toX = [int][math]::Round($windowBounds.x + [double]$operation.to_x)
             $toY = [int][math]::Round($windowBounds.y + [double]$operation.to_y)
-            if ($inputPath -eq "global") {
+            if ($inputPath -ne "app_post") {
+                Use-GlobalInputWindow $hwnd $rootElement
                 Send-GlobalDrag $fromX $fromY $toX $toY
             } else {
                 Send-Drag $postHwnd $fromX $fromY $toX $toY
             }
         }
         "type_text" {
-            if ($inputPath -eq "global") {
+            if ($inputPath -ne "app_post") {
+                Use-GlobalInputWindow $hwnd $rootElement
                 Send-GlobalText $operation.text
             } elseif (-not (Invoke-TypeText $process $operation.text $rootElement)) {
                 Send-Text $postHwnd $operation.text
             }
         }
         "press_key" {
-            if ($inputPath -eq "global") {
+            if ($inputPath -ne "app_post") {
+                Use-GlobalInputWindow $hwnd $rootElement
                 Send-GlobalKey $operation.key
             } else {
                 Send-Key $postHwnd $operation.key
@@ -1830,6 +1913,11 @@ function Invoke-ComputerOperation($operation) {
         # releases any input this driver had pressed; the message carries how
         # much of the action already reached the desktop.
         return [pscustomobject]@{ ok = $false; cancelled = $true; error = $_.Exception.Message }
+    } catch {
+        if ($_.Exception.Data["VarinRejected"]) {
+            return [pscustomobject]@{ ok = $false; rejected = $true; error = $_.Exception.Message }
+        }
+        throw
     } finally {
         Send-ReleaseInput
         $script:InputWindow = [IntPtr]::Zero

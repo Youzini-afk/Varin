@@ -284,6 +284,8 @@ export interface ComputerObservation {
   windows?: ComputerWindowDescriptor[];
   windowBounds?: ComputerFrame;
   treeLines: string[];
+  /** Display page in this fixed observation; element indexes are never renumbered. */
+  treePage?: { offset: number; total: number; nextOffset?: number };
   elements: ComputerElement[];
   focusedSummary?: string;
   selectedText?: string;
@@ -315,7 +317,7 @@ export interface ComputerAction {
   toY?: number;
   clickCount?: number;
   mouseButton?: "left" | "right" | "middle";
-  /** `auto` prefers semantic patterns; `global` forces real pointer input. */
+  /** Windows auto prefers semantic clicks and real pointer/keyboard input. app_post selects window messages. */
   clickMethod?: "auto" | "accessibility" | "app_post" | "global";
   direction?: "up" | "down" | "left" | "right";
   pages?: number;
@@ -363,6 +365,10 @@ export interface ComputerObserveParams {
   /** Window selector within the app: native handle number or window title. */
   window?: number | string;
   includeScreenshot?: boolean;
+  /** Read another page from the same retained observation without scanning again. */
+  observationId?: string;
+  offset?: number;
+  /** Accessibility-tree lines per page; defaults to 100, max returns all remaining lines. */
   textLimit?: number | "max";
   maxTreeNodes?: number;
   maxTreeDepth?: number;

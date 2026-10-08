@@ -102,7 +102,7 @@ const okResponse = (extra: Record<string, unknown> = {}): DriverResponse => ({ i
 const appSnapshot = () => ({
   app: { name: "notepad", pid: 42, windowTitle: "Untitled - Notepad" },
   windowBounds: { x: 10, y: 10, width: 800, height: 600 },
-  treeLines: ["window Untitled - Notepad"],
+  treeLines: ["0 Edit Text editor", "1 Button Save"],
   elements: [
     { index: 0, name: "Text editor", controlType: "Edit", frame: { x: 0, y: 0, width: 780, height: 560 } },
     { index: 1, name: "Save", controlType: "Button", actions: ["Invoke"] },
@@ -136,6 +136,29 @@ const makeService = (driver?: FakeDriver, extra: Partial<ComputerServiceOptions>
 };
 
 describe("computer service (BC4)", () => {
+  it('pages a fixed tree without rescanning, keeps indexes addressable, and omits screenshots by default', async () => {
+    const snapshot = { ...appSnapshot(), treeLines: Array.from({ length: 205 }, (_, index) => `${index} Button Item ${index}`),
+      elements: Array.from({ length: 205 }, (_, index) => ({ index, name: `Item ${index}`, runtimeId: [index] })) };
+    const driver = makeDriver(async op => op.tool === 'get_app_state' ? okResponse({ snapshot }) : okResponse());
+    const { service } = makeService(driver);
+    try {
+      const first = await service.observe({ app: 'notepad' });
+      expect(first.treeLines).toHaveLength(100);
+      expect(first.treePage).toEqual({ offset: 0, total: 205, nextOffset: 100 });
+      expect(first.screenshot).toBeUndefined();
+      expect(driver.calls.find(op => op.tool === 'get_app_state')).toMatchObject({ screenshot: false });
+      const page = await service.observe({ app: 'notepad', observationId: first.id, offset: 100, textLimit: 2 });
+      expect(page.id).toBe(first.id);
+      expect(page.elements.map(element => element.index)).toEqual([100, 101]);
+      expect(page.treeLines).toEqual(['100 Button Item 100', '101 Button Item 101']);
+      const rest = await service.observe({ app: 'notepad', observationId: first.id, offset: 200, textLimit: 'max' });
+      expect(rest.treeLines).toHaveLength(5);
+      expect(rest.treePage?.nextOffset).toBeUndefined();
+      expect(driver.calls.filter(op => op.tool === 'get_app_state')).toHaveLength(1);
+      await service.act({ action: { kind: 'click', app: '42', observationId: first.id, elementIndex: 101 } });
+      expect(driver.calls.find(op => op.tool === 'click')?.element).toMatchObject({ index: 101 });
+    } finally { await service.dispose(); }
+  });
   it('enforces assignments on the actual remote Host, keeps independent observers, and releases it on user stop', async () => {
     const driver = makeDriver(async op => op.tool === 'get_app_state' ? okResponse({ snapshot: appSnapshot() }) : okResponse());
     const { service: target } = makeService(driver, { hostId: 'target' });
@@ -178,6 +201,8 @@ describe("computer service (BC4)", () => {
       const observation = await call('main', 'observe', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
       const requested = await c.request('lookup', 'local-console', 'observe', 'Read UI'); await c.decide('main', requested.id, true);
       await call('lookup', 'observe', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
+      await expect(call('lookup', 'observe', () => service.observe({ desktopId: 'local-console', app: 'notepad', observationId: observation.id, offset: 1 })))
+        .rejects.toMatchObject({ harnessCode: 'forbidden' });
       expect((await call('main', 'control', () => service.act({ desktopId: 'local-console', automationEpoch: control.automationEpoch,
         action: { kind: 'click', app: 'notepad', observationId: observation.id, elementIndex: 1 } }))).accepted).toBe(true);
       await c.stop('main');
@@ -313,7 +338,7 @@ describe("computer service (BC4)", () => {
       ? okResponse({ snapshot: { ...snapshot, ...(op.screenshot ? { screenshotPngBase64: png.toString('base64'), screenshotSource: 'window' } : {}) } })
       : op.tool === 'click' ? { id: 'x', ok: false, rejected: true, error: 'Window geometry changed' } : okResponse());
     const { service } = makeService(driver);
-    const raster = await service.observe({ app: 'notepad' });
+    const raster = await service.observe({ app: 'notepad', includeScreenshot: true });
     const tree = await service.observe({ app: 'notepad', includeScreenshot: false });
     const result = await service.act({ action: { kind: 'click', app: '42', x: 240, y: 160, observationId: raster.id } });
     expect(driver.calls.find(op => op.tool === 'click')).toMatchObject({ x: 120, y: 80, window: 73, expected_bounds: snapshot.windowBounds, expected_dpi: 2, capture_source: 'window', return_state: 'none' });

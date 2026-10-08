@@ -7,7 +7,7 @@ export function installComputerAppSdk(
   write: (text: string) => void,
 ): void {
   type Options = { desktopId?: string; window?: number | string };
-  type ReadOptions = { fresh?: boolean; emit?: boolean; textLimit?: number | 'max' };
+  type ReadOptions = { fresh?: boolean; emit?: boolean; textLimit?: number | 'max'; offset?: number };
   type Binding = { observation: ComputerObservation; automationEpoch: string; readOnly?: boolean };
   computer.getApp = async (selector: string | { pid: number; window?: number | string }, options: Options = {}) => {
     const app = typeof selector === 'string' ? selector : String(selector.pid);
@@ -18,10 +18,13 @@ export function installComputerAppSdk(
     const target = { desktopId: state.desktopId, window: state.windowHandle ?? options.window ?? (typeof selector === 'object' ? selector.window : undefined), automationEpoch: bound.automationEpoch };
     const pid = String(state.app.pid);
     const read = async (screenshot: boolean, options: ReadOptions = {}) => {
-      if (dirty || options.fresh || screenshot || options.textLimit !== undefined) {
+      const fresh = dirty || options.fresh || screenshot;
+      if (fresh || options.textLimit !== undefined || (state.treePage?.offset ?? 0) !== (options.offset ?? 0)) {
+        if (fresh && options.offset) throw new Error('Read the changed app from offset 0 before continuing its tree');
         dirty = true;
         if (screenshot) raster = undefined;
-        state = await call('observe', [pid, { desktopId: target.desktopId, window: target.window, includeScreenshot: screenshot, textLimit: options.textLimit }]) as ComputerObservation;
+        state = await call('observe', [pid, { desktopId: target.desktopId, window: target.window, includeScreenshot: screenshot, textLimit: options.textLimit,
+          ...(!fresh ? { observationId: state.id, offset: options.offset ?? 0 } : {}) }]) as ComputerObservation;
         if (state.screenshot) raster = state;
         dirty = false;
       }
@@ -41,9 +44,13 @@ export function installComputerAppSdk(
       }
     };
     // An emitted image must not also dump its base64 into the REPL's final-expression text.
+    const treeText = (observation: ComputerObservation) => [...observation.treeLines,
+      ...(observation.treePage?.nextOffset !== undefined
+        ? [`More tree lines: getAXState({offset:${observation.treePage.nextOffset}}) (total ${observation.treePage.total}).`] : [])].join('\n');
     const imageResult = (observation: ComputerObservation, options: ReadOptions) => options.emit === false ? observation : {
       observationId: observation.id, desktopId: observation.desktopId, app: observation.app,
       windowHandle: observation.windowHandle, width: observation.screenshot?.width, height: observation.screenshot?.height,
+      treePage: observation.treePage,
     };
     const point = (value: number | [number, number]) => typeof value === 'number'
       ? { elementIndex: value } : { x: value[0], y: value[1] };
@@ -51,7 +58,7 @@ export function installComputerAppSdk(
       desktopId: target.desktopId, pid: state.app.pid, window: target.window, name: state.app.name,
       async getAXState(options: ReadOptions = {}) {
         const observation = await read(false, options);
-        const text = observation.treeLines.join('\n');
+        const text = treeText(observation);
         if (options.emit !== false) write(text);
         return text;
       },
@@ -64,7 +71,7 @@ export function installComputerAppSdk(
       async getAXStateAndScreenshot(options: ReadOptions = {}) {
         const observation = await read(true, options);
         if (options.emit !== false) {
-          write(observation.treeLines.join('\n'));
+          write(treeText(observation));
           if (observation.screenshot) await call('emitImage', [observation]);
         }
         return imageResult(observation, options);
@@ -75,8 +82,8 @@ export function installComputerAppSdk(
           return act({ ...options, kind: 'click', ...point(value) }, Array.isArray(value));
         },
         async setValue(index: number, value: string) { return act({ kind: 'set_value', elementIndex: index, value }); },
-        async typeText(text: string) { return act({ kind: 'type', text }); },
-        async pressKey(key: string) { return act({ kind: 'key', key }); },
+        async typeText(text: string, options: Pick<ComputerAction, 'clickMethod'> = {}) { return act({ ...options, kind: 'type', text }); },
+        async pressKey(key: string, options: Pick<ComputerAction, 'clickMethod'> = {}) { return act({ ...options, kind: 'key', key }); },
         async scroll(value: number | [number, number], direction: NonNullable<ComputerAction['direction']>, pages = 1) {
           return act({ kind: 'scroll', ...point(value), direction, pages }, Array.isArray(value));
         },

@@ -21,7 +21,8 @@ const finish = (run, error, value) => {
   let result;
   try {
     result = error ? { error: error.message || String(error), errorDetails: { code: error.code, actionSent: error.actionSent, retry: error.retry } }
-      : { value: value === undefined ? undefined : typeof value === 'string' ? value : inspect(value, { depth: 6 }) };
+      : { value: value === undefined || typeof value === 'string' && run.logs.at(-1) === value
+          ? undefined : typeof value === 'string' ? value : inspect(value, { depth: 6 }) };
   } catch (failure) { result = { error: failure.message || String(failure) }; }
   run.closed = true;
   parentPort.postMessage({ type: 'result', id: run.id, logs: run.logs, ...result });
@@ -57,7 +58,8 @@ parentPort.on('message', message => {
   }
   const run = { id: message.id, closed: false, logs: [] };
   context.run(run, () => server.eval(message.script + '\n', server.context, 'computer-repl', (error, value) => {
-    finish(run, error, value);
+    if (error) { finish(run, error); return; }
+    Promise.resolve(value).then(value => finish(run, null, value), error => finish(run, error));
   }));
 });
 `;
@@ -71,7 +73,9 @@ export class ComputerRepl {
     const task = this.#tail.catch(() => undefined).then(() => {
       signal.throwIfAborted();
       if (!this.#worker) {
-        const created = new Worker(SOURCE, { eval: true });
+        // This evaluator promises top-level await independently of flags used
+        // to launch the embedding Host (including Electron's Node process).
+        const created = new Worker(SOURCE, { eval: true, execArgv: ['--experimental-repl-await'] });
         this.#worker = created;
         // Detached script work can fail after the evaluation returned. Keep
         // a lifecycle listener even between calls so it cannot crash Pi.

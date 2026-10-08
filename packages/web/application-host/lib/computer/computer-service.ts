@@ -501,6 +501,8 @@ export interface ComputerService {
     /** Select one of the app's windows: hwnd number or title (BC4.B). */
     window?: number | string;
     includeScreenshot?: boolean;
+    observationId?: string;
+    offset?: number;
     textLimit?: number | "max";
     maxTreeNodes?: number;
     maxTreeDepth?: number;
@@ -1553,10 +1555,41 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return element as unknown as Record<string, unknown>;
   };
 
+  const observationPage = (observation: ComputerObservation, params: Pick<Parameters<ComputerService['observe']>[0], 'offset' | 'textLimit' | 'includeScreenshot'>): ComputerObservation => {
+    const offset = params.offset ?? 0;
+    const limit = params.textLimit ?? 100;
+    if (!Number.isSafeInteger(offset) || offset < 0 || (limit !== 'max' && (!Number.isSafeInteger(limit) || limit < 1))) {
+      throw new HarnessServiceError('invalid-params', 'Observation offset must be non-negative; textLimit must be positive or max');
+    }
+    const total = observation.treeLines.length;
+    if (offset > total) throw new HarnessServiceError('invalid-params', `Observation has ${total} tree lines; offset ${offset} is outside it`);
+    const end = limit === 'max' ? total : Math.min(total, offset + limit);
+    const treeLines = observation.treeLines.slice(offset, end);
+    const indexes = new Set(treeLines.flatMap(line => { const match = /^\s*(\d+)\s/.exec(line); return match ? [Number(match[1])] : []; }));
+    const { screenshot, ...rest } = observation;
+    return { ...rest, treeLines, elements: observation.elements.filter(element => indexes.has(element.index)),
+      treePage: { offset, total, ...(end < total ? { nextOffset: end } : {}) },
+      ...(params.includeScreenshot === true && screenshot ? { screenshot } : {}) };
+  };
+
   const observeImpl: ComputerService["observe"] = async (params) => {
     params.signal?.throwIfAborted();
     const id = await resolveDesktopId(params.desktopId);
     const remote = await remoteTargetFor(id);
+    params.signal?.throwIfAborted();
+    if (params.observationId) {
+      const observation = observations.get(id)?.get(params.observationId);
+      if (observation && observationOwners.get(observation.id)?.key !== automation.context.getStore()?.key) {
+        throw new HarnessServiceError('forbidden', 'This observation belongs to another execution');
+      }
+      if (observation && (!observation.treePage || observation.treePage.total === observation.treeLines.length)) {
+        if (params.includeScreenshot && !observation.screenshot) throw new HarnessServiceError('invalid-params', 'This observation has no screenshot; request a fresh observation with includeScreenshot:true');
+        return observationPage(observation, params);
+      }
+      // Remote post-action receipts can contain just the first display page;
+      // its owning Host retains the full snapshot and validates the reader.
+      if (!remote) throw new HarnessServiceError('not-found', 'Observation is no longer available; observe the app again');
+    }
     if (remote) {
       await recordUsage(id, params.sessionId).catch(() => undefined);
       const finish = beginActivity(id, params.sessionId, params.app, "observe");
@@ -1564,8 +1597,9 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/observe`, {
           app: params.app,
           ...(params.window !== undefined ? { window: params.window } : {}),
-          ...(params.includeScreenshot !== undefined ? { includeScreenshot: params.includeScreenshot } : {}),
-          ...(params.textLimit !== undefined ? { textLimit: params.textLimit } : {}),
+          includeScreenshot: params.includeScreenshot === true,
+          textLimit: 'max',
+          ...(params.observationId ? { observationId: params.observationId } : {}),
           ...(params.maxTreeNodes !== undefined ? { maxTreeNodes: params.maxTreeNodes } : {}),
           ...(params.maxTreeDepth !== undefined ? { maxTreeDepth: params.maxTreeDepth } : {}),
           ...(params.sessionId !== undefined ? { sessionId: params.sessionId } : {}),
@@ -1581,7 +1615,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       // binding is mirrored locally.
       const observation = { ...result.observation, desktopId: id, machineId: remote.desktop.machineId };
       rememberObservation(observation);
-      return observation;
+      return observationPage(observation, params);
     }
     const generation = laneGeneration(id);
     return enqueue(id, "observe", async () => {
@@ -1593,9 +1627,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       const response = await requestWithAbort(driver, {
         tool: "get_app_state",
         app: params.app,
-        screenshot: params.includeScreenshot !== false,
+        screenshot: params.includeScreenshot === true,
         ...(params.window !== undefined ? { window: params.window } : {}),
-        ...(params.textLimit !== undefined ? { text_limit: params.textLimit } : {}),
+        // Public textLimit paginates the retained tree. Native per-field text
+        // handling is independent and keeps its existing defaults.
         ...(params.maxTreeNodes !== undefined ? { max_tree_nodes: params.maxTreeNodes } : {}),
         ...(params.maxTreeDepth !== undefined ? { max_tree_depth: params.maxTreeDepth } : {}),
       }, params.signal).catch(error => { finish(false); throw error; });
@@ -1607,7 +1642,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         rememberObservation(observation);
         if (laneFor(id).control.owner === "agent") laneFor(id).needsObservation = false;
       }
-      return observation;
+      return observationPage(observation, params);
     });
   };
 
@@ -1693,7 +1728,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           tool: "scroll" as const,
           direction: action.direction ?? "down",
           pages: action.pages ?? 1,
-          input: action.clickMethod === "global" ? "global" : "auto",
+          input: action.clickMethod === "app_post" ? "app_post" : action.clickMethod === "global" ? "global" : "auto",
           ...(x !== undefined ? { x } : {}),
           ...(y !== undefined ? { y } : {}),
         };
@@ -1705,21 +1740,21 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           from_y: pixel(action.fromY, "y") ?? 0,
           to_x: pixel(action.toX, "x") ?? 0,
           to_y: pixel(action.toY, "y") ?? 0,
-          input: action.clickMethod === "global" ? "global" : "auto",
+          input: action.clickMethod === "app_post" ? "app_post" : action.clickMethod === "global" ? "global" : "auto",
         };
       case "type":
         return {
           ...base,
           tool: "type_text" as const,
           text: action.text ?? "",
-          input: action.clickMethod === "global" ? "global" : "auto",
+          input: action.clickMethod === "app_post" ? "app_post" : action.clickMethod === "global" ? "global" : "auto",
         };
       case "key":
         return {
           ...base,
           tool: "press_key" as const,
           key: action.key ?? "",
-          input: action.clickMethod === "global" ? "global" : "auto",
+          input: action.clickMethod === "app_post" ? "app_post" : action.clickMethod === "global" ? "global" : "auto",
         };
       case "set_value":
         return { ...base, tool: "set_value" as const, value: action.value ?? "" };
@@ -1798,6 +1833,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         );
         if (!payload.result || typeof payload.result.accepted !== "boolean") throw new RemoteTransportError("Remote Host returned no valid action receipt");
         finish(payload.result.accepted && !payload.result.cancelled && !payload.result.outcome);
+        if (payload.result.observation) {
+          const observation = { ...payload.result.observation, desktopId: id, machineId: remote.desktop.machineId };
+          rememberObservation(observation);
+          payload.result.observation = observation;
+        }
         return payload.result;
       } catch (error) {
         finish(false);
@@ -1870,7 +1910,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       if (response.snapshot && laneGeneration(id) === generation) {
         const observation = observationOf(response.snapshot, desktop);
         rememberObservation(observation);
-        result.observation = observation;
+        result.observation = observationPage(observation, { includeScreenshot: action.returnState === 'screenshot' });
       }
       return result;
     } catch (error) {

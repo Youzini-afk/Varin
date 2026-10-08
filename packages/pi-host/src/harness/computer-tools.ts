@@ -51,7 +51,9 @@ const ComputerOperation = Type.Object({
   toY: Type.Optional(Type.Number({ description: "Drag end y pixel in the screenshot from observationId" })),
   clickCount: Type.Optional(Type.Number()),
   mouseButton: Type.Optional(Type.Union([Type.Literal("left"), Type.Literal("right"), Type.Literal("middle")])),
-  clickMethod: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("accessibility"), Type.Literal("app_post"), Type.Literal("global")])),
+  clickMethod: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("accessibility"), Type.Literal("app_post"), Type.Literal("global")], {
+    description: 'Windows input method: auto uses semantic clicks and real pointer/keyboard input; app_post sends background window messages',
+  })),
   direction: Type.Optional(Type.Union([Type.Literal("up"), Type.Literal("down"), Type.Literal("left"), Type.Literal("right")])),
   pages: Type.Optional(Type.Number({ description: "scroll: number of pages" })),
   text: Type.Optional(Type.String({ description: "type: text to insert" })),
@@ -150,10 +152,12 @@ const ComputerParams = Type.Object({
   relativePath: Type.Optional(Type.String({ description: "artifact/put: file path relative to the managed desktop user's home" })),
   app: Type.Optional(Type.String({ description: "observe: process name, window title, or pid" })),
   window: Type.Optional(Type.Union([Type.Integer(), Type.String()], { description: "observe: native window handle or title" })),
-  includeScreenshot: Type.Optional(Type.Boolean({ description: "observe: attach a PNG screenshot" })),
-  textLimit: Type.Optional(Type.Union([Type.Integer({ minimum: 1 }), Type.Literal("max")], { description: "observe: maximum accessibility-tree lines" })),
+  includeScreenshot: Type.Optional(Type.Boolean({ description: "observe: attach a PNG screenshot; default false" })),
+  observationId: Type.Optional(Type.String({ description: 'observe: read a page from this retained snapshot without capturing again' })),
+  offset: Type.Optional(Type.Integer({ minimum: 0, description: 'observe: tree-line offset; continue with nextOffset from the previous page' })),
+  textLimit: Type.Optional(Type.Union([Type.Integer({ minimum: 1 }), Type.Literal("max")], { description: "observe: tree lines per page; default 100, max returns all remaining lines" })),
   operation: Type.Optional(ComputerOperation),
-  script: Type.Optional(Type.String({ description: "run: JavaScript with top-level await; the last expression is returned. Example: const obs = await computer.observe('app'); await computer.emitImage(obs); obs.id" })),
+  script: Type.Optional(Type.String({ description: "run: JavaScript with top-level await; the last value or Promise is returned. Example: const app = await computer.getApp('notepad'); await app.getAXState()" })),
   timeoutMs: Type.Optional(Type.Integer({ minimum: 1, description: "run: evaluation budget in milliseconds; cancellation clears bindings" })),
 });
 
@@ -224,10 +228,11 @@ const summarizeObservation = (observation: ComputerObservation): string => {
     lines.push(`window: ${b.width}×${b.height} @ (${b.x}, ${b.y})${observation.windowHandle !== undefined ? ` · hwnd ${observation.windowHandle}` : ""}${observation.dpiScale !== undefined ? ` · dpi ×${observation.dpiScale}` : ""}`);
   }
   if (observation.windows && observation.windows.length > 1) {
-    lines.push(`windows: ${observation.windows.map((w) => `${w.handle}${w.main ? "*" : ""}${w.title ? ` "${w.title}"` : ""}`).join(", ")}`);
+    lines.push(`windows: ${observation.windows.length} (apps lists window selectors)`);
   }
   if (observation.focusedSummary) lines.push(`focused: ${observation.focusedSummary}`);
   if (observation.treeLines.length) lines.push(...observation.treeLines);
+  if (observation.treePage?.nextOffset !== undefined) lines.push(`More tree lines (${observation.treePage.total} total): action:"observe", app:"${observation.app.pid}", desktopId:"${observation.desktopId}", observationId:"${observation.id}", offset:${observation.treePage.nextOffset}.`);
   if (observation.screenshot) lines.push(`[screenshot attached: ${observation.screenshot.width ?? "?"}×${observation.screenshot.height ?? "?"}, ${observation.screenshot.base64.length} b64 chars]`);
   return lines.join("\n");
 };
@@ -346,6 +351,8 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
               ...(params.window !== undefined ? { window: params.window } : {}),
               ...(params.includeScreenshot !== undefined ? { includeScreenshot: params.includeScreenshot } : {}),
               ...(params.textLimit !== undefined ? { textLimit: params.textLimit } : {}),
+              ...(params.observationId !== undefined ? { observationId: params.observationId } : {}),
+              ...(params.offset !== undefined ? { offset: params.offset } : {}),
             }, signal ? { signal } : undefined) as ComputerObserveResult;
             const observation = result.observation;
             const blocks: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
@@ -356,7 +363,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             }
             return {
               content: blocks,
-              details: { observationId: observation.id, elements: observation.elements, desktopId: observation.desktopId },
+              details: { observationId: observation.id, desktopId: observation.desktopId, ...(observation.treePage ? { treePage: observation.treePage } : {}) },
             };
           }
           case "act": {
@@ -385,10 +392,11 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             if (r.observation?.screenshot) {
               blocks.push({ type: "image", data: r.observation.screenshot.base64, mimeType: r.observation.screenshot.mime });
             }
+            const { observation: _observation, ...receipt } = r;
             return {
               content: blocks,
               ...(r.accepted ? {} : { isError: true as const }),
-              details: { ...r, observationId: r.observation?.id },
+              details: { ...receipt, observationId: r.observation?.id },
             };
           }
           case "cancel": {
@@ -446,7 +454,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
                 deny: (requestId: string, reason?: string) => request('computer.access', { op: 'deny', requestId, ...(reason ? { reason } : {}) }, requestOptions),
                 releaseAssignment: (desktopId?: string) => request('computer.access', { op: 'release', ...(desktopId ? { desktopId } : {}) }, requestOptions),
                 apps: async (id?: string) => bridge.request("computer.apps", await field(id), requestOptions).then((r) => r.apps),
-                observe: async (app: string, opts?: { desktopId?: string; window?: number | string; includeScreenshot?: boolean; textLimit?: number | "max" }) =>
+                observe: async (app: string, opts?: { desktopId?: string; window?: number | string; includeScreenshot?: boolean; textLimit?: number | "max"; observationId?: string; offset?: number }) =>
                   bridge.request("computer.observe", { ...opts, ...await field(opts?.desktopId), app }, requestOptions).then((r) => r.observation),
                 getApp: async (app: string, opts?: { desktopId?: string; window?: number | string }) => {
                   const target = await field(opts?.desktopId);
@@ -503,7 +511,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
                 return fn(...args);
               }, controller.signal);
               const lines = [...result.logs, ...(result.value !== undefined ? [`⇒ ${result.value}`] : [])];
-              return { content: [{ type: "text", text: lines.join("\n") || "(no output)" }, ...images], details: { logs: result.logs } };
+              return { content: [{ type: "text", text: lines.join("\n") || "(no output)" }, ...images], details: {} };
             } finally {
               clearTimeout(timer);
               signal?.removeEventListener("abort", abort);

@@ -153,6 +153,7 @@ describe("computer tool", () => {
     assert.equal(isError(result), undefined);
     assert.deepEqual(requests[0]!.params, { app: "notepad", includeScreenshot: true });
     assert.equal((result.details as { observationId: string }).observationId, "obs-1");
+    assert.equal('elements' in (result.details as object), false);
     assert.match((result.content[0] as { text: string }).text, /observation obs-1/);
   });
 
@@ -202,6 +203,9 @@ describe("computer tool", () => {
     assert.match((second.content[0] as { text: string }).text, /obs-9/);
     assert.equal(requests.filter((r) => r.method !== "computer.control").map((r) => r.method).join(","), "computer.observe,computer.act");
     assert.equal((requests.find((r) => r.method === "computer.act")!.params as { automationEpoch: string }).automationEpoch, "epoch-1");
+    const promise = await execute(tool, { action: 'run', script: "computer.observe('notepad').then(value => value.id)" });
+    assert.match((promise.content[0] as { text: string }).text, /obs-9/);
+    assert.doesNotMatch((promise.content[0] as { text: string }).text, /Promise/);
   });
 
   it("binds an app across cells, batches actions without captures and carries the original control epoch", async () => {
@@ -217,8 +221,9 @@ describe("computer tool", () => {
     assert.notEqual(isError(first), true, JSON.stringify(first));
     assert.match((first.content[0] as { text: string }).text, /window x/, 'the tree is returned through the worker log channel');
     assert.equal(reads, 1, 'binding and first displayed tree share one observation');
-    const second = await execute(tool, { action: "run", script: "await app.pressKey('enter'); await app.getAXState(); 'done'" });
+    const second = await execute(tool, { action: "run", script: "await app.pressKey('enter'); await app.getAXState()" });
     assert.notEqual(isError(second), true, JSON.stringify(second));
+    assert.equal(((second.content[0] as { text: string }).text.match(/window x/g) ?? []).length, 1);
     assert.equal(reads, 2, 'only the explicit decision-point read refreshes the tree');
     const actions = requests.filter(request => request.method === 'computer.act').map(request => request.params as { action: { kind: string; app: string; observationId?: string; returnState: string }; automationEpoch: string });
     assert.equal(actions.length, 3);
