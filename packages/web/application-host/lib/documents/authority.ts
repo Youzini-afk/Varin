@@ -277,6 +277,7 @@ interface DirtyBarrier {
   pending: Set<string>;
   requiredPublications: Map<string, number>;
   released: boolean;
+  cleanup?: () => void;
   surfaceKeys: Set<string>;
   timer: ReturnType<typeof setTimeout> | null;
   waiters: Set<DirtyBarrierWaiter>;
@@ -318,6 +319,7 @@ interface CaptureAgentInputSnapshotRequest {
 
 interface BeginDirtyStateBarrierOptions {
   caseSensitive?: boolean;
+  signal?: AbortSignal | undefined;
 }
 
 interface JournalMutationRequest {
@@ -1303,31 +1305,39 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
 
   const watcherController = (workspaceId: string): WorkspaceWatcher | null => watchers.get(workspaceId)?.controller ?? null;
 
-  const beginCapture = async (workspaceId: string, options: Record<string, unknown> = {}) => {
+  const beginCapture = async (workspaceId: string, options: Record<string, unknown> = {}, signal?: AbortSignal) => {
+    signal?.throwIfAborted();
     const subscription = watch(workspaceId, () => undefined);
-    const record = watchers.get(workspaceId);
-    const controller = await record?.ready;
-    if (!controller || watchers.get(workspaceId) !== record) {
+    try {
+      const record = watchers.get(workspaceId);
+      const controller = await waitWithSignal(Promise.resolve(record?.ready), signal);
+      if (!controller || watchers.get(workspaceId) !== record) {
+        throw new DocumentAuthorityError('Workspace watcher is unavailable for capture', {
+          code: 'failed',
+          statusCode: 500,
+        });
+      }
+      await new Promise((resolve) => setImmediate(resolve));
+      signal?.throwIfAborted();
+      await waitWithSignal(controller.settle(), signal);
+      await waitWithSignal(mutations.setWatchBaseline(workspaceId, controller.position), signal);
+      const capture = await waitWithSignal(mutations.beginCapture(workspaceId, options), signal);
+      signal?.throwIfAborted();
+      captureWatches.set(capture.captureId, { subscription, controller });
+      return capture;
+    } catch (error) {
       subscription.close();
-      throw new DocumentAuthorityError('Workspace watcher is unavailable for capture', {
-        code: 'failed',
-        statusCode: 500,
-      });
+      throw error;
     }
-    await new Promise((resolve) => setImmediate(resolve));
-    await controller.settle();
-    await mutations.setWatchBaseline(workspaceId, controller.position);
-    const capture = await mutations.beginCapture(workspaceId, options);
-    captureWatches.set(capture.captureId, { subscription, controller });
-    return capture;
   };
 
-  const completeCapture = async (capture: unknown) => {
+  const completeCapture = async (capture: unknown, signal?: AbortSignal) => {
     const captureId = (capture as { captureId?: string })?.captureId;
     const tracked = captureId ? captureWatches.get(captureId) : undefined;
     try {
-      await tracked?.controller.settle();
-      return await mutations.completeCapture(capture as never);
+      signal?.throwIfAborted();
+      await waitWithSignal(Promise.resolve(tracked?.controller.settle()), signal);
+      return await waitWithSignal(mutations.completeCapture(capture as never), signal);
     } finally {
       if (captureId) captureWatches.delete(captureId);
       tracked?.subscription.close();
@@ -1406,6 +1416,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   const releaseDirtyBarrier = (barrier: DirtyBarrier, error?: unknown): void => {
     if (!barrier || barrier.released) return;
     barrier.released = true;
+    barrier.cleanup?.();
     if (barrier.timer) clearTimeout(barrier.timer);
     dirtyBarriers.delete(barrier.barrierId);
     for (const surfaceKey of barrier.surfaceKeys) {
@@ -1524,7 +1535,9 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     if (disposed) {
       throw new DocumentAuthorityError('Document authority is disposed', { code: 'failed', statusCode: 500 });
     }
-    await loadWorkspace(workspaceId);
+    options.signal?.throwIfAborted();
+    await waitWithSignal(loadWorkspace(workspaceId), options.signal);
+    options.signal?.throwIfAborted();
     if (!Array.isArray(paths) || paths.some((entry) => typeof entry !== 'string' || !entry)) {
       throw new DocumentAuthorityError('Dirty-state barrier paths are malformed', { code: 'failed', statusCode: 400 });
     }
@@ -1550,6 +1563,12 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     };
     armDirtyBarrierDeadline(barrier);
     dirtyBarriers.set(barrierId, barrier);
+    if (options.signal) {
+      const signal = options.signal;
+      const onAbort = () => releaseDirtyBarrier(barrier, signal.reason ?? new DOMException('Operation aborted', 'AbortError'));
+      barrier.cleanup = () => signal.removeEventListener('abort', onAbort);
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
     for (const surface of surfaces) {
       if (barrier.released) break;
       try {
@@ -1565,7 +1584,9 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         releaseDirtyBarrier(barrier, dirtyBarrierFailure('A document surface could not receive the dirty-state barrier'));
       }
     }
+    options.signal?.throwIfAborted();
     await settleDirtyBarrier(barrier);
+    options.signal?.throwIfAborted();
     return {
       barrierId,
       async release() {

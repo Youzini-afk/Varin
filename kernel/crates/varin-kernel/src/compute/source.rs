@@ -85,6 +85,60 @@ fn safe_disk_path(root:&Path,path:&Path,scopes:&[String])->Result<PathBuf>{
     if !scopes.iter().any(|scope|within(&relative,scope)){return Err("File target is outside the granted scope".into());}
     Ok(canonical)
 }
+
+/// Baseline inventory is exhaustive, unlike search: ignore files do not filter
+/// it, explicit scopes can name hidden state, and unreadable paths fail capture.
+/// The traversal stays on a compute worker and streams one inventory across pages.
+pub(crate) fn inventory(task: &Task, shared: &Shared) -> Result<bool> {
+    let Source::Disk { root } = &task.source else {
+        return Err("Workspace inventory requires an admitted directory".into());
+    };
+    let canonical = fs::canonicalize(root).map_err(|e| e.to_string())?;
+    if canonical != *root { return Err("Admitted root identity changed before inventory".into()); }
+    let mut pending = task.params.paths.clone().unwrap_or_else(|| vec![String::new()]);
+    let mut visited = HashSet::new();
+    while let Some(path) = pending.pop() {
+        shared.check()?;
+        let path = normalize(&path)?;
+        if !visited.insert(path.clone()) { continue; }
+        let allowed = task.scopes.iter().any(|scope| within(&path, scope));
+        if !allowed && !task.scopes.iter().any(|scope| within(scope, &path)) { continue; }
+        let absolute = root.join(&path);
+        let resolved = if path.is_empty() { absolute.clone() } else {
+            // Resolve ancestors, preserving a leaf symlink as an inventory entry.
+            let parent = match fs::canonicalize(absolute.parent().ok_or("Inventory path has no parent")?) {
+                Ok(parent) => parent,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.to_string()),
+            };
+            parent.join(absolute.file_name().ok_or("Inventory path has no filename")?)
+        };
+        let resolved_path = resolved.strip_prefix(root).map_err(|_| "Inventory path escaped its admitted root")?
+            .to_str().ok_or("Filesystem inventory contains a non-UTF-8 path")?.replace('\\', "/");
+        if allowed && !task.scopes.iter().any(|scope| within(&resolved_path, scope)) {
+            return Err("Inventory path is outside the granted scope".into());
+        }
+        let metadata = match fs::symlink_metadata(&resolved) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.to_string()),
+        };
+        if allowed && !path.is_empty() {
+            shared.emit("entry", &path, "", serde_json::json!({}))?;
+        }
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            for entry in fs::read_dir(&resolved).map_err(|e| e.to_string())? {
+                shared.check()?;
+                let name = entry.map_err(|e| e.to_string())?.file_name().into_string()
+                    .map_err(|_| "Filesystem inventory contains a non-UTF-8 path")?;
+                if name == ".git" || name == ".varin" { continue; }
+                pending.push(if path.is_empty() { name } else { format!("{path}/{name}") });
+            }
+        }
+    }
+    Ok(false)
+}
+
 /// callback=false is an explicit caller result budget, not a failed enumeration.
 pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Document)->Result<bool>)->Result<bool>{
     let content=task.params.operation!="list"||task.params.include_revisions.unwrap_or(false);

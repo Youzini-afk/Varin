@@ -26,6 +26,20 @@ it('cancels only the named request, ignores its late response and retains anothe
   } finally { rpc.dispose(); detach(); input.destroy(); output.destroy(); }
 });
 
+it('rejects pending and subsequent requests when the process channel fails', async () => {
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const rpc = createJsonRpcClient({ input, output });
+  try {
+    const failure = new Error('Native process input is closed');
+    const pending = expect(rpc.request('textDocument/hover', {})).rejects.toBe(failure);
+    rpc.rejectAll(failure);
+    await pending;
+    await expect(rpc.request('workspace/symbol', {})).rejects.toBe(failure);
+    expect(() => rpc.notify('textDocument/didChange', {})).toThrow(failure);
+  } finally { rpc.dispose(); input.destroy(); output.destroy(); }
+});
+
 it('answers a server request without confusing its ID with the client request', async () => {
   const input = new PassThrough();
   const output = new PassThrough();

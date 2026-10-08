@@ -401,6 +401,9 @@ Permission inspection recognizes owned tools through the shared Harness catalog;
 network diagnostics and memory reads therefore keep their independent execution plans.
 Memory writes order against other memory operations, including searches across scopes,
 without reserving the whole tool batch.
+Computer access/list/evidence reads and cancellation hold no batch barrier. Input operations
+order by desktop; scripts reserve the computer family because they share bindings and may select
+several desktops. A slow workspace capture therefore does not delay computer status queries.
 The upstream seams are tracked in `packages/pi-host/patches/@earendil-works%2Fpi-agent-core@1.0.4.patch`
 and `packages/pi-host/patches/@earendil-works%2Fpi-coding-agent@1.0.4.patch`: the core builds the
 resource dependency graph in the actual tool-call batch path, while coding-agent

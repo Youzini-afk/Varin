@@ -292,6 +292,40 @@ test("Harness execution plans order a workspace write before dispatch-style capt
   assert.equal(captureSawWrite, true);
 });
 
+test("computer status calls finish while a preceding dispatch is still preparing", { timeout: 5000 }, async () => {
+  let release!: () => void;
+  let statusReady!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const statuses = new Promise<void>(resolve => { statusReady = resolve; });
+  const observed: string[] = [];
+  let dispatchFinished = false;
+  const result = () => ({ content: [{ type: "text" as const, text: "done" }], details: {} });
+  const dispatch = withToolExecutionResources({
+    name: "dispatch", label: "dispatch", description: "dispatch",
+    parameters: Type.Object({ task: Type.String() }),
+    execute: async () => { await held; dispatchFinished = true; return result(); },
+  }, process.cwd());
+  const computer = withToolExecutionResources({
+    name: "computer", label: "computer", description: "computer", executionMode: "sequential" as const,
+    parameters: Type.Object({ action: Type.String() }),
+    execute: async (_id: string, args: { action: string }) => {
+      observed.push(args.action);
+      if (observed.length === 2) statusReady();
+      return result();
+    },
+  }, process.cwd());
+  const running = runBatch([dispatch, computer] as unknown as AgentTool[], [
+    { id: "dispatch", name: "dispatch", arguments: { task: "inspect current files" } },
+    { id: "access", name: "computer", arguments: { action: "access" } },
+    { id: "list", name: "computer", arguments: { action: "list" } },
+  ]);
+  try {
+    await statuses;
+    assert.equal(dispatchFinished, false);
+    assert.deepEqual(observed.sort(), ["access", "list"]);
+  } finally { release(); await running; }
+});
+
 test("retrieval overlaps source writes, unrelated writes and experiment reads", async () => {
   const log: string[] = [];
   let release!: () => void;
@@ -436,4 +470,3 @@ test("memory mutations order later reads while unrelated tools can finish", asyn
     release();
   }
 });
-

@@ -24,7 +24,7 @@ impl Storage {
         let mut params:KernelComputeStartParams=parse_file_params(value)?;
         if params.job_id.is_empty()||params.job_id.len()>200{return Err(failure("Invalid computation identity"));}
         if !matches!(params.lane.as_str(),"foreground"|"background"){return Err(failure("Unknown computation scheduling lane"));}
-        if !matches!(params.operation.as_str(),"read"|"bytes"|"list"|"search"|"structure"|"chunks"|"grammar"){return Err(failure("Unknown native computation operation"));}
+        if !matches!(params.operation.as_str(),"read"|"bytes"|"list"|"inventory"|"search"|"structure"|"chunks"|"grammar"){return Err(failure("Unknown native computation operation"));}
         for(number,zero_allowed)in [(params.max_results,false),(params.before,true),(params.after,true),(params.start_line,false),(params.end_line,false),
             (params.byte_offset,true),(params.byte_length,true),(params.parse_budget_ms,true),(params.chunk_lines,false)]{
             if number.is_some_and(|n|n<if zero_allowed{0}else{1}||n>9_007_199_254_740_991){return Err(failure("Computation limits must be safe integers in their valid range"));}

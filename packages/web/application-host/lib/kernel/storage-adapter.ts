@@ -260,27 +260,23 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   ): Promise<string[]> {
     const root = await this.kernelFileRoot(directory);
     const output: string[] = [];
-    let cursor: number | undefined;
-    let expectedFingerprint: string | undefined;
-    do {
-      signal?.throwIfAborted();
-      const page = await this.context.client.fileScan({
-        workspaceId: this.context.identity.workspaceId,
-        rootId: root.rootId,
-        path: root.basePath,
-        ...(scopes && scopes.length > 0 ? { scopes: scopes.map(normalize) } : {}),
-        ...(cursor === undefined ? {} : { cursor }),
-        pageSize: 1024,
-        ...(expectedFingerprint === undefined ? {} : { expectedFingerprint }),
-      }, signal);
-      if (!Array.isArray(page.paths) || !page.paths.every((entry) => typeof entry === "string")) {
-        throw new Error("Kernel returned an invalid WorkingState file scan page");
+    // Enumerate once in the existing native compute lane. file.scan used to
+    // rescan the entire directory on every page on the shared Storage thread,
+    // blocking process I/O and unrelated workspaces for the duration of each walk.
+    const prefix = root.basePath ? `${root.basePath}/` : "";
+    const result = await runKernelCompute(this.context.client, {
+      workspaceId: this.context.identity.workspaceId, rootId: root.rootId,
+      lane: "foreground", operation: "inventory",
+      paths: scopes?.length ? scopes.map(scope => `${prefix}${normalize(scope)}`) : [root.basePath],
+    }, { signal, collect: false, onRecords: records => {
+      for (const record of records) {
+        if (record.kind !== "entry") continue;
+        if (record.path === root.basePath) continue;
+        if (prefix && !record.path.startsWith(prefix)) throw new Error("Kernel inventory escaped its admitted directory");
+        output.push(normalize(record.path.slice(prefix.length)));
       }
-      output.push(...(page.paths as string[]).map(normalize));
-      if (typeof page.fingerprint !== "string") throw new Error("Kernel scan returned no inventory identity");
-      expectedFingerprint = page.fingerprint;
-      cursor = typeof page.nextCursor === "number" ? page.nextCursor : undefined;
-    } while (cursor !== undefined);
+    } });
+    if (result.status !== "ready" && result.status !== "empty") throw new Error(result.message ?? "Workspace inventory did not complete");
     return [...new Set(output)].sort();
   }
 

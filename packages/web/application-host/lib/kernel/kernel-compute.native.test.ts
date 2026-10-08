@@ -52,6 +52,23 @@ async function fixture() {
 }
 const drain = (client: KernelScopedClient, pinId: string, operation="search", query="needle") => runKernelCompute(client,{workspaceId:"ws",pinId,operation,query,lane:"foreground",includeHidden:true,paths:[""]});
 
+it('streams the same exhaustive baseline paths as file.scan, including explicit hidden scopes', async () => {
+  const f = await fixture();
+  const files = ['.gitignore', '.hidden/note', 'ignored/note', '.git/config', '.varin/state', 'src/main.ts'];
+  for (const file of files) {
+    await fs.mkdir(path.dirname(path.join(f.workspace, file)), { recursive: true });
+    await fs.writeFile(path.join(f.workspace, file), file === '.gitignore' ? 'ignored/\n' : 'content');
+  }
+  for (const scopes of [undefined, ['.varin', '.hidden'], ['absent/nested', 'src']]) {
+    const expected = await f.client.fileScan({ ...f.address, path: '', ...(scopes ? { scopes } : {}) });
+    const observed = await runKernelCompute(f.client, {
+      ...f.address, operation: 'inventory', lane: 'foreground', paths: scopes ?? [''],
+    });
+    assert.ok(['ready', 'empty'].includes(observed.status), observed.message ?? undefined);
+    assert.deepEqual(observed.records.map(record => record.path).sort(), expected.paths);
+  }
+});
+
 it('compares native content before parsing and retains complete coverage for many sibling functions', async () => {
   const f = await fixture();
   const text = Array.from({ length: 3000 }, (_, n) => `export function fn_${n}() { return ${n}; }`).join('\n');

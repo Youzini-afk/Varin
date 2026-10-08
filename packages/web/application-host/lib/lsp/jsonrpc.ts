@@ -15,6 +15,7 @@ export const createJsonRpcClient = ({
   let nextId = 1;
   const pending = new Map<number | string, Waiter>();
   const notificationListeners = new Set<(method: string, params: unknown) => void>();
+  let connectionFailure: Error | null = null;
 
   const detach = attachContentLengthReader(input, async (rawMessage) => {
     const message = asRecord(rawMessage);
@@ -49,13 +50,14 @@ export const createJsonRpcClient = ({
   });
 
   const rejectAllPending = (error?: unknown): void => {
-    const failure = error ?? new Error('Language server connection closed');
-    for (const waiter of pending.values()) waiter.reject(failure);
+    connectionFailure ??= error instanceof Error ? error : new Error('Language server connection closed');
+    for (const waiter of pending.values()) waiter.reject(connectionFailure);
     pending.clear();
   };
 
   return {
     request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
+      if (connectionFailure) return Promise.reject(connectionFailure);
       if (signal?.aborted) return Promise.reject(signal.reason);
       const id = nextId;
       nextId += 1;
@@ -84,6 +86,7 @@ export const createJsonRpcClient = ({
       });
     },
     notify(method: string, params: unknown): void {
+      if (connectionFailure) throw connectionFailure;
       writeContentLengthMessage(output, { jsonrpc: '2.0', method, params });
     },
     onNotification(listener: (method: string, params: unknown) => void): () => boolean {

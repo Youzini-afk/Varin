@@ -80,7 +80,10 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
       highWaterMark: 64 * 1024,
     });
     // Consumers can observe errors, but a broken pipe must not crash the Host.
-    this.stdin.on("error", (error) => this.reportError(error));
+    // A broken write channel invalidates the protocol using this process even
+    // when its OS tree is still alive. Consumers must reject pending RPCs;
+    // reporting only to a log leaves every later frame waiting on a dead pipe.
+    this.stdin.on("error", (error) => this.emit("error", error));
     this.stdout.on("error", (error) => this.reportError(error));
     this.stderr.on("error", (error) => this.reportError(error));
     this.on("error", (error: Error) => this.reportError(error));
@@ -168,7 +171,7 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
       this.inputSequence += 1;
       while (this.acknowledgedInput < sequence) {
         if (this.lost) throw this.lost;
-        if (this.finishing || this.closed) throw new Error("Native process exited before acknowledging stdin");
+        if (this.finishing || this.closed || this.stopRequested) throw new Error("Native process input closed before acknowledging stdin");
         await pause(5);
       }
       if (this.inputError) throw new Error(this.inputError);

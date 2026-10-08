@@ -97,7 +97,7 @@ const PLANNED_HARNESS_TOOLS = new Set([
   "update", "kill", "wait", "threads", "read_thread", "dispatch", "webfetch",
   "websearch", "explore", "recall", "related", "history", "resources",
   "research_source", "research_search", "research_decide", "materials", "document_read",
-  "submit_facts", "experiment", "memory",
+  "submit_facts", "experiment", "memory", "computer",
 ]);
 
 
@@ -164,6 +164,26 @@ const planForHarnessTool = async (name: string, cwd: string, args: ToolArguments
         ["get", "search"].includes(String(args.action)) ? "read" : "write");
     case "ask_question":
       return { resources: [] };
+    case "computer": {
+      const action = String(args.action);
+      // These are live status reads, not a barrier over unrelated workspace work.
+      if (["access", "list", "evidence", "cancel"].includes(action)) return { resources: [] };
+      const desktop = stringArgument(args, "desktopId");
+      const root = resourceId("computer", "desktops");
+      const read = ["apps", "observe"].includes(action)
+        || action === "browser" && ["status", "tabs", "snapshot"].includes(String(args.op))
+        || action === "office" && ["status", "docs"].includes(String(args.op));
+      const resources: ToolExecutionResource[] = [{
+        id: desktop ? resourceId("computer-desktop", desktop) : root,
+        access: read ? "read" : "write",
+        scope: desktop ? "exact" : "subtree",
+        ...(desktop ? { ancestors: [root] } : {}),
+      }];
+      // A script can select other desktops and shares persistent bindings with
+      // later cells. Its scope is the computer family, not every tool in the batch.
+      if (action === "run") return { resources: [{ id: root, access: "write", scope: "subtree" }] };
+      return { resources };
+    }
     case "send":
       return targetResource("thread", stringArgument(args, "threadId") ?? stringArgument(args, "to"));
     case "submit_code": {

@@ -68,6 +68,7 @@ fn units(shared:&Shared,path:&str,revision:&str,text:&str,analysis:Option<&Value
 }
 pub(crate) fn execute(mut task:Task,shared:&Shared,syntax:&mut SyntaxRuntime)->Result<bool>{
     shared.check()?;
+    if task.params.operation == "inventory" { return source::inventory(&task, shared); }
     let params=task.params.clone();
     let files=params.files.clone().unwrap_or_default().into_iter().map(|f|(f.path.clone(),f)).collect::<HashMap<_,_>>();
     let recipes=task.recipes.clone();
