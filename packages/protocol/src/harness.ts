@@ -8,6 +8,7 @@
  * worker holding host credentials.
  */
 
+import type { TodoItem } from "./harness-todo.js";
 import type {
   ThreadListParams,
   ThreadListResult,
@@ -663,9 +664,8 @@ export interface ContextRetentionResult {
 }
 
 export interface TodoUpsertParams {
-  items: Array<{ text: string; status: "open" | "done" | "blocked" }>;
+  items: TodoItem[];
   branchEntryIds: string[];
-  confidence?: number;
 }
 
 export interface TodoUpsertResult {

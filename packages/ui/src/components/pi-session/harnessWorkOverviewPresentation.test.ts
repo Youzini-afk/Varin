@@ -73,17 +73,17 @@ const snapshot = (threadOverrides: Partial<Thread> = {}, runOverrides: Partial<T
 
 describe('work overview presentation', () => {
   it('parses the harness plan into product-level task states', () => {
-    expect(parseOverviewPlan('- [x] Inspect\n- [ ] Implement\n- [!] Waiting on fixture')).toEqual({
+    expect(parseOverviewPlan('- [X] Inspect\n- [ ] Review\n- [/] Implement\n- [/] Document\n- [!] Waiting on fixture')).toEqual({
       items: [
-        { text: 'Inspect', status: 'done' },
-        { text: 'Implement', status: 'open' },
+        { text: 'Inspect', status: 'completed' },
+        { text: 'Review', status: 'pending' },
+        { text: 'Implement', status: 'in_progress' },
+        { text: 'Document', status: 'in_progress' },
         { text: 'Waiting on fixture', status: 'blocked' },
       ],
-      total: 3,
+      total: 5,
       done: 1,
       blocked: 1,
-      open: 1,
-      currentIndex: 1,
     });
   });
 

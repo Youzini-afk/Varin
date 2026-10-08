@@ -557,13 +557,13 @@ export const HarnessThreadsPanel: React.FC<{
               {planSummary.items.length > 0 ? (
                 <div className="space-y-1.5">
                   {planSummary.items.map((item, index) => {
-                    const current = planSummary.currentIndex === index;
+                    const current = item.status === 'in_progress';
                     return (
                       <div key={index + ':' + item.text} className={cn(
                         'flex items-start gap-2 rounded-md px-1.5 py-1 typography-meta leading-5',
-                        current && item.status === 'open' && 'bg-[var(--status-info)]/8 text-foreground',
+                        current && 'bg-[var(--status-info)]/8 text-foreground',
                       )}>
-                        {item.status === 'done' ? (
+                        {item.status === 'completed' ? (
                           <Icon name="checkbox-circle" className="mt-0.5 size-3.5 shrink-0 text-[var(--status-success)]" />
                         ) : item.status === 'blocked' ? (
                           <Icon name="error-warning" className="mt-0.5 size-3.5 shrink-0 text-[var(--status-warning)]" />
@@ -575,9 +575,9 @@ export const HarnessThreadsPanel: React.FC<{
                         )}
                         <span className={cn(
                           'min-w-0 flex-1',
-                          item.status === 'done' && 'text-muted-foreground line-through decoration-muted-foreground/40',
+                          item.status === 'completed' && 'text-muted-foreground line-through decoration-muted-foreground/40',
                           item.status === 'blocked' && 'text-[var(--status-warning)]',
-                          current && item.status === 'open' && 'font-medium',
+                          current && 'font-medium',
                         )}>{item.text}</span>
                       </div>
                     );

@@ -1,22 +1,14 @@
 import type { GitStatus } from '@varin/application-client';
+import { parseTodoPlan, type TodoItem } from '@varin/protocol';
 import type { HarnessThreadSnapshot, HarnessThreadState } from './harnessThreadPresentation';
 import { projectHarnessThreadState } from './harnessThreadPresentation';
 import type { HarnessSessionBlock } from './harnessBlockPresentation';
 
-export type OverviewPlanItemStatus = 'open' | 'done' | 'blocked';
-
-export interface OverviewPlanItem {
-  text: string;
-  status: OverviewPlanItemStatus;
-}
-
 export interface OverviewPlanSummary {
-  items: OverviewPlanItem[];
+  items: TodoItem[];
   total: number;
   done: number;
   blocked: number;
-  open: number;
-  currentIndex: number | null;
 }
 
 export interface OverviewBlockGroups {
@@ -48,24 +40,14 @@ const COMPLETED_STATES = new Set<HarnessThreadState>(['completed', 'merged', 'ar
 const INTEGRATION_PENDING_STATES = new Set<HarnessThreadState>(['dirty', 'merge-ready']);
 
 export const parseOverviewPlan = (content: string): OverviewPlanSummary => {
-  const items: OverviewPlanItem[] = [];
-  for (const line of content.split('\n')) {
-    const match = line.match(/^-\s*\[([ x!X])\]\s*(.+)$/);
-    if (!match) continue;
-    const marker = match[1]?.toLowerCase();
-    const status: OverviewPlanItemStatus = marker === 'x' ? 'done' : marker === '!' ? 'blocked' : 'open';
-    items.push({ text: match[2]!.trim(), status });
-  }
-  const done = items.filter((item) => item.status === 'done').length;
+  const items = parseTodoPlan(content);
+  const done = items.filter((item) => item.status === 'completed').length;
   const blocked = items.filter((item) => item.status === 'blocked').length;
-  const currentIndex = items.findIndex((item) => item.status !== 'done');
   return {
     items,
     total: items.length,
     done,
     blocked,
-    open: items.length - done - blocked,
-    currentIndex: currentIndex === -1 ? null : currentIndex,
   };
 };
 

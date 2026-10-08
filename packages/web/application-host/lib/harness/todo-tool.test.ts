@@ -3,12 +3,8 @@ import { rmSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../knowledge/store.js";
-import {
-  renderPlanContent,
-  parsePlanContent,
-  executeTodoTool,
-  type TodoItem,
-} from "./todo-tool.js";
+import { parseTodoPlan, type TodoItem } from "@varin/protocol";
+import { executeTodoTool } from "./todo-tool.js";
 
 const TEST_DIR = join(tmpdir(), "varin-test-todo");
 function cleanup() {
@@ -27,53 +23,6 @@ async function openStore() {
   });
 }
 
-describe("renderPlanContent", () => {
-  it("renders open items with [ ]", () => {
-    const content = renderPlanContent([{ text: "Task A", status: "open" }]);
-    expect(content).toBe("- [ ] Task A");
-  });
-
-  it("renders done items with [x]", () => {
-    const content = renderPlanContent([{ text: "Task A", status: "done" }]);
-    expect(content).toBe("- [x] Task A");
-  });
-
-  it("renders blocked items with [!]", () => {
-    const content = renderPlanContent([{ text: "Task A", status: "blocked" }]);
-    expect(content).toBe("- [!] Task A");
-  });
-
-  it("renders multiple items on separate lines", () => {
-    const content = renderPlanContent([
-      { text: "Task 1", status: "done" },
-      { text: "Task 2", status: "open" },
-      { text: "Task 3", status: "blocked" },
-    ]);
-    expect(content).toBe("- [x] Task 1\n- [ ] Task 2\n- [!] Task 3");
-  });
-});
-
-describe("parsePlanContent", () => {
-  it("parses round-trip", () => {
-    const items: TodoItem[] = [
-      { text: "Task 1", status: "done" },
-      { text: "Task 2", status: "open" },
-      { text: "Task 3", status: "blocked" },
-    ];
-    const content = renderPlanContent(items);
-    const parsed = parsePlanContent(content);
-    expect(parsed).toEqual(items);
-  });
-
-  it("ignores non-matching lines", () => {
-    const content = "- [x] Done task\nsome other line\n- [ ] Open task";
-    const parsed = parsePlanContent(content);
-    expect(parsed).toHaveLength(2);
-    expect(parsed[0]?.status).toBe("done");
-    expect(parsed[1]?.status).toBe("open");
-  });
-});
-
 describe("executeTodoTool", () => {
   beforeEach(async () => {
     cleanup();
@@ -85,35 +34,45 @@ describe("executeTodoTool", () => {
   });
 
   it("replaces plan block and returns summary", async () => {
+    const items: TodoItem[] = [
+      { text: "Inspect", status: "completed" },
+      { text: "Implement", status: "in_progress" },
+      { text: "Document", status: "in_progress" },
+      { text: "Review", status: "pending" },
+      { text: "External dependency", status: "blocked" },
+    ];
     const result = await executeTodoTool(
-      { items: [
-        { text: "Task 1", status: "done" },
-        { text: "Task 2", status: "open" },
-        { text: "Task 3", status: "blocked" },
-      ]},
+      { items },
       { store, sessionId: "s1" },
     );
-    expect(result.text).toBe("plan updated: 1/3 done, 1 blocked");
+    expect(result.text).toBe("plan updated: 1/5 done, 1 blocked");
 
     const blocks = await store.getBlocks("s1");
     expect(blocks).toHaveLength(1);
     expect(blocks[0]?.label).toBe("plan");
     expect(blocks[0]?.updatedBy).toBe("agent");
-    expect(blocks[0]?.content).toContain("- [x] Task 1");
+    expect(parseTodoPlan(blocks[0]!.content)).toEqual(items);
   });
 
-  it("treats confidence as informational and writes without confirmation", async () => {
+  it("replaces the full list and clears it when the new list is empty", async () => {
     await executeTodoTool(
-      { items: [{ text: "Task", status: "open" }], confidence: 0.3 },
+      { items: [{ text: "Task", status: "pending" }] },
       { store, sessionId: "s1" },
     );
-    expect(await store.getBlocks("s1")).toHaveLength(1);
+    await executeTodoTool({ items: [{ text: "Replacement", status: "in_progress" }] }, { store, sessionId: "s1" });
+    expect((await store.getBlocks("s1"))[0]?.content).toBe("- [/] Replacement");
+    await executeTodoTool({ items: [] }, { store, sessionId: "s1" });
+    expect((await store.getBlocks("s1"))[0]?.content).toBe("");
   });
 
-  it("does not add a second confirmation path when confidence is absent", async () => {
-    await executeTodoTool(
-      { items: [{ text: "Task", status: "open" }] },
-      { store, sessionId: "s1" },
-    );
+  it("preserves the saved plan when a replacement contains an invalid status", async () => {
+    const deps = { store, sessionId: "s1" };
+    await executeTodoTool({ items: [{ text: "Keep this plan", status: "pending" }] }, deps);
+    const before = await store.getBlocks("s1");
+    await expect(executeTodoTool({ items: [
+      { text: "Valid first item", status: "completed" },
+      { text: "Invalid later item", status: "almost_done" },
+    ] } as never, deps)).rejects.toThrow(/todo.items\[1\].status/);
+    expect(await store.getBlocks("s1")).toEqual(before);
   });
 });
