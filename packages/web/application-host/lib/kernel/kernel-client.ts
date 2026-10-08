@@ -1,3 +1,5 @@
+import { NativeCredentialBridge, type PrivateCredentialResponse } from "./native-credential-bridge.js";
+import type { ExistingHostCredentialOwner, NativeCredentialScope } from "./native-credential-owner.js";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { KernelRequestWindow } from "./request-window.js";
@@ -232,6 +234,10 @@ export class KernelScopedClient {
 
   fileCapture(params: KernelMethodParams["file.capture"], signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.fileCapture(params, this.grant, signal);
+  }
+
+  fileCaptureBatch(params: KernelMethodParams["file.captureBatch"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.fileCaptureBatch(params, this.grant, signal);
   }
 
   fileApply(params: KernelMethodParams["file.apply"], signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -530,6 +536,7 @@ export class KernelClient {
   private buffer = Buffer.alloc(0);
   private readonly pending = new Map<string, PendingRequest>();
   private readonly processSubscriptions = new Map<string, ProcessSubscriptionEntry>();
+  private readonly credentialBridge: NativeCredentialBridge;
   private window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private nativeWindow = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private closePromise: Promise<void> | undefined;
@@ -547,6 +554,9 @@ export class KernelClient {
   constructor(options: KernelClientOptions) {
     this.options = options;
     this.spawnProcess = options.spawnProcess ?? spawn;
+    this.credentialBridge = new NativeCredentialBridge(() => this.epoch,
+      response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: "credential-channel-failed", message: "Private credential channel failed", retryable: false }), true));
   }
 
   get isReady(): boolean { return this.started && !this.closed; }
@@ -554,6 +564,14 @@ export class KernelClient {
     this.exitListeners.add(listener);
     return () => { this.exitListeners.delete(listener); };
   }
+
+
+  /** Host-only owner registration. This is not exposed through tool grants or renderer APIs. */
+  async registerNativeCredentialOwner(runId: string, owner: ExistingHostCredentialOwner): Promise<NativeCredentialScope> {
+    if (!this.handshakeResult) await this.start();
+    return this.credentialBridge.register(runId, owner);
+  }
+  unregisterNativeCredentialOwner(runId: string): void { this.credentialBridge.unregister(runId); }
 
   get kernelEpoch(): string | null { return this.epoch; }
   get handshake(): KernelHandshakeResult | null { return this.handshakeResult; }
@@ -734,6 +752,7 @@ export class KernelClient {
       let response: KernelResponse | KernelProcessStreamEvent;
       try { response = JSON.parse(body.toString("utf8")) as KernelResponse | KernelProcessStreamEvent; }
       catch (error) { this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: `Invalid Rust kernel response: ${String(error)}`, retryable: false }), true); return; }
+      if (this.credentialBridge.consume(response)) continue;
       if (response.kind === "process-event") {
         this.consumeProcessEvent(response);
         if (this.transportFailed) return;
@@ -787,6 +806,7 @@ export class KernelClient {
       return;
     }
     this.transportFailed = true;
+    this.credentialBridge.close();
     this.window.close(error);
     this.nativeWindow.close(error);
     for (const pending of this.pending.values()) { pending.reject(error); pending.release(); }
@@ -804,7 +824,7 @@ export class KernelClient {
     if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
-  private async write(request: KernelRequest): Promise<void> {
+  private async write(request: KernelRequest | PrivateCredentialResponse): Promise<void> {
     const stdin = this.child?.stdin;
     if (!stdin || stdin.destroyed) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel stdin is unavailable", retryable: true });
     const writable = stdin as Writable;
@@ -813,7 +833,7 @@ export class KernelClient {
     await new Promise<void>((resolve, reject) => writable.write(frame(JSON.stringify(request)), error => error ? reject(error) : resolve()));
   }
 
-  private async requestRaw<T, M extends KernelMethod = KernelMethod>(method: M, params: KernelMethodParams[M], options: { signal?: AbortSignal | undefined; grant?: KernelGrantHandle | undefined; allowBootstrap?: boolean | undefined } = {}): Promise<T> {
+  private async requestRaw<T, M extends KernelMethod = KernelMethod>(method: M, params: KernelMethodParams[M], options: { signal?: AbortSignal | undefined; grant?: KernelGrantHandle | undefined; allowBootstrap?: boolean | undefined; settleCancellation?: boolean | undefined } = {}): Promise<T> {
     const cancelled = () => new KernelClientError({ code: "cancelled", message: "Kernel request cancelled", retryable: true });
     const release = this.closed && method === "kernel.shutdown" ? () => undefined : await (method.startsWith("runtime.") || method.startsWith("process.subscription.") ? this.nativeWindow : this.window).acquire(options.signal, cancelled);
     let admitted = false;
@@ -833,7 +853,7 @@ export class KernelClient {
       const abort = () => {
         if (!this.pending.has(id) || cancelSent) return;
         cancelSent = true;
-        rejectPending(cancelled());
+        if (!options.settleCancellation) rejectPending(cancelled());
         // Keep the ledger entry/credit until Rust acknowledges the actual stop.
         // Control frames bypass the ordinary request window.
         void this.write({ v: KERNEL_PROTOCOL_VERSION, kind: "cancel", id, ...identity }).catch(error => this.failAll(error instanceof Error ? error : new Error(String(error)), true));
@@ -1019,6 +1039,10 @@ export class KernelClient {
 
   async fileCapture(params: KernelMethodParams["file.capture"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("file.capture", params, { signal, grant });
+  }
+
+  async fileCaptureBatch(params: KernelMethodParams["file.captureBatch"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("file.captureBatch", params, { signal, grant, settleCancellation: true });
   }
 
   async fileApply(params: KernelMethodParams["file.apply"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -1399,6 +1423,7 @@ export class KernelClient {
 
   private async closeInternal(): Promise<void> {
     this.closed = true;
+    this.credentialBridge.close();
     this.window.close(new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closing" }));
     this.nativeWindow.close(new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closing" }));
     for (const pending of this.pending.values()) pending.cancel();

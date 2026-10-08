@@ -23,25 +23,36 @@ writing Pi session files or the Host harness's existing execution records.
 The wire source remains `kernel/protocol/schema.json`; it generates the native state enums and the
 Host request/response DTOs. Domain implementation types remain private to Rust.
 
-## Immutable model request bodies
+## Immutable conversation and model bodies
 
-Model-step metadata holds a content reference, not a serialized full-history request. The runtime
-persists content-defined request chunks and their ordered manifest under `content/objects` before
-committing the reference in SQLite. SHA-256 identities and object paths are shared with kernel
-content primitives; conversation objects have a separate GC domain because kernel storage can be
-rebuilt independently. Dispatch, recovery and input-supersession writes preserve the small reference.
-The public model-step API and completion consumer resolve and verify the exact frozen request.
+Model-step metadata holds content references for frozen requests and provider originals. History
+rows retain identity, ancestry and provenance, while their original content and provider payloads
+live in immutable objects. Committed and rejected model outputs are also referenced objects. The
+runtime persists content-defined chunks and ordered manifests under `content/objects` before
+committing references in SQLite. SHA-256 identities and object paths are shared with kernel content
+primitives; conversation objects have a separate GC domain because kernel storage can be rebuilt
+independently. Dispatch, recovery and input-supersession writes preserve small references. Public
+history, model-step and model-output APIs verify and hydrate their original values; completion
+resolves the exact frozen request before its metadata transaction.
+
+Queue admission and edits persist the eventual history payload before atomically recording its
+reference in `input_history_content`. Delivery and next-run promotion can therefore attach history
+without large body writes inside their transactions. Queue metadata still includes the accepted
+input for its current public API; cancellation preserves its content reference. Command-idempotency
+and tool-receipt records remain their existing inline domains in this slice.
+
+Opening previous native content formats performs one atomic conversion, retaining existing request
+references and preserving history, opaque originals and unknown history metadata. Durable objects
+precede the conversion transaction; interruption leaves either the old representation or committed
+references, never empty history. Catalog version 3 and content format 2 select one current reader
+and prevent older binaries from treating references as inline payloads. Missing or corrupt referenced
+objects fail explicitly. `Catalog::collect_content_objects` marks requests, provider originals,
+history, all model outputs (including rejected output), and queued-history references, verifies live
+objects before sweeping, and preserves unknown files. It never deletes history or invokes the
+replaceable system-kernel GC.
+
 Provider serialization still visits and sends full legal requests; chunk reuse is not remote
 incremental-context support or a measured speedup claim.
-
-Opening the current inline native format performs one atomic conversion of request fields, preserving
-history and provider data. Durable objects precede that transaction; interruption leaves either the
-old representation or committed references, never empty history. A format marker selects one current
-reader. Missing or corrupt referenced objects fail explicitly. `Catalog::collect_content_objects`
-marks every retained model step and verifies its objects before removing unreferenced objects; it
-never deletes history or invokes the replaceable system-kernel GC. Conversation history and model
-output records remain inline in this slice; request-body extraction does not claim that those other
-large-body paths have already been converted.
 
 ## Execution and trust
 

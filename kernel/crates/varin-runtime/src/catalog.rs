@@ -117,7 +117,7 @@ impl Catalog {
         let mut db = Connection::open(root.as_ref().join("conversation.sqlite"))?;
         db.pragma_update(None, "foreign_keys", true)?;
         let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version != 0 && version != 1 && version != 2 {
+        if version != 0 && version != 1 && version != 2 && version != 3 {
             return Err(RuntimeError::Format(version));
         }
         let existing: i64 = db.query_row(
@@ -134,8 +134,9 @@ impl Catalog {
             db.execute_batch(SCHEMA)?;
         }
         let content = crate::content::ContentStore::open(root.as_ref().join("content"))?;
-        crate::content::initialize(&mut db, &content)?;
         inputs::initialize(&mut db)?;
+        crate::content::initialize(&mut db, &content)?;
+        launches::initialize(&mut db)?;
         let epoch: u64 = db.query_row(
             "UPDATE runtime_meta SET epoch=epoch+1 WHERE id=1 RETURNING epoch",
             [],
@@ -182,6 +183,7 @@ impl Catalog {
     }
     pub fn submit(&mut self, command: &SubmitInput) -> Result<Receipt> {
         execution_persistence::user_input_items("admission",&command.input)?;
+        let history_content = self.content.save_history(&command.input, &None)?;
         let input = encode(command)?;
         let tx = self.db.transaction()?;
         let duplicate: Option<(String, String)> = tx
@@ -216,7 +218,7 @@ impl Catalog {
             thread_id: thread.clone(),
             parent: head,
             source: HistorySource::User,
-            content: command.input.clone(),
+            content: history_content,
             provider: None,
         };
         tx.execute(
@@ -343,6 +345,7 @@ impl Catalog {
         content: Value,
         provider: Option<ProviderOriginal>,
     ) -> Result<HistoryItem> {
+        let body_reference = self.content.save_history(&content, &provider)?;
         let tx = self.db.transaction()?;
         let run: Run = record(&tx, "runs", run_id)?;
         fence(&run, epoch)?;
@@ -354,13 +357,13 @@ impl Catalog {
         if head.as_deref() != expected_head || active.as_deref() != Some(run_id) {
             return Err(RuntimeError::Conflict("branch changed".into()));
         }
-        let item = HistoryItem {
+        let mut item = HistoryItem {
             id: id(),
             thread_id: run.thread_id,
             parent: head,
             source,
-            content,
-            provider,
+            content: body_reference,
+            provider: None,
         };
         tx.execute(
             "INSERT INTO history(id,thread_id,parent,body) VALUES(?1,?2,?3,?4)",
@@ -378,13 +381,15 @@ impl Catalog {
             json!({"id":item.id}),
         )?;
         tx.commit()?;
+        item.content = content;
+        item.provider = provider;
         Ok(item)
     }
     pub fn history(&self, branch: &str) -> Result<Vec<HistoryItem>> {
         let mut head = self.head(branch)?;
         let mut result = Vec::new();
         while let Some(key) = head {
-            let item: HistoryItem = record(&self.db, "history", &key)?;
+            let item = self.content.hydrate_history(record(&self.db, "history", &key)?)?;
             head = item.parent.clone();
             result.push(item);
         }
@@ -627,6 +632,7 @@ impl Catalog {
             if old.run_id == run_id && old.request == request_ref {
                 drop(tx);
                 old.request = request;
+                self.content.hydrate_originals(&mut old.original)?;
                 return Ok(old);
             }
             return Err(RuntimeError::Conflict("model step identity reused".into()));
@@ -652,9 +658,10 @@ impl Catalog {
     }
     fn hydrate_model_step(&self, mut step: ModelStep) -> Result<ModelStep> {
         step.request = self.content.load(&step.request)?;
+        self.content.hydrate_originals(&mut step.original)?;
         Ok(step)
     }
-    /// Collect only unreferenced immutable request bodies under this catalog owner lock.
+    /// Collect only unreferenced immutable bodies under this catalog owner lock.
     pub fn collect_content_objects(&mut self) -> Result<u64> {
         self.content.collect(&self.db)
     }
@@ -662,7 +669,7 @@ impl Catalog {
         self.hydrate_model_step(record(&self.db, "model_steps", key)?)
     }
     pub fn dispatch_model_step(&mut self, key: &str, epoch: u64) -> Result<ModelStep> {
-        let request = self.model_step(key)?.request;
+        let hydrated = self.model_step(key)?;
         let tx = self.db.transaction()?;
         let mut step: ModelStep = record(&tx, "model_steps", key)?;
         let run: Run = record(&tx, "runs", &step.run_id)?;
@@ -678,7 +685,8 @@ impl Catalog {
         )?;
         event(&tx, key, 2, "model.dispatched", Value::Null)?;
         tx.commit()?;
-        step.request = request;
+        step.request = hydrated.request;
+        step.original = hydrated.original;
         Ok(step)
     }
     pub fn settle_model_step(
@@ -690,6 +698,7 @@ impl Catalog {
         usage: Option<Value>,
     ) -> Result<ModelStep> {
         let request = self.model_step(key)?.request;
+        let stored_original = self.content.save_originals(&original)?;
         let tx = self.db.transaction()?;
         let mut step: ModelStep = record(&tx, "model_steps", key)?;
         if step.epoch != epoch
@@ -702,7 +711,7 @@ impl Catalog {
             return Err(RuntimeError::Conflict("model step cannot settle".into()));
         }
         step.state = state;
-        step.original = original;
+        step.original = stored_original;
         step.usage = usage;
         put(&tx, "model_steps", key, &step)?;
         tx.execute(
@@ -712,6 +721,7 @@ impl Catalog {
         event(&tx, key, 3, "model.settled", json!({"state":state}))?;
         tx.commit()?;
         step.request = request;
+        step.original = original;
         Ok(step)
     }
     pub fn register_wait(
@@ -1050,3 +1060,6 @@ mod execution_persistence;
 
 #[path="catalog_inputs.rs"]
 pub mod inputs;
+
+#[path="catalog_launch.rs"]
+pub mod launches;

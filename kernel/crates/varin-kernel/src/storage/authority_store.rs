@@ -185,8 +185,13 @@ impl Storage {
         match outcome {
             Ok(()) => {
                 self.conn.execute_batch("COMMIT")?;
-                self.file_leases
-                    .retain(|_, lease| lease.grant_id != grant_id);
+                self.file_leases.retain(|id, lease| {
+                    if lease.grant_id != grant_id { return true; }
+                    if let Some(capture) = self.capture_leases.get_mut(id) {
+                        capture.release_requested = true; return true;
+                    }
+                    false
+                });
                 let process_stop = self.revoke_processes_for_grant(grant_id).unwrap_or_else(|error| {
                     json!({"pendingProcesses": [], "processStopFailures": [{"reason": error.to_string()}]})
                 });

@@ -163,11 +163,60 @@ impl ContentStore {
         }
         Ok(serde_json::from_slice(&bytes)?)
     }
-    /// Called under the catalog's exclusive owner lock. Every retained request is a GC root;
+    pub(crate) fn save_history(
+        &self,
+        content: &Value,
+        provider: &Option<crate::types::ProviderOriginal>,
+    ) -> Result<Value> {
+        self.save(&serde_json::json!({"content": content, "provider": provider}))
+    }
+    pub(crate) fn hydrate_history(
+        &self,
+        mut item: crate::types::HistoryItem,
+    ) -> Result<crate::types::HistoryItem> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Payload {
+            content: Value,
+            provider: Option<crate::types::ProviderOriginal>,
+        }
+        let payload: Payload = serde_json::from_value(self.load(&item.content)?)?;
+        item.content = payload.content;
+        item.provider = payload.provider;
+        Ok(item)
+    }
+    pub(crate) fn save_originals(
+        &self,
+        originals: &[crate::types::ProviderOriginal],
+    ) -> Result<Vec<crate::types::ProviderOriginal>> {
+        originals
+            .iter()
+            .cloned()
+            .map(|mut original| {
+                original.item = self.save(&original.item)?;
+                Ok(original)
+            })
+            .collect()
+    }
+    pub(crate) fn hydrate_originals(
+        &self,
+        originals: &mut [crate::types::ProviderOriginal],
+    ) -> Result<()> {
+        for original in originals {
+            original.item = self.load(&original.item)?;
+        }
+        Ok(())
+    }
+
+    /// Called under the catalog's exclusive owner lock. Every retained content domain is a GC root;
     /// failures during mark abort sweep, and objects saved by a rolled-back commit are collectible.
     pub(crate) fn collect(&self, db: &Connection) -> Result<u64> {
         let mut live = HashSet::new();
-        let mut stmt = db.prepare("SELECT json_extract(body,'$.request') FROM model_steps")?;
+        let mut stmt = db.prepare("SELECT json_extract(body,'$.request') FROM model_steps
+             UNION ALL SELECT json_extract(o.value,'$.item') FROM model_steps m, json_each(m.body,'$.original') o
+             UNION ALL SELECT json_extract(body,'$.content') FROM history
+             UNION ALL SELECT body FROM model_outputs
+             UNION ALL SELECT body FROM input_history_content")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         for row in rows {
             let reference: Reference = serde_json::from_str(&row?)?;
@@ -235,48 +284,134 @@ impl ContentStore {
 pub(crate) fn initialize(db: &mut Connection, content: &ContentStore) -> Result<()> {
     let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_content_format')", [], |r| r.get(0))?;
     let catalog_version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    if !exists && catalog_version == 2 {
-        return Err(RuntimeError::Invalid(
-            "content format marker missing".into(),
-        ));
-    }
-    if exists {
-        if catalog_version != 2 {
-            return Err(RuntimeError::Format(catalog_version));
-        }
-        let version: i64 = db.query_row(
+    let format = if exists {
+        Some(db.query_row::<i64, _, _>(
             "SELECT version FROM runtime_content_format WHERE id=1",
             [],
             |r| r.get(0),
-        )?;
-        if version != 1 {
-            return Err(RuntimeError::Format(version));
+        )?)
+    } else {
+        None
+    };
+    match (catalog_version, format) {
+        (3, Some(2)) => {
+            // A missing root domain cannot be interpreted as an empty catalog.
+            db.prepare("SELECT input_id,body FROM input_history_content")?;
+            return Ok(());
         }
-        return Ok(());
+        (2, Some(1)) | (0 | 1, None) => (),
+        _ => {
+            return Err(RuntimeError::Invalid(
+                "native content format identity is unsupported or incomplete; data was preserved"
+                    .into(),
+            ))
+        }
     }
-    let converted = {
+    // Parse and durably stage every body before beginning the conversion transaction. Preserve
+    // unknown metadata fields; the only replaced fields are the documented large-body slots.
+    let mut converted_steps = Vec::new();
+    {
         let mut stmt = db.prepare("SELECT id,body FROM model_steps")?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-        let mut converted = Vec::new();
         for row in rows {
             let (id, raw) = row?;
             let mut step: Value = serde_json::from_str(&raw)?;
             let request = step
                 .get_mut("request")
                 .ok_or_else(|| RuntimeError::Invalid("model step request missing".into()))?;
-            *request = content.save(request)?;
-            converted.push((id, serde_json::to_string(&step)?));
+            if format.is_none() {
+                *request = content.save(request)?;
+            } else {
+                content.load(request)?;
+            }
+            let originals = step
+                .get_mut("original")
+                .and_then(Value::as_array_mut)
+                .ok_or_else(|| RuntimeError::Invalid("model step originals missing".into()))?;
+            for original in originals {
+                let item = original
+                    .get_mut("item")
+                    .ok_or_else(|| RuntimeError::Invalid("provider original missing".into()))?;
+                *item = content.save(item)?;
+            }
+            converted_steps.push((id, serde_json::to_string(&step)?));
         }
-        converted
-    };
+    }
+    let mut converted_history = Vec::new();
+    {
+        let mut stmt = db.prepare("SELECT id,body FROM history")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        for row in rows {
+            let (id, raw) = row?;
+            let mut item: Value = serde_json::from_str(&raw)?;
+            let body = item
+                .get("content")
+                .ok_or_else(|| RuntimeError::Invalid("history content missing".into()))?;
+            let provider = item
+                .get("provider")
+                .ok_or_else(|| RuntimeError::Invalid("history provider field missing".into()))?;
+            let reference =
+                content.save(&serde_json::json!({"content":body,"provider":provider}))?;
+            item["content"] = reference;
+            item["provider"] = Value::Null;
+            converted_history.push((id, serde_json::to_string(&item)?));
+        }
+    }
+    let mut converted_outputs = Vec::new();
+    {
+        let mut stmt = db.prepare("SELECT request_id,body FROM model_outputs")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        for row in rows {
+            let (id, raw) = row?;
+            let value: Value = serde_json::from_str(&raw)?;
+            converted_outputs.push((id, serde_json::to_string(&content.save(&value)?)?));
+        }
+    }
+    let mut queued = Vec::new();
+    {
+        let mut stmt = db.prepare("SELECT id,body FROM input_queue")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        for row in rows {
+            let (id, raw) = row?;
+            let input: Value = serde_json::from_str(&raw)?;
+            let body = input
+                .get("content")
+                .ok_or_else(|| RuntimeError::Invalid("queued input content missing".into()))?;
+            queued.push((
+                id,
+                serde_json::to_string(&content.save_history(body, &None)?)?,
+            ));
+        }
+    }
     let tx = db.transaction()?;
-    for (id, body) in converted {
+    for (id, body) in converted_steps {
         tx.execute(
             "UPDATE model_steps SET body=?2 WHERE id=?1",
             params![id, body],
         )?;
     }
-    tx.execute_batch("CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,1); PRAGMA user_version=2;")?;
+    for (id, body) in converted_history {
+        tx.execute("UPDATE history SET body=?2 WHERE id=?1", params![id, body])?;
+    }
+    for (id, body) in converted_outputs {
+        tx.execute(
+            "UPDATE model_outputs SET body=?2 WHERE request_id=?1",
+            params![id, body],
+        )?;
+    }
+    tx.execute_batch("CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY REFERENCES input_queue(id),body TEXT NOT NULL);")?;
+    for (id, body) in queued {
+        tx.execute(
+            "INSERT INTO input_history_content(input_id,body) VALUES(?1,?2)",
+            params![id, body],
+        )?;
+    }
+    if !exists {
+        tx.execute_batch("CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,2);")?;
+    } else {
+        tx.execute("UPDATE runtime_content_format SET version=2 WHERE id=1", [])?;
+    }
+    tx.execute_batch("PRAGMA user_version=3;")?;
     tx.commit()?;
     Ok(())
 }

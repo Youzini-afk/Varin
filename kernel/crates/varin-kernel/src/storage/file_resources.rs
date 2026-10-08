@@ -17,7 +17,7 @@ use std::path::{Component, Path};
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-enum FileState {
+pub(super) enum FileState {
     #[serde(rename = "regular-file")]
     RegularFile {
         #[serde(rename = "objectHash")]
@@ -58,7 +58,7 @@ pub(super) fn parse_file_params<T: DeserializeOwned>(
     Ok(serde_json::from_value(file_params_value(params_value))?)
 }
 
-fn file_mode(metadata: &fs::Metadata) -> u32 {
+pub(super) fn file_mode(metadata: &fs::Metadata) -> u32 {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -394,62 +394,7 @@ impl Storage {
         allow_root: bool,
     ) -> Result<ResolvedFileResource, KernelError> {
         let root = self.registered_file_root(root_id, grant)?;
-        let (path, relative_path) = normalized_relative_path(relative, allow_root)?;
-        if !path_allowed(grant, &path) {
-            return Err(KernelError::Authorization(format!(
-                "path is outside grant scope: {path}"
-            )));
-        }
-        let mut current = root.canonical_root.clone();
-        let components = relative_path.components().collect::<Vec<_>>();
-        for (index, component) in components.iter().enumerate() {
-            let next = current.join(component.as_os_str());
-            if index + 1 < components.len() {
-                match fs::canonicalize(&next) {
-                    Ok(canonical) => {
-                        if !path_inside(&root.canonical_root, &canonical) {
-                            return Err(KernelError::Authorization(
-                                "file path escaped the registered workspace root".to_string(),
-                            ));
-                        }
-                        current = canonical;
-                    }
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                        current = next;
-                        for rest in &components[index + 1..] {
-                            current.push(rest.as_os_str());
-                        }
-                        break;
-                    }
-                    Err(error) => return Err(error.into()),
-                }
-            } else {
-                current = next;
-            }
-        }
-        if !path_inside(&root.canonical_root, &current) {
-            return Err(KernelError::Authorization(
-                "file path escaped the registered workspace root".to_string(),
-            ));
-        }
-        let canonical_relative = current.strip_prefix(&root.canonical_root).map_err(|_| {
-            KernelError::Authorization("resolved resource is outside registered root".to_string())
-        })?;
-        let canonical_scope = canonical_relative
-            .to_str()
-            .ok_or_else(|| {
-                KernelError::Authorization("resolved resource is not UTF-8".to_string())
-            })?
-            .replace('\\', "/");
-        if !path_allowed(grant, &canonical_scope) {
-            return Err(KernelError::Authorization(
-                "resolved file path is outside grant scope".to_string(),
-            ));
-        }
-        Ok(ResolvedFileResource {
-            path,
-            absolute: current,
-        })
+        resolve_admitted_resource(&root, relative, grant, allow_root)
     }
 
     fn capture_file_state(
@@ -2401,5 +2346,198 @@ impl Storage {
         remove_tree(&backup.absolute)?;
         let _ = remove_tree(&stage.absolute);
         Ok(result)
+    }
+}
+
+// Shared path resolution for Storage-admitted background captures.
+pub(super) fn resolve_admitted_resource(
+    root: &FileRoot,
+    relative: &str,
+    grant: &Grant,
+    allow_root: bool,
+) -> Result<ResolvedFileResource, KernelError> {
+    let current_root = fs::canonicalize(&root.canonical_root)?;
+    if current_root != root.canonical_root || !fs::metadata(&current_root)?.is_dir() {
+        return Err(KernelError::Authorization(
+            "registered file root identity changed".into(),
+        ));
+    }
+    let (path, relative_path) = normalized_relative_path(relative, allow_root)?;
+    if !path_allowed(grant, &path) {
+        return Err(KernelError::Authorization(format!(
+            "path is outside grant scope: {path}"
+        )));
+    }
+    let mut current = root.canonical_root.clone();
+    let components = relative_path.components().collect::<Vec<_>>();
+    for (index, component) in components.iter().enumerate() {
+        let next = current.join(component.as_os_str());
+        if index + 1 < components.len() {
+            match fs::canonicalize(&next) {
+                Ok(canonical) => {
+                    if !path_inside(&root.canonical_root, &canonical) {
+                        return Err(KernelError::Authorization(
+                            "file path escaped the registered workspace root".to_string(),
+                        ));
+                    }
+                    current = canonical;
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    current = next;
+                    for rest in &components[index + 1..] {
+                        current.push(rest.as_os_str());
+                    }
+                    break;
+                }
+                Err(error) => return Err(error.into()),
+            }
+        } else {
+            current = next;
+        }
+    }
+    if !path_inside(&root.canonical_root, &current) {
+        return Err(KernelError::Authorization(
+            "file path escaped the registered workspace root".to_string(),
+        ));
+    }
+    let canonical_relative = current.strip_prefix(&root.canonical_root).map_err(|_| {
+        KernelError::Authorization("resolved resource is outside registered root".to_string())
+    })?;
+    let canonical_scope = canonical_relative
+        .to_str()
+        .ok_or_else(|| KernelError::Authorization("resolved resource is not UTF-8".to_string()))?
+        .replace('\\', "/");
+    if !path_allowed(grant, &canonical_scope) {
+        return Err(KernelError::Authorization(
+            "resolved file path is outside grant scope".to_string(),
+        ));
+    }
+    Ok(ResolvedFileResource {
+        path,
+        absolute: current,
+    })
+}
+
+impl Storage {
+    /// Typed native adapter entry point. This is deliberately not a wire method:
+    /// the bound Run supplies the root, and the existing grant/root/lease owner
+    /// still admits every read. Materialized sources observe their actual disk.
+    pub(crate) fn native_file_read(
+        &mut self,
+        params: &Value,
+        grant: &Grant,
+        read_body: bool,
+    ) -> Result<Value, KernelError> {
+        let root_id = params["rootId"].as_str().ok_or_else(|| {
+            KernelError::Authorization("materialized source root is missing".into())
+        })?;
+        let path = params["path"]
+            .as_str()
+            .ok_or_else(|| KernelError::Operation("file path is missing".into()))?;
+        let resource = self.resolve_file_resource(root_id, path, grant, false)?;
+        self.assert_file_lease(
+            grant,
+            root_id,
+            &[FileLeaseResource {
+                path: resource.path.clone(),
+                subtree: false,
+            }],
+            None,
+        )?;
+        self.check_cancelled()?;
+        if !read_body {
+            return Ok(Value::Null);
+        }
+        let source = json!({"mode":"materialized","rootId":root_id});
+        let metadata = match fs::symlink_metadata(&resource.absolute) {
+            Ok(value) => value,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(json!({"path":path,"source":source,"missing":true}))
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let state = if metadata.file_type().is_symlink() {
+            Some(FileState::Symlink {
+                symlink_target: fs::read_link(&resource.absolute)?
+                    .into_os_string()
+                    .into_string()
+                    .map_err(|_| KernelError::Operation("symlink target is not UTF-8".into()))?,
+                mode: Some(file_mode(&metadata)),
+            })
+        } else if metadata.is_dir() {
+            Some(FileState::Directory {
+                mode: Some(file_mode(&metadata)),
+            })
+        } else if !metadata.is_file() {
+            Some(FileState::Unsupported)
+        } else {
+            None
+        };
+        if let Some(state) = state {
+            return Ok(json!({"path":path,"source":source,"state":state,"missing":false}));
+        }
+        let mut options = OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        }
+        let mut file = options.open(&resource.absolute)?;
+        let before = file.metadata()?;
+        if !before.is_file() {
+            return Err(KernelError::Operation("file changed before read".into()));
+        }
+        let byte_length = before.len();
+        let offset = params["offset"].as_u64().unwrap_or(0);
+        let length = match params.get("length") {
+            Some(value) => value
+                .as_u64()
+                .ok_or_else(|| KernelError::Operation("invalid byte range".into()))?,
+            None => byte_length.saturating_sub(offset),
+        };
+        if (params.get("length").is_none() && byte_length > MAX_BLOB_RESPONSE_BYTES as u64)
+            || length > MAX_BLOB_RESPONSE_BYTES as u64
+        {
+            return Err(KernelError::Operation(
+                "file is larger than one response frame; request a byte range".into(),
+            ));
+        }
+        let start = offset.min(byte_length);
+        let end = start.saturating_add(length).min(byte_length);
+        file.seek(SeekFrom::Start(start))?;
+        let mut bytes = vec![0u8; (end - start) as usize];
+        for chunk in bytes.chunks_mut(128 * 1024) {
+            self.check_cancelled()?;
+            file.read_exact(chunk)?;
+        }
+        self.check_cancelled()?;
+        let after = file.metadata()?;
+        let resolved = self.resolve_file_resource(root_id, path, grant, false)?;
+        let current = fs::symlink_metadata(&resolved.absolute)?;
+        let mut changed = resolved.absolute != resource.absolute
+            || !current.is_file()
+            || current.file_type().is_symlink()
+            || before.len() != after.len()
+            || before.modified()? != after.modified()?
+            || file_mode(&before) != file_mode(&after)
+            || after.len() != current.len()
+            || after.modified()? != current.modified()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            changed |= after.dev() != current.dev() || after.ino() != current.ino();
+        }
+        if changed {
+            return Err(KernelError::Operation(
+                "file changed while being read".into(),
+            ));
+        }
+        let mut content = json!({"byteLength":byte_length,"offset":start,"nextOffset":end,"eof":end>=byte_length});
+        match String::from_utf8(bytes) {
+            Ok(text) => content["text"] = Value::String(text),
+            Err(error) => content["bytesBase64"] = Value::String(BASE64.encode(error.as_bytes())),
+        }
+        Ok(json!({"path":path,"source":source,"missing":false,"content":content}))
     }
 }

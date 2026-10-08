@@ -17,6 +17,9 @@
     "runtime.input.inspect": "NativeInputHandleParams",
     "runtime.input.list": "NativeHistoryParams",
 
+    "runtime.launch.select": "NativeLaunchSelectParams",
+    "runtime.launch.inspect": "NativeRunParams",
+    "runtime.launch.list": "KernelEmptyParams",
     "runtime.run.start": "NativeRunStartParams",
     "runtime.status": "KernelEmptyParams",
     "runtime.thread.create": "NativeThreadCreateParams",
@@ -60,6 +63,7 @@
     "file.lease.check": "KernelFileLeaseAcquireParams",
     "file.lease.release": "KernelFileLeaseReleaseParams",
     "file.capture": "KernelFileCaptureParams",
+    "file.captureBatch": "KernelFileCaptureBatchParams",
     "file.apply": "KernelFileApplyParams",
     "file.mkdir": "KernelFileMkdirParams",
     "file.remove": "KernelFileRemoveParams",
@@ -128,6 +132,13 @@
     "compute.grammar.register": "KernelComputeGrammarParams"
   },
   "dto": {
+    "NativeLaunchSourceParams": {"fields":{"materialized":{"type":"boolean"},"workspaceId":{"type":"string"},"executionWorkspaceId":{"type":"string"},"branchId":{"type":"string | null"},"revision":{"type":"number | null"}}},
+    "NativeLaunchSelectParams": {"fields":{"runId":{"type":"string"},"source":{"type":"NativeLaunchSourceParams"},"enabledTools":{"type":"string[]"},"credentialScope":{"type":"NativeCredentialScope","optional":true}}},
+    "NativeLaunchSource": {"fields":{"materialized":{"type":"boolean"},"workspace_id":{"type":"string"},"execution_workspace_id":{"type":"string"},"branch_id":{"type":"string | null"},"revision":{"type":"number | null"}}},
+    "NativeLaunchTool": {"fields":{"name":{"type":"string"},"version":{"type":"string"},"schema":{"type":"unknown"}}},
+    "NativeLaunchPolicy": {"fields":{"name":{"type":"string"},"version":{"type":"string"}}},
+    "NativeLaunchSelection": {"fields":{"connection_identity":{"type":"string"},"provider_family":{"type":"string"},"model":{"type":"string"},"configuration_generation":{"type":"number"},"tool_schema_generation":{"type":"number"},"tools":{"type":"NativeLaunchTool[]"},"policy":{"type":"NativeLaunchPolicy"},"source":{"type":"NativeLaunchSource | null"}}},
+    "NativeLaunchIntent": {"fields":{"run_id":{"type":"string"},"revision":{"type":"number"},"selection":{"type":"NativeLaunchSelection"},"bound_epoch":{"type":"number | null"},"requires_rebind":{"type":"boolean"}}},
     "KernelProcessSubscribeParams": {"fields":{"workspaceId":{"type":"string"},"processId":{"type":"string"},"subscriptionId":{"type":"string"},"cursor":{"type":"number"}}},
     "KernelProcessSubscriptionParams": {"fields":{"subscriptionId":{"type":"string"}}},
     "KernelProcessSubscriptionAckParams": {"fields":{"subscriptionId":{"type":"string"},"stream":{"type":"string"},"sequence":{"type":"number"}}},
@@ -143,7 +154,8 @@
     "NativeQueuedInput": {"fields": {"id": {"type": "string"}, "thread_id": {"type": "string"}, "branch_id": {"type": "string"}, "run_id": {"type": "string"}, "mode": {"type": "NativeInputMode"}, "state": {"type": "NativeInputState"}, "revision": {"type": "number"}, "content": {"type": "unknown"}, "cursor": {"type": "number"}}},
 
     "NativeExternalReceipt":{"fields":{"executor":{"type":"string"},"identity":{"type":"string"},"epoch":{"type":"string"},"outcome":{"type":"NativeOutcome"},"effect":{"type":"NativeEffect"},"result":{"type":"unknown"}}},
-    "NativeRunStartParams": {"fields":{"runId":{"type":"string"},"toolBinding":{"type":"unknown","optional":true}}},
+    "NativeRunStartParams": {"fields":{"runId":{"type":"string"},"toolBinding":{"type":"unknown","optional":true},"credentialScope":{"type":"NativeCredentialScope","optional":true}}},
+    "NativeCredentialScope": {"fields":{"reference":{"type":"string"},"authority":{"type":"string"},"account":{"type":"string"},"generation":{"type":"number"}}},
     "NativeModelSessionConfiguration": {"fields": {"providerFamily": {"type": "string"}, "model": {"type": "string"}, "endpoint": {"type": "string"}, "credentialEnvironment": {"type": "string | null"}, "allowAnonymous": {"type": "boolean"}, "configurationGeneration": {"type": "number"}, "maxOutputTokens": {"type": "number"}, "azureDeployment": {"type": "string | null", "optional": true}, "azureApiVersion": {"type": "string | null", "optional": true}, "legacyMaxTokens": {"type": "boolean", "optional": true}, "includeStreamUsage": {"type": "boolean", "optional": true}, "reasoningEffort": {"type": "string | null", "optional": true}}},
     "NativeRunStartReceipt": {"fields": {"runId": {"type": "string"}, "epoch": {"type": "number"}}},
     "NativeRunState": {"raw": "export type NativeRunState = \"accepted\" | \"preparing\" | \"runnable\" | \"generating\" | \"executing\" | \"waiting\" | \"completed\" | \"failed\" | \"cancelled\";"},
@@ -249,6 +261,9 @@
     }},
     "KernelFileCaptureParams": {"fields": {
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "store": {"type": "boolean"}, "leaseId": {"type": "string", "optional": true}
+    }},
+    "KernelFileCaptureBatchParams": {"fields": {
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "paths": {"type": "string[]"}, "store": {"type": "boolean"}, "leaseId": {"type": "string"}
     }},
     "KernelFileApplyParams": {"fields": {
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "targetJson": {"type": "string"}, "expectedJson": {"type": "string", "optional": true}, "ownerId": {"type": "string", "optional": true}, "leaseId": {"type": "string", "optional": true}
@@ -543,6 +558,9 @@
     "KernelComputeReadResult": {"fields":{"jobId":{"type":"string"},"kernelEpoch":{"type":"string"},"workspaceId":{"type":"string"},"status":{"type":"\"queued\" | \"running\" | \"ready\" | \"empty\" | \"partial\" | \"failed\" | \"cancelled\""},"root":{"type":"string | null"},"records":{"type":"KernelComputeRecord[]"},"nextCursor":{"type":"number"},"endCursor":{"type":"number"},"scannedFiles":{"type":"number"},"message":{"type":"string | null"}}}
   },
   "methods": {
+    "runtime.launch.select": "Persist a source launch selection before materialization",
+    "runtime.launch.inspect": "Inspect durable native launch selection and rebind requirement",
+    "runtime.launch.list": "List nonterminal native launch selections for trusted Host rebind",
     "runtime.input.enqueue": "Durable native queued input: enqueue",
     "runtime.input.edit": "Durable native queued input: edit",
     "runtime.input.cancel": "Durable native queued input: cancel",
@@ -592,6 +610,7 @@
     "file.lease.check": "validate that an existing lease covers a nested resource operation without widening it",
     "file.lease.release": "release a filesystem resource lease",
     "file.capture": "capture one filesystem path and optionally install its bytes into the content store",
+    "file.captureBatch": "capture a leased batch with body copying outside the storage actor and conditional owner publication",
     "file.apply": "conditionally apply one typed filesystem path state from kernel-owned content",
     "file.mkdir": "create a workspace directory through the kernel resource authority",
     "file.remove": "remove a workspace path through the kernel resource authority",

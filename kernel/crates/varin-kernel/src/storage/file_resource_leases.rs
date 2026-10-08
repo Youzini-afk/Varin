@@ -65,6 +65,9 @@ impl Storage {
     ) -> Result<(), KernelError> {
         let requested = self.canonical_lease_resources(root_id, paths, grant)?;
         if let Some(lease_id) = lease_id {
+            if self.capture_leases.contains_key(lease_id) {
+                return Err(KernelError::Operation("file lease is retained by an active capture".into()));
+            }
             let lease = self.file_leases.get(lease_id).ok_or_else(|| {
                 KernelError::Operation("file resource lease is no longer active".to_string())
             })?;
@@ -215,6 +218,10 @@ impl Storage {
             return Err(KernelError::Authorization(
                 "file lease belongs to another resource owner".to_string(),
             ));
+        }
+        if let Some(capture) = self.capture_leases.get_mut(&params.lease_id) {
+            capture.release_requested = true;
+            return Ok(json!({"leaseId": params.lease_id, "released": true, "deferred": true}));
         }
         self.file_leases.remove(&params.lease_id);
         Ok(json!({"leaseId": params.lease_id, "released": true}))

@@ -16,6 +16,7 @@ use std::{
 pub struct CredentialScope {
     pub reference: String,
     pub authority: String,
+    /// Durable local credential-binding handle, not an external provider account claim.
     pub account: String,
     /// Changes on account relink/revocation, not normal same-account token refresh.
     pub generation: u64,
@@ -143,6 +144,8 @@ pub struct CredentialBinding {
     pub header: HeaderName,
     pub prefix: String,
     pub account_header: Option<HeaderName>,
+    /// Verified external provider account ID, required when account_header is configured.
+    pub provider_account: Option<String>,
     pub additional_headers: HeaderMap,
     pub refresher: Option<Arc<dyn OAuthRefresher>>,
     pub minimum_validity: Duration,
@@ -155,6 +158,7 @@ impl CredentialBinding {
             header: reqwest::header::AUTHORIZATION,
             prefix: "Bearer ".into(),
             account_header: None,
+            provider_account: None,
             additional_headers: HeaderMap::new(),
             refresher: None,
             minimum_validity: Duration::from_secs(300),
@@ -288,8 +292,13 @@ impl NativeCredentialBroker {
             value.set_sensitive(true);
             headers.insert(binding.header, value);
             if let Some(header) = binding.account_header {
-                let value = HeaderValue::from_str(&binding.scope.account)
-                    .map_err(|_| CredentialError::InvalidHeader)?;
+                let account = binding
+                    .provider_account
+                    .as_deref()
+                    .filter(|value| !value.is_empty())
+                    .ok_or(CredentialError::InvalidScope)?;
+                let value =
+                    HeaderValue::from_str(account).map_err(|_| CredentialError::InvalidHeader)?;
                 headers.insert(header, value);
             }
             Ok(headers)
