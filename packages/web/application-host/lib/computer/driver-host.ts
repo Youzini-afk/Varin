@@ -12,11 +12,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync, watch } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ComputerCapabilities, ComputerPlatform, ComputerGesture } from "@varin/protocol";
-export type DriverGesture = Pick<ComputerGesture, 'phase' | 'point' | 'to' | 'target'>;
+import type { ComputerCapabilities, ComputerPlatform, ComputerGesture, ComputerActionReceipt } from "@varin/protocol";
+export type DriverGesture = Pick<ComputerGesture, 'phase' | 'point' | 'to' | 'target' | 'mechanism'>;
 import { remapAsarUnpackedPath } from "../structure/runtime-path.js";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
@@ -64,6 +64,7 @@ export interface DriverRequest {
 }
 
 export interface DriverResponse {
+  receipt?: ComputerActionReceipt;
   /** Preflight rejection proved no input was sent; other failed responses remain uncertain. */
   rejected?: boolean;
   id: string | null;
@@ -92,6 +93,7 @@ export interface DriverResponse {
 }
 
 export interface DriverSpawnSpec {
+  independentInputRelease?: boolean;
   command: string;
   args: string[];
   cwd?: string;
@@ -121,7 +123,8 @@ export function localDriverSpawnSpec(platform: ComputerPlatform, driverDir = com
     if (!existsSync(script)) return null;
     return {
       command: "powershell.exe",
-      args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", WINDOWS_DRIVER_BOOTSTRAP],
+      independentInputRelease: true,
+      args: ["-NoProfile", "-NonInteractive", "-MTA", "-ExecutionPolicy", "Bypass", "-Command", WINDOWS_DRIVER_BOOTSTRAP],
       env: { ...process.env, VARIN_COMPUTER_DRIVER_ENTRY: script },
     };
   }
@@ -168,6 +171,8 @@ export interface ComputerDriverSession {
    * file the long operations poll; returns false when nothing is in flight.
    */
   cancel(): boolean;
+  /** Stops the input owner through a channel independent of UIA/stdin. */
+  interrupt?(options?: { restoreFocus?: boolean }): Promise<{ released: boolean }>;
   /** The last successful capabilities probe, if any. */
   readonly capabilities: ComputerCapabilities | null;
   alive(): boolean;
@@ -182,6 +187,8 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
   let stderrTail = "";
   let caps: ComputerCapabilities | null = null;
   let disposed = false;
+  let started = false;
+  let interruption: Promise<{ released: boolean }> | undefined;
   const retiring = new Set<Promise<unknown>>();
   // Side-channel cancellation: long native ops poll <dir>/<id>.cancel so a
   // cancel lands mid-operation even while stdin is unread.
@@ -220,7 +227,8 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
       const bounds = progress.target as Record<string, unknown> | undefined;
       const target = rect && typeof bounds?.width === 'number' && Number.isFinite(bounds.width) && bounds.width > 0
         && typeof bounds.height === 'number' && Number.isFinite(bounds.height) && bounds.height > 0 ? { ...rect, width: bounds.width, height: bounds.height } : undefined;
-      try { p.onGesture?.({ phase: progress.phase as DriverGesture['phase'], ...(at ? { point: at } : {}), ...(to ? { to } : {}), ...(target ? { target } : {}) }); } catch { /* effects never change native input */ }
+      const mechanism = ['pointer', 'keyboard', 'semantic'].includes(String(progress.mechanism)) ? progress.mechanism as ComputerGesture['mechanism'] : undefined;
+      try { p.onGesture?.({ phase: progress.phase as DriverGesture['phase'], ...(mechanism ? { mechanism } : {}), ...(at ? { point: at } : {}), ...(to ? { to } : {}), ...(target ? { target } : {}) }); } catch { /* effects never change native input */ }
       return;
     }
     if (typeof message.ok !== "boolean") {
@@ -281,6 +289,7 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
       windowsHide: true,
     });
     child = spawned;
+    started = true;
     spawned.stdout?.setEncoding("utf8");
     spawned.stderr?.setEncoding("utf8");
     spawned.stdout?.on("data", (chunk: string) => {
@@ -351,6 +360,33 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
       return response;
     },
     cancel,
+    ...(spec.independentInputRelease ? { interrupt: (options?: { restoreFocus?: boolean }) => {
+      if (interruption) return interruption;
+      interruption = (async () => {
+        if (!isAlive()) return { released: !started };
+        const signalPath = path.join(cancelDir, `${randomUUID()}.release`);
+        const ackPath = `${signalPath}.ack`;
+        const released = await new Promise<boolean>((resolve) => {
+          let finished = false;
+          const finish = (result: boolean) => {
+            if (finished) return; finished = true;
+            observer.close(); clearTimeout(deadline); resolve(result);
+          };
+          const inspect = () => {
+            try { const value = JSON.parse(readFileSync(ackPath, 'utf8')) as { released?: boolean }; finish(value.released === true); } catch { /* wait for the atomic receipt */ }
+          };
+          const observer = watch(cancelDir, (_event, name) => { if (name?.toString() === path.basename(ackPath)) inspect(); });
+          const deadline = setTimeout(() => finish(false), DEFAULT_REQUEST_TIMEOUT_MS);
+          observer.on('error', () => finish(false));
+          try { writeFileSync(signalPath, options?.restoreFocus === false ? 'release\n' : 'restore\n'); inspect(); } catch { finish(false); }
+        });
+        // The native owner is fenced before this receipt. Closing its UIA worker
+        // prevents a stalled call from later starting the rest of an old script.
+        await wrapped.dispose();
+        return { released };
+      })();
+      return interruption;
+    } } : {}),
     get capabilities() { return caps; },
     alive: isAlive,
     dispose: async () => {

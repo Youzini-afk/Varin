@@ -16,6 +16,7 @@
 $ErrorActionPreference = "Stop"
 $DriverDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $DriverDir "runtime.ps1")
+[VarinInput]::Start($env:VARIN_DRIVER_CANCEL_DIR)
 
 # Report coordinates in physical pixels so Host-side frame math matches the
 # display grid regardless of the user's DPI scale.
@@ -46,17 +47,26 @@ while ($true) {
         $operation = $line | ConvertFrom-Json
         $requestId = [string]$operation.id
         $script:ActiveRequestId = $requestId
+        [VarinInput]::Begin($requestId)
         $response = Invoke-ComputerOperation $operation
+        if ($operation.tool -in @('click', 'perform_secondary_action', 'scroll', 'drag', 'type_text', 'press_key', 'set_value') -and $null -eq $response.receipt) {
+            $effect = if ($response.ok) { if ([VarinInput]::Effect -eq 'verified') { 'verified' } else { 'dispatched' } } elseif ($response.rejected) { 'none' } else { [VarinInput]::Effect }
+            $receipt = @{ effect = $effect; dispatchedEvents = [VarinInput]::DispatchedEvents }
+            if (-not $response.ok) { $receipt.reason = @{ code = 'target-changed'; message = $response.error }; $receipt.recovery = 'observe' }
+            $response | Add-Member -NotePropertyName receipt -NotePropertyValue $receipt
+        }
         & $writeResponse $requestId $response
     } catch [System.OperationCanceledException] {
-        & $writeResponse $requestId ([pscustomobject]@{ ok = $false; cancelled = $true; error = $_.Exception.Message })
+        & $writeResponse $requestId (New-ComputerFailure $_.Exception)
     } catch {
-        $message = $_.Exception.Message
         if (-not [string]::IsNullOrWhiteSpace($_.ScriptStackTrace)) {
-            $message = "$message at $($_.ScriptStackTrace)"
+            [Console]::Error.WriteLine($_.ScriptStackTrace)
         }
-        & $writeResponse $requestId ([pscustomobject]@{ ok = $false; error = $message })
+        & $writeResponse $requestId (New-ComputerFailure $_.Exception)
     } finally {
         $script:ActiveRequestId = $null
+        [VarinInput]::End()
     }
 }
+
+try { Send-ReleaseInput $true } catch { [Console]::Error.WriteLine("Managed input release failed at driver shutdown") }

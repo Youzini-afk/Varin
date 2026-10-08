@@ -82,8 +82,8 @@ export function installComputerAppSdk(
           return act({ ...options, kind: 'click', ...point(value) }, Array.isArray(value));
         },
         async setValue(index: number, value: string) { return act({ kind: 'set_value', elementIndex: index, value }); },
-        async typeText(text: string, options: Pick<ComputerAction, 'clickMethod'> = {}) { return act({ ...options, kind: 'type', text }); },
-        async pressKey(key: string, options: Pick<ComputerAction, 'clickMethod'> = {}) { return act({ ...options, kind: 'key', key }); },
+        async typeText(text: string, options: Pick<ComputerAction, 'clickMethod' | 'elementIndex'> = {}) { return act({ ...options, kind: 'type', text }); },
+        async pressKey(key: string, options: Pick<ComputerAction, 'clickMethod' | 'elementIndex'> = {}) { return act({ ...options, kind: 'key', key }); },
         async scroll(value: number | [number, number], direction: NonNullable<ComputerAction['direction']>, pages = 1) {
           return act({ kind: 'scroll', ...point(value), direction, pages }, Array.isArray(value));
         },

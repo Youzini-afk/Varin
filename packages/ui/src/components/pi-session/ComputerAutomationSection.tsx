@@ -23,7 +23,7 @@ export function ComputerAutomationSection({ view, directory }: { view: ReturnTyp
         onClick={() => openTab(directory, { mode: 'computer', targetPath: desktopId, dedupeKey: `desktop:${desktopId}`, label: desktopLabel })}>
         <Icon name={activity?.status === 'running' ? 'loader-4' : 'computer'} className={`size-4 shrink-0 text-muted-foreground ${activity?.status === 'running' ? 'animate-spin' : ''}`} />
         <span className="min-w-0 flex-1"><span className="block truncate typography-meta">{desktopLabel}</span>
-          <span className="block truncate typography-micro text-muted-foreground">{operator ?? t('computer.automation.observeOnly')}{activity?.status === 'running' ? ` · ${t(`computer.operation.${activity.operation}`)}` : ''}</span>
+          <span className="block truncate typography-micro text-muted-foreground">{controller?.suspended ? t('settings.computers.view.control.you') : operator ?? t('computer.automation.observeOnly')}{activity?.status === 'running' ? ` · ${t(`computer.operation.${activity.operation}`)}` : ''}</span>
           {activity ? <span className="block truncate typography-micro text-muted-foreground/75">{activity.app}</span> : null}</span>
         <Icon name="arrow-right-s" className="size-3.5 text-muted-foreground" />
       </button>;
@@ -33,8 +33,8 @@ export function ComputerAutomationSection({ view, directory }: { view: ReturnTyp
       <span className="block truncate typography-micro text-muted-foreground">{item.desktopLabel ?? item.desktopId} · {t(item.access === 'control' ? 'computer.automation.control' : 'computer.automation.observeOnly')}</span>
       <p className="mt-1 line-clamp-2 text-muted-foreground">{item.reason}</p>
     </div>)}
-    {state?.active && status !== 'stopped' ? <Button size="sm" variant="outline" disabled={view.busy || status === 'stopping'} className="w-full" onClick={() => void view.stop()}>
-      <Icon name="stop" className="mr-1.5 size-3.5" />{t(status === 'stopping' ? 'computer.automation.stopping' : 'computer.automation.stop')}
+    {state?.active ? <Button size="sm" variant="outline" disabled={view.busy || status === 'cancelling'} className="w-full" onClick={() => void view.stop()}>
+      <Icon name="stop" className="mr-1.5 size-3.5" />{t(status === 'cancelling' ? 'computer.automation.cancelling' : 'computer.automation.stop')}
     </Button> : null}
     {view.error ? <p role="alert" className="typography-micro text-destructive">{view.error}</p> : null}
   </div>;

@@ -70,9 +70,11 @@ and yields the Thread slot. `access` reads the family state and `releaseAssignme
 Inside an already admitted script these are also `computer.request(options)`, `grant(requestId)`,
 `deny(requestId, reason?)`, `access()` and `releaseAssignment(desktopId?)`. Retrieval/discussion children
 observe only. Main and child controllers respect one physical desktop owner; different desktops can
-run concurrently. The user can revoke Computer Use for the current main round from the work overview.
-The Host cancels only Computer evaluations and sends a passive stop notification, leaving other Agent
-work available. See [Computer admission](../../../web/application-host/lib/computer/DOCUMENTATION.md).
+run concurrently. The overview cancels the task family's current computer work; the desktop bar
+cancels that desktop's work. This cancels its evaluations and queued input, releases assignments and
+notifies the Agent. Permissions remain available for fresh work in the same Run. Explicit human
+takeover instead pauses the assignment until handback and a new observation.
+See [Computer admission](../../../web/application-host/lib/computer/DOCUMENTATION.md).
 
 Failure messages distinguish reads from desktop mutations. Read timeouts and cancellation before
 dispatch do not imply a desktop change. An interrupted mutation, unknown receipt, or script failure

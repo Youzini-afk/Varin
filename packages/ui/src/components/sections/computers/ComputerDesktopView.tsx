@@ -7,6 +7,7 @@ import {
   sendDesktopInput,
   subscribeDesktopStream,
   takeoverDesktop,
+  stopComputerAutomation,
   type DesktopStreamEvent,
 } from '@/lib/computers';
 import type { ComputerControlState, ComputerDesktop, ComputerDesktopFrame } from '@varin/protocol';
@@ -117,6 +118,15 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
     }
   };
 
+  const cancelWork = async () => {
+    const sessionId = control?.operator?.rootSessionId;
+    if (!sessionId) return;
+    setBusy(true); setInputError(null);
+    try { await stopComputerAutomation(sessionId, desktop.id); }
+    catch (cause) { setInputError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setBusy(false); }
+  };
+
   /** Translate a pointer event on the image into absolute desktop pixels. */
   const pointFor = (event: React.MouseEvent): { x: number; y: number } | null => {
     const img = useVnc ? vncRef.current?.querySelector('canvas') : frameRef.current;
@@ -206,13 +216,15 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
 
   return (
     <div className="flex flex-col gap-3 min-h-0">
-      <div className="flex items-center justify-between gap-3">
+      {control && (control.operator || control.owner === 'human' || control.transitioning) ? <div className="order-2 flex items-center justify-center gap-3 rounded-xl bg-muted/30 px-3 py-2">
         <span className="typography-meta text-muted-foreground" data-control={control?.owner ?? 'unknown'}>
-          {controlLabel}
+          {control?.workStatus === 'cancelling' ? t('computer.automation.cancelling') : control?.workStatus === 'cancel-unconfirmed' ? t('computer.automation.cancel-unconfirmed') : controlLabel}
+          {control?.operator && control.activity?.app ? ` · ${control.activity.app}` : ''}
           {frame?.capturedAt ? <time className="ml-2" dateTime={frame.capturedAt}>{new Date(frame.capturedAt).toLocaleTimeString()}</time> : null}
           {control && control.owner === 'human' && !control.reachable ? ` — ${t('settings.computers.view.control.reconnecting')}` : ''}
         </span>
         <div className="flex items-center gap-2">
+          {control?.operator ? <Button size="sm" variant="ghost" disabled={busy || control.workStatus === 'cancelling'} onClick={() => void cancelWork()}>{t('computer.automation.stop')}</Button> : null}
           {control?.owner === 'agent' ? (
             <Button size="sm" disabled={busy || control.transitioning} onClick={() => { void takeover(); }}>
               {t('settings.computers.view.takeover')}
@@ -229,7 +241,7 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
             </Button>
           ) : null}
         </div>
-      </div>
+      </div> : null}
       {streamError ? <p role="alert" className="typography-meta text-destructive">{streamError}</p> : null}
       {useVnc && vncStatus === 'disconnected' ? <p role="alert" className="typography-meta text-destructive">{t('settings.computers.view.streamLost')}</p> : null}
       {inputError ? <p role="alert" className="typography-meta text-destructive">{inputError}</p> : null}
@@ -249,9 +261,10 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
           <p role="status" className="typography-meta text-muted-foreground p-8">{t('settings.computers.view.waiting')}</p>
         )}
         <ComputerFeedback ref={feedback} bounds={frame?.bounds} upscale={useVnc} disabled={control?.owner !== 'agent' || Boolean(streamError)} />
+        {control?.owner === 'agent' && !control.operator && !control.transitioning ? <Button className="absolute right-2 top-2" size="sm" variant="secondary" disabled={busy} onClick={() => void takeover()}>{t('settings.computers.view.takeover')}</Button> : null}
       </div>
       {weHoldControl ? (
-        <form className="flex gap-2" onSubmit={(event) => {
+        <form className="order-3 flex gap-2" onSubmit={(event) => {
           event.preventDefault();
           if (!textDraft || !canInput) return;
           const submitted = textDraft;

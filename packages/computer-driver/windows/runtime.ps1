@@ -16,7 +16,7 @@
 #   - capabilities, reporting the honest driver feature table.
 #
 # The Host admits a single desktop controller before mutations reach here.
-# Auto uses semantic element actions and real pointer/keyboard input; app_post
+# Auto uses real pointer/keyboard input; explicit accessibility invokes UIA; app_post
 # remains an explicit background-message path for compatible native controls.
 
 $ErrorActionPreference = "Stop"
@@ -33,185 +33,7 @@ Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
 
-Add-Type -TypeDefinition @"
-using System;
-using System.Runtime.InteropServices;
-
-public static class VarinWin32 {
-    [StructLayout(LayoutKind.Sequential)]
-    public struct RECT {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct POINT {
-        public int X;
-        public int Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct MOUSEINPUT {
-        public int dx;
-        public int dy;
-        public uint mouseData;
-        public uint dwFlags;
-        public uint time;
-        public IntPtr dwExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct KEYBDINPUT {
-        public ushort wVk;
-        public ushort wScan;
-        public uint dwFlags;
-        public uint time;
-        public IntPtr dwExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct INPUT {
-        public uint type;
-        public INPUTUNION union;
-    }
-
-    [StructLayout(LayoutKind.Explicit)]
-    public struct INPUTUNION {
-        [FieldOffset(0)] public MOUSEINPUT mi;
-        [FieldOffset(0)] public KEYBDINPUT ki;
-    }
-
-    public const uint INPUT_MOUSE = 0;
-    public const uint INPUT_KEYBOARD = 1;
-
-    public const uint MOUSEEVENTF_MOVE = 0x0001;
-    public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
-    public const uint MOUSEEVENTF_LEFTUP = 0x0004;
-    public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
-    public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
-    public const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
-    public const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
-    public const uint MOUSEEVENTF_WHEEL = 0x0800;
-    public const uint MOUSEEVENTF_HWHEEL = 0x01000;
-    public const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
-
-    public const uint KEYEVENTF_KEYUP = 0x0002;
-    public const uint KEYEVENTF_UNICODE = 0x0004;
-
-    public const uint PW_RENDERFULLCONTENT = 0x00000002;
-
-    [DllImport("user32.dll")]
-    public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
-
-    [DllImport("user32.dll")]
-    public static extern bool ScreenToClient(IntPtr hWnd, ref POINT point);
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    public static extern bool PostMessage(IntPtr hWnd, UInt32 msg, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    public static extern IntPtr SendMessage(IntPtr hWnd, UInt32 msg, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    public static extern IntPtr SendMessage(IntPtr hWnd, UInt32 msg, IntPtr wParam, string lParam);
-
-    [DllImport("user32.dll")]
-    public static extern bool SetCursorPos(int x, int y);
-
-    [DllImport("user32.dll")]
-    public static extern bool SetForegroundWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    public static extern IntPtr GetForegroundWindow();
-
-    [DllImport("user32.dll")]
-    public static extern IntPtr WindowFromPoint(POINT point);
-
-    [DllImport("user32.dll")]
-    public static extern bool IsChild(IntPtr parent, IntPtr child);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
-
-    [DllImport("user32.dll")]
-    public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
-
-    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-
-    [DllImport("user32.dll")]
-    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
-
-    [DllImport("user32.dll")]
-    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-
-    [DllImport("user32.dll")]
-    public static extern bool IsWindowVisible(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    public static extern bool ShowWindowAsync(IntPtr hWnd, int command);
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder name, int maxCount);
-
-    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
-    public static extern int GetWindowLong(IntPtr hWnd, int index);
-
-    [DllImport("dwmapi.dll")]
-    public static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out int value, int size);
-
-    [DllImport("user32.dll")]
-    public static extern bool IsIconic(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    public static extern bool IsWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
-
-    [DllImport("user32.dll")]
-    public static extern int GetWindowTextLength(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
-
-    [DllImport("user32.dll")]
-    public static extern uint GetDpiForWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    public static extern bool SetProcessDPIAware();
-
-    [DllImport("user32.dll")]
-    public static extern int GetSystemMetrics(int nIndex);
-
-    [DllImport("gdi32.dll")]
-    public static extern bool DeleteObject(IntPtr hObject);
-
-    public static INPUT MouseInput(int dx, int dy, uint flags, uint data) {
-        INPUT input = new INPUT();
-        input.type = INPUT_MOUSE;
-        input.union = new INPUTUNION();
-        input.union.mi = new MOUSEINPUT();
-        input.union.mi.dx = dx;
-        input.union.mi.dy = dy;
-        input.union.mi.dwFlags = flags;
-        input.union.mi.mouseData = data;
-        return input;
-    }
-
-    public static INPUT KeyInput(ushort vk, ushort scan, uint flags) {
-        INPUT input = new INPUT();
-        input.type = INPUT_KEYBOARD;
-        input.union = new INPUTUNION();
-        input.union.ki = new KEYBDINPUT();
-        input.union.ki.wVk = vk;
-        input.union.ki.wScan = scan;
-        input.union.ki.dwFlags = flags;
-        return input;
-    }
-}
-"@
+Add-Type -Path @((Join-Path $PSScriptRoot "native-win32.cs"), (Join-Path $PSScriptRoot "input-controller.cs"))
 
 $WM_SETTEXT = 0x000C
 $WM_MOUSEMOVE = 0x0200
@@ -303,6 +125,7 @@ function ConvertTo-WheelWParam([int]$delta) {
 }
 
 function Send-PostedMessage([IntPtr]$hwnd, [uint32]$message, [IntPtr]$wParam, [IntPtr]$lParam) {
+    [VarinInput]::AttemptSemantic()
     if (-not [VarinWin32]::PostMessage($hwnd, $message, $wParam, $lParam)) {
         throw "Windows did not accept the window input message"
     }
@@ -418,38 +241,15 @@ function Send-Scroll([IntPtr]$hwnd, [int]$screenX, [int]$screenY, [string]$direc
     Send-PostedMessage $hwnd $message (ConvertTo-WheelWParam $delta) $lParam
 }
 
-function Send-Text([IntPtr]$hwnd, [string]$text) {
-    $sent = 0
-    foreach ($char in $text.ToCharArray()) {
-        Assert-NotCancelled ("typed $sent of $($text.Length) characters")
-        Send-PostedMessage $hwnd $WM_CHAR ([IntPtr][int][char]$char) ([IntPtr]::Zero)
-        $sent++
-        Start-Sleep -Milliseconds 8
-    }
-}
-
 function Send-TextToEditHandle([IntPtr]$hwnd, [string]$text, $element) {
-    if ($hwnd -eq [IntPtr]::Zero) {
-        return $false
-    }
-
-    try {
-        [void][VarinWin32]::SendMessage($hwnd, $EM_SETSEL, [IntPtr](-1), [IntPtr](-1))
-        [void][VarinWin32]::SendMessage($hwnd, $EM_REPLACESEL, [IntPtr]1, $text)
-        return $true
-    } catch {
-    }
-
-    try {
-        $current = ""
-        if ($null -ne $element) {
-            $current = Get-ElementValue $element
-        }
-        [void][VarinWin32]::SendMessage($hwnd, $WM_SETTEXT, [IntPtr]::Zero, ($current + $text))
-        return $true
-    } catch {
-        return $false
-    }
+    if ($hwnd -eq [IntPtr]::Zero) { return $false }
+    $className = [System.Text.StringBuilder]::new(256)
+    [void][VarinWin32]::GetClassName($hwnd, $className, $className.Capacity)
+    if ($className.ToString() -notmatch '^(Edit|RichEdit.*)$') { return $false }
+    [VarinInput]::AttemptSemantic()
+    # Insert at the current selection; never force append or replace the field.
+    [void][VarinWin32]::SendMessage($hwnd, $EM_REPLACESEL, [IntPtr]1, $text)
+    return $true
 }
 
 # ---------------------------------------------------------------------------
@@ -458,96 +258,36 @@ function Send-TextToEditHandle([IntPtr]$hwnd, [string]$text, $element) {
 # desktop assignment admits both automatic and explicit global input.
 # ---------------------------------------------------------------------------
 
-$script:HeldInputs = @{}
-$script:InputWindow = [IntPtr]::Zero
 
-function Send-ManagedInput($input) {
-    $release = $null
-    $key = $null
-    $isUp = $false
-    if ($input.type -eq [VarinWin32]::INPUT_KEYBOARD) {
-        $keyboard = $input.union.ki
-        $key = "key:$($keyboard.wVk):$($keyboard.wScan)"
-        $isUp = ($keyboard.dwFlags -band [VarinWin32]::KEYEVENTF_KEYUP) -ne 0
-        $release = [VarinWin32]::KeyInput($keyboard.wVk, $keyboard.wScan, ($keyboard.dwFlags -bor [VarinWin32]::KEYEVENTF_KEYUP))
-    } else {
-        foreach ($pair in @(@(2, 4), @(8, 16), @(32, 64))) {
-            if (($input.union.mi.dwFlags -band ($pair[0] -bor $pair[1])) -ne 0) {
-                $key = "mouse:$($pair[0])"
-                $isUp = ($input.union.mi.dwFlags -band $pair[1]) -ne 0
-                $release = [VarinWin32]::MouseInput(0, 0, $pair[1], 0)
-            }
-        }
-    }
-    if (-not $isUp -and $script:InputWindow -ne [IntPtr]::Zero -and [VarinWin32]::GetForegroundWindow() -ne $script:InputWindow) {
-        throw "The target window lost foreground focus; input was stopped"
-    }
-    $sent = [VarinWin32]::SendInput(1, @($input), [System.Runtime.InteropServices.Marshal]::SizeOf([type][VarinWin32+INPUT]))
-    if ($sent -ne 1) { throw "Windows did not accept the input event" }
-    if ($key) {
-        if ($isUp) { $script:HeldInputs.Remove($key) }
-        else { $script:HeldInputs[$key] = $release }
-    }
-}
+function Send-ManagedInput($event) { [VarinInput]::Send([VarinWin32+INPUT[]]@($event)) }
 
-function Move-GlobalPointer([int]$screenX, [int]$screenY) {
-    Assert-NotCancelled "before pointer input"
-    if ($script:InputWindow -ne [IntPtr]::Zero -and [VarinWin32]::GetForegroundWindow() -ne $script:InputWindow) {
-        throw "The target window lost foreground focus; input was stopped"
-    }
-    if ($script:InputWindow -ne [IntPtr]::Zero) {
-        $point = New-Object VarinWin32+POINT
-        $point.X = $screenX; $point.Y = $screenY
-        $owner = [VarinWin32]::WindowFromPoint($point)
-        if ($owner -ne $script:InputWindow -and -not [VarinWin32]::IsChild($script:InputWindow, $owner)) {
-            throw "The pointer target is covered by another window; input was stopped"
-        }
-    }
-    if (-not [VarinWin32]::SetCursorPos($screenX, $screenY)) { throw "Windows did not accept pointer movement" }
-}
+function Move-GlobalPointer([int]$screenX, [int]$screenY) { [VarinInput]::Move($screenX, $screenY) }
 
 function Use-GlobalInputWindow([IntPtr]$hwnd, $rootElement) {
     Assert-NotCancelled "before activating the target window"
-    if ([VarinWin32]::GetForegroundWindow() -ne $hwnd) {
-        if ([VarinWin32]::IsIconic($hwnd)) { [void][VarinWin32]::ShowWindowAsync($hwnd, 9) }
-        [void][VarinWin32]::SetForegroundWindow($hwnd)
-        if ([VarinWin32]::GetForegroundWindow() -ne $hwnd -and $null -ne $rootElement) {
-            try { $rootElement.SetFocus() } catch { }
-        }
-        # Share the driver's existing 120ms input-settle allowance. Do not
-        # inject ALT or attach another application's input queue to force focus.
-        $until = [DateTime]::UtcNow.AddMilliseconds(120)
-        while ([VarinWin32]::GetForegroundWindow() -ne $hwnd -and [DateTime]::UtcNow -lt $until) {
-            Assert-NotCancelled "waiting for the target window to activate"
-            Start-Sleep -Milliseconds 10
-        }
-        if ([VarinWin32]::GetForegroundWindow() -ne $hwnd) {
-            $failure = New-Object System.InvalidOperationException "Windows could not activate the target window; bring it to the foreground and retry"
-            $failure.Data["VarinRejected"] = $true
-            throw $failure
-        }
-    }
+    [VarinInput]::Activate($hwnd)
     if ($null -ne $script:GestureOperation.expected_bounds) {
         $bounds = Get-WindowRectFrame $hwnd
         foreach ($axis in @("x", "y", "width", "height")) {
             if ($null -eq $bounds -or [double]$bounds.$axis -ne [double]$script:GestureOperation.expected_bounds.$axis) {
-                $failure = New-Object System.InvalidOperationException "Window geometry changed while activating; observe again"
-                $failure.Data["VarinRejected"] = $true
-                throw $failure
+                throw [VarinInputException]::new("target-changed", "Window geometry changed while activating; observe again")
             }
         }
     }
-    $script:InputWindow = $hwnd
+}
+
+function Use-KeyboardTarget($element) {
+    if ($null -ne $element) {
+        if (-not $element.Current.HasKeyboardFocus) { $element.SetFocus() }
+        if (-not $element.Current.HasKeyboardFocus) { throw [VarinInputException]::new("focus-changed", "The selected control did not obtain keyboard focus") }
+    }
+    [VarinInput]::BindKeyboardFocus()
 }
 
 function Send-GlobalMouseInput([int]$screenX, [int]$screenY, [uint32[]]$flags) {
     Move-GlobalPointer $screenX $screenY
-    Start-Sleep -Milliseconds 15
-    foreach ($flag in $flags) {
-        $input = [VarinWin32]::MouseInput($screenX, $screenY, $flag, 0)
-        Send-ManagedInput $input
-        Start-Sleep -Milliseconds 40
-    }
+    $events = @($flags | ForEach-Object { [VarinWin32]::MouseInput($screenX, $screenY, $_, 0) })
+    [VarinInput]::Send([VarinWin32+INPUT[]]$events)
 }
 
 function Send-GlobalMouseClick([int]$screenX, [int]$screenY, [string]$button, [int]$count) {
@@ -602,16 +342,13 @@ function Send-GlobalScroll([int]$screenX, [int]$screenY, [string]$direction, [do
 }
 
 function Send-GlobalText([string]$text) {
-    $sent = 0
     foreach ($char in $text.ToCharArray()) {
-        Assert-NotCancelled ("typed $sent of $($text.Length) characters")
+        Assert-NotCancelled "during text input"
         $code = [uint16][char]$char
-        $down = [VarinWin32]::KeyInput(0, $code, [VarinWin32]::KEYEVENTF_UNICODE)
-        $up = [VarinWin32]::KeyInput(0, $code, ([VarinWin32]::KEYEVENTF_UNICODE -bor [VarinWin32]::KEYEVENTF_KEYUP))
-        Send-ManagedInput $down
-        Send-ManagedInput $up
-        $sent++
-        Start-Sleep -Milliseconds 8
+        [VarinInput]::Send([VarinWin32+INPUT[]]@(
+            [VarinWin32]::KeyInput(0, $code, [VarinWin32]::KEYEVENTF_UNICODE),
+            [VarinWin32]::KeyInput(0, $code, ([VarinWin32]::KEYEVENTF_UNICODE -bor [VarinWin32]::KEYEVENTF_KEYUP))
+        ))
     }
 }
 
@@ -631,29 +368,22 @@ function Send-GlobalKey([string]$key) {
             "cmd" { $modifiers += 0x5B }
         }
     }
+    $events = [System.Collections.Generic.List[VarinWin32+INPUT]]::new()
     foreach ($modifier in $modifiers) {
         $down = [VarinWin32]::KeyInput([uint16]$modifier, 0, 0)
-        Send-ManagedInput $down
+        $events.Add($down)
     }
     $vk = Get-VirtualKey $main
-    Send-ManagedInput ([VarinWin32]::KeyInput([uint16]$vk, 0, 0))
-    Start-Sleep -Milliseconds 30
-    Send-ManagedInput ([VarinWin32]::KeyInput([uint16]$vk, 0, [VarinWin32]::KEYEVENTF_KEYUP))
+    $events.Add([VarinWin32]::KeyInput([uint16]$vk, 0, 0))
+    $events.Add([VarinWin32]::KeyInput([uint16]$vk, 0, [VarinWin32]::KEYEVENTF_KEYUP))
     [array]::Reverse($modifiers)
     foreach ($modifier in $modifiers) {
-        Send-ManagedInput ([VarinWin32]::KeyInput([uint16]$modifier, 0, [VarinWin32]::KEYEVENTF_KEYUP))
+        $events.Add([VarinWin32]::KeyInput([uint16]$modifier, 0, [VarinWin32]::KEYEVENTF_KEYUP))
     }
+    [VarinInput]::Send($events.ToArray())
 }
 
-function Send-ReleaseInput {
-    # Release only inputs tracked by this driver. After a crash there is no
-    # reliable way to distinguish old injected state from human-held input.
-    $failed = 0
-    foreach ($key in @($script:HeldInputs.Keys)) {
-        try { Send-ManagedInput $script:HeldInputs[$key] } catch { $failed++ }
-    }
-    if ($failed -gt 0) { throw "Windows did not confirm release of $failed managed inputs" }
-}
+function Send-ReleaseInput([bool]$restoreFocus = $false) { [VarinInput]::Release($restoreFocus) }
 
 function Get-VirtualKey([string]$key) {
     $normalized = $key.ToLowerInvariant()
@@ -729,6 +459,7 @@ function Get-WindowProcessMap {
     $map = @{}
     $callback = [VarinWin32+EnumWindowsProc]{
         param($callbackHwnd, $lParam)
+        if ($script:GestureOperation.control_windows -contains [int64]$callbackHwnd) { return $true }
         $procId = 0
         [void][VarinWin32]::GetWindowThreadProcessId($callbackHwnd, [ref]$procId)
         if ($procId -ne 0) {
@@ -850,7 +581,7 @@ function Resolve-App([string]$query) {
         }
     }
 
-    throw "appNotFound(`"$query`")"
+    throw [VarinInputException]::new("target-unavailable", "Application not found: $query")
 }
 
 # Resolve which of the process's top-level windows an operation targets:
@@ -1453,7 +1184,7 @@ function Find-Element($process, $record, $rootOverride = $null) {
         if ($namedIds.Count -gt 0) { $candidates = $namedIds }
     }
     if ($candidates.Count -eq 1) { return $candidates[0] }
-    if ($candidates.Count -gt 1) { throw "Observed element has multiple matching controls; observe again and choose a distinguishable element" }
+    if ($candidates.Count -gt 1) { throw [VarinInputException]::new("target-changed", "Observed element has multiple matching controls; observe again and choose a distinguishable element") }
     return $null
 }
 
@@ -1468,16 +1199,19 @@ function Get-CurrentPatternOrNull($element, $pattern) {
 function Invoke-PreferredClick($element) {
     $invoke = Get-CurrentPatternOrNull $element ([Windows.Automation.InvokePattern]::Pattern)
     if ($null -ne $invoke) {
+        [VarinInput]::AttemptSemantic()
         $invoke.Invoke()
         return $true
     }
     $selection = Get-CurrentPatternOrNull $element ([Windows.Automation.SelectionItemPattern]::Pattern)
     if ($null -ne $selection) {
+        [VarinInput]::AttemptSemantic()
         $selection.Select()
         return $true
     }
     $toggle = Get-CurrentPatternOrNull $element ([Windows.Automation.TogglePattern]::Pattern)
     if ($null -ne $toggle) {
+        [VarinInput]::AttemptSemantic()
         $toggle.Toggle()
         return $true
     }
@@ -1485,6 +1219,7 @@ function Invoke-PreferredClick($element) {
 }
 
 function Invoke-SecondaryAction($element, [string]$action) {
+    [VarinInput]::AttemptSemantic()
     switch ($action.ToLowerInvariant()) {
         "invoke" {
             $pattern = Get-CurrentPatternOrNull $element ([Windows.Automation.InvokePattern]::Pattern)
@@ -1532,47 +1267,11 @@ function Invoke-Scroll($element, [string]$direction, [double]$pages) {
     $repeat = [math]::Max(1, [int][math]::Ceiling($pages))
     for ($i = 0; $i -lt $repeat; $i++) {
         Assert-NotCancelled ("scrolled $i of $repeat steps")
+        [VarinInput]::AttemptSemantic()
         $scroll.Scroll($horizontal, $vertical)
         Start-Sleep -Milliseconds 40
     }
     return $true
-}
-
-function Find-TextEntryElement($process, $rootOverride = $null) {
-    $root = if ($null -ne $rootOverride) { $rootOverride } else { Get-MainElement $process }
-    $elements = @(Get-AllElements $root)
-    try {
-        $focused = [Windows.Automation.AutomationElement]::FocusedElement
-        if ($null -ne $focused -and $focused.Current.ProcessId -eq $process.Id) {
-            $focusedValue = Get-CurrentPatternOrNull $focused ([Windows.Automation.ValuePattern]::Pattern)
-            if ($null -ne $focusedValue -and -not $focusedValue.Current.IsReadOnly) {
-                foreach ($candidate in $elements) {
-                    if (Same-RuntimeId @($candidate.GetRuntimeId()) @($focused.GetRuntimeId())) { return $candidate }
-                }
-            }
-        }
-    } catch {
-    }
-
-    foreach ($element in $elements) {
-        $valuePattern = Get-CurrentPatternOrNull $element ([Windows.Automation.ValuePattern]::Pattern)
-        if ($null -eq $valuePattern -or $valuePattern.Current.IsReadOnly) {
-            continue
-        }
-        $controlType = Get-ElementControlTypeName $element
-        if ($controlType -like "*Edit*" -or $controlType -like "*Document*") {
-            return $element
-        }
-    }
-
-    foreach ($element in $elements) {
-        $valuePattern = Get-CurrentPatternOrNull $element ([Windows.Automation.ValuePattern]::Pattern)
-        if ($null -ne $valuePattern -and -not $valuePattern.Current.IsReadOnly) {
-            return $element
-        }
-    }
-
-    return $null
 }
 
 function Get-NativeWindowHandle($element) {
@@ -1583,67 +1282,13 @@ function Get-NativeWindowHandle($element) {
     return [IntPtr]$handle
 }
 
-function Test-TextWindowHandleCandidate($process, $element) {
-    if ($null -eq $element) {
-        return $false
-    }
-    $handle = Get-NativeWindowHandle $element
-    if ($handle -eq [IntPtr]::Zero -or $handle -eq [IntPtr]$process.MainWindowHandle) {
-        return $false
-    }
-    $controlType = Get-ElementControlTypeName $element
-    $className = Get-ElementString $element "ClassName"
-    return (
-        $controlType -like "*Edit*" -or
-        $controlType -like "*Document*" -or
-        $className -like "*Edit*" -or
-        $className -like "*Rich*" -or
-        $className -like "*Text*"
-    )
-}
-
-function Find-TextEntryWindowHandle($process, $preferredElement, $rootOverride = $null) {
-    if (Test-TextWindowHandleCandidate $process $preferredElement) {
-        return Get-NativeWindowHandle $preferredElement
-    }
-
-    $root = if ($null -ne $rootOverride) { $rootOverride } else { Get-MainElement $process }
-    foreach ($element in (Get-AllElements $root)) {
-        if (-not (Test-TextWindowHandleCandidate $process $element)) {
-            continue
-        }
-        $valuePattern = Get-CurrentPatternOrNull $element ([Windows.Automation.ValuePattern]::Pattern)
-        if ($null -ne $valuePattern -and -not $valuePattern.Current.IsReadOnly) {
-            return Get-NativeWindowHandle $element
-        }
-    }
-
-    foreach ($element in (Get-AllElements $root)) {
-        if (Test-TextWindowHandleCandidate $process $element) {
-            return Get-NativeWindowHandle $element
-        }
-    }
-
-    return [IntPtr]::Zero
-}
-
-function Invoke-TypeText($process, [string]$text, $rootOverride = $null) {
-    $element = Find-TextEntryElement $process $rootOverride
-    $targetHwnd = Find-TextEntryWindowHandle $process $element $rootOverride
-    if ($targetHwnd -ne [IntPtr]::Zero -and (Send-TextToEditHandle $targetHwnd $text $element)) {
-        return $true
-    }
-
-    if ($null -ne $element) {
-        $valuePattern = Get-CurrentPatternOrNull $element ([Windows.Automation.ValuePattern]::Pattern)
-        if ($null -ne $valuePattern -and -not $valuePattern.Current.IsReadOnly) {
-            $current = ""
-            try { $current = [string]$valuePattern.Current.Value } catch {}
-            $valuePattern.SetValue($current + $text)
-            return $true
-        }
-    }
-    return $false
+function Invoke-TypeText($process, [string]$text, $rootOverride = $null, $preferred = $null) {
+    $element = $preferred
+    if ($null -eq $element) { $element = [Windows.Automation.AutomationElement]::FocusedElement }
+    $targetHwnd = Get-NativeWindowHandle $element
+    $rootHwnd = Get-NativeWindowHandle $rootOverride
+    if ($targetHwnd -eq [IntPtr]::Zero -or $rootHwnd -eq [IntPtr]::Zero -or ($targetHwnd -ne $rootHwnd -and -not [VarinWin32]::IsChild($rootHwnd, $targetHwnd))) { return $false }
+    return (Send-TextToEditHandle $targetHwnd $text $element)
 }
 
 # ---------------------------------------------------------------------------
@@ -1655,15 +1300,26 @@ function Invoke-TypeText($process, [string]$text, $rootOverride = $null) {
 function Send-ComputerGesture([string]$phase, $point = $null, $to = $null, $target = $null) {
     if (-not $script:GestureOperation.visual_feedback) { return }
     $payload = @{ id = [string]$script:GestureOperation.id; type = "gesture"; phase = $phase }
+    if ($script:GestureMechanism) { $payload.mechanism = $script:GestureMechanism }
     if ($null -ne $point) { $payload.point = $point }
     if ($null -ne $to) { $payload.to = $to }
     if ($null -ne $target) { $payload.target = $target }
     try { [Console]::Out.WriteLine(($payload | ConvertTo-Json -Depth 6 -Compress)); [Console]::Out.Flush() } catch {}
 }
 
+function New-ComputerFailure($exception) {
+    while ($null -ne $exception.InnerException) { $exception = $exception.InnerException }
+    $cancelled = $exception -is [System.OperationCanceledException]
+    $code = if ($exception.Data['VarinReason']) { [string]$exception.Data['VarinReason'] } elseif ($cancelled) { 'cancelled' } else { 'driver-error' }
+    $effect = [VarinInput]::Effect
+    $receipt = @{ effect = $effect; reason = @{ code = $code; message = $exception.Message }; recovery = 'observe'; dispatchedEvents = [VarinInput]::DispatchedEvents }
+    return [pscustomobject]@{ ok = $false; cancelled = $cancelled; rejected = ($effect -eq 'none'); error = $exception.Message; receipt = $receipt }
+}
+
 function Invoke-ComputerOperation($operation) {
     $script:GestureOperation = $operation
     $tool = [string]$operation.tool
+    $script:GestureMechanism = if ($tool -in @('set_value', 'perform_secondary_action') -or $operation.click_method -in @('accessibility', 'app_post') -or $operation.input -eq 'app_post') { 'semantic' } elseif ($tool -in @('type_text', 'press_key')) { 'keyboard' } else { 'pointer' }
 
     if ($tool -eq "ping") {
         return [pscustomobject]@{ ok = $true }
@@ -1672,7 +1328,7 @@ function Invoke-ComputerOperation($operation) {
         return [pscustomobject]@{ ok = $true; capabilities = (Get-DriverCapabilities) }
     }
     if ($tool -eq "release_input") {
-        Send-ReleaseInput
+        Send-ReleaseInput $true
         return [pscustomobject]@{ ok = $true }
     }
     if ($tool -eq "list_apps") {
@@ -1725,9 +1381,9 @@ function Invoke-ComputerOperation($operation) {
     try {
         if ($null -ne $operation.expected_bounds) {
             foreach ($axis in @("x", "y", "width", "height")) {
-                if ([double]$windowBounds.$axis -ne [double]$operation.expected_bounds.$axis) { throw "Window geometry changed since the screenshot; observe again" }
+                if ([double]$windowBounds.$axis -ne [double]$operation.expected_bounds.$axis) { throw [VarinInputException]::new("target-changed", "Window geometry changed since the screenshot; observe again") }
             }
-            if ($null -ne $operation.expected_dpi -and (Get-WindowDpiScale $hwnd) -ne [double]$operation.expected_dpi) { throw "Window DPI changed since the screenshot; observe again" }
+            if ($null -ne $operation.expected_dpi -and (Get-WindowDpiScale $hwnd) -ne [double]$operation.expected_dpi) { throw [VarinInputException]::new("target-changed", "Window DPI changed since the screenshot; observe again") }
             if ($operation.capture_source -eq "screen") {
                 $points = New-Object System.Collections.Generic.List[object]
                 if ($tool -eq "drag") {
@@ -1739,14 +1395,14 @@ function Invoke-ComputerOperation($operation) {
                     $screenPoint.X = [int][math]::Round($windowBounds.x + [double]$point[0])
                     $screenPoint.Y = [int][math]::Round($windowBounds.y + [double]$point[1])
                     $owner = [VarinWin32]::WindowFromPoint($screenPoint)
-                    if ($owner -ne $hwnd -and -not [VarinWin32]::IsChild($hwnd, $owner)) { throw "Screenshot coordinate is occluded by another window; use an accessibility element or observe again" }
+                    if ($owner -ne $hwnd -and -not [VarinWin32]::IsChild($hwnd, $owner)) { throw [VarinInputException]::new("target-changed", "Screenshot coordinate is occluded by another window; use an accessibility element or observe again") }
                 }
             }
         }
         $element = Find-Element $process $operation.element $rootElement
-        if ($null -ne $operation.element -and $null -eq $element) { throw "Observed element no longer exists; observe again" }
+        if ($null -ne $operation.element -and $null -eq $element) { throw [VarinInputException]::new("target-unavailable", "Observed element no longer exists; observe again") }
     } catch [System.OperationCanceledException] { throw }
-    catch { return [pscustomobject]@{ ok = $false; rejected = $true; error = $_.Exception.Message } }
+    catch { return (New-ComputerFailure $_.Exception) }
     if ($null -ne $element) { $operation.element.frame = Get-ElementFrame $element $windowBounds }
     # PostMessage paths target the element's own HWND when the UIA record
     # carries one 鈥?child-window controls receive their own messages.
@@ -1757,6 +1413,7 @@ function Invoke-ComputerOperation($operation) {
     }
     $inputPath = [string]$operation.input
     if ([string]::IsNullOrWhiteSpace($inputPath)) { $inputPath = "auto" }
+    if ($tool -eq 'scroll' -and $null -ne $element -and $null -ne (Get-CurrentPatternOrNull $element ([Windows.Automation.ScrollPattern]::Pattern))) { $script:GestureMechanism = 'semantic' }
     if ($operation.visual_feedback) {
         $target = $windowBounds
         if ($null -ne $element) {
@@ -1778,7 +1435,7 @@ function Invoke-ComputerOperation($operation) {
     switch ($tool) {
         "click" {
             $clickMethod = [string]$operation.click_method
-            if ([string]::IsNullOrWhiteSpace($clickMethod)) { $clickMethod = "auto" }
+            if ([string]::IsNullOrWhiteSpace($clickMethod) -or $clickMethod -eq "auto") { $clickMethod = "global" }
 
             if ($clickMethod -eq "accessibility") {
                 if ($null -eq $element) { throw "click_method 'accessibility' requires element_index" }
@@ -1802,32 +1459,11 @@ function Invoke-ComputerOperation($operation) {
                 }
                 Send-ComputerGesture "target" $point
                 Send-GlobalMouseClick $point.x $point.y $operation.mouse_button ([int]$operation.click_count)
-            } elseif ($clickMethod -eq "app_post" -or $clickMethod -eq "auto") {
-                $handled = $false
-                if ($clickMethod -eq "auto" -and $null -ne $element -and $operation.mouse_button -ne "right" -and $operation.mouse_button -ne "middle") {
-                    $handled = Invoke-PreferredClick $element
+            } elseif ($clickMethod -eq "app_post") {
+                $point = if ($null -ne $element) { Get-ScreenPoint $operation.element.frame $windowBounds } else {
+                    [pscustomobject]@{ x = [int][math]::Round($windowBounds.x + [double]$operation.x); y = [int][math]::Round($windowBounds.y + [double]$operation.y) }
                 }
-                if (-not $handled) {
-                    if ($clickMethod -ne "app_post") {
-                        Use-GlobalInputWindow $hwnd $rootElement
-                        $windowBounds = Get-WindowBounds $process $rootElement $hwnd
-                        if ($null -ne $element) { $operation.element.frame = Get-ElementFrame $element $windowBounds }
-                    }
-                    if ($null -ne $operation.element -and $null -ne $operation.element.frame) {
-                        $point = Get-ScreenPoint $operation.element.frame $windowBounds
-                    } else {
-                        $point = [pscustomobject]@{
-                            x = [int][math]::Round($windowBounds.x + [double]$operation.x)
-                            y = [int][math]::Round($windowBounds.y + [double]$operation.y)
-                        }
-                    }
-                    if ($clickMethod -eq "app_post") {
-                        Send-MouseClick $postHwnd $point.x $point.y $operation.mouse_button ([int]$operation.click_count)
-                    } else {
-                        Send-ComputerGesture "target" $point
-                        Send-GlobalMouseClick $point.x $point.y $operation.mouse_button ([int]$operation.click_count)
-                    }
-                }
+                Send-MouseClick $postHwnd $point.x $point.y $operation.mouse_button ([int]$operation.click_count)
             } else {
                 throw "Invalid click_method '$clickMethod'"
             }
@@ -1840,9 +1476,11 @@ function Invoke-ComputerOperation($operation) {
             $handled = $false
             if ($null -ne $element) {
                 $handled = Invoke-Scroll $element $operation.direction ([double]$operation.pages)
+                if ($handled) { $script:GestureMechanism = 'semantic'; Send-ComputerGesture 'target' $null $null $target }
             }
             if (-not $handled) {
                 if ($inputPath -ne "app_post") {
+                    $script:GestureMechanism = 'pointer'
                     Use-GlobalInputWindow $hwnd $rootElement
                     $windowBounds = Get-WindowBounds $process $rootElement $hwnd
                     if ($null -ne $element) { $operation.element.frame = Get-ElementFrame $element $windowBounds }
@@ -1882,16 +1520,19 @@ function Invoke-ComputerOperation($operation) {
         "type_text" {
             if ($inputPath -ne "app_post") {
                 Use-GlobalInputWindow $hwnd $rootElement
+                Use-KeyboardTarget $element
                 Send-GlobalText $operation.text
-            } elseif (-not (Invoke-TypeText $process $operation.text $rootElement)) {
-                Send-Text $postHwnd $operation.text
+            } elseif (-not (Invoke-TypeText $process $operation.text $rootElement $element)) {
+                throw [VarinInputException]::new("unsupported", "This control does not support background text insertion; use a focused input target or set_value")
             }
         }
         "press_key" {
             if ($inputPath -ne "app_post") {
                 Use-GlobalInputWindow $hwnd $rootElement
+                Use-KeyboardTarget $element
                 Send-GlobalKey $operation.key
             } else {
+                [VarinInput]::AttemptSemantic()
                 Send-Key $postHwnd $operation.key
             }
         }
@@ -1899,9 +1540,20 @@ function Invoke-ComputerOperation($operation) {
             if ($null -eq $element) { throw "unknown element_index '$($operation.element.index)'" }
             $valuePattern = Get-CurrentPatternOrNull $element ([Windows.Automation.ValuePattern]::Pattern)
             if ($null -eq $valuePattern) {
-                throw "Cannot set a value for an element that is not settable"
+                throw [VarinInputException]::new("unsupported", "The selected control does not support setting its value")
             }
+            if ($valuePattern.Current.IsReadOnly) { throw [VarinInputException]::new("unsupported", "The selected field is read-only") }
+            [VarinInput]::AttemptSemantic()
             $valuePattern.SetValue($operation.value)
+            $canVerify = $false
+            $observedValue = $null
+            if (-not $element.Current.IsPassword) {
+                try { $observedValue = [string]$valuePattern.Current.Value; $canVerify = $true } catch { }
+            }
+            if ($canVerify -and $observedValue -cne [string]$operation.value) {
+                throw [VarinInputException]::new("verification-failed", "The field value did not match the requested value")
+            }
+            if ($canVerify) { [VarinInput]::Verify() }
         }
         default {
             throw "unsupportedTool(`"$tool`")"
@@ -1912,15 +1564,11 @@ function Invoke-ComputerOperation($operation) {
         # The cancel side-channel fired mid-operation. The finally below still
         # releases any input this driver had pressed; the message carries how
         # much of the action already reached the desktop.
-        return [pscustomobject]@{ ok = $false; cancelled = $true; error = $_.Exception.Message }
+        return (New-ComputerFailure $_.Exception)
     } catch {
-        if ($_.Exception.Data["VarinRejected"]) {
-            return [pscustomobject]@{ ok = $false; rejected = $true; error = $_.Exception.Message }
-        }
-        throw
+        return (New-ComputerFailure $_.Exception)
     } finally {
         Send-ReleaseInput
-        $script:InputWindow = [IntPtr]::Zero
     }
 
     $script:LastInputTimes[$process.Id] = [DateTime]::UtcNow

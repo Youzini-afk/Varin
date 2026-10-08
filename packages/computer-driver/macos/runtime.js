@@ -27,6 +27,8 @@ var GESTURE_OPERATION = {};
 function emitGesture(phase, point, to, target) {
     if (!GESTURE_OPERATION.visual_feedback || typeof writeResponse !== 'function') return;
     var payload = { type: 'gesture', phase: phase };
+    var tool = GESTURE_OPERATION.tool;
+    payload.mechanism = tool === 'set_value' || tool === 'perform_secondary_action' || GESTURE_OPERATION.click_method === 'accessibility' ? 'semantic' : tool === 'type_text' || tool === 'press_key' ? 'keyboard' : 'pointer';
     if (point) payload.point = point;
     if (to) payload.to = to;
     if (target) payload.target = target;
@@ -869,6 +871,7 @@ function performOperation(operation) {
     }
 
     var inputPath = operation.input || "auto";
+    if (inputPath === 'app_post') return { ok: false, rejected: true, error: 'Background window messages are not supported on macOS', receipt: { effect: 'none', reason: { code: 'unsupported', message: 'Background window messages are not supported on macOS' } } };
     if (operation.visual_feedback) {
         var gestureTarget = element ? axFrame(element) : bounds;
         var gesturePoint = null, gestureTo = null;
@@ -882,8 +885,9 @@ function performOperation(operation) {
     }
     switch (tool) {
         case "click": {
-            var method = String(operation.click_method || "auto").toLowerCase();
-            if ((method === "auto" || method === "accessibility") && element && axPress(element)) {
+            var method = String(operation.click_method || "global").toLowerCase();
+            if (method === "auto") method = "global";
+            if (method === "accessibility" && element && axPress(element)) {
                 break;
             }
             if (method === "accessibility") {
@@ -931,11 +935,19 @@ function performOperation(operation) {
         }
         case "type_text": {
             activateObservedWindow(app, windowInfo);
+            if (element) {
+                element.attributes.byName('AXFocused').value = true;
+                if (!element.attributes.byName('AXFocused').value()) throw new Error('The selected control did not obtain keyboard focus');
+            }
             sendText(operation.text || "");
             break;
         }
         case "press_key": {
             activateObservedWindow(app, windowInfo);
+            if (element) {
+                element.attributes.byName('AXFocused').value = true;
+                if (!element.attributes.byName('AXFocused').value()) throw new Error('The selected control did not obtain keyboard focus');
+            }
             sendKey(operation.key || "");
             break;
         }

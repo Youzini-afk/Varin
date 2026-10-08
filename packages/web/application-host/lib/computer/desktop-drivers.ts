@@ -68,7 +68,10 @@ export function createDesktopDriverPool(options: {
       closed = true;
       await Promise.allSettled([...loading.values(), ...resetting.values()]);
       await Promise.allSettled([...inputs.values()].map(async (driver) => {
-        try { if (driver.alive()) await driver.request({ tool: 'release_input' }); }
+        try {
+          if (driver.interrupt) await driver.interrupt();
+          else if (driver.alive()) await driver.request({ tool: 'release_input' });
+        }
         finally { await driver.dispose(); }
       }));
       await Promise.allSettled([...captures.values()].map((driver) => driver.dispose()));

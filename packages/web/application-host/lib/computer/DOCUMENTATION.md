@@ -32,22 +32,38 @@ release; a new work segment has a new identity. Source/target restarts do not si
 A crashed source's remaining
 reservation requires explicit human takeover on the target; there is no speculative expiry timer.
 
-## Stop this round
+## Cancel work and transfer control
 
-The overview calls the authenticated `automation/stop` route for its main conversation. The Host
-marks that root Run stopped before awaiting anything, invalidates descendant tickets, denies pending
-requests, revokes Computer REPL evaluations with their exact execution identity, then cancels queued
-and native/external operations and releases held input. A delayed old-Run cleanup cannot reset a new
-Run's REPL. Grants and fresh evaluations cannot bypass the stopped-round gate. The next root Run has
-its own gate and must acquire new assignments and observations.
+The overview cancels the current task family's computer work through `automation/stop`. A desktop
+control bar scopes cancellation to that desktop. The Host invalidates old admission tickets, denies
+matching pending requests, cancels exact-Run Computer REPL evaluations, drains native/external work,
+releases held input and ends those assignments. Other desktop assignments remain independent.
+Permissions are unchanged: fresh work in the same Run can acquire an assignment after release.
+Old scripts and observation bindings cannot resume through that new assignment.
 
-The Agent receives an idempotent passive notification explaining the user's stop and can continue
-other work. Existing applications stay open. `stopping`, `stopped` and `stop-unconfirmed` are distinct;
-failed input release stays blocked until confirmed recovery/retry. Notification failure is reported
-without restoring revoked access. Human takeover shares this same fence and invalidates assignments.
+The Agent receives a passive user-cancellation notification. The operation reports any known partial
+effects. `cancelling` lasts through release; success returns to `enabled` and removes the work banner.
+`cancel-unconfirmed` preserves a real release failure for recovery. There is no stopped-round state.
 
-These APIs are managed Computer Use admission. The Node REPL and ordinary shell are not OS sandboxes;
-the stop notification explicitly instructs the Agent not to bypass the stop through another tool.
+Human takeover requires an explicit action. It suspends the assignment, interrupts its active script,
+invalidates queued input and releases managed keys/buttons; physical mouse motion does not transfer
+ownership. Target/focus changes interrupt the affected action and retain Agent ownership. Handback
+keeps the assignment, invalidates old observations and delivers a durable continuation to the actor
+captured at takeover, with its root informed. Ended or replaced Runs do not receive that continuation.
+The latest observer/usage record never selects the recipient. Remote control assignments subscribe
+to the owning Host's control stream without frames, even when no viewer is open.
+
+Windows owns synthetic input in `input-controller.cs` on a thread separate from PowerShell's UIA
+calls. A release side channel fences the native owner and acknowledges key/button release before
+the Host closes that helper. The next operation starts a new helper. A crashed helper cannot prove
+release. Normal assignment completion restores the prior foreground only while the Agent's last
+target still owns focus; takeover does not reclaim focus from the user.
+
+`ComputerActionReceipt` separates effect (`none`, `dispatched`, `partial`, `verified`, `unknown`),
+fact-based reason and recovery. OS acceptance is not application completion. Only explicit value
+readback confirms `set_value`. Tool text contains the short result and relevant next step, not an
+internal trace. Explicit `app_post` text requires a native Edit/RichEdit handle in the selected window;
+it cannot silently route browser input through unsupported Win32 edit messages.
 
 ## Feedback and presentation
 
@@ -80,13 +96,20 @@ capture paths cannot currently exclude a real-desktop overlay reliably.
 
 The overview and small desktop launcher share `useComputerAutomation`: one snapshot plus the existing
 UI stream per viewed conversation, no capture or polling. Full/compact overview show the desktop,
-operator, current app/operation and pending requests; both offer Stop this round. The compact action
+operator, current app/operation and pending requests; both offer Cancel computer work. The compact action
 does not open the full panel. This state is a Host projection, not a renderer authority.
+
+The Windows native shell adds a nonfocusable bottom control bar with Take control / Return to Varin
+and Cancel computer work. Its fixed commands call this same Host. Varin windows are excluded from
+automatic app enumeration and capture while work is active; this does not make two applications on
+one local desktop independent. Semantic actions highlight the target without inventing pointer motion.
+The selected default desktop prewarms its resident input/capture helpers without observing or focusing
+an app. Other desktops prepare when selected or used.
 
 ## Evidence boundary
 
 Focused tests exercise actual Registry identities, local/peer exclusivity, observer isolation, event
-waits, stopped-round and epoch fences, real HTTP routing between simulated Hosts, sleeping native Node
+waits, cancellation and epoch fences, real HTTP routing between simulated Hosts, sleeping native Node
 REPL revocation, progress correlation, negative-origin feedback mapping and compact overview stopping.
 The Windows targeting fixture invokes production functions with fake controls/input and checks visual
 events without desktop access. Those results do not establish real Windows overlay placement or

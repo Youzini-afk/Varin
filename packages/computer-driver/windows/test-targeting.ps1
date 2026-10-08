@@ -5,7 +5,7 @@ $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot "runtime.ps1"), [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -gt 0) { throw $parseErrors[0].Message }
-foreach ($name in @("Same-RuntimeId", "Find-Element", "Send-ComputerGesture", "Invoke-ComputerOperation", "Find-TextEntryElement", "Find-TextEntryWindowHandle", "Test-TextWindowHandleCandidate", "Invoke-TypeText", "Send-GlobalMouseInput", "Get-AppWindows")) {
+foreach ($name in @("Same-RuntimeId", "Find-Element", "Send-ComputerGesture", "New-ComputerFailure", "Invoke-ComputerOperation", "Invoke-TypeText", "Send-GlobalMouseInput", "Get-AppWindows")) {
     $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
     if ($null -eq $definition) { throw "Missing production function $name" }
     Invoke-Expression $definition.Extent.Text
@@ -14,13 +14,24 @@ Add-Type -TypeDefinition @"
 using System;
 using System.Collections.Generic;
 public static class VarinWin32 {
+    public struct INPUT { public uint Flags; }
     public struct POINT { public int X; public int Y; }
     public static List<POINT> Points = new List<POINT>();
     public static IntPtr Owner = new IntPtr(73);
     public static IntPtr WindowFromPoint(POINT point) { Points.Add(point); return Owner; }
-    public static bool IsChild(IntPtr parent, IntPtr child) { return false; }
+    public static bool IsChild(IntPtr parent, IntPtr child) { return parent.ToInt64() == 73 && child.ToInt64() == 74; }
     public static IntPtr GetForegroundWindow() { return new IntPtr(73); }
-    public static object MouseInput(int x, int y, uint flags, uint data) { return flags; }
+    public static INPUT MouseInput(int x, int y, uint flags, uint data) { return new INPUT { Flags = flags }; }
+}
+public sealed class VarinInputException : InvalidOperationException {
+    public VarinInputException(string code, string message) : base(message) { Data["VarinReason"] = code; }
+}
+public static class VarinInput {
+    public static string Effect { get { return "none"; } }
+    public static int DispatchedEvents { get { return 0; } }
+    public static int Events;
+    public static void Send(VarinWin32.INPUT[] events) { Events += events.Length; }
+    public static void AttemptSemantic() {}
 }
 namespace Windows.Automation {
     public static class ValuePattern { public static object Pattern = new object(); }
@@ -38,6 +49,7 @@ function Send-Key { $script:Inputs += 1 }
 function Send-MouseClick { $script:Inputs += 1 }
 function Send-Drag { $script:Inputs += 1 }
 function Use-GlobalInputWindow { }
+function Use-KeyboardTarget { }
 function Move-GlobalPointer { }
 function Send-ManagedInput { $script:Inputs += 1 }
 function Send-GlobalMouseClick { $script:Inputs += 1 }
@@ -105,10 +117,13 @@ foreach ($element in @($boundInput, $otherInput)) {
 }
 $boundInput.Current | Add-Member -NotePropertyName NativeWindowHandle -NotePropertyValue 74
 $otherInput.Current | Add-Member -NotePropertyName NativeWindowHandle -NotePropertyValue 99
-$script:Root = [pscustomobject]@{ Name = "Bound window"; Controls = @($boundInput) }
+$script:Root = [pscustomobject]@{ Name = "Bound window"; Controls = @($boundInput); Current = [pscustomobject]@{ NativeWindowHandle = 73 } }
 [Windows.Automation.AutomationElement]::FocusedElement = $otherInput
 $response = Invoke-ComputerOperation ([pscustomobject]@{ tool = "type_text"; app = "42"; window = 73; text = "hello"; input = "app_post" })
-if (-not $response.ok -or $script:TypedHandle -ne [IntPtr]74) { throw "Text input escaped the bound window to the same app's focused/main window" }
+if ($response.ok -or $script:TypedHandle) { throw "Background text escaped the selected window" }
+[Windows.Automation.AutomationElement]::FocusedElement = $boundInput
+$response = Invoke-ComputerOperation ([pscustomobject]@{ tool = "type_text"; app = "42"; window = 73; text = "hello"; input = "app_post" })
+if (-not $response.ok -or $script:TypedHandle -ne [IntPtr]74) { throw "Focused native edit did not receive text" }
 $capture = New-Object System.IO.StringWriter
 $output = [Console]::Out
 try {
@@ -119,9 +134,9 @@ $events = @($capture.ToString().Trim() -split "`n" | ForEach-Object { $_ | Conve
 if (-not $response.ok -or $events.Count -ne 2 -or $events[0].phase -ne "target" -or $events[0].target.x -ne $script:Bounds.x -or $events[1].phase -ne "dispatched") { throw "Native gesture feedback did not carry the relocated target and dispatch" }
 if ($capture.ToString() -like "*private input*") { throw "Gesture feedback leaked typed text" }
 if (-not $script:GlobalText) { throw "Default text did not use real keyboard input" }
-$before = $script:Inputs
+$before = [VarinInput]::Events
 Send-GlobalMouseInput 10 20 @(2, 4)
-if ($script:Inputs -ne $before + 2) { throw "Mouse flags did not bind to the production input function" }
+if ([VarinInput]::Events -ne $before + 2) { throw "Mouse flags did not bind to the production input function" }
 $candidates = Get-AppWindows @(
     [pscustomobject]@{ handle = 73; visible = $true; bounds = @{ width = 1; height = 1 }; title = "auxiliary" },
     [pscustomobject]@{ handle = 74; visible = $true; bounds = @{ width = 800; height = 600 }; title = "Files" }

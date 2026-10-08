@@ -129,6 +129,9 @@ export function createEnvironmentSetService(host: HarnessServiceHost): HarnessSe
         }
       }
       const { environment, previous } = await registry.setThreadEnvironment(owner.owningScopeId, owner.threadId, patch);
+      if (environment?.desktopId && environment.desktopId !== previous?.desktopId) {
+        void host.computerService?.prewarm(environment.desktopId).catch(error => console.error('[Computer] Desktop preparation failed:', error instanceof Error ? error.message : String(error)));
+      }
       // Report what the change actually does: later-admitted operations take
       // the new placement, already-accepted operations keep their pinned
       // target, and nothing is copied or migrated.

@@ -24,6 +24,7 @@ import {
 } from 'electron';
 import contextMenu from 'electron-context-menu';
 import { createComputerFeedback } from './computer-feedback.js';
+import { createComputerControls } from './computer-controls.js';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
 import fs from 'node:fs';
@@ -357,6 +358,7 @@ interface DesktopState {
 }
 
 let desktopComputerFeedback: ReturnType<typeof createComputerFeedback> | null = null;
+let desktopComputerControls: ReturnType<typeof createComputerControls> | null = null;
 const state: DesktopState = {
   serverHandle: null,
   piRuntimeBroker: null,
@@ -1670,10 +1672,15 @@ const spawnLocalServer = async () => {
   const outboundSession = session.fromPartition('varin-harness-egress', { cache: false });
 
   const computerFeedback = createComputerFeedback();
+  const computerControls = createComputerControls();
+  desktopComputerControls?.dispose(); desktopComputerControls = computerControls;
   desktopComputerFeedback?.dispose(); desktopComputerFeedback = computerFeedback;
-  app.once('before-quit', () => computerFeedback.dispose());
+  app.once('before-quit', () => { computerFeedback.dispose(); computerControls.dispose(); });
   const handle = await startWebUiServer({
-    onComputerGesture: gesture => computerFeedback.show(gesture),
+    onComputerGesture: gesture => { computerControls.avoid(gesture); computerFeedback.show(gesture); },
+    onComputerControl: control => computerControls.update(control),
+    onComputerControlsReady: controls => computerControls.bind(controls),
+    computerControlWindows: () => computerControls.handles(),
     desktopNetworkFetch: createDesktopNetworkFetch(outboundSession),
     port: chosenPort,
     host: bindHost,
@@ -1738,6 +1745,7 @@ const spawnLocalServer = async () => {
 
 const killSidecar = async () => {
   desktopComputerFeedback?.dispose(); desktopComputerFeedback = null;
+  desktopComputerControls?.dispose(); desktopComputerControls = null;
   const handle = state.serverHandle;
   state.serverHandle = null;
   state.sidecarUrl = null;
@@ -2704,7 +2712,7 @@ const createBrowserWindow = ({
     if (state.mainWindow && browserWindow.id === state.mainWindow.id) {
       state.mainWindow = null;
     }
-    if (BrowserWindow.getAllWindows().filter(window => !desktopComputerFeedback?.ownsWindow(window.id)).length === 0) {
+    if (BrowserWindow.getAllWindows().filter(window => !desktopComputerFeedback?.ownsWindow(window.id) && !desktopComputerControls?.ownsWindow(window.id)).length === 0) {
       if (state.trayEnabled && !state.quitRequested) {
         return;
       }

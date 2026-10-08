@@ -120,6 +120,7 @@ export interface ComputerLease {
   actor: ComputerActor;
   access: ComputerAccess;
   grantedAt: string;
+  suspended?: boolean;
 }
 export interface ComputerAccessRequest {
   id: string;
@@ -136,7 +137,7 @@ export interface ComputerAutomationState {
   rootSessionId: string;
   runId: string;
   active: boolean;
-  status: "enabled" | "stopping" | "stopped" | "stop-unconfirmed";
+  status: "enabled" | "cancelling" | "cancel-unconfirmed";
   leases: ComputerLease[];
   requests: ComputerAccessRequest[];
 }
@@ -155,6 +156,7 @@ export interface ComputerGesture {
   sessionId?: string;
   actorLabel?: string;
   kind: ComputerAction["kind"] | "move";
+  mechanism?: "pointer" | "keyboard" | "semantic";
   phase: "target" | "dispatched" | "completed" | "cancelled" | "failed";
   at: string;
   /** Absolute physical desktop coordinates, after native element relocation. */
@@ -317,7 +319,7 @@ export interface ComputerAction {
   toY?: number;
   clickCount?: number;
   mouseButton?: "left" | "right" | "middle";
-  /** Windows auto prefers semantic clicks and real pointer/keyboard input. app_post selects window messages. */
+  /** Auto uses real pointer/keyboard input. Explicit accessibility/app_post select their native mechanisms. */
   clickMethod?: "auto" | "accessibility" | "app_post" | "global";
   direction?: "up" | "down" | "left" | "right";
   pages?: number;
@@ -346,6 +348,16 @@ export interface ComputerActionResult {
   detail?: string;
   /** Post-action observation when the driver returned one. */
   observation?: ComputerObservation;
+  /** Execution evidence, independent of application task completion. */
+  receipt?: ComputerActionReceipt;
+}
+
+export interface ComputerActionReceipt {
+  effect: "none" | "dispatched" | "partial" | "verified" | "unknown";
+  reason?: { code: "target-changed" | "focus-changed" | "target-unavailable" | "unsupported" | "input-rejected" | "cancelled" | "control-changed" | "connection-lost" | "verification-failed" | "driver-error"; message: string };
+  recovery?: "observe" | "reconnect" | "wait-for-control";
+  /** Counts accepted input events, not characters visible in an app. */
+  dispatchedEvents?: number;
 }
 
 export interface ComputerListParams {
@@ -651,6 +663,9 @@ export type ComputerControlOwner = "agent" | "human";
  * transfers control again.
  */
 export interface ComputerControlState {
+  /** Current assignment, retained while the user temporarily holds input. */
+  operator?: ComputerActor;
+  workStatus?: "active" | "cancelling" | "cancel-unconfirmed";
   /** Model-facing execution identity, absent on human viewer receipts. */
   executionId?: string;
   desktopId: string;
