@@ -144,9 +144,9 @@ export interface ThreadRuntimeOptions {
   /** Production R3 measurement of a managed execution directory through the kernel. */
   measureManagedDirectory?(workspaceId: string, worktree: NonNullable<Thread["worktree"]>): Promise<ThreadSpaceMeasurement>;
   inspectBaselineWriters?(workspaceId: string, root: string): Promise<Array<{ id: string; purpose?: string; owner?: { kind: string; id: string }; startedAt?: string }>>;
-  beginBaselineCapture?(workspaceId: string, ignoredWriterIds?: readonly string[]): Promise<unknown>;
-  completeBaselineCapture?(capture: unknown): Promise<{ stable: boolean; reasons: string[] }>;
-  beginDirtyStateBarrier?(workspaceId: string, paths: string[]): Promise<{
+  beginBaselineCapture?(workspaceId: string, ignoredWriterIds?: readonly string[], signal?: AbortSignal): Promise<unknown>;
+  completeBaselineCapture?(capture: unknown, signal?: AbortSignal): Promise<{ stable: boolean; reasons: string[] }>;
+  beginDirtyStateBarrier?(workspaceId: string, paths: string[], signal?: AbortSignal): Promise<{
     release(): Promise<void>;
   }>;
   readBlocks?(sessionId: string): Promise<Array<{ label: string; content: string }> | null>;
@@ -1800,11 +1800,6 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         `Thread baseline cannot capture Git submodule paths: ${gitlinks.join(", ")}`,
       );
     };
-    const directoryWindow = async (store: { listWorkspaceBaselinePaths?(directory: string, signal?: AbortSignal): Promise<string[]> }): Promise<string | null> => {
-      if (typeof store.listWorkspaceBaselinePaths !== "function") return null;
-      const paths = await store.listWorkspaceBaselinePaths(sourceRoot, preparationSignal);
-      return directoryBaselineFingerprint(paths);
-    };
     const inspectInventory = async (): Promise<GitBaselineInventory | { kind: "directory" } | null> => {
       if (typeof options.worktrees.inspectGitBaselineInventory !== "function") return null;
       return options.worktrees.inspectGitBaselineInventory(sourceRoot, preparationSignal);
@@ -1840,10 +1835,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     let dirtyBarrier: Awaited<ReturnType<NonNullable<ThreadRuntimeOptions["beginDirtyStateBarrier"]>>> | undefined;
     try {
       if (typeof options.beginDirtyStateBarrier === "function") {
-        dirtyBarrier = await options.beginDirtyStateBarrier(captureWorkspaceId, ["."]);
+        dirtyBarrier = await options.beginDirtyStateBarrier(captureWorkspaceId, ["."], preparationSignal);
       }
       if (typeof options.beginBaselineCapture === "function") {
-        baselineCapture = await options.beginBaselineCapture(captureWorkspaceId, [...ignoredWriterIds]);
+        baselineCapture = await options.beginBaselineCapture(captureWorkspaceId, [...ignoredWriterIds], preparationSignal);
       }
       await assertNoActiveBaselineWriters();
       await options.workingStates.withBranchStore(input.scopeId, "thread-baseline-capture", async (store) => {
@@ -1856,7 +1851,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           const baseRef = `thread-${input.parent.id}@${beforeRevision}`;
           worktree!.base = baseRef;
           if (typeof options.completeBaselineCapture === "function" && baselineCapture !== undefined) {
-            const completed = await options.completeBaselineCapture(baselineCapture);
+            const completed = await options.completeBaselineCapture(baselineCapture, preparationSignal);
             baselineCapture = undefined;
             if (!completed.stable) {
               throw baselineChanged(`documents capture ${completed.reasons.join(",") || "unstable"}`);
@@ -1908,7 +1903,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
                     if (afterInventory?.kind !== "git" || gitBaselineFingerprint(afterInventory) !== gitWindow) throw baselineChanged("Git identity during baseline reuse");
                     await assertNoActiveBaselineWriters();
                     if (typeof options.completeBaselineCapture === "function" && baselineCapture !== undefined) {
-                      const completed = await options.completeBaselineCapture(baselineCapture); baselineCapture = undefined;
+                      const completed = await options.completeBaselineCapture(baselineCapture, preparationSignal); baselineCapture = undefined;
                       if (!completed.stable) throw baselineChanged(`documents capture ${completed.reasons.join(",") || "unstable"}`);
                     }
                     await store.createBranchFromPin(input.scopeId, branchId, pin, baseRef, null, captureScopes);
@@ -1923,7 +1918,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           if (captureScopes.length > 0 && canListCaptureScopes) {
             frozenCaptureScopePaths = [...new Set(await store.listCaptureScopePaths(sourceRoot, captureScopes, preparationSignal))].sort();
           }
-          directoryBefore = await directoryWindow(store);
+          if (typeof store.listWorkspaceBaselinePaths === "function") {
+            relativePaths = await store.listWorkspaceBaselinePaths(sourceRoot, preparationSignal);
+            directoryBefore = directoryBaselineFingerprint(relativePaths);
+          }
         }
         const baseline = await store.captureDirectory(sourceRoot, relativePaths, {
           signal: preparationSignal,
@@ -1939,9 +1937,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           rejectGitlinks(afterInventory.gitlinks);
           if (gitBaselineFingerprint(afterInventory) !== gitWindow) throw baselineChanged("git inventory");
         } else {
-          const directoryAfter = await directoryWindow(store);
-          if (directoryBefore !== null && directoryAfter !== null && directoryBefore !== directoryAfter) {
-            throw baselineChanged("directory paths");
+          if (directoryBefore !== null && typeof store.listWorkspaceBaselinePaths === "function") {
+            const directoryAfter = await store.listWorkspaceBaselinePaths(sourceRoot, preparationSignal);
+            if (directoryBefore !== directoryBaselineFingerprint(directoryAfter)) throw baselineChanged("directory paths");
           }
         }
         const capturedPaths = Object.keys(baseline).sort();
@@ -1978,7 +1976,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         }
         await assertNoActiveBaselineWriters();
         if (typeof options.completeBaselineCapture === "function" && baselineCapture !== undefined) {
-          const completed = await options.completeBaselineCapture(baselineCapture);
+          const completed = await options.completeBaselineCapture(baselineCapture, preparationSignal);
           baselineCapture = undefined;
           if (!completed.stable) {
             throw baselineChanged(`documents capture ${completed.reasons.join(",") || "unstable"}`);
@@ -2031,7 +2029,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       throw error;
     } finally {
       if (typeof options.completeBaselineCapture === "function" && baselineCapture !== undefined) {
-        await options.completeBaselineCapture(baselineCapture).catch(() => undefined);
+        await options.completeBaselineCapture(baselineCapture, preparationSignal).catch(() => undefined);
       }
       await dirtyBarrier?.release().catch(() => undefined);
     }

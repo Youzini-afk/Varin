@@ -1378,6 +1378,32 @@ it('coordinates a dirty-state barrier with every connected document surface', as
   }
 });
 
+it('releases a cancelled dirty-state barrier without waiting for a surface acknowledgement', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  const controller = new AbortController();
+  const events: Record<string, unknown>[] = [];
+  let acquired!: () => void;
+  const ready = new Promise<void>(resolve => { acquired = resolve; });
+  const surface = harness.authority.registerDirtySurface({
+    generation: 1, ownerId: 'surface-cancel', workspaceId: harness.identity.workspaceId,
+  }, event => {
+    const value = event as Record<string, unknown>;
+    events.push(value);
+    if (value.action === 'acquire') acquired();
+  });
+  try {
+    const cancelled = new DOMException('Capture cancelled', 'AbortError');
+    const pending = harness.authority.beginDirtyStateBarrier(harness.identity.workspaceId, ['.'], { signal: controller.signal });
+    const rejected = expect(pending).rejects.toBe(cancelled);
+    await ready;
+    controller.abort(cancelled);
+    await rejected;
+    expect(events).toContainEqual(expect.objectContaining({
+      action: 'release', barrierId: events[0]!.barrierId,
+    }));
+  } finally { controller.abort(); surface.close(); await harness.cleanup(); }
+});
+
 it('stops answering a path from its captured draft once a write is observed', async () => {
   const harness = await createDocumentAuthorityHarness();
   const surface = harness.authority.registerDirtySurface({

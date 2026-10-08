@@ -2357,12 +2357,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // there is no registered project workspace behind it.
     resolveWorkspaceRoot: scopeDirectory,
     resolveRuntimeWorkspaceId: async (cwd) => (await documentsAuthority.resolveWorkspace({ path: cwd })).workspaceId,
-    beginBaselineCapture: (workspaceId, ignoredWriterIds) => documentsAuthority.beginCapture(workspaceId, { ignoredWriterIds }),
-    completeBaselineCapture: async (capture) => {
-      const completed = await documentsAuthority.completeCapture(capture);
+    beginBaselineCapture: (workspaceId, ignoredWriterIds, signal) => documentsAuthority.beginCapture(workspaceId, { ignoredWriterIds }, signal),
+    completeBaselineCapture: async (capture, signal) => {
+      const completed = await documentsAuthority.completeCapture(capture, signal);
       return { stable: completed.stable, reasons: completed.reasons };
     },
-    beginDirtyStateBarrier: (workspaceId, paths) => documentsAuthority.beginDirtyStateBarrier(workspaceId, paths),
+    beginDirtyStateBarrier: (workspaceId, paths, signal) => documentsAuthority.beginDirtyStateBarrier(workspaceId, paths, { signal }),
     inspectBaselineWriters: async (workspaceId, root) => {
       const writersOf = async (id: string) => {
         const inspected = await documentsAuthority.inspectWorkspace(id) as {
