@@ -1,0 +1,14 @@
+//! Native agent authority. Network, tool and extension work executes outside catalog transactions.
+//! This crate is not yet the production runtime; the cutover must replace, not duplicate, Pi ownership.
+pub mod catalog;
+pub mod composition;
+pub mod types;
+mod types_generated;
+pub use catalog::{Catalog, RuntimeError};
+pub use types::*;
+
+pub mod execution;
+
+pub mod providers;
+
+pub mod supervisor;

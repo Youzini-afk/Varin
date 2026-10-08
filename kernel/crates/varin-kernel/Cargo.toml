@@ -6,6 +6,7 @@ license.workspace = true
 description = "Varin private Rust system kernel"
 
 [dependencies]
+varin-runtime = { path = "../varin-runtime" }
 base64.workspace = true
 hex.workspace = true
 fs2.workspace = true

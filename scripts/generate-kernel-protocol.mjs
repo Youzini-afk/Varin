@@ -7,6 +7,8 @@ const schemaPath = path.join(root, 'kernel', 'protocol', 'schema.json');
 const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
 const target = path.join(root, 'packages', 'web', 'application-host', 'lib', 'kernel', 'protocol.generated.ts');
 const rustTarget = path.join(root, 'kernel', 'crates', 'varin-kernel', 'src', 'protocol_generated.rs');
+const nativeRustTarget = path.join(root, 'kernel', 'crates', 'varin-runtime', 'src', 'types_generated.rs');
+const nativeRustGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\nuse serde::{Deserialize, Serialize};\n\n' + Object.entries(schema.nativeRuntimeEnums ?? {}).map(([name, variants]) => `#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(rename_all = "snake_case")]\npub enum ${name} {\n${variants.map(v => `    ${v},`).join('\n')}\n}\n`).join('\n');
 const checkOnly = process.argv.includes('--check');
 const methods = Object.keys(schema.methods).map((method) => `  | ${JSON.stringify(method)}`).join('\n');
 const methodParams = schema.methodParams ?? {};
@@ -109,8 +111,9 @@ const rustGenerated = rustfmt.stdout;
 if (checkOnly) {
   const existing = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';
   const existingRust = fs.existsSync(rustTarget) ? fs.readFileSync(rustTarget, 'utf8') : '';
-  if (existing !== generated || existingRust !== rustGenerated) {
-    const stale = [existing !== generated ? target : null, existingRust !== rustGenerated ? rustTarget : null].filter(Boolean);
+  const existingNative = fs.existsSync(nativeRustTarget) ? fs.readFileSync(nativeRustTarget, "utf8") : "";
+  if (existing !== generated || existingRust !== rustGenerated || existingNative !== nativeRustGenerated) {
+    const stale = [existing !== generated ? target : null, existingRust !== rustGenerated ? rustTarget : null, existingNative !== nativeRustGenerated ? nativeRustTarget : null].filter(Boolean);
     console.error(`Kernel protocol DTO is out of date: ${stale.map((entry) => path.relative(root, entry)).join(', ')}`);
     process.exit(1);
   }
@@ -118,5 +121,6 @@ if (checkOnly) {
 } else {
   fs.writeFileSync(target, generated);
   fs.writeFileSync(rustTarget, rustGenerated);
+  fs.writeFileSync(nativeRustTarget, nativeRustGenerated);
   console.log(`Kernel protocol ${schema.protocolVersion} is generated at ${path.relative(root, target)}`);
 }

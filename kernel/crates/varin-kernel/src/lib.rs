@@ -3,6 +3,7 @@ mod authority;
 mod compute;
 mod error;
 mod model;
+mod native_runtime;
 mod process;
 mod protocol;
 mod protocol_generated;

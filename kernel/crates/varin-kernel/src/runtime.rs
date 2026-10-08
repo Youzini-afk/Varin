@@ -334,6 +334,12 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let revoked_grants = Arc::new(Mutex::new(HashSet::<String>::new()));
     let admission_epoch = Arc::new(Mutex::new(None::<String>));
     let writer_failed = Arc::new(AtomicBool::new(false));
+    let (native_tx, native_rx) = mpsc::sync_channel(KERNEL_REQUEST_WINDOW);
+    let native_cancellations = cancellations.clone();
+    let native_worker = crate::native_runtime::spawn(native_rx, response_tx.clone(), move |id| {
+        if let Ok(mut active) = native_cancellations.lock() { active.remove(id); }
+    });
+    let worker_native_tx = native_tx.clone();
     let worker_cancellations = cancellations.clone();
     let worker_revoked_grants = revoked_grants.clone();
     let worker_admission_epoch = admission_epoch.clone();
@@ -386,6 +392,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(|result| result.get("kernelEpoch"))
                     .and_then(Value::as_str)
                 {
+                    if let Some(root) = kernel.storage_root.as_ref() {
+                        if worker_native_tx.send(crate::native_runtime::Command::Initialize { root: root.clone(), epoch: epoch.to_string() }).is_err() { break; }
+                    }
                     if let Ok(mut current) = worker_admission_epoch.lock() {
                         *current = Some(epoch.to_string());
                     }
@@ -528,6 +537,12 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
         }
+        if request.get("method").and_then(Value::as_str).is_some_and(|method|method.starts_with("runtime.")) {
+            if native_tx.try_send(crate::native_runtime::Command::Request { value: request, cancellation: token }).is_err() {
+                eprintln!("native runtime request admission window exceeded"); break;
+            }
+            continue;
+        }
         if request_tx.try_send((request, token)).is_err() {
             // A sender violating the negotiated window loses this epoch, not
             // the cancellation/control channel. Never accept a silent drop.
@@ -540,6 +555,8 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     drop(request_tx);
     let _ = worker.join();
+    drop(native_tx);
+    let _ = native_worker.join();
     drop(response_tx);
     let _ = writer.join();
     Ok(())
