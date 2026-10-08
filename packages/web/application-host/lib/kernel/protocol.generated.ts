@@ -8,6 +8,15 @@ export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
 
 export type KernelMethod =
+  | "runtime.status"
+  | "runtime.thread.create"
+  | "runtime.input.submit"
+  | "runtime.run.inspect"
+  | "runtime.run.cancel"
+  | "runtime.operation.inspect"
+  | "runtime.operation.cancel"
+  | "runtime.history.read"
+  | "runtime.events.read"
   | "process.spawn"
   | "process.read"
   | "process.write"
@@ -103,6 +112,117 @@ export type KernelMethod =
   | "compute.cancel"
   | "compute.release"
   | "compute.grammar.register";
+
+export type NativeRunState = "accepted" | "preparing" | "runnable" | "generating" | "executing" | "waiting" | "completed" | "failed" | "cancelled";
+
+export type NativeOperationPhase = "accepted" | "preparing" | "queued" | "running" | "waiting" | "settling" | "terminal";
+
+export type NativeOutcome = "succeeded" | "failed" | "cancelled" | "indeterminate";
+
+export type NativeEffect = "none" | "dispatched" | "partial" | "confirmed" | "unknown";
+
+export type NativeLifetime = "call" | "run" | "thread" | "environment";
+
+export type NativeHistorySource = "user" | "assistant" | "tool" | "agent" | "environment" | "compaction";
+
+export type NativeModelStepState = "prepared" | "dispatched" | "completed" | "interrupted" | "failed" | "cancelled";
+
+export type NativeDeliveryState = "selected" | "sent" | "committed";
+
+export interface NativeThreadCreateParams {
+  threadId: string;
+  branchId: string;
+}
+
+export interface NativeInputSubmitParams {
+  key: string;
+  threadId: string;
+  branchId: string;
+  expectedHead: string | null;
+  input: unknown;
+  configuration: unknown;
+}
+
+export interface NativeRunParams {
+  runId: string;
+}
+
+export interface NativeOperationParams {
+  operationId: string;
+}
+
+export interface NativeHistoryParams {
+  branchId: string;
+}
+
+export interface NativeEventsParams {
+  cursor: number;
+  limit: number;
+}
+
+export interface NativeStatus {
+  epoch: number;
+}
+
+export interface NativeReceipt {
+  thread_id: string;
+  branch_id: string;
+  run_id: string;
+  input_id: string;
+  cursor: number;
+}
+
+export interface NativeRun {
+  waiting_on: string | null;
+  id: string;
+  thread_id: string;
+  branch_id: string;
+  state: NativeRunState;
+  revision: number;
+  epoch: number;
+  configuration: unknown;
+  cancel_requested: boolean;
+}
+
+export interface NativeOperation {
+  id: string;
+  run_id: string;
+  epoch: number;
+  revision: number;
+  phase: NativeOperationPhase;
+  outcome: NativeOutcome | null;
+  effect: NativeEffect;
+  cancel_requested: boolean;
+  lifetime: NativeLifetime;
+  handed_off: boolean;
+  executor: string | null;
+  waiting_on: string | null;
+  intent: unknown;
+  result: unknown;
+}
+
+export interface NativeProviderOriginal {
+  adapter: string;
+  version: string;
+  item: unknown;
+}
+
+export interface NativeHistoryItem {
+  id: string;
+  thread_id: string;
+  parent: string | null;
+  source: NativeHistorySource;
+  content: unknown;
+  provider: NativeProviderOriginal | null;
+}
+
+export interface NativeEvent {
+  cursor: number;
+  subject: string;
+  revision: number;
+  kind: string;
+  data: unknown;
+}
 
 export interface KernelProcessEnvironmentEntry {
   name: string;
@@ -1214,6 +1334,15 @@ export interface KernelComputeReadResult {
 }
 
 export type KernelMethodParams = {
+  "runtime.status": KernelEmptyParams;
+  "runtime.thread.create": NativeThreadCreateParams;
+  "runtime.input.submit": NativeInputSubmitParams;
+  "runtime.run.inspect": NativeRunParams;
+  "runtime.run.cancel": NativeRunParams;
+  "runtime.operation.inspect": NativeOperationParams;
+  "runtime.operation.cancel": NativeOperationParams;
+  "runtime.history.read": NativeHistoryParams;
+  "runtime.events.read": NativeEventsParams;
   "process.spawn": KernelProcessSpawnParams;
   "process.read": KernelProcessReadParams;
   "process.write": KernelProcessWriteParams;
@@ -1312,6 +1441,87 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.status";
+      params: KernelEmptyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.thread.create";
+      params: NativeThreadCreateParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.input.submit";
+      params: NativeInputSubmitParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.run.inspect";
+      params: NativeRunParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.run.cancel";
+      params: NativeRunParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.operation.inspect";
+      params: NativeOperationParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.operation.cancel";
+      params: NativeOperationParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.history.read";
+      params: NativeHistoryParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.events.read";
+      params: NativeEventsParams;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";

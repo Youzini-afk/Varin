@@ -512,6 +512,7 @@ export class KernelClient {
   private buffer = Buffer.alloc(0);
   private readonly pending = new Map<string, PendingRequest>();
   private window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
+  private nativeWindow = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private closePromise: Promise<void> | undefined;
   private readonly revokedGrants = new Set<string>();
   private started = false;
@@ -616,6 +617,7 @@ export class KernelClient {
       throw new KernelClientError({ code: "kernel-manifest-missing", message: "Rust kernel manifest is required for this Host", retryable: false });
     }
     this.window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
+    this.nativeWindow = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
     this.transportFailed = false;
     this.revokedGrants.clear();
     const child = this.spawnProcess(command.command, [...command.args, "--stdio"], {
@@ -735,6 +737,7 @@ export class KernelClient {
     }
     this.transportFailed = true;
     this.window.close(error);
+    this.nativeWindow.close(error);
     for (const pending of this.pending.values()) { pending.reject(error); pending.release(); }
     this.pending.clear();
     for (const listener of this.exitListeners) {
@@ -759,7 +762,7 @@ export class KernelClient {
 
   private async requestRaw<T, M extends KernelMethod = KernelMethod>(method: M, params: KernelMethodParams[M], options: { signal?: AbortSignal | undefined; grant?: KernelGrantHandle | undefined; allowBootstrap?: boolean | undefined } = {}): Promise<T> {
     const cancelled = () => new KernelClientError({ code: "cancelled", message: "Kernel request cancelled", retryable: true });
-    const release = this.closed && method === "kernel.shutdown" ? () => undefined : await this.window.acquire(options.signal, cancelled);
+    const release = this.closed && method === "kernel.shutdown" ? () => undefined : await (method.startsWith("runtime.") ? this.nativeWindow : this.window).acquire(options.signal, cancelled);
     let admitted = false;
     try {
       if (this.closed && method !== "kernel.shutdown") throw new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closed" });
@@ -801,6 +804,12 @@ export class KernelClient {
     } finally {
       if (!admitted) release();
     }
+  }
+
+  /** Native authority management. Never expose this Host-owned channel to tool grants. */
+  async nativeRuntimeRequest<T, M extends Extract<KernelMethod, `runtime.${string}`>>(method: M, params: KernelMethodParams[M], signal?: AbortSignal): Promise<T> {
+    if (!this.handshakeResult) await this.start();
+    return this.requestRaw<T, M>(method, params, { signal, allowBootstrap: true });
   }
 
   async health(options: { deep?: boolean; signal?: AbortSignal | undefined } = {}): Promise<KernelHealthResult> {
@@ -1292,6 +1301,7 @@ export class KernelClient {
   private async closeInternal(): Promise<void> {
     this.closed = true;
     this.window.close(new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closing" }));
+    this.nativeWindow.close(new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closing" }));
     for (const pending of this.pending.values()) pending.cancel();
     const child = this.child;
     if (!child) return;
@@ -1301,7 +1311,7 @@ export class KernelClient {
         return await Promise.race([work.then(() => true, () => false), new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 5_000); })]);
       } finally { if (timer) clearTimeout(timer); }
     };
-    if (await bounded(this.window.whenIdle()) && this.handshakeResult && !child.killed) {
+    if (await bounded(Promise.all([this.window.whenIdle(), this.nativeWindow.whenIdle()])) && this.handshakeResult && !child.killed) {
       await bounded(this.requestRaw("kernel.shutdown", {}, { grant: this.managementGrant ?? undefined }));
     }
     const waitForExit = (): Promise<boolean> => new Promise(resolve => {

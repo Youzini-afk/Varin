@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/varin-kernel"]
+members = ["crates/varin-kernel", "crates/varin-runtime"]
 resolver = "2"
 
 [workspace.package]
