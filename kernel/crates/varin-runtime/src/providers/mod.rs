@@ -190,6 +190,8 @@ pub struct Connection {
     pub transport: Arc<dyn HttpTransport>,
     /// Configurable memory budget for an individual SSE event, not total generation size.
     pub max_event_bytes: usize,
+    /// Frozen catalog capability. None is reserved for explicit low-level/bootstrap callers.
+    pub accepts_images: Option<bool>,
 }
 impl Connection {
     pub fn new(
@@ -202,6 +204,7 @@ impl Connection {
             credentials,
             transport,
             max_event_bytes: 16 * 1024 * 1024,
+            accepts_images: None,
         }
     }
     pub(super) fn run(
@@ -444,3 +447,13 @@ impl CredentialResolver for EnvironmentCredentialResolver {
 
 /// Header types for private credential bridges; values remain dispatch-only.
 pub use reqwest::header as header_types;
+
+pub(super) fn validate_images(
+    view: &RequestView,
+    connection: &Connection,
+) -> Result<(), ExecutionError> {
+    if connection.accepts_images==Some(false) && view.history.iter().any(|item|matches!(&item.content,Content::Attachment{media_type,..} if media_type.starts_with("image/"))){
+        return Err(ExecutionError::new("unsupported_model_image","the frozen model catalog does not accept images"));
+    }
+    Ok(())
+}

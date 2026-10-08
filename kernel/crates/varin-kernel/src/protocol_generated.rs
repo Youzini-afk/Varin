@@ -13,6 +13,13 @@ pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeRunReconcileParams {
+    pub(crate) run_id: String,
+    pub(crate) tool_binding: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeLaunchFailedParams {
     pub(crate) run_id: String,
     pub(crate) code: String,
@@ -1326,6 +1333,11 @@ pub(crate) struct KernelVerificationInputIdentity {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.run.reconcile" => {
+            serde_json::from_value::<NativeRunReconcileParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.launch.fail" => serde_json::from_value::<NativeLaunchFailedParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

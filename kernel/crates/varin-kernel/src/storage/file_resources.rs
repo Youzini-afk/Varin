@@ -60,6 +60,8 @@ pub(super) fn parse_file_params<T: DeserializeOwned>(
     // validation rejects it; it remains part of the durable intent identity.
     if let Some(object) = value.as_object_mut() {
         object.remove("__nativeRequestHash");
+        object.remove("__nativeGrantId");
+        object.remove("__nativeEpoch");
     }
     Ok(serde_json::from_value(value)?)
 }
@@ -652,7 +654,7 @@ impl Storage {
         }
     }
 
-    fn file_state_matches(observed: &FileState, expected: &FileState) -> bool {
+    pub(super) fn file_state_matches(observed: &FileState, expected: &FileState) -> bool {
         match (observed, expected) {
             (FileState::Missing, FileState::Missing)
             | (FileState::Unsupported, FileState::Unsupported) => true,
@@ -1086,7 +1088,7 @@ impl Storage {
         self.finish_file_operation_owned(operation_id, result, None, None)
     }
 
-    fn finish_file_operation_owned(
+    pub(super) fn finish_file_operation_owned(
         &mut self,
         operation_id: &str,
         result: &Value,
@@ -1101,8 +1103,10 @@ impl Storage {
         )?;
         if let Some(intent) = intent {
             let envelope: Value = serde_json::from_str(&intent)?;
-            if let Some(identity) = envelope["intent"]["__nativeRequestHash"].as_str() {
-                durable_result["__nativeRequestHash"] = json!(identity);
+            for field in ["__nativeRequestHash", "__nativeGrantId", "__nativeEpoch"] {
+                if let Some(identity) = envelope["intent"][field].as_str() {
+                    durable_result[field] = json!(identity);
+                }
             }
         }
         self.conn.execute_batch("BEGIN IMMEDIATE")?;

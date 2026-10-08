@@ -39,7 +39,8 @@ pub fn connection_identity_with_scope(configuration:&ModelSessionConfiguration,s
 }
 fn build(configuration:ModelSessionConfiguration,credentials:Arc<dyn CredentialResolver>,credential_ref:Option<String>,identity:String)->Result<RunStart,ExecutionError>{
     if configuration.model.trim().is_empty()||configuration.max_output_tokens==Some(0){return Err(ExecutionError::new("invalid_model_configuration","model and positive output capacity are required"));}
-    let connection=Connection::new(configuration.endpoint.clone(),credentials,Arc::new(NativeHttpTransport::default()));
+    let mut connection=Connection::new(configuration.endpoint.clone(),credentials,Arc::new(NativeHttpTransport::default()));
+    connection.accepts_images=configuration.accepts_images;
     let provider:Arc<dyn ModelProvider>=match configuration.provider_family.as_str(){
         responses::FAMILY=>{let mut provider=responses::ResponsesProvider::new(connection);provider.max_output_tokens=configuration.max_output_tokens;Arc::new(provider)},
         anthropic::FAMILY=>Arc::new(anthropic::AnthropicProvider::new(connection,configuration.max_output_tokens.ok_or_else(||ExecutionError::new("output_capacity_required","Anthropic requires an explicit positive output capacity"))?)),

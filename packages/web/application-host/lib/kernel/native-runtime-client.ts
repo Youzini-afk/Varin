@@ -2,7 +2,7 @@ import { startNativeRunFromSource, type NativeSourceLaunch } from './native-sour
 import type { ExistingHostCredentialOwner } from './native-credential-owner.js';
 import type { KernelClient } from './kernel-client.js';
 import type {
-  NativeThreadSummary, NativeLaunchIntent, NativeLaunchSelectParams, NativeInputSubmitParams, NativeReceipt, NativeRun, NativeOperation,
+  NativeRunReconcileResult, NativeThreadSummary, NativeLaunchIntent, NativeLaunchSelectParams, NativeInputSubmitParams, NativeReceipt, NativeRun, NativeOperation,
   NativeHistoryItem, NativeEvent, NativeStatus, NativeRunStartReceipt, NativeInputEnqueueParams, NativeInputReceipt, NativeQueuedInput,
 } from './protocol.generated.js';
 
@@ -45,6 +45,9 @@ export class NativeRuntimeClient {
   }
   inputs(branchId: string, signal?: AbortSignal): Promise<NativeQueuedInput[]> {
     return this.kernel.nativeRuntimeRequest('runtime.input.list', { branchId }, signal);
+  }
+  reconcileRun(runId: string, toolBinding: unknown, signal?: AbortSignal): Promise<NativeRunReconcileResult> {
+    return this.kernel.nativeRuntimeRequest('runtime.run.reconcile', { runId, toolBinding }, signal);
   }
   failLaunch(runId: string, code: 'preparation_failed' | 'source_unavailable' | 'credentials_unavailable' | 'binding_changed', signal?: AbortSignal): Promise<NativeLaunchIntent> {
     return this.kernel.nativeRuntimeRequest('runtime.launch.fail', { runId, code }, signal);

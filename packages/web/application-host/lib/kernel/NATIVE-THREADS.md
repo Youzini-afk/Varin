@@ -46,3 +46,25 @@ authenticated Express routes, real kernel and loopback model service. It covers 
 credential pinning, completed-submit retry without a second provider call, stable create retry,
 history/SSE, mismatched thread/branch rejection, queued input edit/cancel, active cancellation and
 credential-bound next-run completion. It uses fake credentials and proves no live-provider parity.
+
+## Image input vertical
+
+Native submit/enqueue accept the existing protocol `ImageAttachment` shape (`mimeType`, base64
+`data`). The Host validates the HTTP media shape, supplies the `user-upload` source, and maps it
+to native typed attachments. Images remain in the existing chunked conversation content store;
+there is no second upload database. Image-only input has no artificial empty text block.
+Text-only queue edits retain accepted images under the same revision CAS; an explicit images
+array replaces/removes them. The shared browser file reader and attachment strip are used by
+both the existing Pi composer and the native conversation.
+
+The trusted model catalog's image capability is frozen in model configuration. Known text-only
+models reject image input before admission, including queued edits; provider-specific formats
+still follow the actual serializer/remote API contract. PNG/JPEG/WebP, other formats, live-model
+behavior and transport limits require their own evidence, not a universal image-support claim.
+PDFs and arbitrary URLs/local/blob refs are not accepted as image substitutes.
+
+This path uses the existing HTTP JSON policy (50MB) and framed kernel transport (16MiB). Size
+errors retain the UI draft/images and surface an actionable error. Inline history still needs
+paging/content-reference transport for large accumulated media; chunked durable storage alone
+does not remove the IPC response-size limit. Streaming attachment refs must reuse the existing
+content/attachment authority when that path is implemented.

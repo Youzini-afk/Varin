@@ -28,6 +28,7 @@ impl ResponsesProvider {
 impl ModelProvider for ResponsesProvider {
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         validate_view(view, self.family)?;
+        validate_images(view, &self.connection)?;
         let mut input = Vec::new();
         for item in compile_history(
             &view.history,

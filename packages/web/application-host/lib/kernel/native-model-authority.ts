@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { ExistingHostCredentialOwner, type ExistingModelAuthRuntime, type NativeCredentialScope } from './native-credential-owner.js';
 import type { NativeModelSessionConfiguration } from './protocol.generated.js';
-interface SelectedModel { providerId: string; modelId: string; name: string; api: string; baseUrl: string; maxTokens: number; compat?: Record<string, unknown> }
+interface SelectedModel { providerId: string; modelId: string; name: string; api: string; baseUrl: string; maxTokens: number; input?: readonly string[]; compat?: Record<string, unknown> }
 interface ModelAuthority extends ExistingModelAuthRuntime {
   selectedModel(providerId: string, modelId: string): Promise<SelectedModel>;
   listModels(): Promise<SelectedModel[]>;
@@ -66,12 +66,13 @@ export function createNativeModelAuthority(authority: ModelAuthority) {
     const max = model.api === 'openai-codex-responses' ? null
       : Number.isSafeInteger(model.maxTokens) && model.maxTokens > 0 ? model.maxTokens : null;
     if (model.api === 'anthropic-messages' && max === null) return failed('native-anthropic-output-capacity-required');
+    const acceptsImages = model.input?.includes('image') ?? false;
     const legacy = model.compat?.maxTokensField === 'max_tokens';
     const streamUsage = model.compat?.supportsUsageInStreaming !== false;
     const generation = Number.parseInt(createHash('sha256').update(JSON.stringify({ providerId: model.providerId,
-      family: model.api, model: model.modelId, endpoint, max, deployment, apiVersion, legacy, streamUsage })).digest('hex').slice(0, 12), 16);
+      family: model.api, model: model.modelId, endpoint, max, deployment, apiVersion, legacy, streamUsage, acceptsImages })).digest('hex').slice(0, 12), 16);
     return { providerId: model.providerId, providerFamily: model.api, model: model.modelId, endpoint,
-      credentialEnvironment: null, allowAnonymous: false, configurationGeneration: generation, maxOutputTokens: max,
+      credentialEnvironment: null, allowAnonymous: false, acceptsImages, configurationGeneration: generation, maxOutputTokens: max,
       ...(deployment ? { azureDeployment: deployment } : {}), ...(apiVersion ? { azureApiVersion: apiVersion } : {}),
       ...(model.api === 'openai-completions' ? { legacyMaxTokens: legacy, includeStreamUsage: streamUsage } : {}) };
   }
@@ -83,16 +84,16 @@ export function createNativeModelAuthority(authority: ModelAuthority) {
       currentProviderAccount: () => authority.currentProviderAccount(providerId) });
   }
   return {
-    async listModels(): Promise<Array<{ providerId: string; modelId: string; name?: string }>> {
+    async listModels(): Promise<Array<{ providerId: string; modelId: string; name?: string; acceptsImages: boolean }>> {
       return (await authority.listModels()).filter(model => families.has(model.api))
-        .map(model => ({ providerId: model.providerId, modelId: model.modelId, name: model.name }));
+        .map(model => ({ providerId: model.providerId, modelId: model.modelId, name: model.name, acceptsImages: model.input?.includes('image') ?? false }));
     },
     async resolveModel(selection: { providerId: string; modelId: string }) {
       const model = await authority.selectedModel(selection.providerId, selection.modelId);
       const configuration = await configurationFor(model);
       const credentialOwner = ownerFor(configuration);
       await credentialOwner.scope();
-      return { configuration, credentialOwner };
+      return { configuration, credentialOwner, acceptsImages: configuration.acceptsImages ?? false };
     },
     async rebindModel(configuration: NativeModelSessionConfiguration, expectedScope: NativeCredentialScope) {
       if (!expectedScope) return failed('native-credential-selection-missing');

@@ -17,15 +17,16 @@ export function createNativeThreadsHttpAPI(): NativeThreadsAPI {
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) });
     if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during native thread request');
     if (!response.ok) {
-      const failure = await response.json() as { code?: unknown };
-      throw new NativeThreadRequestError(response.status, typeof failure.code === 'string' ? failure.code : 'native-thread-request-failed');
+      const failure = await response.json().catch(() => ({})) as { code?: unknown };
+      throw new NativeThreadRequestError(response.status, typeof failure.code === 'string' ? failure.code
+        : response.status === 413 ? 'native-http-body-too-large' : 'native-thread-request-failed');
     }
     return response.json() as Promise<T>;
   };
   return {
     list: () => post('list', {}), listModels: () => post('models', {}),
     create: key => post('create', { key }), submit: input => post('submit', input), enqueue: input => post('enqueue', input),
-    editInput: (inputId, expectedRevision, text) => post('input/edit', { inputId, expectedRevision, text }),
+    editInput: (inputId, expectedRevision, text, images) => post('input/edit', { inputId, expectedRevision, text, ...(images === undefined ? {} : { images }) }),
     cancelInput: (inputId, expectedRevision) => post('input/cancel', { inputId, expectedRevision }),
     snapshot: selected => post('snapshot', selected), run: runId => post('run', { runId }),
     cancelRun: runId => post('run/cancel', { runId }), operation: operationId => post('operation', { operationId }),

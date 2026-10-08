@@ -65,6 +65,7 @@ fn push(contents: &mut Vec<Value>, role: &str, part: Value) {
 impl ModelProvider for GoogleProvider {
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         validate_view(view, self.family)?;
+        validate_images(view, &self.connection)?;
         let mut contents = Vec::new();
         let mut system = Vec::new();
         let mut calls = BTreeMap::<String, (String, bool)>::new();

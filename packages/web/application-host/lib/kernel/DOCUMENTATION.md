@@ -120,6 +120,15 @@ and request identity, so replay does not apply an edit twice. A confirmed apply 
 effect; an error after dispatch remains indeterminate. These tools require an explicit materialized
 source and Host-selected write permission; fixed-branch bindings are not silently mutated.
 
+Native mutation recovery reads the exact existing `file.apply` journal under a freshly bound grant.
+The journal retains its original grant and kernel epoch as provenance; those old credentials never
+admit new work. Recovery verifies workspace/Run/Thread/root ownership and the exact frozen tool
+arguments before returning a historical applied/conflict receipt. A started intent can be confirmed
+only by observing its already-present target; recovery never reruns the edit. Missing provenance,
+missing journals, and an unproved target remain unresolved. Canonical receipts omit newly generated
+read versions so repeated delivery is idempotent. File observation uses the Storage owner while a
+dedicated reconciliation worker keeps the native control actor available.
+
 `file.capture` returns typed missing/file/directory/symlink/unsupported state and installs regular-file bytes as
 kernel content objects; `file.apply` is conditional on an expected state and can consume only an authorized
 object owner. `file.mkdir`, `file.remove`, and `file.rename` use the same root and lease authority. Started file

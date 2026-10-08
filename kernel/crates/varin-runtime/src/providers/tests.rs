@@ -1048,3 +1048,31 @@ fn codex_never_infers_account_identity_or_calls_http_without_it() {
     );
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
+
+#[test]
+fn explicit_model_image_capability_rejects_attachment_before_request_serialization() {
+    let mut connection = connection(vec![], 1);
+    connection.accepts_images = Some(false);
+    let provider = responses::ResponsesProvider::new(connection);
+    let mut request = view(responses::FAMILY);
+    request.history.push(ConversationItem {
+        id: "image".into(),
+        provenance: Provenance::UserInstruction {
+            input_id: "input".into(),
+        },
+        content: Content::Attachment {
+            media_type: "image/png".into(),
+            content_ref: "data:image/png;base64,ZmFrZQ==".into(),
+            source: "user upload".into(),
+        },
+        opaque: None,
+    });
+    assert_eq!(
+        provider.serialize(&request).unwrap_err().code,
+        "unsupported_model_image"
+    );
+    request.history[0].content = Content::Text {
+        text: "ordinary text".into(),
+    };
+    assert!(provider.serialize(&request).is_ok());
+}

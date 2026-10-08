@@ -1,3 +1,4 @@
+import { parseNativeThreadImages, nativeThreadInput } from './native-thread-images.js';
 import type { Express, RequestHandler } from 'express';
 import type { NativeThreadIdentity, NativeThreadSubmit } from '@varin/application-client';
 import { KernelClientError } from './kernel-client.js';
@@ -23,9 +24,9 @@ const identity = (body: Record<string, unknown>): NativeThreadIdentity => {
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
 export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAdapter, requireAuth: RequestHandler): void {
   const fields: Record<string, readonly string[]> = {
-    create: ['key'], list: [], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'expectedHead', 'model', 'source'],
-    snapshot: ['runtime', 'threadId', 'branchId'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'mode'],
-    'input/edit': ['inputId', 'expectedRevision', 'text'], 'input/cancel': ['inputId', 'expectedRevision'],
+    create: ['key'], list: [], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'expectedHead', 'model', 'source'],
+    snapshot: ['runtime', 'threadId', 'branchId'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'mode'],
+    'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
     run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], events: ['cursor'],
   };
   const post = (method: string, action: (body: Record<string, unknown>) => Promise<unknown>) => {
@@ -49,7 +50,9 @@ export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAd
   post('submit', async body => {
     const model = object(body.model);
     if (Object.keys(model).some(key => !['providerId', 'modelId'].includes(key))) throw new Error('Unsupported model selection field');
-    const input: NativeThreadSubmit = { ...identity(body), key: text(body.key), text: text(body.text),
+    const images = parseNativeThreadImages(body.images);
+    if (typeof body.text !== 'string' || (!body.text.length && !images?.length)) throw new Error('Text or images are required');
+    const input: NativeThreadSubmit = { ...identity(body), key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }),
       expectedHead: body.expectedHead === null ? null : text(body.expectedHead),
       model: { providerId: text(model.providerId), modelId: text(model.modelId) } };
     if (body.source !== undefined) {
@@ -67,9 +70,22 @@ export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAd
   post('enqueue', async body => {
     const selected = identity(body); await adapter.requireIdentity(selected);
     if (!['boundary', 'interrupt', 'next_run'].includes(String(body.mode))) throw new Error('Invalid input mode');
-    return adapter.enqueue({ ...selected, key: text(body.key), text: text(body.text), mode: body.mode as 'boundary' | 'interrupt' | 'next_run' });
+    const images = parseNativeThreadImages(body.images);
+    if (typeof body.text !== 'string' || (!body.text.length && !images?.length)) throw new Error('Text or images are required');
+    return adapter.enqueue({ ...selected, key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), mode: body.mode as 'boundary' | 'interrupt' | 'next_run' });
   });
-  post('input/edit', async body => { await adapter.requireInput(text(body.inputId)); return adapter.runtime.editInput(text(body.inputId), revision(body.expectedRevision), { text: text(body.text) }); });
+  post('input/edit', async body => {
+    const queued = await adapter.requireInput(text(body.inputId));
+    const images = parseNativeThreadImages(body.images);
+    if (images?.length) adapter.assertImagesSupported(images, (await adapter.requireRun(queued.run_id)).configuration);
+    if (typeof body.text !== 'string') throw new Error('Input text must be a string');
+    // Text-only edits preserve the accepted media; explicit images replaces/removes it under CAS.
+    const existing = queued.content as { attachments?: unknown[] };
+    const content = images === undefined ? { ...(body.text.length || !existing.attachments?.length ? { text: body.text } : {}), ...(existing.attachments ? { attachments: existing.attachments } : {}) }
+      : nativeThreadInput(body.text, images);
+    if (!body.text.length && !('attachments' in content && content.attachments?.length)) throw new Error('Text or images are required');
+    return adapter.runtime.editInput(queued.id, revision(body.expectedRevision), content);
+  });
   post('input/cancel', async body => { await adapter.requireInput(text(body.inputId)); return adapter.runtime.cancelInput(text(body.inputId), revision(body.expectedRevision)); });
   post('run', body => adapter.requireRun(text(body.runId))); 
   post('run/cancel', async body => { await adapter.requireRun(text(body.runId)); return adapter.runtime.cancelRun(text(body.runId)); });

@@ -95,8 +95,9 @@ pub(crate) fn spawn(
     resources: crate::native_tools::NativeResourceClient,
     credential_bridge: crate::credential_bridge::CredentialBridge,
     responses: mpsc::SyncSender<Value>,
-    finished: impl Fn(&str) + Send + 'static,
+    finished: impl Fn(&str) + Send + Sync + 'static,
 ) -> JoinHandle<()> {
+    let finished: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(finished);
     thread::spawn(move || {
         let mut identity: Option<(PathBuf, String)> = None;
         let mut runtime: Option<Arc<RunSupervisor>> = None;
@@ -146,6 +147,7 @@ pub(crate) fn spawn(
                         .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_string();
+                    let mut deferred = false;
                     let result = (|| {
                         if cancellation.load(Ordering::Acquire) {
                             return Err(KernelError::Cancelled);
@@ -490,6 +492,48 @@ pub(crate) fn spawn(
                                 .map_err(|e| KernelError::Operation(e.to_string()))?;
                             return Ok(json!({"runId":handle.run_id,"epoch":handle.epoch}));
                         }
+                        if method == "runtime.run.reconcile" {
+                            let p: NativeRunReconcileParams = serde_json::from_value(params)?;
+                            let binding: crate::native_tools::NativeToolBinding =
+                                serde_json::from_value(p.tool_binding)?;
+                            let operations = {
+                                let catalog = runtime.catalog();
+                                let catalog = catalog.lock().map_err(|_| {
+                                    KernelError::Storage("native catalog owner failed".into())
+                                })?;
+                                let run = catalog.run(&p.run_id).map_err(domain)?;
+                                if binding.run_id != run.id || binding.thread_id != run.thread_id {
+                                    return Err(KernelError::Authorization(
+                                        "reconciliation binding belongs to another Run".into(),
+                                    ));
+                                }
+                                catalog
+                                    .pending_run_operations(&run.id)
+                                    .map_err(domain)?
+                                    .into_iter()
+                                    .filter(|operation| {
+                                        matches!(
+                                            operation.executor.as_deref(),
+                                            Some("native_file_write" | "native_file_edit")
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                            };
+                            if operations.is_empty() {
+                                return Ok(json!({"reconciled":[],"unresolved":[]}));
+                            }
+                            crate::native_reconcile::reconcile(
+                                runtime.clone(),
+                                resources.clone(),
+                                binding,
+                                operations,
+                                id.clone(),
+                                responses.clone(),
+                                finished.clone(),
+                            )?;
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
                         if method == "runtime.launch.fail" {
                             let p: NativeLaunchFailedParams = serde_json::from_value(params)?;
                             if runtime
@@ -554,6 +598,9 @@ pub(crate) fn spawn(
                         })?;
                         dispatch(&mut catalog, method, params)
                     })();
+                    if deferred {
+                        continue;
+                    }
                     let response = match result {
                         Ok(result) => response_ok(&id, result),
                         Err(error) => response_error(&id, &error),

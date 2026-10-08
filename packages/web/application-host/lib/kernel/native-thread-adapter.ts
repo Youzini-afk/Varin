@@ -1,3 +1,5 @@
+import type { ImageAttachment } from '@varin/protocol';
+import { nativeThreadInput } from './native-thread-images.js';
 import { createHash } from 'node:crypto';
 import type { NativeThreadIdentity, NativeThreadSubmit, NativeThreadSource, NativeThreadSnapshot } from '@varin/application-client';
 import type { NativeInputMode, NativeModelSessionConfiguration, NativeCredentialScope, NativeRuntimeStreamEvent } from './protocol.generated.js';
@@ -5,7 +7,7 @@ import type { ExistingHostCredentialOwner } from './native-credential-owner.js';
 import { NativeRuntimeClient } from './native-runtime-client.js';
 
 export interface NativeThreadModelAuthority {
-  listModels?(): Promise<Array<{ providerId: string; modelId: string; name?: string }>>;
+  listModels?(): Promise<Array<{ providerId: string; modelId: string; name?: string; acceptsImages?: boolean }>>;
   resolveModel(selection: { providerId: string; modelId: string }): Promise<{ configuration: NativeModelSessionConfiguration; credentialOwner: ExistingHostCredentialOwner }>;
   rebindModel(configuration: NativeModelSessionConfiguration, expectedScope: NativeCredentialScope): Promise<ExistingHostCredentialOwner>;
 }
@@ -38,9 +40,10 @@ export class NativeThreadAdapter {
     await this.requireIdentity(input);
     if (input.source) await this.admitSource(input.source);
     const model = await this.models.resolveModel(input.model);
+    this.assertImagesSupported(input.images, model.configuration);
     // The same Rust transaction accepts input and pins source/credential/tool selection.
     const receipt = await this.runtime.submit({ key: input.key, threadId: input.threadId, branchId: input.branchId,
-      expectedHead: input.expectedHead, input: { text: input.text }, configuration: model.configuration,
+      expectedHead: input.expectedHead, input: nativeThreadInput(input.text, input.images), configuration: model.configuration,
       launch: { source: input.source ? {
         workspaceId: input.source.workspaceId, executionWorkspaceId: input.source.executionWorkspaceId,
         branchId: input.source.branchId, revision: input.source.revision, materialized: input.source.mode === 'materialized',
@@ -56,14 +59,15 @@ export class NativeThreadAdapter {
     return receipt;
   }
 
-  async enqueue(input: NativeThreadIdentity & { key: string; text: string; mode: NativeInputMode }) {
+  async enqueue(input: NativeThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; mode: NativeInputMode }) {
     await this.requireIdentity(input);
     const thread = await this.runtime.thread(input.threadId);
     const branch = thread.branches.find(candidate => candidate.branch_id === input.branchId)!;
     const previous = branch.active_run_id ? await this.runtime.run(branch.active_run_id) : branch.latest_run;
     if (!previous) throw new Error('An initial model selection is required');
+    this.assertImagesSupported(input.images, previous.configuration);
     const receipt = await this.runtime.enqueue({ key: input.key, threadId: input.threadId, branchId: input.branchId,
-      mode: input.mode, input: { text: input.text }, configuration: previous.configuration });
+      mode: input.mode, input: nativeThreadInput(input.text, input.images), configuration: previous.configuration });
     const launch = await this.runtime.launch(receipt.run_id);
     if (launch?.requires_rebind) {
       const run = await this.runtime.run(receipt.run_id);
@@ -73,6 +77,12 @@ export class NativeThreadAdapter {
       catch (error) { await this.recordLaunchFailure(receipt.run_id, error); throw error; }
     }
     return receipt;
+  }
+
+  assertImagesSupported(images: readonly ImageAttachment[] | undefined, configuration: unknown): void {
+    if (images?.length && (configuration as { acceptsImages?: boolean }).acceptsImages === false) {
+      throw Object.assign(new Error('Selected model does not accept images'), { code: 'native-model-images-unsupported' });
+    }
   }
 
   async requireIdentity(identity: NativeThreadIdentity): Promise<void> {

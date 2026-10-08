@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -48,4 +48,29 @@ test('a failed credential-owner update preserves both token and binding metadata
   await assert.rejects(authority.modifyWithIntent('fixture-provider', 'refresh', async () => { throw new Error('fake refresh failed before commit'); }), /fake refresh failed/);
   assert.equal(await readFile(join(directory, 'auth.json'), 'utf8'), original);
   assert.deepEqual(await HostCredentialAuthority.open(directory).currentScope('fixture-provider'), await authority.currentScope('fixture-provider'));
+});
+
+
+test('configured literal key uses its temporary models file identity and detects edits without changing stored-key identity', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'varin-configured-key-review-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const modelsPath = join(directory, 'models.json');
+  await writeFile(modelsPath, JSON.stringify({ providers: { openai: { apiKey: 'fake-configured-key-initial' } } }));
+  const authority = HostCredentialAuthority.open(directory);
+  const original = await authority.currentScope('openai');
+  assert.equal(await authority.readRaw('openai'), undefined);
+  assert.equal((await authority.getAuth('openai'))?.auth.apiKey, 'fake-configured-key-initial');
+  assert.deepEqual(await HostCredentialAuthority.open(directory).currentScope('openai'), original);
+  const document = JSON.parse(await readFile(modelsPath, 'utf8')) as { providers: Record<string, { apiKey: string; name?: string }> };
+  document.providers.openai!.apiKey = 'fake-configured-key-rotated';
+  await writeFile(modelsPath, JSON.stringify(document));
+  const changed = await authority.currentScope('openai');
+  assert.notDeepEqual(changed, original);
+  assert.equal((await authority.getAuth('openai'))?.auth.apiKey, 'fake-configured-key-rotated');
+  await authority.modifyWithIntent('anthropic', 'replace', async () => ({ type: 'api_key', key: 'fake-stored-key' }));
+  const stored = await authority.currentScope('anthropic');
+  document.providers.openai!.name = 'Unrelated model display edit';
+  await writeFile(modelsPath, JSON.stringify(document));
+  assert.notDeepEqual(await authority.currentScope('openai'), changed);
+  assert.deepEqual(await authority.currentScope('anthropic'), stored);
 });

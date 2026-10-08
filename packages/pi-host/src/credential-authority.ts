@@ -9,7 +9,7 @@ import * as fs from 'node:fs/promises';
 import { FileAuthStorageBackend, ModelRuntime, getAgentDir } from '@earendil-works/pi-coding-agent';
 import type { AuthOperationOptions, AuthResult, Credential, CredentialInfo, CredentialStore } from '@earendil-works/pi-ai';
 
-export interface HostSelectedModel { providerId: string; modelId: string; name: string; api: string; baseUrl: string; maxTokens: number; compat?: Record<string, unknown> }
+export interface HostSelectedModel { providerId: string; modelId: string; name: string; api: string; baseUrl: string; maxTokens: number; input: readonly string[]; compat?: Record<string, unknown> }
 export interface HostCredentialScope { reference: string; authority: string; account: string; generation: number }
 interface BindingMetadata { schema: 1; handle: string; generation: number; providerAccount?: string }
 type Stored = Credential & { $varinCredentialBinding?: BindingMetadata };
@@ -80,7 +80,15 @@ export class HostCredentialAuthority implements CredentialStore {
   async currentScope(providerId: string): Promise<HostCredentialScope> {
     const record = await this.#record(providerId);
     const binding = metadata(record);
-    if (!binding) throw publicFailure('credential-missing');
+    if (!binding) {
+      if (this.#modelsPath) {
+        const { configuredCredentialBinding } = await import('./provider-configuration.js');
+        const configured = await configuredCredentialBinding(this.#modelsPath, providerId);
+        if (configured) return { reference: `provider:${providerId}`, authority: `${this.authorityId}:models`,
+          account: `${configured.handle}:${createHash('sha256').update(configured.revision).digest('hex')}`, generation: 1 };
+      }
+      throw publicFailure('credential-missing');
+    }
     if (record?.type === 'api_key') {
       const resolver = await credentialValueResolver();
       if (!record.key || resolver.isCommandConfigValue(record.key) || resolver.getConfigValueEnvVarNames(record.key).length) throw publicFailure('credential-source-binding-required');
@@ -127,27 +135,26 @@ export class HostCredentialAuthority implements CredentialStore {
   async getAuth(providerId: string): Promise<AuthResult | undefined> {
     await this.currentScope(providerId);
     const runtime = await this.#modelRuntime();
-    // A models.json key/command is a separate credential source. Do not silently stamp the
-    // stored-credential handle onto it before that source has an explicit owner binding.
-    if (runtime.getRegisteredProviderConfig(providerId)?.apiKey !== undefined) throw publicFailure('configured-key-binding-required');
+    // Refresh registered configuration before dispatch; the owner checks the pinned source
+    // revision again after resolution, so an edit cannot send a key under an old binding.
+    await runtime.refresh({ allowNetwork: false });
     return this.#intent.run('refresh', () => runtime.getAuth(providerId));
   }
   async selectedModel(providerId: string, modelId: string): Promise<HostSelectedModel> {
     const runtime = await this.#modelRuntime();
     await runtime.refresh({ allowNetwork: false });
-    if (runtime.getRegisteredProviderConfig(providerId)?.apiKey !== undefined) throw publicFailure('configured-key-binding-required');
     const model = runtime.getModel(providerId, modelId);
     if (!model) throw publicFailure('registered-model-not-found');
     return { providerId, modelId: model.id, name: model.name, api: model.api, baseUrl: model.baseUrl,
-      maxTokens: model.maxTokens, ...(model.compat ? { compat: model.compat as Record<string, unknown> } : {}) };
+      maxTokens: model.maxTokens, input: model.input, ...(model.compat ? { compat: model.compat as Record<string, unknown> } : {}) };
   }
   async listModels(): Promise<HostSelectedModel[]> {
     const runtime = await this.#modelRuntime();
     await runtime.refresh({ allowNetwork: false });
     const configured = new Set((await this.list()).map(entry => entry.providerId));
     return runtime.getModels().filter(model => configured.has(model.provider)
-      && runtime.getRegisteredProviderConfig(model.provider)?.apiKey === undefined).map(model => ({ providerId: model.provider,
-        modelId: model.id, name: model.name, api: model.api, baseUrl: model.baseUrl, maxTokens: model.maxTokens,
+      || runtime.getRegisteredProviderConfig(model.provider)?.apiKey !== undefined).map(model => ({ providerId: model.provider,
+        modelId: model.id, name: model.name, api: model.api, baseUrl: model.baseUrl, maxTokens: model.maxTokens, input: model.input,
         ...(model.compat ? { compat: model.compat as Record<string, unknown> } : {}) }));
   }
   async routingEnvironment(providerId: string): Promise<Record<string, string>> {

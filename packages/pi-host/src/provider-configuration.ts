@@ -561,6 +561,41 @@ async function atomicWrite(path: string, content: string): Promise<void> {
   }
 }
 
+/** Nonsecret configured-key identity. Uses the existing models-file lock and JSONC writer.
+ * The file revision deliberately invalidates configured bindings after ANY models-file edit.
+ * No key material is returned, hashed, or copied to the credential store.
+ */
+export async function configuredCredentialBinding(path: string, providerId: string): Promise<{ handle: string; revision: string } | undefined> {
+  if (!await pathExists(path)) return undefined;
+  const release = await acquireLock(path);
+  try {
+    const document = await readDocument(path);
+    const entry = providerRecord(document, providerId);
+    if (entry?.apiKey === undefined) return undefined;
+    if (typeof entry.apiKey !== "string" || !entry.apiKey) throw new Error("configured-key-invalid");
+    const { credentialValueResolver } = await import("./credential-value-resolver.js");
+    const resolver = await credentialValueResolver();
+    if (resolver.isCommandConfigValue(entry.apiKey) || resolver.getConfigValueEnvVarNames(entry.apiKey).length) {
+      throw new Error("credential-source-binding-required");
+    }
+    let binding = entry.$varinCredentialBinding;
+    if (binding === undefined) {
+      binding = { schema: 1, handle: randomUUID() };
+      const content = applyEdits(document.content, modify(document.content,
+        ["providers", providerId, "$varinCredentialBinding"], binding,
+        { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
+      await atomicWrite(path, content);
+    }
+    if (!isObject(binding) || binding.schema !== 1 || typeof binding.handle !== "string" || !binding.handle) {
+      throw new Error("configured-credential-metadata-invalid");
+    }
+    // These are filesystem revision facts, never a digest of credentials. ctime also catches
+    // in-place edits which restore mtime; inode identifies atomic replacements across restart.
+    const info = await stat(path, { bigint: true });
+    return { handle: binding.handle, revision: [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(":") };
+  } finally { await release(); }
+}
+
 async function updateProviderEntry(
   path: string,
   providerId: string,

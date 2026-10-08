@@ -36,6 +36,7 @@ impl ChatProvider {
 impl ModelProvider for ChatProvider {
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         validate_view(view, self.family)?;
+        validate_images(view, &self.connection)?;
         let mut messages = Vec::<Value>::new();
         let mut replayed = BTreeSet::new();
         for item in compile_history(
