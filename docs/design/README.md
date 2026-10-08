@@ -10,6 +10,7 @@ Status: topic index — 设计的实施状态由各文件说明，交付概况�
 | 主题 | 文档 |
 | --- | --- |
 | 总体边界、工作侧重与专卷关系 | [Agent Harness](agent-harness.md) |
+| 替代 Pi 核心的完整运行时方案 | [Varin 原生 Agent 运行时](native-agent-runtime-design.md)（设计草案，未实施） |
 | 工具参数、执行与反馈 | [工具](harness-tools.md) |
 | 源码检索、结构和语义来源 | [检索](harness-retrieval.md)、[快速决策](fast-decision-model-design.md) |
 | Web、论文与材料复用 | [Web 与科研检索](web-research-search-design.md) |
