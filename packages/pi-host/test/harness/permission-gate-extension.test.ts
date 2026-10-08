@@ -124,6 +124,33 @@ describe("native permission gate integration", () => {
     assert.deepEqual(result.executionPlan?.resources, []);
   });
 
+  it("allows diagnostics and memory reads while keeping memory mutation grants scoped", async () => {
+    const { bridge, audits } = makeBridge();
+    const sourceInfo = { path: "<sdk>", source: "sdk", scope: "temporary", origin: "top-level" };
+    const call = harness({ policy: normal(), sessionId: "s", cwd: workspaceRoot, bridge }, [
+      { name: "network_diag", sourceInfo }, { name: "memory", sourceInfo },
+    ]);
+    const result = ui(["Allow for this session scope", "Deny"]);
+    for (const [toolName, input] of [
+      ["network_diag", { url: "https://example.com" }],
+      ["memory", { action: "search", query: "shell" }],
+    ] as const) {
+      const decision = await call({ toolName, input }, result.context) as { block?: boolean; executionPlan?: { barrier?: boolean } };
+      assert.notEqual(decision.block, true);
+      assert.equal(decision.executionPlan?.barrier, false);
+      assert.equal(audits.at(-1)?.target.source.kind, "harness");
+      assert.equal(audits.at(-1)?.target.action, "read");
+    }
+    assert.equal(result.state.selectCalls, 0);
+    const write = { action: "remember", content: "note", scope: "session" };
+    await call({ toolName: "memory", input: write }, result.context);
+    await call({ toolName: "memory", input: write }, result.context);
+    const denied = await call({ toolName: "memory", input: { ...write, scope: "user" } }, result.context);
+    assert.equal(result.state.selectCalls, 2);
+    assert.equal((denied as { block: boolean }).block, true);
+    assert.equal(audits.at(-1)?.target.action, "control");
+  });
+
   it("pins an inherited shell target before permission inspection", async () => {
     const { bridge, audits } = makeBridge({ workTarget: "managed:cloud" });
     const call = harness({ policy: normal(), sessionId: "s", cwd: workspaceRoot, bridge }, [builtin("bash")]);

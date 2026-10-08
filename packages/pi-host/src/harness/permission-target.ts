@@ -71,6 +71,9 @@ export function classifyPermissionAction(toolName: string, source: PermissionToo
   if (toolName === "experiment") {
     return ["list", "get", "logs", "artifact", "wait"].includes(String(params?.action)) ? "read" : "process";
   }
+  if (toolName === "memory") {
+    return ["get", "search"].includes(String(params?.action)) ? "read" : "control";
+  }
   if (toolName === "research_source") return params?.action === "list" ? "read" : "thread";
   if (NETWORK_TOOLS.has(toolName)) return "network";
   if (WRITE_TOOLS.has(toolName)) return "write";
@@ -154,6 +157,9 @@ function networkOrigins(toolName: string, params: Record<string, unknown>): stri
 }
 
 function threadScopes(toolName: string, params: Record<string, unknown>): string[] {
+  if (toolName === "memory") {
+    return [`memory-scope:${typeof params.scope === "string" ? params.scope : "default"}`];
+  }
   if (PROCESS_TOOLS.has(toolName) || toolName === "get_output") {
     const target = routedExecutionTarget(params);
     return target ? [`execution-target:${target}`] : [];

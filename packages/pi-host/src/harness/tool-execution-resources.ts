@@ -97,7 +97,7 @@ const PLANNED_HARNESS_TOOLS = new Set([
   "update", "kill", "wait", "threads", "read_thread", "dispatch", "webfetch",
   "websearch", "explore", "recall", "related", "history", "resources",
   "research_source", "research_search", "research_decide", "materials", "document_read",
-  "submit_facts", "experiment",
+  "submit_facts", "experiment", "memory",
 ]);
 
 
@@ -156,6 +156,12 @@ const planForHarnessTool = async (name: string, cwd: string, args: ToolArguments
       return targetResource("shell", stringArgument(args, "shellId"));
     case "todo":
       return targetResource("session-state", "todo");
+    case "memory":
+      // An unscoped search spans note scopes, and omitted write scope depends
+      // on the session role. Keep memory writes ordered with all memory reads
+      // in this batch without holding unrelated tools behind them.
+      return targetResource("session-state", "memory",
+        ["get", "search"].includes(String(args.action)) ? "read" : "write");
     case "ask_question":
       return { resources: [] };
     case "send":

@@ -339,6 +339,9 @@ export function defaultRules(mode: PermissionMode, askBefore: Record<string, boo
     if (tool === "experiment") {
       rules.push({ tool, match: { param: "action", pattern: "^(list|get|logs|artifact|wait)$" }, decision: "allow" });
     }
+    if (tool === "memory") {
+      rules.push({ tool, match: { param: "action", pattern: "^(get|search)$" }, decision: "allow" });
+    }
     if (meta.permissionAction === "control") {
       rules.push({ tool, decision: mode === "bypass" ? "allow" : "ask" });
       continue;
