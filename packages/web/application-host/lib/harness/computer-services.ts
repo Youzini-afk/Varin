@@ -60,6 +60,8 @@ export function createComputerObserveService(host: HarnessServiceHost): HarnessS
         ...(params.window !== undefined ? { window: params.window } : {}),
         ...(params.includeScreenshot !== undefined ? { includeScreenshot: params.includeScreenshot } : {}),
         ...(params.textLimit !== undefined ? { textLimit: params.textLimit } : {}),
+        ...(params.observationId !== undefined ? { observationId: params.observationId } : {}),
+        ...(params.offset !== undefined ? { offset: params.offset } : {}),
         ...(params.maxTreeNodes !== undefined ? { maxTreeNodes: params.maxTreeNodes } : {}),
         ...(params.maxTreeDepth !== undefined ? { maxTreeDepth: params.maxTreeDepth } : {}),
         sessionId: ctx.sessionId,

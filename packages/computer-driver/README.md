@@ -79,7 +79,7 @@ response is a partial outcome, not a clean rejection.
 
 | platform | host entry | backend |
 | --- | --- | --- |
-| Windows | `windows/driver-host.ps1` (powershell.exe, stdin loop) | UIA tree/patterns + Win32 window messages; `SendInput` for `global`; `PrintWindow` capture with screen-copy fallback; per-process `EnumWindows` inventory |
+| Windows | `windows/driver-host.ps1` (powershell.exe, stdin loop) | UIA element patterns + real pointer/keyboard input by default; explicit `app_post` for Win32 messages; `PrintWindow` capture with screen-copy fallback; per-process `EnumWindows` inventory |
 | Linux | `linux/driver-host.py` (python3, stdin loop) | AT-SPI tree/actions + `Atspi.generate_*` input; Gdk pixbuf capture on X11. Wayland reports no reliable screenshot/coordinate input until a consented RemoteDesktop/ScreenCast session exists; element actions may still work. |
 | macOS | `macos/driver-host.js` (osascript -l JavaScript, stdin loop) | JXA driver: CGWindowList windows + System Events AX tree + CGEvent input + `CGWindowListCreateImage` capture. **Unverified** — no real-machine evidence yet; `capabilities.detail` says so |
 
@@ -151,11 +151,12 @@ catalog. Bot work can download the recorded revision while the source Host is
 reachable. A changed file needs a new registration. The browser verifies the
 received bytes before offering the download.
 
-Windows background-capable actions avoid stealing foreground focus by
-default; the escape hatches `VARIN_COMPUTER_ALLOW_FOCUS_ACTIONS`,
-`VARIN_COMPUTER_ALLOW_APP_LAUNCH`, and
-`VARIN_COMPUTER_ALLOW_UIA_TEXT_FALLBACK` are evaluated inside the driver
-session.
+The Host's desktop assignment admits Windows input. Auto uses UIA click patterns where available,
+then real pointer input; typing, keys and drags use real input. Activation restores a minimized window,
+requests foreground focus and checks the result before input. Lost focus stops later input. `app_post`
+retains directed messages for native controls. `set_value` remains explicit UIA replacement;
+UIA focus/value actions require no additional environment flag. `VARIN_COMPUTER_ALLOW_APP_LAUNCH`
+still controls implicit process-name launching; the explicit `open` operation is separate.
 
 Windows app selection prefers a PID or exact process name (with an optional
 `.exe` suffix), then an exact window title, then a title substring. A folder or
@@ -187,9 +188,9 @@ to external interpreters. The Windows launcher configures UTF-8 input, output
 and error output before loading the driver, so both multilingual operations and
 startup failures use the same transport encoding.
 
-Windows app-name matching prefers a same-name process with a visible, nonzero-area window.
-Default window selection prefers such windows before auxiliary handles; explicit PID and window
-handle selectors retain their exact targets.
+Windows automatic selection excludes hidden, cloaked, shell/helper and 1×1 placeholder windows;
+it prefers the foreground application window, then a non-minimized titled window. Explicit handles
+retain their exact targets; ambiguous title selectors report the need to choose a handle.
 
 See the [BC acceptance record](../../docs/reviews/bot-computer-use.md)
 for remaining native platform and packaging work.

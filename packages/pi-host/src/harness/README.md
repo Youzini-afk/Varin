@@ -91,8 +91,10 @@ The app exposes `getAXState`, `elements`, `getScreenshot`,
 `getAXStateAndScreenshot`, `click(index | [x,y], options?)`, `setValue(index,
 value)`, `typeText(text)`, `pressKey(chord)`, `scroll(index | [x,y], direction,
 pages?)`, `drag([x,y], [x,y])` and `performSecondaryAction(index, action)`.
-Tree reads reuse the last observation until an action, `fresh:true` or an explicit
-`textLimit` requires a refresh. Action failure also invalidates the cached
+Tree reads reuse the last observation until an action or `fresh:true` requires
+a refresh. `textLimit` selects tree lines per page (default 100, `"max"` for all remaining lines);
+`offset` continues the same observation with unchanged element indexes. Direct `observe` continues
+with `observationId` and `offset`. Screenshots are opt-in. Action failure also invalidates the cached
 read. An image read captures the current state; coordinate actions require
 that app's last screenshot and use its original PNG pixels, before display
 scaling. Elements use the latest tree's indexes.
@@ -102,6 +104,11 @@ tree text; `elements` returns records. Image methods emit images by default and
 return `{observationId, desktopId, app, windowHandle, width, height}` metadata,
 so REPL final-expression output does not duplicate base64. With `emit:false`
 they return the full observation for `computer.emitImage(observation)`.
+
+Windows `typeText` and `pressKey` use real keyboard input into the activated bound window;
+`setValue` directly replaces the chosen element's value. Both keyboard methods accept optional
+`{clickMethod:"app_post"}` for controls supporting background window messages. The persistent
+REPL explicitly enables top-level await, awaits a final Promise, and returns an emitted tree only once.
 
 Actions default to no post-action capture; structured calls can request
 `returnState:"tree" | "screenshot"`. A receipt confirms dispatch, not

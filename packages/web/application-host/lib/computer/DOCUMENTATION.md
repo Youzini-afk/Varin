@@ -51,6 +51,12 @@ the stop notification explicitly instructs the Agent not to bypass the stop thro
 
 ## Feedback and presentation
 
+Observations keep the native tree on the owning Host and return a display page (100 lines by default,
+`textLimit:"max"` to expand). `observationId` plus `offset` reads the same retained tree without capturing
+again; its original element indexes and execution ownership remain authoritative. Screenshots are
+explicit. Post-action observations use the same paging contract. Native per-field text handling is
+independent of public tree pagination.
+
 Native helpers emit optional `target` and `dispatched` NDJSON gesture events after window/element
 relocation. The supervisor correlates them with the live request without treating progress as its
 final receipt. The Host emits completion/failure/cancellation using that receipt and discards obsolete
@@ -62,6 +68,9 @@ Existing desktop SSE carries gestures alongside frames/control, including remote
 The shared presentation maps physical coordinates, negative origins, scaling and letterboxes into
 cursor movement, click ripples, drag updates, target highlights and keyboard/scroll badges. Raw events
 are forwarded without React coalescing away a fast dispatch. Stop and takeover clear the visual layer.
+Control events update the viewer's imperative input fence before the next gesture in the same SSE
+batch. The native overlay paints queued phases in order and starts its hide timer after rendering;
+failed actions show a failure marker rather than a successful click ripple.
 
 Electron renders the same presentation in nonfocusable, disabled, click-through Windows windows,
 converts physical pixels to per-display DIP, and excludes them from capture with

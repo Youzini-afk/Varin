@@ -19,6 +19,17 @@ let lifecycle;
 
 try {
   process.chdir(agentDir);
+  // Exercise the actual packaged evaluator under Electron's Node runtime.
+  // These cells have no desktop API and never send input to the computer.
+  const { ComputerRepl } = await import(pathToFileURL(path.join(hostPackageRoot, 'dist/harness/computer-repl.js')).href);
+  const repl = new ComputerRepl();
+  try {
+    const signal = AbortSignal.timeout(10_000);
+    const noDesktop = async () => { throw new Error('Evaluator verification cannot access a desktop'); };
+    const first = await repl.run('const value = await Promise.resolve(40); value', noDesktop, signal);
+    const second = await repl.run('Promise.resolve(value + 2)', noDesktop, signal);
+    if (first.value !== '40' || second.value !== '42') throw new Error('Packaged Computer REPL did not preserve async bindings/results');
+  } finally { repl.reset(); }
   for (const name of Object.keys(process.env)) {
     if (name.startsWith('VARIN_PI_') || name === 'NODE_PATH') delete process.env[name];
   }

@@ -5,7 +5,7 @@ $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot "runtime.ps1"), [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -gt 0) { throw $parseErrors[0].Message }
-foreach ($name in @("Same-RuntimeId", "Find-Element", "Send-ComputerGesture", "Invoke-ComputerOperation", "Find-TextEntryElement", "Find-TextEntryWindowHandle", "Test-TextWindowHandleCandidate", "Invoke-TypeText")) {
+foreach ($name in @("Same-RuntimeId", "Find-Element", "Send-ComputerGesture", "Invoke-ComputerOperation", "Find-TextEntryElement", "Find-TextEntryWindowHandle", "Test-TextWindowHandleCandidate", "Invoke-TypeText", "Send-GlobalMouseInput", "Get-AppWindows")) {
     $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
     if ($null -eq $definition) { throw "Missing production function $name" }
     Invoke-Expression $definition.Extent.Text
@@ -19,6 +19,8 @@ public static class VarinWin32 {
     public static IntPtr Owner = new IntPtr(73);
     public static IntPtr WindowFromPoint(POINT point) { Points.Add(point); return Owner; }
     public static bool IsChild(IntPtr parent, IntPtr child) { return false; }
+    public static IntPtr GetForegroundWindow() { return new IntPtr(73); }
+    public static object MouseInput(int x, int y, uint flags, uint data) { return flags; }
 }
 namespace Windows.Automation {
     public static class ValuePattern { public static object Pattern = new object(); }
@@ -35,6 +37,13 @@ function Get-WindowDpiScale { return 1.5 }
 function Send-Key { $script:Inputs += 1 }
 function Send-MouseClick { $script:Inputs += 1 }
 function Send-Drag { $script:Inputs += 1 }
+function Use-GlobalInputWindow { }
+function Move-GlobalPointer { }
+function Send-ManagedInput { $script:Inputs += 1 }
+function Send-GlobalMouseClick { $script:Inputs += 1 }
+function Send-GlobalKey { $script:Inputs += 1 }
+function Send-GlobalDrag { $script:Inputs += 1 }
+function Send-GlobalText { $script:Inputs += 1; $script:GlobalText = $true }
 function Send-ReleaseInput { }
 function Resolve-TextLimit { return 500 }
 function Get-NativeWindowHandle($element) { return [IntPtr]$element.Current.NativeWindowHandle }
@@ -98,7 +107,7 @@ $boundInput.Current | Add-Member -NotePropertyName NativeWindowHandle -NotePrope
 $otherInput.Current | Add-Member -NotePropertyName NativeWindowHandle -NotePropertyValue 99
 $script:Root = [pscustomobject]@{ Name = "Bound window"; Controls = @($boundInput) }
 [Windows.Automation.AutomationElement]::FocusedElement = $otherInput
-$response = Invoke-ComputerOperation ([pscustomobject]@{ tool = "type_text"; app = "42"; window = 73; text = "hello" })
+$response = Invoke-ComputerOperation ([pscustomobject]@{ tool = "type_text"; app = "42"; window = 73; text = "hello"; input = "app_post" })
 if (-not $response.ok -or $script:TypedHandle -ne [IntPtr]74) { throw "Text input escaped the bound window to the same app's focused/main window" }
 $capture = New-Object System.IO.StringWriter
 $output = [Console]::Out
@@ -109,4 +118,13 @@ try {
 $events = @($capture.ToString().Trim() -split "`n" | ForEach-Object { $_ | ConvertFrom-Json })
 if (-not $response.ok -or $events.Count -ne 2 -or $events[0].phase -ne "target" -or $events[0].target.x -ne $script:Bounds.x -or $events[1].phase -ne "dispatched") { throw "Native gesture feedback did not carry the relocated target and dispatch" }
 if ($capture.ToString() -like "*private input*") { throw "Gesture feedback leaked typed text" }
+if (-not $script:GlobalText) { throw "Default text did not use real keyboard input" }
+$before = $script:Inputs
+Send-GlobalMouseInput 10 20 @(2, 4)
+if ($script:Inputs -ne $before + 2) { throw "Mouse flags did not bind to the production input function" }
+$candidates = Get-AppWindows @(
+    [pscustomobject]@{ handle = 73; visible = $true; bounds = @{ width = 1; height = 1 }; title = "auxiliary" },
+    [pscustomobject]@{ handle = 74; visible = $true; bounds = @{ width = 800; height = 600 }; title = "Files" }
+)
+if (@($candidates).Count -ne 1 -or $candidates.handle -ne 74) { throw "Placeholder window remained an automatic target" }
 Write-Output "Windows targeting checks passed (fake controls/input; no desktop access)."

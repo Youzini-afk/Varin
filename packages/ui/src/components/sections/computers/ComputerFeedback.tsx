@@ -3,7 +3,7 @@ import type { ComputerFrame, ComputerGesture } from '@varin/protocol';
 import { COMPUTER_FEEDBACK_HTML } from '@/lib/computerFeedback';
 import { useI18n } from '@/lib/i18n';
 
-export interface ComputerFeedbackHandle { show(gesture: ComputerGesture): void; clear(): void }
+export interface ComputerFeedbackHandle { show(gesture: ComputerGesture): void; clear(): void; setEnabled(enabled: boolean): void }
 export const ComputerFeedback = React.forwardRef<ComputerFeedbackHandle, { bounds?: ComputerFrame; disabled: boolean; upscale: boolean }>(function ComputerFeedback({ bounds, disabled, upscale }, handle) {
   const ref = React.useRef<HTMLIFrameElement>(null);
   const { t } = useI18n();
@@ -11,7 +11,7 @@ export const ComputerFeedback = React.forwardRef<ComputerFeedbackHandle, { bound
   const latest = React.useRef({ ready, bounds, disabled }); latest.current = { ready, bounds, disabled };
   const pending = React.useRef<ComputerGesture[]>([]);
   const clear = React.useCallback(() => { pending.current = []; ref.current?.contentWindow?.postMessage({ type: 'clear' }, '*'); }, []);
-  React.useImperativeHandle(handle, () => ({ clear, show(gesture) {
+  React.useImperativeHandle(handle, () => ({ clear, setEnabled(enabled) { latest.current.disabled = !enabled; if (!enabled) clear(); }, show(gesture) {
     if (latest.current.disabled) return;
     if (latest.current.ready && latest.current.bounds) ref.current?.contentWindow?.postMessage({ type: 'gesture', gesture }, '*');
     else { if (pending.current[0]?.id !== gesture.id) pending.current = []; pending.current.push(gesture); }
