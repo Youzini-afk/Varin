@@ -1,6 +1,6 @@
 # Small model utility calls
 
-This Host module makes short, direct provider calls for features such as goal progress audits.
+This Host module makes short, direct provider calls for conversation titles and goal progress audits.
 It uses Pi configuration and credentials through `../pi-config/storage.ts`; it does not read an
 OpenCode auth store or run a second agent runtime.
 

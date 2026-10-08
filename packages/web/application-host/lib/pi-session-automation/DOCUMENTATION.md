@@ -1,8 +1,22 @@
 # Pi session automation
 
-Goal continuation and post-turn assistance run against Varin's public Pi
+Conversation titles, Goal continuation and post-turn assistance use Varin's Pi
 runtime contract. They do not call OpenCode endpoints and do not maintain a
 second session model.
+
+## Conversation titles
+
+`titles.ts` requests a short title from the configured small model after a user message
+is accepted into an unnamed session. It sends the first text-bearing user message through
+the existing small-model resolver, independently of the agent run. The system prompt is
+`SESSION_TITLE_SYSTEM_PROMPT`; neither this request nor its response enters agent context.
+The title is persisted through native Pi `session.rename` with `onlyIfUnnamed`, checked at
+the write so a manual rename takes precedence. Name snapshots also update the UI catalog.
+
+Duplicate message and settled events share one request. A failure leaves the first-message
+display fallback intact and can retry on the next user message; opening the session list
+does not generate titles in bulk. Closing the session or replacing its worker cancels the
+request. Named child threads and scheduled sessions retain their assigned names.
 
 ## State ownership
 

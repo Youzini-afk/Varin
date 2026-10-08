@@ -248,6 +248,7 @@ import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createPiScheduledTaskExecutor } from './lib/scheduled-tasks/pi-executor.js';
 import { createSessionSettleTracker } from './lib/scheduled-tasks/session-settle.js';
 import { createPiSessionAutomationRuntime } from './lib/pi-session-automation/runtime.js';
+import { createPiSessionTitleRuntime } from './lib/pi-session-automation/titles.js';
 import { createServerBootstrapRuntime } from './lib/platform/bootstrap-runtime.js';
 import { parseServeCliOptions } from './lib/platform/cli-options.js';
 import {
@@ -4001,6 +4002,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       sendApnsToAllUiSessions(pushPayload),
     ]);
   };
+  const piSessionTitles = createPiSessionTitleRuntime({
+    broker: piRuntimeBroker,
+    getSmallModelService: () => import('./lib/small-model/index.js'),
+  });
   const piSessionAutomation = createPiSessionAutomationRuntime({
     broker: piRuntimeBroker,
     getSmallModelService: () => import('./lib/small-model/index.js'),
@@ -4025,6 +4030,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const brokerUnsubscribe = piRuntimeBroker.subscribe((event) => {
     semanticRuntime.processEvent(event);
     piSessionAutomation.processBrokerEvent(event);
+    piSessionTitles.processBrokerEvent(event);
     sessionRuntime.processBrokerEvent(event);
     sessionSettleTracker.processEvent(event);
     void piWriterTracker.processEvent(event);
@@ -4340,6 +4346,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await botService.dispose();
       followUpService.dispose();
       piSessionAutomation.stop();
+      piSessionTitles.stop();
       experimentService.detachObservers();
       brokerUnsubscribe();
       harnessRouter.dispose();
