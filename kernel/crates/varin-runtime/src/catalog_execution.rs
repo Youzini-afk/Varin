@@ -111,6 +111,21 @@ impl Catalog {
         epoch: u64,
         record: &ExecutionRecord,
     ) -> Result<()> {
+        // Body durability precedes the metadata transaction; rollback leaves a safe orphan.
+        let prepared_request = match record {
+            ExecutionRecord::RequestPrepared { snapshot } => {
+                Some(self.content.save(&serde_json::to_value(snapshot)?)?)
+            }
+            _ => None,
+        };
+        let frozen_snapshot = if let ExecutionRecord::ModelFinished { request_id, .. } = record {
+            let step: ModelStep = super::record(&self.db, "model_steps", request_id)?;
+            Some(serde_json::from_value::<RequestSnapshot>(
+                self.content.load(&step.request)?,
+            )?)
+        } else {
+            None
+        };
         let tx = self.db.transaction()?;
         let mut run: Run = record_value(&tx, run_id)?;
         fence(&run, epoch)?;
@@ -218,7 +233,9 @@ impl Catalog {
                     run_id: run_id.into(),
                     epoch,
                     state: ModelStepState::Prepared,
-                    request: serde_json::to_value(snapshot)?,
+                    request: prepared_request.ok_or_else(|| {
+                        RuntimeError::Invalid("prepared request content missing".into())
+                    })?,
                     original: vec![],
                     usage: None,
                 };
@@ -265,7 +282,9 @@ impl Catalog {
                         "model completion owner changed".into(),
                     ));
                 }
-                let snapshot: RequestSnapshot = serde_json::from_value(step.request.clone())?;
+                let snapshot = frozen_snapshot.as_ref().ok_or_else(|| {
+                    RuntimeError::Invalid("frozen request content missing".into())
+                })?;
                 let head: Option<String> = tx.query_row(
                     "SELECT head FROM branches WHERE id=?1",
                     [&run.branch_id],
