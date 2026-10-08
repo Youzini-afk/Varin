@@ -299,7 +299,15 @@ export interface VarinHostServiceUseOptions {
   routing?: VarinExtensionServiceRoutingContext;
 }
 
-export type VarinHostServiceHandler = Record<string, (...args: JsonValue[]) => JsonValue | Promise<JsonValue>>;
+export interface VarinHostServiceInvocationContext {
+  /** Cooperative cancellation; an aborted signal does not prove an external effect was undone. */
+  readonly signal: AbortSignal;
+  readonly callId: string;
+}
+
+export type VarinHostServiceHandler = Record<string, (
+  args: JsonValue[], call: VarinHostServiceInvocationContext,
+) => JsonValue | Promise<JsonValue>>;
 
 export interface VarinHostStorageDocumentClient {
   readonly snapshot: VarinExtensionStorageSnapshot;

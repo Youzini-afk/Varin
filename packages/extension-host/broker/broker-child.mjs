@@ -4,6 +4,7 @@ import { isAbsolute, relative, resolve } from 'node:path';
 const require = createRequire(import.meta.url);
 const pending = new Map();
 const serviceHandlers = new Map();
+const activeCalls = new Map();
 const disposers = [];
 let modulePath = '';
 let loadedModule = null;
@@ -83,6 +84,7 @@ const resolveExtension = (module) => {
 };
 
 const deactivate = async () => {
+  for (const controller of activeCalls.values()) controller.abort(new Error('Brokered Host extension deactivated'));
   activationController?.abort('Brokered Host extension deactivated');
   activationController = null;
   serviceHandlers.clear();
@@ -95,7 +97,7 @@ const deactivate = async () => {
   if (errors.length > 0) throw new Error(`Brokered Host cleanup failed: ${errors.join('; ')}`);
 };
 
-const handleParentRequest = async (message) => {
+const handleParentRequest = async (message, signal) => {
   switch (message.method) {
     case 'migrate': {
       const extension = resolveExtension(loadExtensionModule(String(message.params?.modulePath || '')));
@@ -177,7 +179,8 @@ const handleParentRequest = async (message) => {
       const method = String(message.params?.method || '');
       const implementation = handler?.[method];
       if (typeof implementation !== 'function') throw new Error(`Brokered Host service method is unavailable: ${key}.${method}`);
-      return implementation(...(Array.isArray(message.params?.args) ? message.params.args : []));
+      signal.throwIfAborted();
+      return implementation(Array.isArray(message.params?.args) ? message.params.args : [], { signal, callId: message.id });
     }
     case 'storage.sync':
       for (const snapshot of Array.isArray(message.params?.storages)
@@ -204,10 +207,17 @@ process.on('message', (message) => {
     else entry.reject(new Error(String(message.error || 'Broker request failed')));
     return;
   }
+  if (message.kind === 'cancel' && typeof message.id === 'string') {
+    activeCalls.get(message.id)?.abort(new Error('Brokered Host call cancelled'));
+    return;
+  }
   if (message.kind !== 'request' || typeof message.id !== 'string') return;
-  void handleParentRequest(message)
+  const controller = new AbortController();
+  activeCalls.set(message.id, controller);
+  void handleParentRequest(message, controller.signal)
     .then((result) => send({ kind: 'response', id: message.id, success: true, result }))
-    .catch((error) => send({ kind: 'response', id: message.id, success: false, error: errorMessage(error) }));
+    .catch((error) => send({ kind: 'response', id: message.id, success: false, error: errorMessage(error) }))
+    .finally(() => activeCalls.delete(message.id));
 });
 
 process.on('disconnect', () => {

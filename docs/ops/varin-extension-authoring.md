@@ -453,6 +453,15 @@ export default defineHostExtension(async (context) => {
 })
 ```
 
+Host service methods receive `(args, call)`, where `args` is the JSON argument array and
+`call` contains `callId` and a cooperative `AbortSignal`. For example,
+`read: async ([path], call) => readFile(path, { signal: call.signal })`.
+Clients continue to use `service.call("read", path)`. The call context is separate from JSON
+arguments and is available in both brokered and trusted-native modes. Cancellation requests
+are delivered to the executing handler; the invocation remains in flight until that handler
+settles or its process exits. A handler that ignores the signal is not reported as stopped,
+and aborting a signal does not undo an already dispatched external effect.
+
 Host storage is extension-namespaced, revision checked, and authoritative at the application host.
 Use the snapshot revision for every update. Missing, ready, and stale storage states are distinct.
 
