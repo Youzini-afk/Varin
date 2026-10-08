@@ -5,6 +5,7 @@ import type { HostServicesBridge } from "./host-services-bridge.js";
 import { HarnessRequestError } from "./host-services-bridge.js";
 import type {
   ComputerActResult,
+  ComputerActionResult,
   ComputerAction,
   ComputerAppsResult,
   ComputerCancelResult,
@@ -13,6 +14,18 @@ import type {
   ComputerObserveResult,
   ComputerReleaseResult,
 } from "@varin/protocol";
+
+const formatActionReceipt = (result: ComputerActionResult): string => {
+  const receipt = result.receipt!;
+  const label = result.cancelled ? 'Computer operation cancelled' : !result.accepted ? 'Computer operation interrupted'
+    : receipt.effect === 'verified' ? 'Field value verified' : 'Input dispatched';
+  const effect = receipt.effect === 'none' ? 'No input was sent.' : receipt.effect === 'partial' ? 'Some input was dispatched; the remaining steps were not sent.'
+    : receipt.effect === 'unknown' ? 'The effect is unknown.' : '';
+  const recovery = receipt.recovery === 'observe' ? 'Observe the current state before continuing.'
+    : receipt.recovery === 'wait-for-control' ? 'Waiting for desktop control.' : receipt.recovery === 'reconnect' ? 'The desktop connection needs to recover.' : '';
+  const detail = receipt.reason?.message ?? result.detail;
+  return [`${label}${detail ? `: ${detail}` : '.'}`, effect, recovery].filter(Boolean).join(' ');
+};
 
 const computerControllers = new Map<string, Set<WeakRef<{ cancel(runId?: string): boolean }>>>();
 const controllerCleanup = new FinalizationRegistry<{ sessionId: string; reference: WeakRef<{ cancel(runId?: string): boolean }> }>(entry => {
@@ -52,7 +65,7 @@ const ComputerOperation = Type.Object({
   clickCount: Type.Optional(Type.Number()),
   mouseButton: Type.Optional(Type.Union([Type.Literal("left"), Type.Literal("right"), Type.Literal("middle")])),
   clickMethod: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("accessibility"), Type.Literal("app_post"), Type.Literal("global")], {
-    description: 'Windows input method: auto uses semantic clicks and real pointer/keyboard input; app_post sends background window messages',
+    description: 'auto/global use real pointer and keyboard input; accessibility invokes an element action; app_post sends Windows control messages',
   })),
   direction: Type.Optional(Type.Union([Type.Literal("up"), Type.Literal("down"), Type.Literal("left"), Type.Literal("right")])),
   pages: Type.Optional(Type.Number({ description: "scroll: number of pages" })),
@@ -189,7 +202,7 @@ export function computerToolPresentation(role: ComputerThreadRole) {
       role === 'main'
         ? 'access lists task-family desktop assignments and pending requests. grant/deny decide a child’s requestId. Each desktop has one input controller; observers can coexist and different desktops can operate in parallel. Multiple windows of one desktop share input.'
         : 'request asks the main thread for a desktop assignment; wait=true waits for its decision, otherwise it returns immediately. ' + (readOnly ? 'This thread has observation access.' : 'Assignments provide observation or exclusive input control.') + ' releaseAssignment ends the assignment.',
-      'A user stop revokes Computer Use for the rest of the current round, including script calls. The stop notification describes the resulting access state.',
+      'User cancellation ends the current computer work and its script; tool permissions remain available. Explicit takeover pauses desktop input until handback, which invalidates prior observations and bindings.',
       'Element indexes and coordinates belong to observationId; stale observations are rejected. ' + (readOnly ? '' : 'act reports driver dispatch; application completion or partial outcomes are reported separately.'),
       'run preserves JavaScript bindings between cells. computer.getApp(app, {desktopId?, window?}) provides getAXState/getScreenshot/getAXStateAndScreenshot/elements' + (readOnly ? '.' : ', click(index or [x,y]), setValue, typeText, pressKey, scroll, drag and performSecondaryAction.') + ' Bound apps retain their desktop/window and access generation; handoff invalidates old bindings. Reads display their result by default; emit:false returns data without displaying it, fresh:true refreshes the cached tree. Image reads return metadata after display; emit:false returns the full observation for computer.emitImage(observation).',
       'Browser coordinates use CSS viewport pixels; desktop coordinates use pixels of the returned screenshot. URLs, files and localhost resolve on the target machine.',
@@ -376,7 +389,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
               ...(desktop ? { desktopId: desktop } : {}),
             }, signal ? { signal } : undefined) as ComputerActResult;
             const r = result.result;
-            const text = r.outcome === "unknown"
+            const text = r.receipt ? formatActionReceipt(r) : r.outcome === "unknown"
               ? `action outcome unknown: ${r.detail ?? "driver response lost"}. Observe the actual state before deciding whether to retry.`
               : r.outcome === "partial"
                 ? `action cancelled mid-operation: ${r.detail ?? "part of the input already reached the desktop"}. Observe before continuing.`
@@ -395,7 +408,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             const { observation: _observation, ...receipt } = r;
             return {
               content: blocks,
-              ...(r.accepted ? {} : { isError: true as const }),
+              ...(r.accepted && !r.cancelled && !r.outcome ? {} : { isError: true as const }),
               details: { ...receipt, observationId: r.observation?.id },
             };
           }
@@ -465,7 +478,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
                   const target = await field(opts?.desktopId);
                   const result = (await request("computer.act", { ...target, action, automationEpoch: opts?.automationEpoch ?? epochs.get(target.desktopId)! }, requestOptions)).result;
                   if (!result.accepted || result.cancelled || result.outcome) {
-                    throw Object.assign(new Error(`Computer action did not complete normally (${result.outcome ?? (result.cancelled ? "cancelled" : "rejected")}): ${result.detail ?? "observe the desktop before continuing"}`), {
+                    throw Object.assign(new Error(result.receipt ? formatActionReceipt(result) : `Computer action did not complete normally (${result.outcome ?? (result.cancelled ? "cancelled" : "rejected")}): ${result.detail ?? "observe the desktop before continuing"}`), {
                       code: result.outcome === "unknown" ? "ACTION_UNKNOWN" : result.outcome === "partial" ? "ACTION_PARTIAL" : "ACTION_REJECTED",
                       actionSent: result.accepted || result.outcome === "unknown" || result.outcome === "partial",
                       retry: result.accepted || result.outcome ? "reobserve" : "never",

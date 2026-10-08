@@ -182,7 +182,7 @@ describe("computer service (BC4)", () => {
       await b.automation.release('main');
       expect((await call(a, 'control', () => a.act({ desktopId: id, action: { kind: 'click', app: 'notepad', observationId: observed.id, elementIndex: 1 }, automationEpoch: control.automationEpoch }))).accepted).toBe(true);
       await expect(call(b, 'control', () => b.act({ desktopId: id, action: { kind: 'key', app: 'notepad', key: 'enter' } }))).rejects.toMatchObject({ harnessCode: 'forbidden' });
-      expect((await a.automation.stop('main')).status).toBe('stopped');
+      expect((await a.automation.stop('main')).status).toBe('enabled');
       expect((await call(b, 'control', () => b.act({ desktopId: id, action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(true);
     } finally {
       await Promise.allSettled([a.automation.release('main'), b.automation.release('main')]);
@@ -206,12 +206,13 @@ describe("computer service (BC4)", () => {
       expect((await call('main', 'control', () => service.act({ desktopId: 'local-console', automationEpoch: control.automationEpoch,
         action: { kind: 'click', app: 'notepad', observationId: observation.id, elementIndex: 1 } }))).accepted).toBe(true);
       await c.stop('main');
-      const before = driver.calls.length;
-      await expect(call('main', 'control', () => service.act({ desktopId: 'local-console', action: { kind: 'key', app: 'notepad', key: 'enter' } }))).rejects.toMatchObject({ harnessCode: 'forbidden' });
-      expect(driver.calls.length).toBe(before);
+      expect((await call('main', 'control', () => service.act({ desktopId: 'local-console', automationEpoch: control.automationEpoch,
+        action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(false);
+      await call('main', 'observe', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
+      expect((await call('main', 'control', () => service.act({ desktopId: 'local-console', action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(true);
       actors.set('main', { ...actors.get('main')!, runId: 'next', rootRunId: 'next' });
-      await expect(call('main', 'control', () => service.act({ desktopId: 'local-console', automationEpoch: control.automationEpoch,
-        action: { kind: 'key', app: 'notepad', key: 'enter' } }))).rejects.toMatchObject({ harnessCode: 'forbidden' });
+      expect((await call('main', 'control', () => service.act({ desktopId: 'local-console', automationEpoch: control.automationEpoch,
+        action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(false);
     } finally { await service.dispose(); }
   });
   it("automation cancel/release cannot lift buttons owned by a human viewer", async () => {
@@ -322,10 +323,10 @@ describe("computer service (BC4)", () => {
     await service.ensureLocal();
     const first = await service.observe({ desktopId: "local-console", app: "notepad" });
     await service.observe({ desktopId: "local-console", app: "notepad" });
-    await expect(service.act({
+    expect(await service.act({
       desktopId: "local-console",
       action: { kind: "click", app: "notepad", elementIndex: 1, observationId: first.id },
-    })).rejects.toMatchObject({ harnessCode: "invalid-params" });
+    })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'target-changed' } } });
     expect(driver.calls.filter((c) => c.tool === "click")).toHaveLength(0);
   });
 
@@ -342,12 +343,13 @@ describe("computer service (BC4)", () => {
     const tree = await service.observe({ app: 'notepad', includeScreenshot: false });
     const result = await service.act({ action: { kind: 'click', app: '42', x: 240, y: 160, observationId: raster.id } });
     expect(driver.calls.find(op => op.tool === 'click')).toMatchObject({ x: 120, y: 80, window: 73, expected_bounds: snapshot.windowBounds, expected_dpi: 2, capture_source: 'window', return_state: 'none' });
-    expect(result).toEqual({ accepted: false, detail: 'Window geometry changed' });
-    await expect(service.act({ action: { kind: 'click', app: '42', elementIndex: 0, observationId: raster.id } })).rejects.toMatchObject({ harnessCode: 'invalid-params' });
-    await expect(service.act({ action: { kind: 'click', app: '42', x: 1, y: 1, observationId: tree.id } })).rejects.toMatchObject({ harnessCode: 'invalid-params' });
-    await expect(service.act({ action: { kind: 'click', app: '42', x: 1600, y: 1, observationId: raster.id } })).rejects.toMatchObject({ harnessCode: 'invalid-params' });
+    expect(result).toMatchObject({ accepted: false, detail: 'Window geometry changed', receipt: { effect: 'none' } });
+    expect(await service.act({ action: { kind: 'click', app: '42', elementIndex: 0, observationId: raster.id } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'target-changed' } } });
+    expect(await service.act({ action: { kind: 'click', app: '42', x: 1, y: 1, observationId: tree.id } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'target-changed' } } });
+    expect(await service.act({ action: { kind: 'click', app: '42', x: 1600, y: 1, observationId: raster.id } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'target-changed' } } });
     expect(driver.calls.filter(op => op.tool === 'click')).toHaveLength(1);
-    await service.act({ action: { kind: 'drag', app: '42', fromX: 100, fromY: 80, toX: 900, toY: 700, observationId: raster.id } });
+    const freshRaster = await service.observe({ app: 'notepad', includeScreenshot: true });
+    await service.act({ action: { kind: 'drag', app: '42', fromX: 100, fromY: 80, toX: 900, toY: 700, observationId: freshRaster.id } });
     expect(driver.calls.find(op => op.tool === 'drag')).toMatchObject({ from_x: 50, from_y: 40, to_x: 450, to_y: 350 });
     await service.dispose();
   });
@@ -389,10 +391,10 @@ describe("computer service (BC4)", () => {
   it("element actions without any observation are rejected", async () => {
     const { service } = makeService(makeDriver(async () => okResponse()));
     await service.ensureLocal();
-    await expect(service.act({
+    expect(await service.act({
       desktopId: "local-console",
       action: { kind: "click", app: "notepad", elementIndex: 1 },
-    })).rejects.toMatchObject({ harnessCode: "invalid-params" });
+    })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'target-changed' } } });
   });
 
   it("reports a lost action response as unknown and does not replay the input", async () => {
@@ -506,10 +508,10 @@ describe("computer service (BC4)", () => {
     const click = driver.calls.find((c) => c.tool === "click");
     expect(click?.window).toBe(778812);
     expect(click?.element).toMatchObject({ path: [3, 1] });
-    await expect(service.act({
+    expect(await service.act({
       desktopId: "local-console",
       action: { kind: "click", app: "notepad", window: 778811, elementIndex: 1, observationId: observation.id },
-    })).rejects.toMatchObject({ harnessCode: "invalid-params" });
+    })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'target-changed' } } });
     expect(driver.calls.filter((c) => c.tool === "click")).toHaveLength(1);
   });
 
@@ -622,8 +624,7 @@ describe("computer service (BC5 control + view)", () => {
     // generation it reports cancelled rather than resuming under human control.
     expect(slowResult.cancelled).toBe(true);
     cancelled = true;
-    await expect(service.act({ desktopId, action: { kind: "key", app: "x", key: "enter" } }))
-      .rejects.toMatchObject({ harnessCode: "forbidden" });
+    expect(await service.act({ desktopId, action: { kind: "key", app: "x", key: "enter" } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'control-changed' } } });
     expect(order.lastIndexOf("release_input")).toBeGreaterThan(-1);
     expect(cancelled).toBe(true);
   });
@@ -663,13 +664,13 @@ describe("computer service (BC5 control + view)", () => {
     holdRelease = true;
     const taking = service.takeover({ desktopId, holderId: "v1" });
     await vi.waitFor(() => expect(finishRelease).toBeDefined());
-    await expect(service.act({ desktopId, action: { kind: "key", app: "notepad", key: "enter" } })).rejects.toMatchObject({ harnessCode: "forbidden" });
+    expect(await service.act({ desktopId, action: { kind: "key", app: "notepad", key: "enter" } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'control-changed' } } });
     finishRelease!(okResponse());
     await taking;
     holdRelease = false;
     await service.handback({ desktopId, holderId: "v1" });
     await service.observe({ desktopId, app: "notepad" });
-    await expect(service.act({ desktopId, automationEpoch: oldEpoch, action: { kind: "key", app: "notepad", key: "enter" } })).rejects.toMatchObject({ harnessCode: "forbidden" });
+    expect(await service.act({ desktopId, automationEpoch: oldEpoch, action: { kind: "key", app: "notepad", key: "enter" } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'control-changed' } } });
     expect(driver.calls.some((call) => call.tool === "press_key")).toBe(false);
     await service.dispose();
   });
@@ -688,7 +689,7 @@ describe("computer service (BC5 control + view)", () => {
     expect(restarted.activities()).toEqual([]);
     await restarted.list({ localOnly: true });
     expect(await restarted.control(desktopId)).toMatchObject({ owner: "human", holderId: "v1", reachable: false });
-    await expect(restarted.act({ desktopId, action: { kind: "key", app: "notepad", key: "enter" } })).rejects.toMatchObject({ harnessCode: "forbidden" });
+    expect(await restarted.act({ desktopId, action: { kind: "key", app: "notepad", key: "enter" } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'control-changed' } } });
     await restarted.dispose();
   });
 
@@ -715,10 +716,10 @@ describe("computer service (BC5 control + view)", () => {
     expect(back.control.owner).toBe("agent");
     expect(back.requiresObservation).toBe(true);
     // The pre-takeover observation is dead — indexes from it must not fire.
-    await expect(service.act({
+    expect(await service.act({
       desktopId,
       action: { kind: "click", app: "notepad", observationId: observation.id, elementIndex: 1 },
-    })).rejects.toMatchObject({ harnessCode: "invalid-params" });
+    })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'target-changed' } } });
     await service.observe({ desktopId, app: "notepad" });
     const result = await service.act({ desktopId, action: { kind: "key", app: "notepad", key: "enter" } });
     expect(result.accepted).toBe(true);
@@ -1178,10 +1179,13 @@ describe("computer service work association (BC8)", () => {
     const kernel = fakeKernel();
     const delivered: string[] = [];
     const options = { client: kernel.client as never, hostId: "h", platform: "windows" as const, dataDir: newDataDir(),
+      resolveActor: async (): Promise<ComputerActor> => ({ sessionId: 's1', runId: 'r1', rootSessionId: 's1', rootRunId: 'r1', threadId: 't1', scopeId: 'bot:b', label: 'Worker', readOnly: false }),
+      notifyActor: async () => {},
       createDriver: () => makeDriver(async (op) => op.tool === "get_app_state" ? okResponse({ snapshot: appSnapshot() }) : okResponse()),
       resolveWork: async () => ({ scopeId: "bot:b", threadId: "t1" }) };
     const first = createComputerService({ ...options, onHandback: async (event) => { delivered.push(event.id); throw new Error("Thread unavailable"); } });
     await first.ensureLocal();
+    await first.automation.authorize('s1', 'control', 'local-console', async () => {});
     await first.observe({ desktopId: "local-console", app: "notepad", sessionId: "s1" });
     const unsubscribe = await first.subscribeFrames("local-console", "viewer", () => {}, { frames: false });
     await first.takeover({ desktopId: "local-console", holderId: "viewer" });
@@ -1557,8 +1561,7 @@ describe("evidence journal (EE6, §10)", () => {
     await service.ensureLocal();
     const unsubscribe = await service.subscribeFrames("local-console", "human", () => {}, { frames: false });
     await service.takeover({ desktopId: "local-console", holderId: "human" });
-    await expect(service.act({ desktopId: "local-console", action: { kind: "type", app: "notepad", text: "x" } }))
-      .rejects.toMatchObject({ harnessCode: "forbidden" });
+    expect(await service.act({ desktopId: "local-console", action: { kind: "type", app: "notepad", text: "x" } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'control-changed' } } });
     const { entries } = await service.evidence({ desktopId: "local-console" });
     const takeover = entries.find((e) => e.op === "takeover");
     const refused = entries.find((e) => e.tool === "act");

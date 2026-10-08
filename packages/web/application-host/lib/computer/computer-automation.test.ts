@@ -45,8 +45,8 @@ describe('Computer Use execution and physical desktop ownership', () => {
     const request = await c.request('worker', 'desktop', 'control', 'Continue UI work');
     expect((await c.snapshot('main')).requests).toContainEqual(expect.objectContaining({ id: request.id, status: 'pending' }));
   });
-  it('revokes active tickets and scripts for this whole round, rejects reacquisition, and restores only for a new round', async () => {
-    const { coordinator: c, actors, revoke, notify } = fixture();
+  it('cancels active tickets and scripts, then permits fresh work in the same run', async () => {
+    const { coordinator: c, revoke, notify } = fixture();
     let resume!: () => void;
     let admitted!: () => void;
     const ready = new Promise<void>(resolve => { admitted = resolve; });
@@ -54,20 +54,19 @@ describe('Computer Use execution and physical desktop ownership', () => {
       const ticket = c.context.getStore()!; admitted(); await new Promise<void>(resolve => { resume = resolve; }); ticket.assert();
     });
     const failed = expect(active).rejects.toBeDefined();
-    await ready; expect((await c.stop('main')).status).toBe('stopped'); resume(); await failed;
+    await ready; expect(await c.stop('main')).toMatchObject({ status: 'enabled', active: false }); resume(); await failed;
     expect(revoke).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'main', runId: 'main:run' }));
-    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'main' }), expect.stringContaining('user stopped'), false, expect.any(String));
-    await expect(c.authorize('main', 'observe', 'desktop', async () => {})).rejects.toMatchObject({ harnessCode: 'forbidden' });
-    await expect(c.request('worker', 'desktop', 'control', 'Try again')).rejects.toMatchObject({ harnessCode: 'forbidden' });
-    actors.set('main', { ...actor('main'), runId: 'new', rootRunId: 'new' });
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'main' }), expect.stringContaining('user manually cancelled'), false, expect.any(String));
+    await c.authorize('main', 'observe', 'desktop', async () => {});
+    expect((await c.request('worker', 'desktop', 'control', 'Fresh work')).status).toBe('pending');
     await c.authorize('main', 'control', 'desktop', async () => {});
   });
   it('keeps a failed release visibly unconfirmed until retry succeeds', async () => {
     const { coordinator: c, release } = fixture();
     await c.authorize('main', 'control', 'desktop', async () => {});
     release.mockResolvedValueOnce({ released: false });
-    expect((await c.stop('main')).status).toBe('stop-unconfirmed');
-    expect((await c.stop('main')).status).toBe('stopped');
+    expect((await c.stop('main')).status).toBe('cancel-unconfirmed');
+    expect((await c.stop('main')).status).toBe('enabled');
     expect(release).toHaveBeenCalledTimes(2);
   });
   it('coordinates physical desktops across Host origins and revokes opaque assignments on takeover', async () => {

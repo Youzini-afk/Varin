@@ -4,6 +4,7 @@ import type { ComputerAccess, ComputerAccessRequest, ComputerActor, ComputerAuto
 import { HarnessServiceError } from '../harness/service-error.js';
 
 export interface ComputerAdmission {
+  sequence: number;
   actor: ComputerActor;
   key: string;
   signal: AbortSignal;
@@ -20,13 +21,18 @@ export function createComputerAutomation(options: {
   notify(actor: ComputerActor, text: string, wake: boolean, id: string): Promise<void>;
   revokeSession(actor: ComputerActor): Promise<void>;
   bindDesktop(actor: ComputerActor, desktopId: string): Promise<void>;
+  cancelWork?(actor: ComputerActor, desktopId?: string): Promise<void>;
   onChange(state: ComputerAutomationState): void;
 }) {
   const context = new AsyncLocalStorage<ComputerAdmission>();
   const leases = new Map<string, ComputerLease>();
   const requests = new Map<string, ComputerAccessRequest>();
-  const controllers = new Map<string, { actor: ComputerActor; abort: AbortController }>();
-  const rounds = new Map<string, ComputerAutomationState['status']>();
+  const controllers = new Map<string, { actor: ComputerActor; abort: AbortController; desktopId?: string; access: ComputerAccess }>();
+  const cancellations = new Map<string, Promise<ComputerAutomationState>>();
+  const cancellationState = new Map<string, Exclude<ComputerAutomationState['status'], 'enabled'>>();
+  const revisions = new Map<string, number>();
+  const cancelledThrough = new Map<string, number>();
+  let admissionSequence = 0;
   const lastActors = new Map<string, ComputerActor>();
   const ended = new Set<string>();
   const transfers = new Set<string>();
@@ -40,13 +46,21 @@ export function createComputerAutomation(options: {
   const peerClaims = new Map<string, { identity: string; lease?: ComputerLease; ready: Promise<string> }>();
   const revokedClaims = new Set<string>();
   const roundKey = (actor: ComputerActor) => `${actor.rootSessionId}:${actor.rootRunId}`;
+  const workKey = (actor: ComputerActor, desktopId?: string) => desktopId ? `${roundKey(actor)}\0${desktopId}` : roundKey(actor);
+  const statusFor = (actor: ComputerActor, desktopId?: string) => {
+    const values = desktopId ? [cancellationState.get(roundKey(actor)), cancellationState.get(workKey(actor, desktopId))]
+      : [...cancellationState].filter(([key]) => key === roundKey(actor) || key.startsWith(`${roundKey(actor)}\0`)).map(([, value]) => value);
+    return values.includes('cancelling') ? 'cancelling' as const : values.includes('cancel-unconfirmed') ? 'cancel-unconfirmed' as const : undefined;
+  };
   const actorKey = (actor: ComputerActor) => `${actor.sessionId}:${actor.runId}`;
   const stateFor = (actor: ComputerActor): ComputerAutomationState => ({
     rootSessionId: actor.rootSessionId, runId: actor.rootRunId,
-    active: !ended.has(actor.rootRunId) && !actor.rootRunId.startsWith('idle:'),
-    status: rounds.get(roundKey(actor)) ?? 'enabled',
+    active: [...leases.values(), ...failedReleases.values()].some(lease => roundKey(lease.actor) === roundKey(actor))
+      || [...requests.values()].some(request => roundKey(request.actor) === roundKey(actor) && request.status === 'pending')
+      || Boolean(statusFor(actor)),
+    status: statusFor(actor) ?? 'enabled',
     leases: [...leases.values()].filter(lease => roundKey(lease.actor) === roundKey(actor)),
-    requests: [...requests.values()].filter(request => request.actor.rootSessionId === actor.rootSessionId
+    requests: [...requests.values()].filter(request => (request.status === 'pending' || request.status === 'granted') && request.actor.rootSessionId === actor.rootSessionId
       && (roundKey(request.actor) === roundKey(actor) || request.status === 'pending' && !ended.has(request.actor.runId))),
   });
   const publish = (actor: ComputerActor) => {
@@ -54,21 +68,22 @@ export function createComputerAutomation(options: {
     try { options.onChange(structuredClone(stateFor(actor))); } catch { /* presentation does not authorize operations */ }
   };
   const wake = (id: string) => { for (const listener of waiters.get(id) ?? []) listener(); };
-  const resolve = async (sessionId: string) => {
+  const resolve = async (sessionId: string, desktopId?: string, started = ++admissionSequence) => {
     const actor = await options.resolveActor(sessionId);
     if (!actor || ended.has(actor.runId)) throw new HarnessServiceError('forbidden', 'Computer Use requires a live authorized Thread/Run');
+    if (started <= Math.max(cancelledThrough.get(roundKey(actor)) ?? 0, cancelledThrough.get(workKey(actor, desktopId)) ?? 0)) throw new HarnessServiceError('unavailable', 'This computer operation was cancelled before admission');
     lastActors.set(actor.sessionId, actor);
     return actor;
   };
-  const assertRound = (actor: ComputerActor) => {
+  const assertRound = (actor: ComputerActor, desktopId?: string) => {
     if (ended.has(actor.runId) || ended.has(actor.rootRunId)) throw new HarnessServiceError('forbidden', 'This Computer Use execution ended; old bindings cannot resume');
-    if ((rounds.get(roundKey(actor)) ?? 'enabled') !== 'enabled') {
-      throw new HarnessServiceError('forbidden', 'The user stopped Computer Use for this round. Continue with other authorized work; do not resume desktop automation until the next round.');
+    if (cancellationState.get(roundKey(actor)) === 'cancelling' || desktopId && cancellationState.get(workKey(actor, desktopId)) === 'cancelling') {
+      throw new HarnessServiceError('unavailable', 'The previous computer operation is still releasing input');
     }
   };
   const owner = (desktopId: string) => [...leases.values()].find(lease => lease.desktopId === desktopId && lease.access === 'control');
   const issue = async (actor: ComputerActor, desktopId: string, access: ComputerAccess) => {
-    assertRound(actor);
+    assertRound(actor, desktopId);
     if (access === 'control') {
       if (actor.readOnly) throw new HarnessServiceError('forbidden', 'This retrieval/discussion thread can only observe assigned desktops');
       if (transfers.has(desktopId) || unconfirmed.has(desktopId) || !options.controlAvailable(desktopId)) throw new HarnessServiceError('forbidden', 'Desktop control is changing, held by a human, or its previous input release is unconfirmed');
@@ -82,13 +97,14 @@ export function createComputerAutomation(options: {
     leases.set(lease.id, lease);
     const abort = new AbortController(); reservationAborts.set(lease.id, abort);
     const reservation = Promise.resolve().then(() => options.reserve?.(lease, abort.signal)); ready.set(lease.id, reservation);
-    try { await reservation; assertRound(actor); if (leases.get(lease.id) !== lease) throw new HarnessServiceError('forbidden', 'Desktop assignment was revoked during admission'); }
+    try { await reservation; assertRound(actor, desktopId); if (leases.get(lease.id) !== lease) throw new HarnessServiceError('forbidden', 'Desktop assignment was revoked during admission'); }
     catch (error) { await removeLease(lease).catch(() => undefined); throw error; }
     reservationAborts.delete(lease.id); publish(actor); return lease;
   };
   const authorize = async <T>(sessionId: string, access: ComputerAccess, desktopId: string | undefined, run: () => Promise<T>): Promise<T> => {
-    const actor = await resolve(sessionId);
-    assertRound(actor);
+    const sequence = context.getStore()?.sequence ?? ++admissionSequence;
+    const actor = await resolve(sessionId, desktopId, sequence);
+    assertRound(actor, desktopId);
     if (access === 'control' && actor.readOnly) throw new HarnessServiceError('forbidden', 'This thread has read-only Computer Use access');
     let lease: ComputerLease | undefined;
     if (actor.sessionId !== actor.rootSessionId && (desktopId || access === 'control')) {
@@ -99,13 +115,13 @@ export function createComputerAutomation(options: {
     const abort = new AbortController();
     const id = randomUUID();
     const admission: ComputerAdmission = {
-      actor, key: actorKey(actor), signal: abort.signal,
+      actor, sequence, key: `${actorKey(actor)}:${revisions.get(roundKey(actor)) ?? 0}:${desktopId ? revisions.get(workKey(actor, desktopId)) ?? 0 : 0}`, signal: abort.signal,
       assert() {
-        assertRound(actor); abort.signal.throwIfAborted();
+        assertRound(actor, desktopId); abort.signal.throwIfAborted();
         if (lease && leases.get(lease.id) !== lease) throw new HarnessServiceError('forbidden', 'The desktop assignment was released or transferred; request a new assignment and observe the current scene');
       },
     };
-    controllers.set(id, { actor, abort });
+    controllers.set(id, { actor, abort, access, ...(desktopId ? { desktopId } : {}) });
     try { const result = await context.run(admission, run); if (access === 'observe') admission.assert(); return result; }
     finally { controllers.delete(id); }
   };
@@ -135,13 +151,14 @@ export function createComputerAutomation(options: {
     try { await release; } finally { releasing.delete(lease.id); }
   };
   const accessRequest = async (sessionId: string, desktopId: string, access: ComputerAccess, reason: string): Promise<ComputerAccessRequest> => {
-    const actor = await resolve(sessionId); assertRound(actor);
+    const sequence = ++admissionSequence;
+    const actor = await resolve(sessionId, desktopId, sequence); assertRound(actor, desktopId);
     if (actor.readOnly && access === 'control') throw new HarnessServiceError('forbidden', 'Retrieval/discussion threads can request observation only');
     if (!reason.trim()) throw new HarnessServiceError('invalid-params', 'Describe the work requiring this desktop');
     const pending = [...requests.values()].find(request => actorKey(request.actor) === actorKey(actor) && request.desktopId === desktopId && request.access === access && request.status === 'pending');
     if (pending) return structuredClone(pending);
     const desktopLabel = await options.describeDesktop?.(desktopId);
-    assertRound(actor);
+    await resolve(sessionId, desktopId, sequence); assertRound(actor, desktopId);
     const request: ComputerAccessRequest = { id: randomUUID(), desktopId, actor, access, reason, status: 'pending', createdAt: new Date().toISOString(), ...(desktopLabel ? { desktopLabel } : {}) };
     requests.set(request.id, request); publish(actor);
     try {
@@ -161,7 +178,10 @@ export function createComputerAutomation(options: {
       const holder = owner(request.desktopId);
       if (request.access === 'control' && holder && actorKey(holder.actor) === actorKey(manager)) await removeLease(holder);
       const lease = await issue({ ...target, rootRunId: manager.runId }, request.desktopId, request.access);
-      try { await options.bindDesktop(target, request.desktopId); assertRound(lease.actor); }
+      try {
+        await options.bindDesktop(target, request.desktopId); assertRound(lease.actor, request.desktopId);
+        if (request.status !== 'pending' || leases.get(lease.id) !== lease) throw new HarnessServiceError('unavailable', 'The desktop request was cancelled during assignment');
+      }
       catch (error) { await removeLease(lease); throw error; }
       request.actor = lease.actor;
     }
@@ -193,25 +213,49 @@ export function createComputerAutomation(options: {
       || actor.sessionId === actor.rootSessionId && lease.actor.rootSessionId === actor.rootSessionId) && (!desktopId || lease.desktopId === desktopId));
     for (const lease of own) await removeLease(lease);
   };
-  const stop = async (sessionId: string) => {
-    const actor = await resolve(sessionId);
-    if (actor.sessionId !== actor.rootSessionId) throw new HarnessServiceError('forbidden', 'Stop the round through its main conversation');
-    const key = roundKey(actor);
-    rounds.set(key, 'stopping');
-    const affected = [...leases.values(), ...failedReleases.values()].filter(lease => lease.actor.rootSessionId === actor.rootSessionId && lease.actor.rootRunId === actor.runId);
-    const recipients = new Map([[actor.sessionId, actor], ...[...lastActors.values()].filter(caller => caller.rootSessionId === actor.rootSessionId
-      && (roundKey(caller) === key || caller.rootRunId.startsWith('idle:')) && !ended.has(caller.runId)).map(caller => [caller.sessionId, caller] as const)]);
-    for (const { actor: caller, abort } of controllers.values()) if (roundKey(caller) === key) abort.abort(new Error('User stopped Computer Use for this round'));
-    for (const request of requests.values()) if (request.actor.rootSessionId === actor.rootSessionId && request.status === 'pending') { request.status = 'denied'; request.detail = 'User stopped Computer Use for this round'; wake(request.id); }
+  const cancelWork = async (actor: ComputerActor, desktopId?: string) => {
+    const key = workKey(actor, desktopId);
+    const belongs = (candidate: ComputerActor, target?: string) => roundKey(candidate) === roundKey(actor) && (!desktopId || target === desktopId);
+    const ongoing = cancellations.get(key);
+    if (ongoing) return ongoing;
+    const cancellationId = randomUUID();
+    cancelledThrough.set(key, admissionSequence);
+    revisions.set(key, (revisions.get(key) ?? 0) + 1);
+    cancellationState.set(key, 'cancelling');
+    const affected = [...leases.values(), ...failedReleases.values()].filter(lease => belongs(lease.actor, lease.desktopId));
+    const participants = [...affected.map(lease => lease.actor), ...[...controllers.values()].filter(entry => belongs(entry.actor, entry.desktopId)).map(entry => entry.actor)];
+    const recipients = new Map([[actor.sessionId, actor], ...participants.map(caller => [caller.sessionId, caller] as const)]);
+    for (const { actor: caller, abort, desktopId: target } of controllers.values()) if (belongs(caller, target)) abort.abort(new Error('User cancelled the current computer work'));
+    for (const request of requests.values()) if (belongs(request.actor, request.desktopId) && request.status === 'pending') { request.status = 'denied'; request.detail = 'User cancelled the current computer work'; recipients.set(request.actor.sessionId, request.actor); wake(request.id); }
     publish(actor);
-    const results = await Promise.allSettled([
-      ...affected.map(removeLease), ...[...recipients.values()].map(recipient => options.revokeSession(recipient)),
-    ]);
-    rounds.set(key, results.some(result => result.status === 'rejected') ? 'stop-unconfirmed' : 'stopped'); publish(actor);
-    const notices = await Promise.allSettled([...recipients.values()].map(recipient => options.notify(recipient,
-      'The user stopped Computer Use for this round. Desktop access is revoked until this round ends; do not reacquire it or automate the GUI through another tool. Continue other authorized work. Existing applications and desktops remain open.', false, `stop:${key}:${recipient.sessionId}`)));
-    if (notices.some(result => result.status === 'rejected')) throw new HarnessServiceError('unavailable', 'Computer Use is revoked, but a stop notification could not be delivered');
-    return stateFor(actor);
+    const cancelled = (async () => {
+      const results = await Promise.allSettled([
+        ...affected.map(removeLease), ...[...new Map(participants.map(participant => [participant.sessionId, participant])).values()].map(async recipient => {
+          if ((await options.resolveActor(recipient.sessionId))?.runId === recipient.runId) await options.revokeSession(recipient);
+        }),
+      ]);
+      if (options.cancelWork) results.push(...await Promise.allSettled([options.cancelWork(actor, desktopId)]));
+      const unconfirmed = results.some(result => result.status === 'rejected');
+      cancellations.delete(key);
+      if (unconfirmed) cancellationState.set(key, 'cancel-unconfirmed');
+      else cancellationState.delete(key);
+      publish(actor);
+      const notices = await Promise.allSettled([...recipients.values()].map(async recipient => {
+        if ((await options.resolveActor(recipient.sessionId))?.runId !== recipient.runId) return;
+        await options.notify(recipient,
+          `The user manually cancelled the current computer work. ${unconfirmed ? 'Input release has not been confirmed.' : 'The work was cancelled; already-dispatched actions may have left partial effects.'} Computer Use permissions are unchanged.`,
+          false, `cancel:${cancellationId}:${recipient.sessionId}`);
+      }));
+      if (notices.some(result => result.status === 'rejected')) throw new HarnessServiceError('unavailable', 'Computer work was cancelled, but its notification could not be delivered');
+      return stateFor(actor);
+    })();
+    cancellations.set(key, cancelled);
+    try { return await cancelled; } finally { if (cancellations.get(key) === cancelled) cancellations.delete(key); }
+  };
+  const stop = async (sessionId: string, desktopId?: string) => {
+    const actor = await resolve(sessionId);
+    if (actor.sessionId !== actor.rootSessionId) throw new HarnessServiceError('forbidden', 'Cancel computer work through its main conversation');
+    return cancelWork(actor, desktopId);
   };
   const finishRun = async (runId: string) => {
     ended.add(runId);
@@ -222,11 +266,46 @@ export function createComputerAutomation(options: {
       ...[...new Map([...lastActors.values()].filter(actor => actor.runId === runId || actor.rootRunId === runId).map(actor => [actor.sessionId, actor])).values()].map(actor => options.revokeSession(actor)),
     ]);
     const actor = [...lastActors.values()].find(actor => actor.rootRunId === runId);
-    if (actor) { if (results.some(result => result.status === 'rejected')) rounds.set(roundKey(actor), 'stop-unconfirmed'); publish(actor); }
+    if (actor) { if (results.some(result => result.status === 'rejected')) cancellationState.set(roundKey(actor), 'cancel-unconfirmed'); publish(actor); }
     if (results.some(result => result.status === 'rejected')) throw new HarnessServiceError('unavailable', 'Computer Use execution ended, but resource release was not confirmed');
   };
   return {
     context, authorize, request: accessRequest, decide, wait, release, stop, finishRun,
+    async cancelDesktop(desktopId: string) {
+      const actor = owner(desktopId)?.actor ?? [...failedReleases.values()].find(lease => lease.desktopId === desktopId)?.actor;
+      if (!actor) return;
+      await cancelWork({ ...actor, sessionId: actor.rootSessionId, runId: actor.rootRunId }, desktopId);
+    },
+    controller: (desktopId: string) => owner(desktopId)?.actor ?? null,
+    cancellationStatus: statusFor,
+    setHumanControl(desktopId: string, human: boolean) {
+      for (const lease of leases.values()) if (lease.desktopId === desktopId && lease.access === 'control') {
+        lease.suspended = human; publish(lease.actor);
+      }
+    },
+    async interruptDesktop(desktopId: string) {
+      const actor = owner(desktopId)?.actor;
+      const interrupted = [...controllers.values()].filter(entry => entry.desktopId === desktopId && entry.access === 'control').map(entry => entry.actor.sessionId);
+      for (const entry of controllers.values()) if (entry.desktopId === desktopId) entry.abort.abort(new Error('User took control of the desktop'));
+      if (actor && await options.resolveActor(actor.sessionId)) await options.revokeSession(actor);
+      return interrupted;
+    },
+    async notifyHandoff(actor: ComputerActor, text: string, id: string, deliveredByTool: readonly string[] = []) {
+      const recipients = new Map([[actor.sessionId, actor]]);
+      if (actor.rootSessionId !== actor.sessionId) {
+        const root = await options.resolveActor(actor.rootSessionId);
+        if (root?.runId === actor.rootRunId) recipients.set(root.sessionId, root);
+      }
+      for (const recipient of recipients.values()) {
+        if (deliveredByTool.includes(recipient.sessionId)) continue;
+        const current = await options.resolveActor(recipient.sessionId);
+        if (current?.runId === recipient.runId) await options.notify(recipient, text, false, `${id}:${recipient.sessionId}`);
+      }
+    },
+    isCurrent: async (actor: ComputerActor) => {
+      const current = await options.resolveActor(actor.sessionId);
+      return Boolean(current && actorKey(current) === actorKey(actor) && roundKey(current) === roundKey(actor) && !ended.has(actor.runId));
+    },
     resetDesktop(desktopId: string) {
       for (const lease of leases.values()) if (lease.desktopId === desktopId) {
         leases.delete(lease.id); foreign.delete(lease.id);
@@ -269,10 +348,10 @@ export function createComputerAutomation(options: {
       const lease = foreign.get(token);
       if (!lease || lease.desktopId !== desktopId || (access === 'control' && lease.access !== 'control')) throw new HarnessServiceError('forbidden', 'A live Host desktop assignment is required');
       const abort = new AbortController(); const id = randomUUID();
-      const admission: ComputerAdmission = { actor: lease.actor, key: actorKey(lease.actor), signal: abort.signal, assert() {
+      const admission: ComputerAdmission = { actor: lease.actor, sequence: ++admissionSequence, key: actorKey(lease.actor), signal: abort.signal, assert() {
         abort.signal.throwIfAborted(); if (foreign.get(token) !== lease || leases.get(token) !== lease) throw new HarnessServiceError('forbidden', 'The Host desktop assignment ended');
       } };
-      controllers.set(id, { actor: lease.actor, abort });
+      controllers.set(id, { actor: lease.actor, abort, desktopId, access });
       try { admission.assert(); const result = await context.run(admission, run); if (access === 'observe') admission.assert(); return result; }
       finally { controllers.delete(id); }
     },

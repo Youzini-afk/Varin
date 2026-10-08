@@ -1866,7 +1866,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     readSettings: async () => await readSettingsFromDisk() as Record<string, unknown>,
     updateSettings: (mutator) => updateSettingsOnDisk((current) => mutator(current as Record<string, unknown>) as typeof current),
   });
+  const nativeComputerHolder = `native:${hostId}`;
   const computerService = createComputerService({
+    localControlHolder: options.onComputerControlsReady ? nativeComputerHolder : undefined,
     resolveActor: (sessionId) => resolveComputerActor(threadRegistry, sessionId),
     bindDesktop: (actor, desktopId) => threadRegistry.setThreadEnvironment(actor.scopeId, actor.threadId, { desktopId }).then(() => {}),
     revokeSession: (actor) => piRuntimeBroker.requestForSession(actor.sessionId, 'session.computer.cancel', { sessionId: actor.sessionId, runId: actor.runId }).then(() => {}),
@@ -1882,6 +1884,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     onActivityChange: (entry) => broadcastGlobalUiEvent?.({ type: 'varin:computer-activity', properties: entry }),
     onGesture: (gesture, localConsole) => { if (localConsole) options.onComputerGesture?.(gesture); },
+    onControlChange: control => options.onComputerControl?.(control),
+    controlWindows: options.computerControlWindows,
     client: kernelClient,
     hostId,
     dataDir: VARIN_DATA_DIR,
@@ -1902,6 +1906,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         requestId: event.id, from: { kind: 'user', id: `desktop:${event.desktopId}` },
         text: `Human returned control of desktop "${event.label}" (${event.desktopId}) at ${event.at}. Inspect the current desktop state before continuing; the human may have changed files or applications while holding control.`,
       });
+      await computerService.automation.notifyHandoff(event.actor, `The user returned control of desktop "${event.label}". The assigned worker can observe the current scene and continue.`, `handback:${event.id}`, [event.actor.sessionId]);
     },
     // BC6: remote desktops are served by the same `desktopHosts` connection
     // settings managed-remote resolves — apiUrl + clientToken authenticate
@@ -1912,6 +1917,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     vmProviders: async () => configuredVmProviders(await readSettingsFromDisk() as unknown as Record<string, unknown>),
   });
   computerServiceRef.current = computerService;
+  void computerService.defaultDesktop().then(id => id ? computerService.prewarm(id) : undefined)
+    .catch(error => console.error('[Computer] Desktop preparation failed:', errorMessage(error)));
+  options.onComputerControlsReady?.({
+    holderId: nativeComputerHolder,
+    takeover: async () => { await computerService.takeover({ desktopId: 'local-console', holderId: nativeComputerHolder }); },
+    handback: async () => { await computerService.handback({ desktopId: 'local-console', holderId: nativeComputerHolder }); },
+    cancel: async () => {
+      await computerService.automation.cancelDesktop('local-console');
+    },
+  });
   // BC1: unified memory domain. The same service backs the harness memory.*
   // methods, the UI routes, and later the background organizer — one writer
   // semantics for accepted/suggested, dedupe, correction, and forgetting.

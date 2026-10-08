@@ -59,6 +59,8 @@ def emit_gesture(phase, point=None, to=None, target=None):
     if not GESTURE_OPERATION.get('visual_feedback'):
         return
     payload = {'id': GESTURE_OPERATION.get('id'), 'type': 'gesture', 'phase': phase}
+    tool = GESTURE_OPERATION.get('tool')
+    payload['mechanism'] = 'semantic' if tool in ('set_value', 'perform_secondary_action') or GESTURE_OPERATION.get('click_method') == 'accessibility' else 'keyboard' if tool in ('type_text', 'press_key', 'scroll') else 'pointer'
     for key, value in (('point', point), ('to', to), ('target', target)):
         if value is not None:
             payload[key] = value
@@ -829,35 +831,6 @@ def send_text(text):
     emit_key(0, str(text), Atspi.KeySynthType.STRING)
 
 
-def find_editable_text(root):
-    def is_editable(node):
-        return supports_interface(node, "EditableText") and supports_interface(
-            node, "Text"
-        )
-
-    return find_first(root, is_editable)
-
-
-def insert_text(root, text):
-    node = find_first(root, lambda candidate: state_contains(candidate, Atspi.StateType.FOCUSED)
-                      and supports_interface(candidate, "EditableText"))
-    if node is None:
-        return False
-    editable = safe(node.get_editable_text_iface)
-    text_iface = safe(node.get_text_iface)
-    if editable is None or text_iface is None:
-        return False
-    offset = int(safe(lambda: Atspi.Text.get_character_count(text_iface), 0) or 0)
-    return bool(
-        safe(
-            lambda: Atspi.EditableText.insert_text(
-                editable, offset, str(text), len(str(text))
-            ),
-            False,
-        )
-    )
-
-
 def set_element_value(node, value):
     if node is not None and supports_interface(node, "EditableText"):
         editable = safe(node.get_editable_text_iface)
@@ -1206,8 +1179,14 @@ def perform_operation(operation):
             tx, ty = screen_point(bounds, None, operation.get('to_x'), operation.get('to_y'))
             point, to = {'x': x, 'y': y}, {'x': tx, 'y': ty}
         emit_gesture('target', point, to, target)
+    if operation.get("input") == "app_post":
+        return {"ok": False, "rejected": True, "error": "Background window messages are not supported on Linux",
+                "receipt": {"effect": "none", "reason": {"code": "unsupported", "message": "Background window messages are not supported on Linux"}}}
+
     if tool == "click":
-        click_method = (operation.get("click_method") or "auto").lower()
+        click_method = (operation.get("click_method") or "global").lower()
+        if click_method == "auto":
+            click_method = "global"
         if click_method == "accessibility":
             if element is None:
                 raise RuntimeError("click_method 'accessibility' requires element_index")
@@ -1224,6 +1203,7 @@ def perform_operation(operation):
         elif click_method == "sky_click":
             raise RuntimeError("click_method 'sky_click' is not supported on Linux")
         elif click_method == "global":
+            focus_window(window)
             x, y = screen_point(
                 bounds,
                 element_record,
@@ -1233,23 +1213,6 @@ def perform_operation(operation):
             send_mouse_click(
                 x, y, operation.get("mouse_button", "left"), operation.get("click_count", 1)
             )
-        elif click_method == "auto":
-            handled = False
-            if element is not None and operation.get("mouse_button", "left") == "left":
-                handled = do_action_by_index(element, preferred_action_index(element))
-            if not handled:
-                x, y = screen_point(
-                    bounds,
-                    element_record,
-                    operation.get("x"),
-                    operation.get("y"),
-                )
-                send_mouse_click(
-                    x,
-                    y,
-                    operation.get("mouse_button", "left"),
-                    operation.get("click_count", 1),
-                )
         else:
             raise RuntimeError("Invalid click_method '{}'".format(click_method))
     elif tool == "perform_secondary_action":
@@ -1258,17 +1221,25 @@ def perform_operation(operation):
         focus_window(window)
         scroll_element(operation.get("direction", "down"), operation.get("pages", 1))
     elif tool == "drag":
+        focus_window(window)
         from_x, from_y = screen_point(
             bounds, None, operation.get("from_x"), operation.get("from_y")
         )
         to_x, to_y = screen_point(bounds, None, operation.get("to_x"), operation.get("to_y"))
         send_drag(from_x, from_y, to_x, to_y)
     elif tool == "type_text":
-        if not insert_text(window, operation.get("text", "")):
-            focus_window(window)
-            send_text(operation.get("text", ""))
+        focus_window(window)
+        if element is not None:
+            component = element.get_component_iface()
+            if not component or not component.grab_focus() or not state_contains(element, Atspi.StateType.FOCUSED):
+                return {"ok": False, "rejected": True, "receipt": {"effect": "none", "reason": {"code": "focus-changed", "message": "The selected control did not obtain keyboard focus"}, "recovery": "observe"}}
+        send_text(operation.get("text", ""))
     elif tool == "press_key":
         focus_window(window)
+        if element is not None:
+            component = element.get_component_iface()
+            if not component or not component.grab_focus() or not state_contains(element, Atspi.StateType.FOCUSED):
+                return {"ok": False, "rejected": True, "receipt": {"effect": "none", "reason": {"code": "focus-changed", "message": "The selected control did not obtain keyboard focus"}, "recovery": "observe"}}
         send_key(operation.get("key", ""))
     elif tool == "set_value":
         if element is None:

@@ -43,8 +43,8 @@ export const readComputerActivity = async (sessionId: string): Promise<ComputerA
 export interface ComputerAutomationProjection { state: ComputerAutomationState; activities: ComputerActivityEntry[] }
 export const readComputerAutomation = async (sessionId: string): Promise<ComputerAutomationProjection> => readJson(
   await runtimeFetch(`/api/computers/automation?sessionId=${encodeURIComponent(sessionId)}`, { cache: 'no-store' }), 'Unable to read Computer Use state');
-export const stopComputerAutomation = async (sessionId: string): Promise<{ state: ComputerAutomationState }> => readJson(
-  await runtimeFetch('/api/computers/automation/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId }) }), 'Unable to confirm Computer Use stop');
+export const stopComputerAutomation = async (sessionId: string, desktopId?: string): Promise<{ state: ComputerAutomationState }> => readJson(
+  await runtimeFetch('/api/computers/automation/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId, desktopId }) }), 'Unable to confirm computer work cancellation');
 
 /** Re-probe a desktop's driver; the response carries the real capability table. */
 export const probeComputerDesktop = async (desktopId: string): Promise<ComputerDesktop> => {

@@ -67,7 +67,7 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
     catch (error) { sendError(response, error, 'Unable to read Computer Use state'); }
   });
   app.post('/api/computers/automation/stop', requireAuth, async (request, response) => {
-    try { response.json({ state: await computers.automation.stop(String(request.body?.sessionId ?? '')) }); }
+    try { response.json({ state: await computers.automation.stop(String(request.body?.sessionId ?? ''), typeof request.body?.desktopId === 'string' ? request.body.desktopId : undefined) }); }
     catch (error) { sendError(response, error, 'Unable to confirm Computer Use stop'); }
   });
   app.post('/api/computers/desktops/:desktopId/assignment', requireAuth, async (request, response) => {

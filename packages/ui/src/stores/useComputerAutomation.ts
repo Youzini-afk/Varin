@@ -62,5 +62,5 @@ export function useComputerAutomation(sessionId: string) {
     } catch (error) { await watchers.get(key)?.refresh(); update(key, current => ({ ...current, error: error instanceof Error ? error.message : String(error) })); }
     finally { if (watchers.has(key)) update(key, current => ({ ...current, busy: false })); }
   }, [key, sessionId]);
-  return { ...view, stop };
+  return { ...view, activities: view.activities.filter(entry => entry.activity.status === 'running'), stop };
 }

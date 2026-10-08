@@ -235,7 +235,7 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
 
   if (envelope.type === 'varin:computer-automation') {
     const state = getEventProperties(envelope.properties);
-    if (typeof state?.rootSessionId === 'string' && typeof state.runId === 'string' && typeof state.active === 'boolean' && ['enabled', 'stopping', 'stopped', 'stop-unconfirmed'].includes(String(state.status))
+    if (typeof state?.rootSessionId === 'string' && typeof state.runId === 'string' && typeof state.active === 'boolean' && ['enabled', 'cancelling', 'cancel-unconfirmed'].includes(String(state.status))
       && Array.isArray(state.leases) && Array.isArray(state.requests)) {
       for (const listener of listeners) listener({ type: 'computer-automation', state: state as unknown as ComputerAutomationState });
     }

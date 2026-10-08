@@ -151,10 +151,12 @@ catalog. Bot work can download the recorded revision while the source Host is
 reachable. A changed file needs a new registration. The browser verifies the
 received bytes before offering the download.
 
-The Host's desktop assignment admits Windows input. Auto uses UIA click patterns where available,
-then real pointer input; typing, keys and drags use real input. Activation restores a minimized window,
-requests foreground focus and checks the result before input. Lost focus stops later input. `app_post`
-retains directed messages for native controls. `set_value` remains explicit UIA replacement;
+The Host's desktop assignment admits Windows input. Auto clicks, typing, keys and drags use real input.
+Explicit accessibility clicks invoke UIA actions. Typing inserts at the selected/focused control's
+selection, while `set_value` replaces its value and checks readback. Activation restores a minimized
+window and validates foreground/native keyboard focus before each input batch. Lost focus interrupts
+later input without declaring human takeover. `app_post` retains directed messages for native controls;
+background text requires an actual Edit/RichEdit handle in the selected window. `set_value` uses UIA;
 UIA focus/value actions require no additional environment flag. `VARIN_COMPUTER_ALLOW_APP_LAUNCH`
 still controls implicit process-name launching; the explicit `open` operation is separate.
 
@@ -173,9 +175,12 @@ global SendInput paths, `PrintWindow` capture, `release_input`,
 The complete upstream notice is retained in
 [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md).
 
-Host cancellation drops queued input, signals the in-flight op through the
-cancel-flag side-channel, and follows with `release_input` so an interrupted
-gesture releases input tracked by that helper. A crashed helper loses its
+Host cancellation drops queued input and signals the in-flight op. On Windows,
+`native-win32.cs` declares the native API and `input-controller.cs` owns input,
+held-key tracking and a release channel independently of the MTA PowerShell UIA
+worker. A `<id>.release` command fences the owner and writes an atomic release
+acknowledgement before the Host closes the helper. Linux/macOS use the request
+cancel flag followed by `release_input`. A crashed helper loses its
 tracking state; a replacement cannot safely send blanket key-up events because
 they could release a person's held keys or mouse buttons. A lost driver response
 therefore leaves the action effect and any held-input state unknown. Post-action
