@@ -137,10 +137,9 @@ describe("Phase 2 e2e integration", () => {
       const todoTool = createTodoTool(bridge);
       const { text } = await executeTool(todoTool, {
         items: [
-          { text: "write tests", status: "open" },
-          { text: "run tests", status: "done" },
+          { text: "write tests", status: "in_progress" },
+          { text: "run tests", status: "completed" },
         ],
-        confidence: 0.8,
       });
 
       assert.match(text, /plan updated/, `todo tool should return "plan updated": got "${text}"`);
@@ -150,7 +149,7 @@ describe("Phase 2 e2e integration", () => {
       const blocks = await knowledgeStore.getBlocks(SESSION_ID);
       const planBlock = blocks.find((b) => b.label === "plan");
       assert.ok(planBlock, "plan block should exist in store");
-      assert.match(planBlock!.content, /write tests/, "plan block should contain 'write tests'");
+      assert.match(planBlock!.content, /\[\/\] write tests/, "plan block should retain the in-progress status");
       assert.match(planBlock!.content, /\[x\] run tests/, "plan block should mark 'run tests' as done");
     } finally {
       await harnessServiceHost.dispose();

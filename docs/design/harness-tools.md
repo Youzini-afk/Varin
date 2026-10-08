@@ -236,13 +236,14 @@ D-302 / 7H 已在同一工具上增加可取消的事件等待，保留默认立
 
 ### 5.6 `todo`（新增，主 agent 自己的计划）
 
-主 agent 对记忆系统零义务（第 8.4.1 节），但它可以为**自己的注意力**维护一份计划。`todo({ items: [{ text, status }],
-confidence? })`——整表替换语义，Claude Code TodoWrite 的形状，模型训练过。写入知识库的 `plan` 块（主 agent 是该块唯一
-的模型侧结构所有者，用户可以在面板编辑），显示在计划面板；用户修改作为新事实进 Zone 2，agent 自己的修改已在工具结果中。
-后台压缩不编辑 plan，也不因停止 keeper 而隐藏计划。`confidence` 可选：主 agent 声明对计划的信心，
-只作说明，不以自报分数自动增加确认步骤。只有用户显式选择 plan mode 或配置计划审批时才按该选择等待。系统提示只建议
-"非平凡任务先计划"，harness 不检查它是否被调用，也不因其陈旧而提醒。confidence 只作信息；plan mode 或权限策略需要
-批准时由既有 pre-tool 流程处理，`todo.upsert` 写入后没有第二次确认协议（D-206/D-209）。
+`todo({ items: [{ text, status? }] })` 替换本会话的完整计划，空列表清空计划。状态为
+`pending`（待做）、`in_progress`（进行中）、`completed`（已完成）或 `blocked`（受阻），省略时使用 `pending`。
+工具入口在 schema 校验前将明确同义的 `done` 归一为 `completed`；未知状态使整次更新失败，原计划保留。
+
+计划写入知识库的 `plan` 块，用户也可在工作概览编辑。`@varin/protocol` 统一其文本表示与解析：
+`[ ]`、`[/]`、`[x]`、`[!]` 分别对应上述四种状态。工作概览高亮明确标记为进行中的条目，允许多项并行。
+用户修改作为新事实进 Zone 2，agent 的修改通过工具结果回传。后台压缩不编辑计划。
+工具不再暴露没有消费方的 `confidence`；已有权限审批发生在 pre-tool 流程，保存后直接返回更新结果。
 
 ### 5.7 `explore`、`dispatch` / `wait`（新增）
 

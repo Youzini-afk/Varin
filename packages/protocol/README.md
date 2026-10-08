@@ -54,7 +54,7 @@ language server read itself, which LSP cannot attribute to a version.
 | `zone2.assemble` | `{ sinceTurn, branchEntryIds, memoryMode, afterEventId?, query?, contextUsage? }` | `{ content, eventCursor }` | Assemble branch-aware, cursor-based Zone 2 context |
 | `compaction.before` | `{ firstKeptEntryId, tokensBefore, branchEntryIds, removedEntryIds, mode }` | `CompactionBeforeResult` | Verify keeper coverage before optional takeover |
 | `compaction.after` | `{ summary, firstKeptEntryId, tokensBefore }` | `{ acknowledged }` | Post-compaction hook |
-| `todo.upsert` | `{ items, branchEntryIds, confidence?, confirmed? }` | `{ text, confirmed?, askedConfirmation }` | Upsert the active branch plan after pi-host confirmation when needed |
+| `todo.upsert` | `{ items: [{ text, status }], branchEntryIds }` | `{ text, materialRevisions? }` | Replace the active branch plan with pending/in_progress/completed/blocked items; an empty list clears it |
 | `recall.search` | `{ query, k? }` | `{ text, results[] }` | Recall search |
 | `memory.blocks.get` | `{ branchEntryIds }` | `{ blocks[] }` | Resolve the closest visible block revision on the active branch |
 | `memory.blocks.apply` | `{ cursorTurn, branchEntryIds, coveredEntryIds, ops[] }` | `MemoryApplyResult` | Atomically validate branch-local keeper operations and update coverage after full acceptance |

@@ -1048,7 +1048,7 @@ export function createTodoUpsertService(host: HarnessServiceHost): HarnessServic
       }
       const deps = await host.todoDepsProvider(ctx.sessionId);
       const result = await executeTodoTool(
-        { items: params.items, ...(params.confidence !== undefined ? { confidence: params.confidence } : {}) },
+        { items: params.items },
         deps,
         params.branchEntryIds,
       );
