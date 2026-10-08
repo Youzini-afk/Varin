@@ -49,7 +49,7 @@ interface ProjectActionsButtonProps {
   className?: string;
   compact?: boolean;
   allowMobile?: boolean;
-  contextMenu?: { trigger: React.ReactElement; children: React.ReactNode };
+  contextMenu?: { trigger: React.ReactElement; leading?: React.ReactNode; children: React.ReactNode };
   menuTrigger?: React.ReactElement;
   previewOnly?: boolean;
 }
@@ -782,6 +782,7 @@ export const ProjectActionsButton = ({
       <ContextMenu onOpenChange={(open) => { if (open) setMenuActivated(true); }}>
         <ContextMenuTrigger render={contextMenu.trigger} />
         <ContextMenuContent className="min-w-52 max-h-[70vh] overflow-y-auto">
+          {contextMenu.leading ? <>{contextMenu.leading}<ContextMenuSeparator /></> : null}
           {menuItems}
           <ContextMenuSeparator />
           {contextMenu.children}

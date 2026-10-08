@@ -8,8 +8,20 @@ import {
   dropdownMenuSeparatorClass,
 } from "./dropdown-menu.styles";
 
-function ContextMenu({ ...props }: React.ComponentProps<typeof BaseContextMenu.Root>) {
-  return <BaseContextMenu.Root {...props} />;
+const ContextMenuPortalContext = React.createContext<HTMLElement | null>(null);
+
+function ContextMenu({ onOpenChange, ...props }: React.ComponentProps<typeof BaseContextMenu.Root>) {
+  const [portalContainer, setPortalContainer] = React.useState<HTMLElement | null>(null);
+  return <ContextMenuPortalContext.Provider value={portalContainer}>
+    <BaseContextMenu.Root {...props} onOpenChange={(open, details) => {
+      if (open) {
+        const target = details.event.target;
+        setPortalContainer(target instanceof Element
+          ? target.closest<HTMLElement>('[data-slot="dialog-content"], [role="dialog"]') : null);
+      }
+      onOpenChange?.(open, details);
+    }} />
+  </ContextMenuPortalContext.Provider>;
 }
 
 function ContextMenuTrigger({ asChild, children, ...props }: React.ComponentProps<typeof BaseContextMenu.Trigger> & { asChild?: boolean }) {
@@ -23,9 +35,10 @@ type ContentProps = {
   children?: React.ReactNode;
 } & React.ComponentProps<typeof BaseContextMenu.Popup>;
 
-function ContextMenuContent({ className, positionerClassName, children, style, ...props }: ContentProps) {
+function ContextMenuContent({ className, positionerClassName, children, style, onContextMenu, ...props }: ContentProps) {
+  const portalContainer = React.useContext(ContextMenuPortalContext);
   return (
-    <BaseContextMenu.Portal>
+    <BaseContextMenu.Portal container={portalContainer || undefined}>
       <BaseContextMenu.Positioner className={cn("app-region-no-drag z-50", positionerClassName)}>
         <BaseContextMenu.Popup
           data-slot="dropdown-menu-content"
@@ -34,7 +47,12 @@ function ContextMenuContent({ className, positionerClassName, children, style, .
             color: "var(--surface-elevated-foreground)",
             ...style,
           }}
-          className={cn(dropdownMenuPopupClass, className)}
+          className={cn(dropdownMenuPopupClass, "overflow-y-auto", className)}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onContextMenu?.(event);
+          }}
           {...props}
         >
           {children}
