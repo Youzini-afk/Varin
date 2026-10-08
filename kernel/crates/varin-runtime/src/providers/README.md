@@ -86,7 +86,7 @@ https://ai.google.dev/api/generate-content and https://ai.google.dev/gemini-api/
 - Google/Vertex have native GenerateContent serialization/parsing and signed-part replay; review tests
   and production factory wiring are separate gates, not implied by the module's presence.
 - Codex SSE serialization and required bound-account headers are implemented. Codex WebSocket/compression
-  parity, Bedrock Converse event framing/signing, the separate stateful Mistral Conversations API and
+  parity, Bedrock AWS credential-chain/SigV4 signing, the separate stateful Mistral Conversations API and
   pi-messages remain explicit work.
 - Environment-key lookup and an injected transactional native OAuth broker are implemented. The broker
   supports scope pinning and cancellation-safe refresh/persistence; the Host store/private bridge is now wired and checked with temporary/fake credentials. Platform
@@ -147,3 +147,25 @@ The locked SDK does not send `max_output_tokens` to this backend; the adapter do
 configuration capacity is a supported Codex wire budget. Run-budget policy remains a separate concern.
 WebSocket incremental state, account-keyed socket pooling, zstd and full capability parity are not
 implemented by this SSE-only path. Real account authorization remains a separate acceptance gate; Host store wiring is now present; no live credentials were used to develop or validate these modules.
+
+## Bedrock ConverseStream bearer binding
+
+`bedrock-converse-stream` uses the actual `/model/{encodedModelId}/converse-stream` API and AWS
+binary eventstream, not SSE. The shared transport validates its content type; the decoder validates
+both prelude and message CRC32, supports fragmented frames, and enforces the caller-configured event
+memory budget. EOF is successful only after `messageStop` and a complete final frame. Trailing usage
+metadata is retained. Event exceptions are sanitized and do not trigger retries. Signed reasoning and
+redacted bytes retain their model/connection-scoped originals; tool calls are admitted only after
+complete JSON arguments and use consistent IDs on replay. Images use admitted inline bytes.
+
+The production Host factory selects this family and resolves existing stored/configured bearer keys
+through the sole credential owner. Standard AWS endpoint region follows a model ARN or explicit owner
+region; custom registered endpoints remain intact. AWS profile/STS credential-chain identity and SigV4
+are pending a body-aware signing boundary. Native model-specific reasoning configuration, documents,
+cache policy and additional model fields are not yet equivalent to all SDK options. This bearer slice
+must not be described as complete Bedrock/cloud-auth parity.
+
+Protocol sources: locked Pi SDK 1.0.4 `api/bedrock-converse-stream.js`,
+https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_ConverseStream.html,
+https://smithy.io/2.0/aws/amazon-eventstream.html, and
+https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html.

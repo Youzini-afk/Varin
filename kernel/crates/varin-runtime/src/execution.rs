@@ -500,7 +500,22 @@ pub enum ExecutionRecord {
 
 /// Implement each callback with short atomic writes and an owner-generation fence.
 /// Never retain a transaction or lock after return. Error means no new work may be dispatched.
+#[derive(Debug, Clone)]
+pub struct ContextProjection {
+    pub checkpoint_id: String,
+    pub history: Vec<ConversationItem>,
+    pub instruction_sources: Vec<String>,
+    pub memory_checkpoint: Option<String>,
+}
+
 pub trait Persistence: Send + Sync {
+    fn compile_context(
+        &self,
+        run_id: &str,
+        owner_generation: u64,
+        expected_head: Option<&str>,
+    ) -> Result<Option<ContextProjection>, ExecutionError>;
+
     fn consume_inputs(
         &self,
         run_id: &str,
@@ -720,6 +735,12 @@ impl<
             },
         )?;
         let mut history = input.history.clone();
+        let mut history_cursor = input
+            .binding
+            .history_range
+            .leaf_id
+            .clone()
+            .or_else(|| history.last().map(|item| item.id.clone()));
         let mut policy_state = input.policy_state.clone();
         let (mut event, mut pending, mut recovered_results, mut recovered_decision) = match recovery
         {
@@ -757,6 +778,7 @@ impl<
                         &recovered_results,
                         ToolCompletion::cancelled(),
                     )?;
+                    history_cursor = history.last().map(|item| item.id.clone());
                 }
                 finish!('agent, RunState::Cancelled, None, None);
             }
@@ -764,7 +786,7 @@ impl<
                 let incoming = self.persistence.consume_inputs(
                     &input.run_id,
                     input.owner_generation,
-                    history.last().map(|item| item.id.as_str()),
+                    history_cursor.as_deref(),
                 )?;
                 if incoming.is_empty() && interrupted_generation {
                     finish!('agent,RunState::Cancelled,None,None);
@@ -777,6 +799,10 @@ impl<
                             _ => None,
                         })
                         .collect();
+                    history_cursor = incoming
+                        .last()
+                        .map(|item| item.id.clone())
+                        .or(history_cursor);
                     history.extend(incoming);
                     event = PolicyEvent::InputDelivered { input_ids };
                     recovered_decision = None;
@@ -815,6 +841,7 @@ impl<
                             &recovered_results,
                             ToolCompletion::failure(&error.code, &error.message, Effect::None),
                         )?;
+                        history_cursor = history.last().map(|item| item.id.clone());
                     }
                     finish!('agent, RunState::Failed, None, Some(error));
                 }
@@ -841,6 +868,7 @@ impl<
                             Effect::None,
                         ),
                     )?;
+                    history_cursor = history.last().map(|item| item.id.clone());
                 }
                 finish!('agent, RunState::Failed, None,
                     Some(ExecutionError::new("illegal_policy_action", "unclosed tool exchange or no tools to execute")));
@@ -869,11 +897,20 @@ impl<
                     steps = steps.checked_add(1).ok_or_else(|| {
                         ExecutionError::new("step_overflow", "model step identity exhausted")
                     })?;
+                    let mut binding = input.binding.clone();
+                    if let Some(context) = self.persistence.compile_context(
+                        &input.run_id,
+                        input.owner_generation,
+                        history_cursor.as_deref(),
+                    )? {
+                        history = context.history;
+                        binding.instruction_sources = context.instruction_sources;
+                        binding.memory_checkpoint = context.memory_checkpoint;
+                    }
                     if let Err(error) = validate_history_pairs(&history) {
                         finish!('agent, RunState::Failed, None, Some(error));
                     }
-                    let mut binding = input.binding.clone();
-                    binding.history_range.leaf_id = history.last().map(|item| item.id.clone());
+                    binding.history_range.leaf_id = history_cursor.clone();
                     let view = RequestView {
                         request_id: format!(
                             "{}:{}:{}",
@@ -1038,6 +1075,7 @@ impl<
                         Err(failure) => finish!('agent, RunState::Failed, None,
                             Some(ExecutionError::new(failure.code, failure.message))),
                     };
+                    history_cursor = items.last().map(|item| item.id.clone()).or(history_cursor);
                     history.extend(items.into_iter().map(|item| ConversationItem {
                         id: item.id,
                         provenance: Provenance::Assistant,
@@ -1072,6 +1110,10 @@ impl<
                             results: results.clone(),
                         },
                     )?;
+                    history_cursor = results
+                        .last()
+                        .map(|result| format!("{}:result:{}", result.request_id, result.call_id))
+                        .or(history_cursor);
                     for result in &results {
                         history.push(ConversationItem {
                             id: format!("{}:result:{}", result.request_id, result.call_id),
@@ -1551,7 +1593,7 @@ fn normalize_completion(completion: ToolCompletion, contract: &ToolContract) -> 
     }
 }
 
-fn validate_history_pairs(history: &[ConversationItem]) -> Result<(), ExecutionError> {
+pub(crate) fn validate_history_pairs(history: &[ConversationItem]) -> Result<(), ExecutionError> {
     let mut pending = BTreeSet::new();
     let mut returning_results = false;
     for item in history {

@@ -6,6 +6,7 @@ license.workspace = true
 description = "Varin native durable agent coordination and execution"
 
 [dependencies]
+base64 = "0.22"
 sha2.workspace = true
 hex.workspace = true
 fs2.workspace = true

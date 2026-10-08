@@ -2,7 +2,7 @@
 //! assembled, authorized executor; model configuration never invents tool permissions.
 use crate::execution::*;
 use crate::providers::{Connection,CredentialResolver,EnvironmentCredentialResolver,EnvironmentHeader,NativeHttpTransport};
-use crate::providers::{anthropic,azure,chat,codex,google,mistral,responses,auth::CredentialScope};
+use crate::providers::{anthropic,azure,bedrock,chat,codex,google,mistral,responses,auth::CredentialScope};
 use crate::supervisor::RunStart;
 use serde_json::{json,Value};
 use sha2::{Digest,Sha256};
@@ -16,7 +16,7 @@ pub fn bind(configuration:ModelSessionConfiguration)->Result<RunStart,ExecutionE
         responses::FAMILY|chat::FAMILY|mistral::FAMILY=>("authorization","Bearer "),
         azure::FAMILY=>("api-key",""),anthropic::FAMILY=>("x-api-key",""),
         google::FAMILY=>("x-goog-api-key",""),
-        google::VERTEX_FAMILY|codex::FAMILY=>return Err(ExecutionError::new("credential_binding_required","this provider requires an explicitly bound credential owner")),
+        google::VERTEX_FAMILY|codex::FAMILY|bedrock::FAMILY=>return Err(ExecutionError::new("credential_binding_required","this provider requires an explicitly bound credential owner")),
         _=>return Err(ExecutionError::new("unsupported_provider","the selected native provider adapter is unavailable")),
     };
     let mut credentials=EnvironmentCredentialResolver{allow_anonymous:configuration.allow_anonymous,..Default::default()};
@@ -53,6 +53,10 @@ fn build(configuration:ModelSessionConfiguration,credentials:Arc<dyn CredentialR
         google::FAMILY=>{let mut provider=google::GoogleProvider::new(connection)?;provider.max_output_tokens=configuration.max_output_tokens;Arc::new(provider)},
         google::VERTEX_FAMILY=>{let mut provider=google::GoogleProvider::vertex(connection)?;provider.max_output_tokens=configuration.max_output_tokens;Arc::new(provider)},
         mistral::FAMILY=>{let mut provider=mistral::MistralProvider::new(connection);if let Some(max)=configuration.max_output_tokens{provider.set_max_output_tokens(max);}provider.set_reasoning_effort(configuration.reasoning_effort);Arc::new(provider)},
+        bedrock::FAMILY=>{
+            if configuration.reasoning_effort.is_some(){return Err(ExecutionError::new("unsupported_reasoning_configuration","Bedrock model-specific reasoning configuration is not yet bound"));}
+            let mut provider=bedrock::BedrockProvider::new(connection);provider.max_output_tokens=configuration.max_output_tokens;Arc::new(provider)
+        },
         codex::FAMILY=>{
             if configuration.max_output_tokens.is_some(){return Err(ExecutionError::new("unsupported_output_capacity","Codex SSE does not support a max_output_tokens request field"));}
             let mut provider=codex::CodexProvider::new(connection);

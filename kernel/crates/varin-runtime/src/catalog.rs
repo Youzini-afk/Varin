@@ -137,6 +137,7 @@ impl Catalog {
         inputs::initialize(&mut db)?;
         crate::content::initialize(&mut db, &content)?;
         launches::initialize(&mut db)?;
+        context::initialize(&mut db)?;
         let epoch: u64 = db.query_row(
             "UPDATE runtime_meta SET epoch=epoch+1 WHERE id=1 RETURNING epoch",
             [],
@@ -1092,3 +1093,6 @@ pub mod recovery;
 
 #[path="catalog_observe.rs"]
 mod observe;
+
+#[path="catalog_context.rs"]
+pub mod context;

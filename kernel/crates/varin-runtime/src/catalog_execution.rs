@@ -4,6 +4,11 @@ use crate::execution::*;
 use std::sync::Mutex;
 
 impl Persistence for Mutex<Catalog> {
+    fn compile_context(&self, run_id:&str, epoch:u64, expected_head:Option<&str>) -> std::result::Result<Option<ContextProjection>,ExecutionError> {
+        let read={self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.prepare_context_read(run_id,epoch,expected_head).map_err(|error|ExecutionError::new("context_compile",error.to_string()))?};
+        read.map(|read|read.load()).transpose().map_err(|error|ExecutionError::new("context_content",error.to_string()))
+    }
+
     fn consume_inputs(
         &self,
         run_id: &str,
