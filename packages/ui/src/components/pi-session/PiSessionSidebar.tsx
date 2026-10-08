@@ -24,8 +24,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
+  ContextMenu,
+  ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -121,6 +124,22 @@ const collectPiSessionForestIds = (nodes: readonly PiSessionNode[]): string[] =>
   return ids;
 };
 
+const isSidebarEditor = (target: EventTarget | null): boolean => (
+  target instanceof Element && Boolean(target.closest('input, textarea, [contenteditable="true"]'))
+);
+
+const openSidebarMenuWithKeyboard = (event: React.KeyboardEvent<HTMLElement>): void => {
+  if (event.defaultPrevented || isSidebarEditor(event.target)) return;
+  if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const target = event.target instanceof HTMLElement ? event.target : event.currentTarget;
+  const rect = target.getBoundingClientRect();
+  target.dispatchEvent(new MouseEvent('contextmenu', {
+    bubbles: true, cancelable: true, clientX: rect.left, clientY: rect.bottom,
+  }));
+};
+
 interface SessionRowProps {
   attentionBySession: Readonly<Record<string, PiSessionAttentionState>>;
   currentSessionId: string | null;
@@ -147,6 +166,10 @@ interface SessionRowProps {
   selectionMode: boolean;
   untitled: string;
   onToggleSelection(session: SessionSummary): void;
+  onBeginSelection(session: SessionSummary): void;
+  onContextTarget(session: SessionSummary): void;
+  onBulkAction(action: 'archive' | 'delete'): void;
+  onExitSelection(): void;
 }
 
 const PiSessionRow: React.FC<SessionRowProps> = (props) => {
@@ -185,11 +208,77 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
     session,
   });
 
+  const finishPendingRename = (open: boolean) => {
+    if (!open && pendingRenameRef.current) {
+      pendingRenameRef.current = false;
+      props.onBeginRename(session);
+    }
+  };
+  const renderMenuItems = (Item: typeof ContextMenuItem | typeof DropdownMenuItem,
+    Separator: typeof ContextMenuSeparator | typeof DropdownMenuSeparator) => <>
+    {props.selectionMode ? <>
+      <div className="px-2 py-1 typography-micro text-muted-foreground">
+        {t('sessions.sidebar.bulkActions.selectedCount', { count: props.selectedIds.size })}
+      </div>
+      <Item onClick={() => props.onBulkAction('archive')} disabled={props.selectedIds.size === 0}>
+        <Icon name="inbox-archive" className="size-4" />
+        {t('sessions.sidebar.bulkActions.archive')}
+      </Item>
+      <Item onClick={() => props.onBulkAction('delete')} disabled={props.selectedIds.size === 0} data-variant="destructive">
+        <Icon name="delete-bin" className="size-4" />
+        {t('sessions.sidebar.bulkActions.delete')}
+      </Item>
+      <Separator />
+      <Item onClick={props.onExitSelection}>
+        <Icon name="close" className="size-4" />
+        {t('sessions.sidebar.header.actions.exitSelection')}
+      </Item>
+    </> : <>
+      <Item onClick={() => { pendingRenameRef.current = true; }}>
+        <Icon name="pencil-ai" className="size-4" />
+        {t('sessions.sidebar.session.menu.rename')}
+      </Item>
+      <Item onClick={() => props.onTogglePinned(session)}>
+        <Icon name={pinned ? 'unpin' : 'pushpin'} className="size-4" />
+        {t(pinned ? 'sessions.sidebar.session.menu.unpin' : 'sessions.sidebar.session.menu.pin')}
+      </Item>
+      {canUseElectronDesktopIPC() ? <Item onClick={() => props.onOpenMiniChat(session)}>
+        <Icon name="chat-new" className="size-4" />
+        {t('sessions.sidebar.session.menu.openMiniChatWindow')}
+      </Item> : null}
+      <Separator />
+      <Item onClick={() => props.onBeginSelection(session)}>
+        <Icon name="checkbox-multiple" className="size-4" />
+        {t('sessions.sidebar.header.actions.selectSessions')}
+      </Item>
+      <Item onClick={() => props.onCopyId(session)}>
+        <Icon name="file-copy" className="size-4" />
+        {t('sessions.sidebar.session.menu.copyId')}
+      </Item>
+      <Separator />
+      <Item onClick={() => props.onArchive(node)}>
+        <Icon name="inbox-archive" className="size-4" />
+        {t('sessions.sidebar.bulkActions.archive')}
+      </Item>
+      <Item onClick={() => props.onDelete(node)} data-variant="destructive">
+        <Icon name="delete-bin" className="size-4" />
+        {t('sessions.sidebar.bulkActions.delete')}
+      </Item>
+    </>}
+  </>;
+
   return (
     <div>
+      <ContextMenu
+        disabled={props.editingId === session.id}
+        onOpenChange={(open) => { if (open) props.onContextTarget(session); }}
+        onOpenChangeComplete={finishPendingRename}
+      >
+      <ContextMenuTrigger asChild onKeyDown={openSidebarMenuWithKeyboard}>
       <div
         className={cn(
           'group/session flex min-h-8 items-center gap-1 rounded-md px-1.5 text-muted-foreground transition-colors',
+          'data-[popup-open]:bg-interactive-hover data-[popup-open]:text-foreground',
           isCurrent ? 'bg-interactive-selection font-medium text-foreground' : 'hover:bg-interactive-hover hover:text-foreground',
           selected && 'bg-interactive-selection text-foreground',
         )}
@@ -283,7 +372,7 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
                 <span>{pendingDialogCount}</span>
               </span>
             ) : null}
-            <span className="shrink-0 group-hover/session:hidden">
+            <span className="shrink-0 group-hover/session:hidden group-focus-within/session:hidden">
               {isBusy && sessionRecord?.activityStartedAt !== undefined ? (
                 <PiSessionActivityDuration startedAt={sessionRecord.activityStartedAt} />
               ) : attention && sessionRecord?.settledActivityDurationMs !== undefined ? (
@@ -298,59 +387,26 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
           </button>
         )}
 
-        {!props.selectionMode ? <DropdownMenu
-          onOpenChangeComplete={(open) => {
-            if (!open && pendingRenameRef.current) {
-              pendingRenameRef.current = false;
-              props.onBeginRename(session);
-            }
-          }}
-        >
+        {!props.selectionMode ? <DropdownMenu onOpenChangeComplete={finishPendingRename}>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="hidden size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground group-hover/session:flex data-[popup-open]:flex"
+              className="hidden size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground group-hover/session:flex group-focus-within/session:flex data-[popup-open]:flex"
               aria-label={t('sessions.sidebar.session.menu.label')}
             >
               <Icon name="more-2" className="size-3.5" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-44">
-            <DropdownMenuItem onClick={() => { pendingRenameRef.current = true; }}>
-              <Icon name="pencil-ai" className="mr-2 size-4" />
-              {t('sessions.sidebar.session.menu.rename')}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => props.onCopyId(session)}>
-              <Icon name="file-copy" className="mr-2 size-4" />
-              {t('sessions.sidebar.session.menu.copyId')}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => props.onTogglePinned(session)}>
-              <Icon name={pinned ? 'unpin' : 'pushpin'} className="mr-2 size-4" />
-              {pinned
-                ? t('sessions.sidebar.session.menu.unpin')
-                : t('sessions.sidebar.session.menu.pin')}
-            </DropdownMenuItem>
-            {canUseElectronDesktopIPC() ? (
-              <DropdownMenuItem onClick={() => props.onOpenMiniChat(session)}>
-                <Icon name="chat-new" className="mr-2 size-4" />
-                {t('sessions.sidebar.session.menu.openMiniChatWindow')}
-              </DropdownMenuItem>
-            ) : null}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => props.onArchive(node)}>
-              <Icon name="inbox-archive" className="mr-2 size-4" />
-              {t('sessions.sidebar.bulkActions.archive')}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => props.onDelete(node)}
-              className="text-destructive focus:text-destructive"
-            >
-              <Icon name="delete-bin" className="mr-2 size-4" />
-              {t('sessions.sidebar.bulkActions.delete')}
-            </DropdownMenuItem>
+          <DropdownMenuContent align="end" className="min-w-48" finalFocus={() => !pendingRenameRef.current}>
+            {renderMenuItems(DropdownMenuItem, DropdownMenuSeparator)}
           </DropdownMenuContent>
         </DropdownMenu> : null}
       </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="min-w-48" finalFocus={() => !pendingRenameRef.current}>
+        {renderMenuItems(ContextMenuItem, ContextMenuSeparator)}
+      </ContextMenuContent>
+      </ContextMenu>
 
       {hasChildren && expanded && (
         <div className="ml-3">
@@ -444,6 +500,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const [confirmation, setConfirmation] = React.useState<ConfirmationState | null>(null);
   const [actionPending, setActionPending] = React.useState(false);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const pendingMenuSearchRef = React.useRef(false);
   const untitled = t('sessions.sidebar.session.untitled');
 
   React.useEffect(() => {
@@ -558,6 +615,25 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
     setSelectionMode(false);
     setSelectedSessionIds(new Set());
   }, []);
+
+  const beginSelectionAt = React.useCallback((session: SessionSummary) => {
+    setSelectedSessionIds(new Set([session.id]));
+    setSelectionMode(true);
+  }, []);
+
+  const prepareContextTarget = React.useCallback((session: SessionSummary) => {
+    if (!selectionMode || selectedSessionIds.has(session.id)) return;
+    setSelectedSessionIds(new Set([session.id]));
+  }, [selectionMode, selectedSessionIds]);
+
+  const collapseAll = () => {
+    setCollapsedGroupIds(new Set(workspaceGroups.map(group => group.id)));
+    setCollapsedSessionIds(new Set(collectPiSessionForestIds(workspaceGroups.flatMap(group => group.forest))));
+  };
+  const expandAll = () => {
+    setCollapsedGroupIds(new Set());
+    setCollapsedSessionIds(new Set());
+  };
 
   const selectedSubtreeIds = React.useMemo(
     () => collectPiSessionSelectionSubtreeIds(summaries, selectedSessionIds),
@@ -827,12 +903,22 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
 
   return (
     <TooltipProvider delayDuration={400} skipDelayDuration={150}>
+      <ContextMenu onOpenChangeComplete={(open) => {
+        if (!open && pendingMenuSearchRef.current) {
+          pendingMenuSearchRef.current = false;
+          setSearchOpen(true);
+          searchInputRef.current?.focus();
+        }
+      }}>
+      <ContextMenuTrigger asChild onKeyDown={openSidebarMenuWithKeyboard}>
       <div
         className={cn(
           'flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground',
           !isVisible && 'pointer-events-none',
         )}
         aria-hidden={!isVisible}
+        onContextMenuCapture={(event) => { if (isSidebarEditor(event.target)) event.stopPropagation(); }}
+        onTouchStartCapture={(event) => { if (isSidebarEditor(event.target)) event.stopPropagation(); }}
       >
         {mobileVariant ? <div className="px-3 pt-3"><WorkbenchProfileSwitcher /></div> : null}
         <div className="flex shrink-0 items-center gap-1 px-2.5 py-2">
@@ -929,17 +1015,11 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                 {t('sessions.sidebar.header.displayMode.stickyHeaders')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => {
-                setCollapsedGroupIds(new Set(workspaceGroups.map((group) => group.id)));
-                setCollapsedSessionIds(new Set(collectPiSessionForestIds(workspaceGroups.flatMap((group) => group.forest))));
-              }}>
+              <DropdownMenuItem onClick={collapseAll}>
                 <Icon name="arrow-right-s" className="mr-2 size-4" />
                 {t('sessions.sidebar.header.displayMode.collapseAll')}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => {
-                setCollapsedGroupIds(new Set());
-                setCollapsedSessionIds(new Set());
-              }}>
+              <DropdownMenuItem onClick={expandAll}>
                 <Icon name="arrow-down-s" className="mr-2 size-4" />
                 {t('sessions.sidebar.header.displayMode.expandAll')}
               </DropdownMenuItem>
@@ -1044,16 +1124,17 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                 ? projects.findIndex((candidate) => candidate.id === project.id)
                 : -1;
               const canManageProject = project !== null;
+              const toggleGroup = () => setCollapsedGroupIds((current) => {
+                const next = new Set(current);
+                if (next.has(group.id)) next.delete(group.id);
+                else next.add(group.id);
+                return next;
+              });
               const groupHeaderContent = (
                 <>
                   <button
                     type="button"
-                    onClick={() => setCollapsedGroupIds((current) => {
-                      const next = new Set(current);
-                      if (next.has(group.id)) next.delete(group.id);
-                      else next.add(group.id);
-                      return next;
-                    })}
+                    onClick={toggleGroup}
                     className="flex min-h-8 min-w-0 flex-1 items-center gap-1.5 px-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                     aria-expanded={expanded}
                     aria-label={t(expanded
@@ -1099,11 +1180,23 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                         <div
                           className={cn(
                             'flex min-w-0 select-none items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
+                            'data-[popup-open]:bg-interactive-hover data-[popup-open]:text-foreground',
                             stickyZoneHeaders && 'sticky top-0 z-10 bg-sidebar/95 backdrop-blur-sm',
                           )}
                           aria-label={t('sessions.sidebar.project.actions.projectMenu')}
+                          onKeyDown={openSidebarMenuWithKeyboard}
                         >{groupHeaderContent}</div>
                       ),
+                      leading: <>
+                        <ContextMenuItem onClick={() => void handleCreate(project.id)}>
+                          <Icon name="chat-new" className="size-4" />
+                          {t('sessions.sidebar.header.actions.newSession')}
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={toggleGroup} disabled={Boolean(query.trim())}>
+                          <Icon name={expanded ? 'arrow-right-s' : 'arrow-down-s'} className="size-4" />
+                          {t(expanded ? 'sessions.sidebar.group.collapseAria' : 'sessions.sidebar.group.expandAria', { label: group.label })}
+                        </ContextMenuItem>
+                      </>,
                       children: <>
                       {canManageProject ? (
                         <>
@@ -1125,6 +1218,15 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                           </ContextMenuItem>
                         </>
                       ) : null}
+                      <ContextMenuItem onClick={() => {
+                        void copyTextToClipboard(project.path).then(result => {
+                          if (result.ok) toast.success(t('sessions.sidebar.session.menu.copied'));
+                          else toast.error(result.error);
+                        });
+                      }}>
+                        <Icon name="file-copy" className="size-4" />
+                        {t('sidebarFilesTree.menu.copyPath')}
+                      </ContextMenuItem>
                       {canRevealProject ? (
                         <>
                           {canManageProject ? <ContextMenuSeparator /> : null}
@@ -1170,12 +1272,27 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                     }}
                   />
                 ) : (
+                  <ContextMenu>
+                  <ContextMenuTrigger asChild onKeyDown={openSidebarMenuWithKeyboard}>
                   <div className={cn(
                     'flex min-w-0 items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
+                    'data-[popup-open]:bg-interactive-hover data-[popup-open]:text-foreground',
                     stickyZoneHeaders && 'sticky top-0 z-10 bg-sidebar/95 backdrop-blur-sm',
                   )}>
                     {groupHeaderContent}
                   </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="min-w-48">
+                    <ContextMenuItem onClick={() => void handleCreate(null)}>
+                      <Icon name="chat-new" className="size-4" />
+                      {t('sessions.sidebar.header.actions.newSession')}
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={toggleGroup} disabled={Boolean(query.trim())}>
+                      <Icon name={expanded ? 'arrow-right-s' : 'arrow-down-s'} className="size-4" />
+                      {t(expanded ? 'sessions.sidebar.group.collapseAria' : 'sessions.sidebar.group.expandAria', { label: group.label })}
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                  </ContextMenu>
                 )}
                 {expanded ? <div className="space-y-0.5 pl-2">
                   {group.forest.map((node) => (
@@ -1194,6 +1311,10 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                       selectionMode={selectionMode}
                       untitled={untitled}
                       onToggleSelection={toggleSelection}
+                      onBeginSelection={beginSelectionAt}
+                      onContextTarget={prepareContextTarget}
+                      onBulkAction={requestBulkAction}
+                      onExitSelection={exitSelectionMode}
                       onSelect={(session) => {
                         if (selectionMode) toggleSelection(session);
                         else void handleSelect(session);
@@ -1354,6 +1475,40 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
           </div>
         </div>
       </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="min-w-48" finalFocus={() => !pendingMenuSearchRef.current}>
+        <ContextMenuItem onClick={() => void handleCreate(null)}>
+          <Icon name="chat-new" className="size-4" />
+          {t('sessions.sidebar.header.actions.newSession')}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => workspaceEvents.requestDirectoryDialog()}>
+          <Icon name="folder-add" className="size-4" />
+          {t('sessions.sidebar.header.actions.addProject')}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => { pendingMenuSearchRef.current = true; }}>
+          <Icon name="search" className="size-4" />
+          {t('sessions.sidebar.header.actions.searchSessions')}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={handleOpenArchive}>
+          <Icon name="archive" className="size-4" />
+          {t('sessions.sidebar.nav.archive')}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={selectionMode ? exitSelectionMode : enterSelectionMode}>
+          <Icon name={selectionMode ? 'checkbox' : 'checkbox-multiple'} className="size-4" />
+          {t(selectionMode ? 'sessions.sidebar.header.actions.exitSelection' : 'sessions.sidebar.header.actions.selectSessions')}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={collapseAll} disabled={groups.length === 0 || Boolean(query.trim())}>
+          <Icon name="arrow-right-s" className="size-4" />
+          {t('sessions.sidebar.header.displayMode.collapseAll')}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={expandAll} disabled={groups.length === 0}>
+          <Icon name="arrow-down-s" className="size-4" />
+          {t('sessions.sidebar.header.displayMode.expandAll')}
+        </ContextMenuItem>
+      </ContextMenuContent>
+      </ContextMenu>
 
       <Dialog open={confirmation !== null} onOpenChange={(open) => { if (!open) setConfirmation(null); }}>
         <DialogContent showCloseButton={false} className="max-w-sm gap-5">

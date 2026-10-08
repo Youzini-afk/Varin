@@ -90,6 +90,14 @@ own execution directory. The sidebar expands children initially, retains explici
 while mounted, and reveals matching descendants during search. Native parent links remain the
 authority; sessions whose parent is unavailable remain accessible as roots.
 
+The session sidebar binds right-click to the row, project header or background under the pointer;
+opening a menu does not navigate. Session right-click and `…` share their actions. In selection mode,
+right-click on a selected row retains the batch, while an unselected row becomes the sole selection.
+The menu states the selected count and uses the existing archive/delete confirmation. Search and
+rename inputs retain native text editing menus. Context-menu keys use the focused row, and delayed
+rename/search focus runs after the menu closes. Shared context menus mount inside their containing
+dialog so the IDE session picker and mobile overlays keep their existing focus boundary.
+
 `HarnessThreadConversation` keeps the existing task-overview popup and offers
 conversation and exchange views. `HarnessThreadMessages` groups original messages
 with replies, shows actual peer names and native-session links, and exposes the
