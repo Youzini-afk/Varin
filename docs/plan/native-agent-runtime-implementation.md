@@ -17,7 +17,7 @@
 
 | 顺序 | 要完成的工作 | 必须建立的合同和出口 | 当前状态 |
 | --- | --- | --- | --- |
-| 1 | 原生事实与持久边界 | Thread/branch/Run/ModelStep/Operation/Wait/Delivery 身份；请求幂等；branch CAS；原文/opaque 项；短事务及 outbox；受理与副作用恢复 | 局部通过：真实SQLite两轮模型/工具/最终提交与重开；受理/恢复原语通过。新输入与跨Run回执反例持续复验，未接生产 |
+| 1 | 原生事实与持久边界 | Thread/branch/Run/ModelStep/Operation/Wait/Delivery 身份；请求幂等；branch CAS；原文/opaque 项；短事务及 outbox；受理与副作用恢复 | 局部通过：真实SQLite两轮模型/工具/最终提交与重开；受理/恢复原语通过。附件保留、跨Run回执隔离与未闭合交换终结限制复验通过，未接生产 |
 | 2 | 单一协议与调用分类 | Rust/TS 生成边界类型；持久 command 与内存 query；效果/资源/完成方式合同；错误与游标语义；凭据只存引用 | 局部实现：共享枚举/控制命令生成与显式Host client；全运行协议及UI消费未完成 |
 | 3 | 一个完整执行纵切 | 默认 AgentPolicy →冻结 RequestSnapshot→真实协议适配→工具合法配对→历史提交/停止/恢复；模型请求不能成为资源权威 | 局部通过：真实SQLite执行loop与两种provider协议fixture；本地真实HTTP流/错误/取消。远端凭据、全部provider与产品路径未完成 |
 | 4 | 资源执行与 IPC 去公共长等待 | 独立准备/捕获作业；保留文件 CAS/恢复；进程推送流；控制与数据分离；每个取消有实际执行端确认 | 未完成 |
@@ -87,14 +87,24 @@
 
 最终验收还包括设计中的完整provider/API家族、Computer Use真实平台、远端与发行包。静态检查、单crate测试和模拟执行都不能代替这些证据。
 
-## 当前独立检查的证据边界
+## 基础检查与当前增量的证据边界
 
-- `cargo test --manifest-path kernel/Cargo.toml -p varin-runtime`：已验证Catalog/loop/opaque重开、受理幂等、epoch、候选生命周期等局部合同；新增反例保持失败时先修实现，不删除用例换取通过
+- `cargo test --manifest-path kernel/Cargo.toml -p varin-runtime`：2026-10-09 04:17（Asia/Singapore）基础快照32项unit与5项resolver集成全部通过；覆盖Catalog/loop/opaque重开、受理幂等、epoch、候选生命周期等局部合同
 - `tests/composition_resolution.rs`：未选环路不阻塞根依赖、optional不吞已选实现错误、实际环路/歧义、陈旧准备/作用域变化、集合顺序已通过
 - `src/providers/tests.rs`：逐字节SSE、合法原项重播、矛盾重复项拒绝、截断/乱序、真实loopback HTTP错误与headers/body停滞取消已通过；这不证明各云端真实认证或全API覆盖
 - `src/execution_tests.rs`：真实SQLite两轮model/tool配对并重开、prepared阶段取消、残缺参数不执行、Catalog锁占用时独立取消已通过
-- kernel compile与生成协议`--check`曾在控制入口快照通过；新增supervisor/输入修复后仍需以最新代码复跑。Host/framed IPC由独立回归继续核对
+- `cargo check --manifest-path kernel/Cargo.toml -p varin-kernel`、生成协议`--check`与`git diff --check`在上述修复后的最新快照通过；kernel保留5个既有process模块警告。Host/framed IPC由独立回归继续核对
 - 已修并留回归：续接claim崩溃丢唤醒、handoff受终态Run阻止、模型历史跨事务、陈旧head提交、扩展cancel投递失败提前drain、矛盾provider opaque重复项
-- 已复现并在复验：用户附件成功受理后投影丢失。新输入schema已实现保留附件/拒绝不支持形状；最终结论等待对应回归
+- 已修并复验：用户附件成功受理后投影丢失；现在输入schema保留附件并拒绝不支持形状。新增跨Run工具回执隔离与未闭合工具交换禁止Run终结回归也通过
 
 这些证据不等同于生产切换、完整恢复驱动、全部领域工具迁移、跨平台发布或完整Pi退出。
+
+### 显式原生启动与资源工具增量（基础提交后）
+
+- `model_session` 已导出；独立配置检查证明不支持的provider不回退、默认不匿名、凭据引用不进入请求body、无tools绑定不产生工具授权
+- `runtime.run.start`、本地真实HTTP与现有Storage资源工具的IPC接线在独立验证；尚未切换任何既有Pi产品路由
+- 已复现并修复交错失败：模型生成期间输入head改变，旧输出被正确拒绝；worker异常退出现在持久进入带恢复Wait的Waiting，保留拒绝输出/opaque/usage而不污染新历史，重开回归通过
+- 进程spawn回执只是后台移交。guardian终态回投native Operation，以及operation.cancel实际通知对应进程执行端，仍需闭合验证；不能将Storage进程已退出等同于native Operation已结算
+
+- 2026-10-09 04:29（Asia/Singapore）增量全量运行时检查通过：34项unit + 5项组合解析 + 3项模型配置。新增证据包括拒绝输出保留/worker错误持久恢复，以及独立快工具不等待仍在执行的慢工具
+- 独立TS IPC审阅已验证8项真实kernel入口行为，含local HTTP启动/完成/取消、固定branch文件读取、实际OS子进程与Storage终态；未据此宣称native Operation/后台进程取消闭环完成

@@ -30,6 +30,8 @@ impl RunState {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Operation {
+    #[serde(default)]
+    pub external_receipt:Option<ExternalReceipt>,
     pub id: String,
     pub run_id: String,
     pub epoch: u64,
@@ -117,4 +119,14 @@ pub struct Wait {
     pub after_cursor: u64,
     pub trigger_cursor: Option<u64>,
     pub cancelled: bool,
+}
+
+#[derive(Debug,Clone,Serialize,Deserialize,PartialEq)]
+pub struct ExternalReceipt {
+    pub executor:String,
+    pub identity:String,
+    pub epoch:String,
+    pub outcome:Outcome,
+    pub effect:Effect,
+    pub result:Value,
 }

@@ -25,7 +25,7 @@ impl ExecutionError {
 
 /// Cancellation is a control fact, not a synthetic tool-effect receipt.
 #[derive(Debug, Default)]
-struct CancellationState { cancelled: AtomicBool, changed: tokio::sync::Notify }
+struct CancellationState { cancelled: Arc<AtomicBool>, changed: tokio::sync::Notify }
 #[derive(Debug, Clone, Default)]
 pub struct CancellationToken(Arc<CancellationState>);
 impl CancellationToken {
@@ -34,6 +34,7 @@ impl CancellationToken {
         self.0.changed.notify_waiters();
     }
     pub fn is_cancelled(&self) -> bool { self.0.cancelled.load(Ordering::Acquire) }
+    pub fn shared_flag(&self)->Arc<AtomicBool>{self.0.cancelled.clone()}
     pub async fn cancelled(&self) {
         loop {
             let notified = self.0.changed.notified();

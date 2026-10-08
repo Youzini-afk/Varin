@@ -141,6 +141,7 @@ impl Catalog {
             epoch,
         };
         this.recover()?;
+        this.reconcile_waits()?;
         Ok(this)
     }
     pub fn epoch(&self) -> u64 {
@@ -430,6 +431,7 @@ impl Catalog {
             return Err(RuntimeError::Invalid("run cancellation pending".into()));
         }
         let op = Operation {
+                            external_receipt:None,
             id: key.into(),
             run_id: run_id.into(),
             epoch,
@@ -583,11 +585,17 @@ impl Catalog {
                 "operation lifetime does not permit handoff".into(),
             ));
         }
+        if op.handed_off {drop(tx);self.reconcile_waits()?;return Ok(op);}
         op.handed_off = true;
         op.revision += 1;
+        if let Some(receipt)=op.external_receipt.clone(){
+            execution_persistence::apply_external_terminal(&mut op,&receipt);
+            event(&tx,key,op.revision,"operation.settled",serde_json::to_value(&op)?)?;
+        }
         put(&tx, "operations", key, &op)?;
         event(&tx, key, op.revision, "operation.handed_off", Value::Null)?;
         tx.commit()?;
+        self.reconcile_waits()?;
         Ok(op)
     }
     pub fn prepare_model_step(

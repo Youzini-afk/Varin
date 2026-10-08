@@ -8,7 +8,16 @@ const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
 const target = path.join(root, 'packages', 'web', 'application-host', 'lib', 'kernel', 'protocol.generated.ts');
 const rustTarget = path.join(root, 'kernel', 'crates', 'varin-kernel', 'src', 'protocol_generated.rs');
 const nativeRustTarget = path.join(root, 'kernel', 'crates', 'varin-runtime', 'src', 'types_generated.rs');
-const nativeRustGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\nuse serde::{Deserialize, Serialize};\n\n' + Object.entries(schema.nativeRuntimeEnums ?? {}).map(([name, variants]) => `#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(rename_all = "snake_case")]\npub enum ${name} {\n${variants.map(v => `    ${v},`).join('\n')}\n}\n`).join('\n');
+const nativeStructs = Object.entries(schema.nativeRuntimeStructs ?? {}).map(([name, spec]) => {
+  const fields = Object.entries(spec.fields).map(([key, value]) => {
+    const type = ({string:"String", number:"u64", boolean:"bool", "string | null":"Option<String>"})[value.type];
+    if (!type) throw new Error(`Unsupported native field type ${value.type}`);
+    const field = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+    return `    pub ${field}: ${type},`;
+  });
+  return `#[derive(Debug, Clone, Serialize, Deserialize)]\n#[serde(rename_all = "camelCase", deny_unknown_fields)]\npub struct ${name} {\n${fields.join("\n")}\n}\n`;
+}).join("\n");
+const nativeRustGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\nuse serde::{Deserialize, Serialize};\n\n' + Object.entries(schema.nativeRuntimeEnums ?? {}).map(([name, variants]) => `#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(rename_all = "snake_case")]\npub enum ${name} {\n${variants.map(v => `    ${v},`).join('\n')}\n}\n`).join('\n') + '\n' + nativeStructs;
 const checkOnly = process.argv.includes('--check');
 const methods = Object.keys(schema.methods).map((method) => `  | ${JSON.stringify(method)}`).join('\n');
 const methodParams = schema.methodParams ?? {};

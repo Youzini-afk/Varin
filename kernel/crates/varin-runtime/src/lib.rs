@@ -12,3 +12,5 @@ pub mod execution;
 pub mod providers;
 
 pub mod supervisor;
+
+pub mod model_session;

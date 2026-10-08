@@ -1,6 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { once } from 'node:events';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
@@ -138,4 +140,131 @@ it('native abort retains wire credit until receipt and cancels queued admission 
   f.release();
   await second;
   expect((await f.native.status()).epoch).toBeGreaterThan(0);
+}, 30_000);
+
+
+async function localProvider(reply: (body: Record<string, unknown>, response: ServerResponse) => void) {
+  const requests: Record<string, unknown>[] = [];
+  const server = createServer((request: IncomingMessage, response: ServerResponse) => {
+    const chunks: Buffer[] = [];
+    request.on('data', (chunk: Buffer) => chunks.push(chunk));
+    request.on('end', () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>;
+      requests.push(body);
+      reply(body, response);
+    });
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('loopback server has no TCP address');
+  cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
+  return { requests, configuration: { providerFamily: 'openai-responses', model: 'local-test-model', endpoint: `http://127.0.0.1:${address.port}/responses`, allowAnonymous: true, configurationGeneration: 1, maxOutputTokens: 32 } };
+}
+
+it('native run.start reaches a local HTTP provider and continues durable assistant history', async () => {
+  const f = await fixture();
+  let outputNumber = 0;
+  const provider = await localProvider((_body, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `local-message-${++outputNumber}`, type: 'message', content: [{ type: 'output_text', text: 'native HTTP result' }] }], usage: { input_tokens: 4, output_tokens: 3 } } })}\n\n`);
+  });
+  await f.native.createThread('model-thread', 'model-branch');
+  const receipt = await f.native.submit({ key: 'model-input', threadId: 'model-thread', branchId: 'model-branch', expectedHead: null, input: { text: 'local user input' }, configuration: provider.configuration });
+  expect((await f.native.startRun(receipt.run_id)).runId).toBe(receipt.run_id);
+  await expect.poll(async () => (await f.native.run(receipt.run_id)).state, { timeout: 8_000 }).toBe('completed');
+  expect(provider.requests).toHaveLength(1);
+  expect(provider.requests[0]).toMatchObject({ model: 'local-test-model', stream: true, input: [{ role: 'user', content: 'local user input' }] });
+  const history = await f.native.history('model-branch');
+  expect(history.some(item => item.source === 'assistant' && JSON.stringify(item.content).includes('native HTTP result'))).toBe(true);
+  await expect(f.native.startRun(receipt.run_id)).rejects.toThrow();
+  expect(provider.requests).toHaveLength(1);
+  const next = await f.native.submit({ key: 'model-followup', threadId: 'model-thread', branchId: 'model-branch', expectedHead: history.at(-1)!.id, input: { text: 'follow up' }, configuration: provider.configuration });
+  await f.native.startRun(next.run_id);
+  await expect.poll(async () => { const run = await f.native.run(next.run_id); if (run.state === 'failed') throw new Error(JSON.stringify(await f.native.events(0, 100))); return run.state; }, { timeout: 8_000 }).toBe('completed');
+  expect(provider.requests).toHaveLength(2);
+  expect(JSON.stringify(provider.requests[1]!.input)).toContain('native HTTP result');
+  expect(JSON.stringify(provider.requests[1]!.input)).toContain('follow up');
+}, 30_000);
+
+it('native run.cancel interrupts an active local HTTP stream and leaves control usable', async () => {
+  const f = await fixture();
+  const provider = await localProvider((_body, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.flushHeaders();
+    response.write(': waiting for cancellation\n\n');
+  });
+  await f.native.createThread('cancel-thread', 'cancel-branch');
+  const receipt = await f.native.submit({ key: 'cancel-input', threadId: 'cancel-thread', branchId: 'cancel-branch', expectedHead: null, input: { text: 'cancel local stream' }, configuration: provider.configuration });
+  await f.native.startRun(receipt.run_id);
+  await expect.poll(() => provider.requests.length, { timeout: 8_000 }).toBe(1);
+  await expect(f.native.startRun(receipt.run_id)).rejects.toThrow();
+  await f.native.cancelRun(receipt.run_id);
+  await expect.poll(async () => (await f.native.run(receipt.run_id)).state, { timeout: 8_000 }).toBe('cancelled');
+  expect(provider.requests).toHaveLength(1);
+  expect((await f.native.status()).epoch).toBeGreaterThan(0);
+}, 30_000);
+
+it('native tool loop reads a grant-scoped fixed file revision and returns its receipt to the provider', async () => {
+  const f = await fixture();
+  let turn = 0;
+  const provider = await localProvider((_body, response) => {
+    const output = ++turn === 1
+      ? [{ id: 'file-call', type: 'function_call', call_id: 'file-read-1', name: 'native_file_read', arguments: JSON.stringify({ path: 'allowed.txt' }) }]
+      : [{ id: 'file-answer', type: 'message', content: [{ type: 'output_text', text: 'read finished' }] }];
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output } })}\n\n`);
+  });
+  await f.native.createThread('tool-thread', 'tool-branch');
+  const receipt = await f.native.submit({ key: 'tool-input', threadId: 'tool-thread', branchId: 'tool-branch', expectedHead: null, input: { text: 'read local file' }, configuration: provider.configuration });
+  const grant = await f.host.issueGrant({ grantId: 'file-owner', threadId: 'tool-thread', runId: receipt.run_id, owningWorkspace: 'workspace', executionWorkspace: 'workspace', capabilities: ['storage.read', 'storage.write'], pathScopes: [''] });
+  const actor = f.host.scoped(grant);
+  const bytes = Buffer.from('fixed native file content');
+  const blob = await actor.putBlob(bytes, 'test-file');
+  await actor.createBranch({ operationId: 'source-create', branchId: 'file-source', workspaceId: 'workspace', draftBasePaths: [], captureScopes: [], entries: [{ path: 'allowed.txt', state: { kind: 'regular-file', objectHash: blob.hash, byteLength: bytes.length, mode: 0o644 }, ownerId: blob.ownerId }] });
+  const source = await actor.readBranch({ branchId: 'file-source' });
+  const published = await actor.publishBranch({ operationId: 'source-publish', branchId: 'file-source', expectedRoot: source.root, expectedWriteRevision: source.writeRevision });
+  const binding = { grantId: grant.grantId, runId: receipt.run_id, threadId: 'tool-thread', workspaceId: 'workspace', executionWorkspaceId: 'workspace', fileSource: { branchId: 'file-source', revision: Number(published.revision) }, enabledTools: ['file_read'] };
+  await expect(f.native.startRun(receipt.run_id, undefined, { ...binding, runId: 'wrong-run' })).rejects.toThrow();
+  expect(provider.requests).toHaveLength(0);
+  await f.native.startRun(receipt.run_id, undefined, binding);
+  await expect.poll(async () => (await f.native.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
+  expect(provider.requests).toHaveLength(2);
+  expect(JSON.stringify(provider.requests[0]!.tools)).toContain('native_file_read');
+  const continuation = provider.requests[1]!.input as Array<Record<string, unknown>>;
+  const result = continuation.find(item => item.type === 'function_call_output');
+  expect(result?.call_id).toBe('file-read-1');
+  expect(String(result?.output)).toContain('fixed native file content');
+  expect((await f.native.history('tool-branch')).some(item => item.source === 'tool')).toBe(true);
+}, 30_000);
+
+it('native tool loop spawns a real process only through its registered workspace grant', async () => {
+  const f = await fixture();
+  const workspace = path.join(f.root, 'process-workspace');
+  await fs.mkdir(workspace);
+  let turn = 0;
+  const provider = await localProvider((_body, response) => {
+    const output = ++turn === 1
+      ? [{ id: 'process-call', type: 'function_call', call_id: 'spawn-1', name: 'native_process_spawn', arguments: JSON.stringify({ cwd: '', command: process.execPath, args: ['-e', 'require("node:fs").writeFileSync("native-test-marker.txt", "real native process")'], mode: 'pipe' }) }]
+      : [{ id: 'process-answer', type: 'message', content: [{ type: 'output_text', text: 'spawn accepted' }] }];
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output } })}\n\n`);
+  });
+  await f.native.createThread('process-thread', 'process-branch');
+  const receipt = await f.native.submit({ key: 'process-input', threadId: 'process-thread', branchId: 'process-branch', expectedHead: null, input: { text: 'spawn local fixture process' }, configuration: provider.configuration });
+  const grant = await f.host.issueGrant({ grantId: 'process-owner', threadId: 'process-thread', runId: receipt.run_id, owningWorkspace: 'process-workspace', executionWorkspace: 'process-workspace', capabilities: ['storage.read', 'storage.write', 'process'], pathScopes: [''] });
+  const actor = f.host.scoped(grant);
+  const registered = await actor.fileRootRegister({ workspaceId: 'process-workspace', executionWorkspaceId: 'process-workspace', canonicalRoot: workspace });
+  await f.native.startRun(receipt.run_id, undefined, { grantId: grant.grantId, runId: receipt.run_id, threadId: 'process-thread', workspaceId: 'process-workspace', executionWorkspaceId: 'process-workspace', rootId: registered.rootId, enabledTools: ['process_spawn'] });
+  await expect.poll(async () => (await f.native.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
+  expect(provider.requests).toHaveLength(2);
+  await expect.poll(async () => fs.readFile(path.join(workspace, 'native-test-marker.txt'), 'utf8').catch(() => ''), { timeout: 8_000 }).toBe('real native process');
+  await expect(actor.processList({ workspaceId: 'process-workspace', rootId: String(registered.rootId) })).rejects.toThrow(/process maintenance/i);
+  const continuation = provider.requests[1]!.input as Array<Record<string, unknown>>;
+  const result = continuation.find(item => item.type === 'function_call_output');
+  const accepted = JSON.parse(String(result?.output)) as { operation_id: string };
+  expect(typeof accepted.operation_id).toBe('string');
+  await expect.poll(async () => (await actor.processInspect({ workspaceId: 'process-workspace', processId: accepted.operation_id })).writerActive, { timeout: 8_000 }).toBe(false);
+  await expect.poll(async () => (await f.native.operation(accepted.operation_id)).phase, { timeout: 8_000 }).toBe('terminal');
+  expect((await f.native.operation(accepted.operation_id)).outcome).toBe('succeeded');
 }, 30_000);

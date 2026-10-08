@@ -12,6 +12,12 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use uuid::Uuid;
 
+enum WorkerRequest {
+    Wire(Value, Arc<AtomicBool>),
+    Native(crate::native_tools::ResourceCall),
+    Stop,
+}
+
 struct ActiveRequest {
     token: Arc<AtomicBool>,
     epoch: Option<String>,
@@ -328,7 +334,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     // The Host holds at most this many acknowledgement-backed credits. The
     // stdin reader therefore stays available for cancel/revoke even while the
     // serial Storage worker is busy. Upload chunks consume the same credits.
-    let (request_tx, request_rx) = mpsc::sync_channel::<(Value, Arc<AtomicBool>)>(KERNEL_REQUEST_WINDOW);
+    let (request_tx, request_rx) = mpsc::sync_channel::<WorkerRequest>(KERNEL_REQUEST_WINDOW);
     let (response_tx, response_rx) = mpsc::sync_channel::<Value>(1);
     let cancellations = Arc::new(Mutex::new(HashMap::<String, ActiveRequest>::new()));
     let revoked_grants = Arc::new(Mutex::new(HashSet::<String>::new()));
@@ -336,7 +342,32 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let writer_failed = Arc::new(AtomicBool::new(false));
     let (native_tx, native_rx) = mpsc::sync_channel(KERNEL_REQUEST_WINDOW);
     let native_cancellations = cancellations.clone();
-    let native_worker = crate::native_runtime::spawn(native_rx, response_tx.clone(), move |id| {
+    let resource_requests = request_tx.clone();
+    let resource_cancellations = cancellations.clone();
+    let resource_revoked = revoked_grants.clone();
+    let resource_epoch = admission_epoch.clone();
+    let resources = crate::native_tools::NativeResourceClient::new(move |call| {
+        let epoch = resource_epoch.lock().map_err(|_| KernelError::Storage("admission identity lock poisoned".into()))?
+            .clone().ok_or_else(|| KernelError::Authorization("kernel handshake required".into()))?;
+        if resource_revoked.lock().map_err(|_| KernelError::Storage("revocation state lock poisoned".into()))?
+            .contains(&call.binding.grant_id) {
+            return Err(KernelError::Authorization("grant is revoked".into()));
+        }
+        let key = format!("native-resource:{}", Uuid::new_v4());
+        resource_cancellations.lock().map_err(|_| KernelError::Storage("cancellation state lock poisoned".into()))?
+            .insert(key.clone(), ActiveRequest { token:call.cancellation.shared_flag(), epoch:Some(epoch), grant_id:Some(call.binding.grant_id.clone()) });
+        // The actor clears this registration after the actual resource receipt, never on mere
+        // cancellation request. Attach the key to the typed message, not to a JSON envelope.
+        let mut call = call;
+        call.admission_key = Some(key.clone());
+        if resource_requests.send(WorkerRequest::Native(call)).is_err() {
+            if let Ok(mut active) = resource_cancellations.lock() { active.remove(&key); }
+            return Err(KernelError::Storage("resource authority stopped before admission".into()));
+        }
+        Ok(())
+    });
+    let native_control = crate::native_runtime::NativeControl::default();
+    let native_worker = crate::native_runtime::spawn(native_rx, native_control.clone(), resources, response_tx.clone(), move |id| {
         if let Ok(mut active) = native_cancellations.lock() { active.remove(id); }
     });
     let worker_native_tx = native_tx.clone();
@@ -347,7 +378,27 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let worker_writer_failed = writer_failed.clone();
     let worker = thread::spawn(move || {
         let mut kernel = Kernel::new();
-        for (request, cancellation) in request_rx {
+        for message in request_rx {
+            let (request, cancellation) = match message {
+                WorkerRequest::Wire(request, cancellation) => (request, cancellation),
+                WorkerRequest::Stop => break,
+                WorkerRequest::Native(call) => {
+                    let denied = worker_revoked_grants.lock().map(|revoked| revoked.contains(&call.binding.grant_id)).unwrap_or(true);
+                    let result = if denied {
+                        Err(crate::native_tools::ResourceFailure { error:KernelError::Authorization("grant is revoked".into()), dispatched:false })
+                    } else if let (Some(storage), Some(host_id), Some(host_generation)) =
+                        (kernel.storage.as_mut(), kernel.host_id.as_deref(), kernel.host_generation.as_deref()) {
+                        crate::native_tools::serve_resource(storage, &kernel.epoch, host_id, host_generation, &call)
+                    } else {
+                        Err(crate::native_tools::ResourceFailure { error:KernelError::Authorization("kernel handshake required".into()), dispatched:false })
+                    };
+                    if let Some(key) = &call.admission_key {
+                        if let Ok(mut active) = worker_cancellations.lock() { active.remove(key); }
+                    }
+                    let _ = call.reply.send(result);
+                    continue;
+                }
+            };
             let id = request
                 .get("id")
                 .and_then(Value::as_str)
@@ -538,12 +589,14 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         if request.get("method").and_then(Value::as_str).is_some_and(|method|method.starts_with("runtime.")) {
+            let current_epoch=admission_epoch.lock().ok().and_then(|epoch|epoch.clone());
+            native_control.cancel_admitted(&request,current_epoch.as_deref());
             if native_tx.try_send(crate::native_runtime::Command::Request { value: request, cancellation: token }).is_err() {
                 eprintln!("native runtime request admission window exceeded"); break;
             }
             continue;
         }
-        if request_tx.try_send((request, token)).is_err() {
+        if request_tx.try_send(WorkerRequest::Wire(request, token)).is_err() {
             // A sender violating the negotiated window loses this epoch, not
             // the cancellation/control channel. Never accept a silent drop.
             eprintln!("kernel request admission window exceeded");
@@ -553,6 +606,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(active) = cancellations.lock() {
         for request in active.values() { request.token.store(true, Ordering::Release); }
     }
+    // Native run workers retain a resource sender. Explicitly stop the owner rather than
+    // waiting for all senders to drop, which would create a shutdown channel cycle.
+    let _ = request_tx.send(WorkerRequest::Stop);
     drop(request_tx);
     let _ = worker.join();
     drop(native_tx);

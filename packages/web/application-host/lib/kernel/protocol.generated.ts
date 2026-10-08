@@ -8,6 +8,7 @@ export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
 
 export type KernelMethod =
+  | "runtime.run.start"
   | "runtime.status"
   | "runtime.thread.create"
   | "runtime.input.submit"
@@ -113,6 +114,35 @@ export type KernelMethod =
   | "compute.release"
   | "compute.grammar.register";
 
+export interface NativeExternalReceipt {
+  executor: string;
+  identity: string;
+  epoch: string;
+  outcome: NativeOutcome;
+  effect: NativeEffect;
+  result: unknown;
+}
+
+export interface NativeRunStartParams {
+  runId: string;
+  toolBinding?: unknown;
+}
+
+export interface NativeModelSessionConfiguration {
+  providerFamily: string;
+  model: string;
+  endpoint: string;
+  credentialEnvironment: string | null;
+  allowAnonymous: boolean;
+  configurationGeneration: number;
+  maxOutputTokens: number;
+}
+
+export interface NativeRunStartReceipt {
+  runId: string;
+  epoch: number;
+}
+
 export type NativeRunState = "accepted" | "preparing" | "runnable" | "generating" | "executing" | "waiting" | "completed" | "failed" | "cancelled";
 
 export type NativeOperationPhase = "accepted" | "preparing" | "queued" | "running" | "waiting" | "settling" | "terminal";
@@ -185,6 +215,7 @@ export interface NativeRun {
 }
 
 export interface NativeOperation {
+  external_receipt: NativeExternalReceipt | null;
   id: string;
   run_id: string;
   epoch: number;
@@ -1334,6 +1365,7 @@ export interface KernelComputeReadResult {
 }
 
 export type KernelMethodParams = {
+  "runtime.run.start": NativeRunStartParams;
   "runtime.status": KernelEmptyParams;
   "runtime.thread.create": NativeThreadCreateParams;
   "runtime.input.submit": NativeInputSubmitParams;
@@ -1441,6 +1473,15 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.run.start";
+      params: NativeRunStartParams;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
