@@ -55,11 +55,8 @@ pub(crate) fn node_hash(node: &TrieNode) -> String {
     format!("sha256-{}", hex::encode(Sha256::digest(bytes)))
 }
 pub(crate) fn object_path(root: &Path, hash: &str) -> Result<PathBuf, KernelError> {
-    let hex = hash
-        .strip_prefix("sha256-")
-        .filter(|value| value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit()))
-        .ok_or_else(|| KernelError::Operation(format!("malformed content hash: {hash}")))?;
-    Ok(root.join("objects").join(&hex[..2]).join(&hex[2..]))
+    varin_runtime::content::object_path(root, hash)
+        .map_err(|_| KernelError::Operation(format!("malformed content hash: {hash}")))
 }
 pub(crate) fn response_ok(id: &str, result: Value) -> Value {
     json!({"v": PROTOCOL_VERSION, "kind": "response", "id": id, "ok": true, "result": result})

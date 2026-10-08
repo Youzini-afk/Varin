@@ -23,6 +23,26 @@ writing Pi session files or the Host harness's existing execution records.
 The wire source remains `kernel/protocol/schema.json`; it generates the native state enums and the
 Host request/response DTOs. Domain implementation types remain private to Rust.
 
+## Immutable model request bodies
+
+Model-step metadata holds a content reference, not a serialized full-history request. The runtime
+persists content-defined request chunks and their ordered manifest under `content/objects` before
+committing the reference in SQLite. SHA-256 identities and object paths are shared with kernel
+content primitives; conversation objects have a separate GC domain because kernel storage can be
+rebuilt independently. Dispatch, recovery and input-supersession writes preserve the small reference.
+The public model-step API and completion consumer resolve and verify the exact frozen request.
+Provider serialization still visits and sends full legal requests; chunk reuse is not remote
+incremental-context support or a measured speedup claim.
+
+Opening the current inline native format performs one atomic conversion of request fields, preserving
+history and provider data. Durable objects precede that transaction; interruption leaves either the
+old representation or committed references, never empty history. A format marker selects one current
+reader. Missing or corrupt referenced objects fail explicitly. `Catalog::collect_content_objects`
+marks every retained model step and verifies its objects before removing unreferenced objects; it
+never deletes history or invokes the replaceable system-kernel GC. Conversation history and model
+output records remain inline in this slice; request-body extraction does not claim that those other
+large-body paths have already been converted.
+
 ## Execution and trust
 
 Catalog methods do no provider, tool, extension or network I/O. A mutex around Catalog is held only

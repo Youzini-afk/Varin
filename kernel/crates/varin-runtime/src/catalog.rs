@@ -98,6 +98,7 @@ fn fence(run: &Run, epoch: u64) -> Result<()> {
 /// Its database is separate from the replaceable system-kernel cache and is never recreated on error.
 pub struct Catalog {
     db: Connection,
+    content: crate::content::ContentStore,
     _owner: File,
     epoch: u64,
 }
@@ -116,7 +117,7 @@ impl Catalog {
         let mut db = Connection::open(root.as_ref().join("conversation.sqlite"))?;
         db.pragma_update(None, "foreign_keys", true)?;
         let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version != 0 && version != 1 {
+        if version != 0 && version != 1 && version != 2 {
             return Err(RuntimeError::Format(version));
         }
         let existing: i64 = db.query_row(
@@ -132,6 +133,8 @@ impl Catalog {
         if version == 0 {
             db.execute_batch(SCHEMA)?;
         }
+        let content = crate::content::ContentStore::open(root.as_ref().join("content"))?;
+        crate::content::initialize(&mut db, &content)?;
         inputs::initialize(&mut db)?;
         let epoch: u64 = db.query_row(
             "UPDATE runtime_meta SET epoch=epoch+1 WHERE id=1 RETURNING epoch",
@@ -140,6 +143,7 @@ impl Catalog {
         )?;
         let mut this = Self {
             db,
+            content,
             _owner: owner,
             epoch,
         };
@@ -612,25 +616,28 @@ impl Catalog {
         epoch: u64,
         request: Value,
     ) -> Result<ModelStep> {
+        let request_ref = self.content.save(&request)?;
         let tx = self.db.transaction()?;
         let run: Run = record(&tx, "runs", run_id)?;
         fence(&run, epoch)?;
         if run.cancel_requested {
             return Err(RuntimeError::Invalid("run cancellation pending".into()));
         }
-        if let Some(old) = optional_record::<ModelStep>(&tx, "model_steps", key)? {
-            if old.run_id == run_id && old.request == request {
+        if let Some(mut old) = optional_record::<ModelStep>(&tx, "model_steps", key)? {
+            if old.run_id == run_id && old.request == request_ref {
+                drop(tx);
+                old.request = request;
                 return Ok(old);
             }
             return Err(RuntimeError::Conflict("model step identity reused".into()));
         }
-        let step = ModelStep {
+        let mut step = ModelStep {
                     superseded_by_input:None,
             id: key.into(),
             run_id: run_id.into(),
             epoch,
             state: ModelStepState::Prepared,
-            request,
+            request: request_ref,
             original: Vec::new(),
             usage: None,
         };
@@ -640,12 +647,22 @@ impl Catalog {
         )?;
         event(&tx, key, 1, "model.prepared", Value::Null)?;
         tx.commit()?;
+        step.request = request;
         Ok(step)
     }
+    fn hydrate_model_step(&self, mut step: ModelStep) -> Result<ModelStep> {
+        step.request = self.content.load(&step.request)?;
+        Ok(step)
+    }
+    /// Collect only unreferenced immutable request bodies under this catalog owner lock.
+    pub fn collect_content_objects(&mut self) -> Result<u64> {
+        self.content.collect(&self.db)
+    }
     pub fn model_step(&self, key: &str) -> Result<ModelStep> {
-        record(&self.db, "model_steps", key)
+        self.hydrate_model_step(record(&self.db, "model_steps", key)?)
     }
     pub fn dispatch_model_step(&mut self, key: &str, epoch: u64) -> Result<ModelStep> {
+        let request = self.model_step(key)?.request;
         let tx = self.db.transaction()?;
         let mut step: ModelStep = record(&tx, "model_steps", key)?;
         let run: Run = record(&tx, "runs", &step.run_id)?;
@@ -661,6 +678,7 @@ impl Catalog {
         )?;
         event(&tx, key, 2, "model.dispatched", Value::Null)?;
         tx.commit()?;
+        step.request = request;
         Ok(step)
     }
     pub fn settle_model_step(
@@ -671,6 +689,7 @@ impl Catalog {
         original: Vec<ProviderOriginal>,
         usage: Option<Value>,
     ) -> Result<ModelStep> {
+        let request = self.model_step(key)?.request;
         let tx = self.db.transaction()?;
         let mut step: ModelStep = record(&tx, "model_steps", key)?;
         if step.epoch != epoch
@@ -692,6 +711,7 @@ impl Catalog {
         )?;
         event(&tx, key, 3, "model.settled", json!({"state":state}))?;
         tx.commit()?;
+        step.request = request;
         Ok(step)
     }
     pub fn register_wait(

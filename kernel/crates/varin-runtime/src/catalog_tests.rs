@@ -997,3 +997,99 @@ fn boundary_input_cannot_be_lost_to_run_completion_and_next_run_skips_cancelled_
         )
         .is_ok());
 }
+
+#[test]
+fn content_backed_request_stays_compact_across_phases_and_reopens_exactly() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let epoch = db.epoch();
+    let request = json!({"request_id":"content-step","history":[{"type":"reasoning","encrypted_content":"opaque-汉字".repeat(60000),"unknown":[null,true,42]}]});
+    let prepared = db
+        .prepare_model_step("content-step", &receipt.run_id, epoch, request.clone())
+        .unwrap();
+    assert_eq!(prepared.request, request);
+    assert_eq!(
+        db.prepare_model_step("content-step", &receipt.run_id, epoch, request.clone())
+            .unwrap(),
+        prepared
+    );
+    let compact_body = |db: &Catalog| -> Value {
+        let raw: String = db
+            .db
+            .query_row(
+                "SELECT body FROM model_steps WHERE id='content-step'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let body: Value = serde_json::from_str(&raw).unwrap();
+        assert!(
+            raw.len() < 1024,
+            "phase persistence must retain request reference"
+        );
+        assert!(body["request"]["content_object"].is_string());
+        body
+    };
+    let original_ref = compact_body(&db)["request"].clone();
+    assert_eq!(
+        db.dispatch_model_step("content-step", epoch)
+            .unwrap()
+            .request,
+        request
+    );
+    assert_eq!(compact_body(&db)["request"], original_ref);
+    let step = db
+        .settle_model_step(
+            "content-step",
+            epoch,
+            ModelStepState::Interrupted,
+            vec![],
+            None,
+        )
+        .unwrap();
+    assert_eq!(step.request, request);
+    assert_eq!(compact_body(&db)["request"], original_ref);
+    assert_eq!(db.collect_content_objects().unwrap(), 0);
+    drop(db);
+    let mut db = f.open();
+    assert_eq!(db.model_step("content-step").unwrap().request, request);
+    assert_eq!(compact_body(&db)["request"], original_ref);
+    assert_eq!(db.collect_content_objects().unwrap(), 0);
+}
+
+#[test]
+fn missing_request_content_does_not_mark_unsent_public_dispatch_as_dispatched() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let epoch = db.epoch();
+    db.prepare_model_step(
+        "missing-content",
+        &receipt.run_id,
+        epoch,
+        json!({"opaque":"must exist before dispatch"}),
+    )
+    .unwrap();
+    let step: ModelStep = record(&db.db, "model_steps", "missing-content").unwrap();
+    let path = crate::content::object_path(
+        &f.0.join("content"),
+        step.request["content_object"].as_str().unwrap(),
+    )
+    .unwrap();
+    std::fs::remove_file(path).unwrap();
+    assert!(db.dispatch_model_step("missing-content", epoch).is_err());
+    let after: ModelStep = record(&db.db, "model_steps", "missing-content").unwrap();
+    assert_eq!(after.state, ModelStepState::Prepared);
+    assert!(db
+        .settle_model_step(
+            "missing-content",
+            epoch,
+            ModelStepState::Interrupted,
+            vec![],
+            None
+        )
+        .is_err());
+    let after_settle: ModelStep = record(&db.db, "model_steps", "missing-content").unwrap();
+    assert_eq!(after_settle.state, ModelStepState::Prepared);
+}
