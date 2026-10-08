@@ -1,8 +1,12 @@
 //! Native wire adapters. Credentials resolve only at dispatch and never enter RequestSnapshot.
 //! HTTP retries and redirects are disabled: an interrupted generation has ambiguous remote cost.
 pub mod anthropic;
+pub mod auth;
 pub mod azure;
 pub mod chat;
+pub mod codex;
+pub mod google;
+pub mod mistral;
 pub mod responses;
 mod sse;
 #[cfg(test)]
@@ -32,6 +36,16 @@ pub trait HttpTransport: Send + Sync {
         cancel: &CancellationToken,
         receive: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>,
     ) -> Result<(), ModelFailure>;
+    /// Protocols such as GenerateContent terminate the HTTP body after their finish marker.
+    /// They must independently reject EOF without that marker.
+    fn stream_to_eof(
+        &self,
+        request: HttpRequest<'_>,
+        cancel: &CancellationToken,
+        receive: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>,
+    ) -> Result<(), ModelFailure> {
+        self.stream(request, cancel, receive)
+    }
 }
 /// A single shared outbound policy can supply proxy, custom roots and DNS via ClientBuilder.
 /// Must run on a native execution worker, outside an existing Tokio runtime.
@@ -63,6 +77,25 @@ impl HttpTransport for NativeHttpTransport {
         request: HttpRequest<'_>,
         cancel: &CancellationToken,
         receive: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>,
+    ) -> Result<(), ModelFailure> {
+        self.stream_internal(request, cancel, receive, false)
+    }
+    fn stream_to_eof(
+        &self,
+        request: HttpRequest<'_>,
+        cancel: &CancellationToken,
+        receive: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>,
+    ) -> Result<(), ModelFailure> {
+        self.stream_internal(request, cancel, receive, true)
+    }
+}
+impl NativeHttpTransport {
+    fn stream_internal(
+        &self,
+        request: HttpRequest<'_>,
+        cancel: &CancellationToken,
+        receive: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>,
+        allow_eof: bool,
     ) -> Result<(), ModelFailure> {
         if cancel.is_cancelled() {
             return Err(failure("cancelled", "generation cancelled"));
@@ -141,6 +174,7 @@ impl HttpTransport for NativeHttpTransport {
                         })?;
                         if done{return Ok(());}
                     }
+                    None if allow_eof => return Ok(()),
                     None => return Err(ModelFailure {provider_request_id:request_id.clone(),
                         ..failure("stream_interrupted", "model stream ended before a terminal event")})
                 }
@@ -193,6 +227,16 @@ impl Connection {
         protocol_headers: &[(&str, &str)],
         event: &mut dyn FnMut(Option<Value>) -> Result<bool, ModelFailure>,
     ) -> Result<(), ModelFailure> {
+        self.run_events_mode(request, cancel, protocol_headers, event, false)
+    }
+    pub(super) fn run_events_mode(
+        &self,
+        request: &RequestSnapshot,
+        cancel: &CancellationToken,
+        protocol_headers: &[(&str, &str)],
+        event: &mut dyn FnMut(Option<Value>) -> Result<bool, ModelFailure>,
+        allow_eof: bool,
+    ) -> Result<(), ModelFailure> {
         if cancel.is_cancelled() {
             return Err(failure("cancelled", "generation cancelled"));
         }
@@ -208,7 +252,13 @@ impl Connection {
             );
         }
         let mut decoder = sse::Decoder::new(self.max_event_bytes);
-        self.transport.stream(
+        let stream = if allow_eof {
+            HttpTransport::stream_to_eof
+        } else {
+            HttpTransport::stream
+        };
+        stream(
+            self.transport.as_ref(),
             HttpRequest {
                 endpoint: &self.endpoint,
                 headers,
@@ -271,9 +321,10 @@ pub(super) fn schema_version(view: &RequestView, name: &str) -> Result<String, M
             )
         })
 }
-pub(super) fn opaque(family: &str, value: Value) -> Option<OpaqueProviderItem> {
+pub(super) fn opaque(view: &RequestView, value: Value) -> Option<OpaqueProviderItem> {
     Some(OpaqueProviderItem {
-        family: family.into(),
+        family: view.binding.provider_family.clone(),
+        connection_identity: view.binding.connection_identity.clone(),
         adapter_version: "1".into(),
         value,
     })

@@ -40,6 +40,10 @@ fn contains(parent: &Path, child: &Path) -> bool {
     }
 }
 impl Storage {
+    pub(crate) fn set_process_subscriptions(&mut self, subscriptions: process::subscriptions::ProcessSubscriptions) {
+        self.processes.set_subscriptions(subscriptions);
+    }
+
     pub(crate) fn set_process_controls(&mut self, controls: process::ProcessControlRegistry) {
         self.processes.set_controls(controls);
     }
@@ -92,10 +96,13 @@ impl Storage {
                 record[key] = value.clone();
             }
         } else {
-            // Process output lives in the owning kernel process. Once a new
-            // kernel opens this record there is no readable buffer, even if
-            // the previous kernel persisted the exit before it shut down.
-            record["outputAvailable"] = json!(false);
+            // Retained output has its own durability evidence. Reopening bytes never proves
+            // that an old process tree stopped; reconcile writer state independently below.
+            let output=match self.processes.restore_output(&self.root,id,string(&record,"kernelEpoch")?) {
+                Ok(output)=>output,
+                Err(error)=>json!({"outputAvailable":false,"outputComplete":false,"outputError":format!("retained output cannot be reopened: {error}")}),
+            };
+            for (key,value) in output.as_object().into_iter().flatten(){record[key]=value.clone();}
             if record["writerActive"].as_bool() != Some(false) {
                 let epoch = string(&record, "kernelEpoch")?;
                 let receipt = process::read_receipt(&self.root, id, epoch)?;
@@ -364,25 +371,36 @@ impl Storage {
         if method == "process.inspect" {
             return Ok(record);
         }
+        if matches!(method,"process.subscribe"|"process.read") && record["outputAvailable"].as_bool()!=Some(true) {
+            return Err(KernelError::Storage(record["outputError"].as_str().unwrap_or("process output is unavailable").into()));
+        }
+        if method == "process.subscribe" {
+            return self.processes.subscribe(string(params_value,"subscriptionId")?,id,&grant.grant_id,&grant.kernel_epoch,
+                unsigned(params_value,"cursor",0)?,record);
+        }
         if method == "process.release" {
             if record["writerActive"].as_bool() != Some(false) {
                 return Err(KernelError::Operation(
                     "process is in use or exit is unconfirmed".into(),
                 ));
             }
-            self.processes.release(id);
-            match fs::remove_file(process::output_path(&self.root, id)) {
-                Ok(()) => {},
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {},
-                Err(error) => return Err(error.into()),
-            }
+            let output_path=process::output_path(&self.root,id);
+            let marker_path=process::output_marker_path(&self.root,id);
+            self.processes.release(id,||{
+                for path in [output_path,marker_path.clone(),marker_path.with_extension("complete.tmp")] {
+                    match fs::remove_file(path) {
+                        Ok(())=>{},Err(error) if error.kind()==io::ErrorKind::NotFound=>{},Err(error)=>return Err(error.into()),
+                    }
+                }
+                Ok(())
+            })?;
             let mut record = record;
             record["status"] = json!("released");
             record["outputAvailable"] = json!(false);
             self.persist_process_record(id, &record)?;
             return Ok(record);
         }
-        if record["kernelEpoch"].as_str() != Some(grant.kernel_epoch.as_str()) {
+        if record["kernelEpoch"].as_str() != Some(grant.kernel_epoch.as_str()) && method != "process.read" {
             return Err(KernelError::Authorization(
                 "process handle belongs to a stale kernel epoch".into(),
             ));

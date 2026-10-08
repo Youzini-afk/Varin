@@ -1,7 +1,7 @@
 {
   "protocolVersion": 1,
-  "nativeRuntimeStructs": {"ModelSessionConfiguration": {"fields": {"providerFamily": {"type": "string"}, "model": {"type": "string"}, "endpoint": {"type": "string"}, "credentialEnvironment": {"type": "string | null"}, "allowAnonymous": {"type": "boolean"}, "configurationGeneration": {"type": "number"}, "maxOutputTokens": {"type": "number"}}}},
-  "nativeRuntimeEnums": {"RunState": ["Accepted", "Preparing", "Runnable", "Generating", "Executing", "Waiting", "Completed", "Failed", "Cancelled"], "OperationPhase": ["Accepted", "Preparing", "Queued", "Running", "Waiting", "Settling", "Terminal"], "Outcome": ["Succeeded", "Failed", "Cancelled", "Indeterminate"], "Effect": ["None", "Dispatched", "Partial", "Confirmed", "Unknown"], "Lifetime": ["Call", "Run", "Thread", "Environment"], "HistorySource": ["User", "Assistant", "Tool", "Agent", "Environment", "Compaction"], "ModelStepState": ["Prepared", "Dispatched", "Completed", "Interrupted", "Failed", "Cancelled"], "DeliveryState": ["Selected", "Sent", "Committed"]},
+  "nativeRuntimeStructs": {"ModelSessionConfiguration": {"fields": {"providerFamily": {"type": "string"}, "model": {"type": "string"}, "endpoint": {"type": "string"}, "credentialEnvironment": {"type": "string | null"}, "allowAnonymous": {"type": "boolean"}, "configurationGeneration": {"type": "number"}, "maxOutputTokens": {"type": "number"}, "azureDeployment": {"type": "string | null", "optional": true}, "azureApiVersion": {"type": "string | null", "optional": true}, "legacyMaxTokens": {"type": "boolean", "optional": true}, "includeStreamUsage": {"type": "boolean", "optional": true}, "reasoningEffort": {"type": "string | null", "optional": true}}}},
+  "nativeRuntimeEnums": {"RunState": ["Accepted", "Preparing", "Runnable", "Generating", "Executing", "Waiting", "Completed", "Failed", "Cancelled"], "OperationPhase": ["Accepted", "Preparing", "Queued", "Running", "Waiting", "Settling", "Terminal"], "Outcome": ["Succeeded", "Failed", "Cancelled", "Indeterminate"], "Effect": ["None", "Dispatched", "Partial", "Confirmed", "Unknown"], "Lifetime": ["Call", "Run", "Thread", "Environment"], "HistorySource": ["User", "Assistant", "Tool", "Agent", "Environment", "Compaction"], "ModelStepState": ["Prepared", "Dispatched", "Completed", "Interrupted", "Failed", "Cancelled"], "DeliveryState": ["Selected", "Sent", "Committed"], "InputMode": ["Boundary", "Interrupt", "NextRun"], "InputState": ["Queued", "Delivered", "Cancelled"]},
   "kernelEpoch": "per-process",
   "framing": "u32be-json",
   "maxFrameBytes": 16777216,
@@ -11,6 +11,12 @@
   "response": {"v": 1, "kind": "response", "id": "request-id", "ok": true, "result": {}},
   "requestUnion": true,
   "methodParams": {
+    "runtime.input.enqueue": "NativeInputEnqueueParams",
+    "runtime.input.edit": "NativeInputEditParams",
+    "runtime.input.cancel": "NativeInputCancelParams",
+    "runtime.input.inspect": "NativeInputHandleParams",
+    "runtime.input.list": "NativeHistoryParams",
+
     "runtime.run.start": "NativeRunStartParams",
     "runtime.status": "KernelEmptyParams",
     "runtime.thread.create": "NativeThreadCreateParams",
@@ -22,6 +28,9 @@
     "runtime.history.read": "NativeHistoryParams",
     "runtime.events.read": "NativeEventsParams",
 
+    "process.subscribe": "KernelProcessSubscribeParams",
+    "process.subscription.ack": "KernelProcessSubscriptionAckParams",
+    "process.subscription.unsubscribe": "KernelProcessSubscriptionParams",
     "process.spawn": "KernelProcessSpawnParams",
     "process.read": "KernelProcessReadParams",
     "process.write": "KernelProcessWriteParams",
@@ -119,9 +128,23 @@
     "compute.grammar.register": "KernelComputeGrammarParams"
   },
   "dto": {
+    "KernelProcessSubscribeParams": {"fields":{"workspaceId":{"type":"string"},"processId":{"type":"string"},"subscriptionId":{"type":"string"},"cursor":{"type":"number"}}},
+    "KernelProcessSubscriptionParams": {"fields":{"subscriptionId":{"type":"string"}}},
+    "KernelProcessSubscriptionAckParams": {"fields":{"subscriptionId":{"type":"string"},"stream":{"type":"string"},"sequence":{"type":"number"}}},
+    "KernelProcessSubscribeResult": {"fields":{"subscriptionId":{"type":"string"},"processId":{"type":"string"},"kernelEpoch":{"type":"string"}}},
+    "KernelProcessStreamEvent": {"fields":{"v":{"type":"protocolVersion"},"kind":{"type":"\"process-event\""},"kernelEpoch":{"type":"string"},"subscriptionId":{"type":"string"},"grantId":{"type":"string"},"processId":{"type":"string"},"stream":{"type":"\"control\" | \"data\" | \"closed\""},"sequence":{"type":"number"},"result":{"type":"KernelProcessReadResult | null"},"error":{"type":"string | null"}}},
+    "NativeInputMode": {"raw": "export type NativeInputMode = \"boundary\" | \"interrupt\" | \"next_run\";"},
+    "NativeInputState": {"raw": "export type NativeInputState = \"queued\" | \"delivered\" | \"cancelled\";"},
+    "NativeInputEnqueueParams": {"fields": {"key": {"type": "string"}, "threadId": {"type": "string"}, "branchId": {"type": "string"}, "mode": {"type": "NativeInputMode"}, "input": {"type": "unknown"}, "configuration": {"type": "unknown", "optional": true}}},
+    "NativeInputEditParams": {"fields": {"inputId": {"type": "string"}, "expectedRevision": {"type": "number"}, "content": {"type": "unknown"}}},
+    "NativeInputCancelParams": {"fields": {"inputId": {"type": "string"}, "expectedRevision": {"type": "number"}}},
+    "NativeInputHandleParams": {"fields": {"inputId": {"type": "string"}}},
+    "NativeInputReceipt": {"fields": {"input_id": {"type": "string"}, "run_id": {"type": "string"}, "mode": {"type": "NativeInputMode"}, "cursor": {"type": "number"}}},
+    "NativeQueuedInput": {"fields": {"id": {"type": "string"}, "thread_id": {"type": "string"}, "branch_id": {"type": "string"}, "run_id": {"type": "string"}, "mode": {"type": "NativeInputMode"}, "state": {"type": "NativeInputState"}, "revision": {"type": "number"}, "content": {"type": "unknown"}, "cursor": {"type": "number"}}},
+
     "NativeExternalReceipt":{"fields":{"executor":{"type":"string"},"identity":{"type":"string"},"epoch":{"type":"string"},"outcome":{"type":"NativeOutcome"},"effect":{"type":"NativeEffect"},"result":{"type":"unknown"}}},
     "NativeRunStartParams": {"fields":{"runId":{"type":"string"},"toolBinding":{"type":"unknown","optional":true}}},
-    "NativeModelSessionConfiguration": {"fields": {"providerFamily": {"type": "string"}, "model": {"type": "string"}, "endpoint": {"type": "string"}, "credentialEnvironment": {"type": "string | null"}, "allowAnonymous": {"type": "boolean"}, "configurationGeneration": {"type": "number"}, "maxOutputTokens": {"type": "number"}}},
+    "NativeModelSessionConfiguration": {"fields": {"providerFamily": {"type": "string"}, "model": {"type": "string"}, "endpoint": {"type": "string"}, "credentialEnvironment": {"type": "string | null"}, "allowAnonymous": {"type": "boolean"}, "configurationGeneration": {"type": "number"}, "maxOutputTokens": {"type": "number"}, "azureDeployment": {"type": "string | null", "optional": true}, "azureApiVersion": {"type": "string | null", "optional": true}, "legacyMaxTokens": {"type": "boolean", "optional": true}, "includeStreamUsage": {"type": "boolean", "optional": true}, "reasoningEffort": {"type": "string | null", "optional": true}}},
     "NativeRunStartReceipt": {"fields": {"runId": {"type": "string"}, "epoch": {"type": "number"}}},
     "NativeRunState": {"raw": "export type NativeRunState = \"accepted\" | \"preparing\" | \"runnable\" | \"generating\" | \"executing\" | \"waiting\" | \"completed\" | \"failed\" | \"cancelled\";"},
     "NativeOperationPhase": {"raw": "export type NativeOperationPhase = \"accepted\" | \"preparing\" | \"queued\" | \"running\" | \"waiting\" | \"settling\" | \"terminal\";"},
@@ -141,7 +164,7 @@
     "NativeReceipt": {"fields": {"thread_id": {"type": "string"}, "branch_id": {"type": "string"}, "run_id": {"type": "string"}, "input_id": {"type": "string"}, "cursor": {"type": "number"}}},
     "NativeRun": {"fields": {"waiting_on": {"type": "string | null"}, "id": {"type": "string"}, "thread_id": {"type": "string"}, "branch_id": {"type": "string"}, "state": {"type": "NativeRunState"}, "revision": {"type": "number"}, "epoch": {"type": "number"}, "configuration": {"type": "unknown"}, "cancel_requested": {"type": "boolean"}}},
     "NativeOperation": {"fields": {"external_receipt":{"type":"NativeExternalReceipt | null"},"id": {"type": "string"}, "run_id": {"type": "string"}, "epoch": {"type": "number"}, "revision": {"type": "number"}, "phase": {"type": "NativeOperationPhase"}, "outcome": {"type": "NativeOutcome | null"}, "effect": {"type": "NativeEffect"}, "cancel_requested": {"type": "boolean"}, "lifetime": {"type": "NativeLifetime"}, "handed_off": {"type": "boolean"}, "executor": {"type": "string | null"}, "waiting_on": {"type": "string | null"}, "intent": {"type": "unknown"}, "result": {"type": "unknown"}}},
-    "NativeProviderOriginal": {"fields": {"adapter": {"type": "string"}, "version": {"type": "string"}, "item": {"type": "unknown"}}},
+    "NativeProviderOriginal": {"fields": {"connection_identity": {"type": "string"}, "adapter": {"type": "string"}, "version": {"type": "string"}, "item": {"type": "unknown"}}},
     "NativeHistoryItem": {"fields": {"id": {"type": "string"}, "thread_id": {"type": "string"}, "parent": {"type": "string | null"}, "source": {"type": "NativeHistorySource"}, "content": {"type": "unknown"}, "provider": {"type": "NativeProviderOriginal | null"}}},
     "NativeEvent": {"fields": {"cursor": {"type": "number"}, "subject": {"type": "string"}, "revision": {"type": "number"}, "kind": {"type": "string"}, "data": {"type": "unknown"}}},
 
@@ -154,7 +177,7 @@
     "KernelProcessHandleParams": {"fields":{"workspaceId":{"type":"string"},"processId":{"type":"string"}}},
     "KernelProcessListParams": {"fields":{"workspaceId":{"type":"string"},"rootId":{"type":"string"},"cursor":{"type":"number","optional":true},"pageSize":{"type":"number","optional":true}}},
     "KernelProcessListResult": {"fields":{"processes":{"type":"KernelProcessSnapshot[]"},"nextCursor":{"type":"number | null"}}},
-    "KernelProcessSnapshot": {"fields":{"processId":{"type":"string"},"kernelEpoch":{"type":"string"},"workspaceId":{"type":"string"},"cwd":{"type":"string"},"mode":{"type":"string"},"status":{"type":"\"starting\" | \"running\" | \"exited\" | \"failed\" | \"unknown\" | \"released\""},"pid":{"type":"number | null"},"exitCode":{"type":"number | null"},"signal":{"type":"string | null"},"reason":{"type":"string | null"},"writerActive":{"type":"boolean"},"outputAvailable":{"type":"boolean"}}},
+    "KernelProcessSnapshot": {"fields":{"processId":{"type":"string"},"kernelEpoch":{"type":"string"},"workspaceId":{"type":"string"},"cwd":{"type":"string"},"mode":{"type":"string"},"status":{"type":"\"starting\" | \"running\" | \"exited\" | \"failed\" | \"unknown\" | \"released\""},"pid":{"type":"number | null"},"exitCode":{"type":"number | null"},"signal":{"type":"string | null"},"reason":{"type":"string | null"},"writerActive":{"type":"boolean"},"outputAvailable":{"type":"boolean"},"outputComplete":{"type":"boolean","optional":true},"outputError":{"type":"string | null","optional":true}}},
     "KernelProcessOutputChunk": {"fields":{"channel":{"type":"\"stdout\" | \"stderr\""},"offset":{"type":"number"},"bytesBase64":{"type":"string"}}},
     "KernelProcessReadResult": {"fields":{"process":{"type":"KernelProcessSnapshot"},"chunks":{"type":"KernelProcessOutputChunk[]"},"nextCursor":{"type":"number"},"endCursor":{"type":"number"},"inputSequence":{"type":"number"},"inputError":{"type":"string | null"},"outputComplete":{"type":"boolean"},"outputError":{"type":"string | null"}}},
     "KernelProcessWriteResult": {"fields":{"sequence":{"type":"number"},"queued":{"type":"boolean"}}},
@@ -520,6 +543,12 @@
     "KernelComputeReadResult": {"fields":{"jobId":{"type":"string"},"kernelEpoch":{"type":"string"},"workspaceId":{"type":"string"},"status":{"type":"\"queued\" | \"running\" | \"ready\" | \"empty\" | \"partial\" | \"failed\" | \"cancelled\""},"root":{"type":"string | null"},"records":{"type":"KernelComputeRecord[]"},"nextCursor":{"type":"number"},"endCursor":{"type":"number"},"scannedFiles":{"type":"number"},"message":{"type":"string | null"}}}
   },
   "methods": {
+    "runtime.input.enqueue": "Durable native queued input: enqueue",
+    "runtime.input.edit": "Durable native queued input: edit",
+    "runtime.input.cancel": "Durable native queued input: cancel",
+    "runtime.input.inspect": "Durable native queued input: inspect",
+    "runtime.input.list": "Durable native queued input: list",
+
     "runtime.run.start": "Start the explicitly configured native model execution",
     "runtime.status": "Native agent authority: status",
     "runtime.thread.create": "Native agent authority: thread.create",
@@ -531,6 +560,9 @@
     "runtime.history.read": "Native agent authority: history.read",
     "runtime.events.read": "Native agent authority: events.read",
 
+    "process.subscribe": "subscribe to bounded process data and independent control changes under the actor grant",
+    "process.subscription.ack": "return one exact process subscription data or control credit",
+    "process.subscription.unsubscribe": "release a process observation without stopping its execution",
     "process.spawn": "start a native PTY or piped process once with a durable writer identity",
     "process.read": "read bounded ordered raw process bytes at a fixed cursor",
     "process.write": "enqueue sequenced stdin bytes without blocking control admission",

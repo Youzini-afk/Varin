@@ -7,8 +7,8 @@ import { Readable, Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import { ManagedProcessLaunchError, type ManagedPipedProcessHandle } from "../process/types.js";
 import { canonicalizePathIdentity } from "../workspace/path-safety.js";
-import type { KernelClient, KernelGrantHandle, KernelScopedClient } from "./kernel-client.js";
-import type { KernelMethodParams, KernelProcessSnapshot } from "./protocol.generated.js";
+import type { KernelClient, KernelGrantHandle, KernelScopedClient, KernelProcessSubscription } from "./kernel-client.js";
+import type { KernelMethodParams, KernelProcessSnapshot, KernelProcessStreamEvent } from "./protocol.generated.js";
 
 export interface NativeProcessIdentity {
   workspaceId: string;
@@ -21,7 +21,6 @@ interface Options {
   onError?: (error: Error) => void;
 }
 interface Address { workspaceId: string; processId: string }
-const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const asError = (value: unknown): Error => value instanceof Error ? value : new Error(String(value));
 const nativeSignal = (value: string | null): NodeJS.Signals | null => {
   if (!value) return null;
@@ -52,7 +51,12 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
   private inputError: string | null = null;
   private outputFailure: Error | null = null;
   private lost: Error | null = null;
-  private polling = false;
+  private subscriptionStart: Promise<void> | undefined;
+  private subscription: KernelProcessSubscription | undefined;
+  private pendingDataAck: (() => Promise<void>) | null = null;
+  private readonly inputWaiters = new Set<() => void>();
+  private endCursor = 0;
+  private outputComplete = false;
   private ready = false;
   private readyResolve!: () => void;
   private readyReject!: (error: Error) => void;
@@ -73,8 +77,8 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
     this.readyPromise = new Promise<void>((resolve, reject) => { this.readyResolve = resolve; this.readyReject = reject; });
     void this.completion.catch(() => undefined);
     void this.readyPromise.catch(() => undefined);
-    this.stdout = new Readable({ read() {}, highWaterMark: 64 * 1024 });
-    this.stderr = new Readable({ read() {}, highWaterMark: 64 * 1024 });
+    this.stdout = new Readable({ read: () => { queueMicrotask(() => this.maybeAcknowledgeData()); }, highWaterMark: 64 * 1024 });
+    this.stderr = new Readable({ read: () => { queueMicrotask(() => this.maybeAcknowledgeData()); }, highWaterMark: 64 * 1024 });
     this.stdin = new Writable({
       write: (chunk: Buffer, _encoding, done) => { void this.writeBytes(Buffer.from(chunk), false).then(() => done(), (error: unknown) => done(asError(error))); },
       final: (done) => { void this.writeBytes(Buffer.alloc(0), true).then(() => done(), (error: unknown) => done(asError(error))); },
@@ -97,12 +101,28 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
   get snapshot(): KernelProcessSnapshot { return { ...this.current }; }
 
   async start(): Promise<void> {
-    if (!this.polling) { this.polling = true; void this.poll(); }
+    this.subscriptionStart ??= this.startSubscription();
+    await this.subscriptionStart;
     return this.readyPromise;
+  }
+  private async startSubscription(): Promise<void> {
+    try {
+      const subscription = await this.scoped.processSubscribe({ ...this.address, cursor: this.cursor }, (event, acknowledge) => this.receive(event, acknowledge));
+      this.subscription = subscription;
+      void subscription.closed.catch((error: unknown) => this.invalidate(asError(error)));
+      if (this.closed || this.lost) await subscription.close().catch((error: unknown) => this.reportError(asError(error)));
+    } catch (error) { this.invalidate(asError(error)); throw error; }
+  }
+  private wakeInput(): void {
+    for (const resolve of this.inputWaiters) resolve();
+    this.inputWaiters.clear();
   }
   invalidate(error: Error): void {
     if (this.closed || this.lost || this.exitConfirmed) return;
     this.lost = error;
+    this.wakeInput();
+    this.pendingDataAck = null;
+    void this.subscription?.close().catch((failure: unknown) => this.reportError(asError(failure)));
     const stopped = !this.current.writerActive;
     if (!stopped) {
       this.current = { ...this.current, status: "unknown", writerActive: true, reason: "Native process connection was lost; exit is unconfirmed" };
@@ -123,76 +143,80 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
     }
     // Without prior tree evidence there is no synthetic exit/close or writer release.
   }
-  private async poll(): Promise<void> {
+  private receive(event: KernelProcessStreamEvent, acknowledge: () => Promise<void>): void {
+    if (this.closed || this.lost) return;
     try {
-      while (!this.closed && !this.lost) {
-        const result = await this.scoped.processRead({ ...this.address, cursor: this.cursor });
+      if (event.stream === "closed") throw new Error(event.error ?? "Native process subscription closed");
+      const result = event.result;
+      if (!result || !Array.isArray(result.chunks) || !Number.isSafeInteger(result.endCursor) || !Number.isSafeInteger(result.nextCursor)
+        || result.endCursor < 0 || result.nextCursor < 0 || !Number.isSafeInteger(result.inputSequence) || result.inputSequence < -1
+        || (result.inputError !== null && typeof result.inputError !== "string") || typeof result.outputComplete !== "boolean"
+        || (result.outputError !== null && typeof result.outputError !== "string")) throw new Error("Native process stream result is malformed");
+      this.endCursor = Math.max(this.endCursor, result.endCursor);
+      if (event.stream === "control") {
+        if (result.chunks.length !== 0) throw new Error("Native control event included output bytes");
         validateSnapshot(result.process, this.address, this.epoch);
         this.current = result.process;
         this.acknowledgedInput = result.inputSequence;
         this.inputError = result.inputError;
-        if (typeof result.outputComplete !== "boolean" || (result.outputError !== null && typeof result.outputError !== "string")) {
-          throw new Error("Native process output completion state is invalid");
-        }
+        this.outputComplete = result.outputComplete;
         if (result.outputError !== null && this.outputFailure === null) {
-          this.outputFailure = new Error(result.outputError);
-          this.emit("error", this.outputFailure);
+          this.outputFailure = new Error(result.outputError); this.emit("error", this.outputFailure);
         }
-        if (!this.ready && this.current.pid !== null) {
-          this.ready = true;
-          this.readyResolve();
-          // Let a newly returned handle install its protocol/output listeners.
-          await pause(0);
-        }
-        if (!this.current.writerActive && !this.ready) {
-          const error = new Error(this.current.reason ?? "Native process failed to start");
-          this.readyReject(error);
-        }
-        const capacity = this.ignoreOutput || (this.stdout.readableLength < 128 * 1024 && this.stderr.readableLength < 128 * 1024);
-        if (capacity) {
-          for (const chunk of result.chunks) {
-            if (chunk.offset !== this.cursor || (chunk.channel !== "stdout" && chunk.channel !== "stderr")) throw new Error("Native output cursor or channel is invalid");
-            const bytes = Buffer.from(chunk.bytesBase64, "base64");
-            this.cursor += bytes.length;
-            if (!this.ignoreOutput) (chunk.channel === "stdout" ? this.stdout : this.stderr).push(bytes);
-          }
-          if (this.cursor !== result.nextCursor) throw new Error("Native process output cursor did not match its bytes");
-        }
-        if (!this.current.writerActive && this.cursor === result.endCursor && (result.outputComplete || this.outputFailure !== null)) {
-          this.finishing = true;
-          this.stdout.push(null);
-          this.stderr.push(null);
-          this.emit("exit", this.exitCode, this.signalCode);
-          // Native exit and cleanup are distinct facts. A failed catalog release
-          // must neither lose the handle nor suppress close for real consumers.
-          await this.release().catch((error: unknown) => this.reportError(asError(error)));
-          this.closed = true;
-          this.emit("close", this.exitCode, this.signalCode);
-          if (this.outputFailure) this.rejectCompletion(this.outputFailure);
-          else this.resolveCompletion();
-          return;
-        }
+        if (!this.ready && this.current.pid !== null) { this.ready = true; this.readyResolve(); }
+        if (!this.current.writerActive && !this.ready) this.readyReject(new Error(this.current.reason ?? "Native process failed to start"));
+        this.wakeInput();
+        // Control credit is independent of Readable capacity and data acknowledgement.
+        void acknowledge().catch((error: unknown) => this.invalidate(asError(error)));
         if (this.current.status === "unknown") throw new Error(this.current.reason ?? "Native process exit remains unknown");
-        await pause(result.chunks.length > 0 && capacity ? 0 : 10);
+      } else {
+        if (this.pendingDataAck !== null) throw new Error("Native process exceeded its data credit");
+        if (result.nextCursor <= this.cursor) throw new Error("Native process data stream made no progress");
+        for (const chunk of result.chunks) {
+          if (chunk.offset !== this.cursor || (chunk.channel !== "stdout" && chunk.channel !== "stderr")) throw new Error("Native output cursor or channel is invalid");
+          const bytes = Buffer.from(chunk.bytesBase64, "base64");
+          this.cursor += bytes.length;
+          if (!this.ignoreOutput) (chunk.channel === "stdout" ? this.stdout : this.stderr).push(bytes);
+        }
+        if (this.cursor !== result.nextCursor) throw new Error("Native process output cursor did not match its bytes");
+        this.pendingDataAck = acknowledge;
+        this.maybeAcknowledgeData();
       }
-    } catch (error) {
-      if (this.exitConfirmed) { this.reportError(asError(error)); this.rejectCompletion(asError(error)); }
-      else this.invalidate(asError(error));
-    }
+      this.maybeFinish();
+    } catch (error) { this.invalidate(asError(error)); }
+  }
+  private maybeAcknowledgeData(): void {
+    if (this.closed || this.lost || this.pendingDataAck === null) return;
+    if (!this.ignoreOutput && (this.stdout.readableLength >= 128 * 1024 || this.stderr.readableLength >= 128 * 1024)) return;
+    const acknowledge = this.pendingDataAck; this.pendingDataAck = null;
+    void acknowledge().catch((error: unknown) => this.invalidate(asError(error)));
+  }
+  private maybeFinish(): void {
+    if (this.finishing || this.closed || this.lost || this.current.writerActive || this.cursor !== this.endCursor
+      || (!this.outputComplete && this.outputFailure === null)) return;
+    this.finishing = true; this.pendingDataAck = null; this.wakeInput();
+    this.stdout.push(null); this.stderr.push(null);
+    this.emit("exit", this.exitCode, this.signalCode);
+    void (async () => {
+      await this.subscription?.close().catch((error: unknown) => this.reportError(asError(error)));
+      await this.release().catch((error: unknown) => this.reportError(asError(error)));
+      this.closed = true; this.emit("close", this.exitCode, this.signalCode);
+      if (this.outputFailure) this.rejectCompletion(this.outputFailure); else this.resolveCompletion();
+    })();
   }
   private async writeBytes(bytes: Buffer, eof: boolean): Promise<void> {
     await this.readyPromise;
     for (let offset = 0; offset < bytes.length || (eof && offset === 0); offset += 64 * 1024) {
       if (this.lost) throw this.lost;
-      if (this.finishing || this.stopRequested) throw new Error("Native process input is closed");
+      if (this.finishing || this.stopRequested || !this.current.writerActive) throw new Error("Native process input is closed");
       const sequence = this.inputSequence;
       const chunk = bytes.subarray(offset, offset + 64 * 1024);
       await this.scoped.processWrite({ ...this.address, sequence, bytesBase64: chunk.toString("base64"), ...(eof ? { eof: true } : {}) });
       this.inputSequence += 1;
       while (this.acknowledgedInput < sequence) {
         if (this.lost) throw this.lost;
-        if (this.finishing || this.closed || this.stopRequested) throw new Error("Native process input closed before acknowledging stdin");
-        await pause(5);
+        if (this.finishing || this.closed || this.stopRequested || !this.current.writerActive) throw new Error("Native process input closed before acknowledging stdin");
+        await new Promise<void>(resolve => { this.inputWaiters.add(resolve); });
       }
       if (this.inputError) throw new Error(this.inputError);
       if (eof) break;
@@ -209,6 +233,7 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
     if (this.exitConfirmed) return;
     await this.scoped.processKill({ ...this.address, force });
     this.stopRequested = true;
+    this.wakeInput();
   }
   async resize(cols: number, rows: number): Promise<void> {
     if (this.lost) throw this.lost;

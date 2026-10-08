@@ -11,6 +11,8 @@ use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
+    #[error("new user input is waiting at this execution boundary")]
+    InputPending,
     #[error("catalog I/O: {0}")]
     Io(#[from] std::io::Error),
     #[error("catalog storage: {0}")]
@@ -111,7 +113,7 @@ impl Catalog {
         owner
             .try_lock_exclusive()
             .map_err(|e| RuntimeError::Conflict(format!("runtime already owned: {e}")))?;
-        let db = Connection::open(root.as_ref().join("conversation.sqlite"))?;
+        let mut db = Connection::open(root.as_ref().join("conversation.sqlite"))?;
         db.pragma_update(None, "foreign_keys", true)?;
         let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
         if version != 0 && version != 1 {
@@ -130,6 +132,7 @@ impl Catalog {
         if version == 0 {
             db.execute_batch(SCHEMA)?;
         }
+        inputs::initialize(&mut db)?;
         let epoch: u64 = db.query_row(
             "UPDATE runtime_meta SET epoch=epoch+1 WHERE id=1 RETURNING epoch",
             [],
@@ -273,6 +276,8 @@ impl Catalog {
             return Err(RuntimeError::Conflict("run revision/state changed".into()));
         }
         if next.terminal() {
+            if matches!(next,RunState::Completed|RunState::Failed)&&inputs::has_boundary_inputs(&tx,id)?{return Err(RuntimeError::InputPending);}
+
             let mut stmt = tx.prepare("SELECT body FROM operations WHERE run_id=?1")?;
             for raw in stmt.query_map([id], |r| r.get::<_, String>(0))? {
                 let op: Operation = serde_json::from_str(&raw?)?;
@@ -299,6 +304,8 @@ impl Catalog {
                 "UPDATE branches SET active_run=NULL WHERE active_run=?1",
                 [id],
             )?;
+            if next==RunState::Cancelled{inputs::cancel_current(&tx,id)?;}
+            inputs::promote_next(&tx,&run.branch_id)?;
         }
         event(
             &tx,
@@ -618,6 +625,7 @@ impl Catalog {
             return Err(RuntimeError::Conflict("model step identity reused".into()));
         }
         let step = ModelStep {
+                    superseded_by_input:None,
             id: key.into(),
             run_id: run_id.into(),
             epoch,
@@ -1019,3 +1027,6 @@ mod tests;
 
 #[path="catalog_execution.rs"]
 mod execution_persistence;
+
+#[path="catalog_inputs.rs"]
+pub mod inputs;

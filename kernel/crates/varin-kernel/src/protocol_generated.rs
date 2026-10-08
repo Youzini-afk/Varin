@@ -13,6 +13,44 @@ pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeInputEnqueueParams {
+    pub(crate) key: String,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) mode: varin_runtime::InputMode,
+    pub(crate) input: Value,
+    pub(crate) configuration: Option<Value>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeInputEditParams {
+    pub(crate) input_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) content: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeInputCancelParams {
+    pub(crate) input_id: String,
+    pub(crate) expected_revision: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeInputHandleParams {
+    pub(crate) input_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeHistoryParams {
+    pub(crate) branch_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeRunStartParams {
     pub(crate) run_id: String,
     pub(crate) tool_binding: Option<Value>,
@@ -54,15 +92,32 @@ pub(crate) struct NativeOperationParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeHistoryParams {
-    pub(crate) branch_id: String,
+pub(crate) struct NativeEventsParams {
+    pub(crate) cursor: i64,
+    pub(crate) limit: i64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeEventsParams {
+pub(crate) struct KernelProcessSubscribeParams {
+    pub(crate) workspace_id: String,
+    pub(crate) process_id: String,
+    pub(crate) subscription_id: String,
     pub(crate) cursor: i64,
-    pub(crate) limit: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelProcessSubscriptionAckParams {
+    pub(crate) subscription_id: String,
+    pub(crate) stream: String,
+    pub(crate) sequence: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelProcessSubscriptionParams {
+    pub(crate) subscription_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1208,6 +1263,25 @@ pub(crate) struct KernelVerificationInputIdentity {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.input.enqueue" => {
+            serde_json::from_value::<NativeInputEnqueueParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.input.edit" => serde_json::from_value::<NativeInputEditParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.input.cancel" => serde_json::from_value::<NativeInputCancelParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.input.inspect" => {
+            serde_json::from_value::<NativeInputHandleParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.input.list" => serde_json::from_value::<NativeHistoryParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.run.start" => serde_json::from_value::<NativeRunStartParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -1244,6 +1318,21 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.events.read" => serde_json::from_value::<NativeEventsParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "process.subscribe" => {
+            serde_json::from_value::<KernelProcessSubscribeParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "process.subscription.ack" => {
+            serde_json::from_value::<KernelProcessSubscriptionAckParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "process.subscription.unsubscribe" => {
+            serde_json::from_value::<KernelProcessSubscriptionParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "process.spawn" => serde_json::from_value::<KernelProcessSpawnParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

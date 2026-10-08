@@ -2,6 +2,7 @@
 //! are private instances of this executable, not Host/Pi processes or authorities.
 //! The kernel owns grants, durable identities, admission and raw byte cursors.
 pub(crate) mod platform;
+pub(crate) mod subscriptions;
 pub(crate) mod worker;
 use crate::{
     error::KernelError,
@@ -18,7 +19,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{
         mpsc::{self, SyncSender},
-        Arc, Mutex, Weak,
+        Arc, Condvar, Mutex, Weak,
     },
     thread,
     time::{Duration, Instant},
@@ -53,6 +54,8 @@ struct Buffer {
 }
 struct Shared {
     buffer: Mutex<Buffer>,
+    changed: Condvar,
+    publication: Mutex<()>,
 }
 impl Shared {
     fn new() -> Self {
@@ -62,6 +65,8 @@ impl Shared {
                 queued_sequence: -1,
                 ..Buffer::default()
             }),
+            changed: Condvar::new(),
+            publication: Mutex::new(()),
         }
     }
     fn lock(&self) -> std::sync::MutexGuard<'_, Buffer> {
@@ -228,11 +233,25 @@ struct LiveProcess {
     guardian_exited: bool,
     output_path: PathBuf,
 }
+#[derive(Clone)]
+struct OutputHandle {
+    shared: Arc<Shared>,
+    output_path: PathBuf,
+    cursor: Arc<Mutex<SpoolCursor>>,
+}
+#[derive(Clone, Default)]
+struct SpoolCursor {
+    base: u64,
+    read_position: u64,
+    frame_start: u64,
+}
 #[derive(Default)]
 pub(crate) struct ProcessManager {
+    outputs: HashMap<String, OutputHandle>,
     live: HashMap<String, LiveProcess>,
     terminal: Option<mpsc::Sender<ProcessTerminal>>,
     controls: ProcessControlRegistry,
+    subscriptions: Option<subscriptions::ProcessSubscriptions>,
 }
 fn failure(message: impl Into<String>) -> KernelError {
     KernelError::Operation(message.into())
@@ -245,6 +264,9 @@ pub(crate) fn receipt_path(root: &Path, process_id: &str) -> PathBuf {
 }
 pub(crate) fn output_path(root: &Path, process_id: &str) -> PathBuf {
     receipt_path(root, process_id).with_extension("output")
+}
+pub(crate) fn output_marker_path(root: &Path, process_id: &str) -> PathBuf {
+    receipt_path(root, process_id).with_extension("output.complete")
 }
 pub(crate) fn job_name(root: &Path, process_id: &str) -> String {
     format!(
@@ -275,8 +297,134 @@ pub(crate) fn read_receipt(
     Ok(Some(value))
 }
 impl ProcessManager {
+    pub(crate) fn set_subscriptions(&mut self, subscriptions: subscriptions::ProcessSubscriptions) {
+        self.subscriptions = Some(subscriptions);
+    }
+    pub(crate) fn subscribe(
+        &self,
+        id: &str,
+        process_id: &str,
+        grant_id: &str,
+        epoch: &str,
+        cursor: u64,
+        snapshot: Value,
+    ) -> Result<Value, KernelError> {
+        let output = self
+            .outputs
+            .get(process_id)
+            .ok_or_else(|| failure("process output storage unavailable"))?
+            .clone();
+        self.subscriptions
+            .as_ref()
+            .ok_or_else(|| failure("process subscriptions are unavailable"))?
+            .subscribe(
+                id,
+                process_id,
+                grant_id,
+                epoch,
+                cursor,
+                snapshot,
+                output,
+                self.live.contains_key(process_id),
+            )
+    }
     pub(crate) fn set_controls(&mut self, controls: ProcessControlRegistry) {
         self.controls = controls;
+    }
+    /// Reopen retained log bytes only. A complete log is not evidence that a process tree stopped.
+    pub(crate) fn restore_output(
+        &mut self,
+        root: &Path,
+        id: &str,
+        epoch: &str,
+    ) -> Result<Value, KernelError> {
+        if !self.outputs.contains_key(id) {
+            let path = output_path(root, id);
+            let mut file = match File::open(&path) {
+                Ok(file) => file,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    return Ok(
+                        json!({"outputAvailable":false,"outputComplete":false,"outputError":"retained process output is missing"}),
+                    );
+                }
+                Err(error) => return Err(error.into()),
+            };
+            let length = file.metadata()?.len();
+            let mut position = 0u64;
+            let mut end = 0u64;
+            let mut truncated = false;
+            while position < length {
+                if length - position < 5 {
+                    truncated = true;
+                    break;
+                }
+                file.seek(SeekFrom::Start(position))?;
+                let mut header = [0u8; 5];
+                file.read_exact(&mut header)?;
+                let count = u32::from_le_bytes(header[..4].try_into().expect("header")) as u64;
+                if count == 0 || count > CHUNK_BYTES as u64 || !matches!(header[4], 1 | 2) {
+                    return Err(failure("retained output frame is corrupt"));
+                }
+                if length - position - 5 < count {
+                    truncated = true;
+                    break;
+                }
+                end = end
+                    .checked_add(count)
+                    .ok_or_else(|| failure("retained output cursor overflow"))?;
+                position += 5 + count;
+            }
+            let marker = match std::fs::read(output_marker_path(root, id)) {
+                Ok(bytes) => Some(serde_json::from_slice::<Value>(&bytes)?),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error.into()),
+            };
+            let complete = if let Some(marker) = marker {
+                if truncated
+                    || marker["processId"].as_str() != Some(id)
+                    || marker["kernelEpoch"].as_str() != Some(epoch)
+                    || marker["fileBytes"].as_u64() != Some(length)
+                    || marker["endCursor"].as_u64() != Some(end)
+                    || marker["complete"].as_bool() != Some(true)
+                {
+                    return Err(failure(
+                        "retained output completion marker is corrupt or mismatched",
+                    ));
+                }
+                true
+            } else {
+                false
+            };
+            let shared = Arc::new(Shared::new());
+            {
+                let mut buffer = shared.lock();
+                buffer.end = end;
+                buffer.file_end = position;
+                buffer.output_closed = true;
+                if !complete {
+                    buffer.output_error = Some(
+                        if truncated {
+                            "process output capture was interrupted in a frame"
+                        } else {
+                            "process output capture ended without a durable completion marker"
+                        }
+                        .into(),
+                    );
+                }
+            }
+            self.outputs.insert(
+                id.into(),
+                OutputHandle {
+                    shared,
+                    output_path: path,
+                    cursor: Arc::new(Mutex::new(SpoolCursor::default())),
+                },
+            );
+        }
+        let buffer = self.outputs.get(id).expect("restored output").shared.lock();
+        Ok(
+            json!({"outputAvailable":true,"outputComplete":buffer.output_closed&&buffer.output_error.is_none(),"outputError":buffer.output_error}),
+        )
     }
     pub(crate) fn set_terminal_sender(&mut self, terminal: mpsc::Sender<ProcessTerminal>) {
         self.terminal = Some(terminal);
@@ -354,6 +502,9 @@ impl ProcessManager {
             .ok_or_else(|| failure("kernel epoch missing"))?
             .to_string();
         let terminal = self.terminal.clone();
+        let data_process_id = process_id.clone();
+        let data_epoch = kernel_epoch.clone();
+        let marker_path = spool_path.with_extension("output.complete");
         let shared = Arc::new(Shared::new());
         let (input, input_rx) = mpsc::sync_channel::<Value>(4);
         let guardian = Arc::new(Mutex::new(guardian));
@@ -389,6 +540,7 @@ impl ProcessManager {
             if result.is_err() {
                 writer_shared.lock().control_error =
                     Some("native process control pipe closed".into());
+                writer_shared.changed.notify_all();
             }
             // Dropping stdin triggers the guardian's EOF cleanup, even on Host loss.
         });
@@ -441,6 +593,7 @@ impl ProcessManager {
                         }
                         _ => return Err(io::Error::other("invalid native control event")),
                     }
+                    reader_shared.changed.notify_all();
                 }
                 Ok(())
             })();
@@ -451,6 +604,7 @@ impl ProcessManager {
                         Some("native control stream ended without a complete frame".into());
                 }
                 buffer.closed = true;
+                reader_shared.changed.notify_all();
             }
             if !terminal_sent {
                 if let Some(sender) = &terminal {
@@ -458,6 +612,13 @@ impl ProcessManager {
                     process_id:process_id.clone(), kernel_epoch:kernel_epoch.clone(),
                     receipt:json!({"processId":process_id,"kernelEpoch":kernel_epoch,"status":"unknown",
                         "treeConfirmed":false,"reason":"guardian control closed without a terminal receipt"}) });
+                }
+            }
+            if result.is_ok() {
+                // Only normal EOF from this trusted guardian means its stdout owner exited.
+                // Reap the same Child here; native callback users need not poll observation.
+                if let Ok(mut guardian) = reader_control.guardian.lock() {
+                    let _ = guardian.wait();
                 }
             }
         });
@@ -495,9 +656,40 @@ impl ProcessManager {
                         .checked_add(bytes.len() as u64)
                         .ok_or_else(|| io::Error::other("process output cursor overflow"))?;
                     buffer.file_end = position;
+                    data_shared.changed.notify_all();
                 }
-                spool.sync_data()
+                spool.sync_data()?;
+                let (end, file_end, discarded) = {
+                    let buffer = data_shared.lock();
+                    (buffer.end, buffer.file_end, buffer.discard)
+                };
+                let _publication = data_shared
+                    .publication
+                    .lock()
+                    .map_err(|_| io::Error::other("output publication poisoned"))?;
+                let released = data_shared.lock().discard;
+                if !discarded && !released {
+                    let temporary = marker_path.with_extension("complete.tmp");
+                    let mut marker = File::create(&temporary)?;
+                    marker.write_all(
+                        serde_json::to_string(
+                            &json!({"processId":data_process_id,"kernelEpoch":data_epoch,
+                        "endCursor":end,"fileBytes":file_end,"complete":true}),
+                        )?
+                        .as_bytes(),
+                    )?;
+                    marker.sync_all()?;
+                    drop(marker);
+                    crate::storage::durable_rename(&temporary, &marker_path)?;
+                    if let Some(parent) = marker_path.parent() {
+                        crate::storage::sync_directory(parent)?;
+                    }
+                }
+                Ok(())
             })();
+            if result.is_err() {
+                let _ = std::fs::remove_file(marker_path.with_extension("complete.tmp"));
+            }
             let mut buffer = data_shared.lock();
             if let Err(error) = result {
                 buffer.output_error = Some(format!(
@@ -505,9 +697,18 @@ impl ProcessManager {
                 ));
             }
             buffer.output_closed = true;
+            data_shared.changed.notify_all();
             // Closing a failed data pipe makes guardian readers request stopping and drain/discard
             // remaining target output. No successful complete-log claim is made.
         });
+        self.outputs.insert(
+            id.into(),
+            OutputHandle {
+                shared: shared.clone(),
+                output_path: spool_path.clone(),
+                cursor: Arc::new(Mutex::new(SpoolCursor::default())),
+            },
+        );
         self.live.insert(
             id.into(),
             LiveProcess {
@@ -581,90 +782,15 @@ impl ProcessManager {
         cursor: u64,
         limit: usize,
     ) -> Result<Value, KernelError> {
-        let live = self
-            .live
-            .get_mut(id)
-            .ok_or_else(|| failure("process stream belongs to an unavailable kernel epoch"))?;
-        let (
-            base,
-            end,
-            mut position,
-            mut frame_start,
-            file_end,
-            input_sequence,
-            input_error,
-            output_error,
-            output_complete,
-        ) = {
-            let buffer = live.shared.lock();
-            (
-                buffer.base,
-                buffer.end,
-                buffer.read_position,
-                buffer.frame_start,
-                buffer.file_end,
-                buffer.input_sequence,
-                buffer.input_error.clone(),
-                buffer.output_error.clone(),
-                buffer.output_closed && buffer.output_error.is_none(),
-            )
-        };
-        if cursor < base || cursor > end {
-            return Err(failure("process output cursor is outside retained bytes"));
-        }
-        let mut file = File::open(&live.output_path)?;
-        let header = |file: &mut File,
-                      position: u64|
-         -> Result<(usize, &'static str), KernelError> {
-            file.seek(SeekFrom::Start(position))?;
-            let mut header = [0u8; 5];
-            file.read_exact(&mut header)?;
-            let length = u32::from_le_bytes(header[..4].try_into().expect("fixed header")) as usize;
-            if length == 0 || length > CHUNK_BYTES {
-                return Err(failure("invalid process output storage frame"));
-            }
-            let channel = match header[4] {
-                1 => "stdout",
-                2 => "stderr",
-                _ => return Err(failure("invalid stored output channel")),
-            };
-            Ok((length, channel))
-        };
-        while frame_start < cursor {
-            let (length, _) = header(&mut file, position)?;
-            if frame_start + length as u64 > cursor {
-                break;
-            }
-            position += 5 + length as u64;
-            frame_start += length as u64;
-        }
-        {
-            let mut buffer = live.shared.lock();
-            buffer.base = cursor;
-            buffer.read_position = position;
-            buffer.frame_start = frame_start;
-        }
-        let mut chunks = Vec::new();
-        let mut remaining = limit;
-        let mut next = cursor;
-        while remaining > 0 && next < end && position < file_end {
-            let (length, channel) = header(&mut file, position)?;
-            let skip = (next - frame_start) as usize;
-            let count = remaining.min(length - skip);
-            file.seek(SeekFrom::Start(position + 5 + skip as u64))?;
-            let mut bytes = vec![0u8; count];
-            file.read_exact(&mut bytes)?;
-            chunks
-                .push(json!({"channel":channel,"offset":next,"bytesBase64":BASE64.encode(bytes)}));
-            next += count as u64;
-            remaining -= count;
-            if skip + count == length {
-                position += 5 + length as u64;
-                frame_start += length as u64;
-            }
-        }
-        Ok(json!({"chunks":chunks,"nextCursor":next,"endCursor":end,
-            "inputSequence":input_sequence,"inputError":input_error,"outputError":output_error,"outputComplete":output_complete}))
+        let output = self
+            .outputs
+            .get(id)
+            .ok_or_else(|| failure("process output storage unavailable"))?;
+        let mut state = output
+            .cursor
+            .lock()
+            .map_err(|_| failure("output cursor poisoned"))?;
+        read_output(output, &mut state, cursor, limit)
     }
     pub(crate) fn write(
         &mut self,
@@ -734,11 +860,35 @@ impl ProcessManager {
         };
         Ok(json!({"requested":requested,"exited":live.control.stopped()}))
     }
-    pub(crate) fn release(&mut self, id: &str) {
+    pub(crate) fn release(
+        &mut self,
+        id: &str,
+        cleanup: impl FnOnce() -> Result<(), KernelError>,
+    ) -> Result<(), KernelError> {
+        let shared = self.outputs.get(id).map(|output| output.shared.clone());
+        // Publication is separate from the control-state mutex. Cleanup cannot return while
+        // a writer can still resurrect a completion marker, and control/terminal stays live.
+        let _publication = shared
+            .as_ref()
+            .map(|shared| {
+                shared
+                    .publication
+                    .lock()
+                    .map_err(|_| failure("output publication poisoned"))
+            })
+            .transpose()?;
         self.controls.release(id);
+        if let Some(subscriptions) = &self.subscriptions {
+            subscriptions.close_process(id, "process output released");
+        }
+        self.outputs.remove(id);
         if let Some(live) = self.live.remove(id) {
             live.shared.lock().discard = true;
         }
+        if let Some(shared) = shared.as_ref() {
+            shared.lock().discard = true;
+        }
+        cleanup()
     }
     pub(crate) fn shutdown(&mut self) -> Result<(), KernelError> {
         for live in self.live.values_mut() {
@@ -779,4 +929,86 @@ impl Drop for ProcessManager {
     fn drop(&mut self) {
         let _ = self.shutdown();
     }
+}
+
+fn read_output(
+    live: &OutputHandle,
+    cursor_state: &mut SpoolCursor,
+    cursor: u64,
+    limit: usize,
+) -> Result<Value, KernelError> {
+    let (
+        base,
+        end,
+        mut position,
+        mut frame_start,
+        file_end,
+        input_sequence,
+        input_error,
+        output_error,
+        output_complete,
+    ) = {
+        let buffer = live.shared.lock();
+        (
+            cursor_state.base,
+            buffer.end,
+            cursor_state.read_position,
+            cursor_state.frame_start,
+            buffer.file_end,
+            buffer.input_sequence,
+            buffer.input_error.clone(),
+            buffer.output_error.clone(),
+            buffer.output_closed && buffer.output_error.is_none(),
+        )
+    };
+    if cursor < base || cursor > end {
+        return Err(failure("process output cursor is outside retained bytes"));
+    }
+    let mut file = File::open(&live.output_path)?;
+    let header = |file: &mut File, position: u64| -> Result<(usize, &'static str), KernelError> {
+        file.seek(SeekFrom::Start(position))?;
+        let mut header = [0u8; 5];
+        file.read_exact(&mut header)?;
+        let length = u32::from_le_bytes(header[..4].try_into().expect("fixed header")) as usize;
+        if length == 0 || length > CHUNK_BYTES {
+            return Err(failure("invalid process output storage frame"));
+        }
+        let channel = match header[4] {
+            1 => "stdout",
+            2 => "stderr",
+            _ => return Err(failure("invalid stored output channel")),
+        };
+        Ok((length, channel))
+    };
+    while frame_start < cursor {
+        let (length, _) = header(&mut file, position)?;
+        if frame_start + length as u64 > cursor {
+            break;
+        }
+        position += 5 + length as u64;
+        frame_start += length as u64;
+    }
+    cursor_state.base = cursor;
+    cursor_state.read_position = position;
+    cursor_state.frame_start = frame_start;
+    let mut chunks = Vec::new();
+    let mut remaining = limit;
+    let mut next = cursor;
+    while remaining > 0 && next < end && position < file_end {
+        let (length, channel) = header(&mut file, position)?;
+        let skip = (next - frame_start) as usize;
+        let count = remaining.min(length - skip);
+        file.seek(SeekFrom::Start(position + 5 + skip as u64))?;
+        let mut bytes = vec![0u8; count];
+        file.read_exact(&mut bytes)?;
+        chunks.push(json!({"channel":channel,"offset":next,"bytesBase64":BASE64.encode(bytes)}));
+        next += count as u64;
+        remaining -= count;
+        if skip + count == length {
+            position += 5 + length as u64;
+            frame_start += length as u64;
+        }
+    }
+    Ok(json!({"chunks":chunks,"nextCursor":next,"endCursor":end,
+            "inputSequence":input_sequence,"inputError":input_error,"outputError":output_error,"outputComplete":output_complete}))
 }

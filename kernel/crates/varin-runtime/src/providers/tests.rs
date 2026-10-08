@@ -49,6 +49,7 @@ fn view(family: &str) -> RequestView {
         run_id: "run".into(),
         step: 1,
         binding: RequestBinding {
+            connection_identity: "fixture-connection".into(),
             provider_family: family.into(),
             model: "model".into(),
             credential_ref: Some("test-ref".into()),
@@ -605,4 +606,445 @@ fn azure_keeps_query_deployment_header_and_distinct_opaque_family() {
         azure::AzureResponsesProvider::new(conflicting, "deployment", "2025-04-01-preview")
             .is_err()
     );
+}
+
+#[test]
+fn google_signed_parts_replay_in_place_and_optional_call_ids_pair_by_name() {
+    let text = json!({"text":"context","thoughtSignature":"text-signature"});
+    let call = json!({"functionCall":{"name":"read","args":{"path":"x"}},"thoughtSignature":"call-signature"});
+    let p=google::GoogleProvider::new(connection(vec![json!({"responseId":"g","candidates":[{"index":0,"content":{"role":"model","parts":[text,call]}}]}),json!({"responseId":"g","candidates":[{"index":0,"finishReason":"STOP"}]}),json!({"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":4,"thoughtsTokenCount":2,"cachedContentTokenCount":3}})],1)).unwrap();
+    let (result, events) = generate(&p, google::FAMILY);
+    assert_eq!(result.unwrap(), FinishReason::ToolCalls);
+    assert!(events.iter().any(|e|matches!(e,ProviderEvent::Usage{receipt} if receipt.output_tokens==Some(6)&&receipt.reasoning_tokens==Some(2))));
+    let items: Vec<_> = events
+        .into_iter()
+        .filter_map(|e| {
+            if let ProviderEvent::ItemCompleted { item } = e {
+                Some(item)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let call_id = items
+        .iter()
+        .find_map(|i| {
+            if let Content::ToolCall { call } = &i.content {
+                Some(call.call_id.clone())
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    let mut v = view(google::FAMILY);
+    v.history = items
+        .into_iter()
+        .map(|i| ConversationItem {
+            id: i.id,
+            provenance: Provenance::Assistant,
+            content: i.content,
+            opaque: i.opaque,
+        })
+        .collect();
+    v.history.push(ConversationItem {
+        id: "result".into(),
+        provenance: Provenance::ToolData {
+            call_id: call_id.clone(),
+        },
+        content: Content::ToolResult {
+            result: ToolResult {
+                request_id: "request".into(),
+                call_id,
+                completion: ToolCompletion::Result {
+                    outcome: crate::Outcome::Succeeded,
+                    effect: crate::Effect::None,
+                    content: json!("bytes"),
+                },
+            },
+        },
+        opaque: None,
+    });
+    let replay = p.serialize(&v).unwrap();
+    assert_eq!(replay["contents"][0]["parts"][0], text);
+    assert_eq!(replay["contents"][0]["parts"][1], call);
+    let response = &replay["contents"][1]["parts"][0]["functionResponse"];
+    assert_eq!(response["name"], "read");
+    assert!(response.get("id").is_none());
+    v.binding.model = "another-model".into();
+    assert!(!p
+        .serialize(&v)
+        .unwrap()
+        .to_string()
+        .contains("thoughtSignature"));
+    let vertex = google::GoogleProvider::vertex(connection(vec![], 1)).unwrap();
+    v.binding.provider_family = google::VERTEX_FAMILY.into();
+    assert!(!vertex
+        .serialize(&v)
+        .unwrap()
+        .to_string()
+        .contains("thoughtSignature"));
+}
+#[test]
+fn google_requires_terminal_evidence_and_rejects_partial_functions() {
+    let p = google::GoogleProvider::new(connection(
+        vec![json!({"candidates":[{"content":{"role":"model","parts":[{"text":"partial"}]}}]})],
+        1,
+    ))
+    .unwrap();
+    assert_eq!(
+        generate(&p, google::FAMILY).0.unwrap_err().code,
+        "stream_interrupted"
+    );
+    let p = google::GoogleProvider::new(connection(
+        vec![json!({"promptFeedback":{"blockReason":"SAFETY"}})],
+        1,
+    ))
+    .unwrap();
+    assert_eq!(
+        generate(&p, google::FAMILY).0.unwrap(),
+        FinishReason::ContentFilter
+    );
+    let p=google::GoogleProvider::new(connection(vec![json!({"candidates":[{"content":{"parts":[{"functionCall":{"name":"read","partialArgs":[{"jsonPath":"$.path","stringValue":"x"}]}}]},"finishReason":"STOP"}]})],1)).unwrap();
+    assert_eq!(
+        generate(&p, google::FAMILY).0.unwrap_err().code,
+        "unsupported_function_streaming"
+    );
+    let p = google::GoogleProvider::new(connection(
+        vec![json!({"candidates":[{"index":0},{"index":1}]})],
+        1,
+    ))
+    .unwrap();
+    assert!(generate(&p, google::FAMILY).0.is_err());
+}
+#[test]
+fn google_accepts_actual_http_eof_only_after_finish_reason() {
+    let data = format!(
+        "data: {}\n\n",
+        json!({"responseId":"g","candidates":[{"content":{"role":"model","parts":[{"text":"EOF answer"}]},"finishReason":"STOP"}]})
+    );
+    let response=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{data}",data.len());
+    let (endpoint, server) = loopback_response(response.into_bytes());
+    let p = google::GoogleProvider::new(Connection::new(
+        endpoint,
+        Arc::new(Credentials(AtomicUsize::new(0))),
+        Arc::new(NativeHttpTransport::new(|| {
+            reqwest::Client::builder().no_proxy()
+        })),
+    ))
+    .unwrap();
+    let (result, events) = generate(&p, google::FAMILY);
+    server.join().unwrap();
+    assert_eq!(result.unwrap(), FinishReason::Stop);
+    assert!(events.iter().any(|e|matches!(e,ProviderEvent::ItemCompleted{item} if matches!(&item.content,Content::Text{text} if text=="EOF answer"))));
+}
+
+#[test]
+fn same_protocol_other_connection_never_receives_opaque_history() {
+    let reasoning =
+        json!({"id":"reasoning","type":"reasoning","encrypted_content":"connection-owned"});
+    let message = json!({"id":"message","type":"message","content":[{"type":"output_text","text":"portable answer"}]});
+    let p = responses::ResponsesProvider::new(connection(
+        vec![json!({"type":"response.completed","response":{"output":[reasoning,message]}})],
+        1,
+    ));
+    let (_, events) = generate(&p, responses::FAMILY);
+    let mut v = view(responses::FAMILY);
+    v.history = events
+        .into_iter()
+        .filter_map(|e| {
+            if let ProviderEvent::ItemCompleted { item } = e {
+                Some(ConversationItem {
+                    id: item.id,
+                    provenance: Provenance::Assistant,
+                    content: item.content,
+                    opaque: item.opaque,
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(v
+        .history
+        .iter()
+        .all(|item| item.opaque.as_ref().unwrap().connection_identity
+            == v.binding.connection_identity));
+    assert!(p
+        .serialize(&v)
+        .unwrap()
+        .to_string()
+        .contains("connection-owned"));
+    v.binding.connection_identity = "different-tenant".into();
+    let changed = p.serialize(&v).unwrap().to_string();
+    assert!(!changed.contains("connection-owned"));
+    assert!(changed.contains("portable answer"));
+    v.binding.connection_identity.clear();
+    for item in &mut v.history {
+        item.opaque.as_mut().unwrap().connection_identity.clear();
+    }
+    let unidentified = p.serialize(&v).unwrap().to_string();
+    assert!(!unidentified.contains("connection-owned"));
+    assert!(unidentified.contains("portable answer"));
+}
+
+#[test]
+fn mistral_wire_id_collision_keeps_both_tool_result_pairs() {
+    let first = "original-nonstandard-call-id".to_string();
+    let second = mistral::derive_id(&first, 0);
+    let p = mistral::MistralProvider::new(connection(vec![], 1));
+    let mut v = view(mistral::FAMILY);
+    for id in [&first, &second] {
+        v.history.push(ConversationItem {
+            id: format!("item-{id}"),
+            provenance: Provenance::Assistant,
+            content: Content::ToolCall {
+                call: ToolCall {
+                    call_id: id.clone(),
+                    name: "read".into(),
+                    schema_version: "1".into(),
+                    arguments: json!({}),
+                },
+            },
+            opaque: None,
+        });
+    }
+    for id in [&first, &second] {
+        v.history.push(ConversationItem {
+            id: format!("result-{id}"),
+            provenance: Provenance::ToolData {
+                call_id: id.clone(),
+            },
+            content: Content::ToolResult {
+                result: ToolResult {
+                    request_id: "request".into(),
+                    call_id: id.clone(),
+                    completion: ToolCompletion::Result {
+                        outcome: crate::Outcome::Succeeded,
+                        effect: crate::Effect::None,
+                        content: json!("ok"),
+                    },
+                },
+            },
+            opaque: None,
+        });
+    }
+    let body = p.serialize(&v).unwrap();
+    let calls = body["messages"][0]["tool_calls"].as_array().unwrap();
+    let a = calls[0]["id"].as_str().unwrap();
+    let b = calls[1]["id"].as_str().unwrap();
+    assert_ne!(a, b);
+    for id in [a, b] {
+        assert_eq!(id.len(), 9);
+        assert!(id.bytes().all(|b| b.is_ascii_alphanumeric()));
+    }
+    assert_eq!(body["messages"][1]["tool_call_id"], a);
+    assert_eq!(body["messages"][2]["tool_call_id"], b);
+    assert_eq!(body["messages"][1]["name"], "read");
+}
+#[test]
+fn mistral_thinking_chunks_and_clean_eof_preserve_visible_text() {
+    let events = vec![
+        json!({"id":"mistral-1","choices":[{"index":0,"delta":{"role":"assistant","content":[{"type":"thinking","thinking":[{"type":"text","text":"first"}]}]},"finish_reason":null}]}),
+        json!({"id":"mistral-1","choices":[{"index":0,"delta":{"content":[{"type":"text","text":""},{"type":"thinking","thinking":[{"type":"text","text":"second"}]},{"type":"text","text":"visible"}]},"finish_reason":"stop"}]}),
+    ];
+    let p = mistral::MistralProvider::new(connection(events.clone(), 1));
+    let (result, output) = generate(&p, mistral::FAMILY);
+    assert_eq!(result.unwrap(), FinishReason::Stop);
+    let item = output
+        .into_iter()
+        .find_map(|e| {
+            if let ProviderEvent::ItemCompleted { item } = e {
+                Some(item)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert!(matches!(&item.content,Content::Text{text} if text=="visible"));
+    let raw = item.opaque.unwrap().value;
+    assert_eq!(raw["content"][0]["thinking"].as_array().unwrap().len(), 2);
+    assert_eq!(raw["content"][1]["text"], "visible");
+    let strict = chat::ChatProvider::new(chat_connection(
+        vec![
+            json!({"id":"strict","choices":[{"index":0,"delta":{"content":"visible"},"finish_reason":"stop"}]}),
+        ],
+        false,
+    ));
+    assert_eq!(
+        generate(&strict, chat::FAMILY).0.unwrap_err().code,
+        "stream_interrupted"
+    );
+}
+#[test]
+fn mistral_missing_call_id_and_object_arguments_form_stable_complete_call() {
+    let p = mistral::MistralProvider::new(connection(
+        vec![
+            json!({"id":"mistral-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":null,"function":{"name":"read","arguments":{"path":"x"}}}]},"finish_reason":"tool_calls"}]}),
+        ],
+        1,
+    ));
+    let (result, output) = generate(&p, mistral::FAMILY);
+    assert_eq!(result.unwrap(), FinishReason::ToolCalls);
+    let call = output
+        .into_iter()
+        .find_map(|e| {
+            if let ProviderEvent::ItemCompleted { item } = e {
+                if let Content::ToolCall { call } = item.content {
+                    Some(call)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(call.call_id.len(), 9);
+    assert_eq!(call.arguments, json!({"path":"x"}));
+}
+
+#[test]
+fn mistral_repeated_function_name_does_not_duplicate_the_bound_tool() {
+    let p = mistral::MistralProvider::new(connection(
+        vec![
+            json!({"id":"mistral-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"abc123XYZ","function":{"name":"read","arguments":"{"}}]},"finish_reason":null}]}),
+            json!({"id":"mistral-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"read","arguments":"\"path\":\"x\"}"}}]},"finish_reason":"tool_calls"}]}),
+        ],
+        1,
+    ));
+    let (result, events) = generate(&p, mistral::FAMILY);
+    assert_eq!(result.unwrap(), FinishReason::ToolCalls);
+    assert!(events.iter().any(|e|matches!(e,ProviderEvent::ItemCompleted{item} if matches!(&item.content,Content::ToolCall{call} if call.name=="read"&&call.arguments==json!({"path":"x"})))));
+}
+
+#[test]
+fn codex_fixture_separates_instructions_and_pins_session_headers() {
+    struct CodexCredentials;
+    impl CredentialResolver for CodexCredentials {
+        fn headers(
+            &self,
+            _: Option<&str>,
+            _: &CancellationToken,
+        ) -> Result<reqwest::header::HeaderMap, ModelFailure> {
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert("authorization", "Bearer fixture-only".parse().unwrap());
+            headers.insert("chatgpt-account-id", "fixture-account".parse().unwrap());
+            Ok(headers)
+        }
+    }
+    struct CodexEndpoint;
+    impl HttpTransport for CodexEndpoint {
+        fn stream(
+            &self,
+            request: HttpRequest<'_>,
+            _: &CancellationToken,
+            receive: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>,
+        ) -> Result<(), ModelFailure> {
+            assert_eq!(request.headers["originator"], "varin");
+            assert_eq!(request.headers["openai-beta"], "responses=experimental");
+            assert_eq!(request.headers["chatgpt-account-id"], "fixture-account");
+            let key = request.body["prompt_cache_key"].as_str().unwrap();
+            assert_eq!(key.len(), 64);
+            assert_eq!(request.headers["session-id"], key);
+            assert_eq!(request.headers["x-client-request-id"], "request");
+            let event = json!({"type":"response.completed","response":{"output":[{"id":"reasoning","type":"reasoning","encrypted_content":"codex-original"}]}});
+            receive(format!("data: {event}\n\n").as_bytes())?;
+            Ok(())
+        }
+    }
+    let provider = codex::CodexProvider::new(Connection::new(
+        "https://fixture.invalid/codex/responses",
+        Arc::new(CodexCredentials),
+        Arc::new(CodexEndpoint),
+    ));
+    let mut v = view(codex::FAMILY);
+    v.binding.history_range.branch_id = "long-branch/with unicode 测试".repeat(8);
+    v.history = vec![
+        ConversationItem {
+            id: "system".into(),
+            provenance: Provenance::SystemInstruction {
+                source: "fixture".into(),
+            },
+            content: Content::Text {
+                text: "Follow the fixture task".into(),
+            },
+            opaque: None,
+        },
+        ConversationItem {
+            id: "user".into(),
+            provenance: Provenance::UserInstruction {
+                input_id: "user".into(),
+            },
+            content: Content::Text {
+                text: "hello".into(),
+            },
+            opaque: None,
+        },
+    ];
+    let body = provider.serialize(&v).unwrap();
+    assert_eq!(body["instructions"], "Follow the fixture task");
+    assert_eq!(body["input"].as_array().unwrap().len(), 1);
+    assert_eq!(body["store"], false);
+    assert_eq!(body["parallel_tool_calls"], true);
+    assert!(body.get("max_output_tokens").is_none());
+    assert!(!body.to_string().contains("fixture-only"));
+    let mut output = Vec::new();
+    assert_eq!(
+        provider
+            .generate(
+                &RequestSnapshot {
+                    view: v,
+                    serialized: body
+                },
+                &CancellationToken::default(),
+                &mut |e| {
+                    output.push(e);
+                    Ok(())
+                }
+            )
+            .unwrap(),
+        FinishReason::Stop
+    );
+    assert!(output.iter().any(|e|matches!(e,ProviderEvent::ItemCompleted{item} if item.opaque.as_ref().is_some_and(|raw|raw.family==codex::FAMILY&&raw.connection_identity=="fixture-connection"))));
+}
+#[test]
+fn codex_never_infers_account_identity_or_calls_http_without_it() {
+    struct BearerOnly;
+    impl CredentialResolver for BearerOnly {
+        fn headers(
+            &self,
+            _: Option<&str>,
+            _: &CancellationToken,
+        ) -> Result<reqwest::header::HeaderMap, ModelFailure> {
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert("authorization", "Bearer fixture-only".parse().unwrap());
+            Ok(headers)
+        }
+    }
+    struct NeverHttp(Arc<AtomicUsize>);
+    impl HttpTransport for NeverHttp {
+        fn stream(
+            &self,
+            _: HttpRequest<'_>,
+            _: &CancellationToken,
+            _: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>,
+        ) -> Result<(), ModelFailure> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(failure(
+                "unexpected_http",
+                "credential boundary was skipped",
+            ))
+        }
+    }
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = codex::CodexProvider::new(Connection::new(
+        "https://fixture.invalid/codex/responses",
+        Arc::new(BearerOnly),
+        Arc::new(NeverHttp(calls.clone())),
+    ));
+    assert_eq!(
+        generate(&provider, codex::FAMILY).0.unwrap_err().code,
+        "codex_credential_binding_required"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
 }

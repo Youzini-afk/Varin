@@ -85,6 +85,22 @@ pub enum DeliveryState {
     Committed,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InputMode {
+    Boundary,
+    Interrupt,
+    NextRun,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InputState {
+    Queued,
+    Delivered,
+    Cancelled,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelSessionConfiguration {
@@ -95,4 +111,9 @@ pub struct ModelSessionConfiguration {
     pub allow_anonymous: bool,
     pub configuration_generation: u64,
     pub max_output_tokens: u64,
+    pub azure_deployment: Option<String>,
+    pub azure_api_version: Option<String>,
+    pub legacy_max_tokens: Option<bool>,
+    pub include_stream_usage: Option<bool>,
+    pub reasoning_effort: Option<String>,
 }

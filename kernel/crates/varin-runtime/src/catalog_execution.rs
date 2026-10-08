@@ -4,6 +4,18 @@ use crate::execution::*;
 use std::sync::Mutex;
 
 impl Persistence for Mutex<Catalog> {
+    fn consume_inputs(
+        &self,
+        run_id: &str,
+        epoch: u64,
+        expected_head: Option<&str>,
+    ) -> std::result::Result<Vec<ConversationItem>, ExecutionError> {
+        self.lock()
+            .map_err(|_| ExecutionError::new("catalog_poisoned", "catalog owner failed"))?
+            .consume_inputs(run_id, epoch, expected_head)
+            .map_err(|e| ExecutionError::new("catalog_input", e.to_string()))
+    }
+
     fn commit(
         &self,
         run_id: &str,
@@ -13,15 +25,23 @@ impl Persistence for Mutex<Catalog> {
         let mut catalog = self
             .lock()
             .map_err(|_| ExecutionError::new("catalog_poisoned", "catalog owner failed"))?;
-        match catalog.commit_execution(run_id,epoch,record) {
-            Ok(())=>Ok(()),
-            Err(error)=>{
-                if matches!(record,ExecutionRecord::ModelFinished{..}) {
-                    if let Err(retain)=catalog.retain_rejected_model_output(run_id,epoch,record){
-                        return Err(ExecutionError::new("catalog_commit",format!("{error}; generated output could not be retained: {retain}")));
+        match catalog.commit_execution(run_id, epoch, record) {
+            Ok(()) => Ok(()),
+            Err(RuntimeError::InputPending) => Err(ExecutionError::new(
+                "input_pending",
+                "new user input is waiting at this boundary",
+            )),
+            Err(error) => {
+                if matches!(record, ExecutionRecord::ModelFinished { .. }) {
+                    if let Err(retain) = catalog.retain_rejected_model_output(run_id, epoch, record)
+                    {
+                        return Err(ExecutionError::new(
+                            "catalog_commit",
+                            format!("{error}; generated output could not be retained: {retain}"),
+                        ));
                     }
                 }
-                Err(ExecutionError::new("catalog_commit",error.to_string()))
+                Err(ExecutionError::new("catalog_commit", error.to_string()))
             }
         }
     }
@@ -47,6 +67,7 @@ fn append_item(tx: &Transaction<'_>, run: &Run, item: &ConversationItem) -> Resu
         _ => HistorySource::Environment,
     };
     let provider = item.opaque.as_ref().map(|o| ProviderOriginal {
+        connection_identity: o.connection_identity.clone(),
         adapter: o.family.clone(),
         version: o.adapter_version.clone(),
         item: o.value.clone(),
@@ -73,11 +94,14 @@ fn operation_id(request: &str, call: &str) -> String {
     format!("{request}:tool:{call}")
 }
 impl Catalog {
-    pub fn execution_history(&self, branch:&str)->Result<Vec<ConversationItem>> {
-        let mut result=Vec::new();
+    pub fn execution_history(&self, branch: &str) -> Result<Vec<ConversationItem>> {
+        let mut result = Vec::new();
         for item in self.history(branch)? {
-            if item.source==HistorySource::User { result.extend(user_input_items(&item.id,&item.content)?); }
-            else { result.push(serde_json::from_value(item.content)?); }
+            if item.source == HistorySource::User {
+                result.extend(user_input_items(&item.id, &item.content)?);
+            } else {
+                result.push(serde_json::from_value(item.content)?);
+            }
         }
         Ok(result)
     }
@@ -90,16 +114,22 @@ impl Catalog {
         let tx = self.db.transaction()?;
         let mut run: Run = record_value(&tx, run_id)?;
         fence(&run, epoch)?;
-        let referenced_request=match record {
-            ExecutionRecord::ModelDispatched{request_id}|ExecutionRecord::ModelFinished{request_id,..}|
-            ExecutionRecord::ToolsAdmitted{request_id,..}|ExecutionRecord::ToolDispatched{request_id,..}|
-            ExecutionRecord::ToolBatchCommitted{request_id,..}=>Some(request_id.as_str()),
-            ExecutionRecord::ToolSettled{result}=>Some(result.request_id.as_str()),
-            _=>None,
+        let referenced_request = match record {
+            ExecutionRecord::ModelDispatched { request_id }
+            | ExecutionRecord::ModelFinished { request_id, .. }
+            | ExecutionRecord::ToolsAdmitted { request_id, .. }
+            | ExecutionRecord::ToolDispatched { request_id, .. }
+            | ExecutionRecord::ToolBatchCommitted { request_id, .. } => Some(request_id.as_str()),
+            ExecutionRecord::ToolSettled { result } => Some(result.request_id.as_str()),
+            _ => None,
         };
-        if let Some(request_id)=referenced_request {
-            let step:ModelStep=super::record(&tx,"model_steps",request_id)?;
-            if step.run_id!=run_id||step.epoch!=epoch{return Err(RuntimeError::Conflict("model exchange belongs to another execution".into()));}
+        if let Some(request_id) = referenced_request {
+            let step: ModelStep = super::record(&tx, "model_steps", request_id)?;
+            if step.run_id != run_id || step.epoch != epoch {
+                return Err(RuntimeError::Conflict(
+                    "model exchange belongs to another execution".into(),
+                ));
+            }
         }
         match record {
             ExecutionRecord::StateChanged { state, waiting_on } => {
@@ -123,6 +153,12 @@ impl Catalog {
                     }
                 }
                 if state.terminal() {
+                    if matches!(state, RunState::Completed | RunState::Failed)
+                        && super::inputs::has_boundary_inputs(&tx, run_id)?
+                    {
+                        return Err(RuntimeError::InputPending);
+                    }
+
                     let ops: Vec<Operation> = read_all(&tx, "operations")?;
                     if ops.iter().any(|op| {
                         op.run_id == run.id
@@ -138,11 +174,17 @@ impl Catalog {
                         return Err(RuntimeError::Invalid("model exchange is unsettled".into()));
                     }
                     let unpaired:i64=tx.query_row("SELECT count(*) FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0",[run_id],|r|r.get(0))?;
-                    if unpaired>0{return Err(RuntimeError::Invalid("tool exchange is unsettled".into()));}
+                    if unpaired > 0 {
+                        return Err(RuntimeError::Invalid("tool exchange is unsettled".into()));
+                    }
                     tx.execute(
                         "UPDATE branches SET active_run=NULL WHERE active_run=?1",
                         [run_id],
                     )?;
+                    if *state == RunState::Cancelled {
+                        super::inputs::cancel_current(&tx, run_id)?;
+                    }
+                    super::inputs::promote_next(&tx, &run.branch_id)?;
                 }
                 run.state = *state;
                 run.waiting_on = waiting_on.clone();
@@ -150,6 +192,8 @@ impl Catalog {
                 put(&tx, "runs", run_id, &run)?;
             }
             ExecutionRecord::RequestPrepared { snapshot } => {
+                if super::inputs::has_boundary_inputs(&tx,run_id)?{return Err(RuntimeError::InputPending);}
+
                 if run.cancel_requested
                     || snapshot.view.run_id != run_id
                     || snapshot.view.binding.history_range.branch_id != run.branch_id
@@ -169,6 +213,7 @@ impl Catalog {
                     ));
                 }
                 let step = ModelStep {
+                    superseded_by_input: None,
                     id: snapshot.view.request_id.clone(),
                     run_id: run_id.into(),
                     epoch,
@@ -183,6 +228,9 @@ impl Catalog {
                 )?;
             }
             ExecutionRecord::ModelDispatched { request_id } => {
+                let interrupt:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM input_queue WHERE run_id=?1 AND state='queued' AND mode='interrupt')",[run_id],|row|row.get(0))?;
+                if interrupt{return Err(RuntimeError::InputPending);}
+
                 let mut step: ModelStep = super::record(&tx, "model_steps", request_id)?;
                 if step.run_id != run_id
                     || step.epoch != epoch
@@ -240,6 +288,7 @@ impl Catalog {
                     .iter()
                     .filter_map(|item| {
                         item.opaque.as_ref().map(|o| ProviderOriginal {
+                            connection_identity: o.connection_identity.clone(),
                             adapter: o.family.clone(),
                             version: o.adapter_version.clone(),
                             item: o.value.clone(),
@@ -275,7 +324,10 @@ impl Catalog {
                 }
                 tx.execute(
                     "INSERT INTO model_outputs(request_id,body) VALUES(?1,?2)",
-                    params![request_id, encode(&json!({"status":"committed","record":record}))?],
+                    params![
+                        request_id,
+                        encode(&json!({"status":"committed","record":record}))?
+                    ],
                 )?;
             }
             ExecutionRecord::ToolsAdmitted { request_id, tools } => {
@@ -293,7 +345,7 @@ impl Catalog {
                     if !tool.contract.read_only || tool.contract.completion == CompletionKind::Job {
                         let key = operation_id(request_id, &tool.call.call_id);
                         let op = Operation {
-                            external_receipt:None,
+                            external_receipt: None,
                             id: key.clone(),
                             run_id: run_id.into(),
                             epoch,
@@ -360,8 +412,13 @@ impl Catalog {
                         effect,
                         content,
                     } => {
-                        if (*effect==Effect::None && op.effect!=Effect::None)||(*outcome==Outcome::Succeeded && op.phase!=OperationPhase::Running){
-                            return Err(RuntimeError::Invalid("tool receipt lacks dispatch/no-send evidence".into()));
+                        if (*effect == Effect::None && op.effect != Effect::None)
+                            || (*outcome == Outcome::Succeeded
+                                && op.phase != OperationPhase::Running)
+                        {
+                            return Err(RuntimeError::Invalid(
+                                "tool receipt lacks dispatch/no-send evidence".into(),
+                            ));
                         }
                         op.phase = OperationPhase::Terminal;
                         op.outcome = Some(*outcome);
@@ -390,15 +447,24 @@ impl Catalog {
                         op.result = Some(json!({"operation_id":operation_id,"phase":phase}));
                     }
                 }
-                if op.handed_off || (op.phase==OperationPhase::Terminal&&op.outcome==Some(Outcome::Indeterminate)) {
-                    if let Some(receipt)=op.external_receipt.clone(){
-                        apply_external_terminal(&mut op,&receipt);
+                if op.handed_off
+                    || (op.phase == OperationPhase::Terminal
+                        && op.outcome == Some(Outcome::Indeterminate))
+                {
+                    if let Some(receipt) = op.external_receipt.clone() {
+                        apply_external_terminal(&mut op, &receipt);
                     }
                 }
                 op.revision += 1;
                 put(&tx, "operations", &key, &op)?;
-                if op.phase==OperationPhase::Terminal {
-                    event(&tx,&key,op.revision,"operation.settled",serde_json::to_value(&op)?)?;
+                if op.phase == OperationPhase::Terminal {
+                    event(
+                        &tx,
+                        &key,
+                        op.revision,
+                        "operation.settled",
+                        serde_json::to_value(&op)?,
+                    )?;
                 }
                 tx.execute(
                     "UPDATE tool_calls SET receipt=?3 WHERE request_id=?1 AND call_id=?2",
@@ -475,7 +541,9 @@ impl Catalog {
             json!({"kind":serde_json::to_value(record)?.get("kind")}),
         )?;
         tx.commit()?;
-        if matches!(record,ExecutionRecord::ToolSettled{..}){self.reconcile_waits()?;}
+        if matches!(record, ExecutionRecord::ToolSettled { .. }) {
+            self.reconcile_waits()?;
+        }
         Ok(())
     }
 }
@@ -510,7 +578,7 @@ impl Catalog {
             return Err(RuntimeError::Conflict("branch owner changed".into()));
         }
         let unresolved: i64 = self.db.query_row(
-            "SELECT count(*) FROM model_steps WHERE run_id=?1 AND state!='completed'",
+            "SELECT count(*) FROM model_steps WHERE run_id=?1 AND state!='completed' AND json_extract(body,'$.superseded_by_input') IS NULL",
             [run_id],
             |r| r.get(0),
         )?;
@@ -521,7 +589,7 @@ impl Catalog {
             ));
         }
         let completed_model_steps: u64 = self.db.query_row(
-            "SELECT count(*) FROM model_steps WHERE run_id=?1 AND state='completed'",
+            "SELECT count(*) FROM model_steps WHERE run_id=?1",
             [run_id],
             |r| read_number(r, 0),
         )?;
@@ -570,96 +638,298 @@ impl Catalog {
 /// A user record may project several typed parts; the final projected part retains the
 /// original entry identity so frozen branch ranges still address the durable history head.
 /// No attachment bytes are loaded or downgraded to text here.
-pub(super) fn user_input_items(id:&str,input:&Value)->Result<Vec<ConversationItem>>{
-    let mut parts=Vec::new();
-    if let Some(text)=input.as_str(){parts.push(Content::Text{text:text.into()});}
-    else {
-        let object=input.as_object().ok_or_else(||RuntimeError::Invalid("user input must be text or a typed text/attachments object".into()))?;
-        if object.keys().any(|key|key!="text"&&key!="attachments"){return Err(RuntimeError::Invalid("unsupported user input field; content was not accepted".into()));}
-        if let Some(text)=object.get("text") {parts.push(Content::Text{text:text.as_str().ok_or_else(||RuntimeError::Invalid("user input text must be a string".into()))?.into()});}
-        if let Some(attachments)=object.get("attachments") {
-            for attachment in attachments.as_array().ok_or_else(||RuntimeError::Invalid("attachments must be an array".into()))? {
+pub(super) fn user_input_items(id: &str, input: &Value) -> Result<Vec<ConversationItem>> {
+    let mut parts = Vec::new();
+    if let Some(text) = input.as_str() {
+        parts.push(Content::Text { text: text.into() });
+    } else {
+        let object = input.as_object().ok_or_else(|| {
+            RuntimeError::Invalid(
+                "user input must be text or a typed text/attachments object".into(),
+            )
+        })?;
+        if object
+            .keys()
+            .any(|key| key != "text" && key != "attachments")
+        {
+            return Err(RuntimeError::Invalid(
+                "unsupported user input field; content was not accepted".into(),
+            ));
+        }
+        if let Some(text) = object.get("text") {
+            parts.push(Content::Text {
+                text: text
+                    .as_str()
+                    .ok_or_else(|| {
+                        RuntimeError::Invalid("user input text must be a string".into())
+                    })?
+                    .into(),
+            });
+        }
+        if let Some(attachments) = object.get("attachments") {
+            for attachment in attachments
+                .as_array()
+                .ok_or_else(|| RuntimeError::Invalid("attachments must be an array".into()))?
+            {
                 #[derive(serde::Deserialize)]
                 #[serde(deny_unknown_fields)]
-                struct Attachment {media_type:String,content_ref:String,source:Option<String>}
-                let attachment:Attachment=serde_json::from_value(attachment.clone())?;
-                if attachment.media_type.trim().is_empty()||attachment.content_ref.trim().is_empty(){return Err(RuntimeError::Invalid("attachment type and content reference are required".into()));}
-                parts.push(Content::Attachment{media_type:attachment.media_type,content_ref:attachment.content_ref,source:attachment.source.unwrap_or_else(||format!("user-input:{id}"))});
+                struct Attachment {
+                    media_type: String,
+                    content_ref: String,
+                    source: Option<String>,
+                }
+                let attachment: Attachment = serde_json::from_value(attachment.clone())?;
+                if attachment.media_type.trim().is_empty()
+                    || attachment.content_ref.trim().is_empty()
+                {
+                    return Err(RuntimeError::Invalid(
+                        "attachment type and content reference are required".into(),
+                    ));
+                }
+                parts.push(Content::Attachment {
+                    media_type: attachment.media_type,
+                    content_ref: attachment.content_ref,
+                    source: attachment
+                        .source
+                        .unwrap_or_else(|| format!("user-input:{id}")),
+                });
             }
         }
     }
-    if parts.is_empty(){return Err(RuntimeError::Invalid("user input has no content".into()));}
-    let last=parts.len()-1;
-    Ok(parts.into_iter().enumerate().map(|(index,content)|ConversationItem{id:if index==last{id.into()}else{format!("{id}:part:{index}")},provenance:Provenance::UserInstruction{input_id:id.into()},content,opaque:None}).collect())
+    if parts.is_empty() {
+        return Err(RuntimeError::Invalid("user input has no content".into()));
+    }
+    let last = parts.len() - 1;
+    Ok(parts
+        .into_iter()
+        .enumerate()
+        .map(|(index, content)| ConversationItem {
+            id: if index == last {
+                id.into()
+            } else {
+                format!("{id}:part:{index}")
+            },
+            provenance: Provenance::UserInstruction {
+                input_id: id.into(),
+            },
+            content,
+            opaque: None,
+        })
+        .collect())
 }
 
 impl Catalog {
     /// A worker ending without a committed terminal Run is an explicit recovery boundary.
     /// This records the lost execution, not a claim that external effects were undone.
-    pub fn pause_failed_execution(&mut self,run_id:&str,epoch:u64,code:&str,message:&str)->Result<()> {
-        let tx=self.db.transaction()?;
-        let mut run:Run=super::record(&tx,"runs",run_id)?;
-        if run.state.terminal(){return Ok(());}
-        if run.epoch!=epoch{return Err(RuntimeError::Conflict("failed worker belongs to an old epoch".into()));}
-        let key=format!("execution-recovery:{run_id}:{epoch}");
-        let after_cursor:u64=tx.query_row("SELECT coalesce(max(cursor),0) FROM events",[],|r|read_number(r,0))?;
-        let wait=Wait{id:key.clone(),run_id:run_id.into(),subject:run_id.into(),kind:"execution.reconciled".into(),after_cursor,trigger_cursor:None,cancelled:false};
-        tx.execute("INSERT INTO waits(id,run_id,body) VALUES(?1,?2,?3) ON CONFLICT(id) DO NOTHING",params![key,run_id,encode(&wait)?])?;
-        run.state=RunState::Waiting;run.waiting_on=Some(key);run.revision+=1;put(&tx,"runs",run_id,&run)?;
-        let steps:Vec<ModelStep>={let mut stmt=tx.prepare("SELECT body FROM model_steps WHERE run_id=?1 AND state IN ('prepared','dispatched')")?;let rows=stmt.query_map([run_id],|r|r.get::<_,String>(0))?;let mut out=Vec::new();for row in rows{out.push(serde_json::from_str(&row?)?);}out};
-        for mut step in steps {
-            step.state=if step.state==ModelStepState::Dispatched{ModelStepState::Interrupted}else{ModelStepState::Cancelled};
-            put(&tx,"model_steps",&step.id,&step)?;
-            tx.execute("UPDATE model_steps SET state=?2 WHERE id=?1",params![step.id,encode(&step.state)?.trim_matches('"')])?;
+    pub fn pause_failed_execution(
+        &mut self,
+        run_id: &str,
+        epoch: u64,
+        code: &str,
+        message: &str,
+    ) -> Result<()> {
+        let tx = self.db.transaction()?;
+        let mut run: Run = super::record(&tx, "runs", run_id)?;
+        if run.state.terminal() {
+            return Ok(());
         }
-        event(&tx,run_id,run.revision,"execution.interrupted",json!({"code":code,"message":message,"waiting_on":run.waiting_on}))?;
-        tx.commit()?;Ok(())
+        if run.epoch != epoch {
+            return Err(RuntimeError::Conflict(
+                "failed worker belongs to an old epoch".into(),
+            ));
+        }
+        let key = format!("execution-recovery:{run_id}:{epoch}");
+        let after_cursor: u64 =
+            tx.query_row("SELECT coalesce(max(cursor),0) FROM events", [], |r| {
+                read_number(r, 0)
+            })?;
+        let wait = Wait {
+            id: key.clone(),
+            run_id: run_id.into(),
+            subject: run_id.into(),
+            kind: "execution.reconciled".into(),
+            after_cursor,
+            trigger_cursor: None,
+            cancelled: false,
+        };
+        tx.execute(
+            "INSERT INTO waits(id,run_id,body) VALUES(?1,?2,?3) ON CONFLICT(id) DO NOTHING",
+            params![key, run_id, encode(&wait)?],
+        )?;
+        run.state = RunState::Waiting;
+        run.waiting_on = Some(key);
+        run.revision += 1;
+        put(&tx, "runs", run_id, &run)?;
+        let steps: Vec<ModelStep> = {
+            let mut stmt=tx.prepare("SELECT body FROM model_steps WHERE run_id=?1 AND state IN ('prepared','dispatched')")?;
+            let rows = stmt.query_map([run_id], |r| r.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(serde_json::from_str(&row?)?);
+            }
+            out
+        };
+        for mut step in steps {
+            step.state = if step.state == ModelStepState::Dispatched {
+                ModelStepState::Interrupted
+            } else {
+                ModelStepState::Cancelled
+            };
+            put(&tx, "model_steps", &step.id, &step)?;
+            tx.execute(
+                "UPDATE model_steps SET state=?2 WHERE id=?1",
+                params![step.id, encode(&step.state)?.trim_matches('"')],
+            )?;
+        }
+        event(
+            &tx,
+            run_id,
+            run.revision,
+            "execution.interrupted",
+            json!({"code":code,"message":message,"waiting_on":run.waiting_on}),
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 }
 
 impl Catalog {
-    fn retain_rejected_model_output(&mut self,run_id:&str,epoch:u64,record:&ExecutionRecord)->Result<()> {
-        let ExecutionRecord::ModelFinished{request_id,items,usage,..}=record else{return Ok(());};
-        let tx=self.db.transaction()?;
-        let Some(mut step)=optional_record::<ModelStep>(&tx,"model_steps",request_id)?else{return Ok(());};
-        if step.run_id!=run_id||step.epoch!=epoch||!matches!(step.state,ModelStepState::Prepared|ModelStepState::Dispatched){return Ok(());}
-        step.original=items.iter().filter_map(|item|item.opaque.as_ref().map(|o|ProviderOriginal{adapter:o.family.clone(),version:o.adapter_version.clone(),item:o.value.clone()})).collect();
-        step.usage=Some(serde_json::to_value(usage)?);
-        put(&tx,"model_steps",request_id,&step)?;
+    fn retain_rejected_model_output(
+        &mut self,
+        run_id: &str,
+        epoch: u64,
+        record: &ExecutionRecord,
+    ) -> Result<()> {
+        let ExecutionRecord::ModelFinished {
+            request_id,
+            items,
+            usage,
+            ..
+        } = record
+        else {
+            return Ok(());
+        };
+        let tx = self.db.transaction()?;
+        let Some(mut step) = optional_record::<ModelStep>(&tx, "model_steps", request_id)? else {
+            return Ok(());
+        };
+        if step.run_id != run_id
+            || step.epoch != epoch
+            || !matches!(
+                step.state,
+                ModelStepState::Prepared | ModelStepState::Dispatched
+            )
+        {
+            return Ok(());
+        }
+        step.original = items
+            .iter()
+            .filter_map(|item| {
+                item.opaque.as_ref().map(|o| ProviderOriginal {
+                    connection_identity: o.connection_identity.clone(),
+                    adapter: o.family.clone(),
+                    version: o.adapter_version.clone(),
+                    item: o.value.clone(),
+                })
+            })
+            .collect();
+        step.usage = Some(serde_json::to_value(usage)?);
+        put(&tx, "model_steps", request_id, &step)?;
         tx.execute("INSERT INTO model_outputs(request_id,body) VALUES(?1,?2) ON CONFLICT(request_id) DO NOTHING",params![request_id,encode(&json!({"status":"rejected","record":record}))?])?;
-        event(&tx,request_id,0,"model.output_rejected",json!({"run_id":run_id}))?;
-        tx.commit()?;Ok(())
+        event(
+            &tx,
+            request_id,
+            0,
+            "model.output_rejected",
+            json!({"run_id":run_id}),
+        )?;
+        tx.commit()?;
+        Ok(())
     }
-    pub fn model_output(&self,request_id:&str)->Result<Option<Value>>{
-        let raw:Option<String>=self.db.query_row("SELECT body FROM model_outputs WHERE request_id=?1",[request_id],|r|r.get(0)).optional()?;
-        raw.map(|raw|serde_json::from_str(&raw).map_err(Into::into)).transpose()
+    pub fn model_output(&self, request_id: &str) -> Result<Option<Value>> {
+        let raw: Option<String> = self
+            .db
+            .query_row(
+                "SELECT body FROM model_outputs WHERE request_id=?1",
+                [request_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        raw.map(|raw| serde_json::from_str(&raw).map_err(Into::into))
+            .transpose()
     }
 }
 
-pub(super) fn apply_external_terminal(op:&mut Operation,receipt:&ExternalReceipt){
-    op.phase=OperationPhase::Terminal;op.outcome=Some(receipt.outcome);op.effect=receipt.effect;op.result=Some(receipt.result.clone());
+pub(super) fn apply_external_terminal(op: &mut Operation, receipt: &ExternalReceipt) {
+    op.phase = OperationPhase::Terminal;
+    op.outcome = Some(receipt.outcome);
+    op.effect = receipt.effect;
+    op.result = Some(receipt.result.clone());
 }
 impl Catalog {
     /// Only a trusted execution-end receipt consumer may call this. It is not exposed as a
     /// model/tool/Host wire command. Receipt identity belongs to the actual resource authority.
-    pub fn record_external_receipt(&mut self,operation_id:&str,receipt:ExternalReceipt)->Result<Operation>{
-        let tx=self.db.transaction()?;let mut op:Operation=super::record(&tx,"operations",operation_id)?;
-        if receipt.identity!=op.id||op.executor.as_deref()!=Some(receipt.executor.as_str())||receipt.epoch.is_empty()||!matches!(op.lifetime,Lifetime::Thread|Lifetime::Environment){
-            return Err(RuntimeError::Conflict("external receipt does not identify this admitted job".into()));
+    pub fn record_external_receipt(
+        &mut self,
+        operation_id: &str,
+        receipt: ExternalReceipt,
+    ) -> Result<Operation> {
+        let tx = self.db.transaction()?;
+        let mut op: Operation = super::record(&tx, "operations", operation_id)?;
+        if receipt.identity != op.id
+            || op.executor.as_deref() != Some(receipt.executor.as_str())
+            || receipt.epoch.is_empty()
+            || !matches!(op.lifetime, Lifetime::Thread | Lifetime::Environment)
+        {
+            return Err(RuntimeError::Conflict(
+                "external receipt does not identify this admitted job".into(),
+            ));
         }
-        if receipt.effect==Effect::Unknown&&receipt.outcome!=Outcome::Indeterminate{return Err(RuntimeError::Invalid("unknown external effect requires indeterminate outcome".into()));}
-        if let Some(previous)=&op.external_receipt {
-            if previous==&receipt{drop(tx);self.reconcile_waits()?;return Ok(op);}
-            if previous.outcome!=Outcome::Indeterminate||previous.effect!=Effect::Unknown||previous.epoch!=receipt.epoch||receipt.effect==Effect::Unknown {
-                return Err(RuntimeError::Conflict("external terminal receipt changed".into()));
+        if receipt.effect == Effect::Unknown && receipt.outcome != Outcome::Indeterminate {
+            return Err(RuntimeError::Invalid(
+                "unknown external effect requires indeterminate outcome".into(),
+            ));
+        }
+        if let Some(previous) = &op.external_receipt {
+            if previous == &receipt {
+                drop(tx);
+                self.reconcile_waits()?;
+                return Ok(op);
+            }
+            if previous.outcome != Outcome::Indeterminate
+                || previous.effect != Effect::Unknown
+                || previous.epoch != receipt.epoch
+                || receipt.effect == Effect::Unknown
+            {
+                return Err(RuntimeError::Conflict(
+                    "external terminal receipt changed".into(),
+                ));
             }
         }
-        if op.phase==OperationPhase::Terminal&&op.outcome!=Some(Outcome::Indeterminate){return Err(RuntimeError::Conflict("job is already settled with another receipt".into()));}
-        let settle=op.handed_off||(op.phase==OperationPhase::Terminal&&op.outcome==Some(Outcome::Indeterminate));
-        op.external_receipt=Some(receipt.clone());op.revision+=1;
-        if settle {apply_external_terminal(&mut op,&receipt);}
-        put(&tx,"operations",operation_id,&op)?;
-        event(&tx,operation_id,op.revision,if settle{"operation.settled"}else{"operation.external_receipt"},serde_json::to_value(&op)?)?;
+        if op.phase == OperationPhase::Terminal && op.outcome != Some(Outcome::Indeterminate) {
+            return Err(RuntimeError::Conflict(
+                "job is already settled with another receipt".into(),
+            ));
+        }
+        let settle = op.handed_off
+            || (op.phase == OperationPhase::Terminal && op.outcome == Some(Outcome::Indeterminate));
+        op.external_receipt = Some(receipt.clone());
+        op.revision += 1;
+        if settle {
+            apply_external_terminal(&mut op, &receipt);
+        }
+        put(&tx, "operations", operation_id, &op)?;
+        event(
+            &tx,
+            operation_id,
+            op.revision,
+            if settle {
+                "operation.settled"
+            } else {
+                "operation.external_receipt"
+            },
+            serde_json::to_value(&op)?,
+        )?;
         tx.commit()?;
         self.reconcile_waits()?;
         Ok(op)
@@ -668,14 +938,21 @@ impl Catalog {
 
 impl Catalog {
     /// Resource recovery queries only the native jobs whose facts are still unresolved.
-    pub fn pending_external_operations(&self,executor:&str)->Result<Vec<String>> {
+    pub fn pending_external_operations(&self, executor: &str) -> Result<Vec<String>> {
         let mut statement=self.db.prepare("SELECT id FROM operations WHERE json_extract(body,'$.executor')=?1 AND (json_extract(body,'$.phase')!='terminal' OR json_extract(body,'$.outcome')='indeterminate') ORDER BY id")?;
-        let rows=statement.query_map([executor],|row|row.get(0))?;
-        Ok(rows.collect::<std::result::Result<Vec<_>,_>>()?)
+        let rows = statement.query_map([executor], |row| row.get(0))?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
-    pub fn record_recovery_failure(&mut self,source:&str,reason:&str)->Result<()> {
-        let tx=self.db.transaction()?;
-        event(&tx,source,0,"recovery.unavailable",json!({"reason":reason}))?;
-        tx.commit()?;Ok(())
+    pub fn record_recovery_failure(&mut self, source: &str, reason: &str) -> Result<()> {
+        let tx = self.db.transaction()?;
+        event(
+            &tx,
+            source,
+            0,
+            "recovery.unavailable",
+            json!({"reason":reason}),
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 }

@@ -37,7 +37,7 @@ impl ModelProvider for AnthropicProvider {
         }
         let mut messages = Vec::new();
         let mut system = Vec::new();
-        for item in compile_history(&view.history, FAMILY) {
+        for item in compile_history(&view.history, FAMILY, &view.binding.connection_identity) {
             if let Some(original) = item.opaque {
                 if original.adapter_version != "1" {
                     return Err(ExecutionError::new(
@@ -361,7 +361,7 @@ impl StreamState {
                         item: ProviderItem {
                             id: format!("{}:{index}", self.id.as_ref().unwrap()),
                             content,
-                            opaque: opaque(FAMILY, block.value),
+                            opaque: opaque(view, block.value),
                         },
                     },
                 )?;

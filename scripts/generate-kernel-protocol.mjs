@@ -10,7 +10,8 @@ const rustTarget = path.join(root, 'kernel', 'crates', 'varin-kernel', 'src', 'p
 const nativeRustTarget = path.join(root, 'kernel', 'crates', 'varin-runtime', 'src', 'types_generated.rs');
 const nativeStructs = Object.entries(schema.nativeRuntimeStructs ?? {}).map(([name, spec]) => {
   const fields = Object.entries(spec.fields).map(([key, value]) => {
-    const type = ({string:"String", number:"u64", boolean:"bool", "string | null":"Option<String>"})[value.type];
+    let type = ({string:"String", number:"u64", boolean:"bool", "string | null":"Option<String>"})[value.type];
+    if (value.optional && type && !type.startsWith("Option<")) type = `Option<${type}>`;
     if (!type) throw new Error(`Unsupported native field type ${value.type}`);
     const field = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
     return `    pub ${field}: ${type},`;
@@ -64,6 +65,7 @@ const snakeCase = (value) => value
   .replace(/[-.]/g, '_')
   .toLowerCase();
 const rustType = (type) => {
+  if (type.startsWith("Native") && schema.nativeRuntimeEnums?.[type.slice(6)]) return `varin_runtime::${type.slice(6)}`;
   if (type.endsWith('[]')) return `Vec<${rustType(type.slice(0, -2))}>`;
   if (type === 'string') return 'String';
   if (type === 'number' || type === 'protocolVersion') return 'i64';

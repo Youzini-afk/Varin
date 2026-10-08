@@ -30,6 +30,8 @@ import {
   type KernelProcessListResult,
   type KernelProcessReadResult,
   type KernelProcessWriteResult,
+  type KernelProcessStreamEvent,
+  type KernelProcessSubscribeResult,
 } from "./protocol.generated.js";
 
 export interface KernelClientOptions {
@@ -89,6 +91,18 @@ export interface KernelGrantHandle {
   readonly storageIdentity: string;
 }
 
+export interface KernelProcessSubscription {
+  readonly closed: Promise<void>;
+  acknowledge(stream: "data" | "control", sequence: number): Promise<void>;
+  close(): Promise<void>;
+}
+export type KernelProcessObserver = (event: KernelProcessStreamEvent, acknowledge: () => Promise<void>) => void;
+interface ProcessSubscriptionEntry {
+  id: string; processId: string; grant: KernelGrantHandle; listener(event: KernelProcessStreamEvent): void;
+  dataSequence: number; controlSequence: number; closed: boolean;
+  resolve(): void; reject(error: Error): void;
+}
+
 interface InternalGrantHandle extends KernelGrantHandle {
   readonly clientToken: symbol;
 }
@@ -138,6 +152,10 @@ export class KernelScopedClient {
 
   processRead(params: KernelMethodParams["process.read"], signal?: AbortSignal): Promise<KernelProcessReadResult> {
     return this.owner.processRead(params, this.grant, signal);
+  }
+
+  processSubscribe(params: Omit<KernelMethodParams["process.subscribe"], "subscriptionId">, observer: KernelProcessObserver): Promise<KernelProcessSubscription> {
+    return this.owner.processSubscribe(params, this.grant, observer);
   }
 
   processWrite(params: KernelMethodParams["process.write"], signal?: AbortSignal): Promise<KernelProcessWriteResult> {
@@ -511,6 +529,7 @@ export class KernelClient {
   private child: ChildProcessWithoutNullStreams | null = null;
   private buffer = Buffer.alloc(0);
   private readonly pending = new Map<string, PendingRequest>();
+  private readonly processSubscriptions = new Map<string, ProcessSubscriptionEntry>();
   private window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private nativeWindow = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private closePromise: Promise<void> | undefined;
@@ -712,9 +731,14 @@ export class KernelClient {
       if (this.buffer.byteLength < length + 4) return;
       const body = this.buffer.subarray(4, length + 4);
       this.buffer = this.buffer.subarray(length + 4);
-      let response: KernelResponse;
-      try { response = JSON.parse(body.toString("utf8")) as KernelResponse; }
+      let response: KernelResponse | KernelProcessStreamEvent;
+      try { response = JSON.parse(body.toString("utf8")) as KernelResponse | KernelProcessStreamEvent; }
       catch (error) { this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: `Invalid Rust kernel response: ${String(error)}`, retryable: false }), true); return; }
+      if (response.kind === "process-event") {
+        this.consumeProcessEvent(response);
+        if (this.transportFailed) return;
+        continue;
+      }
       if (response.v !== KERNEL_PROTOCOL_VERSION || response.kind !== "response" || typeof response.id !== "string" || typeof response.ok !== "boolean") {
         this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: "Rust kernel response envelope is malformed", retryable: false }), true);
         return;
@@ -730,6 +754,33 @@ export class KernelClient {
     }
   }
 
+  private consumeProcessEvent(event: KernelProcessStreamEvent): void {
+    const invalid = (message: string) => this.failAll(new KernelClientError({ code: "kernel-protocol-error", message, retryable: false }), true);
+    if (event.v !== KERNEL_PROTOCOL_VERSION || typeof event.subscriptionId !== "string" || typeof event.kernelEpoch !== "string"
+      || typeof event.grantId !== "string" || typeof event.processId !== "string" || !Number.isSafeInteger(event.sequence)
+      || !["control", "data", "closed"].includes(event.stream)) { invalid("Malformed process stream envelope"); return; }
+    const entry = this.processSubscriptions.get(event.subscriptionId);
+    if (!entry || entry.closed || this.revokedGrants.has(entry.grant.grantId)) return;
+    if (event.kernelEpoch !== this.epoch || event.kernelEpoch !== entry.grant.kernelEpoch || event.grantId !== entry.grant.grantId || event.processId !== entry.processId) {
+      invalid("Process stream actor or epoch mismatch"); return;
+    }
+    if (event.stream === "closed") {
+      if (typeof event.error !== "string") { invalid("Closed process stream omitted its reason"); return; }
+      entry.closed = true; this.processSubscriptions.delete(entry.id); entry.reject(new Error(event.error));
+    } else {
+      if (event.result === null || typeof event.result !== "object" || event.error !== null) { invalid("Process stream omitted its typed result"); return; }
+      const key = event.stream === "data" ? "dataSequence" : "controlSequence";
+      if (event.sequence !== entry[key] + 1) { invalid("Process stream sequence is not contiguous"); return; }
+      entry[key] = event.sequence;
+    }
+    try { entry.listener(event); }
+    catch (error) {
+      entry.closed = true; this.processSubscriptions.delete(entry.id);
+      entry.reject(error instanceof Error ? error : new Error(String(error)));
+      void this.requestRaw("process.subscription.unsubscribe", { subscriptionId: entry.id }, { grant: entry.grant }).catch(() => undefined);
+    }
+  }
+
   private failAll(error: Error, terminate = false): void {
     if (this.transportFailed) {
       if (terminate && this.child && !this.child.killed) this.child.kill();
@@ -740,6 +791,8 @@ export class KernelClient {
     this.nativeWindow.close(error);
     for (const pending of this.pending.values()) { pending.reject(error); pending.release(); }
     this.pending.clear();
+    for (const entry of this.processSubscriptions.values()) { entry.closed = true; entry.reject(error); }
+    this.processSubscriptions.clear();
     for (const listener of this.exitListeners) {
       try { listener(error); } catch { /* A projection cannot prevent other handle invalidations. */ }
     }
@@ -762,7 +815,7 @@ export class KernelClient {
 
   private async requestRaw<T, M extends KernelMethod = KernelMethod>(method: M, params: KernelMethodParams[M], options: { signal?: AbortSignal | undefined; grant?: KernelGrantHandle | undefined; allowBootstrap?: boolean | undefined } = {}): Promise<T> {
     const cancelled = () => new KernelClientError({ code: "cancelled", message: "Kernel request cancelled", retryable: true });
-    const release = this.closed && method === "kernel.shutdown" ? () => undefined : await (method.startsWith("runtime.") ? this.nativeWindow : this.window).acquire(options.signal, cancelled);
+    const release = this.closed && method === "kernel.shutdown" ? () => undefined : await (method.startsWith("runtime.") || method.startsWith("process.subscription.") ? this.nativeWindow : this.window).acquire(options.signal, cancelled);
     let admitted = false;
     try {
       if (this.closed && method !== "kernel.shutdown") throw new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closed" });
@@ -1012,6 +1065,47 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown>>("compute.grammar.register", params, { signal, grant });
   }
 
+  async processSubscribe(params: Omit<KernelMethodParams["process.subscribe"], "subscriptionId">, grantValue: KernelGrantHandle,
+    observer: KernelProcessObserver): Promise<KernelProcessSubscription> {
+    const grant = this.assertGrant(grantValue);
+    const subscriptionId = randomUUID();
+    let resolve!: () => void; let reject!: (error: Error) => void;
+    const closed = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+    void closed.catch(() => undefined);
+    const entry: ProcessSubscriptionEntry = { id: subscriptionId, processId: params.processId, grant, listener: () => undefined,
+      dataSequence: 0, controlSequence: 0, closed: false, resolve, reject };
+    let closing: Promise<void> | undefined;
+    const handle: KernelProcessSubscription = {
+      closed,
+      acknowledge: async (stream, sequence) => {
+        if (entry.closed) return;
+        await this.requestRaw("process.subscription.ack", { subscriptionId, stream, sequence }, { grant });
+      },
+      close: () => {
+        if (closing) return closing;
+        if (entry.closed) return Promise.resolve();
+        entry.closed = true; this.processSubscriptions.delete(subscriptionId);
+        closing = this.requestRaw("process.subscription.unsubscribe", { subscriptionId }, { grant }).then(() => { resolve(); }, (error: unknown) => {
+          const failure = error instanceof Error ? error : new Error(String(error)); reject(failure); throw failure;
+        });
+        return closing;
+      },
+    };
+    entry.listener = event => observer(event, () => event.stream === "closed" ? Promise.resolve() : handle.acknowledge(event.stream, event.sequence));
+    // Register before sending: the initial control/data frame may precede the subscribe reply.
+    this.processSubscriptions.set(subscriptionId, entry);
+    try {
+      const result = await this.requestRaw<KernelProcessSubscribeResult>("process.subscribe", { ...params, subscriptionId }, { grant });
+      if (result.subscriptionId !== subscriptionId || result.processId !== params.processId || result.kernelEpoch !== grant.kernelEpoch) {
+        throw new KernelClientError({ code: "kernel-protocol-error", message: "Process subscription identity mismatch" });
+      }
+      return handle;
+    } catch (error) {
+      entry.closed = true; this.processSubscriptions.delete(subscriptionId);
+      reject(error instanceof Error ? error : new Error(String(error))); throw error;
+    }
+  }
+
   async processSpawn(params: KernelMethodParams["process.spawn"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessSnapshot> {
     return this.requestRaw<KernelProcessSnapshot>("process.spawn", params, { signal, grant });
   }
@@ -1229,6 +1323,11 @@ export class KernelClient {
   async revokeGrant(grantId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     if (!this.handshakeResult) await this.start();
     this.revokedGrants.add(grantId);
+    for (const [id, entry] of this.processSubscriptions) {
+      if (entry.grant.grantId !== grantId) continue;
+      entry.closed = true; this.processSubscriptions.delete(id);
+      entry.reject(new KernelClientError({ code: "forbidden", message: "Process subscription grant was revoked" }));
+    }
     for (const pending of this.pending.values()) if (pending.grantId === grantId) pending.cancel();
     return this.requestRaw<Record<string, unknown>>("authority.grant.revoke", { grantId }, { signal });
   }

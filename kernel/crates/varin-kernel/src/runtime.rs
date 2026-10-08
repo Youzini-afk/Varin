@@ -353,6 +353,13 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let revoked_grants = Arc::new(Mutex::new(HashSet::<String>::new()));
     let admission_epoch = Arc::new(Mutex::new(None::<String>));
     let writer_failed = Arc::new(AtomicBool::new(false));
+    let subscriptions=crate::process::subscriptions::ProcessSubscriptions::new(response_tx.clone());
+    let (subscription_tx,subscription_rx)=mpsc::channel();
+    let subscription_cancellations=cancellations.clone();
+    let subscription_worker=crate::process::subscriptions::spawn_control(subscription_rx,subscriptions.clone(),admission_epoch.clone(),response_tx.clone(),move|id|{
+        if let Ok(mut active)=subscription_cancellations.lock(){active.remove(id);}
+    });
+    let storage_subscriptions=subscriptions.clone();
     let (native_tx, native_rx) = mpsc::channel();
     let (process_terminals, terminal_rx) = mpsc::channel::<crate::process::ProcessTerminal>();
     let terminal_commands = native_tx.clone();
@@ -393,7 +400,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|_| KernelError::Storage("resource authority stopped before receipt replay".into()))
     }, process_controls.clone());
     let native_control = crate::native_runtime::NativeControl::default();
-    let native_worker = crate::native_runtime::spawn(native_rx, native_control.clone(), resources, response_tx.clone(), move |id| {
+    let native_worker = crate::native_runtime::spawn(native_rx, native_tx.clone(), native_control.clone(), resources, response_tx.clone(), move |id| {
         if let Ok(mut active) = native_cancellations.lock() { active.remove(id); }
     });
     let worker_native_tx = native_tx.clone();
@@ -477,7 +484,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(|result| result.get("kernelEpoch"))
                     .and_then(Value::as_str)
                 {
-                    if let Some(storage) = kernel.storage.as_mut() { storage.set_process_terminal_sender(process_terminals.clone()); storage.set_process_controls(process_controls.clone()); }
+                    if let Some(storage) = kernel.storage.as_mut() { storage.set_process_terminal_sender(process_terminals.clone()); storage.set_process_controls(process_controls.clone()); storage.set_process_subscriptions(storage_subscriptions.clone()); }
                     if let Some(root) = kernel.storage_root.as_ref() {
                         if worker_native_tx.send(crate::native_runtime::Command::Initialize { root: root.clone(), epoch: epoch.to_string() }).is_err() { break; }
                     }
@@ -606,10 +613,11 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         if request.get("method").and_then(Value::as_str) == Some("authority.grant.revoke") {
             let current_epoch = admission_epoch.lock().ok().and_then(|epoch| epoch.clone());
             if let Some(target) = admission_revoke_target(&request, current_epoch.as_deref()) {
+                subscriptions.close_grant(&target);
                 mark_grant_revoked(&revoked_grants, &cancellations, &target);
             }
         }
-        let wire_lane = if request.get("method").and_then(Value::as_str).is_some_and(|method| method.starts_with("runtime.")) {
+        let wire_lane = if request.get("method").and_then(Value::as_str).is_some_and(|method| method.starts_with("runtime.") || method.starts_with("process.subscription.")) {
             WireLane::Native
         } else { WireLane::Storage };
         if !id.is_empty() {
@@ -629,6 +637,10 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     },
                 );
             }
+        }
+        if request.get("method").and_then(Value::as_str).is_some_and(|method|method.starts_with("process.subscription.")) {
+            if subscription_tx.send(crate::process::subscriptions::ControlCommand::Request{value:request,cancellation:token}).is_err(){break;}
+            continue;
         }
         if request.get("method").and_then(Value::as_str).is_some_and(|method|method.starts_with("runtime.")) {
             let current_epoch=admission_epoch.lock().ok().and_then(|epoch|epoch.clone());
@@ -653,6 +665,10 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(active) = cancellations.lock() {
         for request in active.values() { request.cancel(); }
     }
+    subscriptions.shutdown();
+    let _=subscription_tx.send(crate::process::subscriptions::ControlCommand::Stop);
+    drop(subscription_tx);
+    let _=subscription_worker.join();
     // Native run workers retain a resource sender. Explicitly stop the owner rather than
     // waiting for all senders to drop, which would create a shutdown channel cycle.
     let _ = request_tx.send(WorkerRequest::Stop);
@@ -661,6 +677,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _ = native_tx.send(crate::native_runtime::Command::Stop);
     drop(native_tx);
     let _ = native_worker.join();
+    drop(subscriptions);
     drop(response_tx);
     let _ = writer.join();
     Ok(())
