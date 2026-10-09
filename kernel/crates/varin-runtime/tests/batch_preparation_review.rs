@@ -314,6 +314,18 @@ fn start(
     Arc<Provider>,
     std::thread::JoinHandle<Result<ExecutionReport, ExecutionError>>,
 ) {
+    start_input(store, input(run), specs, events, cancel)
+}
+fn start_input<P: Persistence + 'static>(
+    store: Arc<P>,
+    input: ExecutionInput,
+    specs: Vec<(&str, Spec)>,
+    events: mpsc::Sender<String>,
+    cancel: CancellationToken,
+) -> (
+    Arc<Provider>,
+    std::thread::JoinHandle<Result<ExecutionReport, ExecutionError>>,
+) {
     let provider = Arc::new(Provider {
         calls: specs
             .iter()
@@ -341,7 +353,6 @@ fn start(
         policy: Arc::new(DefaultAgentPolicy),
         progress: ProgressSink::default(),
     };
-    let input = input(run);
     (
         provider,
         std::thread::spawn(move || engine.run(input, cancel)),
@@ -491,22 +502,138 @@ fn invalid_declared_intent_or_class_cannot_dispatch() {
 
 #[test]
 fn cancellation_during_final_authorization_cannot_dispatch() {
-    let store = Arc::new(Store::default());
+    for access in [Access::Read, Access::Write] {
+        let store = Arc::new(Store::default());
+        let (tx, rx) = mpsc::channel();
+        let mut spec = Spec::ready("file:a", access);
+        spec.cancel_second_authorize = true;
+        let (_, worker) = start(
+            store.clone(),
+            "last-check",
+            vec![("cancelled", spec)],
+            tx,
+            CancellationToken::default(),
+        );
+        worker.join().unwrap().unwrap();
+        assert!(
+            !rx.try_iter().any(|e| e == "execute:cancelled"),
+            "operation cancelled before ToolDispatched must not reach execute"
+        );
+        assert!(!store
+            .records
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| matches!(r, ExecutionRecord::ToolDispatched { .. })));
+        assert_eq!(store.admission.summary().queued, 0);
+    }
+}
+
+#[test]
+fn cancellation_after_durable_dispatch_marker_settles_no_send_and_releases_occupancy() {
+    struct CancelAfterDispatch {
+        db: Arc<Mutex<varin_runtime::Catalog>>,
+        cancel: CancellationToken,
+    }
+    impl Persistence for CancelAfterDispatch {
+        fn resource_admission(&self) -> Arc<ResourceAdmission> {
+            self.db.resource_admission()
+        }
+        fn task_family(&self, run: &str, epoch: u64) -> Result<String, ExecutionError> {
+            self.db.task_family(run, epoch)
+        }
+        fn compile_context(
+            &self,
+            run: &str,
+            epoch: u64,
+            head: Option<&str>,
+        ) -> Result<Option<ContextProjection>, ExecutionError> {
+            self.db.compile_context(run, epoch, head)
+        }
+        fn consume_inputs(
+            &self,
+            run: &str,
+            epoch: u64,
+            head: Option<&str>,
+        ) -> Result<Vec<ConversationItem>, ExecutionError> {
+            self.db.consume_inputs(run, epoch, head)
+        }
+        fn commit(
+            &self,
+            run: &str,
+            epoch: u64,
+            record: &ExecutionRecord,
+        ) -> Result<(), ExecutionError> {
+            self.db.commit(run, epoch, record)?;
+            if matches!(record, ExecutionRecord::ToolDispatched { .. }) {
+                self.cancel.cancel();
+            }
+            Ok(())
+        }
+    }
+    let path = std::env::temp_dir().join(format!("varin-after-marker-{}", uuid::Uuid::new_v4()));
+    let db = Arc::new(Mutex::new(varin_runtime::Catalog::open(&path).unwrap()));
+    let mut prepared = {
+        let mut catalog = db.lock().unwrap();
+        catalog.create_thread("real", "real").unwrap();
+        let receipt = catalog
+            .submit(&varin_runtime::SubmitInput {
+                key: "input".into(),
+                thread_id: "real".into(),
+                branch_id: "real".into(),
+                expected_head: None,
+                input: json!({"text":"exercise dispatch cancellation"}),
+                configuration: json!({}),
+            })
+            .unwrap();
+        let mut prepared = input(&receipt.run_id);
+        prepared.owner_generation = catalog.epoch();
+        prepared.binding.history_range.branch_id = "real".into();
+        prepared.binding.history_range.leaf_id = Some(receipt.input_id);
+        prepared.history = catalog.execution_history("real").unwrap();
+        prepared
+    };
+    prepared.binding.tools[0].schema = json!({"type":"object"});
+    let cancel = CancellationToken::default();
     let (tx, rx) = mpsc::channel();
-    let mut spec = Spec::ready("file:a", Access::Write);
-    spec.cancel_second_authorize = true;
-    let (_, worker) = start(
-        store,
-        "last-check",
-        vec![("cancelled", spec)],
+    let (_, worker) = start_input(
+        Arc::new(CancelAfterDispatch {
+            db: db.clone(),
+            cancel: cancel.clone(),
+        }),
+        prepared,
+        vec![("no-send", Spec::ready("file:a", Access::Write))],
         tx,
-        CancellationToken::default(),
+        cancel,
     );
-    worker.join().unwrap().unwrap();
+    let report = worker.join().unwrap().unwrap();
+    assert_eq!(report.state, RunState::Cancelled);
+    assert!(!rx.try_iter().any(|e| e == "execute:no-send"));
+    let result = report
+        .history
+        .iter()
+        .find_map(|item| match &item.content {
+            Content::ToolResult { result } => Some(result),
+            _ => None,
+        })
+        .unwrap();
+    assert!(matches!(
+        result.completion,
+        ToolCompletion::NotDispatched { .. }
+    ));
+    let owner = format!("{}:tool:{}", result.request_id, result.call_id);
+    let operation = db.lock().unwrap().operation(&owner).unwrap();
+    assert_eq!(operation.effect, Effect::None);
+    assert_eq!(operation.phase, varin_runtime::OperationPhase::Terminal);
+    assert!(db.resource_admission().inspect(&owner).is_none());
+    drop(db);
+    let reopened = varin_runtime::Catalog::open(&path).unwrap();
     assert!(
-        !rx.try_iter().any(|e| e == "execute:cancelled"),
-        "operation cancelled before ToolDispatched must not reach execute"
+        reopened.resource_admission().inspect(&owner).is_none(),
+        "durable occupancy must also be released"
     );
+    drop(reopened);
+    std::fs::remove_dir_all(path).unwrap();
 }
 
 #[test]
