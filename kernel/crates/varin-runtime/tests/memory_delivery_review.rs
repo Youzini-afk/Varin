@@ -109,6 +109,70 @@ fn finish(request: &str, outcome: ModelOutcome) -> ExecutionRecord {
         failure: None,
     }
 }
+
+#[test]
+fn policy_model_quoted_real_memory_facts_keep_selection_send_and_commit_separate() {
+    use std::sync::{Arc, Mutex};
+    use varin_runtime::Outcome;
+    let f = Fixture::new();
+    let mut catalog = Catalog::open(&f.0).unwrap();
+    catalog.create_thread("thread", "main").unwrap();
+    let receipt = catalog.submit_with_context_snapshot(&SubmitInput {
+        key:"policy-memory".into(), thread_id:"thread".into(), branch_id:"main".into(),
+        expected_head:None, input:json!({"text":"plan with current notes"}), configuration:json!({}),
+    }, None, false, Some(ContextProposal {
+        key:"initial".into(), branch_id:"main".into(), through_id:None, expected_revision:0,
+        summary:String::new(), effective_system_prompt:"FROZEN_SYSTEM FROZEN_NOTE".into(),
+        instruction_sources:vec!["review-source".into()], memory_checkpoint:Some("memory:1".into()),
+    }), Some(basis())).unwrap();
+    let epoch = catalog.epoch();
+    catalog.synchronize_memory(&receipt.run_id, epoch, MemoryState {
+        revision:2, memories:vec![note(1,"CHANGED_NOTE_FOR_POLICY")],
+        note_revisions:BTreeMap::from([("1".into(),2)]), known:BTreeMap::new(),
+    }).unwrap();
+    let projection = projection(&catalog, &receipt.run_id, epoch, &receipt.input_id);
+    assert_eq!(projection.history.iter().filter(|item|
+        matches!(&item.provenance, Provenance::EnvironmentFact { event_id } if event_id.starts_with("memory:"))).count(), 1);
+    let boundary = catalog.policy_boundary(&receipt.run_id, epoch).unwrap();
+    let action = format!("{}:policy:{}", receipt.run_id, boundary.id);
+    let mut planning = snapshot(&receipt.run_id, &receipt.input_id, &action, projection.clone());
+    planning.view.origin = RequestOrigin::PolicyModelJob {
+        action_id:action.clone(), purpose:"planning".into(), boundary_id:boundary.id.clone(),
+    };
+    planning.view.history = vec![ConversationItem {
+        id:"quoted-memory-context".into(), provenance:Provenance::ExternalData {
+            source:"committed-conversation-context".into(),
+        }, content:Content::Text {
+            text:format!("Frozen conversation context\n{}", serde_json::to_string(&projection.history).unwrap()),
+        }, opaque:None,
+    }];
+    planning.serialized = serde_json::to_value(&planning.view).unwrap();
+    let intent = PolicyModelIntent::PolicyModelJobV1 {
+        action_id:action.clone(), boundary, identity:PolicyIdentity { name:"default".into(), version:"1".into() },
+        state:Value::Null, instructions:planning.view.binding.instruction_sources.clone(), evidence:vec![],
+        capability:PolicyModelCapability {
+            capability_id:"memory-planner".into(), purpose:"planning".into(), status:PolicyModelStatus::Available,
+            binding_id:Some("bound-planner".into()), configuration_identity:Some("planner-config".into()),
+            supported_operation:"tool_free_text".into(), binding:Some(planning.view.binding.clone()),
+            configuration:None, credential_scope:None,
+        },
+    };
+    let owner = Arc::new(Mutex::new(catalog));
+    owner.admit_policy_model(&receipt.run_id, epoch, &intent, &planning).unwrap();
+    assert_eq!(states(&f.0, &action), vec!["\"selected\""]);
+    owner.dispatch_policy_model(&receipt.run_id, epoch, &action).unwrap();
+    assert_eq!(states(&f.0, &action), vec!["\"sent\""]);
+    let output = PolicyModelOutput { items:vec![ProviderItem {
+        id:"plan".into(), content:Content::Text { text:"use the changed note".into() }, opaque:None,
+    }], ..PolicyModelOutput::default() };
+    owner.record_policy_model(&receipt.run_id, epoch, &action, &output, Some(&PolicyModelReceipt {
+        dispatch:PolicyModelDispatch::Completed, outcome:Outcome::Succeeded, output:None,
+        usage:output.usage.clone(), finish_reason:Some(FinishReason::Stop), failure:None, usable:true,
+    })).unwrap();
+    assert_eq!(states(&f.0, &action), vec!["\"committed\""]);
+    owner.lock().unwrap().collect_content_objects().unwrap();
+    assert_eq!(owner.policy_model_job(&receipt.run_id, epoch).unwrap().unwrap().snapshot, planning);
+}
 #[test]
 fn memory_request_selection_is_not_delivery_and_frozen_request_evidence_survives_new_notes_gc_and_reopen(
 ) {
