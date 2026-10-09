@@ -141,6 +141,30 @@ fn empty_directory(path: &Path) -> Result<bool, KernelError> {
     Ok(fs::read_dir(path)?.next().transpose()?.is_none())
 }
 
+fn has_directory_identity(path: &Path, identity: &DirectoryIdentity) -> Result<bool, KernelError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Ok(false);
+    }
+    Ok(directory_identity(path)?.as_ref() == Some(identity))
+}
+
+fn journal_directory_identity(
+    journal: &Value,
+    field: &str,
+) -> Result<Option<DirectoryIdentity>, KernelError> {
+    Ok(journal
+        .get(field)
+        .cloned()
+        .map(serde_json::from_value::<Option<DirectoryIdentity>>)
+        .transpose()?
+        .flatten())
+}
+
 pub(crate) enum Control {
     CreateStage,
     Promote {
@@ -333,7 +357,7 @@ impl Task {
                 })?;
                 // Existing Git/Varin metadata is outside immutable source content;
                 // observing a match never removes it or replaces that directory.
-                if name == ".git" || name == ".varin" {
+                if resource.path == self.paths[0].path && (name == ".git" || name == ".varin") {
                     continue;
                 }
                 let relative = if prefix.is_empty() {
@@ -515,27 +539,35 @@ impl Task {
         let mut effect_observed = false;
         let mut cow = (0, 0);
         let mut cleanup_backup = None;
+        let original = journal_directory_identity(&self.journal, "materializationOriginal")?;
+        let recorded_stage = journal_directory_identity(&self.journal, "materializationStage")?;
         let result = if self.matches(&target, &entries, true)? {
             effect_observed = self.resuming;
             // Only the original empty directory is eligible for deletion.
-            cleanup_backup = self
-                .journal
-                .get("materializationOriginal")
-                .cloned()
-                .map(serde_json::from_value::<Option<DirectoryIdentity>>)
-                .transpose()?
-                .flatten();
+            cleanup_backup = original;
             self.success(cow)
         } else if self.resuming {
-            if !exists(&target.absolute)? && self.matches(&stage, &entries, true)? {
-                let identity = directory_identity(&stage.absolute)?.expect("matched stage");
-                let original = self
-                    .journal
-                    .get("materializationOriginal")
-                    .cloned()
-                    .map(serde_json::from_value::<Option<DirectoryIdentity>>)
-                    .transpose()?
-                    .flatten();
+            let target_absent = !exists(&target.absolute)?;
+            let staging_owned = match recorded_stage.as_ref() {
+                Some(identity) if target_absent => {
+                    has_directory_identity(&stage.absolute, identity)?
+                }
+                _ => false,
+            };
+            let original_held = if target_absent {
+                match original.as_ref() {
+                    Some(identity) => has_directory_identity(&backup.absolute, identity)?,
+                    None => !exists(&backup.absolute)?,
+                }
+            } else {
+                false
+            };
+            if target_absent
+                && staging_owned
+                && original_held
+                && self.matches(&stage, &entries, true)?
+            {
+                let identity = recorded_stage.expect("journal-proven stage");
                 control(Control::Promote {
                     stage: identity,
                     original: original.clone(),
@@ -547,13 +579,20 @@ impl Task {
                 } else {
                     self.conflict("materialized target changed after promotion")
                 }
-            } else if !exists(&target.absolute)? && exists(&backup.absolute)? {
-                let identity = directory_identity(&backup.absolute)?.ok_or_else(|| {
-                    KernelError::Operation("materialization backup disappeared".into())
-                })?;
-                control(Control::RestoreBackup { backup: identity })?;
-                effect_observed = true;
-                self.conflict("restored backup after incomplete materialization")
+            } else if target_absent && exists(&backup.absolute)? {
+                if let Some(identity) = original {
+                    if has_directory_identity(&backup.absolute, &identity)?
+                        && empty_directory(&backup.absolute)?
+                    {
+                        control(Control::RestoreBackup { backup: identity })?;
+                        effect_observed = true;
+                        self.conflict("restored backup after incomplete materialization")
+                    } else {
+                        self.conflict("materialization backup differs from the journal-proven original; directories were preserved")
+                    }
+                } else {
+                    self.conflict("materialization journal does not own the backup; directories were preserved")
+                }
             } else {
                 self.conflict("interrupted materialization differs from immutable source; directories were preserved")
             }
@@ -915,7 +954,11 @@ impl Storage {
                 stage: identity,
                 original,
             } => {
-                if directory_identity(&stage.absolute)?.as_ref() != Some(&identity) {
+                if journal_directory_identity(&journal, "materializationStage")?.as_ref()
+                    != Some(&identity)
+                    || journal_directory_identity(&journal, "materializationOriginal")? != original
+                    || !has_directory_identity(&stage.absolute, &identity)?
+                {
                     return Err(KernelError::Operation(
                         "materialization staging changed before promotion".into(),
                     ));
@@ -959,10 +1002,17 @@ impl Storage {
                 if let Err(error) = check(&self.materializations[operation_id].cancellation)
                     .and_then(|_| durable_directory_rename(&stage.absolute, &target.absolute))
                 {
-                    if !exists(&target.absolute)? && exists(&backup.absolute)? {
-                        let _ = durable_directory_rename(&backup.absolute, &target.absolute);
-                        if let Some(parent) = target.absolute.parent() {
-                            let _ = sync_directory(parent);
+                    if !exists(&target.absolute)? {
+                        if let Some(original) = &original {
+                            if has_directory_identity(&backup.absolute, original)?
+                                && empty_directory(&backup.absolute)?
+                            {
+                                let _ =
+                                    durable_directory_rename(&backup.absolute, &target.absolute);
+                                if let Some(parent) = target.absolute.parent() {
+                                    let _ = sync_directory(parent);
+                                }
+                            }
                         }
                     }
                     return Err(error);
@@ -975,8 +1025,11 @@ impl Storage {
                 Ok(Controlled::Promoted)
             }
             Control::RestoreBackup { backup: identity } => {
-                if exists(&target.absolute)?
-                    || directory_identity(&backup.absolute)?.as_ref() != Some(&identity)
+                if journal_directory_identity(&journal, "materializationOriginal")?.as_ref()
+                    != Some(&identity)
+                    || exists(&target.absolute)?
+                    || !has_directory_identity(&backup.absolute, &identity)?
+                    || !empty_directory(&backup.absolute)?
                 {
                     return Err(KernelError::Operation(
                         "materialization backup changed before restoration".into(),
