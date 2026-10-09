@@ -335,10 +335,39 @@ The initial live AGENTS.md is read through Documents and its actual revision is 
 existing context checkpoint. Later disk changes remain live for file tools but do not retroactively
 rewrite that instruction checkpoint. Ordinary instruction/memory refresh retains its existing owner.
 
-This slice does not add native LSP tools. A subsequent live-environment integration must reuse
-LanguageSupervisor/LanguageViewBinder, admit every returned resource and report live dependency
-semantics. Materialized files do not pin external symlinks, project configuration outside the copy,
-or compiler libraries; a workspace cwd does not establish a fixed dependency closure.
+Live selections also expose `native_language_definition`, `native_language_references`, and
+`native_language_diagnostics`. Native tool contracts, grant admission and history remain in Rust;
+`native-language-owner.ts` binds saved text through the existing LanguageViewBinder and selected
+LanguageSupervisor. The private epoch-bound language bridge does not own another process, provider
+registry or configuration store. It starts no language service during source preparation. Shared
+startup and per-query cancellation remain with the existing supervisor; no file lease or Catalog
+transaction spans a language wait.
+
+Navigation positions are zero-based UTF-16. The query records its actual bound document revision,
+view, provider and generation, and explicitly reports live dependency semantics. Both Host and Rust
+recheck the input after the query. Rust admits each returned resource under the original Run grant,
+observes that target's own content revision and validates range bounds. `observedRevision` is a
+post-query observation; cross-file `rangeRevision: null` acknowledges that standard LSP locations do
+not prove the target revision used by the server. Native-only strict mapping distinguishes out-of-scope
+and unmappable locations; unavailable targets and stale ranges are separate omission counts. A partial
+result, including one where all locations were omitted, is not a successful empty query. Diagnostics
+return current versioned push or pull evidence; pending/stale/unsupported/unavailable never mean clean.
+The native diagnostic projection exposes primary locations rather than nested related-information links.
+The currently bundled TypeScript server publishes unversioned diagnostics without pull support; its
+native diagnostic result therefore remains pending with `diagnosticVerification: unversioned`.
+Actual nonempty observations are retained and admitted, with `rangeRevision: null`; their current
+file observation does not prove the diagnostics were computed from that revision. Omissions preserve
+pending verification rather than upgrading the observation to verified partial/clean.
+
+Host replies are serialized and checked against the existing frame budget before touching the shared
+kernel writer. Oversized/nonserializable language replies become a small unavailable receipt. Language
+result chunking is not implemented. Oversized transient Rust progress is omitted before the shared
+writer; durable tool content remains available through existing chunked history reads. Transport loss
+still retires the actual private channel.
+
+Fixed-branch and materialized language selection is explicitly unavailable. Materialized files do not
+pin external symlinks, project configuration outside the copy, or compiler libraries; a workspace cwd
+and didOpen overlay do not establish a fixed dependency closure.
 
 The experimental native `run_launches` domain is now format 2; catalog/content remain 3/3.
 This is an intentional incompatible internal encoding change from the old `materialized` boolean.
@@ -347,3 +376,10 @@ epoch advancement or recovery. Read-only preflight observes committed WAL pages.
 WAL and content assets are preserved; there is no migration, silent inference or alternate reader.
 The persisted `live_root` field is required: fixed/materialized encode explicit null and live mode
 encodes the exact descriptor. Missing fields do not silently manufacture a legacy source identity.
+
+
+Native live-language acceptance is recorded by suite in the
+[implementation plan](../../../../../docs/plan/native-agent-runtime-implementation.md#已核验增量live-root-原生语言工具):
+Rust rendezvous/framing 5; native controlled-owner 20, source entry 1, real bundled TypeScript loop 1;
+portable owner 12 and bridge 3; existing Pi navigation 15 and diagnostics adapter 4; UI 18.
+These are focused checks, not an all-repository, fixed-dependency-closure or cross-platform pass.

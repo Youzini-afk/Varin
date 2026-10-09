@@ -1,3 +1,4 @@
+import { createNativeLanguageOwner } from './lib/kernel/native-language-owner.js';
 import { createNativeLiveSourceOwner } from './lib/kernel/native-live-source.js';
 import { createNativeThreadSourcePreparer } from './lib/kernel/native-thread-sources.js';
 import { createNativeThreadContext } from './lib/kernel/native-thread-context.js';
@@ -2873,6 +2874,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const prepareNativePolicy = createNativeAgentPolicy(extensionRuntime);
   const nativeModelAuthority = createNativeModelAuthority(hostCredentialAuthority);
   const nativeLiveSources = createNativeLiveSourceOwner({ documents: documentsAuthority, kernel: kernelClient });
+  kernelClient.setNativeLanguageOwner(createNativeLanguageOwner({ documents: documentsAuthority, supervisor: languageSupervisor, validateSource: nativeLiveSources.validate }));
   const nativeRuntime: NativeRuntimeClient = new NativeRuntimeClient(kernelClient, async (input, signal) => {
     // A read-only fixed branch has no executable filesystem view. Global MCP capabilities run
     // in the neutral Host scope; they must not borrow the mutable project directory.

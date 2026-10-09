@@ -56,7 +56,7 @@ export function NativeThreadSourcePicker({ api, identity, initialPath, active, l
         value={mode} onChange={event => setMode(event.target.value as typeof mode)}>
         <option value="fixed_branch">Read-only file snapshot: read, list and search</option>
         <option value="materialized">Isolated editable copy and commands</option>
-        <option value="live_root">Live workspace: edit actual files and run commands</option>
+        <option value="live_root">Live workspace: files, commands and language tools</option>
       </select>
       {mode === 'live_root' ? <p>Uses saved files directly, without capturing a snapshot. External file and dependency changes remain live; unsaved editor changes are not included. Edits change the selected workspace immediately. Commands can have external effects; this is not a security sandbox.</p> : <p>Captures saved files using the workspace inventory. Unsaved editor changes are not included.</p>}
       {mode === 'materialized' && <p>File edits start in a separate working copy. Commands can have external effects; this is not a security sandbox. Changes are not copied back automatically.</p>}

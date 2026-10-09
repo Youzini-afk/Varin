@@ -89,6 +89,10 @@ fn domain(error: varin_runtime::RuntimeError) -> KernelError {
         other => KernelError::Storage(other.to_string()),
     }
 }
+/// Transient progress is lossy; a protocol-sized guard must run before the shared writer.
+pub(crate) fn progress_frame_fits(event: &Value, frame_limit: usize) -> bool {
+    serde_json::to_vec(event).is_ok_and(|bytes| bytes.len() <= frame_limit)
+}
 pub(crate) fn spawn(
     commands: mpsc::Receiver<Command>,
     self_sender: mpsc::Sender<Command>,
@@ -96,6 +100,7 @@ pub(crate) fn spawn(
     resources: crate::native_tools::NativeResourceClient,
     credential_bridge: crate::credential_bridge::CredentialBridge,
     mcp_bridge: crate::native_mcp::McpBridge,
+    language_bridge: crate::native_language::LanguageBridge,
     policy_bridge: crate::native_policy::PolicyBridge,
     responses: mpsc::SyncSender<Value>,
     finished: impl Fn(&str) + Send + Sync + 'static,
@@ -498,7 +503,8 @@ pub(crate) fn spawn(
                                     binding,
                                     resources.clone(),
                                 )
-                                .map_err(|e| KernelError::Authorization(e.to_string()))?;
+                                .map_err(|e| KernelError::Authorization(e.to_string()))?
+                                .with_language(language_bridge.clone());
                                 start.binding.tools = tools.schemas();
                                 start.binding.tool_schema_generation =
                                     start.binding.configuration_generation;
@@ -570,7 +576,12 @@ pub(crate) fn spawn(
                             let progress_stream_id = uuid::Uuid::new_v4().to_string();
                             thread::spawn(move || {
                                 for update in updates {
-                                    let _ = progress_responses.try_send(json!({"v":PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":progress_epoch,"stream":"progress","runId":update.run_id,"streamId":progress_stream_id,"sequence":update.sequence,"event":update.event}));
+                                    let event = json!({"v":PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":progress_epoch,"stream":"progress","runId":update.run_id,"streamId":progress_stream_id,"sequence":update.sequence,"event":update.event});
+                                    // Progress is already lossy; never let a large tool projection kill
+                                    // the shared writer. Durable history retains its chunked read path.
+                                    if progress_frame_fits(&event, crate::protocol::MAX_FRAME_BYTES) {
+                                        let _ = progress_responses.try_send(event);
+                                    }
                                 }
                             });
                             let handle = runtime

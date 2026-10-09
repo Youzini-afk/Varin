@@ -16,6 +16,7 @@ interface DiagnosticContext extends MappingContext {
   providerId: string;
   resource: LanguageResource;
   severity(value: unknown): unknown;
+  onRejectedLocation?: (reason: 'outOfScope' | 'unmappable') => void;
 }
 interface CodeActionContext extends MappingContext { diagnosticContext: DiagnosticContext }
 
@@ -95,6 +96,38 @@ export const resourceFromUri = (
   const relative = pathModule.relative(root, absolutePath);
   if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) return null;
   return { workspaceId, resourceId: relative.split(pathModule.sep).join('/') };
+};
+
+/** Internal projection hook: expose an omitted location without returning an unauthorized URI. */
+export const validLanguageRange = (value: unknown): boolean => {
+  const range = mapRange(value);
+  return !!range && (range.start.line < range.end.line || (range.start.line === range.end.line && range.start.character <= range.end.character));
+};
+export const strictLocationRejection = (value: unknown, root: string, pathModule: typeof path = path, link = false): 'outOfScope' | 'unmappable' | undefined => {
+  const item = recordOrEmpty(value);
+  const uri = link ? item.targetUri ?? item.uri : item.uri ?? item.targetUri;
+  if (typeof uri !== 'string') return 'unmappable';
+  try {
+    const url = new URL(uri);
+    if (url.protocol !== 'file:' || url.search || url.hash) return 'unmappable';
+    const relative = pathModule.relative(root, fileURLToPath(url));
+    if (relative === '..' || relative.startsWith(`..${pathModule.sep}`) || pathModule.isAbsolute(relative)) return 'outOfScope';
+    if (!relative) return 'unmappable';
+  } catch { return 'unmappable'; }
+  const range = link ? item.targetRange ?? item.range ?? item.targetSelectionRange : item.range ?? item.targetRange ?? item.targetSelectionRange;
+  if (!validLanguageRange(range) || (link && !validLanguageRange(item.targetSelectionRange ?? item.targetRange ?? item.range))
+    || (link && item.originSelectionRange !== undefined && !validLanguageRange(item.originSelectionRange))) return 'unmappable';
+  return undefined;
+};
+
+export const rejectedLocationReason = (value: unknown, root: string, pathModule: typeof path = path): 'outOfScope' | 'unmappable' => {
+  const record = recordOrEmpty(value);
+  const uri = record.targetUri ?? record.uri;
+  if (typeof uri !== 'string') return 'unmappable';
+  try {
+    const relative = pathModule.relative(root, fileURLToPath(uri));
+    return relative === '..' || relative.startsWith(`..${pathModule.sep}`) || pathModule.isAbsolute(relative) ? 'outOfScope' : 'unmappable';
+  } catch { return 'unmappable'; }
 };
 
 export const mapLocation = (value: unknown, workspaceId: string, root: string, pathModule: typeof path = path) => {
@@ -364,6 +397,7 @@ export const mapDiagnostic = (diagnostic: unknown, context: DiagnosticContext) =
     ? record.relatedInformation.map((item: unknown) => {
         const itemRecord = recordOrEmpty(item);
         const location = mapLocation(itemRecord.location, context.workspaceId, context.root, context.pathModule);
+        if (!location) context.onRejectedLocation?.(rejectedLocationReason(itemRecord.location, context.root, context.pathModule));
         return location && typeof itemRecord.message === 'string' ? { location, message: itemRecord.message } : null;
       }).filter(Boolean)
     : undefined;

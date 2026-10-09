@@ -9,6 +9,7 @@ mod native_runtime;
 mod native_tools;
 mod native_questions;
 mod native_mcp;
+mod native_language;
 mod process;
 mod protocol;
 mod protocol_generated;

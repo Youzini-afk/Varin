@@ -366,3 +366,20 @@ it('the kernel refuses process effects attached to a fixed branch even with a va
   await f.runtime.cancelRun(pending.run_id);
   await f.kernel.revokeGrant(grant.grantId);
 }, 30_000);
+
+it('source preparation selects language tools only for the explicitly prepared live workspace', async () => {
+  const f = await fixture((_body, response) => done(response));
+  await fs.writeFile(path.join(f.workspace, 'source.ts'), 'export const value = 1;\n');
+  const identity = await f.api.create('language-source-selection');
+  const languageTools = ['language_definition', 'language_references', 'language_diagnostics'];
+  const live = await f.api.prepareSource({ ...identity, key: 'live-language', path: f.workspace, mode: 'live_root' });
+  expect(live.source.mode).toBe('live_root');
+  expect(live.source.tools).toEqual(expect.arrayContaining(languageTools));
+  for (const mode of ['fixed_branch', 'materialized'] as const) {
+    const prepared = await f.api.prepareSource({ ...identity, key: `switch-${mode}`, path: f.workspace, mode });
+    expect(prepared.source.mode).toBe(mode);
+    for (const tool of languageTools) expect(prepared.source.tools).not.toContain(tool);
+    expect(prepared.source.tools).toContain('file_read');
+  }
+  expect(f.requests).toHaveLength(0);
+}, 30_000);

@@ -24,7 +24,7 @@ export function createNativeThreadSourcePreparer({ documents, workingStates, liv
       if (!liveSources) throw new Error('Live workspace access is unavailable');
       const liveRoot = await liveSources.prepare(workspace.workspaceId, workspace.workspaceId, input.threadId);
       return { path: root, source: { workspaceId: workspace.workspaceId, executionWorkspaceId: workspace.workspaceId,
-        mode: 'live_root', liveRoot, tools: ['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn'] } };
+        mode: 'live_root', liveRoot, tools: ['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn', 'language_definition', 'language_references', 'language_diagnostics'] } };
     }
     const mode = input.mode;
     const key = createHash('sha256').update(JSON.stringify([input.threadId, input.branchId, workspace.workspaceId, input.key, input.mode])).digest('hex');

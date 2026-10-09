@@ -12,6 +12,7 @@
 - 目前以下各项均未完成生产迁移；Pi、用户资产和现有生产路径保持原权威，禁止新旧循环同时推进同一 Thread
 - 已新增局部实现：Catalog持久身份/历史/Operation/Wait，执行loop与事务桥接，RunSupervisor控制，多家族模型适配、输入队列与边界中断、组合依赖解析与绑定；kernel独立control worker和Host显式client已有真实IPC验证，未替代生产Pi路径
 - 独立审阅发现并已修复：续接claim后崩溃丢唤醒、后台handoff仍被终态Run阻止；模型完成与历史/工具调用现由同一事务提交。其余交叉边界继续审阅，最终测试结果以稳定代码重跑为准
+- 显式 `live_root` 已接通原生定义、引用和诊断三个语言工具，复用现有 Documents、LanguageViewBinder/LanguageSupervisor 与 Rust 资源授权；固定/物化语言依赖闭包、其余代码智能能力及完整领域迁移仍未完成。验收与语义边界见本文件末节
 
 ## 2026-10-09 恢复后的增量
 
@@ -60,7 +61,7 @@
 | 总设 §4.1、§9、§23：单一协议、控制/数据分离、事件推进 | `kernel/protocol/schema.json` 生成边界；native control worker、Host native client 独立 credits；guardian 推送/磁盘输出已有局部实证；历史引用分页已有 HTTP 实证 | 不能由某一进程通道推导所有域完成。file_list/file_search 及 compute 背压已使用输出/终态事件而非 10 ms 轮询；大内容模型请求仍全量序列化/读取；同进程资源桥仍需区分 typed 执行与外部 wire 解码 | 沿其他内部等待核查事件通知和共享准备；沿实际大截图/日志/内容路径核查独立数据流；逐域移除重复 JSON 中转而不新增统一 RPC 层 | 计算、输出或大内容拥塞时取消/状态可受理；完整日志可按游标重读；控制成功不冒充执行已停止；空闲内部等待不持续产生 read RPC |
 | 总设 §12–13：模型用途、稳定上下文、即时记忆与压缩 | `providers/`、credential broker、Host credential owner；`catalog_context*.rs`/`context_job.rs`；Host `native-thread-context.ts` | 多家族 fake/loopback 通过不等于真实认证/平台网络完整覆盖；显式摘要不是自动预算策略或完整记忆流程；agentPlanning 已有受所选策略显式请求的 tool-free 模型 Operation 实现与局部独立验收；embedding/rerank/其他 decision/image 仍须按用途接入 | 让内置 ContextCompiler 与可替换上下文策略消费同一来源/记忆 revision；即时写入走现有 memory owner，成功 checkpoint 原子更换稳定系统快照；在实际检索路径绑定非 chat 推理用途 | memory UI/工具交错不丢 revision；压缩候选期间新增尾部保留；失败保留旧 checkpoint；token 预算包含工具/附件/事件；按真实 provider、认证和网络场景分别记录覆盖 |
 | 总设 §14–16：源视图、捕获、dispatch、恢复与整合 | Native source launch/selection、Storage 分支/内容/文件事务、Host Documents/WorkingState；native 历史 branch 与文件 journal 恢复已有证据 | 明确 native source 准备不等于主/子任务 dispatch 完成；编辑器草稿、文件副本与 Git/overview 仍需同源关联；报告和代码集成不能混为一物；组合恢复与 Host 启动续接须走完整产品路径 | 以一个有独立源视图的子任务贯穿立即持久回执、批量捕获/共享固定 root、准备取消、执行、报告和条件代码整合；复用底层 writer | 大非 Git 根准备时父任务和控制继续；重开继承真实副本而不重置文件；无改动子任务正常交付；父目录后来修改形成明确冲突；草稿不被聊天分支操作覆盖 |
-| 总设 §17、扩设 §5.3：语言/检索及一致环境 | Host `lsp`/`search`/`structure`/`knowledge`，Rust compute；原生 file_list/file_search 已复用 compute 与授权 | 原生直接 file 查询不等于完整 LSP/语义检索迁移；服务共享键须包含 environment/project/config/source view，固定工程的依赖文件也必须一致；远端不能只替换文件 provider | 通过同一能力组合绑定 read/Shell/LSP 源视图；把一个现有 LSP 查询和检索 PipelinePlan 接到原生调用，准备按实例共享、独立预热 | LSP 卡住时 read 与其他环境继续；同名本地/远端路径不串源；只改目标 didOpen 不被误记为完整分支视图；取消一个等待者不杀共享 LSP；pending 与 clean 有区别 |
+| 总设 §17、扩设 §5.3：语言/检索及一致环境 | 原生 live_root 定义/引用/诊断已复用 Host LanguageSupervisor/LanguageViewBinder、Documents 与 Rust grant；file_list/file_search 已复用 compute | 仅 live 环境三工具已接通；固定/物化工程依赖闭包、其他 LSP/结构/语义检索和远端同名资源映射未完成；跨文件 revision 只是请求后观察，无版本诊断仍是未确认 current 的 pending 观测 | 沿同一来源绑定接现有检索 PipelinePlan；完整固定语言视图须先证明 imports/配置/链接/编译器库闭包，远端 read/Shell/LSP 共同映射而非只替换文件 provider | live 路径的独立等待、共享准备、单等待者取消、越权/过期结果及真实 bundled TS 证据见末节；后续另证固定依赖闭包、远端不串源及检索来源/配置世代 |
 | 总设 §18：问题、计划、Goal、定时与 Bot | `catalog_questions.rs`/`native_questions.rs` 已出现问题持久路径；Host memory/todo、bots、followups、scheduled-tasks 仍各有领域 owner | 问题记录不代表 Goal/日历发生项全部完成；既有 Host 续接权威还须收敛到统一 Run/Wait；显式 Goal 授权、手动暂停、用量和时区语义不能丢失 | 逐域把领域事件接原生受理和 durable Wait，先完成关闭 UI 后回答/续接与一次日历发生项；计划保留单 revision，Bot 使用相同任务身份而保留独立知识 | 默认答案/到期不是批准；订阅登记窗口不丢唤醒；重启只准入一次 occurrence；分叉不复制自动授权；暂停不被 timer 覆盖；用量不因投影重复累计 |
 | 总设 §19、§22：桌面与远端执行资源 | Host `computer`、`packages/computer-driver`、环境服务；既有真实平台能力继续复用 | 尚未贯穿原生 operation/owner/control epoch；断网/Host 重启不证明进程或输入停止；独立桌面与同一物理桌面必须不同调度语义 | 接一个真实桌面作业和一个远端执行环境，固定资源映射与执行端回执；紧急停止直接到执行端，重连查询原 operation，不从聊天状态推导成功 | Catalog 不可写仍能停止输入；释放键和控制分配有证据；接管后旧队列不续发；鼠标移动不擅自接管；远端失联保持未知效果；其他桌面继续 |
 | 总设 §20、扩设 §8：MCP、持久脚本、作者合同与发现 | `extension-contract/host/sdk` 已有 Host/Surface、effect、typed workbench API；Pi MCP/codemode 仍为已有入口 | 原生 MCP 直调/发现已复用共享 Host owner 并有局部证据；统一 codemode 路径、MCP Tasks 和完整长输出仍未交付；Agent 自助扩展缺实际合同查询到候选包启用的闭环；不得另养文档目录或绕过现有启用授权 | 接既有 MCP 配置/凭据与能力协商；同 registry 提供精确 schema/依赖/选定实现/准备状态/UI slot 查询；用普通 SDK 构建一个领域工具及卡片，再通过原有候选流程更新 | 禁用工具后脚本不能另路使用；完整 async 单元格可等待并保留嵌套调用身份；无 print 仍有必要提交事实；无 UI 工具照常运行；MCP Tasks 只在协商支持时映射 |
@@ -70,18 +71,18 @@
 ### 当前优先级
 
 1. **保留已核验策略纵切并继续补行动范围**：安装策略 → 独立规划 Operation → 有界读取图 → 主模型回答已有下述证据；下一步领域接线保留取消、混合恢复、凭据隔离和未知效果语义，一般工具图、子任务及交付/暂停仍须完成。
-2. **接真实源身份和现有语言 owner**：按下节从 live-disk 版本化观察和一条原生 LSP 查询切入；沿已完成的跨 Run 准入、事件 compute 和 owner 级准备继续接线，补任务族公平及全域共享准备。
+2. **扩展已核验的真实源与语言路径**：live_root 三语言工具已接通；沿同一源身份继续接检索 PipelinePlan，并单独建立固定/物化的完整语言依赖闭包与远端一致环境。跨 Run 准入、事件 compute 和 owner 级共享准备继续复用，任务族公平及全域共享准备仍需补齐。
 3. **让策略和上下文真正可替换**：用实际多步工作证明行动合同，补齐默认记忆/压缩/推理用途；不以 trait 存在或默认循环能聊天作为完成证据。
 4. **沿同一合同接完领域与产品**：协作/源视图、语言/检索、问题/计划/Goal/定时、MCP/脚本、桌面/远端、科研/Bot/UI 各有真实使用路径。迁移可以并行，不能新增第二套领域状态权威。
 5. **以实证收尾完整设计**：局部热更新、独立等待、资源公平、成本复用与平台发行都成立，才完成最终切换及 Pi 清理。Pi 删除不是前四项的替代品。
 
-### 下一条领域纵切：实时来源身份与现有 LSP owner
+### 当前领域纵切：live-root 语言路径已接通，继续补依赖闭包与检索
 
-- 当前 `native-thread-sources.ts` 准备入口总是捕获目录；`NativeSourceMode` 只有 `FixedBranch`/`Materialized`。这尚未覆盖总设 §15.2 的版本化现场观察，不能让普通只读查询为获得语言能力而隐式创建可写副本，也不能将未固定的磁盘读取伪装成固定分支。
-- 先让受理/恢复保留明确的 live-disk environment、workspace/root、位置和来源模式；每次读取返回实际 revision。固定分支保留原固定 root，物化副本保留真实执行目录；省略来源续接不随当前 UI 或 cwd 改绑。沿同一绑定使 read、Shell 与语言查询指向相同资源，而非增加第二个文件 owner。
-- 支持的语言入口已存在：`lsp/supervisor.ts` 的 `createLanguageSupervisor`、`lsp/language-view.ts` 的 `createLanguageViewBinder`，以及 `harness/lsp-nav.ts` / `diagnostics-adapter.ts`。先接一条同环境 live-disk 的原生 definition/hover 或诊断快照到这些 owner，复用 Documents 文本、既有 provider 选择/prepare 和 Rust process spawn；不要直接另起语言服务器或把旧 Pi session 身份当作原生 Run 身份。
-- 当前 Host session 键为 workspace/provider/view；需核对 workspace 是否足以代表实际 environment/project，且 config/provider generation 与 source view 不混用。固定分支查询必须另行证明完整依赖视图，不能只 didOpen 目标文件后让 imports 读取现场。现有捕获虽包含 node_modules/vendor，但符号链接原样保存/重建，外部或绝对链接、tsconfig 路径和编译器标准库引用未固定，也没有受支持的依赖闭包 overlay；仅物化目录不能证明稳定的全工程快照。LSP cwd 不是沙箱，返回的越权资源/位置仍须拒绝。草稿与磁盘、跨环境同名路径、旧诊断世代均分别归属。
-- 必要证据：一个 LSP 卡住时普通读取、其他 Run 和控制仍推进；两个查询共享同一准备，取消一个等待者不杀另一查询；live-disk 查询标明实际依赖来源而不冒充固定快照，后续读取呈现新 revision，固定源不漂移；固定 LSP 后续须另证 imports/配置/链接/标准库闭包；诊断 pending 不等于 clean。再沿同一来源接现有检索 PipelinePlan。此处仅为源码核对与下一步，尚未实现或执行验收。
+- `NativeSourceMode` 现有 `FixedBranch`、`Materialized`、`LiveRoot`；显式 live_root 不捕获目录，受理、续接和恢复保持同一已验证 host/workspace/root。固定来源仍固定，物化环境仍保留实际副本，不随当前 UI/cwd 改绑。
+- live_root 已通过原生注册表执行 `native_language_definition`、`native_language_references`、`native_language_diagnostics`。Rust 拥有工具准入与结果提交，Host 直接使用现有 LanguageViewBinder/LanguageSupervisor 和选定 provider；没有第二个语言进程/config owner、Pi 身份冒充或 decide 内隐藏 I/O。
+- 当前 live 路径核对同一 Host 和实际 Documents 环境；同 workspace/provider/view 的准备复用，实际 query 绑定 generation/documentVersion。输入前后 revision 核对，返回目标逐项授权；目标的 observedRevision 不证明语言服务器计算跨文件 range 时使用了该版本。
+- fixed_branch/materialized LSP 仍明确不可用：外部/绝对 symlink、tsconfig 等配置与编译器库闭包未固定。仅物化目录或 didOpen 目标文件不能证明全工程固定，cwd 也不是 OS sandbox。草稿、远端同名路径和完整 LSP 功能仍须分别建立合同与证据。
+- 本轮独立证据见末节；下一步沿同一来源接现有检索 PipelinePlan，继续补任务/环境范围的能力组合、准备和恢复。无版本诊断可保留真实非空观测，但仍是 pending，不能称为 current/clean。
 
 ## 已核验增量：策略辅助规划模型
 
@@ -125,7 +126,7 @@
 | 文件、草稿、恢复 | Rust `storage`；Host `documents`/`recovery`；UI Document Registry | 复用内容对象/条件写入/恢复；明确草稿owner；分支与磁盘效果区分；组合恢复可核对 | 未完成迁移，底层能力已存在 |
 | 工作分支、基线与dispatch | Host `harness/thread-services.ts`、`thread-runtime.ts`、`kernel/storage-adapter.ts` | 持久受理立即回执；准备独立作业；批量capture；真实一致性标记；无变更报告与代码集成分开 | 未完成 |
 | Shell、PTY、输出、进程树 | Rust `process` guardian；Host `kernel/process-service.ts`/`terminal` | 保留真实进程回执；推送I/O与stdin确认；控制独立；取消观察不同于终止进程 | 未完成迁移，guardian已存在 |
-| LSP、结构/关键词/语义检索 | Host `lsp`/`search`/`structure`/`knowledge`；Rust `compute` | 按environment/project/config/view共享服务；来源修订明确；独立准备；不等待无关索引 | 未完成 |
+| LSP、结构/关键词/语义检索 | Host `lsp`/`search`/`structure`/`knowledge`；Rust `compute` | 按environment/project/config/view共享服务；来源修订明确；独立准备；不等待无关索引 | 局部实现：live_root 定义/引用/诊断与既有语言 owner 接通；fixed/materialized 依赖闭包、其余 LSP/结构/语义检索及远端环境未完成 |
 | 任务协作、消息、wait | Host `harness` registry/services | 单一Thread/Run事实；有来源消息；Wait持久化与游标；结果恰当去重；旧世代不污染新执行 | 未完成 |
 | 计划、普通记忆、Bot知识 | Host `memory`/`knowledge`；普通Agent notes为Rust typed record | 保留各领域owner、权限和revision；不把所有知识塞入泛化状态库 | 未完成 |
 | Goal、自动接续、辅助模型 | Host `bots`/`pi-session-automation`/`run` | 显式Goal授权、暂停/预算/用量；等待不覆盖手动暂停；辅助请求独立身份 | 规划模型独立 Operation 已有局部验收；Goal 和自动接续仍未完成 |
@@ -244,7 +245,7 @@
 - 进程层在Linux本次真实OS验收通过；其他目标平台、非合作/异常断电与全部恢复组合仍需各自证据。不能把本次Linux结果推广到Windows/macOS全部行为
 - 共享取消桥已统一native token通知，外部wire分lane credits与Host独立窗口对齐；相关进程/IPC并发回归已在冻结构建通过，后续协议变化仍须复验
 - RequestSnapshot、history正文/provider originals、model_outputs及队列交付正文已持久化为不可变manifest/chunks，ModelStep相位写入保留短引用；追加历史可复用内容块，读取保留完整原文。当前仍全量序列化/读取请求，未实现完整内存工作集优化；跨 Run 基础原子/FIFO 资源准入已验证，更完整的调度优先级、能力准备和成本证据仍需补齐
-- 完整恢复驱动（已完成模型结果/部分工具回执的原生续接已通过，Host完整恢复编排仍未完成）、输入队列的产品接线、自动压缩与完整记忆流程、全部 provider/OAuth 实际部署、MCP Tasks/持久脚本及扩展领域覆盖、LSP/捕获迁移、UI投影、Pi用户资产导入、跨平台发布和最终Pi退出仍须按能力矩阵交付
+- 完整恢复驱动（已完成模型结果/部分工具回执的原生续接已通过，Host完整恢复编排仍未完成）、输入队列的产品接线、自动压缩与完整记忆流程、全部 provider/OAuth 实际部署、MCP Tasks/持久脚本及扩展领域覆盖、其余 LSP/检索与固定依赖闭包/捕获迁移、UI投影、Pi用户资产导入、跨平台发布和最终Pi退出仍须按能力矩阵交付
 
 ## 已核验增量：显式 live-root 来源与精确重绑
 
@@ -257,9 +258,9 @@
 已有库先以只读 SQLite 检查 domain/表结构及已提交 WAL，再允许可写打开、epoch 变更或恢复。
 旧格式、缺失或损坏结构保留原资产并拒绝，不提供静默推断、内部迁移或双读合同。
 
-当前尚不接入原生 LSP。后续 live 环境语言服务必须复用现有 LanguageSupervisor/LanguageViewBinder，
-且每个返回位置仍经资源授权。外部 symlink、tsconfig 依赖和编译器库可能来自现场，不能宣称全工程固定；
-cwd 不是 OS sandbox。
+该 live-source 历史阶段尚未包含原生 LSP；后续三个 live_root 语言工具已按下节接通。它们复用现有
+LanguageSupervisor/LanguageViewBinder，且每个返回位置仍经资源授权。外部 symlink、tsconfig 依赖和
+编译器库可能来自现场，不能宣称全工程固定；cwd 不是 OS sandbox。
 
 独立验收：Rust 91 项通过（79 个既有 unit、10 个新增来源/格式检查、2 个来源继承检查）；
 Host 21 项在同一修正后的真实内核构建通过（10 个新增 live-source、6 个固定来源/继承/context、5 个 process/CAS）；
@@ -274,3 +275,48 @@ UI 16 项通过。内核二进制 SHA-256 为 `ef9c0c1d75d465ddd9d9f012a07c12f76
 现与协议一致要求显式 null/描述符；即使提供有效 rootId，Rust 也拒绝以 `fixed_branch` 启动进程；
 live read 曾误标 materialized，现 read/list/search 统一从已验证绑定输出真实 mode/rootId/liveRoot。
 读取不同文件状态、实时文件变化、冻结 AGENTS revision、后续 Run、重启/排队重绑、伪造来源拒绝与准备取消后的 grant 撤销均有本轮独立行为证据。
+
+
+## 已核验增量：live-root 原生语言工具
+
+`native_language_definition`、`native_language_references`、`native_language_diagnostics` 已进入原生工具选择、
+执行及历史提交路径，并由现有 source entry 选入 live_root。工具参数使用相对资源路径、零基 UTF-16 位置。
+Rust 通过私有 epoch/查询身份桥接调用既有 Host 语言 owner；Documents 负责文本与编码，LanguageViewBinder
+绑定实际 revision，LanguageSupervisor 继续拥有选定 provider、共享准备、会话世代和 Rust 管理的进程。
+没有新语言配置库、第二个语言进程管理者、伪造 ModelStep 或在策略 decide 内执行扩展 I/O。
+
+语言准备与请求不占 Catalog/control 长锁或文件租约；取消针对一个等待者，共享准备仍由原 supervisor 按引用处理。
+输入在请求后再次核对，返回资源由同一 Run grant 逐项准入并观察实际字节、校验 UTF-16 范围。
+越权/unmappable、不可读和范围过期有不同遗漏计数；所有项目被遗漏不冒充正常零结果。
+跨文件 `observedRevision` 是请求后读取所得，`rangeRevision: null` 明确没有证明服务器使用的目标版本；
+查询自己的 range 只有在绑定及后验 revision 一致时才带该 revision。来源明确报告依赖仍为 live。
+
+诊断保留 pending、stale、unsupported、unavailable 和已验证结果的区别。当前 bundled TypeScript server
+没有 pull 能力且发布不带文档版本；同一 LanguageSessionRecord 保留其真实非空错误观测，结果为 pending +
+`diagnosticVerification: unversioned`，仍经 Rust 授权和范围检查，`rangeRevision` 始终为 null。
+空无版本观测不等于 clean，有遗漏也不把 pending 提升为已验证 partial。原 Pi/editor 的返回形状保持不变。
+
+私有 Host 语言回复先做序列化/既有 framing 预算预检，过大或不可序列化时返回有限 unavailable 回执；
+Rust 对超过实际帧预算的 transient progress 不入共享 writer，durable 工具原文继续通过既有分块历史读取。
+本轮没有实现语言结果分块，也没有执行超大端到端或共享 writer kill 实验。
+
+最终内核 SHA-256 为 `4432bb14292e36e0fb2ae093e6d66567ba41ed2a6da7e90d49e7177ae180f2a9`，
+以正式 build identity `0.9.24` 构建。先前遗漏构建身份的二进制被握手拒绝，未进入产品行为验收；
+最终计数均使用修正后的冻结构建，不把该环境阻断记为产品行为失败。
+
+最终独立验收按 suite 分别记录，不是全仓或全部设计通过：
+
+- Rust rendezvous/framing 5 项：epoch、独立取消、迟到回复、关闭及小型真实字节预算边界。
+- 同一最终内核上的 native 假 owner 20 项、source entry 1 项、真实 bundled TypeScript 三工具闭环 1 项；
+  后者验证真实跨文件定义/引用及 pending 的真实 TS 错误观测，没有补造诊断版本。
+- portable owner 12 项、private bridge 3 项、既有 Pi navigation 15 项、diagnostics adapter 4 项。
+- UI 18 项；完整 Host tests/UI 类型检查、生产 Host 声明与 application-client 构建、协议生成检查和 diff 检查通过。
+
+最终检查修复或澄清了缺失/伪造 source provenance、非 ready 内容旁路、omissions 额外字段、非法 providerId 类型、
+丢失 result/非法 URI/逆向范围冒充零结果、输入变化和 symlink 目标处置。已授权 symlink 叶子按现有文件 owner
+保留为 Symlink 且不跟随，因此为 unavailable；父路径越界和未授权目标属于 outOfScope。
+既有诊断 fixture 的延迟 watcher 失效竞态先在原基线复现，再按真实失效/重新绑定语义修正验证，没有削弱 ready 断言。
+
+该增量限于 live_root 三工具，不证明 fixed_branch/materialized 的 imports、配置、链接和编译器库闭包；
+不完成其他 LSP、结构/语义检索、远端、任务族公平、完整恢复、领域迁移、代表性成本或跨平台发布。
+两份完整设计的其余矩阵仍适用，默认运行时与 Pi 退出状态未变。本轮模型侧只有本地 fixture，没有真实付费模型调用。

@@ -435,3 +435,26 @@ it('requires an explicit live workspace choice and discloses direct effects befo
   await submitForm(container.querySelector('form')!);
   expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ source: prepared.source, text: 'work on these actual files' }));
 });
+
+it.each(['fixed_branch', 'materialized'] as const)('reprepares %s from a live language-capable workspace without retaining live-only tools', async mode => {
+  const f = fixture();
+  const languageTools = ['language_definition', 'language_references', 'language_diagnostics'] as const;
+  const live = { path: '/workspace/project', source: { workspaceId: 'selected-workspace', executionWorkspaceId: 'selected-workspace', mode: 'live_root' as const,
+    liveRoot: { hostId: 'host', canonicalRoot: '/workspace/project', rootId: 'live-root' }, tools: ['file_read' as const, ...languageTools] } };
+  const fixed = { path: '/workspace/project', source: { workspaceId: 'selected-workspace', executionWorkspaceId: 'selected-workspace', branchId: 'captured-source', revision: 0,
+    mode, tools: mode === 'fixed_branch' ? ['file_read' as const] : ['file_read' as const, 'file_write' as const] } };
+  f.api.prepareSource = vi.fn().mockResolvedValueOnce(live).mockResolvedValueOnce(fixed);
+  await act(async () => { root.render(<NativeThreadConversation api={f.api} identity={identity} initialWorkspacePath="/workspace/project" />); });
+  await edit('[aria-label="Native workspace access"]', 'live_root', 'change');
+  await act(async () => { button('Prepare workspace').click(); });
+  expect(f.api.prepareSource).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'live_root' }));
+  expect(container.querySelector('[aria-label="Prepared native workspace"]')?.textContent).toContain('Live files and commands');
+  await edit('[aria-label="Native workspace access"]', mode, 'change');
+  await act(async () => { button('Prepare workspace').click(); });
+  expect(f.api.prepareSource).toHaveBeenLastCalledWith(expect.objectContaining({ mode }));
+  await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
+  await edit('[aria-label="Message native thread"]', 'use the newly prepared source');
+  await submitForm(container.querySelector<HTMLTextAreaElement>('[aria-label="Message native thread"]')!.closest('form')!);
+  expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ source: fixed.source }));
+  for (const tool of languageTools) expect(f.submit.mock.calls[0]![0].source?.tools).not.toContain(tool);
+});

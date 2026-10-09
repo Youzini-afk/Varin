@@ -54,8 +54,20 @@ describe("LanguageSupervisor diagnostics adapter", () => {
       const cleanRevision = (clean as { revision?: string }).revision;
       expect(cleanRevision).toBeTruthy();
 
-      // An agent write changes disk; the answer must describe the new text.
-      await fs.promises.writeFile(absolute, "// first line\n\n  FIXTURE_ERROR\n");
+      // These raw filesystem writes are external to Documents. Wait for their actual
+      // watcher invalidation before binding, otherwise a delayed invalidation may
+      // correctly turn a freshly published report into pending during this call.
+      const writeAndObserve = async (content: string) => {
+        let invalidated = false;
+        const subscription = language.subscribe(harness.identity.workspaceId, event => {
+          if ((event as { kind?: string }).kind === 'diagnostics-invalidated') invalidated = true;
+        });
+        try {
+          await fs.promises.writeFile(absolute, content);
+          await expect.poll(() => invalidated, { timeout: 2_000 }).toBe(true);
+        } finally { subscription.close(); }
+      };
+      await writeAndObserve("// first line\n\n  FIXTURE_ERROR\n");
       const broken = await service.handle({ path: resourceId, waitMs: 2_000 }, contextFor(harness.identity.workspaceId));
       expect(broken).toMatchObject({
         status: "ready",
@@ -64,7 +76,7 @@ describe("LanguageSupervisor diagnostics adapter", () => {
       });
       expect((broken as { revision?: string }).revision).not.toBe(cleanRevision);
 
-      await fs.promises.writeFile(absolute, "export const fixture = true;\n");
+      await writeAndObserve("export const fixture = true;\n");
       const fixed = await service.handle({ path: resourceId, waitMs: 2_000 }, contextFor(harness.identity.workspaceId));
       expect(fixed).toMatchObject({ status: "ready", diagnostics: [] });
       // Diagnostics ran entirely in the Host view; the editor view is untouched.
@@ -102,4 +114,37 @@ describe("LanguageSupervisor diagnostics adapter", () => {
     await expect(service.handle({ path: "README.unknown" }, contextFor("workspace")))
       .resolves.toMatchObject({ status: "unavailable" });
   });
+});
+
+
+it("keeps invalidated publication pending and recovers only after rebinding the disk view", async () => {
+  const harness = await createDocumentAuthorityHarness();
+  const language = createLanguageSupervisor({ documents: harness.authority, spawn, pathModule: path, isTrusted: async () => true });
+  try {
+    const resourceId = 'fixture.ts';
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, resourceId), 'FIXTURE_ERROR\n');
+    language.registerProvider({ providerId: 'fixture', command: process.execPath,
+      args: VARIN_LSP_FIXTURE_SERVER_ARGS, languageIds: ['typescript'], source: 'host' });
+    const provider = createLanguageSupervisorDiagnosticsProvider(language, { documents: harness.authority });
+    const service = createLspDiagnosticsService(provider);
+    const context = contextFor(harness.identity.workspaceId);
+    const before = await service.handle({ path: resourceId, waitMs: 2_000 }, context);
+    expect(before).toMatchObject({ status: 'ready', diagnostics: [expect.objectContaining({ message: 'fixture error' })] });
+    const bind = provider.bindDocument;
+    let invalidateNext = true;
+    provider.bindDocument = async (...args) => {
+      const bound = await bind(...args);
+      if (invalidateNext) {
+        invalidateNext = false;
+        // Deterministic equivalent of a delayed external watch event after binding.
+        language.observeDocumentMutation({ workspaceId: harness.identity.workspaceId, resourceId, kind: 'modified' });
+      }
+      return bound;
+    };
+    const pending = await service.handle({ path: resourceId, waitMs: 10 }, context);
+    expect(pending).toMatchObject({ status: 'pending', diagnostics: [], revision: (before as { revision: string }).revision });
+    const rebound = await service.handle({ path: resourceId, waitMs: 2_000 }, context);
+    expect(rebound).toMatchObject({ status: 'ready', revision: (before as { revision: string }).revision,
+      diagnostics: [expect.objectContaining({ message: 'fixture error' })] });
+  } finally { await language.dispose(); await harness.cleanup(); }
 });
