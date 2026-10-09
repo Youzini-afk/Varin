@@ -347,6 +347,21 @@ impl Catalog {
         if super::inputs::has_boundary_inputs(&tx, run_id)? {
             return Err(RuntimeError::InputPending);
         }
+        // Admission froze this conversation boundary. Hydrating the request can race a new
+        // history owner/head, so verify it again before recording paid dispatch intent.
+        let (thread_id, head, active): (String, Option<String>, Option<String>) = tx.query_row(
+            "SELECT thread_id,head,active_run FROM branches WHERE id=?1", [&run.branch_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        if active.as_deref() != Some(run_id)
+            || thread_id != run.thread_id
+            || snapshot.view.run_id != run_id
+            || snapshot.view.request_id != action
+            || snapshot.view.binding.history_range.branch_id != run.branch_id
+            || snapshot.view.binding.history_range.leaf_id != head
+        {
+            return Err(RuntimeError::Conflict("planning dispatch boundary changed".into()));
+        }
         put(&tx, "operations", action, &op)?;
         super::memory::record_deliveries(&tx, snapshot, &run.thread_id, DeliveryState::Sent)?;
         event(
