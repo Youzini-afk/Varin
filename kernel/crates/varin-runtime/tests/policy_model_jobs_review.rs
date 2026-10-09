@@ -192,6 +192,11 @@ impl ModelProvider for Provider {
 }
 struct NoTools;
 impl ToolExecutor for NoTools {
+    fn plan(&self, call: &varin_runtime::execution::ToolCall, context: &varin_runtime::execution::FrozenToolContext,
+        cancel: &varin_runtime::execution::CancellationToken) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError> {
+        self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+    }
+
     fn prepare(&self, _: &ToolCall, _: &FrozenToolContext, _cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
         panic!("planning tool output must not prepare tools")
     }
@@ -799,6 +804,11 @@ struct Reads {
     calls: Mutex<Vec<String>>,
 }
 impl ToolExecutor for Reads {
+    fn plan(&self, call: &varin_runtime::execution::ToolCall, context: &varin_runtime::execution::FrozenToolContext,
+        cancel: &varin_runtime::execution::CancellationToken) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError> {
+        self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+    }
+
     fn supports_policy_read(&self, _: &FrozenToolContext, _: &ToolCall, _: &ToolContract) -> bool {
         true
     }

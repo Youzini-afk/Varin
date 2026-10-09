@@ -213,6 +213,13 @@ fn mutation_result(query: &Value, value: &Value) -> Option<(Outcome, Effect)> {
     }
 }
 impl ToolExecutor for PlanTools {
+    fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken)
+        -> Result<varin_runtime::execution::ToolPreparation, ExecutionError> {
+        if call.name == TOOL {
+            self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+        } else { self.inner.plan(call, context, cancel) }
+    }
+
     fn execution_class(
         &self,
         call: &ToolCall,

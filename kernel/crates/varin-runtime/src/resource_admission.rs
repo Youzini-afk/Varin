@@ -1,6 +1,9 @@
 //! Instance-scoped resource admission. Entire plans are acquired atomically; no partial leases.
 //! Conflicting requests preserve arrival order, while unrelated work bypasses blocked requests.
-use crate::execution::{Access, CancellationToken, ExecutionError, ResourceClaim};
+use crate::execution::{
+    Access, CancellationRegistration, CancellationToken, ExecutionError, ResourceClaim,
+    ResourceIntent,
+};
 use crate::execution_capacity::{
     AdmissionIdentity, AdmissionStatus, AdmissionSummary, ExecutionClass,
 };
@@ -41,7 +44,8 @@ impl Default for State {
 struct Pending {
     ticket: u64,
     owner: String,
-    claims: Vec<ResourceClaim>,
+    intents: Vec<ResourceIntent>,
+    claims: Option<Vec<ResourceClaim>>,
     wake: mpsc::SyncSender<()>,
     family: String,
     class: ExecutionClass,
@@ -106,6 +110,25 @@ impl ResourceAdmission {
             cancel,
         )
     }
+    /// Reserve arrival order before resolving canonical identities. This holds no resources or
+    /// compute capacity. Later disjoint work bypasses it, including work from other Runs.
+    pub fn reserve(
+        self: &Arc<Self>,
+        owner: &str,
+        intents: Vec<ResourceIntent>,
+        identity: &AdmissionIdentity,
+        class: ExecutionClass,
+        cancel: &CancellationToken,
+    ) -> Result<ResourceReservation, ExecutionError> {
+        self.reserve_inner(
+            owner,
+            intents,
+            &identity.family_id,
+            class,
+            Some(identity.clone()),
+            cancel,
+        )
+    }
     fn acquire_inner(
         self: &Arc<Self>,
         owner: &str,
@@ -115,8 +138,28 @@ impl ResourceAdmission {
         identity: Option<AdmissionIdentity>,
         cancel: &CancellationToken,
     ) -> Result<Option<ResourceLease>, ExecutionError> {
+        let mut reservation = self.reserve_inner(
+            owner,
+            claims.iter().cloned().map(ResourceIntent::Exact).collect(),
+            family,
+            class,
+            identity,
+            cancel,
+        )?;
+        reservation.resolve(claims)?;
+        reservation.acquire()
+    }
+    fn reserve_inner(
+        self: &Arc<Self>,
+        owner: &str,
+        intents: Vec<ResourceIntent>,
+        family: &str,
+        class: ExecutionClass,
+        identity: Option<AdmissionIdentity>,
+        cancel: &CancellationToken,
+    ) -> Result<ResourceReservation, ExecutionError> {
         let (wake, events) = mpsc::sync_channel(1);
-        let _cancellation = cancel.wake_on_cancel(wake.clone());
+        let cancellation = cancel.wake_on_cancel(wake.clone());
         let ticket = {
             let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             if state.active.contains_key(owner) || state.pending.iter().any(|p| p.owner == owner) {
@@ -130,7 +173,8 @@ impl ResourceAdmission {
             state.pending.push_back(Pending {
                 ticket,
                 owner: owner.into(),
-                claims: claims.to_vec(),
+                intents,
+                claims: None,
                 wake,
                 family: family.into(),
                 class,
@@ -140,8 +184,8 @@ impl ResourceAdmission {
             if class == ExecutionClass::LocalCompute
                 && !state.families.iter().any(|id| id == family)
             {
-                // Join the pending round before the last-served family, rather than giving a
-                // sole active family another turn merely because the challenger arrived later.
+                // A new runnable family joins before the last-served family. Unresolved entries
+                // retain their place but do not consume a turn or stall another family's work.
                 let insertion = state
                     .last_compute_family
                     .as_ref()
@@ -152,52 +196,13 @@ impl ResourceAdmission {
             Self::wake_waiters(&state);
             ticket
         };
-        loop {
-            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-            let position = state
-                .pending
-                .iter()
-                .position(|p| p.ticket == ticket)
-                .expect("waiting operation owns its queue entry");
-            if cancel.is_cancelled() {
-                state.pending.remove(position);
-                Self::prune_families(&mut state);
-                Self::wake_waiters(&state);
-                return Ok(None);
-            }
-            let blocked = Self::resource_blocked(&state, position)
-                || (class == ExecutionClass::LocalCompute
-                    && (Self::compute_active(&state) >= state.compute_capacity.get()
-                        || Self::next_compute(&state) != Some(ticket)));
-            if !blocked {
-                state.pending.remove(position);
-                state.active.insert(
-                    owner.into(),
-                    Active {
-                        claims: claims.to_vec(),
-                        family: family.into(),
-                        class,
-                        identity: identity.clone(),
-                    },
-                );
-                if class == ExecutionClass::LocalCompute {
-                    state.families.retain(|id| id != family);
-                    state.families.push_back(family.into());
-                    state.last_compute_family = Some(family.into());
-                }
-                Self::wake_waiters(&state);
-                return Ok(Some(ResourceLease {
-                    admission: self.clone(),
-                    owner: Some(owner.into()),
-                    dispatched: false,
-                }));
-            }
-            drop(state);
-            // Completion and cancellation both enqueue notifications: there is no polling or lost wake.
-            events.recv().map_err(|_| {
-                ExecutionError::new("resource_wait_closed", "resource control channel closed")
-            })?;
-        }
+        Ok(ResourceReservation {
+            admission: self.clone(),
+            ticket,
+            owner: Some(owner.into()),
+            events,
+            _cancellation: cancellation,
+        })
     }
     fn compute_active(state: &State) -> usize {
         state
@@ -207,16 +212,23 @@ impl ResourceAdmission {
             .count()
     }
     fn resource_blocked(state: &State, position: usize) -> bool {
-        let claims = &state.pending[position].claims;
-        state
-            .active
-            .values()
-            .any(|active| claims_conflict(&active.claims, claims))
-            || state
-                .pending
-                .iter()
-                .take(position)
-                .any(|prior| !prior.cancel.is_cancelled() && claims_conflict(&prior.claims, claims))
+        let requested = &state.pending[position];
+        state.active.values().any(|active| {
+            active.claims.iter().any(|claim| {
+                requested
+                    .intents
+                    .iter()
+                    .any(|intent| intent.may_conflict_claim(claim))
+            })
+        }) || state.pending.iter().take(position).any(|prior| {
+            !prior.cancel.is_cancelled()
+                && prior.intents.iter().any(|left| {
+                    requested
+                        .intents
+                        .iter()
+                        .any(|right| left.may_conflict(right))
+                })
+        })
     }
     fn next_compute(state: &State) -> Option<u64> {
         // Round-robin among runnable families. Resource-blocked families do not stall others;
@@ -228,6 +240,7 @@ impl ResourceAdmission {
                 .enumerate()
                 .find(|(position, pending)| {
                     pending.class == ExecutionClass::LocalCompute
+                        && pending.claims.is_some()
                         && &pending.family == family
                         && !pending.cancel.is_cancelled()
                         && !Self::resource_blocked(state, *position)
@@ -283,6 +296,8 @@ impl ResourceAdmission {
             .find(|(_, p)| p.owner == owner)?;
         let reason = if pending.cancel.is_cancelled() {
             "cancelled"
+        } else if pending.claims.is_none() {
+            "resource_planning"
         } else if Self::resource_blocked(&state, position) {
             "resource_conflict"
         } else if pending.class == ExecutionClass::LocalCompute
@@ -318,6 +333,121 @@ impl ResourceAdmission {
         state.active.remove(owner);
         Self::prune_families(&mut state);
         Self::wake_waiters(&state);
+    }
+}
+/// A queue identity retained across owner-side preparation. Dropping an undispatched reservation
+/// removes only its own ordering intent and wakes work that it previously blocked.
+pub struct ResourceReservation {
+    admission: Arc<ResourceAdmission>,
+    ticket: u64,
+    owner: Option<String>,
+    events: mpsc::Receiver<()>,
+    _cancellation: CancellationRegistration,
+}
+impl ResourceReservation {
+    /// Validate the trusted preplanning promise before publishing the complete plan. Narrowing
+    /// releases unrelated successors immediately; no partial resource lease is ever acquired.
+    pub fn resolve(&mut self, claims: &[ResourceClaim]) -> Result<(), ExecutionError> {
+        let mut state = self
+            .admission
+            .state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let pending = state
+            .pending
+            .iter_mut()
+            .find(|entry| entry.ticket == self.ticket)
+            .expect("reservation owns its queue entry");
+        if pending.claims.is_some() {
+            return Err(ExecutionError::new(
+                "resource_plan_already_resolved",
+                "resource plan is immutable after resolution",
+            ));
+        }
+        if claims
+            .iter()
+            .any(|claim| !pending.intents.iter().any(|intent| intent.covers(claim)))
+        {
+            return Err(ExecutionError::new(
+                "resource_intent_mismatch",
+                "resolved resource plan exceeds its ordering intent",
+            ));
+        }
+        pending.intents = claims.iter().cloned().map(ResourceIntent::Exact).collect();
+        pending.claims = Some(claims.to_vec());
+        ResourceAdmission::wake_waiters(&state);
+        Ok(())
+    }
+    pub fn acquire(mut self) -> Result<Option<ResourceLease>, ExecutionError> {
+        loop {
+            let mut state = self
+                .admission
+                .state
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            let position = state
+                .pending
+                .iter()
+                .position(|entry| entry.ticket == self.ticket)
+                .expect("reservation owns its queue entry");
+            let pending = &state.pending[position];
+            if pending.cancel.is_cancelled() {
+                return Ok(None);
+            }
+            if pending.claims.is_none() {
+                return Err(ExecutionError::new(
+                    "resource_plan_unresolved",
+                    "complete resource plan required before admission",
+                ));
+            }
+            let class = pending.class;
+            let blocked = ResourceAdmission::resource_blocked(&state, position)
+                || (class == ExecutionClass::LocalCompute
+                    && (ResourceAdmission::compute_active(&state) >= state.compute_capacity.get()
+                        || ResourceAdmission::next_compute(&state) != Some(self.ticket)));
+            if !blocked {
+                let pending = state.pending.remove(position).expect("checked reservation");
+                let owner = self.owner.take().expect("unconsumed reservation");
+                state.active.insert(
+                    owner.clone(),
+                    Active {
+                        claims: pending.claims.expect("resolved plan"),
+                        family: pending.family.clone(),
+                        class,
+                        identity: pending.identity,
+                    },
+                );
+                if class == ExecutionClass::LocalCompute {
+                    state.families.retain(|id| id != &pending.family);
+                    state.families.push_back(pending.family.clone());
+                    state.last_compute_family = Some(pending.family);
+                }
+                ResourceAdmission::wake_waiters(&state);
+                return Ok(Some(ResourceLease {
+                    admission: self.admission.clone(),
+                    owner: Some(owner),
+                    dispatched: false,
+                }));
+            }
+            drop(state);
+            self.events.recv().map_err(|_| {
+                ExecutionError::new("resource_wait_closed", "resource control channel closed")
+            })?;
+        }
+    }
+}
+impl Drop for ResourceReservation {
+    fn drop(&mut self) {
+        if self.owner.is_some() {
+            let mut state = self
+                .admission
+                .state
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            state.pending.retain(|entry| entry.ticket != self.ticket);
+            ResourceAdmission::prune_families(&mut state);
+            ResourceAdmission::wake_waiters(&state);
+        }
     }
 }
 pub struct ResourceLease {

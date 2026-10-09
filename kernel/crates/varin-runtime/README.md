@@ -273,6 +273,34 @@ ascending key columns, the actual primary-key index origin, and exact FK mapping
 A partial or differently collated index cannot stand in for the admitted identity constraints.
 These checks precede mutable catalog open and never migrate an unsupported catalog.
 
+## Independent tool preparation
+
+Every bound executor implements a local, nonblocking `plan` contract. `Ready` supplies the complete
+canonical contract; `Resolve` supplies resource intents and the trusted execution class before an
+owner lookup. Wrappers forward this contract to the actual capability. The shared `ResourceAdmission`
+registers these intents in model-call order before preparation workers start. Reservations hold
+neither resource leases nor compute capacity. Independent preparation, authorization, dispatch and
+settlement proceed per call; provider history still closes the complete exchange in original order.
+
+An unresolved intent blocks only later claims that may conflict. Resolution must keep every canonical
+claim inside its declared exact key or namespace and cannot promote Read to Write. Admission rejects
+a mismatching plan before durable dispatch, narrows valid intents to their actual claims, and acquires
+all resources plus compute capacity together. This also orders calls from other Runs and policy graphs
+through the same authority. Cancellation wakes the original call; dropping its undispatched
+reservation removes its queue entry. Dispatched occupancy still requires the existing executor
+receipt/reconciliation contract.
+
+Physical file plans use Storage's canonical file namespace until aliases and junctions are resolved;
+workspace/root IDs cannot partition the same physical target. Known process, language, discovery and
+fixed-source plans bypass that unresolved namespace. Two physical reads can overlap; a later possible
+file conflict waits for enough identity evidence to establish independence. The actual resource owner
+revalidates canonical targets at dispatch, as before. No unknown write is speculatively dispatched.
+
+Effectful calls and independent jobs persist their individual admission before dispatch. Plain
+read-only Result calls keep in-memory admission and do not add per-stage durable Operation records.
+Preparation failure settles only its call; a durable-receipt failure stops pending dispatch without
+inventing evidence that active effects stopped. Compilation is separate from behavior acceptance.
+
 ## Search capacity and task-family admission
 
 The Catalog-owned `ResourceAdmission` now admits selected local computation together with its whole

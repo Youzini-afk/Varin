@@ -21,6 +21,11 @@ impl Drop for Fixture {
 }
 struct NoTools;
 impl ToolExecutor for NoTools {
+    fn plan(&self, call: &varin_runtime::execution::ToolCall, context: &varin_runtime::execution::FrozenToolContext,
+        cancel: &varin_runtime::execution::CancellationToken) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError> {
+        self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+    }
+
     fn prepare(&self, _: &ToolCall, _: &FrozenToolContext, _cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
         panic!("summary dispatched tool")
     }

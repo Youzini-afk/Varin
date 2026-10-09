@@ -377,6 +377,11 @@ mod engines {
         read_only: bool,
     }
     impl ToolExecutor for Tools {
+        fn plan(&self, call: &varin_runtime::execution::ToolCall, context: &varin_runtime::execution::FrozenToolContext,
+            cancel: &varin_runtime::execution::CancellationToken) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError> {
+            self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+        }
+
         fn supports_policy_read(
             &self,
             _: &FrozenToolContext,
@@ -512,6 +517,11 @@ mod engines {
         registrations: Arc<AtomicUsize>,
     }
     impl ToolExecutor for WatchedTools {
+        fn plan(&self, call: &varin_runtime::execution::ToolCall, context: &varin_runtime::execution::FrozenToolContext,
+            cancel: &varin_runtime::execution::CancellationToken) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError> {
+            self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+        }
+
         fn execution_class(&self, call: &ToolCall, contract: &ToolContract) -> ExecutionClass {
             self.inner.execution_class(call, contract)
         }
@@ -734,6 +744,11 @@ mod engines {
         dropped: Arc<AtomicUsize>,
     }
     impl ToolExecutor for WatchGateTools {
+        fn plan(&self, call: &varin_runtime::execution::ToolCall, context: &varin_runtime::execution::FrozenToolContext,
+            cancel: &varin_runtime::execution::CancellationToken) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError> {
+            self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+        }
+
         fn supports_policy_read(
             &self,
             c: &FrozenToolContext,

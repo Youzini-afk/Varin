@@ -136,6 +136,13 @@ impl McpTools {
     }
 }
 impl ToolExecutor for McpTools {
+    fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken)
+        -> Result<varin_runtime::execution::ToolPreparation, ExecutionError> {
+        if self.tools.contains_key(&call.name) {
+            self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+        } else { self.inner.plan(call, context, cancel) }
+    }
+
     fn watch_admission(&self, context: &ToolExecutionContext, call: &ToolCall, contract: &ToolContract, cancel: &CancellationToken)
         -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError> {
         if self.tools.contains_key(&call.name) { Ok(None) } else { self.inner.watch_admission(context, call, contract, cancel) }

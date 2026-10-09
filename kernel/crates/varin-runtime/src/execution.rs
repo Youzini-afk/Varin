@@ -388,6 +388,66 @@ pub struct ResourceClaim {
     pub access: Access,
 }
 
+/// A trusted bound on a resource plan that still needs owner-side identity resolution.
+/// Prefixes name canonical resource namespaces, never unverified model paths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResourceIntent {
+    Exact(ResourceClaim),
+    Prefix { key_prefix: String, access: Access },
+}
+impl ResourceIntent {
+    pub fn access(&self) -> Access {
+        match self {
+            Self::Exact(claim) => claim.access,
+            Self::Prefix { access, .. } => *access,
+        }
+    }
+    pub fn covers(&self, claim: &ResourceClaim) -> bool {
+        (self.access() == Access::Write || claim.access == Access::Read)
+            && match self {
+                Self::Exact(expected) => expected.key == claim.key,
+                Self::Prefix { key_prefix, .. } => claim.key.starts_with(key_prefix),
+            }
+    }
+    pub fn may_conflict_claim(&self, claim: &ResourceClaim) -> bool {
+        (self.access() == Access::Write || claim.access == Access::Write)
+            && match self {
+                Self::Exact(expected) => expected.key == claim.key,
+                Self::Prefix { key_prefix, .. } => claim.key.starts_with(key_prefix),
+            }
+    }
+    pub fn may_conflict(&self, other: &Self) -> bool {
+        if self.access() == Access::Read && other.access() == Access::Read {
+            return false;
+        }
+        match (self, other) {
+            (Self::Exact(left), Self::Exact(right)) => left.key == right.key,
+            (Self::Exact(claim), Self::Prefix { key_prefix, .. })
+            | (Self::Prefix { key_prefix, .. }, Self::Exact(claim)) => {
+                claim.key.starts_with(key_prefix)
+            }
+            (
+                Self::Prefix {
+                    key_prefix: left, ..
+                },
+                Self::Prefix {
+                    key_prefix: right, ..
+                },
+            ) => left.starts_with(right) || right.starts_with(left),
+        }
+    }
+}
+
+pub enum ToolPreparation {
+    /// The complete canonical plan is available without I/O.
+    Ready(ToolContract),
+    /// Preparation runs independently. Every eventual claim must be covered by these intents.
+    Resolve {
+        resources: Vec<ResourceIntent>,
+        class: crate::execution_capacity::ExecutionClass,
+    },
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CompletionKind {
@@ -483,6 +543,15 @@ pub mod policy_model;
 pub use policy_model::*;
 
 pub trait ToolExecutor: Send + Sync {
+    /// Establish ordering before any owner lookup. This must be local and nonblocking: no I/O,
+    /// service preparation, credentials or permission waits. Wrappers forward calls they do not own.
+    fn plan(
+        &self,
+        call: &ToolCall,
+        context: &FrozenToolContext,
+        cancel: &CancellationToken,
+    ) -> Result<ToolPreparation, ExecutionError>;
+
     /// Load classification comes only from the bound trusted capability. Wrappers must forward
     /// calls they do not own. This does not grant permission or classify external annotations.
     fn execution_class(&self, _: &ToolCall, _: &ToolContract) -> crate::execution_capacity::ExecutionClass {
@@ -499,7 +568,8 @@ pub trait ToolExecutor: Send + Sync {
     /// Resolve an already-bound schema/contract and the complete canonical resource plan.
     /// Any resource-owner lookup must observe this call's cancellation.
     /// This must not start a service, refresh credentials, wait for permissions or send effects.
-    /// Slow capability preparation belongs to the individual execution, outside batch planning.
+    /// Called independently for a Resolve plan; the core verifies its claims against the intent.
+    /// Slow capability preparation belongs to the individual execution, outside this resource lookup.
     fn prepare(
         &self,
         call: &ToolCall,
@@ -565,7 +635,8 @@ pub enum ExecutionRecord {
         usage: UsageReceipt,
         failure: Option<ModelFailure>,
     },
-    /// Atomic batch intent precedes all side effects. Read-only calls need no per-stage operation.
+    /// Each admitted effectful call's intent precedes its side effects. A record may contain one
+    /// independently prepared call. Read-only results need no per-stage operation.
     ToolsAdmitted {
         request_id: String,
         tools: Vec<AdmittedTool>,
@@ -1436,143 +1507,250 @@ impl<
         cancel: &CancellationToken,
         cached: &BTreeMap<String, ToolResult>,
     ) -> Result<Vec<ToolResult>, ExecutionError> {
-        let mut admitted = Vec::new();
-        let mut rejected = BTreeMap::new();
         let frozen = FrozenToolContext {
-            run_id: input.run_id.clone(), origin: ToolOrigin::ModelStep { request_id: snapshot.view.request_id.clone() },
-            tools: snapshot.view.binding.tools.clone(), tool_schema_generation: snapshot.view.binding.tool_schema_generation,
+            run_id: input.run_id.clone(),
+            origin: ToolOrigin::ModelStep {
+                request_id: snapshot.view.request_id.clone(),
+            },
+            tools: snapshot.view.binding.tools.clone(),
+            tool_schema_generation: snapshot.view.binding.tool_schema_generation,
             source: self.persistence.tool_source(&input.run_id)?,
         };
-        // All contracts are resolved first; no effect can begin while the graph is still being built.
-        for (index, call) in calls.iter().enumerate() {
-            if cached.contains_key(&call.call_id) {
-                continue;
-            }
-            if cancel.is_cancelled() {
-                rejected.insert(index, ToolCompletion::cancelled());
-                continue;
-            }
-            match guarded("tool_prepare_panicked", || {
-                self.tools.prepare(call, &frozen, cancel)
-            }) {
-                Ok(contract)
-                    if contract.name == call.name
-                        && contract.schema_version == call.schema_version =>
-                {
-                    admitted.push((
-                        index,
-                        AdmittedTool {
-                            call: call.clone(),
-                            contract,
-                        },
-                    ));
-                }
-                Ok(_) => {
-                    rejected.insert(
-                        index,
-                        ToolCompletion::failure(
-                            "contract_mismatch",
-                            "resolved tool differs from frozen schema",
-                            Effect::None,
-                        ),
-                    );
-                }
-                Err(error) => {
-                    rejected.insert(
-                        index,
-                        if cancel.is_cancelled() { ToolCompletion::cancelled() }
-                        else { ToolCompletion::failure(&error.code, &error.message, Effect::None) },
-                    );
-                }
-            }
-        }
-        // Register and retain every accepted call's control handle before publishing admission.
-        // A resource-queued call can be cancelled without waiting until execute_one starts.
-        let _operation_tokens: Vec<_> = admitted
-            .iter()
-            .map(|(_, tool)| {
-                cancel.child(&format!(
-                    "{}:tool:{}",
-                    snapshot.view.request_id, tool.call.call_id
-                ))
-            })
-            .collect();
-        self.commit(
-            input,
-            ExecutionRecord::ToolsAdmitted {
-                request_id: snapshot.view.request_id.clone(),
-                tools: admitted.iter().map(|(_, tool)| tool.clone()).collect(),
-            },
-        )?;
         let mut results: Vec<Option<ToolResult>> = calls
             .iter()
             .map(|call| cached.get(&call.call_id).cloned())
             .collect();
-        for (index, completion) in rejected {
-            let result = ToolResult {
-                request_id: snapshot.view.request_id.clone(),
-                call_id: calls[index].call_id.clone(),
-                completion,
+        let mut planned = Vec::new();
+        let mut operation_tokens = Vec::new();
+        let admission = self.persistence.resource_admission().unwrap_or_default();
+        let mut identity = None;
+        // Only local, nonblocking planning runs on this thread. Establish the entire batch's
+        // order before starting owner lookups; the shared admission owner also orders other Runs.
+        for (index, call) in calls.iter().enumerate() {
+            if results[index].is_some() {
+                continue;
+            }
+            let operation_id = format!("{}:tool:{}", snapshot.view.request_id, call.call_id);
+            let operation_cancel = cancel.child(&operation_id);
+            operation_tokens.push(operation_cancel.clone());
+            let preparation = if operation_cancel.is_cancelled() {
+                None
+            } else {
+                match guarded("tool_plan_panicked", || {
+                    self.tools.plan(call, &frozen, &operation_cancel)
+                }) {
+                    Ok(preparation) => Some(preparation),
+                    Err(error) => {
+                        results[index] = Some(self.unprepared_result(
+                            input,
+                            snapshot,
+                            call,
+                            if operation_cancel.is_cancelled() {
+                                ToolCompletion::cancelled()
+                            } else {
+                                ToolCompletion::failure(&error.code, &error.message, Effect::None)
+                            },
+                        ));
+                        continue;
+                    }
+                }
             };
-            self.progress
-                .emit(&input.run_id, ExecutionEvent::ToolCompleted(result.clone()));
-            results[index] = Some(result);
+            let Some(preparation) = preparation else {
+                results[index] = Some(self.unprepared_result(
+                    input,
+                    snapshot,
+                    call,
+                    ToolCompletion::cancelled(),
+                ));
+                continue;
+            };
+            let (intents, class) = match &preparation {
+                ToolPreparation::Ready(contract) => {
+                    if contract.name != call.name || contract.schema_version != call.schema_version
+                    {
+                        results[index] = Some(self.unprepared_result(
+                            input,
+                            snapshot,
+                            call,
+                            ToolCompletion::failure(
+                                "contract_mismatch",
+                                "resolved tool differs from frozen schema",
+                                Effect::None,
+                            ),
+                        ));
+                        continue;
+                    }
+                    let class = match guarded("tool_plan_panicked", || {
+                        Ok(self.tools.execution_class(call, contract))
+                    }) {
+                        Ok(class) => class,
+                        Err(error) => {
+                            results[index] = Some(self.unprepared_result(
+                                input,
+                                snapshot,
+                                call,
+                                ToolCompletion::failure(&error.code, &error.message, Effect::None),
+                            ));
+                            continue;
+                        }
+                    };
+                    (
+                        contract
+                            .resources
+                            .iter()
+                            .cloned()
+                            .map(ResourceIntent::Exact)
+                            .collect(),
+                        class,
+                    )
+                }
+                ToolPreparation::Resolve { resources, class } => (resources.clone(), *class),
+            };
+            if identity.is_none() {
+                match self
+                    .persistence
+                    .task_family(&input.run_id, input.owner_generation)
+                {
+                    Ok(family_id) => {
+                        identity = Some(crate::execution_capacity::AdmissionIdentity {
+                            run_id: input.run_id.clone(),
+                            owner_generation: input.owner_generation,
+                            origin: frozen.origin.clone(),
+                            family_id,
+                        })
+                    }
+                    Err(_) if cancel.is_cancelled() => {
+                        results[index] = Some(self.unprepared_result(
+                            input,
+                            snapshot,
+                            call,
+                            ToolCompletion::cancelled(),
+                        ));
+                        continue;
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            let reservation = admission.reserve(
+                &operation_id,
+                intents,
+                identity.as_ref().expect("established identity"),
+                class,
+                &operation_cancel,
+            )?;
+            planned.push((index, preparation, reservation, class, operation_cancel));
         }
-        let mut started = BTreeSet::new();
-        let mut finished = BTreeSet::new();
         let mut persistence_failure = None;
-        // Each completion releases only its actual dependencies; an unrelated slow tool is no barrier.
         std::thread::scope(|scope| {
             let (tx, rx) = mpsc::channel();
-            let mut running = 0;
-            while finished.len() < admitted.len() {
-                for (position, (index, tool)) in admitted.iter().enumerate() {
-                    if started.contains(&position) {
-                        continue;
-                    }
-                    let blocked = admitted[..position].iter().enumerate().any(
-                        |(earlier, (_, predecessor))| {
-                            !finished.contains(&earlier)
-                                && contracts_conflict(&predecessor.contract, &tool.contract)
-                        },
-                    );
-                    if blocked {
-                        continue;
-                    }
-                    started.insert(position);
-                    running += 1;
-                    let tx = tx.clone();
-                    let cancel = cancel.clone();
-                    let stop_dispatch = persistence_failure.is_some();
-                    scope.spawn(move || {
-                        let result = if stop_dispatch {
-                            Err(ExecutionError::new(
-                                "persistence_failed",
-                                "dispatch stopped after a failed durable receipt",
-                            ))
-                        } else {
-                            guarded("tool_worker_panicked", || {
-                                self.execute_one(input, snapshot, tool, &cancel)
-                            })
+            let count = planned.len();
+            for (index, preparation, mut reservation, class, operation_cancel) in planned {
+                let tx = tx.clone();
+                let frozen = &frozen;
+                let call = &calls[index];
+                scope.spawn(move || {
+                    let result = guarded("tool_worker_panicked", || {
+                        let contract = match preparation {
+                            ToolPreparation::Ready(contract) => Ok(contract),
+                            ToolPreparation::Resolve { .. } => {
+                                guarded("tool_prepare_panicked", || {
+                                    self.tools.prepare(call, frozen, &operation_cancel)
+                                })
+                            }
                         };
-                        let _ = tx.send((position, *index, result));
+                        let contract = match contract {
+                            Ok(contract)
+                                if contract.name == call.name
+                                    && contract.schema_version == call.schema_version =>
+                            {
+                                contract
+                            }
+                            Ok(_) => {
+                                return Ok(self.unprepared_result(
+                                    input,
+                                    snapshot,
+                                    call,
+                                    ToolCompletion::failure(
+                                        "contract_mismatch",
+                                        "resolved tool differs from frozen schema",
+                                        Effect::None,
+                                    ),
+                                ))
+                            }
+                            Err(error) => {
+                                return Ok(self.unprepared_result(
+                                    input,
+                                    snapshot,
+                                    call,
+                                    if operation_cancel.is_cancelled() {
+                                        ToolCompletion::cancelled()
+                                    } else {
+                                        ToolCompletion::failure(
+                                            &error.code,
+                                            &error.message,
+                                            Effect::None,
+                                        )
+                                    },
+                                ))
+                            }
+                        };
+                        if self.tools.execution_class(call, &contract) != class {
+                            return Ok(self.unprepared_result(
+                                input,
+                                snapshot,
+                                call,
+                                ToolCompletion::failure(
+                                    "execution_class_mismatch",
+                                    "resolved execution class differs from preplanning",
+                                    Effect::None,
+                                ),
+                            ));
+                        }
+                        if let Err(error) = reservation.resolve(&contract.resources) {
+                            return Ok(self.unprepared_result(
+                                input,
+                                snapshot,
+                                call,
+                                ToolCompletion::failure(&error.code, &error.message, Effect::None),
+                            ));
+                        }
+                        let tool = AdmittedTool {
+                            call: call.clone(),
+                            contract,
+                        };
+                        // Each side effect owns its durable intent; pure results retain the
+                        // cheaper in-memory path and enter history when provider pairing closes.
+                        if !tool.contract.read_only
+                            || tool.contract.completion == CompletionKind::Job
+                        {
+                            self.commit(
+                                input,
+                                ExecutionRecord::ToolsAdmitted {
+                                    request_id: snapshot.view.request_id.clone(),
+                                    tools: vec![tool.clone()],
+                                },
+                            )?;
+                        }
+                        self.execute_one(input, snapshot, &tool, &operation_cancel, reservation)
                     });
-                }
-                if running == 0 {
-                    break;
-                }
-                let (position, index, result) = rx
+                    let _ = tx.send((index, result));
+                });
+            }
+            drop(tx);
+            for _ in 0..count {
+                let (index, result) = rx
                     .recv()
                     .expect("tool workers retain their completion sender");
-                running -= 1;
-                finished.insert(position);
                 match result {
-                    Ok(result) => {
-                        results[index] = Some(result);
-                    }
+                    Ok(result) => results[index] = Some(result),
                     Err(error) => {
                         if persistence_failure.is_none() {
                             persistence_failure = Some(error);
+                            // No queued successor may remain waiting behind an unconfirmed durable
+                            // receipt. Cancellation stops dispatch but does not release active effects.
+                            for token in &operation_tokens {
+                                token.cancel();
+                            }
                         }
                     }
                 }
@@ -1591,21 +1769,40 @@ impl<
             .collect()
     }
 
+    fn unprepared_result(
+        &self,
+        input: &ExecutionInput,
+        snapshot: &RequestSnapshot,
+        call: &ToolCall,
+        completion: ToolCompletion,
+    ) -> ToolResult {
+        let result = ToolResult {
+            request_id: snapshot.view.request_id.clone(),
+            call_id: call.call_id.clone(),
+            completion,
+        };
+        self.progress
+            .emit(&input.run_id, ExecutionEvent::ToolCompleted(result.clone()));
+        result
+    }
+
     fn execute_one(
         &self,
         input: &ExecutionInput,
         snapshot: &RequestSnapshot,
         tool: &AdmittedTool,
         cancel: &CancellationToken,
+        reservation: crate::resource_admission::ResourceReservation,
     ) -> Result<ToolResult, ExecutionError> {
         let context = ToolExecutionContext {
             run_id: input.run_id.clone(),
-            origin: ToolOrigin::ModelStep { request_id: snapshot.view.request_id.clone() },
+            origin: ToolOrigin::ModelStep {
+                request_id: snapshot.view.request_id.clone(),
+            },
             operation_id: format!("{}:tool:{}", snapshot.view.request_id, tool.call.call_id),
         };
-        let operation_cancel = cancel.child(&context.operation_id);
-        let cancel = &operation_cancel;
         let mut lease = None;
+        let mut reservation = Some(reservation);
         let mut _admission_control = None;
         let completion = if cancel.is_cancelled() {
             ToolCompletion::cancelled()
@@ -1618,33 +1815,49 @@ impl<
             ToolCompletion::cancelled()
         } else {
             let ready = prepare_dispatch(cancel, || {
-                _admission_control = self.tools.watch_admission(&context, &tool.call, &tool.contract, cancel)?;
-                if let Some(admission) = self.persistence.resource_admission() {
-                    let family_id = self.persistence.task_family(&input.run_id, input.owner_generation)?;
-                    let identity = crate::execution_capacity::AdmissionIdentity {
-                        run_id: input.run_id.clone(), owner_generation: input.owner_generation,
-                        origin: context.origin.clone(), family_id,
-                    };
-                    lease = admission.acquire_scheduled(&context.operation_id, &tool.contract.resources,
-                        &identity, self.tools.execution_class(&tool.call, &tool.contract), cancel)?;
-                    return Ok(lease.is_some());
-                }
-                Ok(true)
+                _admission_control =
+                    self.tools
+                        .watch_admission(&context, &tool.call, &tool.contract, cancel)?;
+                lease = reservation
+                    .take()
+                    .expect("one admission per call")
+                    .acquire()?;
+                Ok(lease.is_some())
             })?;
             if !ready {
-                return self.settle_tool(input, tool, ToolResult {
-                    request_id: snapshot.view.request_id.clone(), call_id: tool.call.call_id.clone(),
-                    completion: ToolCompletion::cancelled(),
-                });
+                return self.settle_tool(
+                    input,
+                    tool,
+                    ToolResult {
+                        request_id: snapshot.view.request_id.clone(),
+                        call_id: tool.call.call_id.clone(),
+                        completion: ToolCompletion::cancelled(),
+                    },
+                );
             }
             // A queued call can outlive authorization or its Run generation. Recheck only at
             // the actual dispatch boundary, outside both Catalog and admission locks.
-            if let Err(error) = self.persistence.task_family(&input.run_id, input.owner_generation)
-                .and_then(|_| guarded("tool_authorize_panicked", || self.tools.authorize(&context, &tool.call, &tool.contract, cancel))) {
-                return self.settle_tool(input, tool, ToolResult {
-                    request_id: snapshot.view.request_id.clone(), call_id: tool.call.call_id.clone(),
-                    completion: ToolCompletion::NotDispatched { reason: format!("{}: {}", error.code, error.message) },
-                });
+            if let Err(error) = self
+                .persistence
+                .task_family(&input.run_id, input.owner_generation)
+                .and_then(|_| {
+                    guarded("tool_authorize_panicked", || {
+                        self.tools
+                            .authorize(&context, &tool.call, &tool.contract, cancel)
+                    })
+                })
+            {
+                return self.settle_tool(
+                    input,
+                    tool,
+                    ToolResult {
+                        request_id: snapshot.view.request_id.clone(),
+                        call_id: tool.call.call_id.clone(),
+                        completion: ToolCompletion::NotDispatched {
+                            reason: format!("{}: {}", error.code, error.message),
+                        },
+                    },
+                );
             }
             if !tool.contract.read_only || tool.contract.completion == CompletionKind::Job {
                 self.commit(
@@ -1654,7 +1867,9 @@ impl<
                         call_id: tool.call.call_id.clone(),
                     },
                 )?;
-                if let Some(lease) = lease.as_mut() { lease.dispatched(); }
+                if let Some(lease) = lease.as_mut() {
+                    lease.dispatched();
+                }
             }
             // Only this operation's resource plan is held; no catalog or tool-environment mutex.
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1664,11 +1879,23 @@ impl<
             match result {
                 Ok(completion) => {
                     let confirmed_no_effect = !tool.contract.read_only
-                        && matches!(&completion, ToolCompletion::Result { effect: Effect::None, .. })
-                        && guarded("receipt_evidence_panicked", || self.persistence.confirms_no_effect(
-                            &context, input.owner_generation, &completion)).unwrap_or(false);
+                        && matches!(
+                            &completion,
+                            ToolCompletion::Result {
+                                effect: Effect::None,
+                                ..
+                            }
+                        )
+                        && guarded("receipt_evidence_panicked", || {
+                            self.persistence.confirms_no_effect(
+                                &context,
+                                input.owner_generation,
+                                &completion,
+                            )
+                        })
+                        .unwrap_or(false);
                     normalize_completion(completion, &tool.contract, confirmed_no_effect)
-                },
+                }
                 Err(_) => ToolCompletion::failure(
                     "tool_panicked",
                     "tool worker stopped without a receipt",
@@ -1689,10 +1916,20 @@ impl<
         // Catalog settlement releases synchronous occupancy atomically after its durable receipt.
         // Background jobs and a failed durable receipt remain owned until executor reconciliation.
         if let Some(lease) = lease {
-            if settled.is_err() || matches!(settled.as_ref().map(|r| &r.completion),
-                Ok(ToolCompletion::JobAccepted { .. }) | Ok(ToolCompletion::Result { effect: Effect::Unknown, .. })
-            ) && tool.contract.completion == CompletionKind::Job { lease.handoff(); }
-            else { lease.release(); }
+            if settled.is_err()
+                || matches!(
+                    settled.as_ref().map(|r| &r.completion),
+                    Ok(ToolCompletion::JobAccepted { .. })
+                        | Ok(ToolCompletion::Result {
+                            effect: Effect::Unknown,
+                            ..
+                        })
+                ) && tool.contract.completion == CompletionKind::Job
+            {
+                lease.handoff();
+            } else {
+                lease.release();
+            }
         }
         settled
     }
@@ -1800,14 +2037,6 @@ fn validate_model_items(
         }
     }
     Ok(calls)
-}
-
-fn contracts_conflict(a: &ToolContract, b: &ToolContract) -> bool {
-    a.resources.iter().any(|left| {
-        b.resources.iter().any(|right| {
-            left.key == right.key && (left.access == Access::Write || right.access == Access::Write)
-        })
-    })
 }
 
 fn normalize_completion(completion: ToolCompletion, contract: &ToolContract, confirmed_no_effect: bool) -> ToolCompletion {
