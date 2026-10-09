@@ -1,3 +1,5 @@
+import { createNativePlanOwner } from './lib/kernel/native-plan-owner.js';
+import { NativePlanService } from './lib/kernel/native-plan-service.js';
 import { createPersonalizationContextResolver } from './lib/memory/personalization-context.js';
 import { createNativeMemoryOwner } from './lib/kernel/native-memory-owner.js';
 import { NativeThreadCollaboration } from './lib/kernel/native-thread-collaboration.js';
@@ -2936,6 +2938,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         return projects.find(project => projectContainsPath(project, root))?.id;
       },
     });
+  kernelClient.setNativePlanOwner(createNativePlanOwner(getUserKnowledgeStore, nativeRuntime));
   kernelClient.setNativeMemoryOwner(createNativeMemoryOwner({ personalization: agentPersonalization, prepareContext: nativeContext }));
   const nativeThreads = new NativeThreadAdapter(nativeRuntime,
     nativeModelAuthority, async (source, identity) => {
@@ -2947,7 +2950,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // Durable launch remains inspectable/resumable. Never log credentials or provider responses.
       console.error('[NativeThread] Launch preparation requires attention:', runId);
     }, createNativeThreadSourcePreparer({ documents: documentsAuthority, liveSources: nativeLiveSources, workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter) }),
-    nativeContext);
+    nativeContext, new NativePlanService(nativeRuntime, getUserKnowledgeStore));
   const nativeCollaboration = new NativeThreadCollaboration({ runtime: nativeRuntime, models: nativeModelAuthority,
     workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter), prepareContext: nativeContext,
     admitSource: async source => { await documentsAuthority.inspectWorkspace(source.workspaceId); await documentsAuthority.inspectWorkspace(source.executionWorkspaceId); },
@@ -3179,6 +3182,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (userKnowledgeStore) return userKnowledgeStore;
     if (!userKnowledgeStoreLoad) {
       userKnowledgeStoreLoad = openUserKnowledgeStore({
+        onNativePlanChanged: change => broadcastGlobalUiEvent?.({ type: 'varin:native-plan-changed', properties: { ...change } }),
         dataDir: VARIN_DATA_DIR,
         hostId,
         embedding: null,

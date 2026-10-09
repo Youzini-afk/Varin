@@ -4,6 +4,22 @@ use crate::execution::*;
 use std::sync::Mutex;
 
 impl Persistence for Mutex<Catalog> {
+    fn confirms_no_effect(&self, context: &ToolExecutionContext, epoch: u64, completion: &ToolCompletion)
+        -> std::result::Result<bool, ExecutionError> {
+        let ToolCompletion::Result { outcome, effect: Effect::None, content } = completion else { return Ok(false); };
+        let catalog = self.lock().map_err(|_| ExecutionError::new("catalog_poisoned", "catalog owner failed"))?;
+        let run = catalog.run(&context.run_id).map_err(policy_error)?;
+        fence(&run, epoch).map_err(policy_error)?;
+        let operation = catalog.operation(&context.operation_id).map_err(policy_error)?;
+        let admitted: AdmittedTool = serde_json::from_value(operation.intent.clone())
+            .map_err(|error| ExecutionError::new("external_receipt", error.to_string()))?;
+        let ToolOrigin::ModelStep { request_id } = &context.origin else { return Ok(false); };
+        Ok(catalog.epoch() == epoch && operation.epoch == epoch && operation.run_id == run.id
+            && operation.id == format!("{request_id}:tool:{}", admitted.call.call_id)
+            && operation.executor.as_deref() == Some(admitted.call.name.as_str())
+            && confirmed_no_effect_receipt(&operation, *outcome, content))
+    }
+
     fn task_family(&self, run: &str, epoch: u64) -> std::result::Result<String, ExecutionError> {
         self.lock().map_err(|_| ExecutionError::new("catalog_poisoned", "catalog owner failed"))?
             .task_family(run, epoch).map_err(policy_error)
@@ -532,7 +548,11 @@ impl Catalog {
                         effect,
                         content,
                     } => {
-                        if (*effect == Effect::None && op.effect != Effect::None)
+                        // Dispatched work may prove a genuine no-effect terminal result (for
+                        // example an owner's CAS conflict). Only the already authenticated
+                        // executor receipt can supply that evidence; tool JSON alone cannot.
+                        let confirmed_no_effect = confirmed_no_effect_receipt(&op, *outcome, content);
+                        if (*effect == Effect::None && op.effect != Effect::None && !confirmed_no_effect)
                             || (*outcome == Outcome::Succeeded
                                 && op.phase != OperationPhase::Running)
                         {
@@ -1004,6 +1024,15 @@ impl Catalog {
             .optional()?;
         raw.map(|raw| self.content.load(&serde_json::from_str(&raw)?)).transpose()
     }
+}
+
+fn confirmed_no_effect_receipt(operation: &Operation, outcome: Outcome, content: &Value) -> bool {
+    operation.external_receipt.as_ref().is_some_and(|receipt|
+        receipt.identity == operation.id
+            && operation.executor.as_deref() == Some(receipt.executor.as_str())
+            && receipt.outcome == outcome
+            && receipt.effect == Effect::None
+            && receipt.result == *content)
 }
 
 pub(super) fn apply_external_terminal(op: &mut Operation, receipt: &ExternalReceipt) {

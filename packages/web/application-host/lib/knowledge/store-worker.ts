@@ -124,6 +124,7 @@ async function handle(requests: StoreRequest[]): Promise<void> {
           }
           const store = await openKnowledgeStoreEngine({
             ...openOptions(first.args[0]),
+            onNativePlanChanged: (change) => send({ type: "native-plan", storeId: first.storeId, change }),
             onBlocksChanged: (sessionId, change) => send({ type: "blocks", storeId: first.storeId, sessionId, change }),
             onKnowledgeChanged: (ids) => send({
               type: "knowledge", storeId: first.storeId, ids,

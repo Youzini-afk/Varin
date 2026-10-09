@@ -1,3 +1,4 @@
+import { NativePlanConflict } from './native-plan-service.js';
 import { parseNativeThreadImages, nativeThreadInput } from './native-thread-images.js';
 import type { Express, RequestHandler } from 'express';
 import type { NativeThreadIdentity, NativeThreadSubmit } from '@varin/application-client';
@@ -32,27 +33,39 @@ export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAd
     'child/report': ['runtime', 'threadId', 'branchId', 'operationId', 'itemId', 'offset', 'maxBytes'],
     'child/list': ['runtime', 'threadId', 'branchId'], 'child/cancel': ['runtime', 'threadId', 'branchId', 'operationId'],
     'child/wait/cancel': ['runtime', 'threadId', 'branchId', 'waitId'], 'tree/cancel': ['runtime', 'threadId', 'branchId'],
+    'plan/read': ['runtime', 'threadId', 'branchId'],
+    'plan/update': ['runtime', 'threadId', 'branchId', 'key', 'expectedHeadId', 'expectedRef', 'content'],
     fork: ['runtime', 'threadId', 'branchId', 'key', 'headId'],
     create: ['key'], list: [], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'expectedHead', 'model', 'source'],
     snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'mode'],
     'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
     run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], events: ['cursor'],
   };
-  const post = (method: string, action: (body: Record<string, unknown>) => Promise<unknown>) => {
+  const post = (method: string, action: (body: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>) => {
     app.post(`/api/native-threads/${method}`, requireAuth, async (request, response) => {
+      const controller = new AbortController();
+      const closed = () => { if (!response.writableEnded) controller.abort(new DOMException('Native request closed', 'AbortError')); };
+      response.once('close', closed);
       try {
         const body = object(request.body);
         if (Object.keys(body).some(key => !fields[method]!.includes(key))) throw new Error('Unsupported native thread request field');
-        response.json(await action(body));
+        response.json(await action(body, controller.signal));
       }
       catch (error) {
         // Errors from credentials/model services can contain upstream bodies. Do not echo them.
-        const conflict = error instanceof KernelClientError && error.code === 'operation-error' && error.message.startsWith('operation error: conflict:');
+        const conflict = error instanceof NativePlanConflict || error instanceof KernelClientError && error.code === 'operation-error' && error.message.startsWith('operation error: conflict:');
         const code = conflict ? 'native-thread-conflict' : error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'native-thread-request-failed';
         response.status(code.includes('conflict') ? 409 : 400).json({ code, error: 'Native thread request could not be completed' });
-      }
+      } finally { response.removeListener('close', closed); }
     });
   };
+  post('plan/read', (body, signal) => adapter.readPlan(identity(body), signal));
+  post('plan/update', (body, signal) => {
+    if (typeof body.content !== 'string') throw new Error('Plan content must be text');
+    return adapter.updatePlan({ ...identity(body), key: text(body.key),
+      expectedHeadId: body.expectedHeadId === null ? null : text(body.expectedHeadId),
+      expectedRef: body.expectedRef === null ? null : text(body.expectedRef), content: body.content }, signal);
+  });
   post('permission/decide', body => {
     if (body.decision !== 'allow_once' && body.decision !== 'deny') throw new Error('Invalid permission decision');
     return adapter.decidePermission({ ...identity(body), operationId: text(body.operationId), permissionId: text(body.permissionId), decision: body.decision });
@@ -66,7 +79,7 @@ export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAd
   post('models', () => adapter.listModels());
   post('list', async () => (await adapter.runtime.threads()).filter(thread => thread.thread_id.startsWith('nativeThread:')));
   post('create', body => adapter.create(text(body.key)));
-  post('fork', body => adapter.fork({ ...identity(body), key: text(body.key), headId: body.headId === null ? null : text(body.headId) }));
+  post('fork', (body, signal) => adapter.fork({ ...identity(body), key: text(body.key), headId: body.headId === null ? null : text(body.headId) }, signal));
   post('source/prepare', body => {
     if (body.mode !== 'fixed_branch' && body.mode !== 'materialized' && body.mode !== 'live_root') throw new Error('Invalid source mode');
     return adapter.prepareSource({ ...identity(body), key: text(body.key), path: text(body.path), mode: body.mode });

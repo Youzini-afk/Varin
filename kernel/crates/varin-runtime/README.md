@@ -330,3 +330,41 @@ with build identity 0.9.24 and debug profile. This evidence does not establish r
 grant-revocation/epoch wakeups, OS thread-creation failure rollback, changed-runtime restart replay
 behavior, or fairness for all compute consumers. Integration with the memory/context branch needs
 MemoryTools to forward execution_class and watch_admission and separate combined verification.
+
+## Native plan identity
+
+`catalog_plan` projects fixed Thread/branch/head identity and an immutable fork basis; it stores no
+plan text or mutable plan pointer. New plan-aware forks record the KnowledgeStore capture on
+`branch.created`, after checking its source Thread, branch, head and inherited reference.
+The Host performs KnowledgeStore capture outside the Catalog lock. Historical cuts, including
+null pre-history, remain explicit. Root/legacy branch identity comes from Catalog creation facts;
+an unrelated abandoned capture cannot change it. KnowledgeStore owns atomic version/CAS/receipt
+publication and verifies the recorded fork basis before resolving plan content.
+
+Plan visibility follows at most 256 immutable parent metadata rows per control request, using
+HMAC-authenticated cursors tied to the Catalog-open epoch, Thread, branch, selected head and
+candidate. No complete history list crosses the plan bridge. Host cancellation ends between
+bounded pages; reopening restarts only pure reads. Existing conversation fork replay/pairing
+validation is unchanged and is not claimed to be a new bounded plan-page operation.
+
+`native_todo` exposes `read` and whole-plan `update` with exact `expectedRef` CAS. The private
+bridge derives the fixed request head and original Operation identity from Catalog; model
+arguments contain no owner/scope fields. Only admitted ordinary main Threads receive the schema,
+and dispatch rechecks their persisted role and child relationship. Source-inheritance filters
+recognize this built-in without granting source capabilities. An authoritative CAS-conflict
+receipt settles `Failed/None`; an unknown dispatch is not relabeled as no effect. Recovery queries
+the original Knowledge receipt and never repeats a plan mutation.
+
+### Native plan slice verification (2026-10-09)
+
+Independent owner tests passed 22 cases using real TriviumDB and private IPC. Independent Host
+integration passed 22 cases against the diagnostic kernel, including HTTP identity/CAS,
+fixed and nested forks, bounded membership cursors, native model/tool consumption, structured
+conflict settlement and lost-reply reconciliation after a later user edit and owner/kernel reopen.
+UI/client focused tests passed 18 cases. Cargo check/build, protocol/client builds, the Host raw
+bundle, Host test typecheck and full UI typecheck completed. Fixtures were corrected to use actual
+persisted context admission; this does not substitute for a production scope grant.
+
+The exact durable no-effect receipt test and 12 existing execution behavior tests also passed.
+Integration with the newer process-wait mainline remains a separate pending gate at this snapshot. This is not packaged-surface, power-loss, or full-design
+acceptance. Project/Bot/Pi plans and legacy Pi timestamp CAS are unchanged.

@@ -194,3 +194,50 @@ and failure-state transitions. `store-process.test.ts` exercises the production
 facade/child path, error identity, batching, Set/Date transport, cancellation,
 close ordering and recovery of acknowledged data after a real process kill.
 Process-kill recovery is not equivalent to a power-loss guarantee.
+
+## Native Thread plans
+
+Native ordinary main-Thread plans use this same private KnowledgeStore writer, in the existing
+user store as a physical home. `native-plan-store.ts` records explicit Thread/branch identities;
+it does not invent Pi session IDs or change project/Bot/Pi plan scope. Version bodies, branch
+current references, fork captures and reference-only mutation receipts live here. Native records
+have their own types and no legacy session identity, so block queries, user knowledge lists,
+recall and semantic knowledge indexing exclude them through their existing type filters.
+
+A native update uses exact `expectedRef` CAS. One `commitTransaction` writes the immutable
+version, branch pointer and original receipt together; notifications follow commit. Tool receipt
+lookup uses the real persistent Operation ID, then checks its complete frozen origin and intent.
+User command keys are scoped to the authenticated Thread and branch. Replaying a lost response
+returns the original version, even after a later user edit, without another mutation. Storage
+failure remains unknown until the original receipt can be queried. Pi `expectedUpdatedAt` APIs
+remain separate.
+
+The Host verifies native Catalog identity and captures a fork at the chosen real history cut
+before creating the Catalog branch. Catalog stores only the immutable capture reference/basis.
+Knowledge verifies a new fork's complete captured identity, including captured absence; an
+orphan capture never grants a branch or poisons an existing root. Historical selection follows one immutable candidate at a time through `previousRef`, including
+nested earlier-head forks. Catalog membership uses authenticated, epoch-bound parent cursors
+with at most 256 metadata steps per call; neither IPC nor a lock holds the complete ancestry.
+The owner rechecks the current pointer against temporary selection evidence in its transaction.
+Selection never enters semantic receipt identity. Explicit precommit stale-selection errors may
+restart pure resolution; unknown mutations never automatically retry. Same-head siblings edit
+separate branch owners. This captures a visible version, not an arbitrary earlier wall-clock
+instant within one history head.
+
+`expectedHeadId` is a Catalog admission check for HTTP edits, not a cross-store transaction.
+A later history-only advance can leave the admitted edit valid; a later plan change fails the
+KnowledgeStore latest-reference CAS. Native tool reads, user edits and the native plan card
+consume the same body and reference. The card refreshes from the owner after a mutation and on
+matching plan-change/reconnect events; it preserves a conflicting draft for explicit resolution.
+
+Native HTTP reads/edits check the real persisted ordinary-main context and child relationship.
+An uninitialized context is not-ready; Bot/child plans are unsupported, never successful empty
+plans. Existing conversation forks for unsupported scopes retain their previous no-plan path;
+a storage or Catalog failure cannot silently downgrade a supported plan-aware fork. The card
+separates these states, disables unsupported edits and refreshes after context admission.
+
+The native slice's independent acceptance currently includes 22 real-owner/IPC cases and 22
+real-kernel Host cases; UI/client focused acceptance covers 18 cases. Production Host bundling
+and Host/UI typechecks passed. Receipt replay, fork identity, temporary selection staleness and
+generic recall isolation have direct counterexamples. The exact durable no-effect receipt test
+and 12 execution regressions passed; newer-mainline integration remains a separate gate; no power-loss or packaged cross-platform claim is made.
