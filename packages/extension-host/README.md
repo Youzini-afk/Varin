@@ -43,3 +43,21 @@ preparation cannot publish, and shutdown closes admission before aborting unpubl
 Service publication reserves only conflicting declared single-provider services during storage/catalog
 commit; registry publication itself is synchronous. Retired generations still drain their pinned calls
 before transport disposal. Failed replacement routing rollback touches only selections it changed.
+
+Capability decisions are part of activation identity. A changed selected grant advances the desired
+revision; candidate grant reviews are checked independently before publication. Revocations update
+the Host-owned grant arrays used by live and draining transport callbacks before replacement awaits,
+so retaining an old implementation after a failed update cannot retain revoked privileges.
+
+`ApplicationExtensionRuntime.prepareService` resolves the existing scoped routing configuration once
+and returns an exact-generation service handle. Production service invocation uses this same binding
+path. Registry invocation indexes only the requested service (or directly looks up an explicit
+provider); it does not scan all installed providers. Selected-provider failure never falls back to a
+different implementation. Non-authoritative routing cannot create a new binding.
+
+A bound handle admits ordinary calls while its generation is active. A caller freezing an exchange
+can explicitly pin that generation, including its real broker drain lifetime, and must release the
+pin after settling the exchange. Normal replacement preserves pinned calls; disable/crash drainage
+revokes both the active generation and older retained generations without waiting for abandoned pins.
+These Host bindings do not yet connect Host-selected implementations to the Rust composition resolver,
+nor do they implement the proposed Transform/Decision/Observer SDK contracts.

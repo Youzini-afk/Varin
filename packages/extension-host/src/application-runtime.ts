@@ -47,7 +47,7 @@ import { ApplicationExtensionCatalog } from "./application-catalog.js";
 import { BrokeredHostSupervisor, type BrokeredHostTransportFactory } from "./broker-supervisor.js";
 import { HostCapabilityRegistry } from "./capability-registry.js";
 import { ExtensionPackageManager } from "./package-manager.js";
-import { HostServiceRegistry } from "./service-registry.js";
+import { HostServiceRegistry, HostServiceBindingError, type HostServiceBinding } from "./service-registry.js";
 import { ServiceRoutingStore } from "./service-routing-store.js";
 import { ExtensionStorageError } from "./errors.js";
 import { ExtensionStorageStore } from "./storage-store.js";
@@ -113,7 +113,10 @@ export class ApplicationExtensionRuntime {
       packages: this.packages,
       services: this.services,
       storage: this.storage,
-      invokeService: (request, signal) => this.#invokeRegisteredService(request, signal),
+      invokeService: async (request, signal) => {
+        const parsed = parseVarinExtensionServiceInvocationRequest(request);
+        return (await this.#bindRegisteredService(parsed)).invoke(parsed.method, parsed.args, signal);
+      },
       ...(options.transportFactory ? { transportFactory: options.transportFactory } : {}),
     });
     this.#serviceUnsubscribe = this.services.subscribe(() => this.#publish());
@@ -411,11 +414,49 @@ export class ApplicationExtensionRuntime {
     if (typeof providerId === "string" && this.supervisor.hasStagedProvider(providerId)) {
       return this.supervisor.invokeStagedService(parsed, signal);
     }
-    if (providerId) return this.services.invoke(parsed, signal);
-    return this.#ensureBuiltinServiceArtifacts(parsed).then(() => this.supervisor.activateForService(parsed)).then(async () => {
-      this.#publish();
-      return this.#invokeRegisteredService(parsed, signal);
+    return this.prepareService(parsed).then((binding) => binding.invoke(parsed.method, parsed.args, signal));
+  }
+
+  /** Resolve once at a caller's preparation boundary, then invoke the exact bound implementation.
+   * Routing remains owned by ServiceRoutingStore; the returned handle is not another selection store.
+   * Callers with a frozen exchange can pin the handle and must release it when that exchange settles.
+   */
+  async prepareService(request: VarinExtensionServiceInvocationRequest | unknown, options?: { defaultProviderKey?: string }): Promise<HostServiceBinding> {
+    if (this.#stopped) throw new Error("Application extension runtime is stopped");
+    const parsed = parseVarinExtensionServiceInvocationRequest(request);
+    if (parsed.providerId) return this.services.bind(parsed.serviceId, parsed.version, parsed.providerId);
+    const [catalog, routing] = await Promise.all([this.catalog.snapshot(), this.routing.read()]);
+    if (!catalog.authoritative || !routing.authoritative) throw new Error("Cannot prepare a Host service from stale selection state");
+    const legacySelection = this.services.getSnapshot().selections[`${parsed.serviceId}@${parsed.version}`];
+    if (legacySelection) return this.services.bind(parsed.serviceId, parsed.version, legacySelection);
+    const candidates = catalog.extensions.filter(entry => entry.desired.enabled && entry.manifest.entrypoints?.host
+      && entry.manifest.provides?.services?.some(service => service.id === parsed.serviceId && service.version === parsed.version))
+      .map(entry => ({ extensionId: entry.manifest.id,
+        providerKey: `${entry.manifest.id}:host:${parsed.serviceId}@${parsed.version}`,
+        providerId: entry.manifest.id }));
+    const resolution = resolveVarinExtensionServiceRouting({ candidates, document: routing.document,
+      serviceId: parsed.serviceId, version: parsed.version,
+      ...(parsed.routing ? { context: parsed.routing } : {}),
+      ...(options?.defaultProviderKey ? { defaultProviderKey: options.defaultProviderKey } : {}),
     });
+    if (resolution.status !== "resolved" || !resolution.providerId || !resolution.providerKey) {
+      throw new HostServiceBindingError(resolution.status === "ambiguous" ? "ambiguous"
+        : resolution.matchedRule ? "selected_unavailable" : "missing",
+        resolution.diagnostics.map(diagnostic => diagnostic.message).join("; ") || "Host service provider is unavailable");
+    }
+    // Prepare only the selected root and its declared dependencies, never every installed provider.
+    await this.#ensureBuiltinArtifact(resolution.providerId);
+    await this.supervisor.activateExtension(resolution.providerId);
+    if (this.#stopped) throw new Error("Application extension runtime is stopped");
+    const currentRouting = await this.routing.read();
+    if (!currentRouting.authoritative || currentRouting.document.revision !== routing.document.revision) {
+      throw new Error("Host service routing changed during preparation");
+    }
+    const provider = this.services.getSnapshot().providers.find(candidate => candidate.status === "active"
+      && candidate.providerKey === resolution.providerKey);
+    if (!provider) throw new HostServiceBindingError("selected_unavailable", "Selected Host service provider did not become ready");
+    this.#publish();
+    return this.services.bind(parsed.serviceId, parsed.version, provider.providerId);
   }
 
   setServiceSelection(requestValue: VarinExtensionServiceSelectionRequest | unknown): Promise<VarinExtensionHostStateSnapshot> {
@@ -517,37 +558,41 @@ export class ApplicationExtensionRuntime {
     return this.#stop;
   }
 
-  async #invokeRegisteredService(
-    request: VarinExtensionServiceInvocationRequest | unknown,
-    signal?: AbortSignal,
-  ): Promise<JsonValue> {
+  async #bindRegisteredService(
+    request: VarinExtensionServiceInvocationRequest,
+    defaultProviderKey?: string,
+  ): Promise<HostServiceBinding> {
     const parsed = parseVarinExtensionServiceInvocationRequest(request);
-    if (parsed.providerId) return this.services.invoke(parsed, signal);
+    if (parsed.providerId) return this.services.bind(parsed.serviceId, parsed.version, parsed.providerId);
     const services = this.services.getSnapshot();
     const key = `${parsed.serviceId}@${parsed.version}`;
     const legacySelection = services.selections[key];
-    if (legacySelection) return this.services.invoke({ ...parsed, providerId: legacySelection }, signal);
+    if (legacySelection) return this.services.bind(parsed.serviceId, parsed.version, legacySelection);
     const candidates = services.providers.filter((provider) => (
       provider.status === "active"
       && provider.descriptor.id === parsed.serviceId
       && provider.descriptor.version === parsed.version
     ));
     const routing = await this.routing.read();
+    if (!routing.authoritative) throw new Error("Cannot bind a Host service from stale routing state");
     const resolution = resolveVarinExtensionServiceRouting({
       candidates: candidates.map((provider) => ({
         providerId: provider.providerId,
         providerKey: provider.providerKey,
       })),
       document: routing.document,
+      ...(defaultProviderKey ? { defaultProviderKey } : {}),
       serviceId: parsed.serviceId,
       version: parsed.version,
       ...(parsed.routing ? { context: parsed.routing } : {}),
     });
     if (resolution.status !== "resolved" || !resolution.providerId) {
       const detail = resolution.diagnostics.map((diagnostic) => diagnostic.message).join("; ");
-      throw new Error(detail || `Host service provider is unavailable or ambiguous: ${key}`);
+      throw new HostServiceBindingError(resolution.status === "ambiguous" ? "ambiguous"
+        : resolution.matchedRule ? "selected_unavailable" : "missing",
+        detail || `Host service provider is unavailable or ambiguous: ${key}`);
     }
-    return this.services.invoke({ ...parsed, providerId: resolution.providerId }, signal);
+    return this.services.bind(parsed.serviceId, parsed.version, resolution.providerId);
   }
 
   async #ensureBuiltinArtifact(extensionId: string): Promise<void> {

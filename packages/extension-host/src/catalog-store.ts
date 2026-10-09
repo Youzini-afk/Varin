@@ -518,8 +518,11 @@ export class ExtensionCatalogStore {
       const index = record.capabilityGrants.findIndex((item) => (
         item.capability === grant.capability && item.realm === grant.realm
       ));
+      const previous = index >= 0 ? record.capabilityGrants[index] : undefined;
+      if (previous?.granted === grant.granted && previous.manifestVersion === grant.manifestVersion) return false;
       if (index >= 0) record.capabilityGrants[index] = next;
       else record.capabilityGrants.push(next);
+      record.desired = { ...record.desired, revision: record.desired.revision + 1, updatedAt: now };
       record.updatedAt = now;
       return true;
     });
@@ -537,6 +540,7 @@ export class ExtensionCatalogStore {
         throw new Error(`Built-in Varin extensions are managed by the distribution: ${extensionId}`);
       }
       const requested = new Set(manifestCapabilities(record.manifest).map(capabilityKey));
+      let changed = false;
       for (const decision of decisions) {
         const key = capabilityKey(decision);
         if (!requested.has(key)) throw new Error(`Capability was not requested by ${extensionId}: ${key}`);
@@ -546,11 +550,17 @@ export class ExtensionCatalogStore {
           updatedAt: now,
         };
         const index = record.capabilityGrants.findIndex((grant) => capabilityKey(grant) === key);
+        const previous = index >= 0 ? record.capabilityGrants[index] : undefined;
+        if (previous?.granted === next.granted && previous.manifestVersion === next.manifestVersion) continue;
+        changed = true;
         if (index >= 0) record.capabilityGrants[index] = next;
         else record.capabilityGrants.push(next);
       }
-      if (decisions.length > 0) record.updatedAt = now;
-      return decisions.length > 0;
+      if (changed) {
+        record.desired = { ...record.desired, revision: record.desired.revision + 1, updatedAt: now };
+        record.updatedAt = now;
+      }
+      return changed;
     });
   }
 
