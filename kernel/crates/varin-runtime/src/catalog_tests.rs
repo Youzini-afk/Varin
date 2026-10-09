@@ -1525,3 +1525,95 @@ fn dispatched_no_effect_requires_exact_durable_executor_evidence() {
     assert_eq!(op.result,Some(content));
     assert_eq!(owner.lock().unwrap().operation("model-1:tool:other").unwrap().effect,Effect::Dispatched);
 }
+
+#[test]
+fn recovery_preparation_hydrates_without_catalog_and_rechecks_its_actual_boundary() {
+    use crate::execution::{CancellationToken, PolicyIdentity};
+    use std::sync::{mpsc, Arc, Mutex};
+    for change in ["unrelated", "head", "cancel"] {
+        let f = Fixture::new();
+        let mut catalog = f.open();
+        let receipt = submit(&mut catalog);
+        let epoch = catalog.epoch();
+        let row = catalog.append_history(&receipt.run_id, epoch, Some(&receipt.input_id),
+            HistorySource::User, json!({"text":"retained-history-".repeat(500000)}), None).unwrap();
+        let owner = Arc::new(Mutex::new(catalog));
+        let mut catalog = owner.lock().unwrap();
+        let preparation = catalog.capture_recovered_execution(&receipt.run_id,
+            request_snapshot(&receipt).view.binding,
+            PolicyIdentity { name:"default".into(), version:"1".into() }, Value::Null, true).unwrap();
+        catalog.content.save(&json!({"orphan":"protected until preparation ends"})).unwrap();
+        assert_eq!(catalog.collect_content_objects().unwrap(), 0);
+        let (send, receive) = mpsc::channel();
+        let worker = std::thread::spawn(move || send.send(preparation.load(&CancellationToken::default())).unwrap());
+        // Hold the actual Catalog mutex throughout history traversal, object reads and decode.
+        let prepared = receive.recv_timeout(std::time::Duration::from_secs(20)).unwrap().unwrap().unwrap();
+        worker.join().unwrap();
+        match change {
+            "unrelated" => { catalog.create_thread("other-thread", "other-main").unwrap(); },
+            "head" => { catalog.append_history(&receipt.run_id, epoch, Some(&row.id),
+                HistorySource::User, json!("late correction"), None).unwrap(); },
+            "cancel" => { catalog.request_cancel_run(&receipt.run_id).unwrap(); },
+            _ => unreachable!(),
+        }
+        let launch = catalog.publish_recovered_execution(prepared).unwrap();
+        if change == "unrelated" {
+            let launch = launch.expect("unrelated Catalog writes cannot invalidate this Run");
+            assert_eq!(launch.input.binding.history_range.leaf_id.as_deref(), Some(row.id.as_str()));
+            assert_eq!(launch.input.history.len(), 2);
+        } else {
+            assert!(launch.is_none(), "a stale {change} boundary must be recaptured");
+        }
+        assert!(catalog.collect_content_objects().unwrap() > 0, "publication pin must release");
+        if change == "cancel" {
+            assert_eq!(catalog.cancel_preparing_execution(&receipt.run_id, epoch).unwrap().unwrap().state, RunState::Cancelled);
+        }
+    }
+}
+
+#[test]
+fn recovery_preparation_discards_stale_failure_after_a_real_tool_receipt_arrives() {
+    use crate::execution::*;
+    let f = Fixture::new();
+    let mut catalog = f.open();
+    let receipt = submit(&mut catalog);
+    let epoch = catalog.epoch();
+    let mut snapshot = request_snapshot(&receipt);
+    snapshot.view.binding.tools = vec![ToolSchema {
+        name:"read".into(), version:"1".into(), schema:json!({"type":"object"}),
+    }];
+    let binding = snapshot.view.binding.clone();
+    independent_prepare(&mut catalog, &receipt, snapshot);
+    let call = ToolCall { call_id:"receipt-race".into(), name:"read".into(), schema_version:"1".into(), arguments:json!({}) };
+    catalog.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::ModelFinished {
+        request_id:"model-1".into(), outcome:ModelOutcome::Completed, finish_reason:Some(FinishReason::ToolCalls),
+        items:vec![ProviderItem { id:"call-item".into(), content:Content::ToolCall { call:call.clone() }, opaque:None }],
+        interrupted_deltas:vec![], usage:UsageReceipt::default(), failure:None,
+    }).unwrap();
+    catalog.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::ToolsAdmitted {
+        request_id:"model-1".into(), tools:vec![AdmittedTool { call, contract:ToolContract {
+            name:"read".into(), schema_version:"1".into(), read_only:false,
+            completion:CompletionKind::Result, lifetime:Lifetime::Run, resources:vec![],
+        }}],
+    }).unwrap();
+    catalog.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::ToolDispatched {
+        request_id:"model-1".into(), call_id:"receipt-race".into(),
+    }).unwrap();
+    let policy = PolicyIdentity { name:"default".into(), version:"1".into() };
+    let preparation = catalog.capture_recovered_execution(&receipt.run_id, binding.clone(), policy.clone(), Value::Null, true).unwrap();
+    let identity = preparation.identity();
+    assert!(preparation.load(&CancellationToken::default()).is_err(), "unconfirmed dispatch cannot replay");
+    catalog.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::ToolSettled {
+        result:ToolResult { request_id:"model-1".into(), call_id:"receipt-race".into(),
+            completion:ToolCompletion::Result { outcome:Outcome::Succeeded, effect:Effect::Confirmed, content:json!("actual receipt") } },
+    }).unwrap();
+    assert!(!catalog.preparation_is_current(&identity).unwrap(), "a late real receipt supersedes the earlier recovery failure");
+    let preparation = catalog.capture_recovered_execution(&receipt.run_id, binding, policy, Value::Null, true).unwrap();
+    let prepared = preparation.load(&CancellationToken::default()).unwrap().unwrap();
+    let launch = catalog.publish_recovered_execution(prepared).unwrap().unwrap();
+    let recovery = launch.recovery.unwrap();
+    assert!(recovery.pending.is_some());
+    assert_eq!(recovery.receipts["receipt-race"].completion, ToolCompletion::Result {
+        outcome:Outcome::Succeeded, effect:Effect::Confirmed, content:json!("actual receipt"),
+    });
+}
