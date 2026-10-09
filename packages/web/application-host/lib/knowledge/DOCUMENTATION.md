@@ -198,7 +198,7 @@ Process-kill recovery is not equivalent to a power-loss guarantee.
 ## Native Thread plans
 
 Native ordinary main-Thread plans use this same private KnowledgeStore writer, in the existing
-user store as a physical home. `native-plan-store.ts` records explicit Thread/branch identities;
+user store as a physical home. `plan-store.ts` records explicit Thread/branch identities;
 it does not invent Pi session IDs or change project/Bot/Pi plan scope. Version bodies, branch
 current references, fork captures and reference-only mutation receipts live here. Native records
 have their own types and no legacy session identity, so block queries, user knowledge lists,

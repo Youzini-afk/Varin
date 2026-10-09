@@ -409,14 +409,14 @@ fn owned_receipt(db: &Connection, result: &crate::execution::ToolResult) -> Resu
     let Some(operation) = optional_record::<Operation>(db, "operations", &key)? else {
         return Ok(None);
     };
-    if operation.executor.as_deref() != Some("native_memory")
+    if operation.executor.as_deref() != Some("memory")
         || operation.outcome != Some(Outcome::Succeeded)
         || operation.effect != Effect::Confirmed
     {
         return Ok(None);
     }
     let tool: crate::execution::AdmittedTool = serde_json::from_value(operation.intent)?;
-    if tool.call.name != "native_memory" || tool.call.call_id != result.call_id {
+    if tool.call.name != "memory" || tool.call.call_id != result.call_id {
         return Ok(None);
     }
     let Some(receipt) = operation
@@ -425,7 +425,7 @@ fn owned_receipt(db: &Connection, result: &crate::execution::ToolResult) -> Resu
     else {
         return Ok(None);
     };
-    if receipt["origin"].as_str() != Some(&format!("native:{}:{}", operation.run_id, operation.id))
+    if receipt["origin"].as_str() != Some(&format!("run:{}:{}", operation.run_id, operation.id))
     {
         return Ok(None);
     }
@@ -433,7 +433,7 @@ fn owned_receipt(db: &Connection, result: &crate::execution::ToolResult) -> Resu
 }
 impl Catalog {
     pub(super) fn trusted_memory_receipts(&self, thread: &str) -> Result<BTreeMap<String, Value>> {
-        let mut statement = self.db.prepare("SELECT o.body FROM operations o JOIN runs r ON r.id=o.run_id WHERE json_extract(r.body,'$.thread_id')=?1 AND json_extract(o.body,'$.executor')='native_memory' AND json_extract(o.body,'$.outcome')='succeeded' AND json_extract(o.body,'$.effect')='confirmed'")?;
+        let mut statement = self.db.prepare("SELECT o.body FROM operations o JOIN runs r ON r.id=o.run_id WHERE json_extract(r.body,'$.thread_id')=?1 AND json_extract(o.body,'$.executor')='memory' AND json_extract(o.body,'$.outcome')='succeeded' AND json_extract(o.body,'$.effect')='confirmed'")?;
         let rows = statement
             .query_map([thread], |row| row.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -442,7 +442,7 @@ impl Catalog {
             let operation: Operation = serde_json::from_str(&row)?;
             let tool: crate::execution::AdmittedTool =
                 serde_json::from_value(operation.intent.clone())?;
-            if tool.call.name != "native_memory" {
+            if tool.call.name != "memory" {
                 continue;
             }
             if let Some(receipt) = operation
@@ -450,7 +450,7 @@ impl Catalog {
                 .and_then(|result| result.get("memoryReceipt").cloned())
             {
                 if receipt["origin"].as_str()
-                    == Some(&format!("native:{}:{}", operation.run_id, operation.id))
+                    == Some(&format!("run:{}:{}", operation.run_id, operation.id))
                 {
                     receipts.insert(operation.id, receipt);
                 }

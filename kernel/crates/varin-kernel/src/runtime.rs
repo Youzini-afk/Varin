@@ -14,26 +14,26 @@ use uuid::Uuid;
 
 enum WorkerRequest {
     Wire(Value, Arc<AtomicBool>),
-    Native(crate::native_tools::ResourceCall),
+    Resource(crate::tools::ResourceCall),
     ReplayProcessTerminals(Vec<String>),
     CaptureDone { request: Value, task: crate::storage::capture_resources::CaptureTask, result: Result<crate::storage::capture_resources::CapturedBatch, KernelError> },
     Stop,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum WireLane { Storage, Native }
+enum WireLane { Storage, Agent }
 
 struct ActiveRequest {
     token: Arc<AtomicBool>,
     epoch: Option<String>,
     grant_id: Option<String>,
-    native: Option<varin_runtime::execution::CancellationToken>,
+    runtime_cancel: Option<varin_runtime::execution::CancellationToken>,
     wire_lane: Option<WireLane>,
 }
 
 impl ActiveRequest {
     fn cancel(&self) {
-        if let Some(native) = &self.native { native.cancel(); }
+        if let Some(cancel) = &self.runtime_cancel { cancel.cancel(); }
         else { self.token.store(true, Ordering::Release); }
     }
 }
@@ -381,12 +381,12 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let revoked_grants = Arc::new(Mutex::new(HashSet::<String>::new()));
     let admission_epoch = Arc::new(Mutex::new(None::<String>));
     let credential_bridge = crate::credential_bridge::CredentialBridge::new(response_tx.clone());
-    let mcp_bridge = crate::native_mcp::McpBridge::new(response_tx.clone());
-    let memory_bridge = crate::native_memory_bridge::MemoryBridge::new(response_tx.clone());
-    let plan_bridge = crate::native_plan_bridge::PlanBridge::new(response_tx.clone());
-    let language_bridge = crate::native_language::LanguageBridge::new(response_tx.clone());
-    let retrieval_bridge = crate::native_retrieval::RetrievalBridge::new(response_tx.clone());
-    let policy_bridge = crate::native_policy::PolicyBridge::new(response_tx.clone());
+    let mcp_bridge = crate::mcp::McpBridge::new(response_tx.clone());
+    let memory_bridge = crate::memory_bridge::MemoryBridge::new(response_tx.clone());
+    let plan_bridge = crate::plan_bridge::PlanBridge::new(response_tx.clone());
+    let language_bridge = crate::language::LanguageBridge::new(response_tx.clone());
+    let retrieval_bridge = crate::retrieval::RetrievalBridge::new(response_tx.clone());
+    let policy_bridge = crate::policy::PolicyBridge::new(response_tx.clone());
     let writer_failed = Arc::new(AtomicBool::new(false));
     let subscriptions=crate::process::subscriptions::ProcessSubscriptions::new(response_tx.clone());
     let (subscription_tx,subscription_rx)=mpsc::channel();
@@ -395,16 +395,16 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         if let Ok(mut active)=subscription_cancellations.lock(){active.remove(id);}
     });
     let storage_subscriptions=subscriptions.clone();
-    let (native_tx, native_rx) = mpsc::channel();
+    let (agent_tx, agent_rx) = mpsc::channel();
     let (process_terminals, terminal_rx) = mpsc::channel::<crate::process::ProcessTerminal>();
-    let terminal_commands = native_tx.clone();
+    let terminal_commands = agent_tx.clone();
     thread::spawn(move || {
         for terminal in terminal_rx {
-            if terminal_commands.send(crate::native_runtime::Command::ProcessTerminal(terminal)).is_err() { break; }
+            if terminal_commands.send(crate::agent_runtime::Command::ProcessTerminal(terminal)).is_err() { break; }
         }
     });
     let replay_requests = request_tx.clone();
-    let native_cancellations = cancellations.clone();
+    let agent_cancellations = cancellations.clone();
     let resource_requests = request_tx.clone();
     let resource_cancellations = cancellations.clone();
     let resource_revoked = revoked_grants.clone();
@@ -413,21 +413,21 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let admission_revoked = revoked_grants.clone();
     let admission_cancellations = cancellations.clone();
     let process_controls = crate::process::ProcessControlRegistry::default();
-    let resources = crate::native_tools::NativeResourceClient::new(move |call| {
+    let resources = crate::tools::KernelResourceClient::new(move |call| {
         let epoch = resource_epoch.lock().map_err(|_| KernelError::Storage("admission identity lock poisoned".into()))?
             .clone().ok_or_else(|| KernelError::Authorization("kernel handshake required".into()))?;
         if resource_revoked.lock().map_err(|_| KernelError::Storage("revocation state lock poisoned".into()))?
             .contains(&call.binding.grant_id) {
             return Err(KernelError::Authorization("grant is revoked".into()));
         }
-        let key = format!("native-resource:{}", Uuid::new_v4());
+        let key = format!("resource:{}", Uuid::new_v4());
         resource_cancellations.lock().map_err(|_| KernelError::Storage("cancellation state lock poisoned".into()))?
-            .insert(key.clone(), ActiveRequest { token:call.cancellation.shared_flag(), epoch:Some(epoch), grant_id:Some(call.binding.grant_id.clone()), native:Some(call.cancellation.clone()), wire_lane:None });
+            .insert(key.clone(), ActiveRequest { token:call.cancellation.shared_flag(), epoch:Some(epoch), grant_id:Some(call.binding.grant_id.clone()), runtime_cancel:Some(call.cancellation.clone()), wire_lane:None });
         // The actor clears this registration after the actual resource receipt, never on mere
         // cancellation request. Attach the key to the typed message, not to a JSON envelope.
         let mut call = call;
         call.admission_key = Some(key.clone());
-        if resource_requests.send(WorkerRequest::Native(call)).is_err() {
+        if resource_requests.send(WorkerRequest::Resource(call)).is_err() {
             if let Ok(mut active) = resource_cancellations.lock() { active.remove(&key); }
             return Err(KernelError::Storage("resource authority stopped before admission".into()));
         }
@@ -438,7 +438,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|_| KernelError::Storage("resource authority stopped before receipt replay".into()))
     }, process_controls.clone()).with_admission_control(move |binding, cancel| {
         use varin_runtime::{execution::ExecutionError, execution_capacity::AdmissionControlGuard};
-        let failed = || ExecutionError::new("admission_control", "native capability control is unavailable");
+        let failed = || ExecutionError::new("admission_control", "capability control is unavailable");
         let epoch = queue_admission_epoch.lock().map_err(|_| failed())?.clone()
             .ok_or_else(|| ExecutionError::new("admission_control", "kernel handshake required"))?;
         // Registration and the revoke fence share the existing owner lock order. A revoke cannot
@@ -448,10 +448,10 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             cancel.cancel();
             return Ok(AdmissionControlGuard::new(|| {}));
         }
-        let key = format!("native-admission:{}", Uuid::new_v4());
+        let key = format!("admission:{}", Uuid::new_v4());
         admission_cancellations.lock().map_err(|_| failed())?.insert(key.clone(), ActiveRequest {
             token: cancel.shared_flag(), epoch: Some(epoch), grant_id: Some(binding.grant_id.clone()),
-            native: Some(cancel.clone()), wire_lane: None,
+            runtime_cancel: Some(cancel.clone()), wire_lane: None,
         });
         drop(revoked);
         let active = admission_cancellations.clone();
@@ -459,11 +459,11 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let Ok(mut active) = active.lock() { active.remove(&key); }
         }))
     });
-    let native_control = crate::native_runtime::NativeControl::default();
-    let native_worker = crate::native_runtime::spawn(native_rx, native_tx.clone(), native_control.clone(), resources, credential_bridge.clone(), mcp_bridge.clone(), language_bridge.clone(), memory_bridge.clone(), plan_bridge.clone(), retrieval_bridge.clone(), policy_bridge.clone(), response_tx.clone(), move |id| {
-        if let Ok(mut active) = native_cancellations.lock() { active.remove(id); }
+    let agent_control = crate::agent_runtime::AgentControl::default();
+    let agent_worker = crate::agent_runtime::spawn(agent_rx, agent_tx.clone(), agent_control.clone(), resources, credential_bridge.clone(), mcp_bridge.clone(), language_bridge.clone(), memory_bridge.clone(), plan_bridge.clone(), retrieval_bridge.clone(), policy_bridge.clone(), response_tx.clone(), move |id| {
+        if let Ok(mut active) = agent_cancellations.lock() { active.remove(id); }
     });
-    let worker_native_tx = native_tx.clone();
+    let worker_agent_tx = agent_tx.clone();
     let worker_cancellations = cancellations.clone();
     let worker_revoked_grants = revoked_grants.clone();
     let worker_admission_epoch = admission_epoch.clone();
@@ -504,19 +504,19 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let result = kernel.storage.as_ref().ok_or_else(|| KernelError::Authorization("kernel handshake required".into()))
                         .and_then(|storage| storage.replay_process_terminals(&ids));
                     if let Err(error) = result {
-                        let _ = worker_native_tx.send(crate::native_runtime::Command::ProcessReplayFailed(error.to_string()));
+                        let _ = worker_agent_tx.send(crate::agent_runtime::Command::ProcessReplayFailed(error.to_string()));
                     }
                     continue;
                 }
-                WorkerRequest::Native(call) => {
+                WorkerRequest::Resource(call) => {
                     let denied = worker_revoked_grants.lock().map(|revoked| revoked.contains(&call.binding.grant_id)).unwrap_or(true);
                     let result = if denied {
-                        Err(crate::native_tools::ResourceFailure { error:KernelError::Authorization("grant is revoked".into()), dispatched:false })
+                        Err(crate::tools::ResourceFailure { error:KernelError::Authorization("grant is revoked".into()), dispatched:false })
                     } else if let (Some(storage), Some(host_id), Some(host_generation)) =
                         (kernel.storage.as_mut(), kernel.host_id.as_deref(), kernel.host_generation.as_deref()) {
-                        crate::native_tools::serve_resource(storage, &kernel.epoch, host_id, host_generation, &call)
+                        crate::tools::serve_resource(storage, &kernel.epoch, host_id, host_generation, &call)
                     } else {
-                        Err(crate::native_tools::ResourceFailure { error:KernelError::Authorization("kernel handshake required".into()), dispatched:false })
+                        Err(crate::tools::ResourceFailure { error:KernelError::Authorization("kernel handshake required".into()), dispatched:false })
                     };
                     if let Some(key) = &call.admission_key {
                         if let Ok(mut active) = worker_cancellations.lock() { active.remove(key); }
@@ -579,7 +579,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     worker_policy.initialize(epoch);
                     if let Some(storage) = kernel.storage.as_mut() { storage.set_process_terminal_sender(process_terminals.clone()); storage.set_process_controls(process_controls.clone()); storage.set_process_subscriptions(storage_subscriptions.clone()); }
                     if let Some(root) = kernel.storage_root.as_ref() {
-                        if worker_native_tx.send(crate::native_runtime::Command::Initialize { root: root.clone(), epoch: epoch.to_string() }).is_err() { break; }
+                        if worker_agent_tx.send(crate::agent_runtime::Command::Initialize { root: root.clone(), epoch: epoch.to_string() }).is_err() { break; }
                     }
                     if let Ok(mut current) = worker_admission_epoch.lock() {
                         *current = Some(epoch.to_string());
@@ -751,7 +751,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         let wire_lane = if request.get("method").and_then(Value::as_str).is_some_and(|method| (method.starts_with("runtime.") && !KERNEL_RUNTIME_DATA_METHODS.contains(&method)) || method.starts_with("process.subscription.")) {
-            WireLane::Native
+            WireLane::Agent
         } else { WireLane::Storage };
         if !id.is_empty() {
             if let Ok(mut active) = cancellations.lock() {
@@ -765,7 +765,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                         token: token.clone(),
                         epoch: request_epoch,
                         grant_id: request_grant,
-                        native: None,
+                        runtime_cancel: None,
                         wire_lane: Some(wire_lane),
                     },
                 );
@@ -781,11 +781,11 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .filter(|method| matches!(*method,"runtime.run.cancel"|"runtime.operation.cancel"))
                 .map(|_|request.clone());
             // Enqueue the intent before fast OS control. A resulting terminal fact can then
-            // never overtake its cancel command in the native owner's FIFO and lose causality.
-            if native_tx.send(crate::native_runtime::Command::Request { value: request, cancellation: token }).is_err() {
-                eprintln!("native runtime control authority disconnected"); break;
+            // never overtake its cancel command in the owner's FIFO and lose causality.
+            if agent_tx.send(crate::agent_runtime::Command::Request { value: request, cancellation: token }).is_err() {
+                eprintln!("runtime control authority disconnected"); break;
             }
-            if let Some(request)=cancellation_request { native_control.cancel_admitted(&request,current_epoch.as_deref()); }
+            if let Some(request)=cancellation_request { agent_control.cancel_admitted(&request,current_epoch.as_deref()); }
             continue;
         }
         if request_tx.send(WorkerRequest::Wire(request, token)).is_err() {
@@ -809,14 +809,14 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _=subscription_tx.send(crate::process::subscriptions::ControlCommand::Stop);
     drop(subscription_tx);
     let _=subscription_worker.join();
-    // Native run workers retain a resource sender. Explicitly stop the owner rather than
+    // Run workers retain a resource sender. Explicitly stop the owner rather than
     // waiting for all senders to drop, which would create a shutdown channel cycle.
     let _ = request_tx.send(WorkerRequest::Stop);
     drop(request_tx);
     let _ = worker.join();
-    let _ = native_tx.send(crate::native_runtime::Command::Stop);
-    drop(native_tx);
-    let _ = native_worker.join();
+    let _ = agent_tx.send(crate::agent_runtime::Command::Stop);
+    drop(agent_tx);
+    let _ = agent_worker.join();
     drop(subscriptions);
     drop(response_tx);
     let _ = writer.join();

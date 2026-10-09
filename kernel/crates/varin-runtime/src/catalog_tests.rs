@@ -1334,7 +1334,7 @@ fn initial_input_and_launch_are_one_durable_idempotent_admission() {
     );
 }
 
-// Independent regression evidence from native retrieval concurrency acceptance. Provider item
+// Independent regression evidence from retrieval concurrency acceptance. Provider item
 // identity is local to the model exchange; the conversation graph has its own durable identity.
 fn independent_finished_item(text: &str) -> crate::execution::ProviderItem {
     crate::execution::ProviderItem {

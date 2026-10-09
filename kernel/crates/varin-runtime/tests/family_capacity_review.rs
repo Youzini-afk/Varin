@@ -192,7 +192,7 @@ fn cancellation_clears_pending_ticket_but_cannot_release_running_capacity() {
     assert_eq!(a.summary().queued, 0);
 }
 
-#[path = "fixtures/native_child_dispatch.rs"]
+#[path = "fixtures/child_dispatch.rs"]
 mod fixture;
 #[test]
 fn committed_child_lineage_owns_family_after_parent_completion_and_inspection_is_scoped() {
@@ -261,7 +261,7 @@ fn child_context(
     varin_runtime::catalog::personalization::PersonalizationBasis,
 ) {
     let mut source = child.source_pin.source.clone();
-    source.branch_id = Some(format!("native-child-source:{}", child.operation_id));
+    source.branch_id = Some(format!("child-source:{}", child.operation_id));
     source.revision = Some(0);
     let proposal = varin_runtime::catalog::context::ContextProposal {
         key: format!("child-context:{}", child.operation_id),

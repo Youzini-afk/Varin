@@ -1,4 +1,4 @@
-import type { NativePlanView, NativePlanSelection, NativePlanCandidate, NativePlanSnapshot, NativePlanMutationInput, NativePlanMutationResult, NativePlanForkInput, NativePlanForkCapture, NativePlanChanged } from "@varin/protocol";
+import type { PlanView, PlanSelection, PlanCandidate, PlanSnapshot, PlanMutationInput, PlanMutationResult, PlanForkInput, PlanForkCapture, PlanChanged } from "@varin/protocol";
 /** Shared private KnowledgeStore contract. No native module is loaded here. */
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -491,11 +491,11 @@ export interface KnowledgeStore {
   getBlocks(sessionId: string, branchEntryIds?: readonly string[]): Promise<Block[]>;
   upsertBlock(b: BlockInput): Promise<Block>;
   /** Native plans have real Thread/branch keys, never Pi session aliases. */
-  readNativePlanCandidate(view: NativePlanView, ref?: string | null): Promise<NativePlanCandidate>;
-  readNativePlan(view: NativePlanView, selection: NativePlanSelection): Promise<NativePlanSnapshot | null>;
-  mutateNativePlan(input: NativePlanMutationInput): Promise<NativePlanMutationResult>;
-  readNativePlanMutation(input: NativePlanMutationInput): Promise<NativePlanMutationResult | null>;
-  captureNativePlanFork(input: NativePlanForkInput): Promise<NativePlanForkCapture>;
+  readPlanCandidate(view: PlanView, ref?: string | null): Promise<PlanCandidate>;
+  readPlan(view: PlanView, selection: PlanSelection): Promise<PlanSnapshot | null>;
+  mutatePlan(input: PlanMutationInput): Promise<PlanMutationResult>;
+  readPlanMutation(input: PlanMutationInput): Promise<PlanMutationResult | null>;
+  capturePlanFork(input: PlanForkInput): Promise<PlanForkCapture>;
   /**
    * Delete a block. A branch-scoped delete writes a tombstone at the active
    * leaf so sibling branches retain their inherited revision. If
@@ -667,6 +667,6 @@ export interface OpenWorkspaceKnowledgeDeps {
   embedding: EmbeddingProvider | null;
   onBlocksChanged?: (sessionId: string, change: BlockChange) => void;
   onKnowledgeChanged?: (ids: readonly NodeId[]) => void;
-  onNativePlanChanged?: (change: NativePlanChanged) => void;
+  onPlanChanged?: (change: PlanChanged) => void;
   onPersistenceError?: (error: unknown) => void;
 }

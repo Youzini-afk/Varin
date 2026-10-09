@@ -1,4 +1,4 @@
-//! Native wire adapters. Credentials resolve only at dispatch and never enter RequestSnapshot.
+//! Wire adapters. Credentials resolve only at dispatch and never enter RequestSnapshot.
 //! HTTP retries and redirects are disabled: an interrupted generation has ambiguous remote cost.
 pub mod anthropic;
 pub mod auth;
@@ -72,8 +72,8 @@ pub trait HttpTransport: Send + Sync {
     }
 }
 /// A single shared outbound policy can supply proxy, custom roots and DNS via ClientBuilder.
-/// Must run on a native execution worker, outside an existing Tokio runtime.
-pub struct NativeHttpTransport {
+/// Must run on a execution worker, outside an existing Tokio runtime.
+pub struct ReqwestTransport {
     builder: Arc<dyn Fn() -> reqwest::ClientBuilder + Send + Sync>,
     state: OnceLock<Result<TransportState, ModelFailure>>,
 }
@@ -81,12 +81,12 @@ struct TransportState {
     client: reqwest::Client,
     runtime: tokio::runtime::Runtime,
 }
-impl Default for NativeHttpTransport {
+impl Default for ReqwestTransport {
     fn default() -> Self {
         Self::new(reqwest::Client::builder)
     }
 }
-impl NativeHttpTransport {
+impl ReqwestTransport {
     pub fn new(builder: impl Fn() -> reqwest::ClientBuilder + Send + Sync + 'static) -> Self {
         Self {
             builder: Arc::new(builder),
@@ -95,7 +95,7 @@ impl NativeHttpTransport {
     }
 }
 
-impl HttpTransport for NativeHttpTransport {
+impl HttpTransport for ReqwestTransport {
     fn stream_eventstream(&self, request: HttpRequest<'_>, cancel: &CancellationToken,
         receive: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>) -> Result<(), ModelFailure> {
         self.stream_internal(request, cancel, receive, true, "application/vnd.amazon.eventstream")
@@ -118,7 +118,7 @@ impl HttpTransport for NativeHttpTransport {
         self.stream_internal(request, cancel, receive, true, "text/event-stream")
     }
 }
-impl NativeHttpTransport {
+impl ReqwestTransport {
     fn stream_internal(
         &self,
         request: HttpRequest<'_>,
@@ -133,7 +133,7 @@ impl NativeHttpTransport {
         if tokio::runtime::Handle::try_current().is_ok() {
             return Err(failure(
                 "worker_required",
-                "native model requests must execute on a blocking worker",
+                "model requests must execute on a blocking worker",
             ));
         }
         // State is scoped to this trusted connection configuration, never a global tenant cache.

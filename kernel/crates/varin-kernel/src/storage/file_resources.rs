@@ -363,7 +363,7 @@ fn create_symlink(target: &str, path: &Path) -> Result<(), KernelError> {
 }
 
 impl Storage {
-    pub(crate) fn validate_native_live_root(&self, identity: &varin_runtime::catalog::launches::LiveRoot,
+    pub(crate) fn validate_live_root(&self, identity: &varin_runtime::catalog::launches::LiveRoot,
         grant: &Grant, host_id: &str) -> Result<(), KernelError> {
         let root = self.registered_file_root(&identity.root_id, grant)?;
         if identity.host_id != host_id || root.canonical_root != Path::new(&identity.canonical_root) {
@@ -2452,17 +2452,17 @@ pub(super) fn resolve_admitted_resource(
 impl Storage {
     /// Private read-only Host admission before Documents accesses a retrieval candidate.
     /// The persisted Run grant and physical lease owner remain authoritative; no body is read.
-    pub(crate) fn native_file_read_check(&mut self, params: &Value, grant: &Grant) -> Result<Value, KernelError> {
+    pub(crate) fn file_read_check(&mut self, params: &Value, grant: &Grant) -> Result<Value, KernelError> {
         let args: crate::protocol_generated::KernelFileReadCheckParams = parse_file_params(params)?;
-        let key = self.native_file_resource_key(&args.root_id, &args.path, grant)?;
-        self.native_file_read(params, grant, false)?;
+        let key = self.file_resource_key(&args.root_id, &args.path, grant)?;
+        self.file_read(params, grant, false)?;
         let resource = self.resolve_file_resource(&args.root_id, &args.path, grant, false)?;
         let metadata = fs::symlink_metadata(&resource.absolute)?;
         if !metadata.is_file() || metadata.file_type().is_symlink() {
             return Err(KernelError::Authorization("retrieval read admission requires a regular file, not a symlink".into()));
         }
         // Parent symlinks may have changed while the permission/lease checks ran.
-        if self.native_file_resource_key(&args.root_id, &args.path, grant)? != key {
+        if self.file_resource_key(&args.root_id, &args.path, grant)? != key {
             return Err(KernelError::Authorization("canonical file resource changed during admission".into()));
         }
         Ok(json!({"resourceKey":key}))
@@ -2471,7 +2471,7 @@ impl Storage {
     /// the bound Run supplies the root, and the existing grant/root/lease owner
     /// still admits every read. The caller adds its selected source mode; this owner
     /// only establishes the actual physical root and observed file revision.
-    pub(crate) fn native_file_read(
+    pub(crate) fn file_read(
         &mut self,
         params: &Value,
         grant: &Grant,
@@ -2502,7 +2502,7 @@ impl Storage {
             Ok(value) => value,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 return Ok(
-                    json!({"path":path,"source":source,"missing":true,"readVersion":super::native_file_mutations::read_version(grant,root_id,&resource.path,&FileState::Missing)?}),
+                    json!({"path":path,"source":source,"missing":true,"readVersion":super::file_mutations::read_version(grant,root_id,&resource.path,&FileState::Missing)?}),
                 )
             }
             Err(error) => return Err(error.into()),
@@ -2590,7 +2590,7 @@ impl Storage {
                 byte_length,
                 mode: Some(file_mode(&after)),
             };
-            Some(super::native_file_mutations::read_version(
+            Some(super::file_mutations::read_version(
                 grant,
                 root_id,
                 &resource.path,

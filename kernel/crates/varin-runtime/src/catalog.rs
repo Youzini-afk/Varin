@@ -113,12 +113,12 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
         collaboration::check_format(db)?;
         context::check_format(db)?;
         let content_format:i64=db.query_row("SELECT version FROM runtime_content_format WHERE id=1",[],|r|r.get(0))?;
-        if content_format!=3 {return Err(RuntimeError::Invalid("unsupported native content format; data was preserved".into()));}
+        if content_format!=3 {return Err(RuntimeError::Invalid("unsupported content format; data was preserved".into()));}
     }
     Ok(version)
 }
 
-/// Sole writer of native conversation and coordination facts. Holding this value (or its mutex)
+/// Sole writer of conversation and coordination facts. Holding this value (or its mutex)
 /// across model, extension or tool execution is forbidden: all methods are bounded local transactions.
 /// Its database is separate from the replaceable system-kernel cache and is never recreated on error.
 pub struct Catalog {
@@ -232,7 +232,7 @@ impl Catalog {
     }
     /// Inherit the last committed source within admission, while retaining the new model/credential selection.
     pub fn submit_with_inherited_source(&mut self, command: &SubmitInput, launch: launches::LaunchSelection) -> Result<Receipt> {
-        if launch.source.is_some() || launch.tools.iter().any(|tool| !matches!(tool.name.as_str(), questions::QUESTION_TOOL | collaboration::STATUS_TOOL | collaboration::WAIT_TOOL | collaboration::REPORT_TOOL | "native_memory" | "native_todo")) {
+        if launch.source.is_some() || launch.tools.iter().any(|tool| !matches!(tool.name.as_str(), questions::QUESTION_TOOL | collaboration::STATUS_TOOL | collaboration::WAIT_TOOL | collaboration::REPORT_TOOL | "memory" | "todo")) {
             return Err(RuntimeError::Invalid("source inheritance cannot also override source or tools".into()));
         }
         self.submit_admission(command, Some(launch), false, true, None, None)
@@ -243,7 +243,7 @@ impl Catalog {
         self.submit_with_context_snapshot(command, launch, inherit_source, initial, None)
     }
     pub fn submit_with_context_snapshot(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>, inherit_source: bool, initial: Option<context::ContextProposal>, personalization: Option<personalization::PersonalizationBasis>) -> Result<Receipt> {
-        if inherit_source && launch.as_ref().is_none_or(|selection| selection.source.is_some() || selection.tools.iter().any(|tool| !matches!(tool.name.as_str(), questions::QUESTION_TOOL | collaboration::STATUS_TOOL | collaboration::WAIT_TOOL | collaboration::REPORT_TOOL | "native_memory" | "native_todo"))) {
+        if inherit_source && launch.as_ref().is_none_or(|selection| selection.source.is_some() || selection.tools.iter().any(|tool| !matches!(tool.name.as_str(), questions::QUESTION_TOOL | collaboration::STATUS_TOOL | collaboration::WAIT_TOOL | collaboration::REPORT_TOOL | "memory" | "todo"))) {
             return Err(RuntimeError::Invalid("source inheritance requires an unoverridden model launch".into()));
         }
         if personalization.as_ref().is_some_and(|basis| basis.session_id != command.thread_id) {

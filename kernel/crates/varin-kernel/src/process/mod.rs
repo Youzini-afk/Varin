@@ -84,7 +84,7 @@ struct ProcessControl {
     guardian: Arc<Mutex<Child>>,
     containment: Arc<platform::Containment>,
     input: Arc<Mutex<Option<SyncSender<Value>>>>,
-    native_run_id: Option<String>,
+    run_id: Option<String>,
     state: Mutex<ControlState>,
 }
 impl ProcessControl {
@@ -170,7 +170,7 @@ impl ProcessControlRegistry {
             .get(id)
             .and_then(Weak::upgrade);
         match control {
-            Some(control) if control.native_run_id.is_some() => control.stop(true),
+            Some(control) if control.run_id.is_some() => control.stop(true),
             _ => Ok(false),
         }
     }
@@ -180,7 +180,7 @@ impl ProcessControlRegistry {
             .lock()
             .map_err(|_| failure("process controls poisoned"))?;
         if let Some(control) = controls.live.get(id).and_then(Weak::upgrade) {
-            if control.native_run_id.as_deref() != Some(run_id) {
+            if control.run_id.as_deref() != Some(run_id) {
                 return Err(KernelError::Authorization(
                     "process control Run does not match operation owner".into(),
                 ));
@@ -206,7 +206,7 @@ impl ProcessControlRegistry {
             .lock()
             .map_err(|_| failure("process controls poisoned"))?;
         if let Some((run_id, force)) = controls.pending.get(id) {
-            if control.native_run_id.as_deref() != Some(run_id.as_str()) {
+            if control.run_id.as_deref() != Some(run_id.as_str()) {
                 return Err(KernelError::Authorization(
                     "pending process stop owner mismatch".into(),
                 ));
@@ -514,7 +514,7 @@ impl ProcessManager {
             guardian: guardian.clone(),
             containment: containment.clone(),
             input: input.clone(),
-            native_run_id: config["nativeRunId"].as_str().map(str::to_owned),
+            run_id: config["runId"].as_str().map(str::to_owned),
             state: Mutex::new(ControlState {
                 ready: false,
                 terminal: false,

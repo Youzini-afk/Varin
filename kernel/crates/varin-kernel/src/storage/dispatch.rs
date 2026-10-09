@@ -75,7 +75,7 @@ impl Storage {
                 grant_id.unwrap_or(""),
                 authorized_grant.capabilities.contains("storage.admin"),
             ),
-            "file.read.check" => storage.native_file_read_check(authorized_params, authorized_grant),
+            "file.read.check" => storage.file_read_check(authorized_params, authorized_grant),
             "file.root.register" => storage.file_root_register(authorized_params, authorized_grant),
             "file.operation.list" => {
                 storage.file_operation_list(authorized_params, authorized_grant)

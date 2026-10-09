@@ -2,7 +2,7 @@
 use super::*;
 use crate::execution::AdmittedTool;
 
-pub const QUESTION_TOOL: &str = "native_ask_user";
+pub const QUESTION_TOOL: &str = "ask_user";
 
 impl Catalog {
     pub fn open_question(&mut self, operation_id: &str, run_id: &str) -> Result<String> {

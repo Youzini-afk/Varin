@@ -1,16 +1,16 @@
 /** Durable execution facts for paid semantic inference, separate from index data. */
 import { createHash } from "node:crypto";
 import type { HarnessEmbedResult } from "@varin/protocol";
-import type { NativeSemanticInferenceReceipt } from "./native-inference.js";
+import type { SemanticInferenceReceipt } from "./runtime-inference.js";
 
 export type SemanticInferenceOperation = {
-  kind: "native-query";
+  kind: "retrieval-query";
   hostId: string;
   threadId: string;
   runId: string;
   invocation: { kind: "model_step"; requestId: string; toolCallId: string }
     | { kind: "policy_action"; actionId: string; nodeId: string; toolCallId: string };
-  stage: "native-code-retrieval.semantic.query-embedding";
+  stage: "code-retrieval.semantic.query-embedding";
 } | {
   kind: "index-build";
   hostId: string;
@@ -34,15 +34,15 @@ export type SemanticInferenceLedgerIdentity = {
 export type SemanticInferenceAdmission = {
   key: string;
   identity: SemanticInferenceLedgerIdentity;
-  receipt: NativeSemanticInferenceReceipt;
+  receipt: SemanticInferenceReceipt;
 };
 export type SemanticInferenceAdmissionResult =
   | { status: "admitted"; token: string }
-  | { status: "completed"; result: HarnessEmbedResult; receipt: NativeSemanticInferenceReceipt }
-  | { status: "terminal"; receipt: NativeSemanticInferenceReceipt }
-  | { status: "indeterminate"; receipt: NativeSemanticInferenceReceipt };
+  | { status: "completed"; result: HarnessEmbedResult; receipt: SemanticInferenceReceipt }
+  | { status: "terminal"; receipt: SemanticInferenceReceipt }
+  | { status: "indeterminate"; receipt: SemanticInferenceReceipt };
 export type SemanticInferenceSettlement = {
-  receipt: NativeSemanticInferenceReceipt;
+  receipt: SemanticInferenceReceipt;
   result?: HarnessEmbedResult;
   /** The transport was never created, or its complete pre-dispatch chain has
    * settled with cancellation latched. No late dispatch remains possible. */
@@ -51,7 +51,7 @@ export type SemanticInferenceSettlement = {
 export type SemanticInferenceFact = {
   key: string;
   identity: SemanticInferenceLedgerIdentity;
-  receipt: NativeSemanticInferenceReceipt;
+  receipt: SemanticInferenceReceipt;
   state: "unknown" | "terminal";
   hasResult: boolean;
   admissionNumber: number;
@@ -71,17 +71,17 @@ export type SemanticInferenceLedgerOpenOptions = { dataDir: string; hostId: stri
 
 /** Transport batch IDs never grant permission to repeat a durable operation. */
 export function semanticInferenceOperationKey(identity: SemanticInferenceLedgerIdentity,
-  purpose: NativeSemanticInferenceReceipt["purpose"]): string {
+  purpose: SemanticInferenceReceipt["purpose"]): string {
   const operation = identity.operation;
-  const owner = operation.kind === "native-query"
+  const owner = operation.kind === "retrieval-query"
     ? [operation.kind, operation.hostId, operation.threadId, operation.runId,
       operation.invocation.kind === "model_step"
         ? [operation.invocation.kind, operation.invocation.requestId, operation.invocation.toolCallId]
         : [operation.invocation.kind, operation.invocation.actionId, operation.invocation.nodeId, operation.invocation.toolCallId],
       operation.stage]
     : [operation.kind, operation.hostId, operation.workspaceId, operation.recipeId, operation.stage];
-  const binding = operation.kind === "native-query" ? [] : [identity.providerId, identity.modelId,
+  const binding = operation.kind === "retrieval-query" ? [] : [identity.providerId, identity.modelId,
     identity.protocol, identity.configurationId, identity.endpointHash, identity.dimensions ?? null, identity.maxTokens];
-  return createHash("sha256").update(JSON.stringify(operation.kind === "native-query"
+  return createHash("sha256").update(JSON.stringify(operation.kind === "retrieval-query"
     ? [purpose, owner] : [purpose, owner, binding, identity.inputHashes])).digest("hex");
 }

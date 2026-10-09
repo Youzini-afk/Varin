@@ -9,7 +9,7 @@ import { createStorePersistence, trackStoreMutations } from "../persistence.js";
 import { semanticInferenceOperationKey, type SemanticInferenceAdmission, type SemanticInferenceAdmissionResult,
   type SemanticInferenceFact, type SemanticInferenceFactFilter, type SemanticInferenceLedgerIdentity,
   type SemanticInferenceLedgerOpenOptions, type SemanticInferenceOperation, type SemanticInferenceSettlement } from "./inference-ledger-contract.js";
-import type { NativeSemanticInferenceReceipt } from "./native-inference.js";
+import type { SemanticInferenceReceipt } from "./runtime-inference.js";
 
 const { TriviumDB } = createRequire(import.meta.url)("triviumdb") as typeof import("triviumdb");
 type Entry = SemanticInferenceFact & { type: "semantic-inference" | "semantic-inference-attempt"; token: string; result?: HarnessEmbedResult };
@@ -22,9 +22,9 @@ function identityOf(input: SemanticInferenceLedgerIdentity): SemanticInferenceLe
   if (!input || input.protocol !== "openai-compatible" || !input.operation) return invalid();
   const source = input.operation;
   let operation: SemanticInferenceOperation;
-  if (source.kind === "native-query") {
+  if (source.kind === "retrieval-query") {
     const invocation = source.invocation;
-    if (!invocation || source.stage !== "native-code-retrieval.semantic.query-embedding") return invalid();
+    if (!invocation || source.stage !== "code-retrieval.semantic.query-embedding") return invalid();
     operation = { kind: source.kind, hostId: text(source.hostId), threadId: text(source.threadId), runId: text(source.runId),
       stage: source.stage, invocation: invocation.kind === "model_step"
         ? { kind: invocation.kind, requestId: text(invocation.requestId), toolCallId: text(invocation.toolCallId) }
@@ -43,10 +43,10 @@ function identityOf(input: SemanticInferenceLedgerIdentity): SemanticInferenceLe
     operation, inputHashes: input.inputHashes.map(hash) };
 }
 
-function receiptOf(input: NativeSemanticInferenceReceipt, identity: SemanticInferenceLedgerIdentity): NativeSemanticInferenceReceipt {
+function receiptOf(input: SemanticInferenceReceipt, identity: SemanticInferenceLedgerIdentity): SemanticInferenceReceipt {
   if (!input || input.providerId !== identity.providerId || input.modelId !== identity.modelId
     || input.configurationId !== identity.configurationId
-    || input.purpose !== (identity.operation.kind === "native-query" ? "query-embedding" : "index-document-embedding")
+    || input.purpose !== (identity.operation.kind === "retrieval-query" ? "query-embedding" : "index-document-embedding")
     || input.inputItems !== identity.inputHashes.length
     || !["not-started", "succeeded", "failed", "indeterminate", "delivery-blocked"].includes(input.state)
     || typeof input.attemptsKnown !== "boolean" || !input.usage
@@ -249,8 +249,8 @@ export function createSemanticInferenceLedgerEngine(options: SemanticInferenceLe
         for (const id of ids) {
           const entry = decode(db.getPayload(id));
           const operation = entry.identity.operation;
-          if (filter.runId !== undefined && (operation.kind !== "native-query" || operation.runId !== filter.runId)) continue;
-          if (filter.scopeId !== undefined && (operation.kind === "native-query" ? operation.threadId : operation.workspaceId) !== filter.scopeId) continue;
+          if (filter.runId !== undefined && (operation.kind !== "retrieval-query" || operation.runId !== filter.runId)) continue;
+          if (filter.scopeId !== undefined && (operation.kind === "retrieval-query" ? operation.threadId : operation.workspaceId) !== filter.scopeId) continue;
           if (filter.state !== undefined && entry.state !== filter.state) continue;
           entries.push(fact(entry));
         }

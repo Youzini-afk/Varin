@@ -102,7 +102,7 @@ export async function openUserKnowledgeStore(
     hostId: string;
     embedding: import("../knowledge/store.js").EmbeddingProvider | null;
     onKnowledgeChanged?: (ids: readonly number[]) => void;
-    onNativePlanChanged?: (change: import("@varin/protocol").NativePlanChanged) => void;
+    onPlanChanged?: (change: import("@varin/protocol").PlanChanged) => void;
   },
 ): Promise<KnowledgeStore> {
   // Reuse openWorkspaceKnowledge with a special workspaceId "user"
@@ -113,7 +113,7 @@ export async function openUserKnowledgeStore(
     workspaceId: "user",
     embedding: deps.embedding,
     ...(deps.onKnowledgeChanged ? { onKnowledgeChanged: deps.onKnowledgeChanged } : {}),
-    ...(deps.onNativePlanChanged ? { onNativePlanChanged: deps.onNativePlanChanged } : {}),
+    ...(deps.onPlanChanged ? { onPlanChanged: deps.onPlanChanged } : {}),
   });
 
   // Wrap to reject non-knowledge writes

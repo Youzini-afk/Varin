@@ -14,16 +14,16 @@ pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeBranchForkParams {
+pub(crate) struct BranchForkParams {
     pub(crate) source_branch_id: String,
     pub(crate) branch_id: String,
     pub(crate) head_id: RequiredNullable<String>,
-    pub(crate) plan_capture: Option<NativePlanForkCaptureParams>,
+    pub(crate) plan_capture: Option<PlanForkCaptureParams>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativePlanViewParams {
+pub(crate) struct PlanViewParams {
     pub(crate) branch_id: String,
     pub(crate) head_id: RequiredNullable<String>,
     pub(crate) current: bool,
@@ -31,7 +31,7 @@ pub(crate) struct NativePlanViewParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativePlanContainsParams {
+pub(crate) struct PlanContainsParams {
     pub(crate) branch_id: String,
     pub(crate) head_id: RequiredNullable<String>,
     pub(crate) candidate_head_id: RequiredNullable<String>,
@@ -40,8 +40,8 @@ pub(crate) struct NativePlanContainsParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeContextJobCreateParams {
-    pub(crate) personalization: Option<NativeContextPersonalization>,
+pub(crate) struct ContextJobCreateParams {
+    pub(crate) personalization: Option<ContextPersonalization>,
     pub(crate) key: String,
     pub(crate) branch_id: String,
     pub(crate) through_id: String,
@@ -50,32 +50,32 @@ pub(crate) struct NativeContextJobCreateParams {
     pub(crate) instruction_sources: Vec<String>,
     pub(crate) memory_checkpoint: RequiredNullable<String>,
     pub(crate) configuration: Value,
-    pub(crate) credential_scope: Option<NativeCredentialScope>,
+    pub(crate) credential_scope: Option<CredentialScope>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeRunParams {
+pub(crate) struct RunParams {
     pub(crate) run_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeHistoryParams {
+pub(crate) struct HistoryParams {
     pub(crate) branch_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeContextRefreshParams {
+pub(crate) struct ContextRefreshParams {
     pub(crate) branch_id: String,
     pub(crate) expected_revision: i64,
-    pub(crate) context: NativeInitialContext,
+    pub(crate) context: InitialContext,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeHistoryPageParams {
+pub(crate) struct HistoryPageParams {
     pub(crate) branch_id: String,
     pub(crate) head_id: Option<String>,
     pub(crate) before_id: Option<String>,
@@ -84,35 +84,35 @@ pub(crate) struct NativeHistoryPageParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeHistoryBodyParams {
+pub(crate) struct HistoryBodyParams {
     pub(crate) item_id: String,
     pub(crate) chunk_index: i64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeThreadOperationsParams {
+pub(crate) struct ThreadOperationsParams {
     pub(crate) thread_id: String,
     pub(crate) branch_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeRunReconcileParams {
+pub(crate) struct RunReconcileParams {
     pub(crate) run_id: String,
     pub(crate) tool_binding: Value,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeLaunchFailedParams {
+pub(crate) struct LaunchFailedParams {
     pub(crate) run_id: String,
     pub(crate) code: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeThreadParams {
+pub(crate) struct ThreadParams {
     pub(crate) thread_id: String,
 }
 
@@ -122,7 +122,7 @@ pub(crate) struct KernelEmptyParams {}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeInputEnqueueParams {
+pub(crate) struct InputEnqueueParams {
     pub(crate) key: String,
     pub(crate) thread_id: String,
     pub(crate) branch_id: String,
@@ -133,7 +133,7 @@ pub(crate) struct NativeInputEnqueueParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeInputEditParams {
+pub(crate) struct InputEditParams {
     pub(crate) input_id: String,
     pub(crate) expected_revision: i64,
     pub(crate) content: Value,
@@ -141,54 +141,54 @@ pub(crate) struct NativeInputEditParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeInputCancelParams {
+pub(crate) struct InputCancelParams {
     pub(crate) input_id: String,
     pub(crate) expected_revision: i64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeInputHandleParams {
+pub(crate) struct InputHandleParams {
     pub(crate) input_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeLaunchSelectParams {
+pub(crate) struct LaunchSelectParams {
     pub(crate) run_id: String,
-    pub(crate) source: RequiredNullable<NativeLaunchSourceParams>,
+    pub(crate) source: RequiredNullable<LaunchSourceParams>,
     pub(crate) enabled_tools: Vec<String>,
-    pub(crate) credential_scope: Option<NativeCredentialScope>,
+    pub(crate) credential_scope: Option<CredentialScope>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeMcpPrepareParams {
+pub(crate) struct McpPrepareParams {
     pub(crate) run_id: String,
-    pub(crate) binding: NativeMcpBinding,
+    pub(crate) binding: McpBinding,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativePolicyPrepareParams {
+pub(crate) struct PolicyPrepareParams {
     pub(crate) run_id: String,
-    pub(crate) identity: NativeLaunchPolicy,
+    pub(crate) identity: LaunchPolicy,
     pub(crate) policy_models: Option<Value>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeRunStartParams {
-    pub(crate) policy_binding: Option<NativeAgentPolicyBinding>,
-    pub(crate) mcp_binding: Option<NativeMcpBinding>,
+pub(crate) struct RunStartParams {
+    pub(crate) policy_binding: Option<AgentPolicyBinding>,
+    pub(crate) mcp_binding: Option<McpBinding>,
     pub(crate) run_id: String,
     pub(crate) tool_binding: Option<Value>,
-    pub(crate) credential_scope: Option<NativeCredentialScope>,
+    pub(crate) credential_scope: Option<CredentialScope>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeAdmissionInspectParams {
+pub(crate) struct AdmissionInspectParams {
     pub(crate) run_id: String,
     pub(crate) owner_generation: i64,
     pub(crate) call_id: String,
@@ -199,16 +199,16 @@ pub(crate) struct NativeAdmissionInspectParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeThreadCreateParams {
+pub(crate) struct ThreadCreateParams {
     pub(crate) thread_id: String,
     pub(crate) branch_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeInputSubmitParams {
-    pub(crate) initial_context: Option<NativeInitialContext>,
-    pub(crate) launch: Option<NativeSubmitLaunch>,
+pub(crate) struct InputSubmitParams {
+    pub(crate) initial_context: Option<InitialContext>,
+    pub(crate) launch: Option<SubmitLaunch>,
     pub(crate) key: String,
     pub(crate) thread_id: String,
     pub(crate) branch_id: String,
@@ -219,7 +219,7 @@ pub(crate) struct NativeInputSubmitParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativePermissionOpenParams {
+pub(crate) struct PermissionOpenParams {
     pub(crate) operation_id: String,
     pub(crate) permission_id: String,
     pub(crate) call: Value,
@@ -228,7 +228,7 @@ pub(crate) struct NativePermissionOpenParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativePermissionDecideParams {
+pub(crate) struct PermissionDecideParams {
     pub(crate) operation_id: String,
     pub(crate) permission_id: String,
     pub(crate) decision: String,
@@ -236,27 +236,27 @@ pub(crate) struct NativePermissionDecideParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeQuestionAnswerParams {
+pub(crate) struct QuestionAnswerParams {
     pub(crate) operation_id: String,
     pub(crate) answer: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeOperationParams {
+pub(crate) struct OperationParams {
     pub(crate) operation_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeEventsParams {
+pub(crate) struct EventsParams {
     pub(crate) cursor: i64,
     pub(crate) limit: i64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeObserverReadParams {
+pub(crate) struct ObserverReadParams {
     pub(crate) observer_id: String,
     pub(crate) thread_id: String,
     pub(crate) limit: i64,
@@ -265,7 +265,7 @@ pub(crate) struct NativeObserverReadParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeObserverDeliveryParams {
+pub(crate) struct ObserverDeliveryParams {
     pub(crate) observer_id: String,
     pub(crate) thread_id: String,
     pub(crate) cursor: i64,
@@ -1240,7 +1240,7 @@ pub(crate) struct KernelComputeGrammarParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeChildReportReadParams {
+pub(crate) struct ChildReportReadParams {
     pub(crate) operation_id: String,
     pub(crate) item_id: String,
     pub(crate) offset: Option<i64>,
@@ -1249,28 +1249,28 @@ pub(crate) struct NativeChildReportReadParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeChildPrepareParams {
+pub(crate) struct ChildPrepareParams {
     pub(crate) operation_id: String,
-    pub(crate) source: NativeLaunchSourceParams,
-    pub(crate) context: NativeInitialContext,
+    pub(crate) source: LaunchSourceParams,
+    pub(crate) context: InitialContext,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeChildFailParams {
+pub(crate) struct ChildFailParams {
     pub(crate) operation_id: String,
     pub(crate) code: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeChildWaitParams {
+pub(crate) struct ChildWaitParams {
     pub(crate) wait_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativePlanForkCaptureParams {
+pub(crate) struct PlanForkCaptureParams {
     pub(crate) source_thread_id: String,
     pub(crate) source_branch_id: String,
     pub(crate) target_branch_id: String,
@@ -1281,22 +1281,22 @@ pub(crate) struct NativePlanForkCaptureParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeContextPersonalization {
-    pub(crate) memory_snapshot: NativeMemorySnapshot,
+pub(crate) struct ContextPersonalization {
+    pub(crate) memory_snapshot: MemorySnapshot,
     pub(crate) configuration_digest: String,
     pub(crate) mode: String,
     pub(crate) thread_role: String,
-    pub(crate) context_composition: Option<NativeContextComposition>,
+    pub(crate) context_composition: Option<ContextComposition>,
     pub(crate) revision: i64,
     pub(crate) session_id: String,
     pub(crate) project_id: RequiredNullable<String>,
-    pub(crate) original_sections: Vec<NativeSystemSection>,
+    pub(crate) original_sections: Vec<SystemSection>,
     pub(crate) instruction_sources: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeCredentialScope {
+pub(crate) struct CredentialScope {
     pub(crate) reference: String,
     pub(crate) authority: String,
     pub(crate) account: String,
@@ -1305,8 +1305,8 @@ pub(crate) struct NativeCredentialScope {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeInitialContext {
-    pub(crate) personalization: Option<NativeContextPersonalization>,
+pub(crate) struct InitialContext {
+    pub(crate) personalization: Option<ContextPersonalization>,
     pub(crate) effective_system_prompt: String,
     pub(crate) instruction_sources: Vec<String>,
     pub(crate) memory_checkpoint: RequiredNullable<String>,
@@ -1314,46 +1314,46 @@ pub(crate) struct NativeInitialContext {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeLaunchSourceParams {
+pub(crate) struct LaunchSourceParams {
     pub(crate) environment_run_id: Option<String>,
     pub(crate) workspace_id: String,
     pub(crate) execution_workspace_id: String,
     pub(crate) branch_id: RequiredNullable<String>,
     pub(crate) revision: RequiredNullable<i64>,
     pub(crate) mode: varin_runtime::SourceMode,
-    pub(crate) live_root: Option<RequiredNullable<NativeLiveRoot>>,
+    pub(crate) live_root: Option<RequiredNullable<LiveRoot>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeMcpBinding {
+pub(crate) struct McpBinding {
     pub(crate) resources: std::collections::BTreeMap<String, String>,
     pub(crate) reference: String,
     pub(crate) generation: i64,
-    pub(crate) tools: Vec<NativeLaunchTool>,
+    pub(crate) tools: Vec<LaunchTool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeLaunchPolicy {
+pub(crate) struct LaunchPolicy {
     pub(crate) name: String,
     pub(crate) version: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeAgentPolicyBinding {
+pub(crate) struct AgentPolicyBinding {
     pub(crate) reference: String,
-    pub(crate) identity: NativeLaunchPolicy,
+    pub(crate) identity: LaunchPolicy,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeSubmitLaunch {
+pub(crate) struct SubmitLaunch {
     pub(crate) inherit_source: Option<bool>,
-    pub(crate) source: RequiredNullable<NativeLaunchSourceParams>,
+    pub(crate) source: RequiredNullable<LaunchSourceParams>,
     pub(crate) enabled_tools: Vec<String>,
-    pub(crate) credential_scope: Option<NativeCredentialScope>,
+    pub(crate) credential_scope: Option<CredentialScope>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1507,31 +1507,31 @@ pub(crate) struct KernelComputeFile {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeMemorySnapshot {
+pub(crate) struct MemorySnapshot {
     pub(crate) revision: i64,
     pub(crate) memories: Vec<Value>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeContextComposition {
+pub(crate) struct ContextComposition {
     pub(crate) provider_id: String,
     pub(crate) content_version: String,
     pub(crate) scope_id: String,
     pub(crate) selection_revision: i64,
-    pub(crate) sections: Vec<NativeContextFragment>,
+    pub(crate) sections: Vec<ContextFragment>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeSystemSection {
+pub(crate) struct SystemSection {
     pub(crate) name: String,
     pub(crate) content: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeLiveRoot {
+pub(crate) struct LiveRoot {
     pub(crate) host_id: String,
     pub(crate) canonical_root: String,
     pub(crate) root_id: String,
@@ -1539,7 +1539,7 @@ pub(crate) struct NativeLiveRoot {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeLaunchTool {
+pub(crate) struct LaunchTool {
     pub(crate) name: String,
     pub(crate) version: String,
     pub(crate) schema: Value,
@@ -1589,7 +1589,7 @@ pub(crate) struct KernelReviewFinding {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeContextFragment {
+pub(crate) struct ContextFragment {
     pub(crate) name: String,
     pub(crate) kind: String,
     pub(crate) content: String,
@@ -1625,178 +1625,152 @@ pub(crate) struct KernelVerificationInputIdentity {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
-        "runtime.branch.fork" => serde_json::from_value::<NativeBranchForkParams>(params.clone())
+        "runtime.branch.fork" => serde_json::from_value::<BranchForkParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.plan.view" => serde_json::from_value::<NativePlanViewParams>(params.clone())
+        "runtime.plan.view" => serde_json::from_value::<PlanViewParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.plan.contains" => {
-            serde_json::from_value::<NativePlanContainsParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
+        "runtime.plan.contains" => serde_json::from_value::<PlanContainsParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.context_job.create" => {
-            serde_json::from_value::<NativeContextJobCreateParams>(params.clone())
+            serde_json::from_value::<ContextJobCreateParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
-        "runtime.context_job.inspect" => serde_json::from_value::<NativeRunParams>(params.clone())
+        "runtime.context_job.inspect" => serde_json::from_value::<RunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.context_job.list" => serde_json::from_value::<NativeHistoryParams>(params.clone())
+        "runtime.context_job.list" => serde_json::from_value::<HistoryParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.context_job.publish" => serde_json::from_value::<NativeRunParams>(params.clone())
+        "runtime.context_job.publish" => serde_json::from_value::<RunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.context.inspect" => serde_json::from_value::<NativeHistoryParams>(params.clone())
+        "runtime.context.inspect" => serde_json::from_value::<HistoryParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.context.refresh" => {
-            serde_json::from_value::<NativeContextRefreshParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
-        "runtime.memory.reconcile" => serde_json::from_value::<NativeRunParams>(params.clone())
+        "runtime.context.refresh" => serde_json::from_value::<ContextRefreshParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.plan.reconcile" => serde_json::from_value::<NativeRunParams>(params.clone())
+        "runtime.memory.reconcile" => serde_json::from_value::<RunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.history.page" => serde_json::from_value::<NativeHistoryPageParams>(params.clone())
+        "runtime.plan.reconcile" => serde_json::from_value::<RunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.history.body" => serde_json::from_value::<NativeHistoryBodyParams>(params.clone())
+        "runtime.history.page" => serde_json::from_value::<HistoryPageParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.history.body" => serde_json::from_value::<HistoryBodyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.thread.operations.active" => {
-            serde_json::from_value::<NativeThreadOperationsParams>(params.clone())
+            serde_json::from_value::<ThreadOperationsParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
-        "runtime.run.reconcile" => {
-            serde_json::from_value::<NativeRunReconcileParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
-        "runtime.launch.fail" => serde_json::from_value::<NativeLaunchFailedParams>(params.clone())
+        "runtime.run.reconcile" => serde_json::from_value::<RunReconcileParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.thread.inspect" => serde_json::from_value::<NativeThreadParams>(params.clone())
+        "runtime.launch.fail" => serde_json::from_value::<LaunchFailedParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.thread.inspect" => serde_json::from_value::<ThreadParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.thread.list" => serde_json::from_value::<KernelEmptyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.input.enqueue" => {
-            serde_json::from_value::<NativeInputEnqueueParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
-        "runtime.input.edit" => serde_json::from_value::<NativeInputEditParams>(params.clone())
+        "runtime.input.enqueue" => serde_json::from_value::<InputEnqueueParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.input.cancel" => serde_json::from_value::<NativeInputCancelParams>(params.clone())
+        "runtime.input.edit" => serde_json::from_value::<InputEditParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.input.inspect" => {
-            serde_json::from_value::<NativeInputHandleParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
-        "runtime.input.list" => serde_json::from_value::<NativeHistoryParams>(params.clone())
+        "runtime.input.cancel" => serde_json::from_value::<InputCancelParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.launch.select" => {
-            serde_json::from_value::<NativeLaunchSelectParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
-        "runtime.launch.mcp.prepare" => {
-            serde_json::from_value::<NativeMcpPrepareParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
+        "runtime.input.inspect" => serde_json::from_value::<InputHandleParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.input.list" => serde_json::from_value::<HistoryParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.launch.select" => serde_json::from_value::<LaunchSelectParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.launch.mcp.prepare" => serde_json::from_value::<McpPrepareParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.launch.policy.prepare" => {
-            serde_json::from_value::<NativePolicyPrepareParams>(params.clone())
+            serde_json::from_value::<PolicyPrepareParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
-        "runtime.launch.inspect" => serde_json::from_value::<NativeRunParams>(params.clone())
+        "runtime.launch.inspect" => serde_json::from_value::<RunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.launch.list" => serde_json::from_value::<KernelEmptyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.run.start" => serde_json::from_value::<NativeRunStartParams>(params.clone())
+        "runtime.run.start" => serde_json::from_value::<RunStartParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.status" => serde_json::from_value::<KernelEmptyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.admission.inspect" => {
-            serde_json::from_value::<NativeAdmissionInspectParams>(params.clone())
+            serde_json::from_value::<AdmissionInspectParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
-        "runtime.thread.create" => {
-            serde_json::from_value::<NativeThreadCreateParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
-        "runtime.input.submit" => serde_json::from_value::<NativeInputSubmitParams>(params.clone())
+        "runtime.thread.create" => serde_json::from_value::<ThreadCreateParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.run.inspect" => serde_json::from_value::<NativeRunParams>(params.clone())
+        "runtime.input.submit" => serde_json::from_value::<InputSubmitParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.run.cancel" => serde_json::from_value::<NativeRunParams>(params.clone())
+        "runtime.run.inspect" => serde_json::from_value::<RunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.permission.open" => {
-            serde_json::from_value::<NativePermissionOpenParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
+        "runtime.run.cancel" => serde_json::from_value::<RunParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.permission.open" => serde_json::from_value::<PermissionOpenParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.permission.decide" => {
-            serde_json::from_value::<NativePermissionDecideParams>(params.clone())
+            serde_json::from_value::<PermissionDecideParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
         "runtime.permission.consume" => {
-            serde_json::from_value::<NativePermissionOpenParams>(params.clone())
+            serde_json::from_value::<PermissionOpenParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
-        "runtime.question.answer" => {
-            serde_json::from_value::<NativeQuestionAnswerParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
-        "runtime.operation.inspect" => {
-            serde_json::from_value::<NativeOperationParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
-        "runtime.operation.cancel" => {
-            serde_json::from_value::<NativeOperationParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
-        "runtime.history.read" => serde_json::from_value::<NativeHistoryParams>(params.clone())
+        "runtime.question.answer" => serde_json::from_value::<QuestionAnswerParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.events.read" => serde_json::from_value::<NativeEventsParams>(params.clone())
+        "runtime.operation.inspect" => serde_json::from_value::<OperationParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.observer.read" => {
-            serde_json::from_value::<NativeObserverReadParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
+        "runtime.operation.cancel" => serde_json::from_value::<OperationParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.history.read" => serde_json::from_value::<HistoryParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.events.read" => serde_json::from_value::<EventsParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.observer.read" => serde_json::from_value::<ObserverReadParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.observer.delivery" => {
-            serde_json::from_value::<NativeObserverDeliveryParams>(params.clone())
+            serde_json::from_value::<ObserverDeliveryParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
@@ -2222,36 +2196,34 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map_err(|error| error.to_string())
         }
         "runtime.child.sources.release" => {
-            serde_json::from_value::<NativeOperationParams>(params.clone())
+            serde_json::from_value::<OperationParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
         "runtime.child.list" => serde_json::from_value::<KernelEmptyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.child.inspect" => serde_json::from_value::<NativeOperationParams>(params.clone())
+        "runtime.child.inspect" => serde_json::from_value::<OperationParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.child.report.read" => {
-            serde_json::from_value::<NativeChildReportReadParams>(params.clone())
+            serde_json::from_value::<ChildReportReadParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
-        "runtime.child.for_thread" => serde_json::from_value::<NativeThreadParams>(params.clone())
+        "runtime.child.for_thread" => serde_json::from_value::<ThreadParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.child.prepare" => {
-            serde_json::from_value::<NativeChildPrepareParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
-        "runtime.child.fail" => serde_json::from_value::<NativeChildFailParams>(params.clone())
+        "runtime.child.prepare" => serde_json::from_value::<ChildPrepareParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.child.cancel" => serde_json::from_value::<NativeOperationParams>(params.clone())
+        "runtime.child.fail" => serde_json::from_value::<ChildFailParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.child.release" => serde_json::from_value::<NativeOperationParams>(params.clone())
+        "runtime.child.cancel" => serde_json::from_value::<OperationParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.child.release" => serde_json::from_value::<OperationParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.process.wait.reconcile" => {
@@ -2262,11 +2234,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.child.reconcile" => serde_json::from_value::<KernelEmptyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.child.wait.cancel" => {
-            serde_json::from_value::<NativeChildWaitParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
+        "runtime.child.wait.cancel" => serde_json::from_value::<ChildWaitParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         _ => Ok(()),
     }
 }

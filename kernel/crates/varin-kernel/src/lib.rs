@@ -2,21 +2,21 @@
 mod authority;
 mod compute;
 mod credential_bridge;
-mod native_policy;
+mod policy;
 mod error;
 mod model;
-mod native_runtime;
-mod native_tools;
-mod native_questions;
-mod native_collaboration;
-mod native_process_wait;
-mod native_mcp;
-mod native_language;
-mod native_memory;
-mod native_memory_bridge;
-mod native_plan;
-mod native_plan_bridge;
-mod native_retrieval;
+mod agent_runtime;
+mod tools;
+mod questions;
+mod collaboration;
+mod process_wait;
+mod mcp;
+mod language;
+mod memory;
+mod memory_bridge;
+mod plan;
+mod plan_bridge;
+mod retrieval;
 mod process;
 mod protocol;
 mod protocol_generated;
@@ -31,4 +31,4 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     runtime::run()
 }
 
-mod native_reconcile;
+mod reconcile;

@@ -17,5 +17,5 @@ export * from "./transport/index.js";
 export { projectFolders, projectPathKey, projectContainsPath } from './project-folders.js';
 export type { ProjectFolders } from './project-folders.js';
 export * from "./recommended-pi-packages.js";
-export * from "./native-threads.js";
-export * from "./native-threads-http.js";
+export * from "./threads.js";
+export * from "./threads-http.js";

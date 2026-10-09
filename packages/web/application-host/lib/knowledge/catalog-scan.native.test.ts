@@ -12,8 +12,8 @@ import { createSymbolGraphRuntime } from "./symbol-runtime.js";
 import { CATALOG_EXTRACTOR_VERSION } from "./symbols.js";
 
 const disposes: Array<() => Promise<void>> = [];
-const nativeCompute = createNativeComputeTestHarness();
-afterAll(() => nativeCompute.dispose());
+const kernelCompute = createNativeComputeTestHarness();
+afterAll(() => kernelCompute.dispose());
 afterEach(async () => {
   for (const dispose of disposes.splice(0).reverse()) await dispose();
 });
@@ -32,7 +32,7 @@ describe("cold workspace catalog scan", () => {
     const file = join(documents.workspaceRoot, 'kept.ts');
     writeFileSync(file, 'export function Kept() { return 1; }\n');
     writeFileSync(join(documents.workspaceRoot, 'large-unsupported.bin'), Buffer.alloc(1024 * 1024));
-    const search = createFsSearchRuntime({ compute: nativeCompute, path });
+    const search = createFsSearchRuntime({ compute: kernelCompute, path });
     const inventory = vi.fn(search.searchFilesystemFiles);
     const source = parsingSource();
     const analyzeFile = vi.fn(source.analyzeFile!);
@@ -132,7 +132,7 @@ describe("cold workspace catalog scan", () => {
     const readDiskBody = vi.spyOn(documents.authority, "read");
     readDiskBody.mockClear();
     const readAgentInputSnapshot = vi.spyOn(documents.authority, "readAgentInputSnapshot");
-    const search = createFsSearchRuntime({ compute: nativeCompute, path });
+    const search = createFsSearchRuntime({ compute: kernelCompute, path });
     const runtime = createSymbolGraphRuntime({
       getStore: async () => store,
       documents: documents.authority,
@@ -414,7 +414,7 @@ describe("cold workspace catalog scan", () => {
     const producerPath = join(documents.workspaceRoot, "producer.ts");
     writeFileSync(consumerPath, "export function consumer() { console.log(\"external.event\"); }\n", "utf8");
     writeFileSync(producerPath, "export function producer() { router.register(\"external.event\"); }\n", "utf8");
-    const search = createFsSearchRuntime({ compute: nativeCompute, path });
+    const search = createFsSearchRuntime({ compute: kernelCompute, path });
     const runtime = createSymbolGraphRuntime({
       getStore: async () => store,
       documents: documents.authority,
@@ -640,7 +640,7 @@ describe("cold workspace catalog scan", () => {
     ], freshDisk.revision, [], { extractor: CATALOG_EXTRACTOR_VERSION });
     const freshBefore = await store.getFileRelations("fresh.ts");
 
-    const search = createFsSearchRuntime({ compute: nativeCompute, path });
+    const search = createFsSearchRuntime({ compute: kernelCompute, path });
     const runtime = createSymbolGraphRuntime({
       getStore: async () => store,
       documents: documents.authority,

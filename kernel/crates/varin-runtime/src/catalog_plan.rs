@@ -1,4 +1,4 @@
-//! Native plan identity projections only. KnowledgeStore owns every plan body and receipt.
+//! Plan identity projections only. KnowledgeStore owns every plan body and receipt.
 use super::*;
 use serde::Deserialize;
 

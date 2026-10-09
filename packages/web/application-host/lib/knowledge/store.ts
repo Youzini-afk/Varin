@@ -16,7 +16,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     revision: (value) => { revision = value; },
     notify: (message) => {
       if (message.type === "blocks") deps.onBlocksChanged?.(message.sessionId, message.change);
-      else if (message.type === "native-plan") deps.onNativePlanChanged?.(message.change);
+      else if (message.type === "plan-changed") deps.onPlanChanged?.(message.change);
       else if (message.type === "knowledge") deps.onKnowledgeChanged?.(message.ids);
       else if (deps.onPersistenceError) deps.onPersistenceError(restoreStoreError(message.error));
       else console.error("[KnowledgeStore] Deferred checkpoint failed; storage retains pending data for retry");

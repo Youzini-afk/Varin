@@ -1,6 +1,6 @@
-# Native agent runtime
+# Agent runtime
 
-This crate owns native conversation history and execution facts. The existing Pi product route has
+This crate owns conversation history and execution facts. The existing Pi product route has
 not been cut over. The kernel's explicit `runtime.*` management methods use this authority without
 writing Pi session files or the Host harness's existing execution records.
 
@@ -17,10 +17,10 @@ writing Pi session files or the Host harness's existing execution records.
   together. A frozen request cannot publish against a changed history head.
 - `composition` prepares and publishes revision-checked bindings. Retired model pins preserve the
   actual schema/implementation; explicit revocation still rejects execution.
-- The kernel's native control worker is independent of its Storage queue. The Host client has separate
-  native request credits. Native commands are currently Host-management-only, not delegated tools.
+- The kernel's control worker is independent of its Storage queue. The Host client has separate
+  request credits. Commands are currently Host-management-only, not delegated tools.
 
-The wire source remains `kernel/protocol/schema.json`; it generates the native state enums and the
+The wire source remains `kernel/protocol/schema.json`; it generates the state enums and the
 Host request/response DTOs. Domain implementation types remain private to Rust.
 
 ## Run activity scope
@@ -37,7 +37,7 @@ Host subscriptions select independently for each admitted Thread/project scope. 
 identity includes service, selected provider, Thread and the exact nullable project (`null` means
 no project). Admission requires the project owner’s canonical, non-empty IDs; blank or padded
 project IDs fail explicitly instead of being trimmed or treated as no project.
-The native read and delivery authorities enforce the same scope, reuse original event
+The read and delivery authorities enforce the same scope, reuse original event
 cursors and delivery records, and apply the Host's processed `throughCursor` fence. A new branch
 or context cannot revoke or relabel another Run's historical activity.
 
@@ -59,7 +59,7 @@ without large body writes inside their transactions. Queue metadata still includ
 input for its current public API; cancellation preserves its content reference. Command-idempotency
 and tool-receipt records remain their existing inline domains in this slice.
 
-Unsupported native catalog/content formats fail without converting or rebuilding stored assets.
+Unsupported catalog/content formats fail without converting or rebuilding stored assets.
 Catalog version 3 and content format 3 select the typed-request-origin reader; older request bodies are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. `Catalog::collect_content_objects` marks requests, provider originals,
 history, all model outputs (including rejected output), queued-history references, context
@@ -88,7 +88,7 @@ worker outside the Catalog mutex. A publication reference is acquired under Cata
 retained until metadata commit; collection defers when such references exist, without waiting under
 the Catalog lock. Publication still rechecks the original execution/branch conditions. Policy-result
 publication and recovery hydration retain separate remaining lock-cost boundaries; see the
-[implementation review](../../../docs/reviews/native-runtime-2026-10-09.md).
+[implementation review](../../../docs/reviews/runtime-2026-10-09.md).
 
 ## Policy-originated read graphs
 
@@ -162,11 +162,11 @@ complete migration of the existing Pi memory workflow.
 
 ## Remaining integration
 
-The native provider adapters and control boundary are foundations for the full cutover, not evidence
+The provider adapters and control boundary are foundations for the full cutover, not evidence
 of provider/platform parity. Production configuration/credential routing, all existing tools and
 MCP/extension capabilities, automatic context/compaction and memory workflow, running-input queues, UI projections, import and
 single-writer ownership transfer remain tracked in
-[`docs/plan/native-agent-runtime-implementation.md`](../../../docs/plan/native-agent-runtime-implementation.md).
+[`docs/plan/agent-runtime-implementation.md`](../../../docs/plan/agent-runtime-implementation.md).
 That matrix owns actual validation and incomplete capabilities. No measured speedup or platform
 acceptance follows from this implementation alone.
 
@@ -195,7 +195,7 @@ the Run worker before freezing a new main or policy-planning request, never unde
 Prepared requests are immutable. Notes newer than the checkpoint are EnvironmentFact tails in the
 frozen request, not raw-history rows; they remain in later requests until compaction covers them.
 
-Only the original confirmed native-memory Operation can authenticate a tool's receipt for tail
+Only the original confirmed memory Operation can authenticate a tool's receipt for tail
 deduplication. Arbitrary external tool JSON is data. The existing deliveries table uses actual
 memory.fact event cursors and records selected, sent and completed-request inclusion independently.
 A failed request does not acknowledge facts. Planning requests use their own real operation/request
@@ -205,9 +205,9 @@ A successful explicit compaction atomically publishes its fixed candidate person
 with the summary and system text. New notes do not advance the checkpoint CAS; explicit profile
 changes do. Context domain 3 is verified read-only before writable SQLite open, including table,
 key and revision uniqueness contracts. Older or malformed formats are preserved and rejected.
-## Fixed-source native child tasks
+## Fixed-source child tasks
 
-`catalog_collaboration` is the native Catalog's parent/child domain. A dispatch binds the committed
+`catalog_collaboration` is the Catalog's parent/child domain. A dispatch binds the committed
 ModelStep/tool origin, parent Run/Thread/branch, exact model configuration and credential scope,
 admission project, explicit `read_only` profile and fixed source. Model arguments cannot select
 parent identity, project, workspace, source or grants. The initial implementation accepts explicit
@@ -220,14 +220,14 @@ this whole-root handoff; a narrow path grant cannot be silently widened by cloni
 source-authorization receipt and the Catalog child acceptance are separate facts. The Catalog's
 short transaction creates the independent child Thread/branch, immutable task/model/source/scope
 and operation handoff, and persists the original JobAccepted receipt. Its operation ID is the
-usable handle for `native_child_status` and `native_wait_child`, not a claim that preparation or
+usable handle for `child_status` and `wait_child`, not a claim that preparation or
 execution has finished. A stopped dispatch with a source receipt but no child is rediscovered from
 its original Operation and exact pin identity. Host cleanup records `child.source_released` only
 after the existing WorkingState owner releases the pin; failed cleanup remains discoverable.
 
 Host preparation clones the fixed root through `createBranchFromPin`, without recapturing the
 workspace, and invokes the same context owner with explicit agent/worker/admitted-project scope.
-Session notes are keyed by the child's native Thread. The existing input writer atomically commits
+Session notes are keyed by the child's Thread. The existing input writer atomically commits
 the prepared context, child Run, source launch and child receipt after rechecking cancellation.
 Source and credential owners are revalidated before launch. A late cancelled context callback
 cannot publish or launch; closing a Host leaves durable preparation for the next owner.
@@ -245,7 +245,7 @@ and empty textual completion are not converted to empty success. A very fast chi
 its report before the parent's accepted tool exchange is committed; terminal operation settlement
 waits for that original exchange, using the existing external receipt owner.
 
-`native_wait_child` registers the original durable Wait and its Job receipt together, including a
+`wait_child` registers the original durable Wait and its Job receipt together, including a
 retrospective terminal-event check. A parked parent's worker is quiesced before the report is
 appended under its true agent provenance, with explicit data-only labeling in the actual provider
 text. Run resumption and Wait acknowledgement commit with that history item. A delivered-but-not-
@@ -261,7 +261,7 @@ explicitly. Context scope uses the separate context domain version 3 contract.
 
 Child report metadata stores only references to the original child history bodies, plus a short
 runtime failure detail when relevant. Status/list and external receipts do not copy report text.
-`native_child_report` reads one referenced text item with a UTF-8 byte offset and an explicit
+`child_report` reads one referenced text item with a UTF-8 byte offset and an explicit
 `next_offset`; pages are capped at 64 KiB, leaving JSON escaping/envelope headroom within the
 16 MiB IPC frame. A durable Wait includes only the latest bounded preview, labels it as possibly
 partial other-agent data, and exposes all history references for deliberate continuation reads.
@@ -273,25 +273,25 @@ ascending key columns, the actual primary-key index origin, and exact FK mapping
 A partial or differently collated index cannot stand in for the admitted identity constraints.
 These checks precede mutable catalog open and never migrate an unsupported catalog.
 
-## Native search capacity and task-family admission
+## Search capacity and task-family admission
 
 The Catalog-owned `ResourceAdmission` now admits selected local computation together with its whole
 resource plan. Pending calls hold neither resource claims nor execution capacity. Conflicting claims
 retain FIFO order; runnable local-compute families rotate, so many queued searches from one task do
-not put all of that task's work ahead of another waiting task. A family is the root native Thread
+not put all of that task's work ahead of another waiting task. A family is the root Thread
 obtained from the Catalog's existing child/parent Run lineage, never a project, path, or model-supplied
 family value. Parent completion does not change that identity. No second task tree or durable scheduler
 log is created.
 
-The first classified production capability is bound `NativeToolKind::FileSearch`, including policy
+The first classified production capability is bound `ToolKind::FileSearch`, including policy
 read-graph calls. Plain file reads, directory lists, dispatch, questions and control do not consume its
 capacity. The trusted executor supplies the classification; wrappers forward capabilities they do not
 own. MCP annotations cannot assign local execution classes. FileList, composite retrieval stages,
-LSP/service waits, model-provider quotas, maintenance and direct non-native `compute.start` consumers
+LSP/service waits, model-provider quotas, maintenance and direct non-`compute.start` consumers
 are not yet covered by task-family scheduling. The latter still share the kernel's original compute
 queues; this slice does not claim global execution fairness across those callers.
 
-`VARIN_NATIVE_COMPUTE_CONCURRENCY` selects a positive foreground concurrency at process startup.
+`VARIN_COMPUTE_CONCURRENCY` selects a positive foreground concurrency at process startup.
 Absent an override, the existing conservative two-worker budget is retained, reduced to one on a
 single-core host. This is a deployment default, not a task/tool-count rejection or a measured optimal
 setting. One process-frozen budget configures both the real foreground compute workers and native
@@ -338,16 +338,16 @@ grant-revocation/epoch wakeups, OS thread-creation failure rollback, changed-run
 behavior, or fairness for all compute consumers. Integration with the memory/context branch needs
 MemoryTools to forward execution_class and watch_admission and separate combined verification.
 
-## Native process observation waits
+## Process observation waits
 
-`native_wait_process({processId})` observes a `native_process_spawn` Operation of the same
+`wait_process({processId})` observes a `process_spawn` Operation of the same
 real Run. It registers the existing Catalog Wait and its JobAccepted tool receipt together,
 then parks only after the model/tool exchange closes. Terminal facts that precede registration
 are found retrospectively. Process state/output remain owned by Storage and the original
 process worker; recovery never executes the command again. A recovery-only indeterminate process
 does not trigger the Wait: only the original executor's durable receipt can deliver a lifecycle
 fact, and an indeterminate receipt is never presented as proof that its tree stopped. History contains only a bounded
-lifecycle projection and an existing `native_process_read` reference, not command arguments or
+lifecycle projection and an existing `process_read` reference, not command arguments or
 log contents. Delivery identity deduplicates the same process fact on the visible history chain.
 
 The existing Host continuation coordinator consumes process-wait facts alongside child facts;
@@ -355,13 +355,13 @@ there is no timer/model polling loop. It rebinds the same Run through its saved 
 and context preparation contracts. Cancelling the observation cancels its Wait, not the process.
 Cancelling the actual spawn Operation retains the existing explicit process-stop path.
 
-After legal rebind, native inspect/read can observe that exact same-Run process only after
+After legal rebind, inspect/read can observe that exact same-Run process only after
 Catalog verifies its original spawn Operation and immutable source selection. Storage rechecks
 both the original creating grant (including explicit revocation) and the current authorized
 Run/Thread/workspace/source-scope grant on every observation. This is an internal read-only
 path, not an observer grant, owner replacement, or maintenance/kill/stdin/write delegation.
 Current Host source trust is re-admitted before continuation rebind. The existing Host deployment
-root/trust guard has no event bridge that immediately revokes already issued native grants when
+root/trust guard has no event bridge that immediately revokes already issued grants when
 its deployment configuration changes during a live launch; this unit does not broaden that
 existing lifetime or claim to implement such a bridge. Explicit grant revocation is checked on
 every delegated observation. Cross-Run observation, even within the same Thread, is excluded.
@@ -389,7 +389,7 @@ not a new persistence guarantee. Runtime trust/root changes still follow the exi
 lifetime; this lane does not implement an immediate trust-change revocation listener. Fairness-main
 integration requires ProcessWaitTools capability/admission-hook forwarding and separate verification.
 
-## Native plan identity
+## Plan identity
 
 `catalog_plan` projects fixed Thread/branch/head identity and an immutable fork basis; it stores no
 plan text or mutable plan pointer. New plan-aware forks record the KnowledgeStore capture on
@@ -405,7 +405,7 @@ candidate. No complete history list crosses the plan bridge. Host cancellation e
 bounded pages; reopening restarts only pure reads. Existing conversation fork replay/pairing
 validation is unchanged and is not claimed to be a new bounded plan-page operation.
 
-`native_todo` exposes `read` and whole-plan `update` with exact `expectedRef` CAS. The private
+`todo` exposes `read` and whole-plan `update` with exact `expectedRef` CAS. The private
 bridge derives the fixed request head and original Operation identity from Catalog; model
 arguments contain no owner/scope fields. Only admitted ordinary main Threads receive the schema,
 and dispatch rechecks their persisted role and child relationship. Source-inheritance filters
@@ -413,11 +413,11 @@ recognize this built-in without granting source capabilities. An authoritative C
 receipt settles `Failed/None`; an unknown dispatch is not relabeled as no effect. Recovery queries
 the original Knowledge receipt and never repeats a plan mutation.
 
-### Native plan slice verification (2026-10-09)
+### Plan slice verification (2026-10-09)
 
 Independent owner tests passed 22 cases using real TriviumDB and private IPC. Independent Host
 integration passed 22 cases against the diagnostic kernel, including HTTP identity/CAS,
-fixed and nested forks, bounded membership cursors, native model/tool consumption, structured
+fixed and nested forks, bounded membership cursors, model/tool consumption, structured
 conflict settlement and lost-reply reconciliation after a later user edit and owner/kernel reopen.
 UI/client focused tests passed 18 cases. Cargo check/build, protocol/client builds, the Host raw
 bundle, Host test typecheck and full UI typecheck completed. Fixtures were corrected to use actual
@@ -434,7 +434,7 @@ The plan lane is now integrated with durable process observation and family admi
 `b86064f0695382a1560469644d27db666c091376e528856c863c427ad36a379f`.
 Actual Host/kernel tests passed 27 cases (plan 22 plus existing process wait 5). The exact durable
 no-effect evidence test and three held-permit kernel cases passed. Those three exercise the real
-PlanTools -> MemoryTools -> ProcessWaitTools -> CollaborationTools -> Questions -> NativeToolExecutor
+PlanTools -> MemoryTools -> ProcessWaitTools -> CollaborationTools -> Questions -> KernelToolExecutor
 chain for queued search, cancellation and post-permit Storage revocation. Plan classification is
 unmetered; real plan execution is verified by the Host tests. Immediate queued revocation wakeups
 remain outside this fixture's scope.

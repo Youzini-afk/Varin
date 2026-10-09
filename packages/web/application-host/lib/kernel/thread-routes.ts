@@ -1,0 +1,165 @@
+import { PlanConflict } from './plan-service.js';
+import { parseThreadImages, threadInput } from './thread-images.js';
+import type { Express, RequestHandler } from 'express';
+import type { ThreadIdentity, ThreadSubmit } from '@varin/application-client';
+import { KernelClientError } from './kernel-client.js';
+import { ThreadAdapter } from './thread-adapter.js';
+
+const object = (value: unknown): Record<string, unknown> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Request must be an object');
+  return value as Record<string, unknown>;
+};
+const text = (value: unknown): string => {
+  if (typeof value !== 'string' || !value.length) throw new Error('A non-empty string is required');
+  return value;
+};
+const revision = (value: unknown): number => {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) throw new Error('A non-negative revision is required');
+  return Number(value);
+};
+const identity = (body: Record<string, unknown>): ThreadIdentity => {
+  if (body.runtime !== 'agent') throw new Error('Explicit thread runtime selection is required');
+  return { runtime: 'agent', threadId: text(body.threadId), branchId: text(body.branchId) };
+};
+
+/** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
+export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler): void {
+  const fields: Record<string, readonly string[]> = {
+    'permission/decide': ['runtime', 'threadId', 'branchId', 'operationId', 'permissionId', 'decision'],
+    'question/answer': ['runtime', 'threadId', 'branchId', 'operationId', 'answer'],
+    'source/prepare': ['runtime', 'threadId', 'branchId', 'key', 'path', 'mode'],
+    'context/compact': ['runtime', 'threadId', 'branchId', 'key', 'throughId', 'expectedRevision', 'model'],
+    'context/publish': ['runtime', 'threadId', 'branchId', 'runId'], 'context/cancel': ['runtime', 'threadId', 'branchId', 'runId'], 'context/resume': ['runtime', 'threadId', 'branchId', 'runId'],
+    'child/report': ['runtime', 'threadId', 'branchId', 'operationId', 'itemId', 'offset', 'maxBytes'],
+    'child/list': ['runtime', 'threadId', 'branchId'], 'child/cancel': ['runtime', 'threadId', 'branchId', 'operationId'],
+    'child/wait/cancel': ['runtime', 'threadId', 'branchId', 'waitId'], 'tree/cancel': ['runtime', 'threadId', 'branchId'],
+    'plan/read': ['runtime', 'threadId', 'branchId'],
+    'plan/update': ['runtime', 'threadId', 'branchId', 'key', 'expectedHeadId', 'expectedRef', 'content'],
+    fork: ['runtime', 'threadId', 'branchId', 'key', 'headId'],
+    create: ['key'], list: [], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'expectedHead', 'model', 'source'],
+    snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'mode'],
+    'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
+    run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], events: ['cursor'],
+  };
+  const post = (method: string, action: (body: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>) => {
+    app.post(`/api/threads/${method}`, requireAuth, async (request, response) => {
+      const controller = new AbortController();
+      const closed = () => { if (!response.writableEnded) controller.abort(new DOMException('Request closed', 'AbortError')); };
+      response.once('close', closed);
+      try {
+        const body = object(request.body);
+        if (Object.keys(body).some(key => !fields[method]!.includes(key))) throw new Error('Unsupported thread request field');
+        response.json(await action(body, controller.signal));
+      }
+      catch (error) {
+        // Errors from credentials/model services can contain upstream bodies. Do not echo them.
+        const conflict = error instanceof PlanConflict || error instanceof KernelClientError && error.code === 'operation-error' && error.message.startsWith('operation error: conflict:');
+        const code = conflict ? 'thread-conflict' : error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'thread-request-failed';
+        response.status(code.includes('conflict') ? 409 : 400).json({ code, error: 'Thread request could not be completed' });
+      } finally { response.removeListener('close', closed); }
+    });
+  };
+  post('plan/read', (body, signal) => adapter.readPlan(identity(body), signal));
+  post('plan/update', (body, signal) => {
+    if (typeof body.content !== 'string') throw new Error('Plan content must be text');
+    return adapter.updatePlan({ ...identity(body), key: text(body.key),
+      expectedHeadId: body.expectedHeadId === null ? null : text(body.expectedHeadId),
+      expectedRef: body.expectedRef === null ? null : text(body.expectedRef), content: body.content }, signal);
+  });
+  post('permission/decide', body => {
+    if (body.decision !== 'allow_once' && body.decision !== 'deny') throw new Error('Invalid permission decision');
+    return adapter.decidePermission({ ...identity(body), operationId: text(body.operationId), permissionId: text(body.permissionId), decision: body.decision });
+  });
+  post('question/answer', body => adapter.answerQuestion({ ...identity(body), operationId: text(body.operationId), answer: text(body.answer) }));
+  post('child/report', body => adapter.readChildReport(identity(body), text(body.operationId), text(body.itemId), body.offset === undefined ? 0 : revision(body.offset), body.maxBytes === undefined ? 65536 : revision(body.maxBytes)));
+  post('child/list', body => adapter.children(identity(body)));
+  post('child/cancel', body => adapter.cancelChild(identity(body), text(body.operationId)));
+  post('child/wait/cancel', body => adapter.cancelChildWait(identity(body), text(body.waitId)));
+  post('tree/cancel', async body => { await adapter.cancelTree(identity(body)); return {}; });
+  post('models', () => adapter.listModels());
+  post('list', async () => (await adapter.runtime.threads()).filter(thread => thread.thread_id.startsWith('thread:')));
+  post('create', body => adapter.create(text(body.key)));
+  post('fork', (body, signal) => adapter.fork({ ...identity(body), key: text(body.key), headId: body.headId === null ? null : text(body.headId) }, signal));
+  post('source/prepare', body => {
+    if (body.mode !== 'fixed_branch' && body.mode !== 'materialized' && body.mode !== 'live_root') throw new Error('Invalid source mode');
+    return adapter.prepareSource({ ...identity(body), key: text(body.key), path: text(body.path), mode: body.mode });
+  });
+  post('context/compact', body => {
+    const model = object(body.model);
+    if (Object.keys(model).some(key => !['providerId', 'modelId'].includes(key))) throw new Error('Unsupported model selection field');
+    return adapter.compact({ ...identity(body), key: text(body.key), throughId: text(body.throughId), expectedRevision: revision(body.expectedRevision),
+      model: { providerId: text(model.providerId), modelId: text(model.modelId) } });
+  });
+  post('context/publish', body => adapter.publishContext(identity(body), text(body.runId)));
+  post('context/cancel', body => adapter.cancelContext(identity(body), text(body.runId)));
+  post('context/resume', async body => { await adapter.resumeContext(identity(body), text(body.runId)); return {}; });
+  post('submit', async body => {
+    const model = object(body.model);
+    if (Object.keys(model).some(key => !['providerId', 'modelId'].includes(key))) throw new Error('Unsupported model selection field');
+    const images = parseThreadImages(body.images);
+    if (typeof body.text !== 'string' || (!body.text.length && !images?.length)) throw new Error('Text or images are required');
+    const input: ThreadSubmit = { ...identity(body), key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }),
+      expectedHead: body.expectedHead === null ? null : text(body.expectedHead),
+      model: { providerId: text(model.providerId), modelId: text(model.modelId) } };
+    if (body.source !== undefined) {
+      const source = object(body.source);
+      if (Object.keys(source).some(key => !['workspaceId', 'executionWorkspaceId', 'branchId', 'revision', 'mode', 'tools', 'liveRoot'].includes(key))) throw new Error('Unsupported source selection field');
+      if (source.mode !== 'fixed_branch' && source.mode !== 'materialized' && source.mode !== 'live_root') throw new Error('Invalid source mode');
+      if (!Array.isArray(source.tools) || source.tools.some(tool => !['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn', 'language_definition', 'language_references', 'language_diagnostics', 'code_retrieval'].includes(String(tool)))) throw new Error('Unsupported tool');
+      const base = { workspaceId: text(source.workspaceId), executionWorkspaceId: text(source.executionWorkspaceId),
+        tools: source.tools as NonNullable<ThreadSubmit['source']>['tools'] };
+      if (source.mode === 'live_root') {
+        if (source.branchId !== undefined || source.revision !== undefined) throw new Error('Live source cannot claim a fixed revision');
+        const root = object(source.liveRoot);
+        if (Object.keys(root).some(key => !['hostId', 'canonicalRoot', 'rootId'].includes(key))) throw new Error('Unsupported live root field');
+        input.source = { ...base, mode: 'live_root', liveRoot: { hostId: text(root.hostId), canonicalRoot: text(root.canonicalRoot), rootId: text(root.rootId) } };
+      } else {
+        if (source.liveRoot !== undefined) throw new Error('Fixed source cannot claim a live root');
+        input.source = { ...base, branchId: text(source.branchId), revision: revision(source.revision), mode: source.mode };
+      }
+    }
+    return adapter.submit(input);
+  });
+  post('history/page', body => adapter.historyPage(identity(body), { headId: text(body.headId), beforeId: text(body.beforeId) }));
+  post('snapshot', body => adapter.snapshot(identity(body)));
+  post('enqueue', async body => {
+    const selected = identity(body); await adapter.requireIdentity(selected);
+    if (!['boundary', 'interrupt', 'next_run'].includes(String(body.mode))) throw new Error('Invalid input mode');
+    const images = parseThreadImages(body.images);
+    if (typeof body.text !== 'string' || (!body.text.length && !images?.length)) throw new Error('Text or images are required');
+    return adapter.enqueue({ ...selected, key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), mode: body.mode as 'boundary' | 'interrupt' | 'next_run' });
+  });
+  post('input/edit', async body => {
+    const queued = await adapter.requireInput(text(body.inputId));
+    const images = parseThreadImages(body.images);
+    if (images?.length) adapter.assertImagesSupported(images, (await adapter.requireRun(queued.run_id)).configuration);
+    if (typeof body.text !== 'string') throw new Error('Input text must be a string');
+    // Text-only edits preserve the accepted media; explicit images replaces/removes it under CAS.
+    const existing = queued.content as { attachments?: unknown[] };
+    const content = images === undefined ? { ...(body.text.length || !existing.attachments?.length ? { text: body.text } : {}), ...(existing.attachments ? { attachments: existing.attachments } : {}) }
+      : threadInput(body.text, images);
+    if (!body.text.length && !('attachments' in content && content.attachments?.length)) throw new Error('Text or images are required');
+    return adapter.runtime.editInput(queued.id, revision(body.expectedRevision), content);
+  });
+  post('input/cancel', async body => { await adapter.requireInput(text(body.inputId)); return adapter.runtime.cancelInput(text(body.inputId), revision(body.expectedRevision)); });
+  post('run', body => adapter.requireRun(text(body.runId))); 
+  post('run/cancel', async body => { await adapter.requireRun(text(body.runId)); return adapter.runtime.cancelRun(text(body.runId)); });
+  post('run/resume', async body => { await adapter.resume(text(body.runId)); return {}; });
+  post('operation', body => adapter.requireOperation(text(body.operationId)));
+  post('operation/cancel', body => adapter.cancelOperation(text(body.operationId)));
+  post('events', body => adapter.runtime.events(revision(body.cursor), 256));
+  app.get('/api/threads/observe', requireAuth, (request, response) => {
+    let cursor: number;
+    try { cursor = revision(Number(request.query.cursor ?? 0)); }
+    catch { response.status(400).json({ error: 'Invalid event cursor' }); return; }
+    response.status(200).set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+    response.flushHeaders();
+    const close = adapter.observe(cursor, event => {
+      const writable = response.write(`data: ${JSON.stringify(event)}\n\n`);
+      // A slow consumer reconnects from its durable cursor instead of retaining unbounded buffers.
+      if (!writable) response.end();
+      return writable;
+    }, () => response.end());
+    response.once('close', close);
+  });
+}

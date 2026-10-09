@@ -44,7 +44,7 @@ pub enum CompositionError {
     IdentityExhausted,
 }
 
-/// T is the actual typed native implementation or a managed worker endpoint. This module does
+/// T is the actual typed implementation or a managed worker endpoint. This module does
 /// not turn in-process invocation into JSON RPC. Schema describes the external boundary only.
 /// Implementation/endpoint Drop must be nonblocking: resource owners enqueue asynchronous cleanup
 /// outside this coordinator, since the last lease may be released on any execution thread.

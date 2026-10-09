@@ -1,5 +1,5 @@
 import { NativeAnthropicCredentialOwner, type AnthropicFederationSource } from './native-anthropic-auth.js';
-import { NativeAwsCredentialOwner, type NativeCredentialDispatch } from './native-aws-auth.js';
+import { NativeAwsCredentialOwner, type CredentialDispatch } from './native-aws-auth.js';
 import { NativeGoogleCredentialOwner } from './native-google-auth.js';
 import { credentialValueResolver } from './credential-value-resolver.js';
 /** Application-Host-owned credential storage and relink metadata.
@@ -347,7 +347,7 @@ export class HostCredentialAuthority implements CredentialStore {
     return this.#runtime;
   }
   /** Existing SDK resolution uses this SAME authority; no independent authPath store is opened. */
-  async getAuth(providerId: string, modelId?: string, dispatch?: NativeCredentialDispatch): Promise<AuthResult | undefined> {
+  async getAuth(providerId: string, modelId?: string, dispatch?: CredentialDispatch): Promise<AuthResult | undefined> {
     const scope = await this.currentScope(providerId, modelId);
     if (scope.authority === `${this.authorityId}:ambient`) return this.#nativeAuthResult(providerId, modelId, this.#ambientBindings.get(providerId)!.result);
     const headerBinding = this.#headerBindings.get(JSON.stringify([providerId, modelId ?? null]));

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { DocumentRegistry } from '@varin/ui/lib/documents/registry';
 import type { DocumentsAPI } from '@varin/application-client';
 import { createDocumentAuthority, type DocumentAuthority } from '../application-host/lib/documents/authority.js';
-import { createNativeAuthorityTestRuntime } from '../application-host/lib/kernel/native-authority.test-helper.js';
+import { createAuthorityTestRuntime } from '../application-host/lib/kernel/authority.test-helper.js';
 import { IntegrationCoordinator } from '../application-host/lib/harness/working-state/integration-coordinator.js';
 
 import { parseDocumentWatchEvent } from '../src/api/documents';
@@ -85,7 +85,7 @@ describe('surface Integration vertical path', () => {
       recoverySessionId: 'surface-vertical-editor',
       journalDebounceMs: 0,
     });
-    const native = await createNativeAuthorityTestRuntime({ documents: authority, hostId: 'surface-vertical-host', dataDir });
+    const native = await createAuthorityTestRuntime({ documents: authority, hostId: 'surface-vertical-host', dataDir });
     const { workingStates } = native;
     try {
       const resource = { workspaceId: identity.workspaceId, resourceId: 'draft.txt' };

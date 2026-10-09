@@ -178,5 +178,5 @@ native tools: cross-file definition/reference and actual unversioned diagnostics
 Versioned/pull correctness, independent preparation/cancellation, malformed URI/range rejection and
 stale source behavior also have controlled-provider coverage; existing Pi navigation and diagnostic
 adapter regressions passed. Exact suite counts and the frozen native build are recorded in the
-[implementation plan](../../../../../docs/plan/native-agent-runtime-implementation.md#已核验增量live-root-原生语言工具).
+[implementation plan](../../../../../docs/plan/agent-runtime-implementation.md#已核验增量live-root-原生语言工具).
 This does not certify fixed dependency closure, all language providers or all deployment platforms.

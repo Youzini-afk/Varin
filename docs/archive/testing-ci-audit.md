@@ -53,7 +53,7 @@ the full pi-host suite.
 `kernel-client.test.ts` (node --test) plus 9 vitest files. All 9 are also
 inside `packages/web` `vitest run` (only `kernel-client` is excluded), and
 five more kernel-requiring files use
-`createNativeAuthorityTestRuntime` (`await fs.access(kernelPath)`):
+`createAuthorityTestRuntime` (`await fs.access(kernelPath)`):
 
 - `lib/kernel/{file-resource-audit,kernel-compute,kernel-process,
   kernel-transport.acceptance,process-consumers,request-window,
@@ -201,7 +201,7 @@ presence they are not.
 
 17 test files, **no `test` script** — never run by `test:pi`
 (package name `varin` is outside the `@varin/*` filter) and never run in
-CI except `test-pi-runtime.mjs`/`test-native-search.mjs` harness checks.
+CI except `test-pi-runtime.mjs`/`test-search.mjs` harness checks.
 
 Measured `bun test` run: 53 pass, 6 fail, 5 file-level errors:
 
@@ -517,7 +517,7 @@ Actual verification on Windows x64:
   extension-contract and SDK. ESLint passed for changed code; CI YAML parsed successfully.
 
 Local logs were captured as `varin-tests-after-cleanup.log`, `varin-broker-final-verification.log`,
-`varin-native-tests-after-cleanup.log` and focused `varin-cleanup-*` logs beneath the task's
+`varin-tests-after-cleanup.log` and focused `varin-cleanup-*` logs beneath the task's
 temporary directory. Remote CI was not polled, and new installers, live desktop smokes, Docker
 deploys and VM boots were not run for this test-only change.
 
@@ -533,7 +533,7 @@ source aliases while the emitted package is broken; the NSIS directory check is 
 guard for the historical repeated-child-directory failure; CodeMirror caret/selection specificity
 checks guard prior invisible-handle and input-lag failures. Removing these without corresponding
 artifact/browser evidence would lose protection. They do not prove actual installer or WebKit UI
-behavior. The manual native-driver smoke remains a desktop diagnostic and is not counted among
+behavior. The manual driver smoke remains a desktop diagnostic and is not counted among
 the passing unit tests. Linux AT-SPI/UNO, Windows UIA and macOS AX still need their real platform
 acceptance. Research replay inputs and historical experiment evidence remain scientific assets.
 
@@ -598,7 +598,7 @@ The live-surface completer, in-memory durable port and TS storage adapters remai
 boundaries for Host orchestration tests; they cannot prove real UI or Rust persistence behavior.
 The real vertical Registry/kernel test provides complementary integration evidence. Replacing all
 such fixtures at once would risk removing distinct lost-write, compensation and conflict coverage.
-The single static CodeMirror native-caret scoping guard remains for the documented WebKit input-lag
+The single static CodeMirror caret scoping guard remains for the documented WebKit input-lag
 regression; no real iOS acceptance was run. NSIS, public package/API and native identity checks retain
 their concrete external contracts, rather than being removed simply because they inspect constants.
 

@@ -8,8 +8,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { ExistingHostCredentialOwner } from '../../kernel/native-credential-owner.js';
-import { createNativeSemanticInference, type NativeSemanticInferenceLease } from './native-inference.js';
+import { ExistingHostCredentialOwner } from '../../kernel/credential-owner.js';
+import { createSemanticInference, type SemanticInferenceLease } from './runtime-inference.js';
 import { createSemanticInferenceLedger, semanticInferenceOperationKey, type SemanticInferenceOperation } from './inference-ledger.js';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../../..');
@@ -18,8 +18,8 @@ const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { try { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); } finally { vi.restoreAllMocks(); } });
 const secret = 'fake-ledger-loopback-secret-not-for-real-services';
 const privateText = 'PRIVATE_INPUT_BODY_MUST_NOT_BE_STORED_77';
-const nativeOperation = (id = 'one'): SemanticInferenceOperation => ({ kind: 'native-query', hostId: 'ledger-review', threadId: 'thread', runId: `run-${id}`,
-  invocation: { kind: 'model_step', requestId: `persisted-model-step-${id}`, toolCallId: `persisted-tool-call-${id}` }, stage: 'native-code-retrieval.semantic.query-embedding' });
+const runOperation = (id = 'one'): SemanticInferenceOperation => ({ kind: 'retrieval-query', hostId: 'ledger-review', threadId: 'thread', runId: `run-${id}`,
+  invocation: { kind: 'model_step', requestId: `persisted-model-step-${id}`, toolCallId: `persisted-tool-call-${id}` }, stage: 'code-retrieval.semantic.query-embedding' });
 async function fixture(reply: (body: { input: string[]; model: string }, response: ServerResponse, before: Awaited<ReturnType<ReturnType<typeof createSemanticInferenceLedger>['list']>>) => void) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-inference-ledger-review-')); cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
   const agentDir = path.join(root, 'agent'); await fs.mkdir(agentDir);
@@ -40,13 +40,13 @@ async function fixture(reply: (body: { input: string[]; model: string }, respons
     capabilities: { chat: false, embedding: { protocol: 'openai-compatible', models: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }] } },
   } } }));
   await settings(); await models();
-  let inference = createNativeSemanticInference(authority, undefined, { ledger });
+  let inference = createSemanticInference(authority, undefined, { ledger });
   cleanups.push(() => inference.close());
   const reopen = async () => { await inference.close(); ledger = createSemanticInferenceLedger({ dataDir: root, hostId: 'ledger-review' });
-    inference = createNativeSemanticInference(HostCredentialAuthority.open(agentDir), undefined, { ledger }); };
+    inference = createSemanticInference(HostCredentialAuthority.open(agentDir), undefined, { ledger }); };
   return { root, agentDir, authority, baseUrl, settings, models, observed, requests: () => requests, ledger: () => ledger, inference: () => inference, reopen };
 }
-function input(lease: NativeSemanticInferenceLease, operationIdentity = nativeOperation(), batchId = 'transport-one', text = privateText) {
+function input(lease: SemanticInferenceLease, operationIdentity = runOperation(), batchId = 'transport-one', text = privateText) {
   return { purpose: 'query' as const, ...lease.binding, maxTokens: lease.binding.maxTokens!, batchId,
     // This lower-level suite proves dispatch durability; actual Run authorization is exercised by the native suite.
     guard: async () => {}, items: [{ id: 'stable-position-0', text }], operationIdentity };
@@ -59,9 +59,9 @@ it('actual loopback dispatch observes prior durable admission; lost response and
   await expect(first.embed(input(first))).rejects.toMatchObject({ receipt: { state: 'indeterminate', attempts: 1, attemptsKnown: true, usage: { status: 'unknown' } } }); first.release();
   expect(f.requests()).toBe(1); expect(await f.ledger().list({ runId: 'run-one', state: 'unknown' })).toHaveLength(1);
   await f.reopen(); const again = await f.inference().capture();
-  await expect(again.embed(input(again, nativeOperation(), 'different-bridge-batch'))).rejects.toMatchObject({ receipt: { state: 'indeterminate', reused: true } });
+  await expect(again.embed(input(again, runOperation(), 'different-bridge-batch'))).rejects.toMatchObject({ receipt: { state: 'indeterminate', reused: true } });
   expect(f.requests()).toBe(1);
-  await expect(again.embed(input(again, nativeOperation(), 'different-input-batch', 'CHANGED_INPUT'))).rejects.toThrow();
+  await expect(again.embed(input(again, runOperation(), 'different-input-batch', 'CHANGED_INPUT'))).rejects.toThrow();
   again.release(); await f.settings('b'); const changedModel = await f.inference().capture();
   await expect(changedModel.embed(input(changedModel))).rejects.toThrow(); changedModel.release();
   await f.models(`${f.baseUrl}/changed-endpoint`); const changedEndpoint = await f.inference().capture();
@@ -74,9 +74,9 @@ it('completed vectors survive owner restart, rebind only ephemeral envelopes, an
   const result = await first.embed(input(first)); first.release();
   expect(result.receipt).toMatchObject({ state: 'succeeded', attempts: 1, attemptsKnown: true, usage: { status: 'known', inputTokens: 7, totalTokens: 7 } });
   await f.reopen(); const next = await f.inference().capture();
-  const replay = await next.embed({ ...input(next, nativeOperation(), 'fresh-transport-batch'), items: [{ id: 'fresh-item-envelope', text: privateText }] });
+  const replay = await next.embed({ ...input(next, runOperation(), 'fresh-transport-batch'), items: [{ id: 'fresh-item-envelope', text: privateText }] });
   expect(replay.batchId).toBe('fresh-transport-batch'); expect(replay.items.map(item => item.vector)).toEqual(result.items.map(item => item.vector)); expect(replay.items[0]?.id).toBe('fresh-item-envelope'); expect(replay.receipt.reused).toBe(true); expect(f.requests()).toBe(1);
-  await expect(next.embed(input(next, nativeOperation(), 'changed-input', 'DIFFERENT_INTENT'))).rejects.toThrow(); next.release();
+  await expect(next.embed(input(next, runOperation(), 'changed-input', 'DIFFERENT_INTENT'))).rejects.toThrow(); next.release();
   await f.settings('b'); const wrongSpace = await f.inference().capture(); await expect(wrongSpace.embed(input(wrongSpace))).rejects.toThrow(); wrongSpace.release(); expect(f.requests()).toBe(1);
   await f.settings('a'); await f.authority.modifyWithIntent('ledger-provider', 'replace', async () => ({ type: 'api_key', key: 'fake-new-ledger-account' }));
   const newAccount = await f.inference().capture(); await expect(newAccount.embed(input(newAccount))).rejects.toThrow(); newAccount.release(); expect(f.requests()).toBe(1);
@@ -122,7 +122,7 @@ it('a malformed provider vector response is a known failed attempt and never tri
   const f = await fixture((_body, response) => response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: [{ index: 0, embedding: [1] }] })));
   const lease = await f.inference().capture();
   await expect(lease.embed(input(lease))).rejects.toMatchObject({ receipt: { state: 'failed', attempts: 1, attemptsKnown: true, usage: { status: 'unknown' } } });
-  await expect(lease.embed(input(lease, nativeOperation(), 'retry-envelope'))).rejects.toThrow(); expect(f.requests()).toBe(1);
+  await expect(lease.embed(input(lease, runOperation(), 'retry-envelope'))).rejects.toThrow(); expect(f.requests()).toBe(1);
   expect(await f.ledger().list()).toMatchObject([{ state: 'terminal', hasResult: false, receipt: { state: 'failed' } }]); lease.release();
 }, 30_000);
 
@@ -131,7 +131,7 @@ it('an isolated child exiting after durable admission without close leaves a rec
   const digest = (value: string) => createHash('sha256').update(value).digest('hex');
   const identity = { providerId: 'exit-provider', modelId: 'fixture', protocol: 'openai-compatible' as const,
     configurationId: 'exit-config', endpointHash: digest('loopback-only'), credentialScopeHash: digest('fake-scope'),
-    dimensions: 2, maxTokens: 100, operation: nativeOperation('unclosed'), inputHashes: [digest('no-source-body-persisted')] };
+    dimensions: 2, maxTokens: 100, operation: runOperation('unclosed'), inputHashes: [digest('no-source-body-persisted')] };
   const receipt = { batchId: 'child-original-batch', providerId: identity.providerId, modelId: identity.modelId, configurationId: identity.configurationId,
     purpose: 'query-embedding' as const, inputItems: 1, inputBytes: 32, attempts: 0, attemptsKnown: false, state: 'indeterminate' as const, usage: { status: 'unknown' as const } };
   const admission = { key: semanticInferenceOperationKey(identity, receipt.purpose), identity, receipt };
@@ -158,8 +158,8 @@ it('empty provider usage stays unknown while an explicitly measured zero remains
   let count = 0;
   const f = await fixture((body, response) => response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: body.input.map((_text, index) => ({ index, embedding: [1, 0] })), usage: ++count === 1 ? {} : { prompt_tokens: 0, total_tokens: 0 } })));
   const lease = await f.inference().capture();
-  expect((await lease.embed(input(lease, nativeOperation('unknown-usage')))).receipt.usage).toEqual({ status: 'unknown' });
-  expect((await lease.embed(input(lease, nativeOperation('zero-usage'), 'zero-batch'))).receipt.usage).toEqual({ status: 'known', inputTokens: 0, totalTokens: 0 });
+  expect((await lease.embed(input(lease, runOperation('unknown-usage')))).receipt.usage).toEqual({ status: 'unknown' });
+  expect((await lease.embed(input(lease, runOperation('zero-usage'), 'zero-batch'))).receipt.usage).toEqual({ status: 'known', inputTokens: 0, totalTokens: 0 });
   expect(f.requests()).toBe(2); lease.release();
 }, 30_000);
 

@@ -32,7 +32,7 @@ The caller can stop waiting immediately; the bounded refresh/persistence operati
   separate typed failures; none fall through to environment credentials
 - Secrets and header values are transient and non-serializable/non-Debug; UI and histories contain
   only references, stable account/connection identity and generation, never bearer/refresh material
-- `auth.rs` implements `NativeCredentialBroker`, `CredentialScope`, transactional store/refresh traits
+- `auth.rs` implements `CredentialBroker`, `CredentialScope`, transactional store/refresh traits
   and a bounded HTTPS refresh client. The production factory needs an injected-resolver binding path
   and trusted reference/version fields. The Host store/IPC integration is now present as described
   below; additional platform stores and live provider authorization remain separate acceptance gates

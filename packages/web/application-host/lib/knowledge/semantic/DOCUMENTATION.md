@@ -90,7 +90,7 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this local-m
   hashes, attempt/usage receipts and validated completed vectors; it never stores input text,
   credentials, authentication headers or endpoint URLs. There is no second configuration authority
   or writable mirror of native Run state.
-  A native-query key is its real persisted invocation plus the fixed inference stage. Input hashes
+  A retrieval-query key is its real persisted invocation plus the fixed inference stage. Input hashes
   and vector binding are immutable intent under that key, so changed input/settings cannot bypass
   an unknown outcome; a changed intent fails explicitly. Index-build keys additionally include
   workspace/recipe, input hashes and vector binding so a new model can build a distinct index.
@@ -107,7 +107,7 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this local-m
   proof that its transport can never dispatch may be admitted again. That full-sync transaction
   archives the old no-send fact as `semantic-inference-attempt` and creates a new admission number
   and token under the same operation key. History lists both admissions. A pending pre-dispatch
-  chain remains unknown until finalized; native-query invocations and any started/unknown request
+  chain remains unknown until finalized; retrieval-query invocations and any started/unknown request
   never acquire this retry path. Facts are retained across restarts without automatic
   pruning; future deletion/retention must preserve unresolved-outcome fences. Read-only Run/scope
   history projections omit vector payloads and dispatch tokens.

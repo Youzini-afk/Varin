@@ -3058,7 +3058,7 @@ describe("thread runtime", () => {
       materializeResult,
       directoryMatchesResult: async () => true,
     };
-    const nativeRuntime = createThreadRuntime({
+    const agentRuntime = createThreadRuntime({
       registry,
       sessions: sessionAdapter,
       workingStates: {
@@ -3092,17 +3092,17 @@ describe("thread runtime", () => {
     });
     await registry.setWorkingState(WORKSPACE, thread.id, { branchId: "native-branch", resultRevision: 1 });
     await registry.archiveThread(WORKSPACE, thread.id);
-    const restored = await nativeRuntime.restoreUser(WORKSPACE, PARENT, thread.id);
+    const restored = await agentRuntime.restoreUser(WORKSPACE, PARENT, thread.id);
     expect(restored.restoreStatus).toBe("restored");
     expect(materialize).toHaveBeenCalledWith(dataDir, expect.objectContaining({ path: childPath }), expect.any(AbortSignal));
     expect(materializeResult).toHaveBeenCalledWith("native-branch", 1, childPath);
     expect(sessionAdapter.open).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "child-1", cwd: childPath }));
     expect(restored.activeRun).toMatchObject({ workerState: "running", outcome: null, sessionId: "child-1" });
     const openCalls = vi.mocked(sessionAdapter.open).mock.calls.length;
-    const repeated = await nativeRuntime.restoreUser(WORKSPACE, PARENT, thread.id);
+    const repeated = await agentRuntime.restoreUser(WORKSPACE, PARENT, thread.id);
     expect(sessionAdapter.open).toHaveBeenCalledTimes(openCalls);
     expect(repeated.activeRun?.id).toBe(restored.activeRun?.id);
-    await nativeRuntime.dispose();
+    await agentRuntime.dispose();
   });
 
   it("reopens a settled implementation after its directory was reclaimed", async () => {

@@ -7,19 +7,19 @@ const schemaPath = path.join(root, 'kernel', 'protocol', 'schema.json');
 const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
 const target = path.join(root, 'packages', 'web', 'application-host', 'lib', 'kernel', 'protocol.generated.ts');
 const rustTarget = path.join(root, 'kernel', 'crates', 'varin-kernel', 'src', 'protocol_generated.rs');
-const nativeProtocolTarget = path.join(root, 'packages', 'protocol', 'src', 'native-runtime.generated.ts');
-const nativeRustTarget = path.join(root, 'kernel', 'crates', 'varin-runtime', 'src', 'types_generated.rs');
-const nativeStructs = Object.entries(schema.nativeRuntimeStructs ?? {}).map(([name, spec]) => {
+const protocolTarget = path.join(root, 'packages', 'protocol', 'src', 'agent-runtime.generated.ts');
+const runtimeTypesTarget = path.join(root, 'kernel', 'crates', 'varin-runtime', 'src', 'types_generated.rs');
+const structs = Object.entries(schema.runtimeStructs ?? {}).map(([name, spec]) => {
   const fields = Object.entries(spec.fields).map(([key, value]) => {
     let type = ({string:"String", number:"u64", boolean:"bool", "string | null":"Option<String>", "number | null":"Option<u64>"})[value.type];
     if (value.optional && type && !type.startsWith("Option<")) type = `Option<${type}>`;
-    if (!type) throw new Error(`Unsupported native field type ${value.type}`);
+    if (!type) throw new Error(`Unsupported runtime field type ${value.type}`);
     const field = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
     return `    pub ${field}: ${type},`;
   });
   return `#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]\n#[serde(rename_all = "camelCase", deny_unknown_fields)]\npub struct ${name} {\n${fields.join("\n")}\n}\n`;
 }).join("\n");
-const nativeRustGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\nuse serde::{Deserialize, Serialize};\n\n' + Object.entries(schema.nativeRuntimeEnums ?? {}).map(([name, variants]) => `#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(rename_all = "snake_case")]\npub enum ${name} {\n${variants.map(v => `    ${v},`).join('\n')}\n}\n`).join('\n') + '\n' + nativeStructs;
+const runtimeTypesGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\nuse serde::{Deserialize, Serialize};\n\n' + Object.entries(schema.runtimeEnums ?? {}).map(([name, variants]) => `#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(rename_all = "snake_case")]\npub enum ${name} {\n${variants.map(v => `    ${v},`).join('\n')}\n}\n`).join('\n') + '\n' + structs;
 const checkOnly = process.argv.includes('--check');
 const methods = Object.keys(schema.methods).map((method) => `  | ${JSON.stringify(method)}`).join('\n');
 const methodParams = schema.methodParams ?? {};
@@ -42,7 +42,7 @@ const renderRequestUnion = () => {
 };
 const renderMethodParams = () => `export type KernelMethodParams = {\n${Object.entries(methodParams).map(([method, paramsType]) => `  ${JSON.stringify(method)}: ${paramsType};`).join('\n')}\n};`;
 const dtoEntries = Object.entries(schema.dto ?? {}).filter(([name]) => !(schema.requestUnion && name === 'KernelRequest'));
-const nativeProtocolGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\n\n' + dtoEntries.filter(([name]) => name.startsWith('Native')).map(([name, spec]) => renderDto(name, spec)).join('\n\n') + '\n';
+const protocolGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\n\n' + dtoEntries.filter(([name]) => (schema.runtimeExports ?? []).includes(name)).map(([name, spec]) => renderDto(name, spec)).join('\n\n') + '\n';
 const generated = `/**
  * Generated from \`kernel/protocol/schema.json\`.
  * Do not hand-edit the wire shapes; run \`node scripts/generate-kernel-protocol.mjs\`.
@@ -68,7 +68,7 @@ const snakeCase = (value) => value
   .replace(/[-.]/g, '_')
   .toLowerCase();
 const rustType = (type) => {
-  if (type.startsWith("Native") && schema.nativeRuntimeEnums?.[type.slice(6)]) return `varin_runtime::${type.slice(6)}`;
+  if (schema.runtimeEnums?.[type]) return `varin_runtime::${type}`;
   if (type.endsWith('[]')) return `Vec<${rustType(type.slice(0, -2))}>`;
   if (type === 'string') return 'String';
   if (type === 'Record<string, string>') return 'std::collections::BTreeMap<String, String>';
@@ -127,18 +127,18 @@ const rustGenerated = rustfmt.stdout;
 if (checkOnly) {
   const existing = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';
   const existingRust = fs.existsSync(rustTarget) ? fs.readFileSync(rustTarget, 'utf8') : '';
-  const existingNative = fs.existsSync(nativeRustTarget) ? fs.readFileSync(nativeRustTarget, "utf8") : "";
-  const existingNativeProtocol = fs.existsSync(nativeProtocolTarget) ? fs.readFileSync(nativeProtocolTarget, 'utf8') : '';
-  if (existing !== generated || existingRust !== rustGenerated || existingNative !== nativeRustGenerated || existingNativeProtocol !== nativeProtocolGenerated) {
-    const stale = [existing !== generated ? target : null, existingRust !== rustGenerated ? rustTarget : null, existingNative !== nativeRustGenerated ? nativeRustTarget : null, existingNativeProtocol !== nativeProtocolGenerated ? nativeProtocolTarget : null].filter(Boolean);
+  const existingTypes = fs.existsSync(runtimeTypesTarget) ? fs.readFileSync(runtimeTypesTarget, "utf8") : "";
+  const existingProtocol = fs.existsSync(protocolTarget) ? fs.readFileSync(protocolTarget, 'utf8') : '';
+  if (existing !== generated || existingRust !== rustGenerated || existingTypes !== runtimeTypesGenerated || existingProtocol !== protocolGenerated) {
+    const stale = [existing !== generated ? target : null, existingRust !== rustGenerated ? rustTarget : null, existingTypes !== runtimeTypesGenerated ? runtimeTypesTarget : null, existingProtocol !== protocolGenerated ? protocolTarget : null].filter(Boolean);
     console.error(`Kernel protocol DTO is out of date: ${stale.map((entry) => path.relative(root, entry)).join(', ')}`);
     process.exit(1);
   }
   console.log(`Kernel protocol ${schema.protocolVersion} is up to date.`);
 } else {
-  fs.writeFileSync(nativeProtocolTarget, nativeProtocolGenerated);
+  fs.writeFileSync(protocolTarget, protocolGenerated);
   fs.writeFileSync(target, generated);
   fs.writeFileSync(rustTarget, rustGenerated);
-  fs.writeFileSync(nativeRustTarget, nativeRustGenerated);
+  fs.writeFileSync(runtimeTypesTarget, runtimeTypesGenerated);
   console.log(`Kernel protocol ${schema.protocolVersion} is generated at ${path.relative(root, target)}`);
 }

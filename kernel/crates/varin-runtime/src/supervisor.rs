@@ -1,4 +1,4 @@
-//! Worker ownership and direct cancellation for admitted native Runs.
+//! Worker ownership and direct cancellation for admitted Runs.
 use crate::execution::*;
 use crate::{Catalog, Run, RunState, RuntimeError};
 use serde_json::Value;
@@ -188,7 +188,7 @@ impl RunSupervisor {
         let identity = run_id.to_string();
         let wake = self.wake.clone();
         let join = thread::Builder::new()
-            .name(format!("native-run-{run_id}"))
+            .name(format!("run-{run_id}"))
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     engine.run_recovered(input, cancel, recovery)
@@ -196,7 +196,7 @@ impl RunSupervisor {
                 .unwrap_or_else(|_| {
                     Err(ExecutionError::new(
                         "worker_panicked",
-                        "native worker stopped without a completion receipt",
+                        "worker stopped without a completion receipt",
                     ))
                 });
                 if let Err(error) = &result {
@@ -343,7 +343,7 @@ impl RunSupervisor {
             let operation = catalog.operation(operation_id).map_err(error)?;
             let run = catalog.run(&operation.run_id).map_err(error)?;
             if run.state != RunState::Waiting || run.waiting_on != operation.waiting_on
-                || operation.executor.as_deref() != Some("native_ask_user") { return Ok(()); }
+                || operation.executor.as_deref() != Some("ask_user") { return Ok(()); }
             run.id
         };
         let worker = self.workers.lock().map_err(error)?.remove(&run_id);
@@ -469,7 +469,7 @@ impl RunSupervisor {
         };
         for join in completed {
             join.join()
-                .map_err(|_| ExecutionError::new("worker_panicked", "native worker panicked"))?;
+                .map_err(|_| ExecutionError::new("worker_panicked", "worker panicked"))?;
         }
         Ok(())
     }
@@ -485,7 +485,7 @@ impl RunSupervisor {
         for (_, worker) in workers {
             if let Some(join) = worker.join {
                 join.join().map_err(|_| {
-                    ExecutionError::new("worker_panicked", "native worker panicked")
+                    ExecutionError::new("worker_panicked", "worker panicked")
                 })?;
             }
         }

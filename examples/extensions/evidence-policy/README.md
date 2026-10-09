@@ -43,7 +43,7 @@ Before capturing the Run's fixed branch source, create `evidence-index.json`:
 ```
 
 Create that target file with the evidence to use. Start the project-selected native Run with the
-ordinary `native_file_read` tool enabled and its existing authorized fixed branch/revision source.
+ordinary `file_read` tool enabled and its existing authorized fixed branch/revision source.
 The extension cannot create this grant or source binding. Missing source, disabled tools or
 materialized/live-source reads are rejected by core admission. Files changed after capture do not
 change this Run's source.

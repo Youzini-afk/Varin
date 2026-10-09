@@ -62,14 +62,14 @@ scope isolation and stale edits; Pi `session-e2e.test.ts` exercises actual outgo
 with a faux provider; UI `AgentSettings.behavior.test.tsx` covers editing and scope selection.
 
 
-Native conversations use this same catalog through `kernel/native-thread-context.ts`. A trusted
+Native conversations use this same catalog through `kernel/thread-context.ts`. A trusted
 Host admission supplies mode, role and nullable project; the current-thread scope is the actual
 native Thread ID. The generic preparer requires that scope explicitly. Its `main` adapter alone
 resolves a main conversation's project from the admitted workspace. Child contexts do not inherit
 parent session notes or a parent's assembled system prompt. Bot contexts exclude ordinary notes
 and prompt profiles.
 
-`native_memory` exposes read/search and revision-checked save/delete. Native calls carry their real
+`memory` exposes read/search and revision-checked save/delete. Native calls carry their real
 Run, request/call-derived operation and admitted scopes through the private epoch-fenced memory
 bridge. The existing personalization typed record remains the only note writer. The current document
 adds only per-note latest revision metadata and its last mutation receipt. Historical receipts reuse
@@ -102,7 +102,7 @@ facts are selected once per frozen request with stable identities and real Envir
 Their complete bodies remain in immutable RequestSnapshots. They are not additional raw-history
 messages. Subsequent requests retain these facts until a successful compaction snapshot covers them;
 recording delivery must not make an old snapshot forget a newer note. Native tool receipts suppress
-the corresponding fact only after matching the real confirmed native-memory Operation, original
+the corresponding fact only after matching the real confirmed memory Operation, original
 request/call, origin and exact receipt body. Arbitrary tool/MCP JSON is not receipt authority.
 
 Selected, sent and successfully completed delivery records reuse real Catalog fact-event cursors.

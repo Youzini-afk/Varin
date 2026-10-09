@@ -156,12 +156,12 @@ export function createAgentPersonalization(options: {
     }, identity);
   };
   return { catalog, context, saveNote,
-    async nativeState() {
+    async runtimeState() {
       const { document, revision } = await read();
       return structuredClone({ catalog: { memories: document.memories, prompts: document.prompts, revision }, noteRevisions: document.noteRevisions ?? {} });
     },
     async mutationReceipt(origin: string, intent?: unknown) { return (await findMutation(origin, intent))?.receipt ?? null; },
-    async nativeMutation(input: { origin: string; action: 'save' | 'delete'; id?: number; scope: AgentMemoryScope; content?: string; revision: number },
+    async mutation(input: { origin: string; action: 'save' | 'delete'; id?: number; scope: AgentMemoryScope; content?: string; revision: number },
       admitted: { mode: 'agent' | 'bot'; sessionId: string; projectId: string | null }) {
       if (admitted.mode !== 'agent') throw new AgentPersonalizationError('Bot memory has its own owner');
       const scope = parseAgentScope(input.scope);
