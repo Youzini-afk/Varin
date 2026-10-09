@@ -389,6 +389,60 @@ fn supervisor_control_reaches_provider_while_catalog_is_locked() {
 }
 
 #[test]
+fn cold_run_assembly_is_independent_and_cancellation_prevents_model_dispatch() {
+    use crate::supervisor::{RunStart, RunSupervisor};
+    let f = Fixture::new();
+    let db = f.catalog();
+    let first = input(&db);
+    let second = {
+        let mut owner = db.lock().unwrap();
+        owner.create_thread("independent", "independent").unwrap();
+        owner.submit(&SubmitInput {
+            key: "independent".into(), thread_id: "independent".into(), branch_id: "independent".into(),
+            expected_head: None, input: json!({"text":"answer"}), configuration: json!({"provider":"test"}),
+        }).unwrap()
+    };
+    let catalog = Arc::try_unwrap(db).ok().unwrap().into_inner().unwrap();
+    let supervisor = RunSupervisor::new(catalog);
+    let make_start = |binding|RunStart {
+        binding, context_preparation: Arc::new(NoopContextPreparation), policy_state: Value::Null,
+        provider: Arc::new(Provider {calls: AtomicUsize::new(0),mode:Mode::ToolThenAnswer,cancel:CancellationToken::default()}),
+        tools: Arc::new(Tools::default()),policy:Arc::new(DefaultAgentPolicy),progress:ProgressSink::default(),
+    };
+    let mut first_start = make_start(first.binding.clone());
+    let first_provider = Arc::new(Provider {calls: AtomicUsize::new(0),mode:Mode::ToolThenAnswer,cancel:CancellationToken::default()});
+    first_start.provider = first_provider.clone();
+    let (started, entered) = std::sync::mpsc::channel();
+    let (release, gate) = std::sync::mpsc::channel();
+    let (observed, cancellation) = std::sync::mpsc::channel();
+    let handle = supervisor.prepare_start(&first.run_id, move|cancel| {
+        started.send(()).unwrap();
+        gate.recv().unwrap();
+        observed.send(cancel.is_cancelled()).unwrap();
+        Ok(first_start)
+    }).unwrap();
+    entered.recv_timeout(std::time::Duration::from_secs(3)).unwrap();
+    let mut binding = first.binding;
+    binding.history_range = HistoryRange {branch_id:"independent".into(),ancestor_id:None,leaf_id:Some(second.input_id)};
+    let independent = supervisor.start(&second.run_id,make_start(binding)).unwrap();
+    let (done, completion) = std::sync::mpsc::channel();
+    let waiter = std::thread::spawn(move||done.send(independent.wait()).unwrap());
+    let independent_result = completion.recv_timeout(std::time::Duration::from_secs(3));
+    let cancelled = supervisor.cancel(&first.run_id);
+    release.send(()).unwrap();
+    let observed = cancellation.recv_timeout(std::time::Duration::from_secs(3)).unwrap();
+    let report = handle.wait().unwrap();
+    waiter.join().unwrap();
+    assert!(independent_result.is_ok(),"cold assembly blocked an independent Run");
+    assert_eq!(independent_result.unwrap().unwrap().state,RunState::Completed);
+    assert!(cancelled.unwrap().cancel_requested);
+    assert!(observed);
+    assert_eq!(report.state,RunState::Cancelled);
+    assert_eq!(first_provider.calls.load(Ordering::SeqCst),0);
+    supervisor.shutdown().unwrap();
+}
+
+#[test]
 fn worker_commit_conflict_cannot_leave_a_workerless_run_generating() {
     struct ConcurrentInput {
         catalog: Arc<Mutex<Catalog>>,
