@@ -75,6 +75,16 @@ impl Catalog {
     }
     /// A candidate fixes an ancestor, not a moving leaf. Appended tail input remains untouched.
     pub fn publish_context(&mut self, proposal: ContextProposal) -> Result<ContextCheckpoint> {
+        let (checkpoint, reference) = self.stage_context(proposal)?;
+        let tx = self.db.transaction()?;
+        publish_prepared(&tx, &checkpoint, &reference)?;
+        tx.commit()?;
+        Ok(checkpoint)
+    }
+    pub(super) fn stage_context(
+        &self,
+        proposal: ContextProposal,
+    ) -> Result<(ContextCheckpoint, Value)> {
         let duplicate: Option<String> = self
             .db
             .query_row(
@@ -87,7 +97,7 @@ impl Catalog {
             let previous: ContextCheckpoint =
                 serde_json::from_value(self.content.load(&serde_json::from_str(&reference)?)?)?;
             return if previous.proposal == proposal {
-                Ok(previous)
+                Ok((previous, serde_json::from_str(&reference)?))
             } else {
                 Err(RuntimeError::Conflict(
                     "context candidate identity has different content".into(),
@@ -95,16 +105,9 @@ impl Catalog {
             };
         }
         if let Some(through_id) = proposal.through_id.as_deref() {
-            let history = self.execution_history(&proposal.branch_id)?;
-            let through = history
-                .iter()
-                .position(|item| item.id == through_id)
-                .ok_or_else(|| {
-                    RuntimeError::Conflict(
-                        "context boundary is no longer on the selected branch".into(),
-                    )
-                })?;
-            crate::execution::validate_history_pairs(&history[..=through])
+            let metadata = self.context_source_metadata(&proposal.branch_id, through_id)?;
+            let history = super::context_jobs::hydrate_source(&self.content, metadata)?;
+            crate::execution::validate_history_pairs(&history)
                 .map_err(|error| RuntimeError::Conflict(error.to_string()))?;
             if proposal.summary.trim().is_empty() {
                 return Err(RuntimeError::Invalid(
@@ -129,24 +132,7 @@ impl Catalog {
             proposal,
         };
         let reference = self.content.save(&serde_json::to_value(&checkpoint)?)?;
-        let tx = self.db.transaction()?;
-        let current:Option<u64>=tx.query_row("SELECT c.revision FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",[&checkpoint.proposal.branch_id],|r|read_number(r,0)).optional()?;
-        if current.unwrap_or(0) != checkpoint.proposal.expected_revision {
-            return Err(RuntimeError::Conflict(
-                "active context checkpoint changed".into(),
-            ));
-        }
-        tx.execute("INSERT INTO context_checkpoints(id,branch_id,revision,through_id,body) VALUES(?1,?2,?3,?4,?5)",params![checkpoint.id,checkpoint.proposal.branch_id,sql_number(revision)?,checkpoint.proposal.through_id,encode(&reference)?])?;
-        tx.execute("INSERT INTO active_contexts(branch_id,checkpoint_id) VALUES(?1,?2) ON CONFLICT(branch_id) DO UPDATE SET checkpoint_id=excluded.checkpoint_id",params![checkpoint.proposal.branch_id,checkpoint.id])?;
-        event(
-            &tx,
-            &checkpoint.proposal.branch_id,
-            revision,
-            "context.published",
-            json!({"checkpoint_id":checkpoint.id,"through_id":checkpoint.proposal.through_id}),
-        )?;
-        tx.commit()?;
-        Ok(checkpoint)
+        Ok((checkpoint, reference))
     }
     pub fn prepare_context_read(
         &self,
@@ -160,6 +146,16 @@ impl Catalog {
             return Err(RuntimeError::Conflict(
                 "context branch changed during preparation".into(),
             ));
+        }
+        if let Some(request) = run.configuration.get("context_job") {
+            let request: crate::context_job::ContextJobRequest =
+                serde_json::from_value(request.clone())?;
+            let source = self.context_source_metadata(&request.branch_id, &request.through_id)?;
+            return Ok(Some(ContextRead(ContextReadKind::Summary {
+                content: self.content.clone(),
+                request,
+                source,
+            })));
         }
         let active:Option<(String,Option<String>,String)>=self.db.query_row("SELECT c.id,c.through_id,c.body FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",[&run.branch_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
         let Some((checkpoint_id, through_id, reference)) = active else {
@@ -176,25 +172,128 @@ impl Catalog {
             suffix.push(metadata);
         }
         suffix.reverse();
-        Ok(Some(ContextRead {
+        Ok(Some(ContextRead(ContextReadKind::Checkpoint {
             content: self.content.clone(),
             checkpoint_id,
             reference: serde_json::from_str(&reference)?,
             suffix,
-        }))
+        })))
     }
 }
 /// The immutable, already-referenced bodies are loaded after releasing the Catalog owner.
-pub struct ContextRead {
-    content: crate::content::ContentStore,
-    checkpoint_id: String,
-    reference: Value,
-    suffix: Vec<HistoryItem>,
+/// Called with the candidate body already durable and all caller-specific fences checked.
+pub(super) fn publish_prepared(
+    tx: &Transaction<'_>,
+    checkpoint: &ContextCheckpoint,
+    reference: &Value,
+) -> Result<()> {
+    let prior: Option<String> = tx
+        .query_row(
+            "SELECT body FROM context_checkpoints WHERE id=?1",
+            [&checkpoint.id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(prior) = prior {
+        if serde_json::from_str::<Value>(&prior)? == *reference {
+            return Ok(());
+        }
+        return Err(RuntimeError::Conflict(
+            "context candidate identity has different content".into(),
+        ));
+    }
+    let current:Option<u64>=tx.query_row("SELECT c.revision FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",[&checkpoint.proposal.branch_id],|r|read_number(r,0)).optional()?;
+    if current.unwrap_or(0) != checkpoint.proposal.expected_revision {
+        return Err(RuntimeError::Conflict(
+            "active context checkpoint changed".into(),
+        ));
+    }
+    tx.execute("INSERT INTO context_checkpoints(id,branch_id,revision,through_id,body) VALUES(?1,?2,?3,?4,?5)",params![checkpoint.id,checkpoint.proposal.branch_id,sql_number(checkpoint.revision)?,checkpoint.proposal.through_id,encode(reference)?])?;
+    tx.execute("INSERT INTO active_contexts(branch_id,checkpoint_id) VALUES(?1,?2) ON CONFLICT(branch_id) DO UPDATE SET checkpoint_id=excluded.checkpoint_id",params![checkpoint.proposal.branch_id,checkpoint.id])?;
+    event(
+        tx,
+        &checkpoint.proposal.branch_id,
+        checkpoint.revision,
+        "context.published",
+        json!({"checkpoint_id":checkpoint.id,"through_id":checkpoint.proposal.through_id}),
+    )?;
+    Ok(())
+}
+
+pub struct ContextRead(ContextReadKind);
+
+enum ContextReadKind {
+    Checkpoint {
+        content: crate::content::ContentStore,
+        checkpoint_id: String,
+        reference: Value,
+        suffix: Vec<HistoryItem>,
+    },
+    Summary {
+        content: crate::content::ContentStore,
+        request: crate::context_job::ContextJobRequest,
+        source: Vec<HistoryItem>,
+    },
 }
 impl ContextRead {
     pub fn load(self) -> Result<ContextProjection> {
-        let checkpoint: ContextCheckpoint =
-            serde_json::from_value(self.content.load(&self.reference)?)?;
+        let (content, checkpoint_id, reference, suffix) = match self.0 {
+            ContextReadKind::Checkpoint {
+                content,
+                checkpoint_id,
+                reference,
+                suffix,
+            } => (content, checkpoint_id, reference, suffix),
+            ContextReadKind::Summary {
+                content,
+                request,
+                source,
+            } => {
+                let originals = super::context_jobs::hydrate_source(&content, source)?;
+                let mut history = vec![ConversationItem {
+                    id: format!("context-job:{}:system", request.key),
+                    provenance: Provenance::SystemInstruction {
+                        source: "context_compaction:v1".into(),
+                    },
+                    content: Content::Text {
+                        text: crate::context_job::SUMMARIZER_SYSTEM.into(),
+                    },
+                    opaque: None,
+                }];
+                for mut item in originals {
+                    // Quote the semantic source with its real role and identity; never replay a
+                    // historical tool call or promote earlier instructions into job authority.
+                    item.opaque = None;
+                    history.push(ConversationItem {
+                        id: format!("context-job:{}:source:{}", request.key, item.id),
+                        provenance: Provenance::ExternalData {
+                            source: format!("history:{}", item.id),
+                        },
+                        content: Content::Text {
+                            text: serde_json::to_string(&item)?,
+                        },
+                        opaque: None,
+                    });
+                }
+                history.push(ConversationItem {
+                    id: format!("context-job:{}:request", request.key),
+                    provenance: Provenance::UserInstruction {
+                        input_id: request.key.clone(),
+                    },
+                    content: Content::Text {
+                        text: crate::context_job::SUMMARY_REQUEST.into(),
+                    },
+                    opaque: None,
+                });
+                return Ok(ContextProjection {
+                    checkpoint_id: format!("context-job:{}", request.key),
+                    history,
+                    instruction_sources: vec!["context_compaction:v1".into()],
+                    memory_checkpoint: None,
+                });
+            }
+        };
+        let checkpoint: ContextCheckpoint = serde_json::from_value(content.load(&reference)?)?;
         let mut history = Vec::new();
         if !checkpoint.proposal.effective_system_prompt.is_empty() {
             history.push(ConversationItem {
@@ -220,8 +319,8 @@ impl ContextRead {
                 opaque: None,
             });
         }
-        for metadata in self.suffix {
-            let item = self.content.hydrate_history(metadata)?;
+        for metadata in suffix {
+            let item = content.hydrate_history(metadata)?;
             if item.source == HistorySource::User {
                 history.extend(super::execution_persistence::user_input_items(
                     &item.id,
@@ -232,7 +331,7 @@ impl ContextRead {
             }
         }
         Ok(ContextProjection {
-            checkpoint_id: self.checkpoint_id,
+            checkpoint_id,
             history,
             instruction_sources: checkpoint.proposal.instruction_sources,
             memory_checkpoint: checkpoint.proposal.memory_checkpoint,

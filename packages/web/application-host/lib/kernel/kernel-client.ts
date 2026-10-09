@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import {
   KERNEL_PROTOCOL_VERSION,
   KERNEL_REQUEST_WINDOW,
+  KERNEL_RUNTIME_DATA_METHODS,
   type KernelBranchReadResult,
   type KernelBranchChange,
   type KernelCreateEntry,
@@ -36,6 +37,8 @@ import {
   type NativeRuntimeStreamEvent,
   type KernelProcessSubscribeResult,
 } from "./protocol.generated.js";
+
+const NATIVE_DATA_METHODS: ReadonlySet<string> = new Set(KERNEL_RUNTIME_DATA_METHODS);
 
 export interface KernelClientOptions {
   hostId: string;
@@ -856,7 +859,7 @@ export class KernelClient {
 
   private async requestRaw<T, M extends KernelMethod = KernelMethod>(method: M, params: KernelMethodParams[M], options: { signal?: AbortSignal | undefined; grant?: KernelGrantHandle | undefined; allowBootstrap?: boolean | undefined; settleCancellation?: boolean | undefined } = {}): Promise<T> {
     const cancelled = () => new KernelClientError({ code: "cancelled", message: "Kernel request cancelled", retryable: true });
-    const release = this.closed && method === "kernel.shutdown" ? () => undefined : await (method.startsWith("runtime.") || method.startsWith("process.subscription.") ? this.nativeWindow : this.window).acquire(options.signal, cancelled);
+    const release = this.closed && method === "kernel.shutdown" ? () => undefined : await ((method.startsWith("runtime.") && !NATIVE_DATA_METHODS.has(method)) || method.startsWith("process.subscription.") ? this.nativeWindow : this.window).acquire(options.signal, cancelled);
     let admitted = false;
     try {
       if (this.closed && method !== "kernel.shutdown") throw new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closed" });

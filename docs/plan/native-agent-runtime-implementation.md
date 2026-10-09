@@ -13,6 +13,14 @@
 - 已新增局部实现：Catalog持久身份/历史/Operation/Wait，执行loop与事务桥接，RunSupervisor控制，多家族模型适配、输入队列与边界中断、组合依赖解析与绑定；kernel独立control worker和Host显式client已有真实IPC验证，未替代生产Pi路径
 - 独立审阅发现并已修复：续接claim后崩溃丢唤醒、后台handoff仍被终态Run阻止；模型完成与历史/工具调用现由同一事务提交。其余交叉边界继续审阅，最终测试结果以稳定代码重跑为准
 
+## 2026-10-09 恢复后的增量
+
+- 历史读取改为固定 head 的引用分页与现有正文分块读取；初始 UI 只载入最近 20 项，按需查看更早历史。已用实际 HTTP/内核验证累计图片历史超过单个 16 MiB IPC 帧仍能完整读取；错误游标、跨线程锚点和切换分支后的迟到响应有独立反例覆盖
+- 原生对话分支现在接到 Host/client/UI；分支创建重试在新分支推进后不回退 head，非法工具交换边界拒绝。当前复制对话祖先，不复制活动进程、工作区授权或模型选择
+- 显式上下文摘要采用独立持久 Run、固定源祖先和无工具策略；成功发布才切换 checkpoint，追加尾部与原文保留。核心独立验证覆盖正常摘要、失败／取消／工具输出候选与幂等发布；Host/UI 集成验证仍在进行
+- 凭据增量接入 configured provider/model headers、仅 header 的连接、环境 key/bearer 和 Vertex 显式 Cloud API key。独立测试使用假凭据；ADC、AWS SigV4 等接线及真实账号验收不包含在本段通过结论中
+- 这批工作尚未切换默认聊天、移除 Pi，或完成所有领域能力／平台发布验收。中断前未结束的测试没有计为通过
+
 ## 实施顺序与出口
 
 | 顺序 | 要完成的工作 | 必须建立的合同和出口 | 当前状态 |
@@ -33,9 +41,9 @@
 
 | 能力 | 当前入口/权威 | 目标交付 | 原生替代状态 |
 | --- | --- | --- | --- |
-| 会话、分支、运行中输入 | `packages/pi-host/src/session-host.ts`、`packages/runtime-broker` | ConversationStore + RunCoordinator；队列编辑、steering、停止、重连、历史回读 | 局部实现：持久队列、编辑/取消、边界输入/中断/nextRun；产品迁移与完整恢复未完成 |
+| 会话、分支、运行中输入 | `packages/pi-host/src/session-host.ts`、`packages/runtime-broker` | ConversationStore + RunCoordinator；队列编辑、steering、停止、重连、历史回读 | 局部实现：持久队列、编辑/取消、边界输入/中断/nextRun；显式原生界面、固定 head 分页与对话分支已接入；默认路由迁移与完整恢复未完成 |
 | 模型、认证、推理用途 | Pi SDK、Host `connections`/`pi-config`/`small-model` | 各实际配置 transport、OAuth/云身份、模型覆盖、reasoning/opaque、多模态、usage；chat与embedding/rerank等各自合同 | 未完成 |
-| 上下文、记忆checkpoint、压缩 | Pi harness/session history、Host `memory` | 原文保留；来源角色；冻结快照；祖先范围压缩；交付去重；即时记忆写入与稳定system快照 | 未完成 |
+| 上下文、记忆checkpoint、压缩 | Pi harness/session history、Host `memory` | 原文保留；来源角色；冻结快照；祖先范围压缩；交付去重；即时记忆写入与稳定system快照 | 原生 checkpoint 与显式摘要 Run 已实现，产品接线验收中；自动预算触发与完整记忆流程未完成 |
 | 文件、草稿、恢复 | Rust `storage`；Host `documents`/`recovery`；UI Document Registry | 复用内容对象/条件写入/恢复；明确草稿owner；分支与磁盘效果区分；组合恢复可核对 | 未完成迁移，底层能力已存在 |
 | 工作分支、基线与dispatch | Host `harness/thread-services.ts`、`thread-runtime.ts`、`kernel/storage-adapter.ts` | 持久受理立即回执；准备独立作业；批量capture；真实一致性标记；无变更报告与代码集成分开 | 未完成 |
 | Shell、PTY、输出、进程树 | Rust `process` guardian；Host `kernel/process-service.ts`/`terminal` | 保留真实进程回执；推送I/O与stdin确认；控制独立；取消观察不同于终止进程 | 未完成迁移，guardian已存在 |

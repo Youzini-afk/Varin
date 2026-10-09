@@ -28,7 +28,7 @@ receipt facts.
 The Agent workbench has an explicit nativeThread selector using the shared layout and Markdown
 renderer. Its projection controller reconstructs durable history, queue and operation facts and
 keeps transient progress separate. This is a vertical integration, not Pi parity. Default main-chat
-cutover, multimodal input, compaction, memory, questions, goal/schedule domains, MCP/extension routing,
+cutover, full multimodal coverage, automatic context-budget policy, memory, questions, goal/schedule domains, MCP/extension routing,
 remote environments, Pi asset import and final Pi removal still require their named owners.
 Next-run admission uses the saved launch credential scope and the core environment-owner reference
 to retain a materialized directory, rather than resetting files to the original source. Independent
@@ -64,7 +64,63 @@ behavior and transport limits require their own evidence, not a universal image-
 PDFs and arbitrary URLs/local/blob refs are not accepted as image substitutes.
 
 This path uses the existing HTTP JSON policy (50MB) and framed kernel transport (16MiB). Size
-errors retain the UI draft/images and surface an actionable error. Inline history still needs
-paging/content-reference transport for large accumulated media; chunked durable storage alone
-does not remove the IPC response-size limit. Streaming attachment refs must reuse the existing
-content/attachment authority when that path is implemented.
+errors retain the UI draft/images and surface an actionable error. Accumulated history is read through head-anchored reference pages and immutable body chunks,
+so the Host does not ask one framed RPC to return the complete inline conversation. Individual
+input uploads still use the existing request frame boundary. Streaming attachment uploads must
+reuse the existing content/attachment authority when that path is implemented.
+
+
+## Paged conversation projection
+
+Snapshots hydrate the newest 20 history records using `history.page` references and the existing
+immutable content chunk reader. Twenty is a display page size, not a conversation/input limit.
+`NativeThreadsAPI.historyPage(identity, {headId, beforeId})` exposes explicit earlier-page reads;
+opaque provider material and image bytes are preserved in the hydrated native history items.
+
+The Agent workbench's Load earlier history action pins its view to the returned head. Background
+Run, input and operation facts remain live. New messages do not get silently concatenated into a
+saved historical view; Show latest messages returns to the newest projection. Only pages the
+user explicitly loads are retained for that historical view. Switching thread/Host invalidates
+in-flight view requests. Active/indeterminate operation discovery comes from the native thread
+query independently of the visible history page, so older background jobs do not disappear
+just because their originating tool message scrolled outside the newest page.
+
+## Conversation branching
+
+The authenticated `fork` route accepts a native identity, an immutable ancestor and a stable
+client request key. The Host derives the new branch identity; Rust validates the ancestry and
+complete tool-call/result exchanges, and owns the idempotent branch creation. Retrying after the
+branch advances still refers to its original creation, rather than comparing its mutable head.
+The history UI offers this action in both the latest and head-pinned historical views and opens
+the returned branch through the same native conversation projection. Failed/uncertain requests
+retain their creation key; switching Host or conversation invalidates pending navigation.
+
+This action is explicitly conversation-only. It preserves original history and opaque provider
+items, but does not copy an active Run, process, workspace/tool grant, model selection or context
+checkpoint. The UI explains this before creation and asks for a model on the new branch. Resource
+forking and default main-chat replacement remain distinct work; no Pi session is created or used
+as a fallback.
+
+
+## Explicit context summary jobs
+
+The native history UI can request a summary through a selected immutable message using the
+registered model chosen in its composer. The Host resolves model configuration and credentials;
+HTTP callers cannot supply a model endpoint, prompt recipe, memory checkpoint or tool binding.
+The active native checkpoint supplies its existing effective prompt, instruction sources and
+memory reference. An uncertain retry keeps the job's original recipe even if a checkpoint was
+published meanwhile. The core rejects stale checkpoint revisions and incomplete tool exchanges
+before generation.
+
+Summary generation is an ordinary authenticated Run on an isolated internal branch, with the
+core's tool-free one-generation policy. Its durable job and state appear in the source branch's
+snapshot after reconnect or reload. The UI exposes cancellation, explicit preparation resume,
+and applying a successfully completed candidate. Publication uses the recorded checkpoint revision;
+a candidate does not overwrite a newer checkpoint. Original conversation pages remain available.
+The Host recovers eligible summary launches with their saved credential scope after validating
+their source branch, and strips the core-owned recipe marker before comparing model configuration.
+It does not retry unknown model effects or select a replacement paid model.
+
+This is explicit user-triggered compaction, not automatic budget management, prompt/skill loading,
+Agent memory CRUD, or parity with Pi context behavior. Source branches and ongoing runs remain
+independent of the summary job; only a successful explicit publication changes later context views.

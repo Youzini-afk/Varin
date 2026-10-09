@@ -1,5 +1,40 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export interface NativeHistoryPageParams {
+  branchId: string;
+  headId?: string;
+  beforeId?: string;
+  limit: number;
+}
+
+export interface NativeHistoryBodyParams {
+  itemId: string;
+  chunkIndex: number;
+}
+
+export interface NativeHistoryReference {
+  id: string;
+  thread_id: string;
+  parent: string | null;
+  source: NativeHistorySource;
+  content_ref: string;
+}
+
+export interface NativeHistoryPage {
+  head: string | null;
+  items: NativeHistoryReference[];
+  previous: string | null;
+}
+
+export interface NativeHistoryBodyChunk {
+  itemId: string;
+  contentRef: string;
+  chunkIndex: number;
+  chunkCount: number;
+  totalBytes: number;
+  bytesBase64: string;
+}
+
 export interface NativeRunReconcileParams {
   runId: string;
   toolBinding: unknown;
@@ -150,6 +185,29 @@ export interface NativeExternalReceipt {
   outcome: NativeOutcome;
   effect: NativeEffect;
   result: unknown;
+}
+
+export interface NativeBranchForkParams {
+  sourceBranchId: string;
+  branchId: string;
+  headId: string | null;
+}
+
+export interface NativeBranchForkResult {
+  threadId: string;
+  branchId: string;
+}
+
+export interface NativeContextJobCreateParams {
+  key: string;
+  branchId: string;
+  throughId: string;
+  expectedRevision: number;
+  effectiveSystemPrompt: string;
+  instructionSources: string[];
+  memoryCheckpoint: string | null;
+  configuration: unknown;
+  credentialScope?: NativeCredentialScope;
 }
 
 export interface NativeRunStartParams {

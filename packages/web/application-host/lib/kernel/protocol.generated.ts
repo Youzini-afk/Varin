@@ -5,9 +5,19 @@
 
 export const KERNEL_PROTOCOL_VERSION = 1 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
+export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.history.body"] as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
 
 export type KernelMethod =
+  | "runtime.branch.fork"
+  | "runtime.context_job.create"
+  | "runtime.context_job.inspect"
+  | "runtime.context_job.list"
+  | "runtime.context_job.publish"
+  | "runtime.context.inspect"
+  | "runtime.history.page"
+  | "runtime.history.body"
+  | "runtime.thread.operations.active"
   | "runtime.run.reconcile"
   | "runtime.launch.fail"
   | "runtime.thread.inspect"
@@ -129,6 +139,41 @@ export type KernelMethod =
   | "compute.cancel"
   | "compute.release"
   | "compute.grammar.register";
+
+export interface NativeHistoryPageParams {
+  branchId: string;
+  headId?: string;
+  beforeId?: string;
+  limit: number;
+}
+
+export interface NativeHistoryBodyParams {
+  itemId: string;
+  chunkIndex: number;
+}
+
+export interface NativeHistoryReference {
+  id: string;
+  thread_id: string;
+  parent: string | null;
+  source: NativeHistorySource;
+  content_ref: string;
+}
+
+export interface NativeHistoryPage {
+  head: string | null;
+  items: NativeHistoryReference[];
+  previous: string | null;
+}
+
+export interface NativeHistoryBodyChunk {
+  itemId: string;
+  contentRef: string;
+  chunkIndex: number;
+  chunkCount: number;
+  totalBytes: number;
+  bytesBase64: string;
+}
 
 export interface NativeRunReconcileParams {
   runId: string;
@@ -316,6 +361,29 @@ export interface NativeExternalReceipt {
   outcome: NativeOutcome;
   effect: NativeEffect;
   result: unknown;
+}
+
+export interface NativeBranchForkParams {
+  sourceBranchId: string;
+  branchId: string;
+  headId: string | null;
+}
+
+export interface NativeBranchForkResult {
+  threadId: string;
+  branchId: string;
+}
+
+export interface NativeContextJobCreateParams {
+  key: string;
+  branchId: string;
+  throughId: string;
+  expectedRevision: number;
+  effectiveSystemPrompt: string;
+  instructionSources: string[];
+  memoryCheckpoint: string | null;
+  configuration: unknown;
+  credentialScope?: NativeCredentialScope;
 }
 
 export interface NativeRunStartParams {
@@ -1590,6 +1658,15 @@ export interface KernelComputeReadResult {
 }
 
 export type KernelMethodParams = {
+  "runtime.branch.fork": NativeBranchForkParams;
+  "runtime.context_job.create": NativeContextJobCreateParams;
+  "runtime.context_job.inspect": NativeRunParams;
+  "runtime.context_job.list": NativeHistoryParams;
+  "runtime.context_job.publish": NativeRunParams;
+  "runtime.context.inspect": NativeHistoryParams;
+  "runtime.history.page": NativeHistoryPageParams;
+  "runtime.history.body": NativeHistoryBodyParams;
+  "runtime.thread.operations.active": NativeThreadParams;
   "runtime.run.reconcile": NativeRunReconcileParams;
   "runtime.launch.fail": NativeLaunchFailedParams;
   "runtime.thread.inspect": NativeThreadParams;
@@ -1714,6 +1791,87 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.branch.fork";
+      params: NativeBranchForkParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.context_job.create";
+      params: NativeContextJobCreateParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.context_job.inspect";
+      params: NativeRunParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.context_job.list";
+      params: NativeHistoryParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.context_job.publish";
+      params: NativeRunParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.context.inspect";
+      params: NativeHistoryParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.history.page";
+      params: NativeHistoryPageParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.history.body";
+      params: NativeHistoryBodyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.thread.operations.active";
+      params: NativeThreadParams;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";

@@ -126,6 +126,7 @@ fn write_input(tx: &Transaction<'_>, input: &QueuedInput) -> Result<()> {
 }
 impl Catalog {
     pub fn enqueue_input(&mut self, command: &EnqueueInput) -> Result<InputReceipt> {
+        super::context_jobs::require_regular_branch(&self.db, &command.branch_id)?;
         execution_persistence::user_input_items("admission", &command.input)?;
         let history_content = self.content.save_history(&command.input, &None)?;
         let encoded = encode(command)?;
@@ -245,6 +246,8 @@ impl Catalog {
         revision: u64,
         content: Value,
     ) -> Result<QueuedInput> {
+        let existing = self.queued_input(id)?;
+        super::context_jobs::require_regular_branch(&self.db, &existing.branch_id)?;
         execution_persistence::user_input_items(id, &content)?;
         let history_content = self.content.save_history(&content, &None)?;
         let tx = self.db.transaction()?;

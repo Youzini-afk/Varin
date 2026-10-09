@@ -1,6 +1,6 @@
 use crate::error::{response_error, KernelError};
 use crate::protocol::*;
-use crate::protocol_generated::KERNEL_REQUEST_WINDOW;
+use crate::protocol_generated::{KERNEL_REQUEST_WINDOW, KERNEL_RUNTIME_DATA_METHODS};
 use crate::storage::Storage;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -587,7 +587,17 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         let stdout = io::stdout();
         let mut output = stdout.lock();
         for response in response_rx {
-            if write_frame(&mut output, &response).is_err() {
+            let mut payload=match serde_json::to_vec(&response){Ok(payload)=>payload,Err(_)=>{writer_failed_for_thread.store(true,Ordering::Release);break;}};
+            if payload.len()>MAX_FRAME_BYTES {
+                // A large result is one failed read, not a broken shared transport. Transient
+                // streams can lose an update; their sequence/cursor lets the Host resynchronize.
+                if response.get("kind").and_then(Value::as_str)==Some("runtime-event") && response.get("stream").and_then(Value::as_str)==Some("progress") {continue;}
+                if let Some(id)=response.get("id").and_then(Value::as_str).filter(|_|response.get("kind").and_then(Value::as_str)==Some("response")) {
+                    let failure=response_error(id,&KernelError::Operation("response exceeds the transport frame limit; use paged history/content reads".into()));
+                    payload=serde_json::to_vec(&failure).expect("response error is JSON");
+                }
+            }
+            if write_encoded_frame(&mut output, &payload).is_err() {
                 writer_failed_for_thread.store(true, Ordering::Release);
                 // There is no safe way to drain stdin after stdout is gone:
                 // the Host cannot receive any pending response. Exit the
@@ -673,7 +683,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 mark_grant_revoked(&revoked_grants, &cancellations, &target);
             }
         }
-        let wire_lane = if request.get("method").and_then(Value::as_str).is_some_and(|method| method.starts_with("runtime.") || method.starts_with("process.subscription.")) {
+        let wire_lane = if request.get("method").and_then(Value::as_str).is_some_and(|method| (method.starts_with("runtime.") && !KERNEL_RUNTIME_DATA_METHODS.contains(&method)) || method.starts_with("process.subscription.")) {
             WireLane::Native
         } else { WireLane::Storage };
         if !id.is_empty() {

@@ -4,19 +4,25 @@ import { fileToImageAttachment } from '@/components/chat/composer/imageAttachmen
 import { useI18n } from '@/lib/i18n';
 import React from 'react';
 import { NativeThreadRequestError } from '@varin/application-client';
-import type { NativeThreadIdentity, NativeThreadSnapshot, NativeThreadsAPI } from '@varin/application-client';
+import type { NativeThreadIdentity, NativeThreadSnapshot, NativeThreadsAPI, NativeThreadHistoryPage } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { NativeThreadProjection, nativeHistoryText, nativeHistoryImages } from '@/lib/native-runtime/thread-projection';
 
-export function NativeThreadConversation({ api, identity }: { api: NativeThreadsAPI; identity: NativeThreadIdentity }) {
+export function NativeThreadConversation({ api, identity, onBranchCreated }: { api: NativeThreadsAPI; identity: NativeThreadIdentity; onBranchCreated?: (identity: NativeThreadIdentity) => void }) {
   const { t } = useI18n();
   const [images, setImages] = React.useState<ImageAttachment[]>([]);
   const fileInput = React.useRef<HTMLInputElement | null>(null);
   const fileReadGeneration = React.useRef(0);
   const [readingFiles, setReadingFiles] = React.useState(false);
   const [snapshot, setSnapshot] = React.useState<NativeThreadSnapshot>();
+  const [historyView, setHistoryView] = React.useState<NativeThreadHistoryPage | null>(null);
+  const [historyLoading, setHistoryLoading] = React.useState(false);
+  const historyGeneration = React.useRef(0);
+  const identityGeneration = React.useRef(0);
+  const forkKeys = React.useRef(new Map<string, string>());
+  const compactionKeys = React.useRef(new Map<string, string>());
   const [progress, setProgress] = React.useState('');
   const [text, setText] = React.useState('');
   const draftRef = React.useRef({ text, images });
@@ -31,10 +37,12 @@ export function NativeThreadConversation({ api, identity }: { api: NativeThreads
   const pendingInput = React.useRef<{ fingerprint: string; send(): Promise<unknown> } | undefined>(undefined);
   const projection = React.useRef<NativeThreadProjection | undefined>(undefined);
   React.useEffect(() => {
+    identityGeneration.current += 1; forkKeys.current.clear(); compactionKeys.current.clear();
+    historyGeneration.current += 1; setHistoryView(null); setHistoryLoading(false);
     setSnapshot(undefined); setProgress(''); setImages([]); setReadingFiles(false); pendingInput.current = undefined; fileReadGeneration.current += 1;
     const view = new NativeThreadProjection(api, identity, setSnapshot, value => setError(value instanceof Error ? value.message : 'Native thread unavailable'), setProgress);
     projection.current = view; view.start();
-    return () => { fileReadGeneration.current += 1; view.close(); };
+    return () => { identityGeneration.current += 1; historyGeneration.current += 1; fileReadGeneration.current += 1; view.close(); };
   }, [api, identity]);
   const branch = snapshot?.thread.branches.find(value => value.branch_id === identity.branchId);
   const run = snapshot?.activeRun ?? branch?.latest_run;
@@ -68,15 +76,65 @@ export function NativeThreadConversation({ api, identity }: { api: NativeThreads
     } catch (value) { if (generation === fileReadGeneration.current) setError(value instanceof Error ? value.message : 'Could not read images'); }
     finally { if (generation === fileReadGeneration.current) setReadingFiles(false); }
   };
+  const returnToLatest = () => { historyGeneration.current += 1; setHistoryView(null); setHistoryLoading(false); };
+  const loadEarlier = async () => {
+    if (!snapshot) return;
+    const current = historyView ?? { ...snapshot.historyPage, items: snapshot.history };
+    if (!current.head || !current.previous) return;
+    const generation = ++historyGeneration.current;
+    setHistoryLoading(true); setError(undefined);
+    try {
+      const page = await api.historyPage(identity, { headId: current.head, beforeId: current.previous });
+      if (generation === historyGeneration.current) setHistoryView({ head: current.head, previous: page.previous, items: [...page.items, ...current.items] });
+    } catch (value) { if (generation === historyGeneration.current) setError(value instanceof Error ? value.message : 'Earlier history is unavailable'); }
+    finally { if (generation === historyGeneration.current) setHistoryLoading(false); }
+  };
+  const forkFrom = async (headId: string) => {
+    const generation = identityGeneration.current;
+    let key = forkKeys.current.get(headId);
+    if (!key) { key = crypto.randomUUID(); forkKeys.current.set(headId, key); }
+    await act(async () => {
+      const created = await api.fork({ ...identity, key, headId });
+      if (generation === identityGeneration.current) { forkKeys.current.delete(headId); onBranchCreated?.(created); }
+    });
+  };
+  const compactThrough = async (throughId: string) => {
+    if (!snapshot) return;
+    const expectedRevision = snapshot.context.checkpoint?.revision ?? 0;
+    const fingerprint = JSON.stringify([throughId, expectedRevision, providerId, modelId]);
+    let key = compactionKeys.current.get(fingerprint);
+    if (!key) { key = crypto.randomUUID(); compactionKeys.current.set(fingerprint, key); }
+    await act(async () => {
+      await api.compact({ ...identity, key, throughId, expectedRevision, model: { providerId, modelId } });
+      compactionKeys.current.delete(fingerprint);
+    });
+  };
+  const visibleHistory = historyView?.items ?? snapshot?.history ?? [];
+  const previousHistory = historyView ? historyView.previous : snapshot?.historyPage.previous;
   return <section className="flex h-full min-h-0 flex-col" aria-label="Native thread conversation">
-    <div className="border-b px-4 py-2 text-xs text-muted-foreground">nativeThread · {identity.threadId} · {run?.state ?? 'Ready'}{run?.waiting_on ? ` · ${run.waiting_on}` : ''}</div>
+    <div className="border-b px-4 py-2 text-xs text-muted-foreground">nativeThread · {identity.threadId} · branch {identity.branchId.slice(-8)} · {run?.state ?? 'Ready'}{run?.waiting_on ? ` · ${run.waiting_on}` : ''}</div>
     <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4">
-      {snapshot?.history.map(item => <article key={item.id} className="mx-auto max-w-3xl">
+      <div className="mx-auto flex max-w-3xl items-center gap-2">
+        {previousHistory && <Button variant="ghost" size="sm" disabled={historyLoading} onClick={() => void loadEarlier()}>{historyLoading ? 'Loading earlier history' : 'Load earlier history'}</Button>}
+        {historyView && <Button variant="outline" size="sm" onClick={returnToLatest}>{historyView.head !== snapshot?.historyPage.head ? 'Show latest messages' : 'Return to latest view'}</Button>}
+        {historyView && <span className="text-xs text-muted-foreground">Viewing saved history</span>}
+      </div>
+      {visibleHistory.map(item => <article key={item.id} className="mx-auto max-w-3xl">
         <div className="mb-1 text-xs text-muted-foreground">{item.source}</div>
         <MarkdownRenderer messageId={item.id} content={nativeHistoryText(item.content)} />
         <ImageAttachmentStrip images={nativeHistoryImages(item.content)} />
+        <details className="mt-2 text-xs text-muted-foreground">
+          <summary className="cursor-pointer">Summarize through this message</summary>
+          <p className="py-2">Generate a continuation summary with the selected model. Original messages stay available. Apply the completed summary below when ready.</p>
+          <Button variant="ghost" size="sm" disabled={pending || !snapshot || !providerId || !modelId} onClick={() => void compactThrough(item.id)}>Generate context summary</Button>
+        </details>
+        {onBranchCreated && <details className="mt-2 text-xs text-muted-foreground">
+          <summary className="cursor-pointer">Branch from this message</summary>
+          <p className="py-2">Keeps conversation through this message. Choose a model for the new branch. Running work, workspace tools and context summaries stay on the original branch.</p>
+          <Button variant="ghost" size="sm" disabled={pending} onClick={() => void forkFrom(item.id)}>Branch conversation only</Button>
+        </details>}
       </article>)}
-      {progress && <article className="mx-auto max-w-3xl" aria-label="Streaming assistant response"><MarkdownRenderer messageId={`${identity.threadId}:progress`} isStreaming content={progress} /></article>}
+      {!historyView && progress && <article className="mx-auto max-w-3xl" aria-label="Streaming assistant response"><MarkdownRenderer messageId={`${identity.threadId}:progress`} isStreaming content={progress} /></article>}
       {snapshot?.operations.map(operation => <div key={operation.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
         <div>Background operation · {operation.phase} · {operation.outcome ?? 'In progress'} · effect: {operation.effect}</div>
         {operation.external_receipt && <div className="text-xs text-muted-foreground">{operation.external_receipt.executor} · {operation.external_receipt.outcome}</div>}
@@ -93,6 +151,23 @@ export function NativeThreadConversation({ api, identity }: { api: NativeThreads
         <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelInput(input.id, input.revision))}>Cancel queued input</Button>
       </div>)}
     </div>
+    {snapshot && <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">
+      <summary className="cursor-pointer">Context summaries · checkpoint {snapshot.context.checkpoint?.revision ?? 0} · {snapshot.context.jobs.length} jobs</summary>
+      {snapshot.context.checkpoint && <div className="my-2" aria-label="Active context summary">
+        <MarkdownRenderer messageId={snapshot.context.checkpoint.id} content={snapshot.context.checkpoint.proposal.summary} />
+      </div>}
+      {snapshot.context.jobs.map(({ job, run: jobRun }) => {
+        const published = snapshot.context.checkpoint?.id === job.request.key;
+        const superseded = (snapshot.context.checkpoint?.revision ?? 0) > job.request.expected_revision;
+        const terminal = ['completed', 'cancelled', 'failed'].includes(jobRun.state);
+        return <div key={jobRun.id} className="my-2 rounded border p-2">
+          <p>Summary through {job.request.through_id.slice(-8)} · {published ? 'Applied' : jobRun.state}{!published && superseded ? ' · Checkpoint has changed' : ''}</p>
+          {jobRun.state === 'completed' && !published && !superseded && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.publishContext(identity, jobRun.id))}>Apply context summary</Button>}
+          {!terminal && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.cancelContext(identity, jobRun.id))}>Cancel summary</Button>}
+          {!terminal && ['accepted', 'preparing', 'runnable', 'waiting', 'recovering'].includes(jobRun.state) && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.resumeContext(identity, jobRun.id))}>Resume summary preparation</Button>}
+        </div>;
+      })}
+    </details>}
     <form className="mx-auto w-full max-w-3xl space-y-2 p-4" onSubmit={event => {
       event.preventDefault();
       void act(async () => {
@@ -104,7 +179,7 @@ export function NativeThreadConversation({ api, identity }: { api: NativeThreads
           pendingInput.current = { fingerprint, send: active ? () => api.enqueue(queued) : () => api.submit(submit) };
         }
         await pendingInput.current.send();
-        pendingInput.current = undefined;
+        pendingInput.current = undefined; returnToLatest();
         if (draftRef.current.text === text) setText('');
         setImages(current => current.filter(image => !images.includes(image)));
       });

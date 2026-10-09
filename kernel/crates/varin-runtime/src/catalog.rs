@@ -192,6 +192,9 @@ impl Catalog {
         self.submit_with_launch(command, None)
     }
     pub fn submit_with_launch(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>) -> Result<Receipt> {
+        self.submit_admission(command, launch, false)
+    }
+    fn submit_admission(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>, create_thread: bool) -> Result<Receipt> {
         if let Some(selection)=launch.as_ref(){selection.validate()?;}
         execution_persistence::user_input_items("admission",&command.input)?;
         let history_content = self.content.save_history(&command.input, &None)?;
@@ -211,6 +214,12 @@ impl Catalog {
                 ));
             }
             return Ok(serde_json::from_str(&receipt)?);
+        }
+        context_jobs::require_regular_branch(&tx, &command.branch_id)?;
+        if create_thread {
+            tx.execute("INSERT INTO threads(id) VALUES(?1)", [&command.thread_id])?;
+            tx.execute("INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,NULL)", params![command.branch_id, command.thread_id])?;
+            event(&tx, &command.thread_id, 1, "thread.created", json!({"branch_id":command.branch_id}))?;
         }
         let (thread, head, active): (String, Option<String>, Option<String>) = tx.query_row(
             "SELECT thread_id,head,active_run FROM branches WHERE id=?1",
@@ -369,6 +378,7 @@ impl Catalog {
         content: Value,
         provider: Option<ProviderOriginal>,
     ) -> Result<HistoryItem> {
+        context_jobs::require_regular_branch(&self.db, &self.run(run_id)?.branch_id)?;
         let body_reference = self.content.save_history(&content, &provider)?;
         let tx = self.db.transaction()?;
         let run: Run = record(&tx, "runs", run_id)?;
@@ -420,22 +430,71 @@ impl Catalog {
         result.reverse();
         Ok(result)
     }
+    pub fn branch_thread_id(&self, branch_id: &str) -> Result<String> {
+        self.db.query_row(
+            "SELECT thread_id FROM branches WHERE id=?1",
+            [branch_id],
+            |row| row.get(0),
+        ).optional()?.ok_or_else(|| RuntimeError::NotFound(branch_id.into()))
+    }
     pub fn fork_branch(
         &mut self,
         source: &str,
         new_branch: &str,
         head: Option<&str>,
     ) -> Result<()> {
-        let ancestry = self.history(source)?;
-        if head.is_some_and(|head| !ancestry.iter().any(|item| item.id == head)) {
-            return Err(RuntimeError::Invalid("fork head is not an ancestor".into()));
+        // Creation identity is immutable even when either branch later advances.
+        let creation: Option<String> = self.db.query_row(
+            "SELECT data FROM events WHERE subject=?1 AND kind='branch.created' ORDER BY cursor LIMIT 1",
+            [new_branch],
+            |row| row.get(0),
+        ).optional()?;
+        let identity = json!({"source":source,"head":head});
+        if let Some(creation) = creation {
+            if serde_json::from_str::<Value>(&creation)? == identity {
+                return Ok(());
+            }
+            return Err(RuntimeError::Conflict("branch identity has different fork input".into()));
+        }
+        let exists: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM branches WHERE id=?1)",
+            [new_branch],
+            |row| row.get(0),
+        )?;
+        if exists {
+            return Err(RuntimeError::Conflict("branch identity already exists".into()));
+        }
+        let (thread, mut cursor): (String, Option<String>) = self.db.query_row(
+            "SELECT thread_id,head FROM branches WHERE id=?1",
+            [source],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?.ok_or_else(|| RuntimeError::NotFound(source.into()))?;
+        if let Some(head) = head {
+            // Membership uses immutable ancestry columns, never hydrated source bodies.
+            while cursor.as_deref() != Some(head) {
+                let key = cursor.ok_or_else(|| RuntimeError::Invalid("fork head is not an ancestor".into()))?;
+                cursor = self.db.query_row(
+                    "SELECT parent FROM history WHERE id=?1",
+                    [&key],
+                    |row| row.get(0),
+                ).optional()?.ok_or_else(|| RuntimeError::NotFound(key))?;
+            }
+        }
+        if head.is_some() {
+            // A fork is a replayable conversation cut, not a continuation of live tool work.
+            // Only hydrate the selected prefix to apply the existing pairing rules.
+            let mut metadata = Vec::new();
+            while let Some(key) = cursor {
+                let item: HistoryItem = record(&self.db, "history", &key)?;
+                cursor = item.parent.clone();
+                metadata.push(item);
+            }
+            metadata.reverse();
+            let history = context_jobs::hydrate_source(&self.content, metadata)?;
+            crate::execution::validate_history_pairs(&history)
+                .map_err(|error| RuntimeError::Invalid(error.to_string()))?;
         }
         let tx = self.db.transaction()?;
-        let thread: String = tx.query_row(
-            "SELECT thread_id FROM branches WHERE id=?1",
-            [source],
-            |r| r.get(0),
-        )?;
         tx.execute(
             "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,?3)",
             params![new_branch, thread, head],
@@ -445,7 +504,7 @@ impl Catalog {
             new_branch,
             1,
             "branch.created",
-            json!({"source":source,"head":head}),
+            identity,
         )?;
         tx.commit()?;
         Ok(())
@@ -1096,3 +1155,9 @@ mod observe;
 
 #[path="catalog_context.rs"]
 pub mod context;
+
+#[path="catalog_history.rs"]
+pub mod history_views;
+
+#[path="catalog_context_jobs.rs"]
+pub mod context_jobs;

@@ -9,7 +9,7 @@ afterEach(() => { vi.useRealTimers(); });
 it('reconnects from the last durable cursor and replaces lossy progress with authoritative history', async () => {
   vi.useFakeTimers();
   const run = { id: 'run', thread_id: identity.threadId, branch_id: identity.branchId, state: 'generating' as const, revision: 1, epoch: 1, configuration: {}, cancel_requested: false, waiting_on: null };
-  const view: NativeThreadSnapshot = { identity, thread: { thread_id: identity.threadId, branches: [{ branch_id: identity.branchId, head: null, active_run_id: run.id, latest_run: run }] }, activeRun: run, history: [], inputs: [], operations: [], launch: null };
+  const view: NativeThreadSnapshot = { identity, thread: { thread_id: identity.threadId, branches: [{ branch_id: identity.branchId, head: null, active_run_id: run.id, latest_run: run }] }, activeRun: run, history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], launch: null, context: { checkpoint: null, jobs: [] } };
   const connections: Array<{ close(): void; listener: Parameters<NativeThreadsAPI['observe']>[1] }> = [];
   const observe = vi.fn(async (_cursor: number, listener: Parameters<NativeThreadsAPI['observe']>[1], { signal }: { signal: AbortSignal }) => {
     const pending = deferred();

@@ -55,7 +55,23 @@ struct Reference {
 pub(crate) struct ContentStore {
     root: PathBuf,
 }
+pub struct ContentChunk {
+    pub content_ref:String,
+    pub chunk_index:usize,
+    pub chunk_count:usize,
+    pub total_bytes:u64,
+    pub bytes:Vec<u8>,
+}
 impl ContentStore {
+    pub(crate) fn load_chunk(&self, reference:&Value, index:usize)->Result<ContentChunk>{
+        let reference:Reference=serde_json::from_value(reference.clone())?;
+        let manifest:Manifest=serde_json::from_slice(&self.read_bytes(&reference.content_object)?)?;
+        if manifest.version!=1{return Err(RuntimeError::Invalid("unsupported content manifest".into()));}
+        let hash=manifest.chunks.get(index).ok_or_else(||RuntimeError::Invalid("content chunk index out of range".into()))?;
+        let bytes=self.read_bytes(hash)?;
+        Ok(ContentChunk{content_ref:reference.content_object,chunk_index:index,chunk_count:manifest.chunks.len(),total_bytes:manifest.bytes,bytes})
+    }
+
     pub(crate) fn open(root: PathBuf) -> Result<Self> {
         fs::create_dir_all(root.join("objects"))?;
         fs::create_dir_all(root.join("staging"))?;
