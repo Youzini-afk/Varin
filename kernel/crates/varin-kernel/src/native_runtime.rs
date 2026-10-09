@@ -96,6 +96,7 @@ pub(crate) fn spawn(
     resources: crate::native_tools::NativeResourceClient,
     credential_bridge: crate::credential_bridge::CredentialBridge,
     mcp_bridge: crate::native_mcp::McpBridge,
+    policy_bridge: crate::native_policy::PolicyBridge,
     responses: mpsc::SyncSender<Value>,
     finished: impl Fn(&str) + Send + Sync + 'static,
 ) -> JoinHandle<()> {
@@ -307,6 +308,13 @@ pub(crate) fn spawn(
                                 .map_err(|e| KernelError::Operation(e.to_string()))?;
                             return Ok(serde_json::to_value(input)?);
                         }
+                        if method == "runtime.launch.policy.prepare" {
+                            let p: NativePolicyPrepareParams = serde_json::from_value(params)?;
+                            let identity = crate::native_questions::policy_identity(varin_runtime::execution::PolicyIdentity { name: p.identity.name, version: p.identity.version });
+                            let result = runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?
+                                .prepare_policy_launch(&p.run_id, identity).map_err(domain)?;
+                            return Ok(serde_json::to_value(result)?);
+                        }
                         if method == "runtime.launch.mcp.prepare" {
                             let p: NativeMcpPrepareParams = serde_json::from_value(params)?;
                             let binding = native_mcp_binding(p.binding)?;
@@ -327,6 +335,7 @@ pub(crate) fn spawn(
                                     credential_scope: selected.credential_scope.clone(),
                                     tool_binding: None,
                                     mcp_binding: None,
+                                    policy_binding: None,
                                 }
                             } else {
                                 serde_json::from_value(params)?
@@ -339,7 +348,7 @@ pub(crate) fn spawn(
                                 catalog.run(&p.run_id).map_err(domain)?
                             };
                             let is_context_job = run.configuration.get("context_job").is_some();
-                            if is_context_job && (selected.is_some() || p.tool_binding.is_some() || p.mcp_binding.is_some()) {
+                            if is_context_job && (selected.is_some() || p.tool_binding.is_some() || p.mcp_binding.is_some() || p.policy_binding.is_some()) {
                                 return Err(KernelError::Protocol(
                                     "context jobs use their fixed tool-free launch".into(),
                                 ));
@@ -384,6 +393,11 @@ pub(crate) fn spawn(
                             if is_context_job {
                                 start =
                                     varin_runtime::context_job::configure_compaction_start(start);
+                            }
+                            if let Some(binding) = p.policy_binding {
+                                start.policy = policy_bridge.policy(p.run_id.clone(), binding.reference,
+                                    varin_runtime::execution::PolicyIdentity { name: binding.identity.name, version: binding.identity.version })
+                                    .map_err(|error| KernelError::Authorization(error.to_string()))?;
                             }
                             if !is_context_job { start = crate::native_questions::configure(start, runtime.catalog()); }
                             if let Some(selected) = selected {
@@ -554,6 +568,7 @@ pub(crate) fn spawn(
                                 let terminal = completion_catalog.lock().ok().and_then(|catalog| catalog.run(&completion_run).ok())
                                     .is_some_and(|run| run.state.terminal());
                                 if terminal {
+                                    let _ = completion_responses.send(json!({"v":1,"kind":"agent-policy-release","kernelEpoch":completion_epoch,"runId":completion_run}));
                                     let _ = completion_responses.send(json!({"v":1,"kind":"mcp-owner-release",
                                         "kernelEpoch":completion_epoch,"runId":completion_run}));
                                 }
@@ -906,7 +921,7 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
     }
 
     match method {
-        "runtime.status" => Ok(json!({"epoch":catalog.epoch()})),
+        "runtime.status" => Ok(json!({"epoch":catalog.epoch(),"eventCursor":catalog.event_cursor().map_err(domain)?})),
         "runtime.thread.create" => {
             let p: NativeThreadCreateParams = serde_json::from_value(params)?;
             if p.thread_id.trim().is_empty() || p.branch_id.trim().is_empty() {
@@ -1071,6 +1086,21 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
             Ok(serde_json::to_value(
                 catalog.history(&p.branch_id).map_err(domain)?,
             )?)
+        }
+        "runtime.observer.read" => {
+            let p: NativeObserverReadParams = serde_json::from_value(params)?;
+            let limit = u32::try_from(p.limit)
+                .map_err(|_| KernelError::Protocol("observer event limit out of range".into()))?;
+            let through_cursor = u64::try_from(p.through_cursor)
+                .map_err(|_| KernelError::Protocol("observer through cursor must be nonnegative".into()))?;
+            Ok(serde_json::to_value(catalog.observer_run_activity(&p.observer_id, &p.thread_id, through_cursor, limit).map_err(domain)?)?)
+        }
+        "runtime.observer.delivery" => {
+            let p: NativeObserverDeliveryParams = serde_json::from_value(params)?;
+            let cursor = u64::try_from(p.cursor)
+                .map_err(|_| KernelError::Protocol("observer cursor must be nonnegative".into()))?;
+            catalog.acknowledge_run_activity(&p.observer_id, &p.thread_id, cursor, p.state).map_err(domain)?;
+            Ok(json!({}))
         }
         "runtime.events.read" => {
             let p: NativeEventsParams = serde_json::from_value(params)?;

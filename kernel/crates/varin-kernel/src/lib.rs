@@ -2,6 +2,7 @@
 mod authority;
 mod compute;
 mod credential_bridge;
+mod native_policy;
 mod error;
 mod model;
 mod native_runtime;

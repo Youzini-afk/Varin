@@ -873,6 +873,7 @@ fn input_arriving_between_completion_decision_and_commit_is_not_lost() {
             view: &PolicyView<'_>,
             event: &PolicyEvent,
             state: &Value,
+            cancel: &CancellationToken,
         ) -> Result<PolicyDecision, ExecutionError> {
             if matches!(event, PolicyEvent::ModelCompleted { .. })
                 && !self.paused.swap(true, Ordering::SeqCst)
@@ -880,7 +881,7 @@ fn input_arriving_between_completion_decision_and_commit_is_not_lost() {
                 self.ready.send(()).unwrap();
                 self.release.lock().unwrap().recv().unwrap();
             }
-            DefaultAgentPolicy.decide(view, event, state)
+            DefaultAgentPolicy.decide(view, event, state, cancel)
         }
     }
     let f = Fixture::new();

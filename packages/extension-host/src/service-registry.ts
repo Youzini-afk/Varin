@@ -50,6 +50,8 @@ export interface HostServiceBinding {
 
 export interface HostServicePin {
   readonly providerId: string;
+  /** Check revocation without calling the worker; ordinary retirement preserves a held pin. */
+  assertAvailable(): void;
   invoke(method: string, args: JsonValue[], signal?: AbortSignal): Promise<JsonValue>;
   release(): void;
 }
@@ -283,6 +285,11 @@ export class HostServiceRegistry {
     if (changed) this.#publish();
   }
 
+  /** After revocation drops exchange pins, remaining ownership represents unsettled callbacks. */
+  hasPendingOwnerCalls(owner: HostServiceOwnerIdentity): boolean {
+    return [...this.#providers.values()].some(provider => exactOwnerKey(provider.owner) === exactOwnerKey(owner) && provider.inFlight > 0);
+  }
+
   async drainOwner(owner: HostServiceOwnerIdentity): Promise<void> {
     this.revokeOwner(owner);
     const providers = [...this.#providers.values()].filter((provider) => (
@@ -374,6 +381,10 @@ export class HostServiceRegistry {
         provider.pins.add(release);
         return Object.freeze({
           providerId: provider.providerId,
+          assertAvailable: () => {
+            if (released) throw new Error("Host service exchange pin has been released");
+            available(true);
+          },
           invoke: async (method: string, args: JsonValue[], signal?: AbortSignal) => {
             if (released) throw new Error("Host service exchange pin has been released");
             available(true);

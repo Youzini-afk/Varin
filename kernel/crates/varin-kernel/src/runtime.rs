@@ -382,6 +382,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let admission_epoch = Arc::new(Mutex::new(None::<String>));
     let credential_bridge = crate::credential_bridge::CredentialBridge::new(response_tx.clone());
     let mcp_bridge = crate::native_mcp::McpBridge::new(response_tx.clone());
+    let policy_bridge = crate::native_policy::PolicyBridge::new(response_tx.clone());
     let writer_failed = Arc::new(AtomicBool::new(false));
     let subscriptions=crate::process::subscriptions::ProcessSubscriptions::new(response_tx.clone());
     let (subscription_tx,subscription_rx)=mpsc::channel();
@@ -430,7 +431,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|_| KernelError::Storage("resource authority stopped before receipt replay".into()))
     }, process_controls.clone());
     let native_control = crate::native_runtime::NativeControl::default();
-    let native_worker = crate::native_runtime::spawn(native_rx, native_tx.clone(), native_control.clone(), resources, credential_bridge.clone(), mcp_bridge.clone(), response_tx.clone(), move |id| {
+    let native_worker = crate::native_runtime::spawn(native_rx, native_tx.clone(), native_control.clone(), resources, credential_bridge.clone(), mcp_bridge.clone(), policy_bridge.clone(), response_tx.clone(), move |id| {
         if let Ok(mut active) = native_cancellations.lock() { active.remove(id); }
     });
     let worker_native_tx = native_tx.clone();
@@ -439,6 +440,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let worker_admission_epoch = admission_epoch.clone();
     let worker_credentials = credential_bridge.clone();
     let worker_mcp = mcp_bridge.clone();
+    let worker_policy = policy_bridge.clone();
     let worker_response_tx = response_tx.clone();
     let worker_writer_failed = writer_failed.clone();
     let capture_completions = request_tx.clone();
@@ -537,6 +539,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     let _ = worker_credentials.initialize(epoch);
                     worker_mcp.initialize(epoch);
+                    worker_policy.initialize(epoch);
                     if let Some(storage) = kernel.storage.as_mut() { storage.set_process_terminal_sender(process_terminals.clone()); storage.set_process_controls(process_controls.clone()); storage.set_process_subscriptions(storage_subscriptions.clone()); }
                     if let Some(root) = kernel.storage_root.as_ref() {
                         if worker_native_tx.send(crate::native_runtime::Command::Initialize { root: root.clone(), epoch: epoch.to_string() }).is_err() { break; }
@@ -630,6 +633,10 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         };
         // Private secret-bearing replies must never enter method validation, durable queues,
         // public tool grants, or diagnostic formatting. Malformed/old replies are discarded.
+        if request.get("kind").and_then(Value::as_str) == Some("agent-policy-response") {
+            policy_bridge.receive(request);
+            continue;
+        }
         if request.get("kind").and_then(Value::as_str) == Some("mcp-tool-response") {
             mcp_bridge.receive(request);
             continue;
@@ -740,6 +747,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     credential_bridge.close();
     mcp_bridge.close();
+    policy_bridge.close();
     subscriptions.shutdown();
     let _=subscription_tx.send(crate::process::subscriptions::ControlCommand::Stop);
     drop(subscription_tx);

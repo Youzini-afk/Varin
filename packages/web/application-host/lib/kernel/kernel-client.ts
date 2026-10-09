@@ -1,3 +1,4 @@
+import { NativeAgentPolicyBridge, type NativeAgentPolicyLease, type NativeAgentPolicyBinding, type PrivatePolicyResponse } from './native-agent-policy.js';
 import { NativeMcpBridge, type NativeMcpLease, type NativeMcpBinding, type PrivateMcpResponse } from './native-mcp-bridge.js';
 import { NativeCredentialBridge, type PrivateCredentialResponse } from "./native-credential-bridge.js";
 import type { ExistingHostCredentialOwner, NativeCredentialScope } from "./native-credential-owner.js";
@@ -548,6 +549,8 @@ export class KernelClient {
   }
   private readonly credentialBridge: NativeCredentialBridge;
   private readonly mcpBridge: NativeMcpBridge;
+  private readonly policyBridge: NativeAgentPolicyBridge;
+  private readonly nativePreparations = new Map<string, Set<AbortController>>();
   private window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private nativeWindow = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private closePromise: Promise<void> | undefined;
@@ -555,6 +558,12 @@ export class KernelClient {
   private started = false;
   private transportFailed = false;
   private readonly exitListeners = new Set<(error: Error) => void>();
+  private readonly readyListeners = new Set<() => void>();
+  /** Observe future successful handshakes. Subscribing never starts the kernel. */
+  subscribeReady(listener: () => void): () => void {
+    this.readyListeners.add(listener);
+    return () => { this.readyListeners.delete(listener); };
+  }
   private closed = false;
   private epoch: string | null = null;
   private readonly clientToken = Symbol("varin-kernel-client");
@@ -565,6 +574,8 @@ export class KernelClient {
   constructor(options: KernelClientOptions) {
     this.options = options;
     this.spawnProcess = options.spawnProcess ?? spawn;
+    this.policyBridge = new NativeAgentPolicyBridge(() => this.epoch, response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: "policy-channel-failed", message: "Private policy channel failed", retryable: false }), true));
     this.mcpBridge = new NativeMcpBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "mcp-channel-failed", message: "Private MCP channel failed", retryable: false }), true));
     this.credentialBridge = new NativeCredentialBridge(() => this.epoch,
@@ -580,9 +591,10 @@ export class KernelClient {
 
 
   /** Host-only owner registration. This is not exposed through tool grants or renderer APIs. */
-  async registerNativeCredentialOwner(runId: string, owner: ExistingHostCredentialOwner): Promise<NativeCredentialScope> {
+  async registerNativeCredentialOwner(runId: string, owner: ExistingHostCredentialOwner, signal?: AbortSignal): Promise<NativeCredentialScope> {
     if (!this.handshakeResult) await this.start();
-    return this.credentialBridge.register(runId, owner);
+    signal?.throwIfAborted();
+    return this.credentialBridge.register(runId, owner, signal);
   }
   unregisterNativeCredentialOwner(runId: string): void { this.credentialBridge.unregister(runId); }
   async registerNativeMcpOwner(runId: string, lease: NativeMcpLease): Promise<NativeMcpBinding> {
@@ -591,6 +603,30 @@ export class KernelClient {
   }
   nativeMcpBinding(runId: string): NativeMcpBinding | undefined { return this.mcpBridge.binding(runId); }
   unregisterNativeMcpOwner(runId: string): void { this.mcpBridge.unregister(runId); }
+
+  /** Ephemeral launch waits share the existing Run cancellation and kernel lifetime. */
+  beginNativeRunPreparation(runId: string): { signal: AbortSignal; release(): void } {
+    const controller = new AbortController();
+    const registrations = this.nativePreparations.get(runId) ?? new Set<AbortController>();
+    registrations.add(controller);
+    this.nativePreparations.set(runId, registrations);
+    return { signal: controller.signal, release: () => {
+      registrations.delete(controller);
+      if (this.nativePreparations.get(runId) === registrations && registrations.size === 0) this.nativePreparations.delete(runId);
+    } };
+  }
+  cancelNativeRunPreparation(runId: string): void {
+    const registrations = this.nativePreparations.get(runId);
+    if (!registrations) return;
+    this.nativePreparations.delete(runId);
+    for (const controller of registrations) controller.abort(new DOMException('Run preparation cancelled', 'AbortError'));
+  }
+  async registerNativePolicyOwner(runId: string, lease: NativeAgentPolicyLease): Promise<NativeAgentPolicyBinding> {
+    if (!this.handshakeResult) await this.start();
+    return this.policyBridge.register(runId, lease);
+  }
+  nativePolicyBinding(runId: string): NativeAgentPolicyBinding | undefined { return this.policyBridge.binding(runId); }
+  unregisterNativePolicyOwner(runId: string): void { this.policyBridge.unregister(runId); }
 
   get kernelEpoch(): string | null { return this.epoch; }
   get handshake(): KernelHandshakeResult | null { return this.handshakeResult; }
@@ -754,6 +790,9 @@ export class KernelClient {
       pathScopes: [""],
     }, { allowBootstrap: true });
     this.managementGrant = this.grantFromResponse(managementGrant);
+    for (const listener of this.readyListeners) {
+      try { listener(); } catch { this.readyListeners.delete(listener); }
+    }
     return result;
   }
 
@@ -771,7 +810,7 @@ export class KernelClient {
       let response: KernelResponse | KernelProcessStreamEvent | NativeRuntimeStreamEvent;
       try { response = JSON.parse(body.toString("utf8")) as KernelResponse | KernelProcessStreamEvent | NativeRuntimeStreamEvent; }
       catch (error) { this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: `Invalid Rust kernel response: ${String(error)}`, retryable: false }), true); return; }
-      if (this.credentialBridge.consume(response) || this.mcpBridge.consume(response)) continue;
+      if (this.credentialBridge.consume(response) || this.mcpBridge.consume(response) || this.policyBridge.consume(response)) continue;
       if (response.kind === "runtime-event") {
         if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch
           || !["durable", "progress"].includes(response.stream)
@@ -842,6 +881,8 @@ export class KernelClient {
     this.transportFailed = true;
     this.credentialBridge.close();
     this.mcpBridge.close();
+    this.policyBridge.close();
+    for (const runId of this.nativePreparations.keys()) this.cancelNativeRunPreparation(runId);
     this.window.close(error);
     this.nativeWindow.close(error);
     for (const pending of this.pending.values()) { pending.reject(error); pending.release(); }
@@ -859,7 +900,7 @@ export class KernelClient {
     if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
-  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateMcpResponse, encoded?: Buffer): Promise<void> {
+  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateMcpResponse | PrivatePolicyResponse, encoded?: Buffer): Promise<void> {
     const stdin = this.child?.stdin;
     if (!stdin || stdin.destroyed) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel stdin is unavailable", retryable: true });
     const writable = stdin as Writable;
@@ -1462,6 +1503,8 @@ export class KernelClient {
     this.closed = true;
     this.credentialBridge.close();
     this.mcpBridge.close();
+    this.policyBridge.close();
+    for (const runId of this.nativePreparations.keys()) this.cancelNativeRunPreparation(runId);
     this.window.close(new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closing" }));
     this.nativeWindow.close(new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closing" }));
     for (const pending of this.pending.values()) pending.cancel();

@@ -146,6 +146,29 @@ pub(super) fn initialize(db: &mut Connection) -> Result<()> {
     Ok(())
 }
 impl Catalog {
+    /// Select one exact policy before execution. Private state is never migrated to a different identity.
+    pub fn prepare_policy_launch(&mut self, run_id: &str, identity: PolicyIdentity) -> Result<LaunchIntent> {
+        if identity.name.is_empty() || identity.version.is_empty() { return Err(RuntimeError::Invalid("policy identity is empty".into())); }
+        let tx = self.db.transaction()?;
+        let run: Run = record(&tx, "runs", run_id)?;
+        fence(&run, self.epoch)?;
+        let mut launch: LaunchIntent = record(&tx, "run_launches", run_id)?;
+        if launch.selection.policy == identity { return Ok(launch); }
+        let steps: i64 = tx.query_row("SELECT count(*) FROM model_steps WHERE run_id=?1", [run_id], |row| row.get(0))?;
+        let checkpoints: i64 = tx.query_row("SELECT count(*) FROM policy_checkpoints WHERE run_id=?1", [run_id], |row| row.get(0))?;
+        if run.cancel_requested || run.state.terminal() || launch.bound_epoch.is_some() || steps != 0 || checkpoints != 0
+            || launch.selection.policy.name != "default+questions" || launch.selection.policy.version != "1+1" {
+            return Err(RuntimeError::Conflict("policy preparation cannot replace a selected or used launch".into()));
+        }
+        launch.selection.policy = identity;
+        launch.selection.validate()?;
+        launch.revision += 1;
+        put(&tx, "run_launches", run_id, &launch)?;
+        event(&tx, run_id, launch.revision, "run.policy_prepared", serde_json::to_value(&launch)?)?;
+        tx.commit()?;
+        Ok(launch)
+    }
+
     /// Preparation can append one concrete MCP generation only before the launch is bound or used.
     /// It cannot revise a source, model, base capability, or an already frozen tool description.
     pub fn prepare_mcp_launch(&mut self, run_id: &str, binding: HostToolBinding) -> Result<LaunchIntent> {

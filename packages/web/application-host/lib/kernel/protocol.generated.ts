@@ -25,6 +25,9 @@ export type KernelMethod =
   | "runtime.thread.list"
   | "runtime.launch.select"
   | "runtime.launch.mcp.prepare"
+  | "runtime.launch.policy.prepare"
+  | "runtime.observer.read"
+  | "runtime.observer.delivery"
   | "runtime.launch.inspect"
   | "runtime.launch.list"
   | "runtime.input.enqueue"
@@ -257,6 +260,16 @@ export interface NativeLaunchPolicy {
   version: string;
 }
 
+export interface NativeAgentPolicyBinding {
+  reference: string;
+  identity: NativeLaunchPolicy;
+}
+
+export interface NativePolicyPrepareParams {
+  runId: string;
+  identity: NativeLaunchPolicy;
+}
+
 export interface NativeMcpBinding {
   resources: Record<string, string>;
   reference: string;
@@ -407,6 +420,7 @@ export interface NativeContextJobCreateParams {
 }
 
 export interface NativeRunStartParams {
+  policyBinding?: NativeAgentPolicyBinding;
   mcpBinding?: NativeMcpBinding;
   runId: string;
   toolBinding?: unknown;
@@ -551,8 +565,23 @@ export interface NativeEventsParams {
   limit: number;
 }
 
+export interface NativeObserverReadParams {
+  observerId: string;
+  threadId: string;
+  limit: number;
+  throughCursor: number;
+}
+
+export interface NativeObserverDeliveryParams {
+  observerId: string;
+  threadId: string;
+  cursor: number;
+  state: NativeDeliveryState;
+}
+
 export interface NativeStatus {
   epoch: number;
+  eventCursor: number;
 }
 
 export interface NativeReceipt {
@@ -1763,6 +1792,7 @@ export type KernelMethodParams = {
   "runtime.input.list": NativeHistoryParams;
   "runtime.launch.select": NativeLaunchSelectParams;
   "runtime.launch.mcp.prepare": NativeMcpPrepareParams;
+  "runtime.launch.policy.prepare": NativePolicyPrepareParams;
   "runtime.launch.inspect": NativeRunParams;
   "runtime.launch.list": KernelEmptyParams;
   "runtime.run.start": NativeRunStartParams;
@@ -1779,6 +1809,8 @@ export type KernelMethodParams = {
   "runtime.operation.cancel": NativeOperationParams;
   "runtime.history.read": NativeHistoryParams;
   "runtime.events.read": NativeEventsParams;
+  "runtime.observer.read": NativeObserverReadParams;
+  "runtime.observer.delivery": NativeObserverDeliveryParams;
   "process.subscribe": KernelProcessSubscribeParams;
   "process.subscription.ack": KernelProcessSubscriptionAckParams;
   "process.subscription.unsubscribe": KernelProcessSubscriptionParams;
@@ -2074,6 +2106,15 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "runtime.launch.policy.prepare";
+      params: NativePolicyPrepareParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "runtime.launch.inspect";
       params: NativeRunParams;
       epoch?: string;
@@ -2211,6 +2252,24 @@ export type KernelRequest =
       id: string;
       method: "runtime.events.read";
       params: NativeEventsParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.observer.read";
+      params: NativeObserverReadParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.observer.delivery";
+      params: NativeObserverDeliveryParams;
       epoch?: string;
       grantId?: string;
     }
