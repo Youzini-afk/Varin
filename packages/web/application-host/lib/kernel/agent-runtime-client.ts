@@ -1,4 +1,6 @@
 import type { PlanView, PlanForkCapture } from '@varin/protocol';
+import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { LiveSourceResolver } from './live-source.js';
 import type { PolicyModelPreparer } from './policy-models.js';
 import { waitWithSignal } from '../cancellation.js';
@@ -23,9 +25,20 @@ export type McpPreparer = (input: McpPreparation, signal?: AbortSignal) => Promi
 
 /** Explicit authority client. Existing Pi thread routes are not silently redirected. */
 export class AgentRuntimeClient {
-  constructor(private readonly kernel: KernelClient, private readonly prepareMcpOwner?: McpPreparer, private readonly preparePolicyOwner?: RunPolicyPreparer, private readonly preparePolicyModels?: PolicyModelPreparer, private readonly resolveLiveSource?: LiveSourceResolver) { kernel.subscribeExit(() => this.sourceGrants.clear()); }
+  constructor(private readonly kernel: KernelClient, private readonly prepareMcpOwner?: McpPreparer, private readonly preparePolicyOwner?: RunPolicyPreparer, private readonly preparePolicyModels?: PolicyModelPreparer, private readonly resolveLiveSource?: LiveSourceResolver) {
+    kernel.subscribeExit(() => {
+      this.sourceGrants.clear(); this.mcpPreparations.clear();
+      for (const controller of this.mcpUpdates.values()) controller.abort();
+      this.mcpUpdates.clear();
+    });
+    kernel.onMcpReleased(runId => {
+      this.mcpPreparations.delete(runId); this.mcpUpdates.get(runId)?.abort(); this.mcpUpdates.delete(runId);
+    });
+  }
 
   private readonly sourceGrants = new Map<string, Set<string>>();
+  private readonly mcpPreparations = new Map<string, McpPreparation>();
+  private readonly mcpUpdates = new Map<string, AbortController>();
   retainSourceGrant(runId: string, grantId: string): void {
     const grants = this.sourceGrants.get(runId) ?? new Set<string>(); grants.add(grantId); this.sourceGrants.set(runId, grants);
   }
@@ -175,6 +188,7 @@ export class AgentRuntimeClient {
       const preparation = this.prepareMcpOwner({ runId, threadId: run.thread_id, source, ...(executionCwd ? { executionCwd } : {}) }, signal);
       void preparation.then(lease => { if (signal.aborted) lease?.release(); }, () => undefined);
       const lease = await waitWithSignal(preparation, signal);
+      this.mcpPreparations.set(runId, { runId, threadId: run.thread_id, source, ...(executionCwd ? { executionCwd } : {}) });
       if (!lease || lease.binding.tools.length === 0) {
         lease?.release();
         if (saved?.selection.mcp_binding) throw new Error('Saved MCP capabilities are unavailable');
@@ -186,6 +200,36 @@ export class AgentRuntimeClient {
         return await this.kernel.registerMcpOwner(runId, lease);
       } catch (error) { lease.release(); throw error; }
     });
+  }
+  /** Called by the actual MCP scope's configuration/tool events, never by each model request. */
+  async refreshMcp(runId: string): Promise<void> {
+    const input = this.mcpPreparations.get(runId);
+    if (!input || !this.prepareMcpOwner) return;
+    const controller = new AbortController();
+    this.mcpUpdates.get(runId)?.abort(); this.mcpUpdates.set(runId, controller);
+    const selectionId = randomUUID();
+    try {
+      await this.withRunPreparation(runId, controller.signal, async signal => {
+        await this.kernel.agentRuntimeRequest('runtime.tools.select', { runId, selectionId }, signal);
+        const work = this.prepareMcpOwner!(input, signal);
+        void work.then(lease => { if (signal.aborted) lease?.release(); }, () => undefined);
+        const lease = await waitWithSignal(work, signal);
+        const binding = lease?.binding;
+        if (isDeepStrictEqual(binding, this.kernel.mcpBinding(runId))) { lease?.release(); return; }
+        let retained: McpBinding | undefined;
+        try {
+          signal.throwIfAborted();
+          if (lease && binding?.tools.length) retained = await this.kernel.registerMcpCandidate(runId, lease);
+          else lease?.release();
+          const result = await this.kernel.agentRuntimeRequest<{ ready: boolean }, 'runtime.tools.ready'>('runtime.tools.ready', { runId, selectionId, ...(retained ? { binding: retained } : {}) }, signal);
+          if (!result.ready && retained) this.kernel.discardMcpCandidate(runId, retained);
+        } catch (error) {
+          if (retained) this.kernel.discardMcpCandidate(runId, retained); else lease?.release();
+          throw error;
+        }
+      });
+    } catch (error) { if (!controller.signal.aborted) throw error; }
+    finally { if (this.mcpUpdates.get(runId) === controller) this.mcpUpdates.delete(runId); }
   }
   startFromSource(selection: SourceLaunch, options: { credentialOwner?: ExistingHostCredentialOwner; signal?: AbortSignal } = {}): Promise<RunStartReceipt> {
     return this.withRunPreparation(selection.runId, options.signal, signal => startRunFromSource(this.kernel, this, selection, { ...options, signal, ...(this.resolveLiveSource ? { resolveLiveSource: this.resolveLiveSource } : {}) }));

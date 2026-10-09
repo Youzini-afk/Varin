@@ -14,6 +14,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "kernel.shutdown",
     "authority.grant.revoke",
     "runtime.status",
+    "runtime.tools.select",
     "runtime.run.inspect",
     "runtime.run.cancel",
     "runtime.operation.inspect",
@@ -34,6 +35,7 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "kernel.shutdown",
     "authority.grant.revoke",
     "runtime.status",
+    "runtime.tools.select",
     "runtime.run.cancel",
     "runtime.operation.cancel",
     "process.resize",
@@ -209,6 +211,21 @@ pub(crate) struct LaunchSelectParams {
 pub(crate) struct McpPrepareParams {
     pub(crate) run_id: String,
     pub(crate) binding: McpBinding,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ToolSelectParams {
+    pub(crate) run_id: String,
+    pub(crate) selection_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ToolReadyParams {
+    pub(crate) run_id: String,
+    pub(crate) selection_id: String,
+    pub(crate) binding: Option<McpBinding>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1757,6 +1774,12 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.launch.mcp.prepare" => serde_json::from_value::<McpPrepareParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.tools.select" => serde_json::from_value::<ToolSelectParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.tools.ready" => serde_json::from_value::<ToolReadyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.launch.policy.prepare" => {

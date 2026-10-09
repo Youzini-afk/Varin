@@ -95,9 +95,11 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n')
     const Transport = base.constructor as new (options: Record<string, unknown>) => typeof base;
     return new Transport({ ...base.options, maxMessageBytes });
   } } : {}); cleanups.push(() => mcp.close());
+  const scope = (threadId: string) => ({ agentDir, configCwd: workspace, executionCwd: workspace,
+    environmentId: 'fixture-environment', executionScope: 'workspace' as const, projectTrusted: true, sessionId: threadId });
   const transportTrace: Array<Record<string, unknown>> = [];
-  const runtime = new AgentRuntimeClient(kernel, async input => {
-    const lease = await mcp.acquire({ agentDir, configCwd: workspace, executionCwd: workspace, environmentId: 'fixture-environment', executionScope: 'workspace', projectTrusted: true, sessionId: input.threadId }, { servers: selectedServers });
+  const runtime = new AgentRuntimeClient(kernel, async (input, signal) => {
+    const lease = await mcp.acquire(scope(input.threadId), { servers: selectedServers, ...(signal ? { signal } : {}) });
     const tracked = { ...lease, callTool: async (...args: Parameters<typeof lease.callTool>) => { transportTrace.push({ stage: 'enter', run: input.runId }); try { const result = await lease.callTool(...args); transportTrace.push({ stage: 'returned', run: input.runId }); return result; } catch (error) { transportTrace.push({ stage: 'error', error: String(error), run: input.runId }); throw error; } } };
     return createMcpLease({ lease: tracked, kernel, currentPolicy: async () => ({ mode: 'normal', rules: [] }) });
   });
@@ -117,7 +119,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n')
   const hostUrl = await listen(createServer(app));
   configureRuntimeUrlResolver({ apiBaseUrl: hostUrl, realtimeBaseUrl: hostUrl });
   setRuntimeExtraHeaders({ 'x-fixture-auth': 'fixture-client' });
-  return { transportTrace, effectsPath, startsPath, unusedPath, mcp, endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
+  return { transportTrace, effectsPath, startsPath, unusedPath, script, agentDir, scope, mcp, endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
 }
 
 it('the shared MCP authority invokes a real selected stdio server only after allow-once and never starts unrelated configuration', async () => {
@@ -190,6 +192,87 @@ it('lazy discovery starts only its selected real server, then validates and gate
   expect((await fs.readFile(f.startsPath, 'utf8')).trim().split('\n')).toHaveLength(1);
   expect(await fs.stat(f.unusedPath).then(() => true, () => false)).toBe(false);
 }, 30_000);
+it('a real configuration watch prepares a new MCP directory while the frozen request completes against its original server', async () => {
+  let held!: ServerResponse;
+  let turns = 0;
+  const f = await fixture((body, response) => {
+    if (++turns === 1) { held = response; return; }
+    const tool = (body.tools as Array<{ name: string; parameters: Record<string, unknown> }>).find(tool => tool.name.startsWith('mcp__fixture__'))!;
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    const output = turns === 2 ? { id: 'new-call', type: 'function_call', call_id: 'new-call-id', name: tool.name, arguments: JSON.stringify({ message: 'new schema call' }) }
+      : { id: 'done', type: 'message', content: [{ type: 'output_text', text: 'both retained generations completed' }] };
+    response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [output] } })}\n\n`);
+  });
+  const identity = await f.api.create('live-mcp-update');
+  const receipt = await f.api.submit({ ...identity, key: 'live-mcp-update-input', expectedHead: null, text: 'use this tool across its update', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
+  await expect.poll(() => f.requests.length, { timeout: 15_000 }).toBe(1);
+  const original = f.kernel.mcpBinding(receipt.run_id)!;
+  const originalTool = original.tools.find(tool => tool.name.startsWith('mcp__fixture__'))!;
+  const configPath = path.join(f.agentDir, 'mcp.json');
+  const initialConfig = await fs.readFile(configPath, 'utf8');
+  await fs.writeFile(configPath, '{ invalid configuration');
+  await expect(f.runtime.refreshMcp(receipt.run_id)).rejects.toThrow('mcp-config-invalid');
+  expect(f.kernel.mcpBinding(receipt.run_id)).toEqual(original);
+  await fs.writeFile(configPath, initialConfig);
+  await f.kernel.agentRuntimeRequest('runtime.tools.select', { runId: receipt.run_id, selectionId: 'obsolete-candidate' });
+  await f.kernel.agentRuntimeRequest('runtime.tools.select', { runId: receipt.run_id, selectionId: 'newer-desire' });
+  expect(await f.kernel.agentRuntimeRequest('runtime.tools.ready', { runId: receipt.run_id, selectionId: 'obsolete-candidate', binding: original })).toEqual({ ready: false });
+  let updated!: () => void; let failed!: (error: unknown) => void;
+  const ready = new Promise<void>((resolve, reject) => { updated = resolve; failed = reject; });
+  const unsubscribe = await f.mcp.subscribe(f.scope(identity.threadId), () => { void f.runtime.refreshMcp(receipt.run_id).then(updated, failed); });
+  cleanups.push(async () => { unsubscribe(); });
+  const nextScript = path.join(f.root, 'next-mcp.mjs');
+  const nextEffects = path.join(f.root, 'next-effects.jsonl');
+  await fs.writeFile(nextScript, (await fs.readFile(f.script, 'utf8'))
+    .replace("description:'Fixture external send'", "description:'Updated fixture tool'")
+    .replace("text:{type:'string'}", "message:{type:'string'}").replace("required:['text']", "required:['message']"));
+  const config = JSON.parse(initialConfig) as { mcpServers: Record<string, Record<string, unknown>> };
+  config.mcpServers.fixture = { ...config.mcpServers.fixture, args: [nextScript, nextEffects, f.startsPath] };
+  await fs.writeFile(configPath, JSON.stringify(config));
+  await ready;
+  expect(f.kernel.mcpBinding(receipt.run_id)).toEqual(original);
+  expect((await f.runtime.launch(receipt.run_id))!.selection.mcp_binding?.generation).toBe(original.generation);
+  held.writeHead(200, { 'content-type': 'text/event-stream' });
+  held.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'old-call', type: 'function_call', call_id: 'old-call-id', name: originalTool.name, arguments: JSON.stringify({ text: 'old schema call' }) }] } })}\n\n`);
+  for (const callId of ['old-call-id', 'new-call-id']) {
+    await expect.poll(async () => (await f.api.snapshot(identity)).operations.some(op => op.waiting_on?.startsWith('permission:')
+      && (op.result as { permission?: { call?: { callId?: string } } })?.permission?.call?.callId === callId), { timeout: 15_000 }).toBe(true);
+    const operation = (await f.api.snapshot(identity)).operations.find(op => op.waiting_on?.startsWith('permission:')
+      && (op.result as { permission?: { call?: { callId?: string } } })?.permission?.call?.callId === callId)!;
+    await f.api.decidePermission({ ...identity, operationId: operation.id, permissionId: (operation.result as { permission: { id: string } }).permission.id, decision: 'allow_once' });
+  }
+  await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');
+  expect((await fs.readFile(f.effectsPath, 'utf8')).trim().split('\n').map(line => JSON.parse(line))).toEqual([{ name: 'send', arguments: { text: 'old schema call' } }]);
+  expect((await fs.readFile(nextEffects, 'utf8')).trim().split('\n').map(line => JSON.parse(line))).toEqual([{ name: 'send', arguments: { message: 'new schema call' } }]);
+  const nextTool = (f.requests[1]!.body.tools as Array<{ name: string; parameters: { properties: Record<string, unknown> } }>).find(tool => tool.name === originalTool.name)!;
+  expect(nextTool.parameters.properties).toHaveProperty('message');
+  expect(nextTool.parameters.properties).not.toHaveProperty('text');
+  const selection = (await f.runtime.launch(receipt.run_id))!.selection;
+  expect(selection.mcp_binding!.generation).not.toBe(original.generation);
+  expect(selection.tool_schema_generation).toBeGreaterThan(0);
+  expect((await f.runtime.events(0, 256)).filter(event => event.kind === 'run.tools_activated' && event.subject === receipt.run_id)).toHaveLength(1);
+  expect(f.launchErrors).toEqual([]);
+}, 45_000);
+it('disabling a real selected MCP dependency ends its outstanding permission wait without an answer or remote dispatch', async () => {
+  let turns=0;
+  const f=await fixture((body,response)=>{
+    response.writeHead(200,{'content-type':'text/event-stream'});
+    const tool=(body.tools as Array<{name:string}>).find(tool=>tool.name.startsWith('mcp__fixture__'))!;
+    const output=++turns===1?{id:'blocked-call',type:'function_call',call_id:'blocked-call-id',name:tool.name,arguments:JSON.stringify({text:'must not send'})}
+      :{id:'finished',type:'message',content:[{type:'output_text',text:'disabled dependency was rejected'}]};
+    response.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[output]}})}\n\n`);
+  });
+  const identity=await f.api.create('disabled-mcp');
+  const receipt=await f.api.submit({...identity,key:'disabled-mcp-input',expectedHead:null,text:'try this tool',model:{providerId:'fixture-provider',modelId:'fixture-model'}});
+  await expect.poll(async()=>(await f.api.snapshot(identity)).operations.some(op=>op.waiting_on?.startsWith('permission:')),{timeout:15_000}).toBe(true);
+  const opened=f.mcp.open(f.scope(identity.threadId));
+  try {await f.mcp.updateConfig(opened.scope,'fixture',{enabled:false});} finally {f.mcp.closeScope(opened.scope);}
+  await expect.poll(async()=>(await f.api.run(receipt.run_id)).state,{timeout:15_000}).toBe('completed');
+  expect(await fs.readFile(f.effectsPath,'utf8').catch(()=>'' )).toBe('');
+  expect((await f.api.snapshot(identity)).operations.some(op=>op.waiting_on?.startsWith('permission:'))).toBe(false);
+  const result=(f.requests[1]!.body.input as Array<{type:string;output?:string}>).find(item=>item.type==='function_call_output')!;
+  expect(JSON.parse(result.output!)).toMatchObject({kind:'result',outcome:'failed',effect:'none',content:{error:'mcp_authorization_failed'}});
+},30_000);
 it('a real oversized UTF-8 MCP result keeps its remote-effect receipt, preserves other Runs and releases headless owners', async () => {
   const f = await fixture((body, response) => {
     const independent = JSON.stringify(body.input).includes('independent small run');

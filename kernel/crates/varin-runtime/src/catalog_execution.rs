@@ -444,6 +444,12 @@ impl Catalog {
                 put(&tx, "runs", run_id, &run)?;
             }
             ExecutionRecord::RequestPrepared { snapshot } => {
+                if let Some(launch) = optional_record::<super::launches::LaunchIntent>(&tx,"run_launches",run_id)? {
+                    if launch.selection.tool_schema_generation != snapshot.view.binding.tool_schema_generation
+                        || launch.selection.tools != snapshot.view.binding.tools {
+                        return Err(RuntimeError::Conflict("request differs from the activated tool composition".into()));
+                    }
+                }
                 let graph_pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_read_graph_v1','policy_model_job_v1') AND json_extract(body,'$.phase')!='terminal')",[run_id],|r|r.get(0))?;
                 if graph_pending {return Err(RuntimeError::Conflict("policy graph is unsettled".into()));}
                 if super::inputs::has_boundary_inputs(&tx,run_id)?{return Err(RuntimeError::InputPending);}

@@ -576,7 +576,15 @@ impl<T: ToolExecutor + ?Sized> PreparedToolCall for ExecutorCall<T> {
     fn execute(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken) -> ToolCompletion { self.executor.execute(context, &self.call, contract, cancel) }
 }
 
+pub struct SelectedTools {
+    pub generation: u64,
+    pub schemas: Vec<ToolSchema>,
+    pub executor: Arc<dyn ToolExecutor>,
+}
 pub trait ToolExecutor: Send + Sync + 'static {
+    /// Ready candidates may publish only here, at a closed ModelStep boundary. Each request
+    /// retains the selected executor; preparing another candidate cannot change that exchange.
+    fn select_for_request(&self, _: &str, _: u64, _: &CancellationToken) -> Result<Option<SelectedTools>, ExecutionError> { Ok(None) }
     /// Freeze before the model request is sent. A directory returns only the selected pins;
     /// simple typed adapters may use their already immutable instance directly.
     fn freeze(&self, _: &[ToolSchema]) -> Result<Option<Arc<dyn ToolExecutor>>, ExecutionError> { Ok(None) }
@@ -1216,6 +1224,15 @@ impl<
                         input.binding.credential_ref = selected.binding.credential_ref.clone();
                         input.binding.configuration_generation = selected.binding.configuration_generation;
                     }
+                    let selected_tools = match guarded("tool_selection_panicked", || self.tools.select_for_request(&input.run_id,input.owner_generation,&cancel)) {
+                        Ok(selected)=>selected,
+                        Err(_) if cancel.is_cancelled()=>{policy_state=previous_policy_state;continue 'agent;},
+                        Err(error)=>finish!('agent,RunState::Failed,None,Some(error)),
+                    };
+                    if let Some(selected) = &selected_tools {
+                        input.binding.tools = selected.schemas.clone();
+                        input.binding.tool_schema_generation = selected.generation;
+                    }
                     if self.context_preparation.prepare(&input.run_id, input.owner_generation, &cancel).is_err() {
                         policy_state = previous_policy_state;
                         if cancel.is_cancelled() { continue 'agent; }
@@ -1239,7 +1256,10 @@ impl<
                         finish!('agent, RunState::Failed, None, Some(error));
                     }
                     binding.history_range.leaf_id = history_cursor.clone();
-                    let request_tools = self.tools.freeze(&binding.tools)?;
+                    let request_tools = match selected_tools {
+                        Some(selected)=>Some(selected.executor),
+                        None=>self.tools.freeze(&binding.tools)?,
+                    };
                     let mut request_history=compile_history(&history,&binding.provider_family,&binding.connection_identity);
                     let mut selected=BTreeSet::new();
                     for reference in evidence {

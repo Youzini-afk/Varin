@@ -6,8 +6,8 @@
 export const KERNEL_PROTOCOL_VERSION = 1 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
-export const KERNEL_CONTROL_METHODS = ["kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.run.inspect","runtime.run.cancel","runtime.operation.inspect","runtime.operation.cancel","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
-export const KERNEL_CONTROL_RESPONSE_METHODS = ["kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.run.cancel","runtime.operation.cancel","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
+export const KERNEL_CONTROL_METHODS = ["kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.cancel","runtime.operation.inspect","runtime.operation.cancel","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
+export const KERNEL_CONTROL_RESPONSE_METHODS = ["kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.cancel","runtime.operation.cancel","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.history.body"] as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
@@ -34,6 +34,8 @@ export type KernelMethod =
   | "runtime.thread.list"
   | "runtime.launch.select"
   | "runtime.launch.mcp.prepare"
+  | "runtime.tools.select"
+  | "runtime.tools.ready"
   | "runtime.launch.policy.prepare"
   | "runtime.observer.read"
   | "runtime.observer.delivery"
@@ -374,6 +376,17 @@ export interface McpBinding {
 export interface McpPrepareParams {
   runId: string;
   binding: McpBinding;
+}
+
+export interface ToolSelectParams {
+  runId: string;
+  selectionId: string;
+}
+
+export interface ToolReadyParams {
+  runId: string;
+  selectionId: string;
+  binding?: McpBinding;
 }
 
 export interface LaunchSelection {
@@ -2082,6 +2095,8 @@ export type KernelMethodParams = {
   "runtime.input.list": HistoryParams;
   "runtime.launch.select": LaunchSelectParams;
   "runtime.launch.mcp.prepare": McpPrepareParams;
+  "runtime.tools.select": ToolSelectParams;
+  "runtime.tools.ready": ToolReadyParams;
   "runtime.launch.policy.prepare": PolicyPrepareParams;
   "runtime.launch.inspect": RunParams;
   "runtime.launch.list": KernelEmptyParams;
@@ -2450,6 +2465,24 @@ export type KernelRequest =
       id: string;
       method: "runtime.launch.mcp.prepare";
       params: McpPrepareParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.tools.select";
+      params: ToolSelectParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.tools.ready";
+      params: ToolReadyParams;
       epoch?: string;
       grantId?: string;
     }

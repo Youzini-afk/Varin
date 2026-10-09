@@ -552,6 +552,7 @@ export class KernelClient {
   }
   private readonly credentialBridge: CredentialBridge;
   private readonly mcpBridge: McpBridge;
+  private readonly mcpReleaseListeners = new Set<(runId: string) => void>();
   private readonly languageBridge: LanguageBridge;
   private readonly memoryBridge: MemoryBridge;
   private readonly contextBridge: ContextBridge;
@@ -596,7 +597,8 @@ export class KernelClient {
     this.languageBridge = new LanguageBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "language-channel-failed", message: "Private language channel failed", retryable: false }), true));
     this.mcpBridge = new McpBridge(() => this.epoch, response => this.write(response),
-      () => this.failAll(new KernelClientError({ code: "mcp-channel-failed", message: "Private MCP channel failed", retryable: false }), true));
+      () => this.failAll(new KernelClientError({ code: "mcp-channel-failed", message: "Private MCP channel failed", retryable: false }), true),
+      runId => { for (const listener of this.mcpReleaseListeners) { try { listener(runId); } catch { this.mcpReleaseListeners.delete(listener); } } });
     this.credentialBridge = new CredentialBridge(() => this.epoch,
       response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "credential-channel-failed", message: "Private credential channel failed", retryable: false }), true));
@@ -619,6 +621,14 @@ export class KernelClient {
   async registerMcpOwner(runId: string, lease: McpLease): Promise<McpBinding> {
     if (!this.handshakeResult) await this.start();
     return this.mcpBridge.register(runId, lease);
+  }
+  async registerMcpCandidate(runId: string, lease: McpLease): Promise<McpBinding> {
+    if (!this.handshakeResult) await this.start();
+    return this.mcpBridge.register(runId, lease, false);
+  }
+  discardMcpCandidate(runId: string, binding: McpBinding): void { this.mcpBridge.discard(runId, binding); }
+  onMcpReleased(listener: (runId: string) => void): () => void {
+    this.mcpReleaseListeners.add(listener); return () => { this.mcpReleaseListeners.delete(listener); };
   }
   setRetrievalOwner(owner: RetrievalOwner): void { this.retrievalBridge.setOwner(owner); }
   /** Resolve only an actual Host-issued native Run grant, never caller-created scope metadata. */

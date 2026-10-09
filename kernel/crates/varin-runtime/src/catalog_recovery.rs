@@ -137,6 +137,7 @@ impl ExecutionPreparation {
 
 struct ModelRecoveryPreparation {
     active_model: Option<super::models::RunModelSelection>,
+    active_tool_composition: Option<Value>,
     step: ModelStep,
     output: Value,
     calls: Vec<ToolCall>,
@@ -226,9 +227,16 @@ impl RecoveryPreparation {
                         } else {crate::model_session::connection_identity(&active.configuration)}
                             .map_err(|error|RuntimeError::Invalid(error.to_string()))?)
                 }).transpose()?.unwrap_or(false);
-                if snapshot.view.binding.tools != binding.tools
-                    || snapshot.view.binding.tool_schema_generation
-                        != binding.tool_schema_generation
+                let tools_changed = snapshot.view.binding.tools != binding.tools
+                    || snapshot.view.binding.tool_schema_generation != binding.tool_schema_generation;
+                let activated_tools = match &model.active_tool_composition {
+                    Some(reference) => {
+                        let selected:super::tools::ToolComposition=serde_json::from_value(self.execution.content.load(reference)?)?;
+                        selected.generation==binding.tool_schema_generation && selected.tools==binding.tools
+                    },
+                    None=>false,
+                };
+                if (tools_changed && (model.committed != model.calls.len() || !activated_tools))
                     || (model_changed && (model.committed != model.calls.len() || !activated_model))
                 {
                     return Err(RuntimeError::Conflict(
@@ -729,6 +737,8 @@ impl Catalog {
             }
         }
         Ok(ModelRecoveryPreparation {
+            active_tool_composition: database.query_row("SELECT json_extract(data,'$.composition') FROM events WHERE subject=?1 AND kind='run.tools_activated' ORDER BY cursor DESC LIMIT 1",
+                [run_id],|row|row.get::<_,String>(0)).optional()?.map(|value|serde_json::from_str(&value)).transpose()?,
             active_model: {
                 let id: Option<String> = database.query_row("SELECT id FROM model_selections WHERE run_id=?1 AND active=1",[run_id],|row|row.get(0)).optional()?;
                 id.map(|id|record(database,"model_selections",&id)).transpose()?

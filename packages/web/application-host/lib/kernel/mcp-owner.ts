@@ -93,6 +93,7 @@ export function createMcpLease(options: McpOwnerOptions): McpLease {
         tool: await lease.prepareTool(selected.server, selected.tool, selected.schemaVersion, signal), args: selected.args,
       };
       lease.validateArguments(target.tool.name, target.tool.schemaVersion, target.args);
+      const authorizedSignal = AbortSignal.any([signal, lease.revocationSignal(target.tool.name, target.tool.schemaVersion)]);
       const current = await policy();
       const result = decision(current.value, target);
       if (result.decision === 'deny') throw new Error('mcp_permission_denied');
@@ -100,8 +101,8 @@ export function createMcpLease(options: McpOwnerOptions): McpLease {
         ownerReference: binding.reference, ownerGeneration: binding.generation,
         toolSchemaVersion: call.schemaVersion, policyGeneration: current.generation,
         reason: result.reason ?? 'MCP permission required',
-      }, signal);
-      signal.throwIfAborted();
+      }, authorizedSignal);
+      authorizedSignal.throwIfAborted();
       lease.assertCallable(target.tool.name, target.tool.schemaVersion);
       approved.set(call.operationId, { identity: JSON.stringify(call), policy: current.generation, target });
     },

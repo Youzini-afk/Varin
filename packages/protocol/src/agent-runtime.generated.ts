@@ -192,6 +192,17 @@ export interface McpPrepareParams {
   binding: McpBinding;
 }
 
+export interface ToolSelectParams {
+  runId: string;
+  selectionId: string;
+}
+
+export interface ToolReadyParams {
+  runId: string;
+  selectionId: string;
+  binding?: McpBinding;
+}
+
 export interface LaunchSelection {
   policy_models: PolicyModelCapability[];
   mcp_binding: McpBinding | null;

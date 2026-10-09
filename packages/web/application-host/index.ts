@@ -2882,6 +2882,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     providerToken: async (_scope, provider) => (await hostCredentialAuthority.getAuth(provider))?.auth.apiKey,
     credentialScope: async (_scope, provider) => hostCredentialAuthority.currentScope(provider),
   });
+  const agentMcpWatches = new Map<string, { identity: string; ready: Promise<() => void> }>();
+  const releaseAgentMcpWatch = (runId: string) => {
+    const entry = agentMcpWatches.get(runId); agentMcpWatches.delete(runId);
+    if (entry) void entry.ready.then(release => release(), () => undefined);
+  };
+  kernelClient.onMcpReleased(releaseAgentMcpWatch);
+  kernelClient.subscribeExit(() => { for (const runId of agentMcpWatches.keys()) releaseAgentMcpWatch(runId); });
   const prepareAgentPolicy = createAgentPolicy(extensionRuntime);
   const modelAuthority = createModelAuthority(hostCredentialAuthority);
   const liveSources = createLiveSourceOwner({ documents: documentsAuthority, kernel: kernelClient });
@@ -2899,6 +2906,24 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       projectTrusted: Boolean(workspace) && mcpHostProjectTrusted(mcpAgentDir, configCwd),
       sessionId: `agent:${input.threadId}`,
     };
+    const watchIdentity = JSON.stringify(scope);
+    let watch = agentMcpWatches.get(input.runId);
+    if (watch?.identity !== watchIdentity) {
+      releaseAgentMcpWatch(input.runId);
+      const ready = mcpAuthority.subscribe(scope, () => {
+        void agentRuntime.refreshMcp(input.runId).catch(() => {
+          console.error('[MCP] Tool composition preparation failed for Run:', input.runId);
+        });
+      });
+      watch = { identity: watchIdentity, ready };
+      const selectedWatch = watch;
+      agentMcpWatches.set(input.runId, watch);
+      void ready.then(release => { if (agentMcpWatches.get(input.runId) !== selectedWatch) release(); }, () => {
+        if (agentMcpWatches.get(input.runId) === selectedWatch) agentMcpWatches.delete(input.runId);
+      });
+    }
+    await watch.ready;
+    signal?.throwIfAborted();
     const inspection = mcpAuthority.inspect(scope);
     const lease = await mcpAuthority.acquire(scope, {
       servers: inspection.servers.filter(server => server.hasDirectTools && server.status !== 'disabled' && server.exposure !== 'hidden').map(server => server.name),

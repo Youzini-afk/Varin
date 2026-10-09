@@ -8,6 +8,7 @@ mod model;
 mod agent_runtime;
 mod run_assembly;
 mod run_models;
+mod run_tools;
 mod tools;
 mod questions;
 mod collaboration;

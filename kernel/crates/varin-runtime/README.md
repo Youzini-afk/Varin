@@ -29,6 +29,11 @@ writing Pi session files or the Host harness's existing execution records.
   The private MCP bridge retains concrete generations and scope holders. Retired generations drain
   their calls; a waiting Run retains its active owner. Cancellation wakes the call and settles from
   the actual Host receipt. Rechecking an approved action does not open another permission wait.
+  Active MCP scopes subscribe to configuration and leased-schema changes. A ready replacement
+  becomes active at a closed ModelStep boundary; failed or superseded preparation leaves the
+  current directory selected. The activation records an immutable composition reference, retained
+  by content collection and checked on recovery. Explicit dependency revocation also ends its
+  outstanding authorization wait without requiring a user answer.
 - `providers::registry` selects typed model adapters through the same composition leases. Factories
   run outside the registry lock; replacement preserves retained implementations and explicit revocation
   cancels active generation. Builtin protocol options are validated by family. The `pi-messages` HTTP
