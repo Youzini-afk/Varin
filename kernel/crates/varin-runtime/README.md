@@ -83,12 +83,18 @@ continuation state in the same transaction.
 Transient provider progress uses a bounded, nonblocking sink. Durable tool results and model output
 remain available independently of whether a viewer consumed progress.
 
-Ordinary execution commits stage immutable request, model-output and tool-batch bodies on the Run
-worker outside the Catalog mutex. A publication reference is acquired under Catalog ownership and
-retained until metadata commit; collection defers when such references exist, without waiting under
-the Catalog lock. Publication still rechecks the original execution/branch conditions. Policy-result
-publication and recovery hydration retain separate remaining lock-cost boundaries; see the
-[implementation review](../../../docs/reviews/runtime-2026-10-09.md).
+Ordinary execution and policy commits stage immutable requests, outputs and evidence on the Run
+worker outside the Catalog mutex. Memory delivery candidates, including quoted planning context,
+are parsed there too; transactions authenticate their original receipts and record delivery stages.
+A publication reference spans body I/O through metadata commit; collection defers without waiting
+under the Catalog lock. Publication rechecks the original execution/branch conditions.
+
+Run startup returns its control handle before history recovery. The worker traverses immutable
+history and restores request/output/receipt bodies through read-only SQLite and content handles.
+Publication rechecks the Run epoch/revision, branch owner/head and its own relevant event cursor;
+unrelated Runs do not invalidate preparation. Queued promotion and cancellation retain their original
+identities. See the [control isolation review](../../../docs/reviews/runtime-control-isolation-2026-10-09.md)
+for tested boundaries and remaining transport/cold-open work.
 
 ## Policy-originated read graphs
 
@@ -110,9 +116,9 @@ schema/source. Recovery works before the first ModelStep and restores later deci
 The policy receives owned references and can request bounded `ReadResult` chunks. Selected evidence
 enters `RequestModelWithEvidence` as labeled ExternalData, without synthetic provider call/result
 pairing. Output references are checked against Run, action and node; no arbitrary object-hash reader
-is granted. Chunk and selected-evidence hydration happen outside the Catalog mutex. New graph output
-body writes and reference publication retain the Catalog lock, which also excludes content GC;
-large-result publication cost remains an explicit optimization boundary, not a claimed speedup.
+is granted. Chunk/evidence reads and new graph output writes happen outside the Catalog mutex.
+The publication reference protects uncommitted objects until the short receipt transaction commits.
+Graph definition admission still validates all nodes before accepting the graph.
 
 ## Policy-originated planning models
 
@@ -133,15 +139,16 @@ usage and a terminal receipt. A never-dispatched prepared request may resume onl
 binding and request. Once dispatch intent is durable, a crash or cancellation without completion
 produces an interrupted/indeterminate receipt, never automatic paid replay or assumed zero usage.
 Completed-item, usage and terminal boundaries persist observed output; token deltas are transient
-until such a boundary. A crash can lose uncommitted deltas. This avoids per-token durable writes;
-large completed-item publication remains a content/Catalog optimization boundary.
+until such a boundary. A crash can lose uncommitted deltas. Completed items are stored on the Run
+worker before their references and observed usage commit; token deltas do not each write a transaction.
 
 Tool calls returned by the tool-free provider are retained but never executed and make the plan
 unusable. A successful textual plan is exposed through a Run/action-owned reference and bounded
 `ReadResult` chunks. Main-model injection labels it as untrusted model-derived evidence. Provider
-opaque originals are retained separately and never enter that evidence path. Body creation and
-reference publication use the same Catalog exclusion as content GC. Both operation cancellation and
-model-generation interruption address the same registered cancellation child.
+opaque originals are retained separately and never enter that evidence path. Body creation uses a
+publication reference across off-lock work. New dispatch verifies the frozen conversation head and
+branch owner; already-dispatched output and usage remain recordable after later history changes.
+Both operation cancellation and model-generation interruption address the same registered child.
 
 ## Explicit context compaction
 
