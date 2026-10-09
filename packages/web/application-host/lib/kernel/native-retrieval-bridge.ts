@@ -9,6 +9,10 @@ export const unavailableRetrievalResult = (message: string): NativeRetrievalResu
 const validQuery = (value: unknown): value is NativeRetrievalQuery => {
   if (!record(value) || !['runId','threadId','workspaceId','executionWorkspaceId','grantId','question'].every(key => text(value[key]))
     || !record(value.liveRoot) || !['hostId','canonicalRoot','rootId'].every(key => text(value.liveRoot && record(value.liveRoot) ? value.liveRoot[key] : undefined))) return false;
+  const invocation = value.invocation;
+  if (!record(invocation) || !text(invocation.toolCallId)
+    || !(invocation.kind === 'model_step' ? text(invocation.requestId)
+      : invocation.kind === 'policy_action' && text(invocation.actionId) && text(invocation.nodeId))) return false;
   return (value.projectId === null || text(value.projectId))
     && (value.paths === undefined || (Array.isArray(value.paths) && value.paths.every(text)))
     && (value.limit === undefined || (Number.isSafeInteger(value.limit) && Number(value.limit) > 0));
@@ -46,6 +50,8 @@ export class NativeRetrievalBridge {
       let result: NativeRetrievalResult;
       try {
         result = validQuery(query) && owner
+          // Cancellation detaches even a non-cooperative owner. Its durable inference ledger
+          // can still settle actual dispatch facts without reviving this result delivery.
           ? await waitWithSignal(owner(query, controller.signal), controller.signal)
           : unavailableRetrievalResult(owner ? 'Invalid retrieval query' : 'Retrieval owner is unavailable');
       } catch {

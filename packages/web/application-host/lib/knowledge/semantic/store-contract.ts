@@ -49,6 +49,19 @@ export type SemanticCheckpoint = {
   publishedDocuments: number;
 };
 
+/** Opaque, process-local lease on an immutable native publication. */
+export type SemanticPublishedReader = {
+  token: string;
+  ownerEpoch: string;
+  publicationId: string;
+  checkpoint: SemanticCheckpoint;
+};
+
+export type SemanticPublishedReaderStats = {
+  activeReaders: number;
+  retainedPublications: number;
+};
+
 export type BlockPayload = {
   type: "block";
   documentId: string;

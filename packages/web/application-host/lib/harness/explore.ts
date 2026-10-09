@@ -92,6 +92,8 @@ export interface ExploreRgSearchOptions {
 
 export type ExploreSemanticHit = {
   documentId: string;
+  /** Indexed source revision; native retrieval requires equality with the admitted Documents snapshot. */
+  revision?: string;
   blockId: string;
   parentUnitId: string;
   parentName: string;

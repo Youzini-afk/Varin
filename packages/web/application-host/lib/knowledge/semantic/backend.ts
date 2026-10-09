@@ -78,6 +78,9 @@ export function createSemanticBackend(options: {
     get embedder() { return current; },
     get lastError() { return lastError; },
     bind,
+    bindRetained: (embedder: SemanticEmbedder): void => {
+      lastError = undefined; kind = "remote"; current = embedder; currentKey = "retained";
+    },
     unavailable,
     get local() { return local; },
     replaceLocal: (next: SemanticEmbedder): void => {

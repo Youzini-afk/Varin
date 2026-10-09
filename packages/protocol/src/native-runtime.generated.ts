@@ -1,6 +1,9 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export type NativeRetrievalInvocation = { kind: 'model_step'; requestId: string; toolCallId: string } | { kind: 'policy_action'; actionId: string; nodeId: string; toolCallId: string };
+
 export interface NativeRetrievalQuery {
+  invocation: NativeRetrievalInvocation;
   runId: string;
   threadId: string;
   workspaceId: string;

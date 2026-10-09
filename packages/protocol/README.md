@@ -2,6 +2,14 @@
 
 Varin protocol types, schemas, and event/method definitions.
 
+## Node-only inference transport
+
+`@varin/protocol/node/embeddings` is the credential-free, stateless OpenAI-compatible
+embedding wire implementation shared by Pi background inference and the native Application
+Host. It is not exported from the browser-safe root. Callers own provider selection,
+credentials, authorization, lifetime and retry policy; native inference uses one dispatch,
+no adaptive resubmission, and exposes actual dispatch/response/usage observations.
+
 ## Envelope decoding
 
 Text transports use `decodeEnvelope` (or `JsonLineDecoder` for stdio). Node IPC uses

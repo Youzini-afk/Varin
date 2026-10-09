@@ -2,10 +2,13 @@
 
 This package contains the browser-safe manifests for Varin's built-in extensions and the immutable Node runtimes used by brokered Host extensions.
 
-The lazy brokered `varin.builtin.retrieval-structured` and `varin.builtin.retrieval-keyword` packages
+The lazy brokered `varin.builtin.retrieval-structured`, `varin.builtin.retrieval-keyword`, and
+`varin.builtin.retrieval-semantic` packages
 provide `varin.retrieval.plan@1`. The structured declaration is the native retrieval distribution
-default; the ordinary extension service-routing picker can select keyword-only before either package
-has activated. Both declare only stage choices and receive no filesystem/model grants. Their
+default; the ordinary extension service-routing picker can explicitly select keyword-only or
+keyword+structure+semantic before activation. They declare only stage choices and receive no
+filesystem/model grants. Selecting the semantic declaration uses the native owner's explicitly
+configured remote embedding backend and published reader, with no local or paid fallback. Their
 immutable `host.cjs`, manifest and fingerprint ship through the same package-root map and artifact
 lifecycle as other built-ins. See [native retrieval authoring](../../docs/ops/varin-extension-authoring.md#native-retrieval-plans).
 

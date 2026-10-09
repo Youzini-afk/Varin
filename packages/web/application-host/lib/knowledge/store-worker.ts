@@ -4,6 +4,9 @@ import { createSemanticStoreEngine, type SemanticStoreEngine } from "./semantic/
 import { isSemanticStoreMethod } from "./semantic/store-protocol.js";
 import { purgeSemanticWorkspaceCache } from "./semantic/cache-maintenance-engine.js";
 import type { SemanticStoreOpenOptions } from "./semantic/store-contract.js";
+import { resolve } from "node:path";
+import { createSemanticInferenceLedgerEngine, type SemanticInferenceLedgerEngine } from "./semantic/inference-ledger-engine.js";
+import type { SemanticInferenceLedgerOpenOptions } from "./semantic/inference-ledger-contract.js";
 import {
   isStoreMethod, storeFailure, type StoreChildMessage, type StoreOpenOptions,
   type StoreRequest, type StoreResponse,
@@ -12,6 +15,8 @@ import {
 if (!process.send) throw new Error("Knowledge storage requires a private IPC channel");
 const stores = new Map<number, KnowledgeStoreEngine>();
 const semanticStores = new Map<number, SemanticStoreEngine>();
+const inferenceHandles = new Map<number, string>();
+const inferenceLedgers = new Map<string, { store: SemanticInferenceLedgerEngine; references: number }>();
 let tail: Promise<void> = Promise.resolve();
 let disconnected = false;
 const send = (message: StoreChildMessage): Promise<void> => new Promise(resolve => {
@@ -48,11 +53,44 @@ async function handle(requests: StoreRequest[]): Promise<void> {
       offset += 1;
       try {
         const [method, ...args] = first.args;
-        if (method === "purge") {
+        if (method === "inference-open") {
+          if (inferenceHandles.has(first.storeId) || semanticStores.has(first.storeId) || stores.has(first.storeId)) {
+            throw new Error("Storage handle already exists");
+          }
+          const input = args[0] as SemanticInferenceLedgerOpenOptions;
+          if (!input || typeof input.dataDir !== "string" || !input.dataDir
+            || typeof input.hostId !== "string" || !/^[a-zA-Z0-9_-]+$/.test(input.hostId)) {
+            throw new Error("Invalid semantic inference ledger open request");
+          }
+          const key = JSON.stringify([resolve(input.dataDir), input.hostId]);
+          let shared = inferenceLedgers.get(key);
+          if (!shared) {
+            shared = { store: createSemanticInferenceLedgerEngine(input), references: 0 };
+            inferenceLedgers.set(key, shared);
+          }
+          shared.references += 1;
+          inferenceHandles.set(first.storeId, key);
+          responses.push({ id: first.id, ok: true, value: undefined });
+        } else if (typeof method === "string" && method.startsWith("inference-")) {
+          const key = inferenceHandles.get(first.storeId);
+          const shared = key ? inferenceLedgers.get(key) : undefined;
+          if (!shared) throw new Error("Semantic inference ledger is not open");
+          const action = method.slice("inference-".length);
+          if (!["admit", "settle", "read", "list", "close"].includes(action)) throw new Error("Invalid semantic inference ledger method");
+          let value: unknown;
+          if (action === "close") {
+            if (shared.references === 1) { await shared.store.close(); inferenceLedgers.delete(key!); }
+            else shared.references -= 1;
+            inferenceHandles.delete(first.storeId);
+          } else {
+            value = await Reflect.apply(shared.store[action as "admit" | "settle" | "read" | "list"], shared.store, args);
+          }
+          responses.push({ id: first.id, ok: true, value });
+        } else if (method === "purge") {
           await purgeSemanticWorkspaceCache(args[0] as Parameters<typeof purgeSemanticWorkspaceCache>[0]);
           responses.push({ id: first.id, ok: true, value: undefined });
         } else if (method === "open") {
-          if (semanticStores.has(first.storeId) || stores.has(first.storeId)) throw new Error("Storage handle already exists");
+          if (semanticStores.has(first.storeId) || stores.has(first.storeId) || inferenceHandles.has(first.storeId)) throw new Error("Storage handle already exists");
           const input = args[0] as SemanticStoreOpenOptions;
           if (!input || typeof input.dataDir !== "string" || typeof input.hostId !== "string"
             || typeof input.scope?.scopeId !== "string" || typeof input.scope.scopeKind !== "string"
@@ -71,7 +109,7 @@ async function handle(requests: StoreRequest[]): Promise<void> {
           responses.push({ id: first.id, ok: true, value: { value, checkpoint: store.checkpoint() } });
         }
       } catch (error) {
-        if (first.args[0] === "open" && error instanceof AggregateError) throw error;
+        if ((first.args[0] === "open" || first.args[0] === "inference-open") && error instanceof AggregateError) throw error;
         responses.push({ id: first.id, ok: false, error: storeFailure(error) });
       }
       await send({ type: "results", responses: responses.splice(0) });
@@ -81,7 +119,9 @@ async function handle(requests: StoreRequest[]): Promise<void> {
       offset += 1;
       try {
         if (first.method === "open") {
-          if (stores.has(first.storeId)) throw new Error("Knowledge store handle already exists");
+          if (stores.has(first.storeId) || semanticStores.has(first.storeId) || inferenceHandles.has(first.storeId)) {
+            throw new Error("Knowledge store handle already exists");
+          }
           const store = await openKnowledgeStoreEngine({
             ...openOptions(first.args[0]),
             onBlocksChanged: (sessionId, change) => send({ type: "blocks", storeId: first.storeId, sessionId, change }),
@@ -174,7 +214,8 @@ process.on("message", (message: unknown) => {
 process.once("disconnect", () => {
   disconnected = true;
   void tail.then(async () => {
-    const results = await Promise.allSettled([...stores.values(), ...semanticStores.values()].map(store => store.close()));
+    const results = await Promise.allSettled([...stores.values(), ...semanticStores.values(),
+      ...[...inferenceLedgers.values()].map(entry => entry.store)].map(store => store.close()));
     // Process exit also releases Windows mmap handles still retained by the addon.
     process.exit(results.some(result => result.status === "rejected") ? 1 : 0);
   });

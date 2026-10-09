@@ -9,10 +9,10 @@
 - 工作分支：`implementation/native-agent-runtime`
 - 首个纵切：新增独立 `varin-runtime` crate，建立持久身份、历史提交及模型执行的可检验路径；不把未接入的库称为产品能力
 - 本文件只追踪实际状态和依赖；具体测试结论须来自对应代码与真实执行结果，未运行不记为通过
-- 目前以下各项均未完成生产迁移；Pi、用户资产和现有生产路径保持原权威，禁止新旧循环同时推进同一 Thread
+- 完整默认产品迁移尚未完成；显式原生入口的已验收能力见下文。Pi 与未迁移领域保持原权威，禁止新旧循环同时推进同一 Thread
 - 已新增局部实现：Catalog持久身份/历史/Operation/Wait，执行loop与事务桥接，RunSupervisor控制，多家族模型适配、输入队列与边界中断、组合依赖解析与绑定；kernel独立control worker和Host显式client已有真实IPC验证，未替代生产Pi路径
 - 独立审阅发现并已修复：续接claim后崩溃丢唤醒、后台handoff仍被终态Run阻止；模型完成与历史/工具调用现由同一事务提交。其余交叉边界继续审阅，最终测试结果以稳定代码重跑为准
-- 显式 `live_root` 已接通原生定义、引用和诊断三个语言工具，复用现有 Documents、LanguageViewBinder/LanguageSupervisor 与 Rust 资源授权；固定/物化语言依赖闭包、其余代码智能能力及完整领域迁移仍未完成。验收与语义边界见本文件末节
+- 显式 `live_root` 已接通原生定义、引用和诊断三个语言工具，复用现有 Documents、LanguageViewBinder/LanguageSupervisor 与 Rust 资源授权；同时已接通原生可组合关键词/结构检索，以及显式选择的 published-reader 语义检索和持久 embedding 外发事实。固定/物化依赖闭包、rerank、其余代码智能及完整领域迁移仍未完成。验收与边界见本文件末两节
 
 ## 2026-10-09 恢复后的增量
 
@@ -38,7 +38,7 @@
 | 2 | 单一协议与调用分类 | Rust/TS 生成边界类型；持久 command 与内存 query；效果/资源/完成方式合同；错误与游标语义；凭据只存引用 | 局部实现：共享枚举/控制命令生成与显式Host client；全运行协议及UI消费未完成 |
 | 3 | 一个完整执行纵切 | 默认 AgentPolicy →冻结 RequestSnapshot→真实协议适配→工具合法配对→历史提交/停止/恢复；模型请求不能成为资源权威 | 局部通过：真实SQLite执行loop、多家族provider协议fixture与本地真实HTTP流/错误/取消；输入队列与序列化窗口中断通过。完整认证迁移、全部provider与产品路径未完成 |
 | 4 | 资源执行与 IPC 去公共长等待 | 独立准备/捕获作业；保留文件 CAS/恢复；进程推送流；控制与数据分离；每个取消有实际执行端确认 | 未完成 |
-| 5 | 组合计划与既有扩展接线 | 在启用/配置变化时解析依赖与绑定；复用现有 Host/Surface、候选更新；在途绑定保留；观察者不阻塞提交 | 局部通过：原生绑定/pins/撤权、root-reachable依赖解析、候选scope检查及现有调用取消；异步owner装配与原生生产接线未完成 |
+| 5 | 组合计划与既有扩展接线 | 在启用/配置变化时解析依赖与绑定；复用现有 Host/Surface、候选更新；在途绑定保留；观察者不阻塞提交 | 局部通过：原生绑定/pins/撤权、root-reachable依赖解析、候选scope检查及现有调用取消；真实 context/Decision/Observer 与 live-root retrieval 已接线；全域异步owner装配与生产迁移未完成 |
 | 6 | 领域与产品消费者迁移 | 完成下表全部能力；UI snapshot/cursor；远端身份一致；用户资产一次性导入；逐域单写者切换 | 未完成 |
 | 7 | 完整底层的产品交付与实证 | 两份设计的结构不变量和全部领域路径共同成立；默认完整产品与局部替换均可用；冷/热/并发/更新成本有证据；真实平台/发行验证；由此完成单写者切换并删除 Pi 与重复中转 | 未完成 |
 
@@ -52,7 +52,7 @@
 
 | 设计要求 | 当前实际 owner / 已有实现 | 尚缺的不变量或调用路径 | 下一工程纵切 | 验收证据（未执行不得记为通过） |
 | --- | --- | --- | --- | --- |
-| 扩设 §4–6、§10：同一能力合同与预绑定调用 | `kernel/crates/varin-runtime/src/composition.rs` 的 `CompositionRegistry`/pins；`composition/resolver.rs` 的根可达依赖图；`packages/extension-host/src/service-registry.ts` 的 provider/drain/候选替换 | `varin.context.fragments@1` 已贯穿真实 Host 安装/作用域选择、broker 声明、Rust resolver/registry、预绑定纯变换与实际模型请求；Host 显式 provider 直查及 service 索引已接通。通用检索/工具组合仍未完成，不能把静态工具选择视为统一 registry | 在已验收的 context、Decision、Observer 纵切上逐域接检索/工具合同；保持内部 Rust 直接调用、仅真实边界编码 | 两个项目选择不同实现；工具/调用方无需修改；加未使用扩展不改变调用扫描范围；普通缺失与选定实现失败分别呈现 |
+| 扩设 §4–6、§10：同一能力合同与预绑定调用 | `kernel/crates/varin-runtime/src/composition.rs` 的 `CompositionRegistry`/pins；`composition/resolver.rs` 的根可达依赖图；`packages/extension-host/src/service-registry.ts` 的 provider/drain/候选替换 | `varin.context.fragments@1` 已贯穿真实 Host 安装/作用域选择、broker 声明、Rust resolver/registry、预绑定纯变换与实际模型请求；Host 显式 provider 直查及 service 索引已接通。live-root 检索已通过同一 service routing/CompositionRegistry 选择 keyword-only、keyword+structure 与显式 semantic；更广工具组合仍未完成 | 在已验收的 context、Decision、Observer 和 live-root 检索上继续接其余领域/工具合同；保持内部 Rust 直接调用、仅真实边界编码 | 两个项目选择不同实现；工具/调用方无需修改；加未使用扩展不改变调用扫描范围；普通缺失与选定实现失败分别呈现 |
 | 扩设 §5.2–5.4、§9：作用域、共享实例及局部准备 | resolver 已有 `ScopedSelection`/`PreparationKey`/`preparable`，把优先级解析明确交给现有 routing owner；Host supervisor 已有候选及 owner | 公共生命周期长队列已按 owner/依赖拆开，独立准备/释放及共享依赖合并已有后文证据；父子作用域差量、全部能力的共享实例键和局部组合复用仍未完成 | 沿已拆开的 owner/依赖路径接入语言等真实能力；验证共享键、父子作用域差量和局部更新复用，不另外建安装器或配置库 | A 的 activate 或 dispose 未完成，独立 B 仍可启用/停用/调用；同依赖只启动一次；可选缺失不吞掉已选实现的启动失败；冲突选择给出实际来源 |
 | 扩设 §6：Provider / Transform / Decision / Observer 四类参与方式 | Rust `ModelProvider`、`ToolExecutor`、`AgentPolicy`、`ProgressSink` 和 Catalog durable events 各自存在；Host SDK 有 services/effect/Surface 贡献 | SDK 已有声明式 `provideContextFragments` 与同合同 inspect，内置默认/可安装项目实例经真实模型请求验收。Decision 与 Observer 已有真实 broker 作者合同、可安装示例及游标消费；跨 branch/Run 的 Observer scope 已按不可变受理 checkpoint 接通；多变换顺序/冲突和更广领域组合仍未完成；非阻塞 progress 不等于第三方执行隔离 | 沿已有 Transform、Decision、Observer 纵切扩展真实领域组合并核对多变换顺序/冲突；复用事实游标与既有 worker，慢计算作为真实 Operation | 慢/同步阻塞观察插件不阻止工具提交与无关 worker；观察者重连按游标恢复；变换不修改原历史；决策只阻塞依赖自己的工作；观察者后续动作有新命令来源 |
 | 总设 §11、扩设 §7：完整可替换 AgentPolicy | `execution.rs` 已有合法行动检查、版本化 `PolicyCheckpoint` 和默认循环；`model_session.rs` 默认绑定 `DefaultAgentPolicy` | `PolicyAction` 已通过所选 Decision 支持独立只读依赖图、作用域结果分块及引用证据请求；ExecuteTools 继续只结算真实模型批次。辅助规划模型已有下述冻结构建的独立检查证据；子任务、一般工具图和交付/暂停仍未完成；策略目前按整个 Run 固定 | 以研究/计划执行的一条真实策略路径补行动受理与状态关联，接组合选择；慢规划模型用独立推理工作，不在 `decide()` 内做 I/O；保留核心交换配对 | 替换策略后原文/模型 opaque 仍可读；规划等待期间其他 Run 可执行；重开不会重做已受理行动；不兼容私有状态不伪造迁移；策略卸载不删除已受理子任务 |
@@ -61,7 +61,7 @@
 | 总设 §4.1、§9、§23：单一协议、控制/数据分离、事件推进 | `kernel/protocol/schema.json` 生成边界；native control worker、Host native client 独立 credits；guardian 推送/磁盘输出已有局部实证；历史引用分页已有 HTTP 实证 | 不能由某一进程通道推导所有域完成。file_list/file_search 及 compute 背压已使用输出/终态事件而非 10 ms 轮询；大内容模型请求仍全量序列化/读取；同进程资源桥仍需区分 typed 执行与外部 wire 解码 | 沿其他内部等待核查事件通知和共享准备；沿实际大截图/日志/内容路径核查独立数据流；逐域移除重复 JSON 中转而不新增统一 RPC 层 | 计算、输出或大内容拥塞时取消/状态可受理；完整日志可按游标重读；控制成功不冒充执行已停止；空闲内部等待不持续产生 read RPC |
 | 总设 §12–13：模型用途、稳定上下文、即时记忆与压缩 | `providers/`、credential broker、Host credential owner；`catalog_context*.rs`/`context_job.rs`；Host `native-thread-context.ts` | 多家族 fake/loopback 通过不等于真实认证/平台网络完整覆盖；显式摘要不是自动预算策略或完整记忆流程；agentPlanning 已有受所选策略显式请求的 tool-free 模型 Operation 实现与局部独立验收；embedding/rerank/其他 decision/image 仍须按用途接入 | 让内置 ContextCompiler 与可替换上下文策略消费同一来源/记忆 revision；即时写入走现有 memory owner，成功 checkpoint 原子更换稳定系统快照；在实际检索路径绑定非 chat 推理用途 | memory UI/工具交错不丢 revision；压缩候选期间新增尾部保留；失败保留旧 checkpoint；token 预算包含工具/附件/事件；按真实 provider、认证和网络场景分别记录覆盖 |
 | 总设 §14–16：源视图、捕获、dispatch、恢复与整合 | Native source launch/selection、Storage 分支/内容/文件事务、Host Documents/WorkingState；native 历史 branch 与文件 journal 恢复已有证据 | 明确 native source 准备不等于主/子任务 dispatch 完成；编辑器草稿、文件副本与 Git/overview 仍需同源关联；报告和代码集成不能混为一物；组合恢复与 Host 启动续接须走完整产品路径 | 以一个有独立源视图的子任务贯穿立即持久回执、批量捕获/共享固定 root、准备取消、执行、报告和条件代码整合；复用底层 writer | 大非 Git 根准备时父任务和控制继续；重开继承真实副本而不重置文件；无改动子任务正常交付；父目录后来修改形成明确冲突；草稿不被聊天分支操作覆盖 |
-| 总设 §17、扩设 §5.3：语言/检索及一致环境 | 原生 live_root 定义/引用/诊断已复用 Host LanguageSupervisor/LanguageViewBinder、Documents 与 Rust grant；file_list/file_search 已复用 compute | 仅 live 环境三工具已接通；固定/物化工程依赖闭包、其他 LSP/结构/语义检索和远端同名资源映射未完成；跨文件 revision 只是请求后观察，无版本诊断仍是未确认 current 的 pending 观测 | 沿同一来源绑定接现有检索 PipelinePlan；完整固定语言视图须先证明 imports/配置/链接/编译器库闭包，远端 read/Shell/LSP 共同映射而非只替换文件 provider | live 路径的独立等待、共享准备、单等待者取消、越权/过期结果及真实 bundled TS 证据见末节；后续另证固定依赖闭包、远端不串源及检索来源/配置世代 |
+| 总设 §17、扩设 §5.3：语言/检索及一致环境 | 原生 live_root 语言三工具及可组合关键词/结构/语义检索复用既有 Language、Documents、Structure、semantic owner 与 Rust grant；语义已绑定真实 immutable reader 和持久外发事实 | live_root 检索已进入真实原生历史，语义 revision/chunk hash 分别验证；固定/物化工程依赖闭包、其余 LSP、rerank 和远端映射未完成；语言跨文件 revision 仍仅请求后观察，无版本诊断仍为 pending | 继续建立固定语言/检索依赖闭包与远端一致映射；后续 rerank 沿显式推理用途/持久外发合同接入，保留未知效果和零隐式付费规则 | 语言与检索的独立等待、授权/过期结果、配置/reader切代、撤权、取消和账本恢复证据见后文；固定闭包、远端不串源及大语料成本另证 |
 | 总设 §18：问题、计划、Goal、定时与 Bot | `catalog_questions.rs`/`native_questions.rs` 已出现问题持久路径；Host memory/todo、bots、followups、scheduled-tasks 仍各有领域 owner | 问题记录不代表 Goal/日历发生项全部完成；既有 Host 续接权威还须收敛到统一 Run/Wait；显式 Goal 授权、手动暂停、用量和时区语义不能丢失 | 逐域把领域事件接原生受理和 durable Wait，先完成关闭 UI 后回答/续接与一次日历发生项；计划保留单 revision，Bot 使用相同任务身份而保留独立知识 | 默认答案/到期不是批准；订阅登记窗口不丢唤醒；重启只准入一次 occurrence；分叉不复制自动授权；暂停不被 timer 覆盖；用量不因投影重复累计 |
 | 总设 §19、§22：桌面与远端执行资源 | Host `computer`、`packages/computer-driver`、环境服务；既有真实平台能力继续复用 | 尚未贯穿原生 operation/owner/control epoch；断网/Host 重启不证明进程或输入停止；独立桌面与同一物理桌面必须不同调度语义 | 接一个真实桌面作业和一个远端执行环境，固定资源映射与执行端回执；紧急停止直接到执行端，重连查询原 operation，不从聊天状态推导成功 | Catalog 不可写仍能停止输入；释放键和控制分配有证据；接管后旧队列不续发；鼠标移动不擅自接管；远端失联保持未知效果；其他桌面继续 |
 | 总设 §20、扩设 §8：MCP、持久脚本、作者合同与发现 | `extension-contract/host/sdk` 已有 Host/Surface、effect、typed workbench API；Pi MCP/codemode 仍为已有入口 | 原生 MCP 直调/发现已复用共享 Host owner 并有局部证据；统一 codemode 路径、MCP Tasks 和完整长输出仍未交付；Agent 自助扩展缺实际合同查询到候选包启用的闭环；不得另养文档目录或绕过现有启用授权 | 接既有 MCP 配置/凭据与能力协商；同 registry 提供精确 schema/依赖/选定实现/准备状态/UI slot 查询；用普通 SDK 构建一个领域工具及卡片，再通过原有候选流程更新 | 禁用工具后脚本不能另路使用；完整 async 单元格可等待并保留嵌套调用身份；无 print 仍有必要提交事实；无 UI 工具照常运行；MCP Tasks 只在协商支持时映射 |
@@ -71,18 +71,18 @@
 ### 当前优先级
 
 1. **保留已核验策略纵切并继续补行动范围**：安装策略 → 独立规划 Operation → 有界读取图 → 主模型回答已有下述证据；下一步领域接线保留取消、混合恢复、凭据隔离和未知效果语义，一般工具图、子任务及交付/暂停仍须完成。
-2. **扩展已核验的真实源与语言路径**：live_root 三语言工具已接通；沿同一源身份继续接检索 PipelinePlan，并单独建立固定/物化的完整语言依赖闭包与远端一致环境。跨 Run 准入、事件 compute 和 owner 级共享准备继续复用，任务族公平及全域共享准备仍需补齐。
+2. **扩展已核验的真实源与语言路径**：live_root 三语言工具、可组合关键词/结构检索和显式语义闭环已接通；下一步建立固定/物化的完整依赖闭包、远端一致环境，并按独立推理合同评估 rerank。跨 Run 准入、事件 compute 和 owner 级共享准备继续复用，任务族公平及全域共享准备仍需补齐。
 3. **让策略和上下文真正可替换**：用实际多步工作证明行动合同，补齐默认记忆/压缩/推理用途；不以 trait 存在或默认循环能聊天作为完成证据。
 4. **沿同一合同接完领域与产品**：协作/源视图、语言/检索、问题/计划/Goal/定时、MCP/脚本、桌面/远端、科研/Bot/UI 各有真实使用路径。迁移可以并行，不能新增第二套领域状态权威。
 5. **以实证收尾完整设计**：局部热更新、独立等待、资源公平、成本复用与平台发行都成立，才完成最终切换及 Pi 清理。Pi 删除不是前四项的替代品。
 
-### 当前领域纵切：live-root 语言路径已接通，继续补依赖闭包与检索
+### 当前领域纵切：live-root 语言与检索已接通，继续补依赖闭包与环境范围
 
 - `NativeSourceMode` 现有 `FixedBranch`、`Materialized`、`LiveRoot`；显式 live_root 不捕获目录，受理、续接和恢复保持同一已验证 host/workspace/root。固定来源仍固定，物化环境仍保留实际副本，不随当前 UI/cwd 改绑。
 - live_root 已通过原生注册表执行 `native_language_definition`、`native_language_references`、`native_language_diagnostics`。Rust 拥有工具准入与结果提交，Host 直接使用现有 LanguageViewBinder/LanguageSupervisor 和选定 provider；没有第二个语言进程/config owner、Pi 身份冒充或 decide 内隐藏 I/O。
 - 当前 live 路径核对同一 Host 和实际 Documents 环境；同 workspace/provider/view 的准备复用，实际 query 绑定 generation/documentVersion。输入前后 revision 核对，返回目标逐项授权；目标的 observedRevision 不证明语言服务器计算跨文件 range 时使用了该版本。
 - fixed_branch/materialized LSP 仍明确不可用：外部/绝对 symlink、tsconfig 等配置与编译器库闭包未固定。仅物化目录或 didOpen 目标文件不能证明全工程固定，cwd 也不是 OS sandbox。草稿、远端同名路径和完整 LSP 功能仍须分别建立合同与证据。
-- 本轮独立证据见末节；下一步沿同一来源接现有检索 PipelinePlan，继续补任务/环境范围的能力组合、准备和恢复。无版本诊断可保留真实非空观测，但仍是 pending，不能称为 current/clean。
+- 同一 live_root 已接入实际检索 PipelinePlan 与显式语义 owner，证据见后文；下一步继续补任务/环境范围的能力组合、固定依赖闭包和恢复。无版本诊断可保留真实非空观测，但仍是 pending，不能称为 current/clean。
 
 ## 已核验增量：策略辅助规划模型
 
@@ -121,12 +121,12 @@
 | 能力 | 当前入口/权威 | 目标交付 | 原生实现状态 |
 | --- | --- | --- | --- |
 | 会话、分支、运行中输入 | `packages/pi-host/src/session-host.ts`、`packages/runtime-broker` | ConversationStore + RunCoordinator；队列编辑、steering、停止、重连、历史回读 | 局部实现：持久队列、编辑/取消、边界输入/中断/nextRun；显式原生界面、固定 head 分页与对话分支已接入；默认路由迁移与完整恢复未完成 |
-| 模型、认证、推理用途 | Pi SDK、Host `connections`/`pi-config`/`small-model` | 各实际配置 transport、OAuth/云身份、模型覆盖、reasoning/opaque、多模态、usage；chat与embedding/rerank等各自合同 | 未完成 |
+| 模型、认证、推理用途 | Pi SDK、Host `connections`/`pi-config`/`small-model` | 各实际配置 transport、OAuth/云身份、模型覆盖、reasoning/opaque、多模态、usage；chat与embedding/rerank等各自合同 | 局部实现：native query/index embedding 复用真实配置/凭据 owner、共享纯transport和持久dispatch/usage事实；rerank及完整认证/模型覆盖未完成 |
 | 上下文、记忆checkpoint、压缩 | Pi harness/session history、Host `memory` | 原文保留；来源角色；冻结快照；祖先范围压缩；交付去重；即时记忆写入与稳定system快照 | 原生 checkpoint 与显式摘要 Run 已实现，产品接线验收中；自动预算触发与完整记忆流程未完成 |
 | 文件、草稿、恢复 | Rust `storage`；Host `documents`/`recovery`；UI Document Registry | 复用内容对象/条件写入/恢复；明确草稿owner；分支与磁盘效果区分；组合恢复可核对 | 未完成迁移，底层能力已存在 |
 | 工作分支、基线与dispatch | Host `harness/thread-services.ts`、`thread-runtime.ts`、`kernel/storage-adapter.ts` | 持久受理立即回执；准备独立作业；批量capture；真实一致性标记；无变更报告与代码集成分开 | 未完成 |
 | Shell、PTY、输出、进程树 | Rust `process` guardian；Host `kernel/process-service.ts`/`terminal` | 保留真实进程回执；推送I/O与stdin确认；控制独立；取消观察不同于终止进程 | 未完成迁移，guardian已存在 |
-| LSP、结构/关键词/语义检索 | Host `lsp`/`search`/`structure`/`knowledge`；Rust `compute` | 按environment/project/config/view共享服务；来源修订明确；独立准备；不等待无关索引 | 局部实现：live_root 定义/引用/诊断与既有语言 owner 接通；fixed/materialized 依赖闭包、其余 LSP/结构/语义检索及远端环境未完成 |
+| LSP、结构/关键词/语义检索 | Host `lsp`/`search`/`structure`/`knowledge`；Rust `compute` | 按environment/project/config/view共享服务；来源修订明确；独立准备；不等待无关索引 | 局部实现：live_root 定义/引用/诊断及可组合关键词/结构/显式语义已接原 owner 与原生历史；真实reader切代、撤权和推理账本已验收。fixed/materialized 闭包、其余 LSP、rerank 与远端仍未完成 |
 | 任务协作、消息、wait | Host `harness` registry/services | 单一Thread/Run事实；有来源消息；Wait持久化与游标；结果恰当去重；旧世代不污染新执行 | 未完成 |
 | 计划、普通记忆、Bot知识 | Host `memory`/`knowledge`；普通Agent notes为Rust typed record | 保留各领域owner、权限和revision；不把所有知识塞入泛化状态库 | 未完成 |
 | Goal、自动接续、辅助模型 | Host `bots`/`pi-session-automation`/`run` | 显式Goal授权、暂停/预算/用量；等待不覆盖手动暂停；辅助请求独立身份 | 规划模型独立 Operation 已有局部验收；Goal 和自动接续仍未完成 |
@@ -335,7 +335,7 @@ Rust 对超过实际帧预算的 transient progress 不入共享 writer，durabl
 生产通过既有扩展 service routing 选择 `varin.retrieval.plan@1`，内置 keyword+structure 与 keyword-only
 两个惰性声明均可在既有服务配置中选取。查询使用真实 native Thread、Run受理checkpoint项目及已授权canonical目录，
 不读取后来侧栏选择；结果记录选定provider/artifact/configuration及路由revision，正常退休和明确撤权分开处理。
-生产内置 semantic/model 明确 disabled。可组合 seam 支持显式既有语义 handle 与仅针对已授权
+该冻结版本的生产内置 semantic/model 明确 disabled。后续语义增量见下节。可组合 seam 支持显式既有语义 handle 与仅针对已授权
 片段的模型选材；语义块 SHA-256 与文件 Documents revision 分别验证。尚未接生产语义/模型设置、扩展 worker 的
 完整恢复、固定依赖闭包、远端或最终产品默认路由。没有运行真实付费模型。本增量不等同两份完整设计交付。
 
@@ -362,3 +362,84 @@ ModelFinished为只读幂等，差异回执冲突。恢复统一读取冻结leaf
 实际扩展候选 fixture 曾等待候选切换完成却仍持有待退休旧 pin，形成测试自身等待；修正为既有发布/退休
 合同的顺序：先观察新代发布、验证旧 pin 可续用，再释放旧 pin 并等待退休。没有延长 timeout 或修改产品以绕过该验证。
 以上不是全仓、完整恢复矩阵、真实付费模型或跨平台发布验收。
+
+
+## 当前增量：真实 published reader 与原生语义推理
+
+本节记录在前一检索增量之后的实现及下列冻结源码/二进制的独立验收；这一受限增量不等于两份完整设计交付。默认仍为 keyword+structure；新增显式 keyword+structure+semantic 声明，首轮限
+live_root、明确登记索引目录、已配置远端 embedding 与 source ranking。模型 rerank、固定/物化来源、远端
+环境、真实认证/收费、语料检索质量及跨平台性能不在本轮已证范围。
+
+### 单一 owner 与冻结身份
+
+- 原 `workspace-runtime` / `runtime` / semantic storage process 继续唯一维护源索引。没有第二个扫描器、
+  配置库、模型下载器或用原生 Thread 冒充 Pi session；native 路径直接使用原 Host 配置/凭据 owner。
+- 现有 Trivium mutable `g1` 不是 snapshot。原 storage owner 在既有 quiet/busy/完成 checkpoint 边界用
+  `publishGenerationManifest` 形成完整文件集，真复制后以 `immutable` 打开，再发布 reader 指针。
+  `.pld.N` 等动态成员来自 native manifest；不 hardlink、不逐 query 全库复制，也不逐 document 强制全库快照。
+  publication ID、store epoch、recipe/space、冻结 coverage 与 Documents revision/chunk hash 分开保存。
+- 查询只 retain 已经准备好的 published reader；冷查询不打开 writer、不等待全库 scan、不用付费 readiness probe。
+  未知维度由明确登记的背景构建首个真实文档 chunk 学得，向量缓存供随后正式 publication 复用。
+- 正常新 backend/publication 不改变旧请求的固定绑定；明确禁用、账户/凭据作用域变化、目录移除、grant撤销、
+  store/Host epoch变化阻止后续外发和交付。每条命中再经原 Run grant、Documents revision、行范围和chunk hash校验。
+  reader release、maintenance 和 shutdown 由原owner收尾，未关闭成功的存储句柄不被当成已清理。
+
+### 付费外发事实与恢复
+
+普通 RetrievalQuery 仍是 read-only Result，不为廉价 keyword 查询创建持久 Operation；之前不能据此声称
+所有检索均已有 Rust Operation。选择 semantic 后，实际 embedding 外发先经原 semantic process 的专用
+执行事实账本，位于原 Varin dataDir 的 `knowledge/<host>/semantic-inference/ledger.tdb`，独立于可清理的
+derived vector cache。该账本仅拥有这类实际外发/回执，不重复写 Run/ModelStep 状态，也不伪造 ModelStep。
+
+Native 来源带真实已提交 model request+tool call，或 policy action+node+tool call。幂等键使用此持久来源
+与固定推理 stage；临时 bridge/batch UUID、input hash、模型或 credential epoch 不能更换该键。input和binding
+作为不可变 intent 核对，差异明确拒绝。Index-build 使用原 workspace/recipe/vector-binding/输入内容身份，
+未决输入的重分批/换顺序也不得重派；确实不同的源码输入或模型世代另有事实，旧 unknown 不消失。
+
+full-sync admission 必须在外发之前得到持久确认；没有 ledger 或确认失败时不发送。已派发但没有可观察
+回执保持 indeterminate，attempt 是否确知另存，不把未知 usage 写成零。完整结果先持久结算再交付，重开后
+按同一 intent 与当前授权复用；不同 credential scope 的同一完成请求保守拒绝。Warm vector cache 也先核对
+账本 intent/unknown，缓存响应按真实零外发结算。原 owner 提供按 Run/scope/state 的只读事实查询，不自动
+清除 unknown，不因索引目录清理抹掉可能收费的事实。只对index-build且原transport链已最终结束、
+持久receipt证明not-started/attemptsKnown=true/attempts=0的请求，允许同intent重新受理；原零派发事实归档，
+新token与admission lineage在同一个full-sync事务发布。单纯尚未更新计数、仍在beforeDispatch等待、
+任何unknown/started或原生取消调用都不满足条件。此合同不声称 exactly-once HTTP。
+
+取消及时停止等待者，不无限等待不响应 signal 的 Host callback。它不声称远端已停止；真实 transport 的
+晚到回执可以结算原账本成本，但不能恢复取消结果交付。正常原生历史保存可获得的 plan/reader/推理回执，
+取消历史可能先返回而没有晚到回执，持久账本仍保留该原 invocation 的独立执行事实。
+
+### 旧入口与验证边界
+
+OpenAI-compatible embedding 纯 transport 移到中立 Node-only 模块，Pi adapter 与 native owner 共用。
+新 native query 和背景源索引不调用 Pi worker；旧 Pi semanticRecall / knowledge-vector 仍沿其真实 broker
+身份和结算边界，复用同一源索引及共享 transport。它们尚未迁移到原生 invocation，不能假造身份来抹掉这一
+边界，也不会与 native owner 同时推进同一个 query。Rerank/decision 等旧能力保持原入口。
+
+实施作者只做构建、类型、格式和静态核对；独立 reviewer 使用真实 storage/IPC、Documents/Structure、
+Host credential/settings、Composition 与原生历史，唯一模拟外部对象为本机 deterministic HTTP provider。
+最终 Linux x64 内核以正式 build identity `0.9.24` 构建，SHA-256 为
+`ada4437138ca313dd928208b9a7c7fd21ca65c21a77656fd59095e8a11bd7ce6`。2026-10-09 独立验收结果：
+
+- 同一最终 v3 内核：新增 native semantic 13/13、既有 retrieval 21/21、legacy 消费者 31/31，
+  六文件共 65/65 通过。覆盖真实配置/凭据 owner、实际 Composition 选择、索引 query 到原生历史、
+  冷查询零外发、A 查询保留旧 reader 而 B 发布、失败配置候选、禁用/目录移除/账户变化/Run 撤权、
+  revision/chunk hash 分别核对、取消及真实 reader/backend/transport 引用归零。
+- 最终 portable 五文件 35/35 通过：published reader 8、持久 ledger 9、既有 store 10、
+  workspace inference 3、embed scheduler 5 项。
+  ledger 反例包括稳定 invocation 的 intent 冲突、unknown 阻止重派、完成复用保留原回执、
+  index 输入重分批 fence、独立子进程未 close 的 WAL 重开，以及 beforeDispatch 尚未最终结束时
+  拒绝恢复、真正零外发最终结算后并发恢复只发送一次并保留旧 lineage。
+- 一个真实并发容量为 1 的测试单独证明：embedding HTTP 阻塞时原生 file read、状态及取消仍可完成。
+  A/B 切代 fixture 使用原有 scheduler 的显式 concurrency=3，证明已受理旧 lease 与新 publication
+  可并存。初版 fixture 用默认单槽却阻塞 A 再等待 B，两个测试曾失败；修正测试容量后重跑并在最终
+  v3 全套通过。未修改生产默认容量，初轮失败没有记作通过。
+- 另以纯 Node 导入实际 compiled package exports，验证中立 transport 与旧 Pi adapter 为同一实现，
+  并经真实 `BackgroundInferenceRuntime.embed` 调用本机 HTTP provider 通过；未使用 TS/source alias 掩盖包布局。
+- 正式构建、Host 生产及测试类型检查、协议生成、文档检查（185 文件、1556 链接、0 错误）和 diff
+  检查通过。targeted lint 命令返回非零：唯一诊断为 `index.ts` 既有
+  `refreshNativePersonalization` 的 `prefer-const`，已在 HEAD 核实；其余所查变更文件没有诊断，
+  不将此次 lint 写为全部通过。最终验收前后 48 项冻结生产/文档 SHA 全部一致；随后仅补本文验收记录。
+
+这些结果不包含全仓测试、全部恢复矩阵、真实付费供应商、跨平台构建或大语料性能/质量验收。
+原 Pi broker 入口的完整持久结算迁移、模型 rerank、固定/远端来源及完整两份设计的其他里程碑仍另行推进。

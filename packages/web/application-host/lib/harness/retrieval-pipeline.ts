@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ExploreDeps } from './explore.js';
+import type { NativeSemanticInferenceReceipt } from '../knowledge/semantic/native-inference.js';
 
 export type RetrievalStageKind = 'keyword' | 'structure' | 'semantic' | 'model';
 export type RetrievalStageStatus = 'ready' | 'empty' | 'partial' | 'unavailable' | 'unsupported' | 'failed' | 'cancelled' | 'stale' | 'disabled';
@@ -9,10 +10,25 @@ export interface PipelineStage {
   readonly configurationId: string;
   readonly status: 'ready' | 'disabled' | 'unavailable' | 'unsupported';
 }
+/** Nonsecret identity of the exact backend and published reader retained for this query. */
+export interface NativeRetrievalSemanticMetadata {
+  readonly bindingState: 'ready' | 'unconfigured' | 'disabled' | 'invalid' | 'unavailable';
+  readonly providerId: string | null;
+  readonly modelId: string | null;
+  readonly configurationId: string | null;
+  readonly spaceId: string | null;
+  readonly recipeId: string | null;
+  readonly publishedRevision: string | null;
+  readonly processEpoch: string | null;
+  readonly coverage: 'empty' | 'partial' | 'complete';
+  readonly lifecycle: 'idle' | 'building' | 'rebuilding' | 'ready';
+  readonly credential?: Readonly<{ reference: string; authority: string; account: string; generation: number }>;
+}
 export interface PipelinePlan {
   readonly id: string;
   readonly configurationGeneration: number;
   readonly stages: readonly PipelineStage[];
+  readonly semantic?: Readonly<NativeRetrievalSemanticMetadata>;
   readonly selection?: Readonly<{ providerId: string; providerKey: string; artifactId: string; configurationId: string; selectionRevision: number }>;
 }
 export interface RetrievalSnippet { path: string; revision: string; startLine: number; endLine: number; content: string }
@@ -33,6 +49,8 @@ export interface RetrievalPipelineConfiguration {
 export interface BoundRetrievalPipeline {
   readonly plan: PipelinePlan;
   readonly assertAvailable?: () => void;
+  readonly validateAvailable?: (signal?: AbortSignal) => Promise<void>;
+  readonly inferenceReceipts?: () => readonly NativeSemanticInferenceReceipt[];
   readonly release?: () => void;
   readonly structure?: NonNullable<ExploreDeps['structure']>;
   readonly semantic?: NonNullable<ExploreDeps['semantic']>;

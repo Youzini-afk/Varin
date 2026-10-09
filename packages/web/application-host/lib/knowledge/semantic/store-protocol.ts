@@ -4,6 +4,7 @@ export const SEMANTIC_STORE_METHODS: Record<SemanticStoreMethod, true> = {
   checkpoint: true, markBuilding: true, markReady: true, lookupVectors: true,
   publishedRevision: true, publishDocuments: true, listDocumentIds: true,
   listDocumentStates: true, recordSourceMetadata: true,
+  retainPublished: true, searchPinned: true, releasePinned: true, publishedReaderStats: true,
   removeDocument: true, search: true, searchDocumentScores: true, close: true,
 };
 export const isSemanticStoreMethod = (value: unknown): value is SemanticStoreMethod =>

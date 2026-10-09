@@ -1,5 +1,5 @@
 /** Native derived-index owner, loaded only by the private storage process. */
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { createStorePersistence, trackStoreMutations } from "../persistence.js";
@@ -8,16 +8,17 @@ import { defaultRecipeIdentity, recipeIdOf, semanticGenerationDir, semanticSpace
 import { cosineSimilarity } from "./embedder.js";
 import { pathInRoots, rootsAreRestricted } from "../../workspace/path-scope.js";
 import { readSemanticCheckpoint, writeSemanticCheckpoint } from "./checkpoint.js";
+import { createSemanticPublishedReaders } from "./published-readers.js";
 import { resolveSemanticSearchOptions, type BlockPayload, type DocumentPayload, type PreparedSemanticPublication,
   type SemanticStoreOpenOptions, type SemanticIndexLifecycle, type SemanticQueryCoverage, type SemanticCheckpoint,
   type SemanticHit, type SemanticSearchOptions, type SemanticOverlayBlock,
   type SemanticDocumentState, type SemanticSourceMetadataUpdate, type SemanticDocumentExpectation,
-  type SemanticDocumentScore, type SemanticDocumentScores } from "./store-contract.js";
+  type SemanticDocumentScore, type SemanticDocumentScores, type SemanticPublishedReader } from "./store-contract.js";
 const { TriviumDB } = createRequire(import.meta.url)("triviumdb") as typeof import("triviumdb");
 const FLUSH_QUIET_MS = 250;
 const FLUSH_MAX_DEFER_MS = 30_000;
 
-const openDb = (file: string, dim: number, accessMode: "readWrite" | "readOnly") => {
+const openDb = (file: string, dim: number, accessMode: "readWrite" | "readOnly" | "immutable") => {
   const db = new TriviumDB(file, {
     dim,
     syncMode: "normal",
@@ -58,6 +59,12 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
   let lifecycle: SemanticIndexLifecycle = checkpoint?.lifecycle ?? "idle";
   let coverage: SemanticQueryCoverage = checkpoint?.coverage ?? "empty";
   const dbFile = () => join(semanticGenerationDir(options.dataDir, options.hostId, options.scope, spaceId, generation), "index.tdb");
+  const publicationsDirectory = join(semanticGenerationDir(options.dataDir, options.hostId, options.scope, spaceId, generation), "publications");
+  const publications = createSemanticPublishedReaders({
+    directory: publicationsDirectory,
+    open: file => openDb(file, space.dim, "immutable"),
+    onCleanupError: error => options.onPersistenceError?.(error),
+  });
   const maximumLookupResults = (db: InstanceType<typeof TriviumDB>): number => Math.max(1, db.nodeCount());
   let writer: InstanceType<typeof TriviumDB> | null = null;
   const countStoredDocuments = (): number => {
@@ -89,23 +96,21 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
   // survive an index mutation.
   let documentBlockIdsCache: Map<string, number[]> | null = null;
 
-  const enqueue = <T>(work: () => T): Promise<T> => {
+  const enqueue = <T>(work: () => T, recover = true): Promise<T> => {
     if (disposed || closeTask) return Promise.reject(new Error("Semantic store is closing or closed"));
-    const admitted = (): T => { persistence.recover(); return work(); };
+    const admitted = (): T => { if (recover) persistence.recover(); return work(); };
     const run = writeTail.then(admitted, admitted);
     writeTail = run.then(() => undefined, () => undefined);
     return run;
   };
   const persistence = createStorePersistence({
-    flush: () => writer?.flush(),
+    flush: () => { if (writer) publications.publish(writer, dbFile(), refreshCheckpoint()); },
     close: () => writer?.close(),
     enqueue,
     quietMs: FLUSH_QUIET_MS,
     maxDeferMs: FLUSH_MAX_DEFER_MS,
     onError: error => options.onPersistenceError?.(error),
   });
-  publishedDocuments = countStoredDocuments();
-  if (writer) writer = trackStoreMutations(writer, persistence);
   const scheduleFlush = (): void => persistence.defer({ busy: lifecycle === "building" || lifecycle === "rebuilding" });
 
   const refreshCheckpoint = (): SemanticCheckpoint => {
@@ -129,6 +134,9 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
     if (writer) return writer;
     mkdirSync(semanticGenerationDir(options.dataDir, options.hostId, options.scope, spaceId, generation), { recursive: true });
     writer = trackStoreMutations(openDb(dbFile(), space.dim, "readWrite"), persistence);
+    // The native exclusive writer lock excludes another live owner here.
+    // Publications from an exited process have no usable tokens or handles.
+    rmSync(publicationsDirectory, { recursive: true, force: true });
     return writer;
   };
 
@@ -140,8 +148,7 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
     db.indexedLookup({ type: "block", documentId }, maximumLookupResults(db))
   );
 
-  const documentBlockIds = (db: InstanceType<typeof TriviumDB>): Map<string, number[]> => {
-    if (documentBlockIdsCache) return documentBlockIdsCache;
+  const collectDocumentBlockIds = (db: InstanceType<typeof TriviumDB>): Map<string, number[]> => {
     const indexed = new Map<string, number[]>();
     // One block-index pass avoids one native lookup per document on the first
     // scoped query. The cache is then maintained incrementally by writes.
@@ -152,9 +159,12 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
       if (ids) ids.push(id);
       else indexed.set(payload.documentId, [id]);
     }
-    documentBlockIdsCache = indexed;
     return indexed;
   };
+
+  const documentBlockIds = (db: InstanceType<typeof TriviumDB>): Map<string, number[]> => (
+    documentBlockIdsCache ??= collectDocumentBlockIds(db)
+  );
 
   const lookupVectorByEmbedText = (db: InstanceType<typeof TriviumDB> | null, embedText: string): number[] | undefined => {
     if (!db) return undefined;
@@ -171,6 +181,112 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
     }
     return undefined;
   };
+
+  const searchDatabase = (
+    db: InstanceType<typeof TriviumDB> | null,
+    blocks: () => Map<string, number[]>,
+    query: number[],
+    limit: number,
+    rootsOrOptions?: readonly string[] | SemanticSearchOptions,
+    resultGeneration = generation,
+  ): SemanticHit[] => {
+    if (query.length !== space.dim) {
+      throw new Error(`Semantic query vector has dimension ${query.length}; expected ${space.dim}.`);
+    }
+    const searchOptions = resolveSemanticSearchOptions(rootsOrOptions);
+    const roots = searchOptions.roots;
+    const mask = new Set(searchOptions.maskPaths ?? []);
+    const restricted = rootsAreRestricted(roots);
+    const selected = (documentId: string): boolean => !searchOptions.indexScope
+      || indexPathAllowed(searchOptions.indexScope, resolve(searchOptions.indexScope.resourceRoot, documentId), true);
+    const allowedDisk = (documentId: string): boolean => (
+      !mask.has(documentId) && (!restricted || pathInRoots(documentId, roots)) && selected(documentId)
+    );
+    const allowedExtra = (documentId: string): boolean => (
+      (!restricted || pathInRoots(documentId, roots)) && selected(documentId)
+    );
+    const extras = (searchOptions.extras ?? [])
+      .filter(extra => extra.vector.length === space.dim && allowedExtra(extra.documentId))
+      .map(extra => ({ score: cosineSimilarity(query, extra.vector), payload: extra }));
+    let hits: Array<{ score: number; payload: BlockPayload | SemanticOverlayBlock }> = [];
+    if (db && searchOptions.disk !== false) {
+      const scoped = restricted || mask.size > 0 || Boolean(searchOptions.indexScope);
+      if (scoped) {
+        const scopedIds = [...blocks().entries()]
+          .filter(([documentId]) => allowedDisk(documentId)).flatMap(([, ids]) => ids);
+        if (scopedIds.length > 0) {
+          try {
+            // Exact Top-K over all admitted anchors avoids global oversampling.
+            hits = db.searchGraphFirst(query, scopedIds, limit, scopedIds.length)
+              .map(hit => ({ score: hit.score, payload: hit.payload as BlockPayload }));
+          } catch {
+            // The fallback keeps the same admitted anchors and immutable DB.
+            for (const id of scopedIds) {
+              const node = db.get(id);
+              if (!node) continue;
+              const payload = node.payload as BlockPayload;
+              if (payload.type !== "block" || !allowedDisk(payload.documentId)) continue;
+              hits.push({ score: cosineSimilarity(query, node.vector), payload });
+            }
+          }
+        }
+      } else {
+        try {
+          hits = db.searchExact(query, Math.max(limit * 4, limit))
+            .map(hit => ({ score: hit.score, payload: hit.payload as BlockPayload }));
+        } catch {
+          for (const id of db.indexedLookup({ type: "block" }, maximumLookupResults(db))) {
+            const node = db.get(id);
+            if (!node) continue;
+            const payload = node.payload as BlockPayload;
+            if (payload.type !== "block") continue;
+            hits.push({ score: cosineSimilarity(query, node.vector), payload });
+          }
+        }
+      }
+    }
+    return [...hits, ...extras]
+      .filter(hit => "type" in hit.payload
+        ? hit.payload.type === "block" && allowedDisk(hit.payload.documentId)
+        : allowedExtra(hit.payload.documentId))
+      .sort((left, right) => right.score - left.score).slice(0, limit)
+      .map((hit, index) => ({
+        documentId: hit.payload.documentId,
+        revision: hit.payload.revision,
+        blockId: hit.payload.blockId,
+        parentUnitId: hit.payload.parentUnitId,
+        parentName: hit.payload.parentName,
+        parentKind: hit.payload.parentKind,
+        startLine: hit.payload.startLine,
+        endLine: hit.payload.endLine,
+        contentHash: hit.payload.contentHash,
+        fallback: hit.payload.fallback,
+        body: typeof hit.payload.body === "string" ? hit.payload.body : "",
+        similarity: hit.score,
+        rank: index + 1,
+        scope: options.scope,
+        spaceId,
+        generation: resultGeneration,
+      }));
+  };
+
+  // Recovery and first publication happen during store initialization, never
+  // on the acquisition/query path. An interrupted WAL is recovered by the sole
+  // writer before producing the immutable manifest-backed copy.
+  try {
+    publishedDocuments = countStoredDocuments();
+    if (writer) {
+      writer = trackStoreMutations(writer, persistence);
+      rmSync(publicationsDirectory, { recursive: true, force: true });
+      publications.publish(writer, dbFile(), refreshCheckpoint());
+    }
+  } catch (error) {
+    const errors: unknown[] = [error];
+    try { publications.close(); } catch (closeError) { errors.push(closeError); }
+    try { persistence.close(); } catch (closeError) { errors.push(closeError); }
+    if (errors.length > 1) throw new AggregateError(errors, "Semantic recovery and cleanup failed");
+    throw error;
+  }
 
   const publishDocuments = async (
     inputs: readonly PreparedSemanticPublication[],
@@ -270,15 +386,27 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
       return { ...checkpoint };
     },
     markBuilding(kind: "building" | "rebuilding"): void {
+      persistence.assertOpen();
       lifecycle = kind;
       if (coverage === "empty") coverage = "partial";
       persistCheckpoint();
     },
     markReady(complete: boolean): void {
-      persistence.commit();
+      persistence.assertOpen();
+      const priorLifecycle = lifecycle;
+      const priorCoverage = coverage;
       lifecycle = "ready";
       coverage = complete ? "complete" : (publishedDocuments > 0 ? "partial" : "empty");
-      persistCheckpoint();
+      try {
+        persistence.commit();
+        publications.refreshCheckpoint(refreshCheckpoint());
+        persistCheckpoint();
+      } catch (error) {
+        lifecycle = priorLifecycle;
+        coverage = priorCoverage;
+        refreshCheckpoint();
+        throw error;
+      }
     },
     async publishedRevision(documentId: string): Promise<{ revision: string; recipeId: string } | null> {
       return enqueue(() => {
@@ -362,135 +490,31 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
         if (oldDocuments.length > 0) persistCheckpoint();
       });
     },
-    async search(query: number[], limit: number, rootsOrOptions?: readonly string[] | SemanticSearchOptions): Promise<SemanticHit[]> {
-      if (query.length !== space.dim) {
-        throw new Error(`Semantic query vector has dimension ${query.length}; expected ${space.dim}.`);
-      }
-      const searchOptions = resolveSemanticSearchOptions(rootsOrOptions);
-      const roots = searchOptions.roots;
-      const mask = new Set(searchOptions.maskPaths ?? []);
-      const includeDisk = searchOptions.disk !== false;
-      const restricted = rootsAreRestricted(roots);
-      const selected = (documentId: string): boolean => !searchOptions.indexScope
-        || indexPathAllowed(searchOptions.indexScope, resolve(searchOptions.indexScope.resourceRoot, documentId), true);
-      const allowedDisk = (documentId: string): boolean => (
-        !mask.has(documentId) && (!restricted || pathInRoots(documentId, roots)) && selected(documentId)
-      );
-      const allowedExtra = (documentId: string): boolean => (
-        (!restricted || pathInRoots(documentId, roots)) && selected(documentId)
-      );
+    retainPublished(): Promise<SemanticPublishedReader | null> {
+      // Reading a publication must not retry a dirty writer checkpoint, copy
+      // files, or wait for the current background build to finish.
+      return enqueue(() => publications.retain(), false);
+    },
+    searchPinned(token: string, query: number[], limit: number,
+      searchOptions?: readonly string[] | SemanticSearchOptions): Promise<SemanticHit[]> {
+      return enqueue(() => publications.read(token, (backing, pinnedCheckpoint) => searchDatabase(
+        backing.db, () => backing.documentBlockIds ??= collectDocumentBlockIds(backing.db),
+        query, limit, searchOptions, pinnedCheckpoint.generation,
+      )), false);
+    },
+    releasePinned(token: string): Promise<void> {
+      // Releasing a closed/revoked reader is idempotent and may retry cleanup.
+      if (disposed) return Promise.resolve();
+      if (closeTask) return closeTask;
+      return enqueue(() => publications.release(token), false);
+    },
+    publishedReaderStats: () => publications.stats(),
+    search(query: number[], limit: number, searchOptions?: readonly string[] | SemanticSearchOptions): Promise<SemanticHit[]> {
       return enqueue(() => {
-        const extras = (searchOptions.extras ?? [])
-          .filter((extra) => extra.vector.length === space.dim && allowedExtra(extra.documentId))
-          .map((extra) => ({
-            score: cosineSimilarity(query, extra.vector),
-            payload: extra,
-          }));
-        if (!includeDisk || (!existsSync(dbFile()) && !writer)) {
-          return extras
-            .sort((left, right) => right.score - left.score)
-            .slice(0, limit)
-            .map((hit, index) => ({
-              documentId: hit.payload.documentId,
-              revision: hit.payload.revision,
-              blockId: hit.payload.blockId,
-              parentUnitId: hit.payload.parentUnitId,
-              parentName: hit.payload.parentName,
-              parentKind: hit.payload.parentKind,
-              startLine: hit.payload.startLine,
-              endLine: hit.payload.endLine,
-              contentHash: hit.payload.contentHash,
-              fallback: hit.payload.fallback,
-              body: hit.payload.body,
-              similarity: hit.score,
-              rank: index + 1,
-              scope: options.scope,
-              spaceId,
-              generation,
-            }));
-        }
-        const db = writer ?? openDb(dbFile(), space.dim, writer ? "readWrite" : "readOnly");
-        try {
-          let hits: Array<{ score: number; payload: BlockPayload | SemanticOverlayBlock }>;
-          const scoped = restricted || mask.size > 0 || Boolean(searchOptions.indexScope);
-          if (scoped) {
-            const scopedIds = [...documentBlockIds(db).entries()]
-              .filter(([documentId]) => allowedDisk(documentId))
-              .flatMap(([, ids]) => ids);
-            if (scopedIds.length === 0) {
-              hits = [];
-            } else {
-              try {
-                // `searchGraphFirst` computes exact Top-K within the supplied
-                // anchors. Passing every scoped block ID avoids global
-                // oversampling and preserves the correct result when global top-K
-                // is filled by out-of-scope documents.
-                hits = db.searchGraphFirst(query, scopedIds, limit, scopedIds.length).map((hit) => ({
-                  score: hit.score,
-                  payload: hit.payload as BlockPayload,
-                }));
-              } catch {
-                // Keep the same scoped anchors if the native exact query is
-                // unavailable at runtime; this fallback does not widen scope.
-                hits = [];
-                for (const id of scopedIds) {
-                  const node = db.get(id);
-                  if (!node) continue;
-                  const payload = node.payload as BlockPayload;
-                  if (payload.type !== "block" || !allowedDisk(payload.documentId)) continue;
-                  hits.push({ score: cosineSimilarity(query, node.vector), payload });
-                }
-                hits.sort((left, right) => right.score - left.score);
-              }
-            }
-          } else {
-            try {
-              hits = db.searchExact(query, Math.max(limit * 4, limit)).map((hit) => ({
-                score: hit.score,
-                payload: hit.payload as BlockPayload,
-              }));
-            } catch {
-              hits = [];
-              for (const id of db.indexedLookup({ type: "block" }, maximumLookupResults(db))) {
-                const node = db.get(id);
-                if (!node) continue;
-                const payload = node.payload as BlockPayload;
-                if (payload.type !== "block") continue;
-                hits.push({ score: cosineSimilarity(query, node.vector), payload });
-              }
-              hits.sort((left, right) => right.score - left.score);
-            }
-          }
-          const ranked = [...hits, ...extras]
-            .filter((hit) => {
-              if ("type" in hit.payload) {
-                return hit.payload.type === "block" && allowedDisk(hit.payload.documentId);
-              }
-              return allowedExtra(hit.payload.documentId);
-            })
-            .sort((left, right) => right.score - left.score)
-            .slice(0, limit);
-          return ranked.map((hit, index) => ({
-            documentId: hit.payload.documentId,
-            revision: hit.payload.revision,
-            blockId: hit.payload.blockId,
-            parentUnitId: hit.payload.parentUnitId,
-            parentName: hit.payload.parentName,
-            parentKind: hit.payload.parentKind,
-            startLine: hit.payload.startLine,
-            endLine: hit.payload.endLine,
-            contentHash: hit.payload.contentHash,
-            fallback: hit.payload.fallback,
-            body: typeof hit.payload.body === "string" ? hit.payload.body : "",
-            similarity: hit.score,
-            rank: index + 1,
-            scope: options.scope,
-            spaceId,
-            generation,
-          }));
-        } finally {
-          if (db !== writer) db.close();
-        }
+        if (!writer && !existsSync(dbFile())) return searchDatabase(null, () => new Map(), query, limit, searchOptions);
+        const db = writer ?? openDb(dbFile(), space.dim, "readOnly");
+        try { return searchDatabase(db, () => documentBlockIds(db), query, limit, searchOptions); }
+        finally { if (db !== writer) db.close(); }
       });
     },
     async searchDocumentScores(
@@ -548,8 +572,10 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
       if (disposed) return;
       if (closeTask) return closeTask;
       closeTask = writeTail.then(() => {
-        persistence.close();
-        writer = null;
+        const errors: unknown[] = [];
+        try { publications.close(); } catch (error) { errors.push(error); }
+        try { persistence.close(); writer = null; } catch (error) { errors.push(error); }
+        if (errors.length) throw new AggregateError(errors, "Semantic store close failed");
         disposed = true;
       }).catch((error: unknown) => {
         closeTask = null; // A failed close keeps its handle available for retry.

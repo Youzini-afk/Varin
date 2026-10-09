@@ -642,13 +642,15 @@ remain part of the existing operation lifecycle, not an extension-owned task or 
 
 A brokered Host extension can provide `varin.retrieval.plan@1` with
 `provideRetrievalPlan(context, { configurationId: 'my-plan-v1', structure: 'native' })`.
-Use `structure: 'disabled'` for keyword-only retrieval. Declare the service with `multiple: true`
+Use `structure: 'disabled'` for keyword-only retrieval. Optional `semantic: 'native'` selects the
+native semantic owner; omission or `semantic: 'disabled'` disables it. Declare the service with `multiple: true`
 in the manifest and activate on `service-request`. `inspect([])` exposes the shared schemas;
-`describe([])` accepts no arguments and returns only those two fields. The declaration must be
+`describe([])` accepts no arguments and returns only these declared fields. The declaration must be
 immutable for the selected artifact. It is not a callback for reading files or calling models.
 
 Open **Settings → Varin Extensions → Service routing → Native code retrieval**. Select
-**Native Retrieval: Keyword and Structure** or **Native Retrieval: Keyword Only** for **My default**
+**Native Retrieval: Keyword and Structure**, **Native Retrieval: Keyword Only**, or
+**Native Retrieval: Keyword, Structure and Semantic** for **My default**
 or **This workspace**. Installed declarations are listed before activation; their status says they
 activate when used. The built-in structured package is the automatic default. An explicitly selected
 disabled, missing or invalid provider fails preparation instead of silently using another plan.
@@ -675,8 +677,17 @@ stage method handles and plan provenance. A failed or superseded candidate leave
 prepared plan intact, but the failing query reports the error. Existing queries retain their own
 generation pins across ordinary package replacement; explicit disable/crash revokes them. The caller
 releases its pin on settlement or cancellation. Keyword/structure work remains with the existing
-Run-granted compute and Documents owners. Production semantic and model stages stay disabled; this
-contract neither consults Pi model settings nor launches an index or paid inference.
+Run-granted compute and Documents owners. The explicit semantic selection captures a fresh native-owner
+lease for each query: its backend configuration, credential/account generation, index recipe and
+published-reader generation stay fixed until release. It does not start indexing or wait for a first
+publication; a cold or unavailable publication is reported explicitly. Source candidates must match
+both their indexed file revision and chunk hash before entering results. The selected semantic owner
+may embed the query with the explicitly configured remote embedding model, using the original Run
+grant before dispatch. It never silently chooses a local backend, another model, or a paid probe.
+The model reranking stage remains disabled. Normal backend/index replacement preserves in-flight
+leases; explicit disable, owner/epoch loss, credential invalidation or Run revocation rejects further
+reads, inference and delivery. The plan records nonsecret backend/publication identity and actual
+inference receipts preserve unknown usage and indeterminate dispatch outcomes.
 
 ## Install and development workflow
 

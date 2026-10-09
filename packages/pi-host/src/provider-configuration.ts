@@ -20,7 +20,7 @@ import {
 import * as systemOne from "@earendil-works/pi-ai/api/typesafe-system-one";
 import * as cloudflareSystemOne from "@earendil-works/pi-ai/api/cloudflare-workers-ai-system-one";
 import * as llamaClassify from "@earendil-works/pi-ai/api/llama-cpp-classify";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, CredentialStore } from "@earendil-works/pi-ai";
 import {
   type ProviderConfigDetails,
   type ProviderConfigInput,
@@ -709,16 +709,20 @@ async function updateProviderEntry(
 export interface ProviderConfigurationManagerOptions {
   agentDir: string;
   customConfigPath?: string;
+  /** Existing Application Host credential authority, never a second store. */
+  credentials?: CredentialStore;
 }
 
 export class ProviderConfigurationManager {
   readonly #agentDir: string;
   readonly #customPath: string | undefined;
+  readonly #credentials: CredentialStore | undefined;
   readonly #runtimeStates = new WeakMap<ModelRuntime, RuntimeConfigurationState>();
   #inferenceCatalog: { key: string; runtime: Promise<ModelRuntime> } | undefined;
 
   constructor(options: ProviderConfigurationManagerOptions) {
     this.#agentDir = resolve(options.agentDir);
+    this.#credentials = options.credentials;
     const configuredPath = options.customConfigPath ?? process.env.VARIN_MODELS_CONFIG;
     this.#customPath = configuredPath ? resolve(configuredPath) : undefined;
   }
@@ -887,8 +891,9 @@ export class ProviderConfigurationManager {
     const documents = await this.#documents(cwd, false);
     const key = JSON.stringify([documents.user?.data, documents.custom?.data]);
     if (this.#inferenceCatalog?.key !== key) {
-      const catalog = createHostModelRuntime({
+      const catalog = (this.#credentials ? ModelRuntime.create : createHostModelRuntime)({
         allowModelNetwork: false,
+        ...(this.#credentials ? { credentials: this.#credentials } : {}),
         authPath: join(this.#agentDir, "auth.json"),
         modelsPath: join(this.#agentDir, "models.json"),
       }).then(async native => { await this.apply(native, cwd, false); return native; });
@@ -898,6 +903,29 @@ export class ProviderConfigurationManager {
       });
     }
     return this.#inferenceCatalog.runtime;
+  }
+
+  /** Private auth-source facts for Host leases. Never return through browser/RPC metadata.
+   * Endpoint/model selection is deliberately excluded: changing routing retires a binding,
+   * whereas changing a credential source revokes it. No source is hashed or persisted.
+   */
+  async inferenceCredentialSources(cwd: string, providerId: string): Promise<{
+    configured: boolean;
+    sources: unknown[];
+    revision: string;
+  }> {
+    const documents = await this.#documents(cwd, false);
+    const sources: unknown[] = [];
+    const revisions: string[] = [];
+    for (const scope of ["user", "custom"] as const) {
+      const document = documents[scope];
+      const value = document && providerRecord(document, this.#providerId(providerId));
+      if (!value) continue;
+      sources.push({ scope, apiKey: value.apiKey, headers: value.headers, authHeader: value.authHeader });
+      const info = await stat(document!.path, { bigint: true });
+      revisions.push([scope, info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':'));
+    }
+    return { configured: sources.length > 0, sources, revision: revisions.join('|') };
   }
 
   async upsert(

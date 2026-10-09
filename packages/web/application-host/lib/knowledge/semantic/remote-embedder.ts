@@ -1,6 +1,6 @@
 /**
- * Host-side remote embedder. Submits authorized text through the Pi workspace
- * binding and never sees provider secrets.
+ * Host-side remote embedder. Submits authorized text through its retained
+ * inference binding and never sees provider secrets.
  */
 
 import { randomUUID } from "node:crypto";
@@ -58,9 +58,11 @@ const spaceFromBinding = (
 export function createRemoteEmbedder(options: {
   binding: HarnessResolvedEmbeddingBinding;
   client: RemoteEmbedClient;
+  /** Already learned by the same backend; never changes the wire dimensions option. */
+  knownDimensions?: number;
 }): SemanticEmbedder {
   const maxTokens = options.binding.maxTokens ?? REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS;
-  const space = spaceFromBinding(options.binding, options.binding.dimensions ?? 0);
+  const space = spaceFromBinding(options.binding, options.binding.dimensions ?? options.knownDimensions ?? 0);
   const embedder: SemanticEmbedder = {
     status: "ready",
     get space() { return space; },

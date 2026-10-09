@@ -5,6 +5,7 @@ import {
   VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION_ID,
   VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION_ID,
   VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION_ID,
+  VARIN_BUILTIN_RETRIEVAL_SEMANTIC_EXTENSION_ID,
   VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
   VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID,
 } from "./index.js";
@@ -36,6 +37,7 @@ export const resolveVarinBuiltinPackageRoot = (
 export const VARIN_BUILTIN_EXTENSION_PACKAGE_ROOTS: ReadonlyMap<string, string> = new Map([
   [VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/context-fragments/", import.meta.url)))],
   [VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/retrieval-structured/", import.meta.url)))],
+  [VARIN_BUILTIN_RETRIEVAL_SEMANTIC_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/retrieval-semantic/", import.meta.url)))],
   [VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/retrieval-keyword/", import.meta.url)))],
   [
     VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,

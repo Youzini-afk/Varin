@@ -68,6 +68,48 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this local-m
   It sends only document IDs, revisions and scores; code-semantic `search` still returns source hits.
   This generation disables automatic QuIVer construction: checkpoints must not build an ANN graph
   that neither query path consumes. Stores outside this shared generation retain their own search policies.
+  Native retrieval leases retain an immutable publication, with an owner epoch and publication
+  identity separate from the durable generation directory. At the existing checkpoint boundary,
+  TriviumDB's `publishGenerationManifest` performs the flush; the owner copies every manifest-declared
+  member and the manifest into a unique private directory, then opens it in native `immutable` mode.
+  These copies never use hardlinks, WAL files or writer locks. Acquisition and pinned searches never
+  flush or copy the writer. Recovery creates the first publication during store initialization;
+  a cold store has no reader until a checkpoint exists. Each lease freezes coverage/lifecycle metadata
+  and uses the immutable handle's own scoped block-ID cache. New publications preserve retained old
+  readers; final release closes retired handles and removes their files. Store close or owner loss
+  invalidates all tokens, and startup under the exclusive writer lock removes abandoned copies.
+  Same-space embedder replacement affects future document admissions while an admitted batch keeps
+  its original binding through preparation and embedding.
+- Inference execution facts: `inference-ledger.ts` uses the same private semantic storage process.
+  Its sole durable ledger is `VARIN_DATA_DIR/knowledge/<hostId>/semantic-inference/ledger.tdb`, alongside
+  the derived `semantic/` subtree rather than inside it. Storage relocation and index-cache purge
+  cannot erase admitted external work. This dimension-independent, one-dimensional Trivium store
+  uses full-sync WAL transactions: dispatch intent is acknowledged only after persistence, before
+  the inference owner may send HTTP. It records whitelisted operation/identity metadata, input
+  hashes, attempt/usage receipts and validated completed vectors; it never stores input text,
+  credentials, authentication headers or endpoint URLs. There is no second configuration authority
+  or writable mirror of native Run state.
+  A native-query key is its real persisted invocation plus the fixed inference stage. Input hashes
+  and vector binding are immutable intent under that key, so changed input/settings cannot bypass
+  an unknown outcome; a changed intent fails explicitly. Index-build keys additionally include
+  workspace/recipe, input hashes and vector binding so a new model can build a distinct index.
+  An indexed unresolved-state scan also fences overlapping index inputs under the same workspace,
+  recipe and vector binding, independent of batch grouping/order after restart. Settlement removes
+  terminal operations from that scan; no second claim authority or background cleanup is introduced.
+  Transport batch IDs and credential epochs are excluded from deduplication. Completed-result reuse
+  additionally requires the original credential-scope fingerprint and the inference caller's current
+  authorization; a different account cannot inherit that result. Recovered unresolved dispatches remain unknown and
+  are never automatically resent. Successful settled vectors can be reused after interruption before
+  publication. Known zero-attempt cache hits remain distinguishable from paid dispatches, and
+  unknown attempts remain explicitly unknown. Known settled failures/no-send outcomes are terminal,
+  not indeterminate. Only an index build with unchanged intent, zero known attempts and finalized
+  proof that its transport can never dispatch may be admitted again. That full-sync transaction
+  archives the old no-send fact as `semantic-inference-attempt` and creates a new admission number
+  and token under the same operation key. History lists both admissions. A pending pre-dispatch
+  chain remains unknown until finalized; native-query invocations and any started/unknown request
+  never acquire this retry path. Facts are retained across restarts without automatic
+  pruning; future deletion/retention must preserve unresolved-outcome fences. Read-only Run/scope
+  history projections omit vector payloads and dispatch tokens.
 - Runtime: `runtime.ts` — native directory inventory first returns path and stat metadata without
   reading every file body. New, changed, invalidated and failed paths then enter Documents reads,
   parsing and embedding. Successful document publications retain the metadata from the native byte capture

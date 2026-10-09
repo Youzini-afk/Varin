@@ -1,4 +1,9 @@
 import { resolveScopedIndexRoots } from '../index-scope.js';
+import { createHash } from 'node:crypto';
+import { createRemoteEmbedder } from './remote-embedder.js';
+import { DEFAULT_SEMANTIC_RECALL } from '../../harness/explore.js';
+import { NativeSemanticInferenceError, type createNativeSemanticInference, type NativeSemanticInferenceLease, type NativeSemanticInferenceReceipt, type NativeSemanticInferenceDescription } from './native-inference.js';
+import type { NativeRetrievalSemanticLease } from '../../kernel/native-retrieval-composition.js';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { PiRuntimeBroker, PiRuntimeBrokerEvent } from '@varin/runtime-broker';
@@ -11,7 +16,8 @@ import type { ThreadExecutionViewRegistry } from '../../harness/working-state/ex
 import { createSemanticBackend } from './backend.js';
 import type { SemanticEmbedder } from './embedder.js';
 import { isAbortError, waitWithSignal } from '../../cancellation.js';
-import { workspaceScope } from './identity.js';
+import { workspaceScope, defaultRecipeIdentity, recipeIdOf, spaceIdOf } from './identity.js';
+import type { NativeRetrievalInvocation } from '../../kernel/protocol.generated.js';
 import { pinSemanticQueryView, type SemanticDraftReadResult } from './query-view.js';
 import { createSemanticIndexRuntime, resolveSemanticScanRoots, type SemanticIndexRuntimeOptions, type SemanticScanOptions } from './runtime.js';
 import { requestWorkspaceInference, resolveInferenceBinding } from './workspace-inference.js';
@@ -51,6 +57,8 @@ export interface WorkspaceSemanticRuntimeOptions extends Omit<SemanticIndexRunti
    * Root cwd still owns document reads and scan addressing.
    */
   configCwd: string;
+  /** Shared Host configuration/credential owner; never a Pi session or worker. */
+  nativeInference?: ReturnType<typeof createNativeSemanticInference>;
   executionViews: Pick<ThreadExecutionViewRegistry, 'get'>;
   workingBranches: Pick<ReturnType<typeof createWorkingBranchLookups>, 'pinQuery'>;
   onBindingChanged?: (workspaceId: string) => void;
@@ -71,6 +79,8 @@ type WorkspaceState = {
   watching: Promise<void> | null;
   documentWatch: { ready: Promise<boolean>; close(): void } | null;
   documentWatchReady: boolean;
+  nativeEmbedding?: NativeSemanticInferenceLease;
+  nativeBindingState?: NativeSemanticInferenceDescription['status'];
 };
 
 // Reconcile each active root only after a quiet first minute. Later intervals
@@ -94,6 +104,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   const maintenance = new Map<string, Promise<unknown>>();
   const watchWorkspaces = new Map<string, string>();
   const pending = new Set<Promise<unknown>>();
+  const nativeQueries = new Set<object>();
   let epoch = 0;
   let disposed = false;
   let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
@@ -190,6 +201,72 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   };
   const refreshNow = async (state: WorkspaceState, scanWhenChanged: boolean): Promise<void> => {
     if (disposed) return;
+    if (options.nativeInference) {
+      const startedEpoch = epoch;
+      let candidate: NativeSemanticInferenceLease | undefined;
+      try {
+        const settings = await options.nativeInference.readGlobalSettings();
+        state.snapshot = { global: settings as PiSettingsSnapshot['global'],
+          globalRevision: createHash('sha256').update(JSON.stringify(settings)).digest('hex'),
+          project: {}, projectRevision: '', projectTrusted: false };
+        const described = await options.nativeInference.describe();
+        if (described.status === 'ready') candidate = await options.nativeInference.capture();
+        if (disposed || startedEpoch !== epoch || states.get(state.workspaceId) !== state) { candidate?.release(); return; }
+        const key = candidate ? JSON.stringify([candidate.binding, candidate.identity.credentialScope]) : described.status;
+        const changed = key !== state.bindingKey;
+        state.needsRefresh = described.status === 'unavailable';
+        state.nativeBindingState = described.status;
+        if (candidate) {
+          state.binding.embedding = { status: 'ready', binding: candidate.binding };
+          if (changed || !state.nativeEmbedding) {
+            const previous = state.nativeEmbedding;
+            state.nativeEmbedding = candidate;
+            const retained = candidate;
+            state.backend.bindRetained(createRemoteEmbedder({ binding: retained.binding,
+              client: { embed: async params => {
+                // Retiring the selection releases only its owner reference.
+                // A dispatched batch owns a separate handle until settlement.
+                const call = retained.retain();
+                try { return await call.embed({ ...params, operationIdentity: {
+                  kind: 'index-build', hostId: options.hostId, workspaceId: state.workspaceId,
+                  recipeId: recipeIdOf(defaultRecipeIdentity()), stage: 'document-embedding',
+                } }); } finally { call.release(); }
+              } } }));
+            candidate = undefined;
+            previous?.release();
+          }
+        } else {
+          state.binding.embedding = { status: described.status === 'disabled' || described.status === 'ready' ? 'unavailable' : described.status,
+            ...(described.status === 'ready' ? {} : { message: described.reason }) };
+          state.nativeEmbedding?.release(); delete state.nativeEmbedding;
+          // Existing Pi consumers retain their installed-local unconfigured
+          // behavior. Native acquisition below requires an explicit remote lease.
+          if (described.status === 'unconfigured') state.backend.bind(undefined);
+          else state.backend.unavailable(new Error('Selected Host embedding binding is unavailable'));
+        }
+        candidate?.release();
+        state.bindingKey = key;
+        if (changed) {
+          state.runtime.cancelScans();
+          try { options.onBindingChanged?.(state.workspaceId); } catch (error) { report(error); }
+          if (state.indexingEnabled && scanWhenChanged) track(state.runtime.scanWorkspace(state.workspaceId));
+        }
+      } catch (error) {
+        candidate?.release();
+        if (disposed || startedEpoch !== epoch) return;
+        state.needsRefresh = true;
+        state.nativeBindingState = error instanceof NativeSemanticInferenceError ? error.status
+          : error && typeof error === 'object' && 'code' in error && error.code === 'inference-settings-invalid' ? 'invalid' : 'unavailable';
+        state.bindingKey = '';
+        state.binding.embedding = { status: 'unavailable', message: 'Host embedding configuration is unavailable' };
+        state.backend.unavailable(new Error('Host embedding configuration is unavailable'));
+        state.runtime.cancelScans();
+        // Existing accepted query leases remain independent. A new query does
+        // not fall back to the prior backend after a failed candidate.
+        state.nativeEmbedding?.release(); delete state.nativeEmbedding;
+      }
+      return;
+    }
     const retrying = state.needsRefresh && state.binding.embedding.status === 'unavailable';
     const startedEpoch = epoch;
     const broker = options.getBroker();
@@ -281,7 +358,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     }
   };
   const watch = async (state: WorkspaceState): Promise<void> => {
-    if (disposed || state.watches.length > 0) return;
+    if (disposed || options.nativeInference || state.watches.length > 0) return;
     if (state.watching) return state.watching;
     const broker = options.getBroker();
     if (!broker) return;
@@ -311,7 +388,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     })();
     try { await state.watching; } finally { state.watching = null; }
   };
-  const getWorkspace = async (workspaceId: string, autoScan = true): Promise<WorkspaceState> => {
+  const getWorkspace = async (workspaceId: string, autoScan = true, queryOnly = false): Promise<WorkspaceState> => {
     await maintenance.get(workspaceId);
     assertActive();
     const loading = loads.get(workspaceId);
@@ -320,10 +397,10 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     if (existing) {
       existing.indexingEnabled = workspaceId !== GLOBAL_INFERENCE_SCOPE
         && (await selectedRoots(existing.root)).length > 0;
-      if (existing.indexingEnabled) await ensureDocumentWatch(existing, true);
+      if (existing.indexingEnabled && !queryOnly) await ensureDocumentWatch(existing, true);
       await watch(existing);
       // Also wait for a refresh already queued by config.changed.
-      if (existing.needsRefresh) await refresh(existing, autoScan);
+      if (existing.needsRefresh || options.nativeInference) await refresh(existing, autoScan);
       else await existing.refreshTail;
       assertActive();
       return existing;
@@ -372,10 +449,10 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       // Never let a query run against the local backend before settings resolve.
       markUnavailable(state);
       states.set(workspaceId, state);
-      scheduleReconcile();
+      if (!queryOnly) scheduleReconcile();
       // Subscribe before the first scan so writes during enumeration are either
       // observed incrementally or cause the scope to be reconciled.
-      if (indexingEnabled) await ensureDocumentWatch(state, false);
+      if (indexingEnabled && !queryOnly) await ensureDocumentWatch(state, false);
       // Register observation before reading settings, so changes made while a
       // watch is being created are included in the first binding snapshot.
       await watch(state);
@@ -389,6 +466,16 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     try { return await task; } finally { if (loads.get(workspaceId) === task) loads.delete(workspaceId); }
   };
 
+  const legacyEmbedderFor = (state: WorkspaceState): SemanticEmbedder | undefined => {
+    if (!options.nativeInference || state.binding.embedding.status !== 'ready') return undefined;
+    return createRemoteEmbedder({ binding: state.binding.embedding.binding,
+      knownDimensions: state.backend.embedder.space.dim, client: { embed: params => {
+        const broker = options.getBroker();
+        if (!broker) throw new Error('Pi workspace inference is unavailable');
+        const { signal, ...request } = params;
+        return requestWorkspaceInference(broker, options.configCwd, 'harness.embed', request, signal);
+      } } });
+  };
   const semanticRecall: NonNullable<HarnessServiceHost['semanticRecall']> = async (workspaceId, question, limit, searchOptions) => {
     searchOptions?.signal?.throwIfAborted();
     const state = await waitWithSignal(getWorkspace(workspaceId), searchOptions?.signal);
@@ -424,7 +511,12 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
             : options.documents.readAgentInputSnapshot(sessionId, inputContext, resourceId, workspaceId),
         } : {}),
       });
+      // Existing Pi callers retain their own query purpose/invocation transport.
+      // They share this index and the neutral wire implementation, never a fake
+      // native Run or a second workspace index. Native queries do not enter here.
+      const legacyEmbedder = legacyEmbedderFor(state);
       const result = await state.runtime.search(workspaceScope(workspaceId), question, limit, {
+        ...(legacyEmbedder ? { embedder: legacyEmbedder } : {}),
         ...(searchOptions?.signal ? { signal: searchOptions.signal } : {}),
         ...(searchOptions?.roots ? { roots: searchOptions.roots } : {}),
         ...(reconcilingWorkspaceId === workspaceId ? { waitForFirstPublish: false } : {}),
@@ -454,12 +546,146 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       await threadSnapshot?.release();
     }
   };
+  const acquireNativeQuery = async (input: {
+    workspaceId: string;
+    threadId: string;
+    runId: string;
+    invocation: NativeRetrievalInvocation;
+    /** Synchronous Run-owner fence after asynchronous credential/source checks. */
+    assertAuthorized(): void;
+    roots: readonly string[];
+    signal?: AbortSignal;
+    authorize(signal: AbortSignal): Promise<void>;
+  }): Promise<NativeRetrievalSemanticLease> => {
+    if (!options.nativeInference) throw new Error('Native semantic inference owner is unavailable');
+    const signal = input.signal ?? new AbortController().signal;
+    signal.throwIfAborted();
+    // This admission only refreshes cheap configuration bindings. It neither
+    // enrolls a folder nor starts or waits for its background index build.
+    const state = await waitWithSignal(getWorkspace(input.workspaceId, false, true), signal);
+    const current = state.nativeEmbedding;
+    if (!current || state.binding.embedding.status !== 'ready') {
+      return {
+        stage: { providerId: 'varin.semantic', configurationId: 'native-semantic-v1', status: 'unavailable' },
+        metadata: { bindingState: state.nativeBindingState ?? 'unavailable',
+          providerId: null, modelId: null, configurationId: null,
+          spaceId: null, recipeId: null, publishedRevision: null, processEpoch: null, coverage: 'empty', lifecycle: 'idle' },
+        assertAvailable: () => { signal.throwIfAborted(); assertActive(); input.assertAuthorized(); },
+        validateAvailable: async () => { signal.throwIfAborted(); assertActive(); await input.authorize(signal); },
+        release: () => {},
+      };
+    }
+    const inference = current.retain();
+    const queryHandle = {};
+    nativeQueries.add(queryHandle);
+    const receipts: NativeSemanticInferenceReceipt[] = [];
+    let released = false;
+    let pinned: Awaited<ReturnType<typeof state.runtime.acquirePublishedQuery>> | undefined;
+    const assertAvailable = (): void => {
+      signal.throwIfAborted(); assertActive(); input.assertAuthorized();
+      if (released || states.get(input.workspaceId) !== state || maintenance.has(input.workspaceId)) {
+        throw new Error('Native semantic source lease is unavailable');
+      }
+      pinned?.assertAvailable();
+    };
+    const validateAvailable = async (active: AbortSignal = signal): Promise<void> => {
+      active.throwIfAborted(); assertAvailable();
+      await input.authorize(active);
+      await inference.assertAvailable(active);
+      active.throwIfAborted(); assertAvailable();
+    };
+    const onReceipt = (receipt: NativeSemanticInferenceReceipt): void => {
+      const previous = receipts.findIndex(item => item.batchId === receipt.batchId);
+      if (previous < 0) receipts.push(receipt); else receipts[previous] = receipt;
+    };
+    const knownDimensions = state.backend.embedder.space.dim;
+    const knownSpaceId = spaceIdOf(state.backend.embedder.space);
+    const makeQueryEmbedder = (cached?: number[]): SemanticEmbedder => createRemoteEmbedder({ binding: inference.binding,
+      knownDimensions,
+      client: { embed: params => inference.embed({ ...params, operationIdentity: {
+          kind: 'native-query', hostId: options.hostId, threadId: input.threadId, runId: input.runId,
+          invocation: input.invocation, stage: 'native-code-retrieval.semantic.query-embedding',
+        },
+        ...(cached ? { cachedResult: { batchId: params.batchId,
+          space: { providerId: params.providerId, modelId: params.modelId, protocol: params.protocol,
+            configurationId: params.configurationId, maxTokens: params.maxTokens, dim: cached.length,
+            spaceId: knownSpaceId },
+          items: params.items.map((item, index) => ({ id: item.id, index, vector: cached })),
+        } } : {}),
+        guard: () => validateAvailable(params.signal ?? signal), onReceipt,
+      }) } });
+    const embedder = makeQueryEmbedder();
+    try {
+      pinned = await state.runtime.acquirePublishedQuery(workspaceScope(input.workspaceId), {
+        embedder, roots: input.roots, signal,
+        queryVector: async (question, cached, active) => {
+          const [vector] = await makeQueryEmbedder(cached).embed([question], { purpose: 'query', signal: active });
+          if (!vector) throw new Error('Native query embedding is missing');
+          return vector;
+        },
+        assertAvailable: () => {
+          signal.throwIfAborted(); assertActive(); input.assertAuthorized();
+          if (released || states.get(input.workspaceId) !== state || maintenance.has(input.workspaceId)) {
+            throw new Error('Native semantic source lease is unavailable');
+          }
+        },
+        authorize: async active => {
+          await input.authorize(active); await inference.assertAvailable(active);
+        },
+      });
+      await validateAvailable();
+      const reader = pinned.reader;
+      const selected = pinned;
+      return {
+        stage: { providerId: 'varin.semantic', configurationId: inference.binding.configurationId, status: 'ready',
+          implementation: { search: async (question, limit, active) => {
+            const response = await selected.search(question, limit ?? DEFAULT_SEMANTIC_RECALL, active);
+            const watchUnavailable = !state.documentWatchReady;
+            return { status: watchUnavailable && ['ready', 'empty'].includes(response.status.status) ? 'incomplete' : response.status.status,
+              coverage: watchUnavailable && response.status.coverage === 'complete' ? 'partial' : response.status.coverage,
+              lifecycle: response.status.lifecycle, ...(response.status.generation ? { generation: response.status.generation } : {}),
+              ...(response.status.spaceId ? { spaceId: response.status.spaceId } : {}),
+              scope: response.status.scope, hits: response.hits,
+              gaps: watchUnavailable ? [...response.gaps, { path: '.', reason: 'index-watch-unavailable' }] : response.gaps };
+          } } },
+        metadata: { bindingState: 'ready', coverage: pinned.status.coverage, lifecycle: pinned.status.lifecycle,
+          providerId: inference.binding.providerId, modelId: inference.binding.modelId,
+          configurationId: inference.binding.configurationId, spaceId: reader?.checkpoint.spaceId ?? null,
+          recipeId: reader?.checkpoint.recipeId ?? null, publishedRevision: reader?.publicationId ?? null,
+          processEpoch: reader?.ownerEpoch ?? null, credential: { ...inference.identity.credentialScope } },
+        assertAvailable,
+        validateAvailable,
+        inferenceReceipts: () => receipts.map(receipt => structuredClone(receipt)),
+        release: () => {
+          if (released) return;
+          released = true;
+          nativeQueries.delete(queryHandle);
+          inference.release();
+          track(selected.release());
+        },
+      };
+    } catch (error) {
+      released = true; nativeQueries.delete(queryHandle); inference.release();
+      if (pinned) await pinned.release();
+      throw error;
+    }
+  };
+  const refreshLegacyInference = async (state: WorkspaceState): Promise<void> => {
+    if (!options.nativeInference) return;
+    const broker = options.getBroker();
+    if (!broker) throw new Error('Legacy inference binding is unavailable');
+    const binding = await broker.requestForWorkspace(options.configCwd, 'harness.inference.describe', {});
+    state.binding.rerank = binding.rerank;
+    if (binding.fastDecision) state.binding.fastDecision = binding.fastDecision;
+    else delete state.binding.fastDecision;
+  };
   const harnessSettings: NonNullable<HarnessServiceHost['harnessSettings']> = async (workspaceId) => (
     await getWorkspace(inferenceScopeId(workspaceId))
   ).snapshot;
   const rerankExploreViews: NonNullable<HarnessServiceHost['rerankExploreViews']> = async (input) => {
     input.signal?.throwIfAborted();
     const state = await waitWithSignal(getWorkspace(inferenceScopeId(input.workspaceId)), input.signal);
+    await refreshLegacyInference(state);
     const broker = options.getBroker();
     if (!broker) throw new Error('Pi workspace binding is unavailable');
     const configured = state.binding.rerank.status === 'ready' ? state.binding.rerank.binding : undefined;
@@ -495,11 +721,13 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     purpose,
   ) => {
     const state = await getWorkspace(inferenceScopeId(workspaceId));
+    await refreshLegacyInference(state);
     return state.binding.fastDecision?.purposes?.[purpose] ?? { status: 'unavailable' as const };
   };
   const fastDecision: NonNullable<HarnessServiceHost['fastDecision']> = async (input) => {
     input.signal?.throwIfAborted();
     const state = await waitWithSignal(getWorkspace(inferenceScopeId(input.workspaceId)), input.signal);
+    await refreshLegacyInference(state);
     const broker = options.getBroker();
     if (!broker) throw new Error('Pi workspace binding is unavailable');
     const purposeStatus = state.binding.fastDecision?.purposes?.[input.purpose];
@@ -557,7 +785,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   };
   const processEvent = (event: PiRuntimeBrokerEvent): void => {
     if (disposed) return;
-    if (event.kind === 'worker.exit' && event.role === 'workspace') {
+    if (event.kind === 'worker.exit' && event.role === 'workspace' && !options.nativeInference) {
       epoch++;
       for (const state of states.values()) { markUnavailable(state); track(unwatch(state)); }
     } else if (event.kind === 'host' && event.envelope.event === 'config.changed') {
@@ -569,7 +797,14 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     }
   };
   return {
-    semanticRecall, harnessSettings, rerankExploreViews, fastDecisionStatus, fastDecision, observeDocumentMutation, observeToolWrite, processEvent,
+    nativeQueryStats: async () => {
+      const values = await Promise.all([...states.values()].map(state => state.runtime.publishedReaderStats()));
+      return { activeQueries: nativeQueries.size, ...values.reduce((total, value) => ({
+        activeReaders: total.activeReaders + value.activeReaders,
+        retainedPublications: total.retainedPublications + value.retainedPublications,
+      }), { activeReaders: 0, retainedPublications: 0 }) };
+    },
+    acquireNativeQuery, semanticRecall, harnessSettings, rerankExploreViews, fastDecisionStatus, fastDecision, observeDocumentMutation, observeToolWrite, processEvent,
     refreshIndexScope: async () => {
       for (const state of states.values()) {
         if (state.workspaceId === GLOBAL_INFERENCE_SCOPE) continue;
@@ -612,6 +847,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
         if (state) {
           state.documentWatch?.close();
           await state.runtime.dispose();
+          state.nativeEmbedding?.release();
           await state.refreshTail;
           await state.watching;
           await unwatch(state);
@@ -634,7 +870,8 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     },
     resolveKnowledgeEmbedder: async (scopeId: string) => {
       const state = await getWorkspace(inferenceScopeId(scopeId));
-      if (state.binding.embedding.status === 'ready') return { status: 'ready' as const, embedder: state.backend.embedder };
+      if (state.binding.embedding.status === 'ready') return { status: 'ready' as const,
+        embedder: legacyEmbedderFor(state) ?? state.backend.embedder };
       if (state.binding.embedding.status === 'unconfigured') return { status: 'unconfigured' as const };
       return { status: state.binding.embedding.status === 'invalid' ? 'invalid' as const : 'unavailable' as const,
         ...(state.binding.embedding.message === undefined ? {} : { message: state.binding.embedding.message }) };
@@ -649,16 +886,24 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       if (reconcileTimer) clearTimeout(reconcileTimer);
       reconcileTimer = null;
       for (const state of states.values()) state.documentWatch?.close();
-      await Promise.allSettled([...states.values()].map((state) => state.runtime.dispose()));
+      const closedStates = new Set<WorkspaceState>();
+      const closeResults = await Promise.allSettled([...states.values()].map(async state => {
+        await state.runtime.dispose(); closedStates.add(state);
+      }));
       await Promise.allSettled([...loads.values(), ...pending]);
       await Promise.allSettled([...states.values()].map(async (state) => {
         await state.refreshTail;
         await state.watching;
         await unwatch(state);
       }));
-      states.clear();
+      for (const [id, state] of states) {
+        state.nativeEmbedding?.release();
+        if (closedStates.has(state)) states.delete(id);
+      }
       await Promise.allSettled([...localEmbedders].map(embedder => embedder.dispose?.()));
       localEmbedders.clear();
+      const failed = closeResults.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+      if (failed.length) throw new AggregateError(failed.map(result => result.reason), 'Semantic runtime shutdown failed');
     },
   };
 }

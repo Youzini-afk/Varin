@@ -124,7 +124,7 @@ it('selected semantic candidates use real chunk hashes, admit source before mode
   await f.write('allowed/semantic.ts', semanticText); await f.write('private/secret.ts', 'PRIVATE_INDEX_BODY');
   const observed = vi.spyOn(f.documents.authority, 'readSnapshot');
   const selectedBodies: string[] = [];
-  const hit = (documentId: string, body: string, rank: number) => ({ documentId, blockId: `block-${rank}`, parentUnitId: `parent-${rank}`,
+  const hit = (documentId: string, body: string, rank: number) => ({ documentId, revision: `d1_${createHash('sha256').update(body).digest('base64url')}`, blockId: `block-${rank}`, parentUnitId: `parent-${rank}`,
     parentName: 'conceptualAnswer', parentKind: 'function', startLine: 1, endLine: body.split('\n').length,
     contentHash: createHash('sha256').update(body).digest('hex'), body, similarity: 0.9, rank });
   install(f, createRetrievalPipelineOwner({ configurationId: 'explicit-semantic',

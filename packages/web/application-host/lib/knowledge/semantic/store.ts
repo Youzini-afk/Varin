@@ -10,9 +10,11 @@ import type { SemanticEmbedder } from "./embedder.js";
 import { waitWithSignal } from "../../cancellation.js";
 import type { SemanticStoreMethod } from "./store-protocol.js";
 import type { SemanticCheckpoint, SemanticDocumentPublication, SemanticHit, SemanticSearchOptions,
-  SemanticDocumentState, SemanticSourceMetadataUpdate, SemanticDocumentExpectation, SemanticDocumentScores } from "./store-contract.js";
+  SemanticDocumentState, SemanticSourceMetadataUpdate, SemanticDocumentExpectation, SemanticDocumentScores,
+  SemanticPublishedReader, SemanticPublishedReaderStats } from "./store-contract.js";
 export type { SemanticIndexLifecycle, SemanticQueryCoverage, SemanticHit, SemanticCheckpoint,
-  SemanticDocumentPublication, SemanticOverlayBlock, SemanticSearchOptions } from "./store-contract.js";
+  SemanticDocumentPublication, SemanticOverlayBlock, SemanticSearchOptions,
+  SemanticPublishedReader, SemanticPublishedReaderStats } from "./store-contract.js";
 export { readSemanticCheckpoint } from "./checkpoint.js";
 
 export function createSemanticGenerationStore(options: {
@@ -21,15 +23,18 @@ export function createSemanticGenerationStore(options: {
   scheduler?: EmbedScheduler; embedPriority?: EmbedPriority;
 }) {
   const space = { ...options.embedder.space };
+  let embedder = options.embedder;
   const spaceId = spaceIdOf(space);
   const recipeId = recipeIdOf(options.recipe ?? defaultRecipeIdentity());
   let checkpoint = readSemanticCheckpoint(semanticSpaceDir(options.dataDir, options.hostId, options.scope, spaceId));
   const vectorCache = options.vectorCache ?? createVectorCache();
   const latestPublish = new Map<string, number>();
   const pending = new Set<Promise<unknown>>();
+  const retainedReaders = new Set<string>();
   let owner: ReturnType<typeof knowledgeStoreProcess> | null = null;
   let storeId = 0;
   let openTask: Promise<void> | null = null;
+  let initialized = false;
   let initializationFailed = false;
   let closed = false;
   let closing: Promise<void> | null = null;
@@ -45,6 +50,7 @@ export function createSemanticGenerationStore(options: {
       dataDir: options.dataDir, hostId: options.hostId, scope: options.scope, space, recipe: options.recipe,
     }]).then(result => {
       checkpoint = (result as { checkpoint: SemanticCheckpoint | null }).checkpoint;
+      initialized = true;
     }).catch(async error => {
       initializationFailed = true;
       await activeOwner.release(storeId);
@@ -70,7 +76,9 @@ export function createSemanticGenerationStore(options: {
 
   const publishDocuments = (inputs: readonly SemanticDocumentPublication[], signal?: AbortSignal): Promise<void> => {
     if (closed || closing) return Promise.reject(new Error("Semantic store is closing or closed"));
-    if (options.embedder.status !== "ready" || inputs.length === 0) return Promise.resolve();
+    // Same-space credential/binding changes affect future admissions only.
+    const admittedEmbedder = embedder;
+    if (admittedEmbedder.status !== "ready" || inputs.length === 0) return Promise.resolve();
     const byDocument = new Map<string, SemanticDocumentPublication>();
     for (const input of inputs) {
       const token = input.publishToken ?? 0;
@@ -82,7 +90,7 @@ export function createSemanticGenerationStore(options: {
     if (publications.length === 0) return Promise.resolve();
     return track(async () => {
       signal?.throwIfAborted();
-      await options.embedder.prepare();
+      await admittedEmbedder.prepare();
       const chunks = publications.flatMap(input => input.chunks);
       const reused = await call<Array<number[] | undefined>>("lookupVectors", [chunks.map(chunk => chunk.embedText)], signal);
       const claims: Array<ReturnType<SemanticVectorCache["claim"]> | undefined> = [];
@@ -95,7 +103,7 @@ export function createSemanticGenerationStore(options: {
       }
       try {
         if (owners.length > 0) {
-          const fresh = await embedInScheduledBatches({ embedder: options.embedder,
+          const fresh = await embedInScheduledBatches({ embedder: admittedEmbedder,
             texts: owners.map(owner => owner.text), ...(options.scheduler ? { scheduler: options.scheduler } : {}),
             priority: options.embedPriority ?? "background", purpose: "document", ...(signal ? { signal } : {}) });
           if (fresh.length !== owners.length || fresh.some(vector => vector.length !== space.dim || vector.some(value => !Number.isFinite(value)))) {
@@ -129,12 +137,56 @@ export function createSemanticGenerationStore(options: {
     });
   };
 
+  const assertPublishedReaderAvailable = (token: string): void => {
+    if (closed || closing || owner?.failed || !retainedReaders.has(token)) {
+      throw new Error("Semantic reader is no longer available");
+    }
+  };
+  const releasePinned = (token: string): Promise<void> => {
+    if (!retainedReaders.delete(token)) return Promise.resolve();
+    // Close owns all still-retained native handles, including a raced release.
+    if (closed || closing || owner?.failed) return closing ?? Promise.resolve();
+    return track(() => call<void>("releasePinned", [token]));
+  };
+  const retainPublished = (signal?: AbortSignal): Promise<SemanticPublishedReader | null> => {
+    const acquisition = track(async () => {
+      signal?.throwIfAborted();
+      if (initializationFailed || owner?.failed) throw new Error("Semantic storage owner is unavailable");
+      // Initialization may recover and checkpoint existing data. Only the
+      // background/explicit ready path may start or await that work; a query
+      // acquires the currently available publication or reports a cold source.
+      if (!initialized) return null;
+      const reader = await call<SemanticPublishedReader | null>("retainPublished", [], signal);
+      // IPC may already have admitted an acquire when cancellation or close
+      // arrives. Observe its late result and release it before ending this task.
+      if (reader && (signal?.aborted || closed || closing)) {
+        await call<void>("releasePinned", [reader.token]);
+        signal?.throwIfAborted();
+        throw new Error("Semantic store is closing or closed");
+      }
+      signal?.throwIfAborted();
+      if (reader) retainedReaders.add(reader.token);
+      return reader;
+    });
+    return waitWithSignal(acquisition, signal).catch(error => {
+      // Also cover cancellation between adoption and resolving the caller's
+      // wait. The full acquisition remains tracked until late cleanup finishes.
+      void acquisition.then(reader => reader ? releasePinned(reader.token) : undefined).catch(() => {});
+      throw error;
+    });
+  };
+
   return {
     scope: options.scope, space, spaceId, recipeId,
     get lifecycle() { return checkpoint?.lifecycle ?? "idle"; },
     get coverage() { return checkpoint?.coverage ?? "empty"; },
     get generation() { return checkpoint?.generation ?? "g1"; },
     checkpoint: (): SemanticCheckpoint | null => checkpoint ? { ...checkpoint } : null,
+    setEmbedder(next: SemanticEmbedder): void {
+      if (closed || closing) throw new Error("Semantic store is closing or closed");
+      if (spaceIdOf(next.space) !== spaceId) throw new Error("Semantic embedder vector space changed");
+      embedder = next;
+    },
     ready: (): Promise<void> => track(open),
     markBuilding: (kind: "building" | "rebuilding"): Promise<void> => track(() => call("markBuilding", [kind])),
     markReady: (complete: boolean): Promise<void> => track(() => call("markReady", [complete])),
@@ -153,12 +205,25 @@ export function createSemanticGenerationStore(options: {
     },
     search: (query: number[], limit: number, searchOptions?: readonly string[] | SemanticSearchOptions): Promise<SemanticHit[]> =>
       track(() => call("search", [query, limit, searchOptions])),
+    retainPublished,
+    assertPublishedReaderAvailable,
+    searchPinned: (token: string, query: number[], limit: number,
+      searchOptions?: readonly string[] | SemanticSearchOptions, signal?: AbortSignal): Promise<SemanticHit[]> =>
+      track(() => {
+        assertPublishedReaderAvailable(token);
+        return call("searchPinned", [token, query, limit, searchOptions], signal);
+      }),
+    releasePinned,
+    publishedReaderStats: (): Promise<SemanticPublishedReaderStats> => closed
+      ? Promise.resolve({ activeReaders: 0, retainedPublications: 0 })
+      : track(() => call("publishedReaderStats", [])),
     searchDocumentScores: (query: number[], documents: readonly SemanticDocumentExpectation[], limit: number,
       signal?: AbortSignal): Promise<SemanticDocumentScores> =>
       track(() => call("searchDocumentScores", [query, documents, limit], signal)),
     close: (): Promise<void> => {
       if (closed) return Promise.resolve();
       if (closing) return closing;
+      retainedReaders.clear();
       closing = (async () => {
         await Promise.allSettled([...pending]);
         if (openTask && !initializationFailed) {

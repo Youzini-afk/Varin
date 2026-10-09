@@ -1,3 +1,5 @@
+import { createSemanticInferenceLedger } from './lib/knowledge/semantic/inference-ledger.js';
+import { createNativeSemanticInference } from './lib/knowledge/semantic/native-inference.js';
 import { createNativeRetrievalOwner } from './lib/kernel/native-retrieval-owner.js';
 import { createNativeRetrievalComposition } from './lib/kernel/native-retrieval-composition.js';
 import { createNativeLanguageOwner } from './lib/kernel/native-language-owner.js';
@@ -3347,12 +3349,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       resolveTarget: sourceViewRuntime.resolveLanguageTarget,
     }),
   ]);
-  const nativeRetrievalComposition = createNativeRetrievalComposition(extensionRuntime, { structure: structureSource });
-  kernelClient.setNativeRetrievalOwner(createNativeRetrievalOwner({ documents: documentsAuthority, kernel: kernelClient,
-    validateSource: nativeLiveSources.validate,
-    preparePipeline: (query, signal) => nativeRetrievalComposition.prepare({ threadId: query.threadId,
-      workspaceId: query.liveRoot.canonicalRoot, ...(query.projectId ? { projectId: query.projectId } : {}) }, signal),
-  }));
   const projectDirectories = (settings: { projects?: unknown }) => (sanitizeProjects(settings.projects) ?? []).flatMap(projectFolders);
   const languagePrewarm = createLanguagePrewarm({
     documents: documentsAuthority, languages: languageSupportRuntime, supervisor: languageSupervisor,
@@ -3429,7 +3425,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     backgroundIntervalMs: semanticIndexConfig.requestIntervalMs,
   });
   const semanticVectorCache = createVectorCache();
+  const nativeSemanticInference = createNativeSemanticInference(hostCredentialAuthority, {
+    readGlobalSettings: () => hostCredentialAuthority.readGlobalInferenceSettings(),
+  }, { ledger: createSemanticInferenceLedger({ dataDir: VARIN_DATA_DIR, hostId }) });
   const semanticRuntime = createWorkspaceSemanticRuntime({
+    nativeInference: nativeSemanticInference,
     dataDir: semanticIndexConfig.storageDirectory ?? VARIN_DATA_DIR,
     hostId,
     // HR3: one shared worker serves settings/inference for every resource root;
@@ -3471,6 +3471,40 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (error) => console.error('[HarnessKnowledge] Semantic runtime failed:', errorMessage(error)),
   });
   semanticRuntimeHolder.current = semanticRuntime;
+  const nativeRetrievalComposition = createNativeRetrievalComposition(extensionRuntime, {
+    structure: structureSource,
+    prepareSemantic: async (scope, signal) => {
+      const query = scope.query;
+      if (!query) throw new Error('Native semantic retrieval requires its Run identity');
+      const active = signal ?? new AbortController().signal;
+      const relative = (value: string): string => {
+        if (value.includes('\\') || value.startsWith('/') || value.includes(':') || value.includes('\0')
+          || value.split('/').includes('..')) throw new Error('Invalid native semantic root');
+        return value.split('/').filter(part => part && part !== '.').join('/');
+      };
+      const grant = kernelClient.nativeRetrievalGrant(query);
+      const roots = (query.paths ?? grant.pathScopes).map(relative);
+      const authorize = async (requestSignal: AbortSignal): Promise<void> => {
+        requestSignal.throwIfAborted();
+        await nativeLiveSources.validate(query, requestSignal);
+        const current = kernelClient.nativeRetrievalGrant(query);
+        const granted = current.pathScopes.map(relative);
+        if (!roots.length || roots.some(root => !granted.some(parent => !parent || root === parent || root.startsWith(`${parent}/`)))) {
+          throw new Error('Native semantic roots are outside the Run grant');
+        }
+      };
+      await authorize(active);
+      return semanticRuntime.acquireNativeQuery({ workspaceId: query.workspaceId, threadId: query.threadId,
+        runId: query.runId, invocation: query.invocation, roots, signal: active, authorize,
+        assertAuthorized: () => { kernelClient.nativeRetrievalGrant(query); } });
+    },
+  });
+  kernelClient.setNativeRetrievalOwner(createNativeRetrievalOwner({ documents: documentsAuthority, kernel: kernelClient,
+    validateSource: nativeLiveSources.validate,
+    preparePipeline: (query, signal) => nativeRetrievalComposition.prepare({ threadId: query.threadId, query,
+      workspaceId: query.liveRoot.canonicalRoot, ...(query.projectId ? { projectId: query.projectId } : {}) }, signal),
+  }));
+
   const indexDirectories = createIndexDirectoryManager({
     dataDir: VARIN_DATA_DIR,
     resolve: async (directory) => {
@@ -4566,6 +4600,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await indexDirectories.dispose();
       observeKnowledgeDocumentMutation = () => undefined;
       await semanticRuntime.dispose();
+      await nativeSemanticInference.close();
       await symbolGraphRuntime.dispose();
       // Stop producers and drain their receipts while process grants are valid.
       // One refused exit must not prevent the other domains from shutting down.
