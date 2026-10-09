@@ -147,6 +147,13 @@ MCP ordinary RPC scope claims serialize local dispatch windows only. A disconnec
 cannot prove remote execution stopped; its unknown effect is retained without replay, and the scope
 claim must not be presented as a remote filesystem/desktop lock or an MCP Tasks terminal receipt.
 
+MCP composition prepares each direct dependency independently over the shared Host authority. Ready
+contributions publish at a closed model exchange; unrelated slow preparation does not delay the model.
+Durable schema/configuration identity is separate from the ephemeral live owner handle. Re-enabling an
+identically described dependency creates a fresh live binding while old revoked exchanges stay revoked.
+Recovery waits only for its recorded dependencies and restores that exact selection. Retired connections
+drain their holders/calls, and Host shutdown awaits connection cleanup already in progress.
+
 ## Selected context composition
 
 Native context checkpoints retain an optional `personalization.contextComposition`: exact Host

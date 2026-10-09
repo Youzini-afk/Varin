@@ -73,6 +73,7 @@ export function createMcpLease(options: McpOwnerOptions): McpLease {
     evaluateGate(selected.tool.name, selected.args, current);
   return {
     binding,
+    implementationIdentity: lease.implementationIdentity,
     async authorize(call, signal) {
       signal.throwIfAborted();
       const selected = selection(call);

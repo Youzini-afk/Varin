@@ -1,5 +1,5 @@
 //! Cold model/tool assembly belongs to a supervised Run, never the Agent command actor.
-use crate::agent_runtime::{bind_policy_model, domain, mcp_binding};
+use crate::agent_runtime::{bind_policy_model, domain, live_mcp_binding};
 use crate::error::KernelError;
 use crate::protocol::PROTOCOL_VERSION;
 use crate::protocol_generated::{LaunchSelectParams, RunStartParams};
@@ -307,9 +307,10 @@ impl RunAssembly {
                 plan_bridge.clone(),
             ));
         }
-        let mcp_binding = p.mcp_binding.map(mcp_binding).transpose()?;
+        let mcp_live = p.mcp_binding.map(live_mcp_binding).transpose()?;
+        let mcp_binding = mcp_live.as_ref().map(|live|live.binding.clone());
         if let Some(generation)=saved_schema_generation {start.binding.tool_schema_generation=generation;}
-        let directory = self.tools.prepare_scope(&p.run_id,declarations,mcp_binding.clone())
+        let directory = self.tools.prepare_scope(&p.run_id,declarations,mcp_live)
             .map_err(|error| KernelError::Protocol(error.to_string()))?;
         start.binding.tools = directory.schemas().to_vec();
         let policy_models = runtime

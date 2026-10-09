@@ -373,6 +373,11 @@ export interface McpBinding {
   tools: LaunchTool[];
 }
 
+export interface LiveMcpBinding {
+  ownerId: string;
+  binding: McpBinding;
+}
+
 export interface McpPrepareParams {
   runId: string;
   binding: McpBinding;
@@ -386,7 +391,7 @@ export interface ToolSelectParams {
 export interface ToolReadyParams {
   runId: string;
   selectionId: string;
-  binding?: McpBinding;
+  binding?: LiveMcpBinding;
 }
 
 export interface LaunchSelection {
@@ -577,7 +582,7 @@ export interface RunModelSelections {
 
 export interface RunStartParams {
   policyBinding?: AgentPolicyBinding;
-  mcpBinding?: McpBinding;
+  mcpBinding?: LiveMcpBinding;
   runId: string;
   toolBinding?: unknown;
   credentialScope?: CredentialScope;
