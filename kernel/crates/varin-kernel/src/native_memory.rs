@@ -91,6 +91,30 @@ struct MemoryTools {
     mutations: bool,
 }
 impl ToolExecutor for MemoryTools {
+    fn execution_class(
+        &self,
+        call: &ToolCall,
+        contract: &ToolContract,
+    ) -> varin_runtime::execution_capacity::ExecutionClass {
+        if call.name == TOOL {
+            varin_runtime::execution_capacity::ExecutionClass::Unmetered
+        } else {
+            self.inner.execution_class(call, contract)
+        }
+    }
+    fn watch_admission(
+        &self,
+        context: &ToolExecutionContext,
+        call: &ToolCall,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError> {
+        if call.name == TOOL {
+            Ok(None)
+        } else {
+            self.inner.watch_admission(context, call, contract, cancel)
+        }
+    }
     fn supports_policy_read(
         &self,
         context: &FrozenToolContext,
@@ -342,3 +366,7 @@ pub(crate) fn reconcile(
     }).map_err(|failure| crate::error::KernelError::Operation(failure.to_string()))?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "native_memory_capacity_review.rs"]
+mod capacity_review;

@@ -483,6 +483,16 @@ pub mod policy_model;
 pub use policy_model::*;
 
 pub trait ToolExecutor: Send + Sync {
+    /// Load classification comes only from the bound trusted capability. Wrappers must forward
+    /// calls they do not own. This does not grant permission or classify external annotations.
+    fn execution_class(&self, _: &ToolCall, _: &ToolContract) -> crate::execution_capacity::ExecutionClass {
+        crate::execution_capacity::ExecutionClass::Unmetered
+    }
+
+    /// Retain the capability owner's revocation control while queued. No I/O or preparation.
+    fn watch_admission(&self, _: &ToolExecutionContext, _: &ToolCall, _: &ToolContract, _: &CancellationToken)
+        -> Result<Option<crate::execution_capacity::AdmissionControlGuard>, ExecutionError> { Ok(None) }
+
     /// Trusted implementation opt-in, never inferred from untrusted MCP annotations.
     fn supports_policy_read(&self, _: &FrozenToolContext, _: &ToolCall, _: &ToolContract) -> bool { false }
 
@@ -588,6 +598,9 @@ pub struct ContextProjection {
 }
 
 pub trait Persistence: Send + Sync {
+    /// Native Catalog overrides this with its actual parent/child lineage and execution fence.
+    fn task_family(&self, run: &str, _epoch: u64) -> Result<String, ExecutionError> { Ok(run.into()) }
+
     fn policy_model_job(&self, _run: &str, _epoch: u64) -> Result<Option<PolicyModelState>, ExecutionError> { Ok(None) }
     fn admit_policy_model(&self, _run: &str, _epoch: u64, _intent: &PolicyModelIntent, _snapshot: &RequestSnapshot) -> Result<PolicyModelState, ExecutionError> { Err(ExecutionError::new("policy_model_unavailable", "durable model job authority required")) }
     fn dispatch_policy_model(&self, _run: &str, _epoch: u64, _action: &str) -> Result<(), ExecutionError> { Err(ExecutionError::new("policy_model_unavailable", "durable model job authority required")) }
@@ -1576,6 +1589,7 @@ impl<
         let operation_cancel = cancel.child(&context.operation_id);
         let cancel = &operation_cancel;
         let mut lease = None;
+        let mut _admission_control = None;
         let completion = if cancel.is_cancelled() {
             ToolCompletion::cancelled()
         } else if let Err(error) = guarded("tool_authorize_panicked", || {
@@ -1586,20 +1600,33 @@ impl<
         } else if cancel.is_cancelled() {
             ToolCompletion::cancelled()
         } else {
-            if let Some(admission) = self.persistence.resource_admission() {
-                lease = admission.acquire(&context.operation_id, &tool.contract.resources, cancel)?;
-                if lease.is_none() {
-                    return self.settle_tool(input, tool, ToolResult {
-                        request_id: snapshot.view.request_id.clone(),
-                        call_id: tool.call.call_id.clone(),
-                        completion: ToolCompletion::cancelled(),
-                    });
+            let ready = prepare_dispatch(cancel, || {
+                _admission_control = self.tools.watch_admission(&context, &tool.call, &tool.contract, cancel)?;
+                if let Some(admission) = self.persistence.resource_admission() {
+                    let family_id = self.persistence.task_family(&input.run_id, input.owner_generation)?;
+                    let identity = crate::execution_capacity::AdmissionIdentity {
+                        run_id: input.run_id.clone(), owner_generation: input.owner_generation,
+                        origin: context.origin.clone(), family_id,
+                    };
+                    lease = admission.acquire_scheduled(&context.operation_id, &tool.contract.resources,
+                        &identity, self.tools.execution_class(&tool.call, &tool.contract), cancel)?;
+                    return Ok(lease.is_some());
                 }
-            }
-            if cancel.is_cancelled() {
+                Ok(true)
+            })?;
+            if !ready {
                 return self.settle_tool(input, tool, ToolResult {
                     request_id: snapshot.view.request_id.clone(), call_id: tool.call.call_id.clone(),
                     completion: ToolCompletion::cancelled(),
+                });
+            }
+            // A queued call can outlive authorization or its Run generation. Recheck only at
+            // the actual dispatch boundary, outside both Catalog and admission locks.
+            if let Err(error) = self.persistence.task_family(&input.run_id, input.owner_generation)
+                .and_then(|_| guarded("tool_authorize_panicked", || self.tools.authorize(&context, &tool.call, &tool.contract, cancel))) {
+                return self.settle_tool(input, tool, ToolResult {
+                    request_id: snapshot.view.request_id.clone(), call_id: tool.call.call_id.clone(),
+                    completion: ToolCompletion::NotDispatched { reason: format!("{}: {}", error.code, error.message) },
                 });
             }
             if !tool.contract.read_only || tool.contract.completion == CompletionKind::Job {
@@ -1654,6 +1681,24 @@ impl<
         self.progress
             .emit(&input.run_id, ExecutionEvent::ToolCompleted(result.clone()));
         Ok(result)
+    }
+}
+
+/// Cancellation wins only while no tool has been dispatched. Inspect it after admission
+/// returns, including on error: durable cancellation can invalidate task_family while
+/// a watch is being registered. Without that control fact, preserve recovery errors.
+fn prepare_dispatch(
+    cancel: &CancellationToken,
+    admission: impl FnOnce() -> Result<bool, ExecutionError>,
+) -> Result<bool, ExecutionError> {
+    if cancel.is_cancelled() {
+        return Ok(false);
+    }
+    let result = admission();
+    if cancel.is_cancelled() {
+        Ok(false)
+    } else {
+        result
     }
 }
 

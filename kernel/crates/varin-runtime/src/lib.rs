@@ -20,3 +20,5 @@ pub mod content;
 pub mod context_job;
 
 pub mod resource_admission;
+
+pub mod execution_capacity;

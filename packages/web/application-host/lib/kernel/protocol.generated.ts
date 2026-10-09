@@ -38,6 +38,7 @@ export type KernelMethod =
   | "runtime.input.list"
   | "runtime.run.start"
   | "runtime.status"
+  | "runtime.admission.inspect"
   | "runtime.thread.create"
   | "runtime.input.submit"
   | "runtime.run.inspect"
@@ -668,9 +669,42 @@ export interface NativeObserverDeliveryParams {
   state: NativeDeliveryState;
 }
 
+export interface NativeAdmissionInspectParams {
+  runId: string;
+  ownerGeneration: number;
+  callId: string;
+  requestId?: string;
+  actionId?: string;
+  nodeId?: string;
+}
+
+export interface NativeAdmissionSummary {
+  localComputeCapacity: number;
+  localComputeActive: number;
+  queued: number;
+}
+
+export interface NativeAdmissionStatus {
+  admissionId: string;
+  familyId: string;
+  class: 'unmetered' | 'local_compute';
+  runId: string | null;
+  ownerGeneration: number | null;
+  origin: unknown;
+  state: 'queued' | 'active';
+  reason: string | null;
+}
+
+export interface NativeAdmissionInspection {
+  admissionId: string;
+  state: 'queued' | 'active' | 'settled' | 'not_active';
+  queue: NativeAdmissionStatus | null;
+}
+
 export interface NativeStatus {
   epoch: number;
   eventCursor: number;
+  admission: NativeAdmissionSummary;
 }
 
 export interface NativeReceipt {
@@ -1978,6 +2012,7 @@ export type KernelMethodParams = {
   "runtime.launch.list": KernelEmptyParams;
   "runtime.run.start": NativeRunStartParams;
   "runtime.status": KernelEmptyParams;
+  "runtime.admission.inspect": NativeAdmissionInspectParams;
   "runtime.thread.create": NativeThreadCreateParams;
   "runtime.input.submit": NativeInputSubmitParams;
   "runtime.run.inspect": NativeRunParams;
@@ -2347,6 +2382,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.status";
       params: KernelEmptyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.admission.inspect";
+      params: NativeAdmissionInspectParams;
       epoch?: string;
       grantId?: string;
     }

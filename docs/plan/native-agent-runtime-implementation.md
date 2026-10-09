@@ -574,3 +574,37 @@ collaboration v1 两域只读预检、真实 memory owner、精确来源继承�
 
 本节仍不覆盖全仓/完整 MCP 套件、跨平台、付费供应商、极端负载、完整恢复矩阵或全部设计完成。
 家族公平调度位于后续独立增量，不包含在本次综合交付中。
+
+## 2026-10-09 家族公平准入首切与综合取消修复
+
+原生已绑定 FileSearch 采用可信 Catalog 父子谱系推导的 task family，与原有资源冲突计划一起
+原子取得 local-compute 容量。排队时不占文件资源，冲突 FIFO 保留，可运行家族轮转；默认预算
+与实际 foreground compute workers 使用同一进程启动配置。plain read/control/memory 不消耗
+该容量。精确 admission inspect 从真实 Run generation、ModelStep/tool 或 policy action/node
+反查，区分 queued/active/settled/not_active、未知、过期与越权，不伪造 durable Operation。
+
+与已交付 A+B 综合时，MemoryTools 对非自身工具透传 execution_class/watch_admission，自身
+memory read 不注册文件 grant watcher。综合独立验收 **Host 5 个不同用例、Rust 13 个用例**通过：
+Host 在真实 memory/context owner 主链验证 capacity 1/3、真实微型搜索和精确身份；Rust 由原
+family 8、真实 Supervisor 取消竞态 2、真实 kernel wrapper/Storage 准入 3 构成。
+确定性持有同 Catalog 的一个 permit，证明真实 wrapper 下搜索等待、取消在释放 permit 前完成、
+释放后真实 Storage 撤权拒绝派发，以及 memory read/Prepare 仍可继续。没有用大扫描制造阻塞。
+
+综合审查真实复现了两个新取消竞态：watch 注册期间真实 Supervisor.cancel 已发生，首次
+family 查询通过裸错误传播，把 Run 留在 Waiting/execution-recovery。修复只在未派发阶段的
+watch/family/acquire 返回后重读真实取消 token；明确取消走既有取消结算，无取消的基础设施
+错误保留原恢复语义。模型和 policy 两个反例由旧版 0/2 变为通过，断言终态、真实回执、零派发、
+无排队容量和 guard 残留；未改 context preparation 或 memory delivery 的已有事务。
+
+最终 Host tests 类型、变更测试 lint、协议与 diff 检查通过，client/protocol 和 Host bundle
+构建通过。早先 Host 默认 1 秒轮询失败、测试 identity 缺判别字段的类型失败与两个生产取消
+红测均保留；仅修测试 identity 后重跑受影响 Host 2 例，不重复计数。无全仓 lint/零 warning 声明。
+最终源码摘要 `d9cd7ad416a088c7023f152f829d7af3f305b3e49f88f82950e1823fc94a8963`，
+相对实际 v2 binary 构建仅一个 TS 测试 identity 字段变化，生产与 Rust 输入不变；验收后只加本节。
+0.9.24 debug binary SHA256：
+`0a7a2ea31105dcc50b627bf1f8c58835164779d08ae799e80f7eb5695e966f47`。
+
+边界：kernel 测试观察透传/卸载所用 watcher 为测试提供；真实 Kernel grant 撤销在 permit
+仍被持有时立即唤醒排队调用，尚未端到端实证。真实 Storage 撤权后拒派发、真实 Supervisor
+取消已分别实证。此首切不覆盖所有 compute 消费者、OS 线程创建失败注入、完整重启矩阵、
+统一有界 worker 执行器、优先级老化、性能比较或完整设计交付；下一进程持久等待增量独立推进。
