@@ -31,10 +31,35 @@ export interface HostServiceProvision {
   handler: HostServiceHandler;
 }
 
+export class HostServiceBindingError extends Error {
+  constructor(readonly code: "missing" | "ambiguous" | "selected_unavailable" | "binding_retired" | "binding_revoked", message: string) {
+    super(message);
+    this.name = "HostServiceBindingError";
+  }
+}
+
+/** A resolved implementation, never a recipe that silently chooses a different provider. */
+export interface HostServiceBinding {
+  readonly providerId: string;
+  readonly providerKey: string;
+  readonly descriptor: Readonly<VarinExtensionServiceProvision>;
+  invoke(method: string, args: JsonValue[], signal?: AbortSignal): Promise<JsonValue>;
+  /** Retain this exact generation for a frozen exchange; release when the exchange settles. */
+  pin(): HostServicePin;
+}
+
+export interface HostServicePin {
+  readonly providerId: string;
+  invoke(method: string, args: JsonValue[], signal?: AbortSignal): Promise<JsonValue>;
+  release(): void;
+}
+
 interface ActiveProvider {
   descriptor: VarinExtensionServiceProvision;
   handler: HostServiceHandler;
   inFlight: number;
+  revoked: boolean;
+  pins: Set<() => void>;
   onDrained: Array<() => void>;
   owner: HostServiceOwnerIdentity;
   providerId: string;
@@ -73,6 +98,7 @@ export class HostServiceRegistry {
   readonly hostId: string;
   readonly #listeners = new Set<() => void>();
   readonly #providers = new Map<string, ActiveProvider>();
+  readonly #activeByService = new Map<string, readonly ActiveProvider[]>();
   readonly #selections = new Map<string, string>();
   readonly #replacements = new Map<string, { owner: HostServiceOwnerIdentity; provisions: readonly { descriptor: VarinExtensionServiceProvision }[] }>();
   #revision = 0;
@@ -228,6 +254,8 @@ export class HostServiceRegistry {
       descriptor: provision.descriptor,
       handler: provision.handler,
       inFlight: 0,
+      revoked: false,
+      pins: new Set(),
       onDrained: [],
       owner: { ...owner },
       providerId,
@@ -242,16 +270,24 @@ export class HostServiceRegistry {
       : new Promise<void>((resolveDrain) => provider.onDrained.push(resolveDrain))));
   }
 
-  async drainOwner(owner: HostServiceOwnerIdentity): Promise<void> {
-    const providers = [...this.#providers.values()].filter((provider) => exactOwnerKey(provider.owner) === exactOwnerKey(owner));
+  /** Close admission synchronously, before an owner queue can wait for a retired exchange.
+   * Revoke retained older generations too, but never a newer owner from stale teardown. */
+  revokeOwner(owner: HostServiceOwnerIdentity): void {
     let changed = false;
-    for (const provider of providers) {
-      if (provider.status !== "draining") {
-        provider.status = "draining";
-        changed = true;
-      }
+    for (const provider of this.#providers.values()) {
+      if (ownerKey(provider.owner) !== ownerKey(owner) || provider.owner.generation > owner.generation) continue;
+      if (!provider.revoked || provider.status !== "draining") changed = true;
+      this.#revokeProvider(provider);
+      provider.status = "draining";
     }
     if (changed) this.#publish();
+  }
+
+  async drainOwner(owner: HostServiceOwnerIdentity): Promise<void> {
+    this.revokeOwner(owner);
+    const providers = [...this.#providers.values()].filter((provider) => (
+      ownerKey(provider.owner) === ownerKey(owner) && provider.owner.generation <= owner.generation
+    ));
     await this.#waitForProviders(providers);
   }
 
@@ -260,6 +296,7 @@ export class HostServiceRegistry {
     const removed = new Set<string>();
     for (const [providerId, provider] of [...this.#providers]) {
       if (exactOwnerKey(provider.owner) !== exactOwnerKey(owner)) continue;
+      this.#revokeProvider(provider);
       this.#providers.delete(providerId);
       removed.add(providerId);
       changed = true;
@@ -278,7 +315,7 @@ export class HostServiceRegistry {
     if (providerId === null) this.#selections.delete(key);
     else {
       const provider = this.#providers.get(providerId);
-      if (!provider || serviceKey(provider.descriptor.id, provider.descriptor.version) !== key) {
+      if (!provider || provider.status !== "active" || provider.revoked || serviceKey(provider.descriptor.id, provider.descriptor.version) !== key) {
         throw new Error(`Selected Host service provider is unavailable: ${providerId}`);
       }
       this.#selections.set(key, providerId);
@@ -300,38 +337,93 @@ export class HostServiceRegistry {
     return matches.length === 1 ? matches : [];
   }
 
+  /** Bind after scoped routing/preparation. Only the affected service's index is consulted. */
+  bind(serviceId: string, version: number, providerId?: string): HostServiceBinding {
+    const key = serviceKey(serviceId, version);
+    const selected = providerId ?? this.#selections.get(key);
+    const matches = this.#activeByService.get(key) ?? [];
+    const provider = selected ? this.#providers.get(selected) : matches.length === 1 ? matches[0] : undefined;
+    if (!provider || provider.status !== "active" || provider.revoked || serviceKey(provider.descriptor.id, provider.descriptor.version) !== key) {
+      throw new HostServiceBindingError(selected ? "selected_unavailable" : matches.length > 1 ? "ambiguous" : "missing",
+        `Host service provider is unavailable or ambiguous: ${key}`);
+    }
+    const available = (pinned: boolean): void => {
+      if (provider.revoked || this.#providers.get(provider.providerId) !== provider || (!pinned && provider.status !== "active")) {
+        throw new HostServiceBindingError(provider.revoked || this.#providers.get(provider.providerId) !== provider
+          ? "binding_revoked" : "binding_retired", `Bound Host service provider is no longer available: ${provider.providerId}`);
+      }
+    };
+    return Object.freeze({
+      providerId: provider.providerId,
+      providerKey: provider.providerKey,
+      descriptor: Object.freeze({ ...provider.descriptor }),
+      invoke: async (method: string, args: JsonValue[], signal?: AbortSignal) => {
+        available(false);
+        return this.#invokeProvider(provider, method, args, signal);
+      },
+      pin: () => {
+        available(false);
+        provider.inFlight += 1;
+        let released = false;
+        const release = () => {
+          if (released) return;
+          released = true;
+          provider.pins.delete(release);
+          this.#releaseProvider(provider);
+        };
+        provider.pins.add(release);
+        return Object.freeze({
+          providerId: provider.providerId,
+          invoke: async (method: string, args: JsonValue[], signal?: AbortSignal) => {
+            if (released) throw new Error("Host service exchange pin has been released");
+            available(true);
+            return this.#invokeProvider(provider, method, args, signal);
+          },
+          release,
+        });
+      },
+    });
+  }
+
   async invoke(requestValue: VarinExtensionServiceInvocationRequest | unknown, signal?: AbortSignal): Promise<JsonValue> {
     const request = parseVarinExtensionServiceInvocationRequest(requestValue);
-    const matches = [...this.#providers.values()].filter((provider) => (
-      provider.status === "active"
-      && provider.descriptor.id === request.serviceId
-      && provider.descriptor.version === request.version
-      && (!request.providerId || provider.providerId === request.providerId)
-    ));
-    let provider: ActiveProvider | undefined;
-    if (request.providerId) provider = matches[0];
-    else {
-      const selected = this.#selections.get(serviceKey(request.serviceId, request.version));
-      provider = selected ? matches.find((candidate) => candidate.providerId === selected) : matches.length === 1 ? matches[0] : undefined;
-    }
-    if (!provider) throw new Error(`Host service provider is unavailable or ambiguous: ${serviceKey(request.serviceId, request.version)}`);
+    return this.bind(request.serviceId, request.version, request.providerId).invoke(request.method, request.args, signal);
+  }
+
+  async #invokeProvider(provider: ActiveProvider, method: string, args: JsonValue[], signal?: AbortSignal): Promise<JsonValue> {
+    if (signal?.aborted) throw signal.reason ?? new Error("Host service invocation cancelled");
     const controller = new AbortController();
     const abort = () => controller.abort(signal?.reason);
-    if (signal?.aborted) abort();
-    else signal?.addEventListener("abort", abort, { once: true });
+    signal?.addEventListener("abort", abort, { once: true });
     provider.inFlight += 1;
     try {
-      return assertJsonValue(await provider.handler(request.method, request.args, { signal: controller.signal }));
+      // This is the worker boundary. Typed native callers never enter this JSON contract.
+      return assertJsonValue(await provider.handler(method, args, { signal: controller.signal }));
     } finally {
       signal?.removeEventListener("abort", abort);
-      provider.inFlight -= 1;
-      if (provider.inFlight === 0) {
-        for (const resolveDrain of provider.onDrained.splice(0)) resolveDrain();
-      }
+      this.#releaseProvider(provider);
+    }
+  }
+
+  #revokeProvider(provider: ActiveProvider): void {
+    provider.revoked = true;
+    for (const release of [...provider.pins]) release();
+  }
+
+  #releaseProvider(provider: ActiveProvider): void {
+    provider.inFlight -= 1;
+    if (provider.inFlight === 0) {
+      for (const resolveDrain of provider.onDrained.splice(0)) resolveDrain();
     }
   }
 
   #publish(): void {
+    this.#activeByService.clear();
+    for (const provider of this.#providers.values()) {
+      if (provider.status !== "active" || provider.revoked) continue;
+      const key = serviceKey(provider.descriptor.id, provider.descriptor.version);
+      this.#activeByService.set(key, [...(this.#activeByService.get(key) ?? []), provider]);
+    }
     this.#revision += 1;
     for (const listener of this.#listeners) listener();
   }

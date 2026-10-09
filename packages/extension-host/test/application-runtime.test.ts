@@ -552,6 +552,10 @@ test("persistent routes select different real providers by session and isolate p
       runtime.invokeService({ args: [], method: "read", serviceId, version: 1 }),
       /explicit routing rule is required/,
     );
+    assert.equal((await runtime.state()).services.providers.length, 0, "ambiguous preparation must not launch either provider");
+    // Ambiguous preparation must not activate unrelated roots. Activate the fixtures
+    // explicitly to obtain their stable routing keys for the scoped-selection checks.
+    await Promise.all([runtime.activateExtension("dev.example.alpha"), runtime.activateExtension("dev.example.beta")]);
     const providers = (await runtime.state()).services.providers;
     const alphaProvider = providers.find((provider) => provider.extensionId === "dev.example.alpha");
     const betaProvider = providers.find((provider) => provider.extensionId === "dev.example.beta");

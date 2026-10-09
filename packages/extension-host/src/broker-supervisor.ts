@@ -79,6 +79,7 @@ interface BrokeredHostInstance {
   broker: BrokeredHostTransport;
   desiredRevision: number;
   grants: VarinExtensionCapabilityGrant[];
+  grantIdentity: string;
   manifest: VarinExtensionManifest;
   owner: HostServiceOwnerIdentity;
   provisions: HostServiceProvision[];
@@ -109,6 +110,13 @@ export interface BrokeredHostSupervisorOptions {
   transportFactory?: BrokeredHostTransportFactory;
   invokeService?(request: VarinExtensionServiceInvocationRequest | unknown, signal?: AbortSignal): Promise<JsonValue>;
 }
+
+const hostGrants = (grants: readonly VarinExtensionCapabilityGrant[], version: string): VarinExtensionCapabilityGrant[] => (
+  grants.filter((grant) => grant.realm === "host" && grant.manifestVersion === version).map((grant) => ({ ...grant }))
+);
+const grantIdentity = (grants: readonly VarinExtensionCapabilityGrant[], version: string): string => JSON.stringify(
+  hostGrants(grants, version).map((grant) => [grant.capability, grant.granted]).sort(([left], [right]) => String(left).localeCompare(String(right))),
+);
 
 const serviceKey = (id: string, version: number): string => `${id}@${version}`;
 const ownerStorageKey = (owner: HostServiceOwnerIdentity): string => `${owner.extensionId}\0${owner.entrypointId}\0${owner.generation}`;
@@ -315,7 +323,15 @@ export class BrokeredHostSupervisor {
   readonly #selectedPreparations = new Map<string, { identity: string; promise: Promise<void> }>();
   readonly #candidatePreparations = new Map<string, { identity: string; promise: Promise<VarinExtensionCandidatePreparationResult> }>();
   readonly #preparations = new Map<string, AbortController>();
-  readonly #preparationTargets = new Map<string, { integrity: string; slot: "candidate" | "selected"; desiredRevision: number }>();
+  readonly #preparationTargets = new Map<string, { integrity: string; slot: "candidate" | "selected"; desiredRevision: number; grantIdentity: string; version: string }>();
+  // These arrays are also captured by the transport's privileged-call callback. Keep them
+  // alive through retirement so an explicit revocation reaches old pinned generations too.
+  readonly #ownerGrants = new Map<string, {
+    owner: HostServiceOwnerIdentity;
+    grants: VarinExtensionCapabilityGrant[];
+    desiredRevision: number;
+    slot: "candidate" | "selected";
+  }>();
   readonly #epochs = new Map<string, number>();
   #stopping = false;
   #shutdown: Promise<void> | undefined;
@@ -363,6 +379,19 @@ export class BrokeredHostSupervisor {
   }
 
   forceTerminate(extensionId: string): void {
+    const active = this.#active.get(extensionId);
+    if (active) {
+      this.#services.revokeOwner(active.owner);
+      for (const grant of active.grants) grant.granted = false;
+      this.#ownerGrants.delete(ownerStorageKey(active.owner));
+      if (active.manifest.entrypoints?.host?.mode === "native") this.#nativeRestartRequired.add(extensionId);
+    }
+    const staged = this.#staged.get(extensionId);
+    if (staged) {
+      for (const grant of staged.grants) grant.granted = false;
+      this.#ownerGrants.delete(ownerStorageKey(staged.owner));
+      if (staged.manifest.entrypoints?.host?.mode === "native") this.#nativeRestartRequired.add(extensionId);
+    }
     this.#invalidate(extensionId);
     this.#active.get(extensionId)?.broker.forceTerminate();
     this.#staged.get(extensionId)?.broker.forceTerminate();
@@ -425,6 +454,7 @@ export class BrokeredHostSupervisor {
   shutdown(): Promise<void> {
     if (this.#shutdown) return this.#shutdown;
     this.#stopping = true;
+    for (const instance of this.#active.values()) this.#services.revokeOwner(instance.owner);
     for (const [id, controller] of this.#preparations) {
       this.#invalidate(id);
       controller.abort(new Error("Host supervisor is shutting down"));
@@ -476,6 +506,10 @@ export class BrokeredHostSupervisor {
     const integrity = instance.slot === "candidate" ? entry?.candidate?.integrity : entry?.integrity;
     if (!entry?.desired.enabled || entry.desired.revision !== instance.desiredRevision
       || integrity !== instance.artifactIntegrity) throw new Error(`Host activation is stale: ${instance.owner.extensionId}`);
+    const grants = instance.slot === "candidate" ? entry.candidate?.capabilityGrants : entry.capabilityGrants;
+    if (!grants || grantIdentity(grants, instance.owner.extensionVersion) !== instance.grantIdentity) {
+      throw new Error(`Host capability review changed during activation: ${instance.owner.extensionId}`);
+    }
     this.#assertDependencies(instance.manifest);
   }
 
@@ -493,7 +527,10 @@ export class BrokeredHostSupervisor {
     const entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
     if (!entry?.candidate || entry.candidate.integrity !== integrity) throw new Error(`Host candidate is no longer current: ${extensionId}`);
     const preparing = this.#preparationTargets.get(extensionId);
-    if (preparing?.slot === "candidate" && preparing.integrity !== integrity) this.#invalidate(extensionId);
+    if (preparing?.slot === "candidate" && (preparing.integrity !== integrity
+      || preparing.grantIdentity !== grantIdentity(entry.candidate.capabilityGrants, entry.candidate.resolvedVersion))) {
+      this.#invalidate(extensionId);
+    }
     const epoch = this.#epochs.get(extensionId) ?? 0;
     if (!entry.candidate.capabilitiesReviewed) throw new Error(`Host candidate capability changes require review: ${extensionId}`);
     if (entry.candidate.manifest.entrypoints?.host?.mode === "native") {
@@ -522,14 +559,15 @@ export class BrokeredHostSupervisor {
       }
     }
     const candidate = entry.candidate;
-    const identity = `${integrity}:${entry.desired.revision}:${epoch}`;
+    const identity = `${integrity}:${entry.desired.revision}:${epoch}:${grantIdentity(candidate.capabilityGrants, candidate.resolvedVersion)}`;
     const pending = this.#candidatePreparations.get(extensionId);
     if (pending?.identity === identity) return pending.promise;
     const promise = this.#enqueue(extensionId, async () => {
       this.#assertRunning();
       if ((this.#epochs.get(extensionId) ?? 0) !== epoch) throw new Error("Host activation was cancelled");
       const current = this.#staged.get(extensionId);
-      if (current?.artifactIntegrity === integrity && current.desiredRevision === entry.desired.revision && current.epoch === epoch) {
+      if (current?.artifactIntegrity === integrity && current.desiredRevision === entry.desired.revision && current.epoch === epoch
+        && current.grantIdentity === grantIdentity(candidate.capabilityGrants, candidate.resolvedVersion)) {
         await this.#assertCurrent(current);
         return this.#candidatePreparation(current);
       }
@@ -609,13 +647,36 @@ export class BrokeredHostSupervisor {
     return selected;
   }
 
+  #refreshOwnerGrants(snapshot: VarinExtensionCatalogSnapshot): void {
+    for (const tracked of this.#ownerGrants.values()) {
+      const entry = snapshot.extensions.find((value) => value.manifest.id === tracked.owner.extensionId);
+      if (!entry) continue;
+      const source = tracked.slot === "candidate" ? entry.candidate : entry;
+      if (!source) continue;
+      const version = source.manifest.version;
+      if (version === tracked.owner.extensionVersion) {
+        const next = hostGrants(source.capabilityGrants, version);
+        tracked.grants.splice(0, tracked.grants.length, ...next);
+      } else if (entry.desired.revision > tracked.desiredRevision) {
+        // Ordinary version replacement preserves old calls. A later explicit review may
+        // revoke the same capability for a still-draining, older-version generation.
+        const denied = new Set(source.capabilityGrants.filter((grant) => grant.realm === "host" && !grant.granted).map((grant) => grant.capability));
+        for (const grant of tracked.grants) if (denied.has(grant.capability)) grant.granted = false;
+      }
+      tracked.desiredRevision = entry.desired.revision;
+    }
+  }
+
   async #reconcile(snapshot: VarinExtensionCatalogSnapshot): Promise<void> {
     if (!snapshot.authoritative) return;
+    this.#refreshOwnerGrants(snapshot);
     const enabled = new Map(snapshot.extensions.filter((entry) => entry.desired.enabled).map((entry) => [entry.manifest.id, entry]));
     for (const [extensionId, target] of this.#preparationTargets) {
       const entry = enabled.get(extensionId);
       const integrity = target.slot === "candidate" ? entry?.candidate?.integrity : entry?.integrity;
-      if (!entry || integrity !== target.integrity || entry.desired.revision !== target.desiredRevision) {
+      const grants = target.slot === "candidate" ? entry?.candidate?.capabilityGrants : entry?.capabilityGrants;
+      if (!entry || integrity !== target.integrity || entry.desired.revision !== target.desiredRevision
+        || !grants || grantIdentity(grants, target.version) !== target.grantIdentity) {
         this.#invalidate(extensionId);
       }
     }
@@ -696,6 +757,12 @@ export class BrokeredHostSupervisor {
     stack: string[],
   ): Promise<void> {
     this.#assertRunning();
+    const preparing = this.#preparationTargets.get(entry.manifest.id);
+    if (preparing?.slot === "selected" && (preparing.integrity !== entry.integrity
+      || preparing.desiredRevision !== entry.desired.revision
+      || preparing.grantIdentity !== grantIdentity(entry.capabilityGrants, entry.selectedVersion))) {
+      this.#invalidate(entry.manifest.id);
+    }
     const epoch = this.#epochs.get(entry.manifest.id) ?? 0;
     if (stack.includes(entry.manifest.id)) {
       throw new Error(`Host service dependency cycle: ${[...stack, entry.manifest.id].join(" -> ")}`);
@@ -721,25 +788,20 @@ export class BrokeredHostSupervisor {
         return;
       }
     }
-    const identity = `${entry.integrity}:${entry.desired.revision}:${epoch}`;
+    const identity = `${entry.integrity}:${entry.desired.revision}:${epoch}:${grantIdentity(entry.capabilityGrants, entry.selectedVersion)}`;
     const pending = this.#selectedPreparations.get(entry.manifest.id);
     if (pending?.identity === identity) return pending.promise;
     const promise = this.#enqueue(entry.manifest.id, async () => {
       this.#assertRunning();
       if ((this.#epochs.get(entry.manifest.id) ?? 0) !== epoch) throw new Error("Host activation was cancelled");
-      const active = this.#active.get(entry.manifest.id);
-      if (active && active.artifactIntegrity === entry.integrity && active.desiredRevision === entry.desired.revision) return;
-      const native = entry.manifest.entrypoints?.host?.mode === "native";
-      if (native && active && active.artifactIntegrity === entry.integrity) {
-        active.desiredRevision = entry.desired.revision;
-        await this.#reportActual(entry.manifest.id, diagnosticState(
-          snapshot.hostId,
-          entry.desired.revision,
-          active.owner.generation,
-          "active",
-        )).catch(() => undefined);
-        return;
+      const current = (await this.#catalog.snapshot()).extensions.find((value) => value.manifest.id === entry.manifest.id);
+      if (!current?.desired.enabled || current.integrity !== entry.integrity || current.desired.revision !== entry.desired.revision
+        || grantIdentity(current.capabilityGrants, current.selectedVersion) !== grantIdentity(entry.capabilityGrants, entry.selectedVersion)) {
+        throw new Error(`Host activation is stale: ${entry.manifest.id}`);
       }
+      this.#assertRunning();
+      const active = this.#active.get(entry.manifest.id);
+      const native = entry.manifest.entrypoints?.host?.mode === "native";
       if (native && (this.#nativeRestartRequired.has(entry.manifest.id) || (active && active.artifactIntegrity !== entry.integrity))) {
         this.#nativeRestartRequired.add(entry.manifest.id);
         await this.#reportActual(entry.manifest.id, diagnosticState(
@@ -749,6 +811,20 @@ export class BrokeredHostSupervisor {
           "restart-required",
           "trusted_native_restart_required",
           "The trusted-native Host generation can change only after the application host restarts",
+        )).catch(() => undefined);
+        return;
+      }
+      if (active && this.#ownerGrants.has(ownerStorageKey(active.owner)) && active.artifactIntegrity === entry.integrity && active.desiredRevision === entry.desired.revision
+        && active.grantIdentity === grantIdentity(entry.capabilityGrants, entry.selectedVersion)) return;
+      if (native && active && active.artifactIntegrity === entry.integrity) {
+        active.grants.splice(0, active.grants.length, ...hostGrants(entry.capabilityGrants, active.owner.extensionVersion));
+        active.grantIdentity = grantIdentity(active.grants, active.owner.extensionVersion);
+        active.desiredRevision = entry.desired.revision;
+        await this.#reportActual(entry.manifest.id, diagnosticState(
+          snapshot.hostId,
+          entry.desired.revision,
+          active.owner.generation,
+          "active",
         )).catch(() => undefined);
         return;
       }
@@ -835,8 +911,18 @@ export class BrokeredHostSupervisor {
     const controller = new AbortController();
     let prepared = false;
     this.#preparations.set(entry.manifest.id, controller);
-    this.#preparationTargets.set(entry.manifest.id, { integrity: selection.integrity, slot: selection.slot, desiredRevision: entry.desired.revision });
+    this.#preparationTargets.set(entry.manifest.id, {
+      integrity: selection.integrity, slot: selection.slot, desiredRevision: entry.desired.revision,
+      grantIdentity: grantIdentity(selection.capabilityGrants, selection.version), version: selection.version,
+    });
     try {
+      const current = (await this.#catalog.snapshot()).extensions.find((value) => value.manifest.id === entry.manifest.id);
+      const currentSelection = selection.slot === "candidate" ? current?.candidate : current;
+      if (!current?.desired.enabled || current.desired.revision !== entry.desired.revision
+        || currentSelection?.integrity !== selection.integrity
+        || grantIdentity(currentSelection.capabilityGrants, selection.version) !== grantIdentity(selection.capabilityGrants, selection.version)) {
+        throw new Error(`Host capability review or selection changed before activation: ${entry.manifest.id}`);
+      }
       const artifact = await this.#packages.resolveBrokeredHostEntrypoint(entry.manifest.id, selection.slot, selection.integrity);
       controller.signal.throwIfAborted();
       this.#assertRunning();
@@ -848,7 +934,8 @@ export class BrokeredHostSupervisor {
         extensionVersion: selection.version,
         generation,
       };
-      const grants = selection.capabilityGrants.filter((grant) => grant.realm === "host" && grant.manifestVersion === selection.version);
+      const grants = hostGrants(selection.capabilityGrants, selection.version);
+      const preparedGrantIdentity = grantIdentity(grants, selection.version);
       let crashed: Error | null = null;
       const requestFromExtension = (method: string, params: unknown, signal: AbortSignal) => (
         this.#handleChildRequest(owner, grants, method, params, signal)
@@ -863,6 +950,7 @@ export class BrokeredHostSupervisor {
             void this.#handleCrash(entry.manifest.id, owner, error, snapshot.hostId, entry.desired.revision);
           },
         });
+      this.#ownerGrants.set(ownerStorageKey(owner), { owner, grants, desiredRevision: entry.desired.revision, slot: selection.slot });
       const cancelPreparation = () => broker.forceTerminate();
       controller.signal.addEventListener("abort", cancelPreparation, { once: true });
       if (controller.signal.aborted) cancelPreparation();
@@ -912,6 +1000,7 @@ export class BrokeredHostSupervisor {
           broker,
           desiredRevision: entry.desired.revision,
           grants,
+          grantIdentity: preparedGrantIdentity,
           manifest: selection.manifest,
           owner,
           provisions,
@@ -921,6 +1010,8 @@ export class BrokeredHostSupervisor {
       } catch (error) {
         for (const session of this.#storageSessions.get(ownerStorageKey(owner))?.values() ?? []) session.phase = "disposed";
         this.#storageSessions.delete(ownerStorageKey(owner));
+        for (const grant of grants) grant.granted = false;
+        this.#ownerGrants.delete(ownerStorageKey(owner));
         broker.forceTerminate();
         if (selection.manifest.entrypoints?.host?.mode === "native") this.#nativeRestartRequired.add(entry.manifest.id);
         throw error;
@@ -994,6 +1085,10 @@ export class BrokeredHostSupervisor {
   ): Promise<void> {
     if (visited.has(extensionId)) return;
     visited.add(extensionId);
+    // Close exchange admission before waiting for the owner queue: replacement finalization
+    // may itself be awaiting an old pin. In-flight calls still retain normal drain ownership.
+    const active = this.#active.get(extensionId);
+    if (active) this.#services.revokeOwner(active.owner);
     this.#invalidate(extensionId);
     const manifest = this.#active.get(extensionId)?.manifest
       ?? snapshot.extensions.find((entry) => entry.manifest.id === extensionId)?.manifest;
@@ -1055,8 +1150,19 @@ export class BrokeredHostSupervisor {
     }
     this.#setStoragePhase(instance, "disposed");
     this.#storageSessions.delete(ownerStorageKey(instance.owner));
-    if (terminate) await instance.broker.terminate();
-    else await instance.broker.terminate().catch(() => instance.broker.forceTerminate());
+    try {
+      // Disposers still execute extension code. Keep the captured grant view tracked until
+      // termination settles so a concurrent explicit review reaches the draining callback.
+      if (terminate) {
+        try { await instance.broker.terminate(); }
+        catch (error) { instance.broker.forceTerminate(); throw error; }
+      } else await instance.broker.terminate().catch(() => instance.broker.forceTerminate());
+    } finally {
+      // Trusted-native callbacks may retain their context even after cleanup failed. Never
+      // leave those captured grants usable after the owner is no longer tracked.
+      for (const grant of instance.grants) grant.granted = false;
+      this.#ownerGrants.delete(ownerStorageKey(instance.owner));
+    }
   }
 
   #handleCrash(
@@ -1066,6 +1172,7 @@ export class BrokeredHostSupervisor {
     hostId: string,
     desiredRevision: number,
   ): void {
+    this.#services.revokeOwner(owner);
     void this.#enqueue(extensionId, async () => {
       await this.#handleCrashNow(extensionId, owner, error, hostId, desiredRevision);
     }).catch(() => undefined);
@@ -1094,6 +1201,8 @@ export class BrokeredHostSupervisor {
     this.#active.delete(extensionId);
     this.#setStoragePhase(active, "disposed");
     this.#storageSessions.delete(ownerStorageKey(owner));
+    for (const grant of active.grants) grant.granted = false;
+    this.#ownerGrants.delete(ownerStorageKey(owner));
     await this.#reportActual(extensionId, diagnosticState(
       hostId,
       desiredRevision,
@@ -1246,6 +1355,8 @@ export class BrokeredHostSupervisor {
   }
 
   #finalizeInstanceStorage(instance: BrokeredHostInstance): void {
+    const grantOwner = this.#ownerGrants.get(ownerStorageKey(instance.owner));
+    if (grantOwner) grantOwner.slot = "selected";
     if (this.#preparations.get(instance.owner.extensionId) === instance.preparation) {
       this.#preparations.delete(instance.owner.extensionId);
       this.#preparationTargets.delete(instance.owner.extensionId);

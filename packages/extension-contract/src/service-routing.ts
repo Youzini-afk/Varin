@@ -244,6 +244,8 @@ const routingDiagnostic = (code: string, message: string): VarinExtensionDiagnos
 
 export const resolveVarinExtensionServiceRouting = (options: {
   candidates: readonly VarinExtensionServiceRoutingCandidate[];
+  /** Distribution default, considered only after all applicable explicit routing rules. */
+  defaultProviderKey?: string;
   context?: VarinExtensionServiceRoutingContext;
   document: VarinExtensionServiceRoutingDocument | unknown;
   serviceId: string;
@@ -299,6 +301,10 @@ export const resolveVarinExtensionServiceRouting = (options: {
     ));
     if (!rule.allowFallback) return { diagnostics, matchedRule: rule, providerKey: rule.providerKey, status: "unavailable" };
   }
+  const defaultProvider = options.defaultProviderKey
+    ? candidates.find(candidate => candidate.providerKey === options.defaultProviderKey) : undefined;
+  if (defaultProvider) return { diagnostics, providerId: defaultProvider.providerId,
+    providerKey: defaultProvider.providerKey, status: "resolved" };
   if (candidates.length === 1) {
     const candidate = candidates[0] as VarinExtensionServiceRoutingCandidate;
     return {
