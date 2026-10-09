@@ -1,3 +1,4 @@
+import { createNativeMemoryOwner } from './native-memory-owner.js';
 import { createNativeLiveSourceOwner } from './native-live-source.js';
 import { createNativeThreadContext } from './native-thread-context.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
@@ -63,6 +64,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const prepare = createNativeThreadSourcePreparer({ documents, workingStates, liveSources });
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }) });
   const prepareContext = createNativeThreadContext({ personalization, workingStates, liveSource: { documents, validate: liveSources.validate }, projectForWorkspace: async () => 'selected-project' });
+  kernel.setNativeMemoryOwner(createNativeMemoryOwner({ personalization, prepareContext }));
   let closed = false;
   const close = async () => { if (closed) return; closed = true; await storage.dispose(); await documents.dispose(); await kernel.close(); };
   cleanups.push(close);

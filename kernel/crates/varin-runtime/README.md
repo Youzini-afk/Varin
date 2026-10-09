@@ -198,3 +198,70 @@ A successful explicit compaction atomically publishes its fixed candidate person
 with the summary and system text. New notes do not advance the checkpoint CAS; explicit profile
 changes do. Context domain 3 is verified read-only before writable SQLite open, including table,
 key and revision uniqueness contracts. Older or malformed formats are preserved and rejected.
+## Fixed-source native child tasks
+
+`catalog_collaboration` is the native Catalog's parent/child domain. A dispatch binds the committed
+ModelStep/tool origin, parent Run/Thread/branch, exact model configuration and credential scope,
+admission project, explicit `read_only` profile and fixed source. Model arguments cannot select
+parent identity, project, workspace, source or grants. The initial implementation accepts explicit
+`model: parent` and inherits only the parent's selected file read/list/search subset. Child Runs do
+not acquire MCP, questions, recursive dispatch, process, file mutation or memory mutation tools.
+
+The source owner first validates the actual parent grant and records an immutable revision pin
+under the already persisted tool Operation identity. Whole-root read authority is necessary for
+this whole-root handoff; a narrow path grant cannot be silently widened by cloning its root. That
+source-authorization receipt and the Catalog child acceptance are separate facts. The Catalog's
+short transaction creates the independent child Thread/branch, immutable task/model/source/scope
+and operation handoff, and persists the original JobAccepted receipt. Its operation ID is the
+usable handle for `native_child_status` and `native_wait_child`, not a claim that preparation or
+execution has finished. A stopped dispatch with a source receipt but no child is rediscovered from
+its original Operation and exact pin identity. Host cleanup records `child.source_released` only
+after the existing WorkingState owner releases the pin; failed cleanup remains discoverable.
+
+Host preparation clones the fixed root through `createBranchFromPin`, without recapturing the
+workspace, and invokes the same context owner with explicit agent/worker/admitted-project scope.
+Session notes are keyed by the child's native Thread. The existing input writer atomically commits
+the prepared context, child Run, source launch and child receipt after rechecking cancellation.
+Source and credential owners are revalidated before launch. A late cancelled context callback
+cannot publish or launch; closing a Host leaves durable preparation for the next owner.
+
+The child has an independent Run and grant. Parent final, cancelling the parent's current Run,
+normal extension retirement, or revoking only the old parent grant after a successful source
+handoff do not implicitly kill the delegated child. Cancelling the child or the task tree is a
+separate action; higher-level workspace or credential disablement still applies at its actual
+owner boundary. The first slice does not implement arbitrary siblings, remote/live first capture,
+write-capable children, code integration or a complete collaboration product migration.
+
+Completion retains actual child history references and a separate `no_changes` code result. A
+read-only textual report is a successful result, not an empty code merge. Failed/cancelled tools
+and empty textual completion are not converted to empty success. A very fast child may publish
+its report before the parent's accepted tool exchange is committed; terminal operation settlement
+waits for that original exchange, using the existing external receipt owner.
+
+`native_wait_child` registers the original durable Wait and its Job receipt together, including a
+retrospective terminal-event check. A parked parent's worker is quiesced before the report is
+appended under its true agent provenance, with explicit data-only labeling in the actual provider
+text. Run resumption and Wait acknowledgement commit with that history item. A delivered-but-not-
+launched continuation remains discoverable after restart, while its report history identity is
+idempotent. Cancelling observation delivers an environment fact, leaves the child running, and
+does not consume a later child report. Ordinary model dispatch recovery continues to refuse
+replaying a dispatched request whose completion is unknown.
+
+Collaboration domain version 1 is required by the read-only existing-catalog preflight. An older,
+missing or malformed domain is rejected before writable SQLite access or epoch advancement;
+there is no schema upgrade, fallback registry, or asset reset. New empty catalogs create the domain
+explicitly. Context scope uses the separate context domain version 3 contract.
+
+Child report metadata stores only references to the original child history bodies, plus a short
+runtime failure detail when relevant. Status/list and external receipts do not copy report text.
+`native_child_report` reads one referenced text item with a UTF-8 byte offset and an explicit
+`next_offset`; pages are capped at 64 KiB, leaving JSON escaping/envelope headroom within the
+16 MiB IPC frame. A durable Wait includes only the latest bounded preview, labels it as possibly
+partial other-agent data, and exposes all history references for deliberate continuation reads.
+A fork after a delivered report reuses its visible ancestor delivery; a fork before that item can
+receive its own report. Cancelling an observation never marks the report delivered.
+
+Collaboration preflight verifies complete nonpartial unique keys, their BINARY collation and
+ascending key columns, the actual primary-key index origin, and exact FK mappings/actions/match.
+A partial or differently collated index cannot stand in for the admitted identity constraints.
+These checks precede mutable catalog open and never migrate an unsupported catalog.

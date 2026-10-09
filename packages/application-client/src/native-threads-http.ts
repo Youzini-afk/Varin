@@ -26,6 +26,13 @@ export function createNativeThreadsHttpAPI(): NativeThreadsAPI {
     return result;
   };
   return {
+    collaboration: {
+      children: identity => post('child/list', identity),
+      readReport: (identity, operationId, itemId, offset, maxBytes) => post('child/report', { ...identity, operationId, itemId, offset, maxBytes }),
+      cancelChild: (identity, operationId) => post('child/cancel', { ...identity, operationId }),
+      cancelWait: (identity, waitId) => post('child/wait/cancel', { ...identity, waitId }),
+      async cancelTree(identity) { await post('tree/cancel', identity); },
+    },
     list: () => post('list', {}), listModels: () => post('models', {}),
     create: key => post('create', { key }), fork: input => post('fork', input), submit: input => post('submit', input), enqueue: input => post('enqueue', input),
     prepareSource: input => post('source/prepare', input),

@@ -1,3 +1,4 @@
+import { createNativeMemoryOwner } from './native-memory-owner.js';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { createNativeContextComposition } from './native-context-composition.js';
 import { createRequire } from 'node:module';
@@ -71,6 +72,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   await extensions.start(); cleanups.push(() => extensions.stop());
   const composition = createNativeContextComposition(extensions);
   const prepareContext = createNativeThreadContext({ composition, personalization, workingStates, projectForWorkspace: async () => 'selected-project' });
+  kernel.setNativeMemoryOwner(createNativeMemoryOwner({ personalization, prepareContext }));
   let closed = false;
   const close = async () => { if (closed) return; closed = true; await storage.dispose(); await documents.dispose(); await kernel.close(); };
   cleanups.push(close);

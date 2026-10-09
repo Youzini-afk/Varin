@@ -169,6 +169,7 @@ struct ProcessSpawnArgs {
 }
 #[derive(Debug, Clone)]
 enum ResourceOperation {
+    CollaborationPin { release: bool, pin_id: String },
     FileRead(FileReadArgs),
     FileQuery(FileQueryArgs),
     LanguageQuery(LanguageQueryArgs),
@@ -277,6 +278,11 @@ impl ResourceOperation {
         context: &ToolExecutionContext,
     ) -> (&'static str, Value) {
         match self {
+            Self::CollaborationPin { release, pin_id } => {
+                let source = binding.file_source.as_ref().expect("fixed collaboration binding");
+                if *release { ("branch.unpin", json!({"operationId":format!("native-child-unpin:{}",context.operation_id),"branchId":source.branch_id,"pinId":pin_id})) }
+                else { ("branch.pin", json!({"operationId":format!("native-child-pin:{}",context.operation_id),"branchId":source.branch_id,"revision":source.revision,"pinId":pin_id})) }
+            }
             Self::RetrievalQuery(args) => {
                 // Revalidate the bound read grant and explicit scopes without inventing a root
                 // path or dispatching compute. Body reads receive separate per-file admission.
@@ -400,6 +406,15 @@ impl NativeResourceClient {
             replay: Arc::new(replay),
             controls,
         }
+    }
+    pub(crate) fn collaboration_pin(&self, binding: &NativeToolBinding, context: &ToolExecutionContext,
+        release: bool, authorize_only: bool, cancel: &CancellationToken) -> Result<Value, ExecutionError> {
+        if binding.source_mode != NativeSourceMode::FixedBranch || binding.file_source.is_none() {
+            return Err(ExecutionError::new("collaboration_source", "dispatch requires an admitted fixed source"));
+        }
+        self.call(binding, context, ResourceOperation::CollaborationPin {
+            release, pin_id: format!("native-child-pin:{}", context.operation_id),
+        }, authorize_only, cancel).map_err(|failure| ExecutionError::new("collaboration_source", failure.error.to_string()))
     }
     pub(crate) fn replay_process_terminals(
         &self,
@@ -605,7 +620,7 @@ impl NativeToolExecutor {
         let read_only = !matches!(operation, ResourceOperation::FileMutation(_) | ResourceOperation::ProcessSpawn(_));
         let key = |value: Value| value.to_string();
         let (resource, access) = match operation {
-            ResourceOperation::ReconcileMutation { .. } | ResourceOperation::ComputeControl { .. } | ResourceOperation::ObserveCompute { .. } =>
+            ResourceOperation::CollaborationPin { .. } | ResourceOperation::ReconcileMutation { .. } | ResourceOperation::ComputeControl { .. } | ResourceOperation::ObserveCompute { .. } =>
                 unreachable!("private receipt queries have no model contract"),
             // Discovery snapshots have their own short Storage coordination and consume fixed bytes.
             // Their long search/scan wait must not hold a directory-wide write barrier.
@@ -913,6 +928,11 @@ pub(crate) fn serve_resource(
             &params,
         )?;
         validate_binding(&grant, &request.binding, &request.context)?;
+        if matches!(request.operation, ResourceOperation::CollaborationPin { release: false, .. })
+            && (!grant.path_scopes.iter().any(String::is_empty)
+                || !(grant.capabilities.contains("storage.read") || grant.capabilities.contains("storage.admin"))) {
+            return Err(KernelError::Authorization("fixed-root child handoff requires the parent's whole-root read authority".into()));
+        }
         if let Some(root) = &request.binding.live_root {
             storage.validate_native_live_root(root, &grant, host_id)?;
         }
@@ -1047,3 +1067,7 @@ pub(crate) fn serve_resource(
     })();
     result.map_err(|error| ResourceFailure { error, dispatched })
 }
+
+#[cfg(test)]
+#[path = "native_collaboration_boundary_review.rs"]
+mod collaboration_boundary_review;

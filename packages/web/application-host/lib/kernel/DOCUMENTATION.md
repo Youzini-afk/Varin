@@ -484,3 +484,37 @@ scoped suites, not whole-repository or visual UI acceptance. The [implementation
 records the initial provider-ID collision and corrected candidate-publication fixture sequence;
 neither initial failure is counted as a passing run. No paid models or huge-frame/kill experiments
 were used. The model reranking and fixed-source limits above remain in force; semantic lease acceptance is recorded separately.
+
+## Native fixed-source child owner
+
+`NativeThreadCollaboration` consumes the native Catalog's committed collaboration facts. Its maps
+only coalesce cancellable in-flight preparation and launch; they are not task storage. It registers
+for durable notifications before startup discovery, reopens exact pending source pins, prepares the
+child through the shared context owner, and uses `NativeRuntimeClient.rebindLaunch` plus the normal
+RunSupervisor. It neither launches a Pi session nor registers native children in ThreadRegistry.
+
+Source preparation has an independent child lifetime. Parent final or a stalled child context
+preparer does not hold the parent's file reads/control channel. Cancelling preparation detaches the
+context wait and checks the owner signal again before every publication. Cleanup is independent of
+that cancelled wait; source pins and failed source branches are released through WorkingState, and
+child source grants are revoked when their actual terminal outcome is known. Kernel loss leaves
+unfinished durable cleanup for recovery instead of pretending the resources were released.
+
+The authenticated `child/list`, `child/cancel`, `child/wait/cancel` and `tree/cancel` HTTP routes verify
+native Thread ownership. The optional `NativeThreadsAPI.collaboration` capability and child task
+projection distinguish stopping the current Run, stopping a child, cancelling an observation and
+stopping the task with its children. The UI shows the child's actual state/report and no-file-change
+result; source/profile/model facts remain the Catalog's authority.
+
+The first profile is fixed-source, read-only and nonrecursive, with explicit parent-model selection.
+No arbitrary model, MCP, process or write capability is inferred from its worker role. Global/project
+notes in its initial context remain owned by personalization; parent's session notes are not copied.
+Role and admitted project are required inputs to the common context preparer, never inferred from
+current navigation during child preparation. Broader collaboration, live isolation capture and code
+merge remain outside this slice. Acceptance evidence is recorded separately after production freeze.
+
+The authenticated `child/report` route verifies parent Thread ownership and reads only a history
+item referenced by that child's durable report. `collaboration.readReport` returns a bounded UTF-8
+page with byte offsets and total size. The UI replaces pages on explicit continuation rather than
+assembling an unbounded report in memory. Status/list contain report metadata only; the original
+history content owner remains the sole durable body owner.
