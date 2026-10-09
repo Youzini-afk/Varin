@@ -72,6 +72,10 @@ pub(crate) enum Command {
         root: PathBuf,
         epoch: String,
     },
+    RuntimeOpened {
+        identity: (PathBuf, String),
+        result: Result<Catalog, KernelError>,
+    },
     Request {
         value: Value,
         cancellation: Arc<AtomicBool>,
@@ -119,7 +123,16 @@ pub(crate) fn spawn(
     thread::spawn(move || {
         let mut identity: Option<(PathBuf, String)> = None;
         let mut runtime: Option<Arc<RunSupervisor>> = None;
-        for command in commands {
+        let mut opening = false;
+        let mut initialization_failure: Option<String> = None;
+        let mut waiting = std::collections::VecDeque::new();
+        loop {
+            let command = if !opening && !waiting.is_empty() {
+                waiting.pop_front().expect("pending request")
+            } else {
+                let Ok(command) = commands.recv() else { break; };
+                command
+            };
             match command {
                 Command::AdvanceRuns => {
                     if let Some(runtime) = runtime.as_ref() {
@@ -154,7 +167,101 @@ pub(crate) fn spawn(
                     }
                 }
                 Command::Initialize { root, epoch } => {
-                    identity = Some((root.join("agent-runtime"), epoch));
+                    let selected = (root.join("agent-runtime"), epoch);
+                    if identity.as_ref() == Some(&selected) { continue; }
+                    identity = Some(selected.clone());
+                    opening = true;
+                    initialization_failure = None;
+                    let sender = self_sender.clone();
+                    thread::spawn(move || {
+                        // Opening, durable recovery, content parsing and occupancy restoration belong
+                        // to this initialization worker, never the shared Agent command actor.
+                        let result = (|| {
+                            let capacity = varin_runtime::execution_capacity::configured_compute_capacity()
+                                .map_err(KernelError::Protocol)?;
+                            let catalog = Catalog::open(&selected.0).map_err(domain)?;
+                            catalog.resource_admission().set_compute_capacity(capacity);
+                            Ok(catalog)
+                        })();
+                        let _ = sender.send(Command::RuntimeOpened { identity: selected, result });
+                    });
+                }
+                Command::RuntimeOpened { identity: selected, result } => {
+                    if identity.as_ref() != Some(&selected) { continue; }
+                    opening = false;
+                    let epoch = &selected.1;
+                    let result: Result<(), KernelError> = (|| {
+                        let catalog = result?;
+                    let owner = Arc::new(RunSupervisor::new(catalog));
+                    let (notify, notifications) = mpsc::sync_channel(1);
+                    owner
+                        .catalog()
+                        .lock()
+                        .map_err(|_| {
+                            KernelError::Storage("catalog owner failed".into())
+                        })?
+                        .set_event_notifier(notify.clone())
+                        .map_err(domain)?;
+                    let observed = Arc::downgrade(&owner);
+                    let event_responses = responses.clone();
+                    let event_epoch = epoch.clone();
+                    thread::spawn(move || {
+                        while notifications.recv().is_ok() {
+                            let Some(owner) = observed.upgrade() else {
+                                break;
+                            };
+                            let cursor = owner
+                                .catalog()
+                                .lock()
+                                .ok()
+                                .and_then(|catalog| catalog.event_cursor().ok());
+                            if let Some(cursor) = cursor {
+                                if event_responses.send(json!({"v":PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":event_epoch,"stream":"durable","cursor":cursor})).is_err() { break; }
+                            }
+                        }
+                    });
+                    let _ = notify.try_send(());
+                    let (wake, wakes) = mpsc::channel();
+                    owner
+                        .set_wake_sender(wake)
+                        .map_err(|e| KernelError::Operation(e.to_string()))?;
+                    let sender = self_sender.clone();
+                    thread::spawn(move || {
+                        while wakes.recv().is_ok() {
+                            if sender.send(Command::AdvanceRuns).is_err() {
+                                break;
+                            }
+                        }
+                    });
+                    *control.0.lock().map_err(|_| {
+                        KernelError::Storage("control owner failed".into())
+                    })? = Some(AgentOwner {
+                        runtime: owner.clone(),
+                        resources: resources.clone(),
+                    });
+                    runtime = Some(owner.clone());
+                    let pending = {
+                        let catalog = owner.catalog();
+                        let catalog = catalog.lock().map_err(|_| {
+                            KernelError::Storage("catalog owner failed".into())
+                        })?;
+                        catalog
+                            .pending_external_operations("process_spawn")
+                            .map_err(domain)?
+                    };
+                    if let Err(error) = resources.replay_process_terminals(pending) {
+                        let catalog = owner.catalog();
+                        if let Ok(mut catalog) = catalog.lock() {
+                            let _ = catalog.record_recovery_failure(
+                                "process-replay",
+                                &error.to_string(),
+                            );
+                        };
+                    }
+
+                        Ok(())
+                    })();
+                    if let Err(error) = result { initialization_failure = Some(error.to_string()); }
                 }
                 Command::Request {
                     value,
@@ -165,6 +272,12 @@ pub(crate) fn spawn(
                         .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_string();
+                    if opening {
+                        // Cancellation flags remain owned by the protocol reader while this request
+                        // waits for its concrete runtime initialization dependency.
+                        waiting.push_back(Command::Request { value, cancellation });
+                        continue;
+                    }
                     let mut deferred = false;
                     let result = (|| {
                         if cancellation.load(Ordering::Acquire) {
@@ -181,7 +294,7 @@ pub(crate) fn spawn(
                         {
                             return Err(KernelError::Protocol("invalid runtime envelope".into()));
                         }
-                        let (root, epoch) = identity.as_ref().ok_or_else(|| {
+                        let (_root, epoch) = identity.as_ref().ok_or_else(|| {
                             KernelError::Authorization("kernel handshake required".into())
                         })?;
                         if value.get("epoch").and_then(Value::as_str) != Some(epoch.as_str())
@@ -198,79 +311,10 @@ pub(crate) fn spawn(
                             .ok_or_else(|| KernelError::Protocol("method required".into()))?;
                         let params = value.get("params").cloned().unwrap_or_else(|| json!({}));
                         validate_method_params(method, &params)?;
-                        if runtime.is_none() {
-                            let capacity = varin_runtime::execution_capacity::configured_compute_capacity()
-                                .map_err(KernelError::Protocol)?;
-                            let catalog = Catalog::open(root).map_err(domain)?;
-                            catalog.resource_admission().set_compute_capacity(capacity);
-                            let owner = Arc::new(RunSupervisor::new(catalog));
-                            let (notify, notifications) = mpsc::sync_channel(1);
-                            owner
-                                .catalog()
-                                .lock()
-                                .map_err(|_| {
-                                    KernelError::Storage("catalog owner failed".into())
-                                })?
-                                .set_event_notifier(notify.clone())
-                                .map_err(domain)?;
-                            let observed = Arc::downgrade(&owner);
-                            let event_responses = responses.clone();
-                            let event_epoch = epoch.clone();
-                            thread::spawn(move || {
-                                while notifications.recv().is_ok() {
-                                    let Some(owner) = observed.upgrade() else {
-                                        break;
-                                    };
-                                    let cursor = owner
-                                        .catalog()
-                                        .lock()
-                                        .ok()
-                                        .and_then(|catalog| catalog.event_cursor().ok());
-                                    if let Some(cursor) = cursor {
-                                        if event_responses.send(json!({"v":PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":event_epoch,"stream":"durable","cursor":cursor})).is_err() { break; }
-                                    }
-                                }
-                            });
-                            let _ = notify.try_send(());
-                            let (wake, wakes) = mpsc::channel();
-                            owner
-                                .set_wake_sender(wake)
-                                .map_err(|e| KernelError::Operation(e.to_string()))?;
-                            let sender = self_sender.clone();
-                            thread::spawn(move || {
-                                while wakes.recv().is_ok() {
-                                    if sender.send(Command::AdvanceRuns).is_err() {
-                                        break;
-                                    }
-                                }
-                            });
-                            *control.0.lock().map_err(|_| {
-                                KernelError::Storage("control owner failed".into())
-                            })? = Some(AgentOwner {
-                                runtime: owner.clone(),
-                                resources: resources.clone(),
-                            });
-                            runtime = Some(owner.clone());
-                            let pending = {
-                                let catalog = owner.catalog();
-                                let catalog = catalog.lock().map_err(|_| {
-                                    KernelError::Storage("catalog owner failed".into())
-                                })?;
-                                catalog
-                                    .pending_external_operations("process_spawn")
-                                    .map_err(domain)?
-                            };
-                            if let Err(error) = resources.replay_process_terminals(pending) {
-                                let catalog = owner.catalog();
-                                if let Ok(mut catalog) = catalog.lock() {
-                                    let _ = catalog.record_recovery_failure(
-                                        "process-replay",
-                                        &error.to_string(),
-                                    );
-                                };
-                            }
+                        if let Some(failure) = &initialization_failure {
+                            return Err(KernelError::Storage(format!("runtime initialization failed: {failure}")));
                         }
-                        let runtime = runtime.as_ref().expect("opened runtime");
+                        let runtime = runtime.as_ref().ok_or_else(|| KernelError::Storage("runtime initialization has not completed".into()))?;
                         runtime
                             .reap()
                             .map_err(|e| KernelError::Operation(e.to_string()))?;
