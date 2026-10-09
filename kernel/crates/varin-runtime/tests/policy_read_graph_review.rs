@@ -1,4 +1,7 @@
 //! Independent adversarial tests: graph evidence is not a synthetic model tool exchange.
+#[path="fixtures/input_admission.rs"]
+mod input_admission;
+use input_admission::InputAdmission;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};

@@ -25,7 +25,18 @@ fn identity(value: &Value) -> Value {
     for key in ["v", "kind", "id", "method", "epoch", "grantId", "kernelEpoch"] {
         if let Some(value) = value.get(key) { fields.insert(key.into(), value.clone()); }
     }
+    if value["kind"] == "request" {
+        if let Some((_,field)) = crate::protocol_generated::KERNEL_INPUT_ORDER_PARAMS.iter().find(|(method,_)|value["method"].as_str()==Some(*method)) {
+            if let Some(target)=value["params"][*field].as_str() {
+                fields.insert("inputOrderKey".into(),Value::String(format!("input:{field}:{target}")));
+            }
+        }
+    }
     Value::Object(fields)
+}
+pub(crate) fn input_order_key(meta:&Value)->Option<&str> {
+    let (_,field)=crate::protocol_generated::KERNEL_INPUT_ORDER_PARAMS.iter().find(|(method,_)|meta["method"].as_str()==Some(*method))?;
+    meta["inputOrderKey"].as_str().filter(|key|key.starts_with(&format!("input:{field}:")))
 }
 fn protocol_error(message: &str) -> io::Error { io::Error::new(io::ErrorKind::InvalidData, message) }
 

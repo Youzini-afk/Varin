@@ -44,6 +44,7 @@ struct ActiveRequest {
     epoch: Option<String>,
     grant_id: Option<String>,
     runtime_cancel: Option<varin_runtime::execution::CancellationToken>,
+    input_order: Option<varin_runtime::resource_admission::ResourceReservation>,
     wire_lane: Option<WireLane>,
     pending_body: bool,
     body_cancel_receipt: bool,
@@ -525,7 +526,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         let key = format!("resource:{}", Uuid::new_v4());
         resource_cancellations.lock().map_err(|_| KernelError::Storage("cancellation state lock poisoned".into()))?
-            .insert(key.clone(), ActiveRequest { token:call.cancellation.shared_flag(), epoch:Some(epoch), grant_id:Some(call.binding.grant_id.clone()), runtime_cancel:Some(call.cancellation.clone()), wire_lane:None, pending_body:false, body_cancel_receipt:false });
+            .insert(key.clone(), ActiveRequest { token:call.cancellation.shared_flag(), epoch:Some(epoch), grant_id:Some(call.binding.grant_id.clone()), runtime_cancel:Some(call.cancellation.clone()), input_order:None, wire_lane:None, pending_body:false, body_cancel_receipt:false });
         // The actor clears this registration after the actual resource receipt, never on mere
         // cancellation request. Attach the key to the typed message, not to a JSON envelope.
         let mut call = call;
@@ -554,7 +555,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         let key = format!("admission:{}", Uuid::new_v4());
         admission_cancellations.lock().map_err(|_| failed())?.insert(key.clone(), ActiveRequest {
             token: cancel.shared_flag(), epoch: Some(epoch), grant_id: Some(binding.grant_id.clone()),
-            runtime_cancel: Some(cancel.clone()), wire_lane: None, pending_body: false, body_cancel_receipt:false,
+            runtime_cancel: Some(cancel.clone()), input_order:None, wire_lane: None, pending_body: false, body_cancel_receipt:false,
         });
         drop(revoked);
         let active = admission_cancellations.clone();
@@ -796,12 +797,18 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let id = meta["id"].as_str().filter(|id| !id.is_empty()).ok_or("stream request identity required")?;
                 let grant_id = meta["grantId"].as_str().map(str::to_string);
                 let revoked = grant_id.as_ref().is_some_and(|grant| revoked_grants.lock().map(|grants| grants.contains(grant)).unwrap_or(true));
+                let cancel=varin_runtime::execution::CancellationToken::default();
+                if revoked {cancel.cancel();}
+                let epoch=admission_epoch.lock().map_err(|_|"admission epoch poisoned")?.clone();
+                // Arrival belongs to the authenticated control offer, before JSON encoding,
+                // content upload or hydration can make a later small input overtake it.
+                let input_order=agent_control.reserve_input(&meta,epoch.as_deref(),&cancel)?;
                 let mut active = cancellations.lock().map_err(|_| "cancellation owner poisoned")?;
                 if active.contains_key(id) || active.values().filter(|request| request.wire_lane == Some(WireLane::Data)).count() >= KERNEL_REQUEST_WINDOW {
                     eprintln!("invalid content request admission"); break;
                 }
-                active.insert(id.to_string(), ActiveRequest { token:Arc::new(AtomicBool::new(revoked)),
-                    epoch:meta["epoch"].as_str().map(str::to_string), grant_id, runtime_cancel:None,
+                active.insert(id.to_string(), ActiveRequest { token:cancel.shared_flag(),
+                    epoch:meta["epoch"].as_str().map(str::to_string), grant_id, runtime_cancel:Some(cancel), input_order,
                     wire_lane:Some(WireLane::Data), pending_body:true, body_cancel_receipt:false });
                 continue;
             }
@@ -883,17 +890,17 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("invalid kernel request admission");
             break;
         }
-        let token = {
+        let (token,input_order) = {
             let mut active = cancellations.lock().map_err(|_| "cancellation owner poisoned")?;
             match active.get_mut(&id) {
                 Some(request) if lane == Lane::Data && request.pending_body && request.body_cancel_receipt => {
                     active.remove(&id);
                     continue;
                 }
-                Some(request) if lane == Lane::Data && request.pending_body => { request.pending_body = false; request.token.clone() }
+                Some(request) if lane == Lane::Data && request.pending_body => { request.pending_body = false; (request.token.clone(),request.input_order.take()) }
                 Some(_) => { eprintln!("duplicate in-flight request id"); break; }
                 None if lane == Lane::Data => { eprintln!("content request lost admission identity"); break; }
-                None => Arc::new(AtomicBool::new(false)),
+                None => (Arc::new(AtomicBool::new(false)),None),
             }
         };
         let request_epoch = request
@@ -918,7 +925,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("kernel external request admission window exceeded"); break;
             }
             active.insert(id, ActiveRequest { token:token.clone(), epoch:request_epoch,
-                grant_id:request_grant, runtime_cancel:None, wire_lane:Some(wire_lane), pending_body:false, body_cancel_receipt:false });
+                grant_id:request_grant, runtime_cancel:None, input_order:None, wire_lane:Some(wire_lane), pending_body:false, body_cancel_receipt:false });
         }
         if request.get("method").and_then(Value::as_str).is_some_and(|method|method.starts_with("process.subscription.")) {
             if subscription_tx.send(crate::process::subscriptions::ControlCommand::Request{value:request,cancellation:token}).is_err(){break;}
@@ -931,7 +938,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|_|request.clone());
             // Enqueue the intent before fast OS control. A resulting terminal fact can then
             // never overtake its cancel command in the owner's FIFO and lose causality.
-            if agent_tx.send(crate::agent_runtime::Command::Request { value: request, cancellation: token }).is_err() {
+            if agent_tx.send(crate::agent_runtime::Command::Request { value: request, cancellation: token, input_order }).is_err() {
                 eprintln!("runtime control authority disconnected"); break;
             }
             if let Some(request)=cancellation_request { agent_control.cancel_admitted(&request,current_epoch.as_deref()); }

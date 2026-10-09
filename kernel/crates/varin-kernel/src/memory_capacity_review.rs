@@ -1,6 +1,9 @@
 //! Combined production PlanTools -> MemoryTools -> ProcessWaitTools admission checks.
 //! The watcher below is an injected hook-contract witness, NOT runtime::run's private
 //! grant watcher. Storage revocation is real; immediate queued revoke wake is not tested.
+#[path="../../varin-runtime/tests/fixtures/input_admission.rs"]
+mod input_admission;
+use input_admission::InputAdmission;
 use super::*;
 use crate::tools::{
     FixedFileSource, KernelResourceClient, SourceMode, ToolBinding, KernelToolExecutor,

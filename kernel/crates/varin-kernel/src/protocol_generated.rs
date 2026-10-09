@@ -41,6 +41,11 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "process.subscription.ack",
     "process.subscription.unsubscribe",
 ];
+pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
+    ("runtime.input.submit", "branchId"),
+    ("runtime.input.enqueue", "branchId"),
+    ("runtime.input.edit", "inputId"),
+];
 pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &["runtime.history.body"];
 
 #[derive(Clone, Debug, Deserialize)]

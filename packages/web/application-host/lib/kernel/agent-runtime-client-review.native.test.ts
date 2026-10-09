@@ -405,10 +405,14 @@ it('next-run inputs promote in FIFO order, skipping a cancelled queued Run', asy
   const run = await f.runtimeClient.submit({ key: 'next-initial', threadId: 'next-thread', branchId: 'next-branch', expectedHead: null, input: { text: 'initial turn' }, configuration: provider.configuration });
   await f.runtimeClient.startRun(run.run_id);
   await expect.poll(() => provider.requests.length).toBe(1);
-  const enqueue = (key: string) => f.runtimeClient.enqueue({ key, threadId: 'next-thread', branchId: 'next-branch', mode: 'next_run', input: { text: key } });
+  const enqueue = (key: string, text = key) => f.runtimeClient.enqueue({ key, threadId: 'next-thread', branchId: 'next-branch', mode: 'next_run', input: { text } });
   const cancelled = await enqueue('skip queued turn');
-  const first = await enqueue('first queued turn');
-  const second = await enqueue('second queued turn');
+  // A later small body may finish staging first; ingress arrival still determines FIFO.
+  const [first, second] = await Promise.all([
+    enqueue('first queued turn', `first queued turn ${'中文🎉'.repeat(100_000)}`),
+    enqueue('second queued turn'),
+  ]);
+  expect(first.cursor).toBeLessThan(second.cursor);
   await f.runtimeClient.cancelInput(cancelled.input_id, 1);
   expect((await f.runtimeClient.startRun(first.run_id)).runId).toBe(first.run_id);
   expect((await f.runtimeClient.startRun(second.run_id)).runId).toBe(second.run_id);

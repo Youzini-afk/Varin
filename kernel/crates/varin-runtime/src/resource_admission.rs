@@ -129,6 +129,12 @@ impl ResourceAdmission {
             cancel,
         )
     }
+    /// Host ingress has no model/tool origin. Preserve conflicting command arrival order
+    /// while preparing bodies independently, using the same instance resource authority.
+    pub fn reserve_unmetered(self:&Arc<Self>,owner:&str,intents:Vec<ResourceIntent>,cancel:&CancellationToken)
+        ->Result<ResourceReservation,ExecutionError> {
+        self.reserve_inner(owner,intents,owner,ExecutionClass::Unmetered,None,cancel)
+    }
     fn acquire_inner(
         self: &Arc<Self>,
         owner: &str,

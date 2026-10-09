@@ -24,7 +24,7 @@ fn db() -> Connection {
 fn collection_db() -> Connection {
     let db = db();
     db.execute_batch(
-        "CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE operations(id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE context_jobs(recipe TEXT NOT NULL); CREATE TABLE context_job_parts(body TEXT NOT NULL)",
+        "CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE commands(intent TEXT NOT NULL); CREATE TABLE operations(id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE context_jobs(recipe TEXT NOT NULL); CREATE TABLE context_job_parts(body TEXT NOT NULL)",
     )
     .unwrap();
     db

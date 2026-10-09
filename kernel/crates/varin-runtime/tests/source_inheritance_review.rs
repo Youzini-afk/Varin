@@ -1,3 +1,6 @@
+#[path="fixtures/input_admission.rs"]
+mod input_admission;
+use input_admission::InputAdmission;
 use serde_json::json;
 use varin_runtime::catalog::launches::LaunchSelection;
 use varin_runtime::{Catalog, Receipt, RunState, SubmitInput};

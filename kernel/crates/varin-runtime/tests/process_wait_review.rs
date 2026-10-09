@@ -1,5 +1,8 @@
 //! Independent Catalog counterexamples. These exercise real committed model origins and reopen;
 //! guardian, Storage grant authorization and Host continuation require the native integration lane.
+#[path="fixtures/input_admission.rs"]
+mod input_admission;
+use input_admission::InputAdmission;
 use serde_json::{json, Value};
 use varin_runtime::catalog::launches::LaunchSelection;
 use varin_runtime::catalog::process_wait::WAIT_TOOL;

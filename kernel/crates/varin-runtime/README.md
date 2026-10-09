@@ -88,15 +88,25 @@ resolves the exact frozen request before its metadata transaction.
 
 Queue admission and edits persist the eventual history payload before atomically recording its
 reference in `input_history_content`. Delivery and next-run promotion can therefore attach history
-without large body writes inside their transactions. Queue metadata still includes the accepted
-input for its current public API; cancellation preserves its content reference. Command-idempotency
-and tool-receipt records remain their existing inline domains in this slice.
+without large body writes inside their transactions. The queue stores only ownership/status metadata;
+inspection hydrates a separately captured reference on a worker. Boundary delivery hydrates its selected
+inputs first, then checks their actual revisions and the execution boundary. Edits/cancels invalidate
+that material; a newly appended input does not invalidate an unchanged selected prefix.
+
+First-input, child-context and summary-input bodies use the same required preparation/commit path.
+Initial prompt and memory bodies are staged off Catalog; admission atomically freezes their metadata,
+scope and references with the input and launch. Command intents are immutable content references,
+so edited input never replaces its original idempotency identity. Host input offers reserve conflicting
+arrival order before body encoding/upload/hydration; unrelated branches bypass them. Cancellation
+wakes/removes the existing resource reservation. Full input validation and public body hydration run
+on request workers rather than the Agent actor. Test-only fixture drivers exercise these same APIs.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 7 stores context-job ownership, source-part and immutable recipe references separately from model
+Catalog version 8 and input domain 2 store input intents/queue bodies and context-job ownership,
+source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. `Catalog::collect_content_objects` marks requests, provider originals,
-history, all model outputs (including rejected output), queued-history references, context
+history, all model outputs (including rejected output), original command intents, queued-history references, context
 checkpoints, memory projections, summary recipes and source parts, and strictly typed policy-graph node and planning-model request/output references. It verifies every live object
 before sweeping and preserves unknown files; it never deletes history or invokes system-kernel GC.
 
@@ -108,8 +118,8 @@ then load, validate, merge and stage bodies on the worker. Publication compares 
 for synchronization, active checkpoint identities. A changed basis causes a fresh owner read; an
 unchanged owner revision regression remains an error. Late confirmed receipts may settle after Run
 cancellation, without reviving the Run or overwriting a newer note. Context compilation reads trusted
-receipt bodies on its read worker. First-input/context staging and conversation-fork body work remain
-separate unfinished control-path boundaries.
+receipt bodies on its read worker. Full child-task records, conversation-fork body work and content
+collection remain separate unfinished control-path boundaries.
 
 ## Execution and trust
 

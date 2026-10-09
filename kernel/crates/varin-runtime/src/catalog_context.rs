@@ -462,6 +462,35 @@ pub(super) fn publish_prepared(
     checkpoint: &ContextCheckpoint,
     reference: &Value,
 ) -> Result<()> {
+    publish_metadata(tx, &CheckpointMetadata::from(checkpoint), reference)
+}
+
+/// Publication needs identities and scope, never the full prompt or memory body.
+pub(super) struct CheckpointMetadata {
+    pub id: String,
+    pub branch_id: String,
+    pub revision: u64,
+    pub expected_revision: u64,
+    pub through_id: Option<String>,
+    pub scope: Option<ContextScope>,
+}
+impl From<&ContextCheckpoint> for CheckpointMetadata {
+    fn from(checkpoint: &ContextCheckpoint) -> Self {
+        Self {
+            id: checkpoint.id.clone(),
+            branch_id: checkpoint.proposal.branch_id.clone(),
+            revision: checkpoint.revision,
+            expected_revision: checkpoint.proposal.expected_revision,
+            through_id: checkpoint.proposal.through_id.clone(),
+            scope: checkpoint.personalization.as_ref().map(ContextScope::from),
+        }
+    }
+}
+pub(super) fn publish_metadata(
+    tx: &Transaction<'_>,
+    checkpoint: &CheckpointMetadata,
+    reference: &Value,
+) -> Result<()> {
     let prior: Option<String> = tx
         .query_row(
             "SELECT body FROM context_checkpoints WHERE id=?1",
@@ -477,22 +506,22 @@ pub(super) fn publish_prepared(
             "context candidate identity has different content".into(),
         ));
     }
-    let current:Option<u64>=tx.query_row("SELECT c.revision FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",[&checkpoint.proposal.branch_id],|r|read_number(r,0)).optional()?;
-    if current.unwrap_or(0) != checkpoint.proposal.expected_revision {
+    let current:Option<u64>=tx.query_row("SELECT c.revision FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",[&checkpoint.branch_id],|r|read_number(r,0)).optional()?;
+    if current.unwrap_or(0) != checkpoint.expected_revision {
         return Err(RuntimeError::Conflict(
             "active context checkpoint changed".into(),
         ));
     }
     // Searchable metadata is derived from this exact immutable body in the same publication.
     // It is not an independently editable project/configuration store.
-    tx.execute("INSERT INTO context_checkpoints(id,branch_id,revision,through_id,body,project_id,scope) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![checkpoint.id,checkpoint.proposal.branch_id,sql_number(checkpoint.revision)?,checkpoint.proposal.through_id,encode(reference)?,checkpoint.personalization.as_ref().and_then(|basis| basis.project_id.as_deref()),checkpoint.personalization.as_ref().map(ContextScope::from).map(|scope|encode(&scope)).transpose()?])?;
-    tx.execute("INSERT INTO active_contexts(branch_id,checkpoint_id) VALUES(?1,?2) ON CONFLICT(branch_id) DO UPDATE SET checkpoint_id=excluded.checkpoint_id",params![checkpoint.proposal.branch_id,checkpoint.id])?;
+    tx.execute("INSERT INTO context_checkpoints(id,branch_id,revision,through_id,body,project_id,scope) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![checkpoint.id,checkpoint.branch_id,sql_number(checkpoint.revision)?,checkpoint.through_id,encode(reference)?,checkpoint.scope.as_ref().and_then(|scope|scope.project_id.as_deref()),checkpoint.scope.as_ref().map(encode).transpose()?])?;
+    tx.execute("INSERT INTO active_contexts(branch_id,checkpoint_id) VALUES(?1,?2) ON CONFLICT(branch_id) DO UPDATE SET checkpoint_id=excluded.checkpoint_id",params![checkpoint.branch_id,checkpoint.id])?;
     event(
         tx,
-        &checkpoint.proposal.branch_id,
+        &checkpoint.branch_id,
         checkpoint.revision,
         "context.published",
-        json!({"checkpoint_id":checkpoint.id,"through_id":checkpoint.proposal.through_id}),
+        json!({"checkpoint_id":checkpoint.id,"through_id":checkpoint.through_id}),
     )?;
     Ok(())
 }
@@ -507,9 +536,15 @@ pub struct CheckpointRead {
 }
 impl CheckpointRead {
     pub fn load(self) -> Result<ContextCheckpoint> {
-        let checkpoint:ContextCheckpoint=serde_json::from_value(self.content.load(&self.reference)?)?;
-        if checkpoint.id!=self.id || checkpoint.revision!=self.revision || checkpoint.personalization.as_ref().map(ContextScope::from)!=self.scope {
-            return Err(RuntimeError::Invalid("context checkpoint differs from its ownership metadata".into()));
+        let checkpoint: ContextCheckpoint =
+            serde_json::from_value(self.content.load(&self.reference)?)?;
+        if checkpoint.id != self.id
+            || checkpoint.revision != self.revision
+            || checkpoint.personalization.as_ref().map(ContextScope::from) != self.scope
+        {
+            return Err(RuntimeError::Invalid(
+                "context checkpoint differs from its ownership metadata".into(),
+            ));
         }
         Ok(checkpoint)
     }

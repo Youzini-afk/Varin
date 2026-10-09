@@ -1,3 +1,4 @@
+use crate::test_submission::InputAdmission;
 use super::*;
 use std::path::PathBuf;
 struct Fixture(PathBuf);
@@ -140,6 +141,11 @@ fn single_writer_and_unknown_formats_preserve_assets() {
             .unwrap(),
         999
     );
+    raw.pragma_update(None,"user_version",FORMAT).unwrap();
+    raw.execute("UPDATE runtime_domains SET version=999 WHERE name='input_queue'",[]).unwrap();
+    let epoch:i64=raw.query_row("SELECT epoch FROM runtime_meta WHERE id=1",[],|row|row.get(0)).unwrap();
+    assert!(matches!(Catalog::open(&f.0),Err(RuntimeError::Invalid(_))));
+    assert_eq!(raw.query_row("SELECT epoch FROM runtime_meta WHERE id=1",[],|row|row.get::<_,i64>(0)).unwrap(),epoch);
 }
 #[test]
 fn cancellation_is_a_request_and_dispatched_unknown_is_not_replayed() {
@@ -883,6 +889,190 @@ fn later_external_confirmation_resolves_lost_acceptance_receipt_without_handoff(
     assert_eq!(confirmed.phase, OperationPhase::Terminal);
 }
 
+#[test]
+fn prepared_inputs_preserve_original_intents_and_only_retry_changed_queue_material() {
+    use crate::catalog::inputs::EnqueueInput;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let epoch = db.epoch();
+    let command = EnqueueInput {
+        key: "body-input".into(),
+        thread_id: "thread".into(),
+        branch_id: "main".into(),
+        mode: InputMode::Boundary,
+        input: json!({"text":"original 中文🎉".repeat(10000)}),
+        configuration: None,
+    };
+    let prepared = db.prepare_enqueue(command.clone()).load().unwrap();
+    let queued = db.admit_queued_input(prepared).unwrap();
+    let stored: String = db
+        .db
+        .query_row(
+            "SELECT body FROM input_queue WHERE id=?1",
+            [&queued.input_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(stored.len() < 1024);
+    assert!(!stored.contains("original"));
+    let intent: String = db
+        .db
+        .query_row(
+            "SELECT intent FROM commands WHERE id=?1",
+            [&command.key],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(intent.len() < 256);
+    let first = db
+        .prepare_input_delivery(&receipt.run_id, epoch, Some(&receipt.input_id))
+        .unwrap()
+        .load()
+        .unwrap();
+    let stale_edit = db
+        .prepare_input_edit(&queued.input_id, 1, json!({"text":"stale edit"}))
+        .unwrap()
+        .load()
+        .unwrap();
+    let edit = db
+        .prepare_input_edit(&queued.input_id, 1, json!({"text":"corrected"}))
+        .unwrap()
+        .load()
+        .unwrap();
+    db.admit_input_edit(edit).unwrap().load().unwrap();
+    assert!(db.admit_input_delivery(first).unwrap().is_none());
+    assert_eq!(
+        db.head("main").unwrap().as_deref(),
+        Some(receipt.input_id.as_str())
+    );
+    assert!(db.admit_input_edit(stale_edit).is_err());
+    let corrected = db
+        .prepare_input_delivery(&receipt.run_id, epoch, Some(&receipt.input_id))
+        .unwrap()
+        .load()
+        .unwrap();
+    let later = db
+        .enqueue_input(&EnqueueInput {
+            key: "later".into(),
+            input: json!({"text":"later"}),
+            ..command.clone()
+        })
+        .unwrap();
+    let delivered = db.admit_input_delivery(corrected).unwrap().unwrap();
+    assert!(
+        matches!(&delivered[0].content,crate::execution::Content::Text {text} if text=="corrected")
+    );
+    assert_eq!(
+        db.queued_input_metadata(&later.input_id).unwrap().state,
+        InputState::Queued
+    );
+    let edit = db
+        .prepare_input_edit(&later.input_id, 1, json!({"text":"cancelled edit"}))
+        .unwrap()
+        .load()
+        .unwrap();
+    db.cancel_input(&later.input_id, 1).unwrap();
+    assert!(db.admit_input_edit(edit).is_err());
+    db.collect_content_objects().unwrap();
+    assert_eq!(
+        db.content
+            .load(&serde_json::from_str(&intent).unwrap())
+            .unwrap()["input"],
+        command.input
+    );
+    drop(db);
+    let mut db = f.open();
+    // Editing changes the delivered body, never the original idempotency intent.
+    assert_eq!(db.enqueue_input(&command).unwrap(), queued);
+    assert_eq!(
+        db.queued_input(&queued.input_id).unwrap().content,
+        json!({"text":"corrected"})
+    );
+    assert_eq!(
+        db.history("main").unwrap().last().unwrap().content,
+        json!({"text":"corrected"})
+    );
+}
+#[test]
+fn staged_first_input_rechecks_checkpoint_and_owner_without_holding_catalog() {
+    use crate::catalog::context::ContextProposal;
+    let f = Fixture::new();
+    let mut db = f.open();
+    db.create_thread("thread", "main").unwrap();
+    let proposal = ContextProposal {
+        key: "initial".into(),
+        branch_id: "main".into(),
+        through_id: None,
+        expected_revision: 0,
+        summary: String::new(),
+        effective_system_prompt: "system 中文🎉".repeat(10000),
+        instruction_sources: vec![],
+        memory_checkpoint: None,
+    };
+    let preparation = db
+        .prepare_submission(command(), Some(proposal.clone()), None)
+        .unwrap();
+    let competing = db
+        .prepare_submission(
+            SubmitInput {
+                key: "competing".into(),
+                ..command()
+            },
+            Some(proposal.clone()),
+            None,
+        )
+        .unwrap()
+        .load(None, false)
+        .unwrap();
+    let (release, wait) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        wait.recv().unwrap();
+        preparation.load(None, false).unwrap()
+    });
+    // While the real candidate is held by its body worker, unrelated control and input continue.
+    db.create_thread("other", "other-branch").unwrap();
+    let other = db
+        .submit(&SubmitInput {
+            key: "other".into(),
+            thread_id: "other".into(),
+            branch_id: "other-branch".into(),
+            ..command()
+        })
+        .unwrap();
+    db.request_cancel_run(&other.run_id).unwrap();
+    let prepared = db
+        .prepare_submission(command(), Some(proposal), None)
+        .unwrap()
+        .load(None, false)
+        .unwrap();
+    let accepted = db.admit_submission(prepared).unwrap();
+    assert!(
+        matches!(db.admit_submission(competing),Err(RuntimeError::Conflict(message)) if message=="input context changed during preparation")
+    );
+    release.send(()).unwrap();
+    assert_eq!(
+        db.admit_submission(worker.join().unwrap()).unwrap(),
+        accepted
+    );
+    let next = db
+        .prepare_submission(
+            SubmitInput {
+                key: "next-owner".into(),
+                expected_head: Some(accepted.input_id.clone()),
+                ..command()
+            },
+            None,
+            None,
+        )
+        .unwrap()
+        .load(None, false)
+        .unwrap();
+    drop(db);
+    let mut db = f.open();
+    assert!(db.admit_submission(next).is_err());
+    assert_eq!(db.history("main").unwrap().len(), 1);
+}
 #[test]
 fn queued_input_is_durable_editable_and_only_enters_a_closed_model_boundary() {
     use crate::catalog::inputs::EnqueueInput;

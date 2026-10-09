@@ -100,6 +100,7 @@ impl Catalog {
             .transpose()?
             .unwrap_or_default();
         Ok(ContextJobPreparation {
+            epoch: self.epoch,
             database: self
                 .db
                 .path()
@@ -125,7 +126,7 @@ impl Catalog {
             configuration,
             admission,
             parts,
-            _publication,
+            submission,
         } = prepared;
 
         // Retry the original admission before checking a source which may since have advanced.
@@ -182,24 +183,7 @@ impl Catalog {
         }
         // The worker proved immutable ancestry and validated the frozen checkpoint. Branch heads
         // only append; a fork has a distinct branch ID. New tail input does not invalidate A.
-        let thread_id = format!("context-job-thread:{}", request.key);
-        let branch_id = format!("context-job-branch:{}", request.key);
-        let receipt = self.submit_admission(
-            &SubmitInput {
-                key: command_key,
-                thread_id,
-                branch_id,
-                expected_head: None,
-                input: Value::String(crate::context_job::SUMMARY_REQUEST.into()),
-                configuration,
-            },
-            Some(launch),
-            true,
-            false,
-            None,
-            None,
-            Some((&admission, &parts)),
-        )?;
+        let receipt = self.submit_admission(submission, Some((&admission, &parts)))?;
         Ok(ContextJob { request, receipt })
     }
 
@@ -588,6 +572,7 @@ impl ContextJobRead {
 
 /// Owns the immutable input and content lifetime while a worker checks the fixed ancestor.
 pub struct ContextJobPreparation {
+    epoch: u64,
     database: std::path::PathBuf,
     content: crate::content::ContentStore,
     publication: crate::content::ContentPublication,
@@ -603,7 +588,7 @@ pub struct PreparedContextJob {
     configuration: Value,
     admission: ContextJobAdmission,
     parts: Vec<Value>,
-    _publication: crate::content::ContentPublication,
+    submission: submissions::PreparedSubmission,
 }
 impl ContextJobPreparation {
     pub fn load(mut self) -> Result<PreparedContextJob> {
@@ -735,12 +720,19 @@ impl ContextJobPreparation {
             parts: parts.len() as u64,
         };
         Ok(PreparedContextJob {
+            submission: submissions::PreparedSubmission::stage(submissions::SubmissionBody {
+                command:SubmitInput {key:format!("context-job:{}",self.request.key),
+                    thread_id:format!("context-job-thread:{}",self.request.key),
+                    branch_id:format!("context-job-branch:{}",self.request.key),expected_head:None,
+                    input:Value::String(crate::context_job::SUMMARY_REQUEST.into()),configuration:self.configuration.clone()},
+                launch:Some(self.launch.clone()),inherit_source:false,initial:None,personalization:None,
+                origin:submissions::SubmissionOrigin::Summary,epoch:self.epoch,content:self.content,publication:self.publication,
+            })?,
             request: self.request,
             launch: self.launch,
             configuration: self.configuration,
             admission,
             parts,
-            _publication: self.publication,
         })
     }
 }

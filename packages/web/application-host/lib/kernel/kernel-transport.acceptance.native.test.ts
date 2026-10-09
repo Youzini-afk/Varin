@@ -166,3 +166,28 @@ it('Run inspection streams large configuration while cancellation returns a cont
   } finally { data.resume(); }
   expect((await read).configuration).toEqual(configuration);
 }, 30_000);
+
+it('cancelling an input upload releases its arrival reservation before later input admission', async () => {
+  const f = await fixture();
+  const runtime = new AgentRuntimeClient(f.host);
+  await runtime.createThread('input-upload', 'input-upload-branch');
+  await runtime.submit({key: 'initial-input', threadId: 'input-upload', branchId: 'input-upload-branch',
+    expectedHead: null, input: {text: 'initial'}, configuration: {}});
+  const controller = new AbortController();
+  const data = f.probe.socket('data');
+  data.cork();
+  const upload = runtime.enqueue({key: 'cancelled-upload', threadId: 'input-upload', branchId: 'input-upload-branch',
+    mode: 'next_run', input: {text: '中文🎉'.repeat(100_000)}}, controller.signal);
+  const rejected = expect(upload).rejects.toThrow(/cancelled/i);
+  try {
+    await expect.poll(() => data.writableLength).toBeGreaterThan(0);
+    controller.abort();
+    await rejected;
+    expect((await runtime.status()).epoch).toBeGreaterThan(0);
+  } finally {data.uncork();}
+  const next = await runtime.enqueue({key: 'after-cancelled-upload', threadId: 'input-upload', branchId: 'input-upload-branch',
+    mode: 'next_run', input: {text: 'later input'}});
+  const inputs = await runtime.inputs('input-upload-branch');
+  expect(inputs.map(input => input.id)).toEqual([next.input_id]);
+  expect(inputs[0]!.content).toEqual({text: 'later input'});
+}, 30_000);

@@ -1,5 +1,8 @@
 //! Independent counterexamples for durable child admission. Host/source authority is covered by
 //! the loopback suite; these tests use real Catalog transactions and committed tool origins.
+#[path="fixtures/input_admission.rs"]
+mod input_admission;
+use input_admission::InputAdmission;
 use serde_json::json;
 use varin_runtime::catalog::launches::{LaunchSelection, SourceSelection};
 use varin_runtime::execution::*;
