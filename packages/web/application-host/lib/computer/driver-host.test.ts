@@ -243,10 +243,11 @@ $ErrorActionPreference = 'Stop'
 $tokens = $null; $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($env:VARIN_TEST_DRIVER_RUNTIME, [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw $errors[0] }
-$definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-App' }, $true)
-Invoke-Expression $definition.Extent.Text
-$windowDefinition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-AppWindow' }, $true)
-Invoke-Expression $windowDefinition.Extent.Text
+foreach ($functionName in @('Get-AppWindows', 'Resolve-App', 'Resolve-AppWindow')) {
+    $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
+    Invoke-Expression $definition.Extent.Text
+}
+Add-Type 'public static class VarinWin32 { public static System.IntPtr GetForegroundWindow() { return System.IntPtr.Zero; } }'
 function ConvertTo-ObjectArray($value) { return ,@($value) }
 function Get-Process {
     [pscustomobject]@{ Id = 1; ProcessName = 'explorer'; MainWindowTitle = 'Varin' }

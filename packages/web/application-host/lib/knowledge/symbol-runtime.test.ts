@@ -20,7 +20,7 @@ describe("symbol graph runtime", () => {
       revision: 'current', encoding: 'utf-8', bom: false, byteLength: 28, epoch: 1 }));
     const resolve = vi.fn(() => store.resolveAssociationCandidates());
     const runtime = createSymbolGraphRuntime({ getStore: async () => ({ ...store, resolveAssociationCandidates: resolve }),
-      documents: { read, readAgentInputSnapshot: () => ({ status: 'disk' as const }) } as never,
+      documents: { read, readSnapshot: read, readAgentInputSnapshot: () => ({ status: 'disk' as const }) } as never,
       isIndexablePath: async (_workspace, resource) => !resource.startsWith('generated/'),
       supervisor: {
         syncDocument: async () => ({ status: 'synced', documentVersion: 1 }),
@@ -115,7 +115,7 @@ describe("symbol graph runtime", () => {
     };
     const runtime = createSymbolGraphRuntime({
       getStore: async () => store,
-      documents: { read, readAgentInputSnapshot: () => ({ status: "disk" as const }) } as never,
+      documents: { read, readSnapshot: read, readAgentInputSnapshot: () => ({ status: "disk" as const }) } as never,
       supervisor: supervisor as never,
     });
     const mutation = { workspaceId: "workspace", resourceId: "src/a.ts", kind: "modified" as const, owner: { kind: "web-route", id: "editor" } };
