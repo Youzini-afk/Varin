@@ -285,6 +285,7 @@ impl<
                                 };
                                 let token = cancel.child(&context.operation_id);
                                 let mut lease = None;
+                                let mut _admission_control = None;
                                 let completion = if blocked {
                                     ToolCompletion::NotDispatched {
                                         reason: "dependency_failed".into(),
@@ -319,19 +320,26 @@ impl<
                                             reason: format!("{}: {}", error.code, error.message),
                                         },
                                         Ok(()) => {
+                                            _admission_control = self.tools.watch_admission(&context, &node.call, &admitted.contract, &token)?;
                                             if let Some(admission) =
                                                 self.persistence.resource_admission()
                                             {
-                                                lease = admission.acquire(
-                                                    &context.operation_id,
-                                                    &admitted.contract.resources,
-                                                    &token,
+                                                let identity = crate::execution_capacity::AdmissionIdentity {
+                                                    run_id: input.run_id.clone(), owner_generation: input.owner_generation,
+                                                    origin: context.origin.clone(),
+                                                    family_id: self.persistence.task_family(&input.run_id, input.owner_generation)?,
+                                                };
+                                                lease = admission.acquire_scheduled(
+                                                    &context.operation_id, &admitted.contract.resources, &identity,
+                                                    self.tools.execution_class(&node.call, &admitted.contract), &token,
                                                 )?;
                                             }
                                             if token.is_cancelled() {
                                                 ToolCompletion::NotDispatched {
                                                     reason: "cancelled".into(),
                                                 }
+                                            } else if let Err(error) = self.persistence.task_family(&input.run_id, input.owner_generation) {
+                                                ToolCompletion::NotDispatched { reason: format!("{}: {}", error.code, error.message) }
                                             } else if let Err(error) = self.tools.authorize(
                                                 &context,
                                                 &node.call,

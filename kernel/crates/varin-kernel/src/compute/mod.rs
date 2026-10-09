@@ -110,6 +110,12 @@ impl Queue {
             let work=queue.remove(index).unwrap(); work.shared.finish(Err("cancelled".into()));
         }
     }
+    fn close(&self) {
+        // Publish closure under the wait predicate's mutex, so rollback/shutdown cannot lose a wake.
+        let _queue = self.work.lock().unwrap_or_else(|e| e.into_inner());
+        self.closed.store(true, Ordering::Release);
+        self.available.notify_all();
+    }
     fn take(&self)->Option<Work> {
         let mut queue=self.work.lock().unwrap_or_else(|e|e.into_inner());
         loop { if let Some(work)=queue.pop_front(){return Some(work);}
@@ -170,9 +176,13 @@ pub(crate) struct ComputeManager {
 impl ComputeManager {
     fn ensure_workers(&mut self) -> Result<()> {
         if !self.workers.is_empty(){return Ok(());}
-        // Two foreground slots prevent one backpressured query from blocking a
-        // small read. A dedicated background lane cannot occupy either slot.
-        for (name,queue) in [("compute-read-1",self.foreground.clone()),("compute-read-2",self.foreground.clone()),("compute-index",self.background.clone())] {
+        // The actual workers and native admission use the same deployment budget. Background
+        // work keeps its independent lane; model/service waits never consume these workers.
+        let capacity = varin_runtime::execution_capacity::configured_compute_capacity()?;
+        let foreground = self.foreground.clone();
+        let queues = (0..capacity.get()).map(move |index| (format!("compute-read-{index}"), foreground.clone()))
+            .chain(std::iter::once(("compute-index".into(), self.background.clone())));
+        for (name, queue) in queues {
             let worker=thread::Builder::new().name(name.into()).spawn(move||{
                 let mut syntax=structure::SyntaxRuntime::default();
                 while let Some(work)=queue.take() {
@@ -181,8 +191,18 @@ impl ComputeManager {
                         .unwrap_or_else(|_|Err("Native computation failed unexpectedly".into()));
                     work.shared.finish(result);
                 }
-            }).map_err(|e|e.to_string())?;
-            self.workers.push(worker);
+            });
+            match worker {
+                Ok(worker) => self.workers.push(worker),
+                Err(error) => {
+                    // No task has been queued yet. A partial pool must not masquerade as the
+                    // configured capacity on the next start after an OS thread-creation failure.
+                    self.foreground.close(); self.background.close();
+                    for worker in self.workers.drain(..) { let _ = worker.join(); }
+                    self.foreground = Arc::default(); self.background = Arc::default();
+                    return Err(error.to_string());
+                }
+            }
         }
         Ok(())
     }
@@ -223,8 +243,7 @@ impl ComputeManager {
     }
     pub fn shutdown(&mut self) {
         let ids=self.jobs.keys().cloned().collect::<Vec<_>>();for id in ids{self.cancel(&id);}
-        self.foreground.closed.store(true,Ordering::Release);self.foreground.available.notify_all();
-        self.background.closed.store(true,Ordering::Release);self.background.available.notify_all();
+        self.foreground.close(); self.background.close();
         for worker in self.workers.drain(..){let _=worker.join();}
     }
 }

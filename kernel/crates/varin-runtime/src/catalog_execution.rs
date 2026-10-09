@@ -4,6 +4,11 @@ use crate::execution::*;
 use std::sync::Mutex;
 
 impl Persistence for Mutex<Catalog> {
+    fn task_family(&self, run: &str, epoch: u64) -> std::result::Result<String, ExecutionError> {
+        self.lock().map_err(|_| ExecutionError::new("catalog_poisoned", "catalog owner failed"))?
+            .task_family(run, epoch).map_err(policy_error)
+    }
+
     fn policy_model_job(&self,run:&str, epoch:u64)->std::result::Result<Option<PolicyModelState>,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.policy_model_job(run,epoch).map_err(policy_error)}
     fn admit_policy_model(&self,run:&str,epoch:u64,intent:&PolicyModelIntent,snapshot:&RequestSnapshot)->std::result::Result<PolicyModelState,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.admit_policy_model(run,epoch,intent,snapshot).map_err(policy_error)}
     fn dispatch_policy_model(&self,run:&str,epoch:u64,action:&str)->std::result::Result<(),ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.dispatch_policy_model(run,epoch,action).map_err(policy_error)}

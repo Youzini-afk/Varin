@@ -198,6 +198,17 @@ pub(crate) struct NativeRunStartParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeAdmissionInspectParams {
+    pub(crate) run_id: String,
+    pub(crate) owner_generation: i64,
+    pub(crate) call_id: String,
+    pub(crate) request_id: Option<String>,
+    pub(crate) action_id: Option<String>,
+    pub(crate) node_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeThreadCreateParams {
     pub(crate) thread_id: String,
     pub(crate) branch_id: String,
@@ -1710,6 +1721,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.status" => serde_json::from_value::<KernelEmptyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.admission.inspect" => {
+            serde_json::from_value::<NativeAdmissionInspectParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.thread.create" => {
             serde_json::from_value::<NativeThreadCreateParams>(params.clone())
                 .map(|_| ())
