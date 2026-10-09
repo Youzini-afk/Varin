@@ -187,7 +187,7 @@ interface LanguageProviderDescriptor extends Record<string, unknown> {
 interface LanguageSupervisorOptions {
   activateProviders?: (request: { languageId: string; workspaceId: string }) => Promise<void>;
   prepareProvider?: (providerId: string, root: string, signal: AbortSignal) => Promise<{ command: string; args: readonly string[]; initializationOptions?: Readonly<Record<string, unknown>> } | null>;
-  documents: Pick<DocumentAuthority, 'getWorkspace' | 'watch'>;
+  documents: Pick<DocumentAuthority, 'getWorkspace' | 'watch' | 'readSnapshot'>;
   env?: NodeJS.ProcessEnv;
   isTrusted?: (root: string) => Promise<boolean>;
   pathModule?: typeof path;
@@ -550,7 +550,27 @@ export const createLanguageSupervisor = ({
         const owned = activation;
         void owned.finally(() => { if (activations.get(activationKey) === owned) activations.delete(activationKey); }).catch(() => undefined);
       }
-      await waitWithSignal(activation, signal);
+      try {
+        await waitWithSignal(activation, signal);
+      } catch (error) {
+        signal?.throwIfAborted();
+        const key = sessionKey(workspaceId, languageId, view);
+        const existing = sessions.get(key);
+        const failed = createRecord({
+          workspaceId, languageId, view,
+          providerId: provider?.providerId ?? 'varin.workspace-match',
+          providerOwnerKey: provider?.ownerKey ?? 'varin.host\0activation',
+          generation: existing?.generation ?? nextGeneration(key),
+          status: 'failed',
+          message: error instanceof Error ? error.message : 'Language extension activation failed',
+          failureReason: 'provider-failed', root: '',
+        });
+        if (!existing?.rpc) {
+          sessions.set(key, failed);
+          emit(workspaceId, { kind: 'status', snapshot: snapshotFor(failed) });
+        }
+        return failed;
+      }
       provider = findProvider(workspaceId, languageId);
     }
     signal?.throwIfAborted();
@@ -1347,23 +1367,37 @@ export const createLanguageSupervisor = ({
       const absolute = pathModule.resolve(record.root, resourceId);
       const relative = pathModule.relative(record.root, absolute);
       if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) continue;
+      const invalidate = (): void => {
+        if (sessions.get(key) !== record || !record.rpc) return;
+        const open = record.documents.get(resourceId);
+        if (open?.fixed) return;
+        const language = languageIdForPath(resourceId);
+        if (open || (language && record.languageIds.includes(language)) || /\.(?:json|toml|yaml|yml|xml)$/.test(resourceId)) {
+          record.documentEpoch += 1;
+          emit(record.workspaceId, { kind: 'diagnostics-invalidated', view: record.view });
+        }
+        // A closed disk document is once again read by the server from disk.
+        // Fixed drafts and editor buffers keep their own content ownership.
+        try {
+          if (isHostOwnedView(record.view) && open) {
+            record.rpc.notify('textDocument/didClose', { textDocument: { uri: toFileUri(absolute) } });
+            record.documents.delete(resourceId);
+            desiredDocuments.get(key)?.delete(resourceId);
+          }
+          record.rpc.notify('workspace/didChangeWatchedFiles', { changes: [{ uri: toFileUri(absolute), type: event.kind === 'created' ? 1 : event.kind === 'deleted' ? 3 : 2 }] });
+        } catch (error) { setFailed(record, error instanceof Error ? error.message : 'Language connection failed'); }
+      };
       const open = record.documents.get(resourceId);
       if (open?.fixed) continue;
-      const language = languageIdForPath(resourceId);
-      if (open || (language && record.languageIds.includes(language)) || /\.(?:json|toml|yaml|yml|xml)$/.test(resourceId)) {
-        record.documentEpoch += 1;
-        emit(record.workspaceId, { kind: 'diagnostics-invalidated', view: record.view });
-      }
-      // A closed disk document is once again read by the server from disk.
-      // Fixed drafts and editor buffers keep their own content ownership.
-      try {
-        if (isHostOwnedView(record.view) && open) {
-          record.rpc.notify('textDocument/didClose', { textDocument: { uri: toFileUri(absolute) } });
-          record.documents.delete(resourceId);
-          desiredDocuments.get(key)?.delete(resourceId);
-        }
-        record.rpc.notify('workspace/didChangeWatchedFiles', { changes: [{ uri: toFileUri(absolute), type: event.kind === 'created' ? 1 : event.kind === 'deleted' ? 3 : 2 }] });
-      } catch (error) { setFailed(record, error instanceof Error ? error.message : 'Language connection failed'); }
+      if (isHostOwnedView(record.view) && open) {
+        // Watch delivery can follow a bind that already read the new disk bytes.
+        // Invalidate only when the current binding differs from disk.
+        void documents.readSnapshot({ workspaceId: record.workspaceId, resourceId }).then(snapshot => {
+          const current = record.documents.get(resourceId);
+          if (snapshot.status === 'ready' && current?.contentRevision === snapshot.revision) return;
+          invalidate();
+        }, invalidate);
+      } else invalidate();
     }
   };
 
