@@ -154,7 +154,19 @@
     "compute.read": "KernelComputeReadParams",
     "compute.cancel": "KernelComputeHandleParams",
     "compute.release": "KernelComputeHandleParams",
-    "compute.grammar.register": "KernelComputeGrammarParams"
+    "compute.grammar.register": "KernelComputeGrammarParams",
+    "runtime.child.sources.pending": "KernelEmptyParams",
+    "runtime.child.sources.release": "NativeOperationParams",
+    "runtime.child.list": "KernelEmptyParams",
+    "runtime.child.inspect": "NativeOperationParams",
+    "runtime.child.report.read": "NativeChildReportReadParams",
+    "runtime.child.for_thread": "NativeThreadParams",
+    "runtime.child.prepare": "NativeChildPrepareParams",
+    "runtime.child.fail": "NativeChildFailParams",
+    "runtime.child.cancel": "NativeOperationParams",
+    "runtime.child.release": "NativeOperationParams",
+    "runtime.child.reconcile": "KernelEmptyParams",
+    "runtime.child.wait.cancel": "NativeChildWaitParams"
   },
   "dto": {
     "NativeRetrievalInvocation": {"raw":"export type NativeRetrievalInvocation = { kind: 'model_step'; requestId: string; toolCallId: string } | { kind: 'policy_action'; actionId: string; nodeId: string; toolCallId: string };"},
@@ -621,7 +633,18 @@
     "KernelComputeHandleParams": {"fields":{"workspaceId":{"type":"string"},"jobId":{"type":"string"}}},
     "KernelComputeGrammarParams": {"fields":{"recipeId":{"type":"string"},"grammarPath":{"type":"string"},"grammarName":{"type":"string"},"style":{"type":"string"},"definitionQuery":{"type":"string"},"importQuery":{"type":"string","optional":true},"literalCallQuery":{"type":"string","optional":true},"maxDepth":{"type":"number","optional":true},"maxSymbols":{"type":"number","optional":true},"grammarHash":{"type":"string","optional":true}}},
     "KernelComputeRecord": {"fields":{"kind":{"type":"string"},"path":{"type":"string"},"revision":{"type":"string"},"data":{"type":"unknown"}}},
-    "KernelComputeReadResult": {"fields":{"jobId":{"type":"string"},"kernelEpoch":{"type":"string"},"workspaceId":{"type":"string"},"status":{"type":"\"queued\" | \"running\" | \"ready\" | \"empty\" | \"partial\" | \"failed\" | \"cancelled\""},"root":{"type":"string | null"},"records":{"type":"KernelComputeRecord[]"},"nextCursor":{"type":"number"},"endCursor":{"type":"number"},"scannedFiles":{"type":"number"},"message":{"type":"string | null"}}}
+    "KernelComputeReadResult": {"fields":{"jobId":{"type":"string"},"kernelEpoch":{"type":"string"},"workspaceId":{"type":"string"},"status":{"type":"\"queued\" | \"running\" | \"ready\" | \"empty\" | \"partial\" | \"failed\" | \"cancelled\""},"root":{"type":"string | null"},"records":{"type":"KernelComputeRecord[]"},"nextCursor":{"type":"number"},"endCursor":{"type":"number"},"scannedFiles":{"type":"number"},"message":{"type":"string | null"}}},
+    "NativeUnacceptedChildSource": {"fields": {"operation_id": {"type": "string"}, "parent_thread_id": {"type": "string"}, "source": {"type": "NativeLaunchSource"}, "pin_id": {"type": "string"}}},
+    "NativeChildPrepareParams": {"fields": {"operationId": {"type": "string"}, "source": {"type": "NativeLaunchSourceParams"}, "context": {"type": "NativeInitialContext"}}},
+    "NativeChildFailParams": {"fields": {"operationId": {"type": "string"}, "code": {"type": "string"}}},
+    "NativeChildWaitParams": {"fields": {"waitId": {"type": "string"}}},
+    "NativeChildInput": {"fields": {"task": {"type": "string"}, "model": {"type": "string"}, "profile": {"type": "string"}}},
+    "NativeChildSourcePin": {"fields": {"pin_id": {"type": "string"}, "root": {"type": "string"}, "source": {"type": "NativeLaunchSource"}}},
+    "NativeChildReportReadParams": {"fields": {"operationId": {"type": "string"}, "itemId": {"type": "string"}, "offset": {"type": "number", "optional": true}, "maxBytes": {"type": "number", "optional": true}}},
+    "NativeChildTextPage": {"fields": {"operation_id": {"type": "string"}, "item_id": {"type": "string"}, "offset": {"type": "number"}, "next_offset": {"type": "number | null"}, "total_bytes": {"type": "number"}, "text": {"type": "string"}}},
+    "NativeChildReport": {"fields": {"outcome": {"type": "NativeOutcome"}, "sender_thread_id": {"type": "string"}, "run_id": {"type": "string | null"}, "history_ids": {"type": "string[]"}, "detail": {"type": "string | null"}, "code_result": {"type": "string"}}},
+    "NativeChildTask": {"fields": {"operation_id": {"type": "string"}, "parent_run_id": {"type": "string"}, "parent_thread_id": {"type": "string"}, "parent_branch_id": {"type": "string"}, "origin": {"type": "unknown"}, "call_id": {"type": "string"}, "child_thread_id": {"type": "string"}, "child_branch_id": {"type": "string"}, "project_id": {"type": "string | null"}, "input": {"type": "NativeChildInput"}, "configuration": {"type": "unknown"}, "launch": {"type": "NativeLaunchSelection"}, "source_pin": {"type": "NativeChildSourcePin"}, "state": {"type": "string"}, "revision": {"type": "number"}, "cursor": {"type": "number"}, "receipt": {"type": "NativeReceipt | null"}, "report": {"type": "NativeChildReport | null"}, "resources_released": {"type": "boolean"}}},
+    "NativeChildWait": {"fields": {"id": {"type": "string"}, "run_id": {"type": "string"}, "subject": {"type": "string"}, "kind": {"type": "string"}, "after_cursor": {"type": "number"}, "trigger_cursor": {"type": "number | null"}, "cancelled": {"type": "boolean"}}}
   },
   "methods": {
     "runtime.branch.fork": "Fork immutable conversation ancestry into a new native branch",
@@ -766,6 +789,18 @@
     "compute.read": "read bounded computation records using an acknowledged cursor",
     "compute.cancel": "cancel the actual native computation and unblock output backpressure",
     "compute.release": "release only a terminal native computation and its reader references",
-    "compute.grammar.register": "register a Host-admitted grammar recipe, never download or execute Host code"
+    "compute.grammar.register": "register a Host-admitted grammar recipe, never download or execute Host code",
+    "runtime.child.sources.pending": "Discover unaccepted stopped dispatch source handoffs requiring cleanup",
+    "runtime.child.sources.release": "Record successful cleanup of an unaccepted source handoff",
+    "runtime.child.list": "Native collaboration authority: list",
+    "runtime.child.inspect": "Native collaboration authority: inspect",
+    "runtime.child.report.read": "Read a bounded page of original child report history",
+    "runtime.child.for_thread": "Native collaboration authority: for_thread",
+    "runtime.child.prepare": "Native collaboration authority: prepare",
+    "runtime.child.fail": "Native collaboration authority: fail",
+    "runtime.child.cancel": "Native collaboration authority: cancel",
+    "runtime.child.release": "Native collaboration authority: release",
+    "runtime.child.reconcile": "Native collaboration authority: reconcile",
+    "runtime.child.wait.cancel": "Native collaboration authority: wait.cancel"
   }
 }

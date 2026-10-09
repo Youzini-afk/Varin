@@ -29,6 +29,9 @@ export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAd
     'source/prepare': ['runtime', 'threadId', 'branchId', 'key', 'path', 'mode'],
     'context/compact': ['runtime', 'threadId', 'branchId', 'key', 'throughId', 'expectedRevision', 'model'],
     'context/publish': ['runtime', 'threadId', 'branchId', 'runId'], 'context/cancel': ['runtime', 'threadId', 'branchId', 'runId'], 'context/resume': ['runtime', 'threadId', 'branchId', 'runId'],
+    'child/report': ['runtime', 'threadId', 'branchId', 'operationId', 'itemId', 'offset', 'maxBytes'],
+    'child/list': ['runtime', 'threadId', 'branchId'], 'child/cancel': ['runtime', 'threadId', 'branchId', 'operationId'],
+    'child/wait/cancel': ['runtime', 'threadId', 'branchId', 'waitId'], 'tree/cancel': ['runtime', 'threadId', 'branchId'],
     fork: ['runtime', 'threadId', 'branchId', 'key', 'headId'],
     create: ['key'], list: [], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'expectedHead', 'model', 'source'],
     snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'mode'],
@@ -55,6 +58,11 @@ export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAd
     return adapter.decidePermission({ ...identity(body), operationId: text(body.operationId), permissionId: text(body.permissionId), decision: body.decision });
   });
   post('question/answer', body => adapter.answerQuestion({ ...identity(body), operationId: text(body.operationId), answer: text(body.answer) }));
+  post('child/report', body => adapter.readChildReport(identity(body), text(body.operationId), text(body.itemId), body.offset === undefined ? 0 : revision(body.offset), body.maxBytes === undefined ? 65536 : revision(body.maxBytes)));
+  post('child/list', body => adapter.children(identity(body)));
+  post('child/cancel', body => adapter.cancelChild(identity(body), text(body.operationId)));
+  post('child/wait/cancel', body => adapter.cancelChildWait(identity(body), text(body.waitId)));
+  post('tree/cancel', async body => { await adapter.cancelTree(identity(body)); return {}; });
   post('models', () => adapter.listModels());
   post('list', async () => (await adapter.runtime.threads()).filter(thread => thread.thread_id.startsWith('nativeThread:')));
   post('create', body => adapter.create(text(body.key)));

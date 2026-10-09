@@ -270,8 +270,23 @@ pub(crate) fn spawn(
                         runtime
                             .reap()
                             .map_err(|e| KernelError::Operation(e.to_string()))?;
+                        if matches!(method, "runtime.child.reconcile" | "runtime.child.wait.cancel") {
+                            runtime.quiesce_child_waits().map_err(|e| KernelError::Operation(e.to_string()))?;
+                        }
+                        if method == "runtime.child.cancel" {
+                            let p: NativeOperationParams = serde_json::from_value(params.clone())?;
+                            let child = runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?.child_task(&p.operation_id).map_err(domain)?;
+                            runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?.cancel_child(&p.operation_id).map_err(domain)?;
+                            if let Some(receipt) = child.receipt { runtime.cancel(&receipt.run_id).map_err(|e| KernelError::Operation(e.to_string()))?; }
+                            let catalog=runtime.catalog();let mut catalog=catalog.lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?;
+                            catalog.reconcile_child_reports().map_err(domain)?;
+                            return Ok(serde_json::to_value(catalog.child_task(&p.operation_id).map_err(domain)?)?);
+                        }
                         if method == "runtime.input.enqueue" {
                             let p: NativeInputEnqueueParams = serde_json::from_value(params)?;
+                            if runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?.child_task_for_thread(&p.thread_id).map_err(domain)?.is_some() {
+                                return Err(KernelError::Protocol("read-only delegated Threads accept only their admitted child task".into()));
+                            }
                             if let Some(configuration) = p.configuration.as_ref() {
                                 validate_configuration(configuration)?;
                             }
@@ -317,7 +332,7 @@ pub(crate) fn spawn(
                         }
                         if method == "runtime.launch.policy.prepare" {
                             let p: NativePolicyPrepareParams = serde_json::from_value(params)?;
-                            let identity = crate::native_questions::policy_identity(varin_runtime::execution::PolicyIdentity { name: p.identity.name, version: p.identity.version });
+                            let identity = crate::native_collaboration::policy_identity(crate::native_questions::policy_identity(varin_runtime::execution::PolicyIdentity { name: p.identity.name, version: p.identity.version }));
                             let mut models: Vec<varin_runtime::execution::policy_model::PolicyModelCapability> =
                                 p.policy_models.map(serde_json::from_value).transpose()?.unwrap_or_default();
                             // The Host selects registered models; only the kernel constructs their
@@ -367,6 +382,9 @@ pub(crate) fn spawn(
                                 catalog.run(&p.run_id).map_err(domain)?
                             };
                             let is_context_job = run.configuration.get("context_job").is_some();
+                            let is_child = runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?
+                                .require_child_launch(&run.id).map_err(domain)?.is_some();
+                            if is_child && (p.mcp_binding.is_some() || p.policy_binding.is_some()) { return Err(KernelError::Authorization("read-only child cannot expand its admitted capabilities".into())); }
                             if is_context_job && (selected.is_some() || p.tool_binding.is_some() || p.mcp_binding.is_some() || p.policy_binding.is_some()) {
                                 return Err(KernelError::Protocol(
                                     "context jobs use their fixed tool-free launch".into(),
@@ -419,8 +437,13 @@ pub(crate) fn spawn(
                                     .map_err(|error| KernelError::Authorization(error.to_string()))?;
                             }
                             if !is_context_job {
+                                // Context ownership is independent of the selected tool profile.
+                                // Read-only children synchronize their own admitted notes without gaining memory tools.
+                                start = crate::native_memory::configure_context(start, runtime.catalog(), memory_bridge.clone());
+                            }
+                            if !is_context_job && !is_child {
                                 start = crate::native_questions::configure(start, runtime.catalog());
-                                start = crate::native_memory::configure(start, runtime.catalog(), memory_bridge.clone(), true);
+                                start = crate::native_collaboration::configure(start, runtime.catalog());
                             }
                             if let Some(selected) = selected {
                                 let kinds: std::collections::BTreeSet<
@@ -434,8 +457,11 @@ pub(crate) fn spawn(
                                     crate::native_tools::NativeToolExecutor::selected_schemas(
                                         &kinds,
                                     );
-                                start.binding.tools.push(crate::native_questions::schema());
-                                start.binding.tools.push(crate::native_memory::schema(true));
+                                if !is_child {
+                                    start.binding.tools.push(crate::native_questions::schema());
+                                    start.binding.tools = crate::native_collaboration::schemas(start.binding.tools, selected.source.0.as_ref().is_some_and(|source| source.mode == varin_runtime::SourceMode::FixedBranch));
+                                    start.binding.tools.push(crate::native_memory::schema(true));
+                                }
                                 start.binding.tool_schema_generation =
                                     start.binding.configuration_generation;
                                 let source = selected
@@ -508,6 +534,7 @@ pub(crate) fn spawn(
                                 let retrieval_project_id = runtime.catalog().lock()
                                     .map_err(|_| KernelError::Storage("native catalog owner failed".into()))?
                                     .run_project_id(&p.run_id).map_err(domain)?;
+                                let collaboration_binding = binding.clone();
                                 let tools = crate::native_tools::NativeToolExecutor::new(
                                     binding,
                                     resources.clone(),
@@ -520,8 +547,18 @@ pub(crate) fn spawn(
                                     start.binding.configuration_generation;
                                 start.tools = Arc::new(tools);
                                 // The source executor replaced the initial built-ins; keep the existing policy wrapper.
-                                start.tools = crate::native_questions::wrap_tools(start.tools, runtime.catalog());
-                                start.binding.tools.push(crate::native_questions::schema());
+                                if !is_child {
+                                    start.tools = crate::native_questions::wrap_tools(start.tools, runtime.catalog());
+                                    start.binding.tools.push(crate::native_questions::schema());
+                                    start.binding.tools = crate::native_collaboration::schemas(start.binding.tools, collaboration_binding.source_mode == varin_runtime::SourceMode::FixedBranch);
+                                    start.tools = crate::native_collaboration::wrap_tools(start.tools, runtime.catalog(), Some(collaboration_binding), resources.clone());
+                                }
+                            }
+                            if launch_source.is_none() && !is_context_job && !is_child {
+                                start.binding.tools = crate::native_collaboration::schemas(start.binding.tools, false);
+                                start.tools = crate::native_collaboration::wrap_tools(start.tools, runtime.catalog(), None, resources.clone());
+                            }
+                            if !is_context_job && !is_child {
                                 start = crate::native_memory::configure(start, runtime.catalog(), memory_bridge.clone(), true);
                             }
                             let mcp_binding = p.mcp_binding.map(native_mcp_binding).transpose()?;
@@ -750,6 +787,7 @@ pub(crate) fn spawn(
                             let p: NativeRunParams = serde_json::from_value(params)?;
                             let waiting = runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?
                                 .run(&p.run_id).map_err(domain)?.waiting_on;
+                            if waiting.as_deref().is_some_and(|id|id.starts_with("child-wait:")) {runtime.quiesce_child_waits().map_err(|e|KernelError::Operation(e.to_string()))?;}
                             if let Some(operation_id) = waiting.as_deref().and_then(|id| id.strip_prefix("question:")) {
                                 runtime.quiesce_question(operation_id).map_err(|e| KernelError::Operation(e.to_string()))?;
                             }
@@ -974,6 +1012,39 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
     }
 
     match method {
+        "runtime.child.report.read" => {let p:NativeChildReportReadParams=serde_json::from_value(params)?;
+            let offset=usize::try_from(p.offset.unwrap_or(0)).map_err(|_|KernelError::Protocol("invalid offset".into()))?;
+            let max=usize::try_from(p.max_bytes.unwrap_or(65536)).map_err(|_|KernelError::Protocol("invalid maxBytes".into()))?;
+            Ok(serde_json::to_value(catalog.read_child_report(&p.operation_id,&p.item_id,offset,max).map_err(domain)?)?)},
+        "runtime.child.sources.pending" => Ok(serde_json::to_value(catalog.unaccepted_child_sources().map_err(domain)?)?),
+        "runtime.child.sources.release" => {let p:NativeOperationParams=serde_json::from_value(params)?;catalog.mark_unaccepted_child_source_released(&p.operation_id).map_err(domain)?;Ok(json!({}))},
+        "runtime.child.list" => Ok(serde_json::to_value(catalog.child_tasks().map_err(domain)?)?),
+        "runtime.child.for_thread" => { let p: NativeThreadParams = serde_json::from_value(params)?; Ok(serde_json::to_value(catalog.child_task_for_thread(&p.thread_id).map_err(domain)?)?) },
+        "runtime.child.inspect" | "runtime.child.cancel" | "runtime.child.release" => {
+            let p: NativeOperationParams = serde_json::from_value(params)?;
+            let child = match method { "runtime.child.cancel" => catalog.cancel_child(&p.operation_id), "runtime.child.release" => catalog.mark_child_resources_released(&p.operation_id), _ => catalog.child_task(&p.operation_id) }.map_err(domain)?;
+            Ok(serde_json::to_value(child)?)
+        }
+        "runtime.child.fail" => {
+            let p: NativeChildFailParams = serde_json::from_value(params)?;
+            if !["preparation_failed","source_unavailable","credentials_unavailable","binding_changed"].contains(&p.code.as_str()) {return Err(KernelError::Protocol("unknown child preparation failure".into()));}
+            Ok(serde_json::to_value(catalog.fail_child_preparation(&p.operation_id,&p.code).map_err(domain)?)?)
+        }
+        "runtime.child.prepare" => {
+            let p: NativeChildPrepareParams = serde_json::from_value(params)?;
+            let child=catalog.child_task(&p.operation_id).map_err(domain)?;
+            let source=varin_runtime::catalog::launches::SourceSelection {environment_run_id:p.source.environment_run_id,mode:p.source.mode,
+                live_root:p.source.live_root.and_then(|root|root.0).map(|root|varin_runtime::catalog::launches::LiveRoot{host_id:root.host_id,canonical_root:root.canonical_root,root_id:root.root_id}),
+                workspace_id:p.source.workspace_id,execution_workspace_id:p.source.execution_workspace_id,branch_id:p.source.branch_id.0,
+                revision:p.source.revision.0.map(u64::try_from).transpose().map_err(|_|KernelError::Protocol("source revision must be nonnegative".into()))?};
+            let basis=native_personalization_basis(p.context.personalization.ok_or_else(||KernelError::Protocol("child context requires admitted scope".into()))?)?;
+            let proposal=varin_runtime::catalog::context::ContextProposal {key:format!("initial-child-context:{}",p.operation_id),branch_id:child.child_branch_id,
+                through_id:None,expected_revision:0,summary:String::new(),effective_system_prompt:p.context.effective_system_prompt,
+                instruction_sources:p.context.instruction_sources,memory_checkpoint:p.context.memory_checkpoint.0};
+            Ok(serde_json::to_value(catalog.prepare_child(&p.operation_id,source,proposal,basis).map_err(domain)?)?)
+        }
+        "runtime.child.reconcile" => Ok(serde_json::to_value(catalog.deliver_child_waits().map_err(domain)?)?),
+        "runtime.child.wait.cancel" => {let p:NativeChildWaitParams=serde_json::from_value(params)?;Ok(serde_json::to_value(catalog.cancel_child_wait(&p.wait_id).map_err(domain)?)?)},
         "runtime.status" => Ok(json!({"epoch":catalog.epoch(),"eventCursor":catalog.event_cursor().map_err(domain)?})),
         "runtime.thread.create" => {
             let p: NativeThreadCreateParams = serde_json::from_value(params)?;
@@ -989,6 +1060,9 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         }
         "runtime.input.submit" => {
             let p: NativeInputSubmitParams = serde_json::from_value(params)?;
+            if catalog.child_task_for_thread(&p.thread_id).map_err(domain)?.is_some() {
+                return Err(KernelError::Protocol("read-only delegated Threads accept only their admitted child task".into()));
+            }
             validate_configuration(&p.configuration)?;
             if p.key.trim().is_empty() {
                 return Err(KernelError::Protocol(
@@ -1075,8 +1149,14 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                         } else {
                             0
                         },
-                        tools: { let mut tools = crate::native_questions::schemas(crate::native_tools::NativeToolExecutor::selected_schemas(&kinds)); tools.push(crate::native_memory::schema(true)); tools },
-                        policy: crate::native_questions::default_policy_identity(),
+                        tools: {
+                            let mut tools = crate::native_collaboration::schemas(
+                                crate::native_questions::schemas(crate::native_tools::NativeToolExecutor::selected_schemas(&kinds)),
+                                source.as_ref().is_some_and(|source| source.mode == varin_runtime::SourceMode::FixedBranch));
+                            tools.push(crate::native_memory::schema(true));
+                            tools
+                        },
+                        policy: crate::native_collaboration::default_policy_identity(),
                         source,
                     })
                 })

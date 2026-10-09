@@ -118,6 +118,6 @@ it('first public submit without a source completes without resource capabilities
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state).toBe('completed');
   const launch = (await f.runtime.launch(receipt.run_id))!;
   expect(launch.selection.source).toBeNull();
-  expect(launch.selection.tools.map(tool => tool.name)).toEqual(['native_ask_user']);
+  expect(launch.selection.tools.map(tool => tool.name)).toEqual(['native_ask_user', 'native_child_status', 'native_wait_child', 'native_child_report', 'native_memory']);
   expect(f.launchErrors).toEqual([]);
 });

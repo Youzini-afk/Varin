@@ -110,6 +110,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
     }
     if version == 3 {
         launches::check_format(db)?;
+        collaboration::check_format(db)?;
         context::check_format(db)?;
         let content_format:i64=db.query_row("SELECT version FROM runtime_content_format WHERE id=1",[],|r|r.get(0))?;
         if content_format!=3 {return Err(RuntimeError::Invalid("unsupported native content format; data was preserved".into()));}
@@ -161,6 +162,7 @@ impl Catalog {
         crate::content::initialize(&mut db, &content)?;
         launches::initialize(&mut db)?;
         context::initialize(&mut db)?;
+        if version == 0 { collaboration::initialize_new(&db)?; }
         let epoch: u64 = db.query_row(
             "UPDATE runtime_meta SET epoch=epoch+1 WHERE id=1 RETURNING epoch",
             [],
@@ -224,14 +226,14 @@ impl Catalog {
         self.submit_with_launch(command, None)
     }
     pub fn submit_with_launch(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>) -> Result<Receipt> {
-        self.submit_admission(command, launch, false, false, None)
+        self.submit_admission(command, launch, false, false, None, None)
     }
     /// Inherit the last committed source within admission, while retaining the new model/credential selection.
     pub fn submit_with_inherited_source(&mut self, command: &SubmitInput, launch: launches::LaunchSelection) -> Result<Receipt> {
-        if launch.source.is_some() || launch.tools.iter().any(|tool| tool.name != questions::QUESTION_TOOL && tool.name != "native_memory") {
+        if launch.source.is_some() || launch.tools.iter().any(|tool| !matches!(tool.name.as_str(), questions::QUESTION_TOOL | collaboration::STATUS_TOOL | collaboration::WAIT_TOOL | collaboration::REPORT_TOOL | "native_memory")) {
             return Err(RuntimeError::Invalid("source inheritance cannot also override source or tools".into()));
         }
-        self.submit_admission(command, Some(launch), false, true, None)
+        self.submit_admission(command, Some(launch), false, true, None, None)
     }
     /// Trusted first-input context is committed with input and launch, never before admission.
     /// Existing checkpoints (including uncertain retries) remain the frozen authority.
@@ -239,7 +241,7 @@ impl Catalog {
         self.submit_with_context_snapshot(command, launch, inherit_source, initial, None)
     }
     pub fn submit_with_context_snapshot(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>, inherit_source: bool, initial: Option<context::ContextProposal>, personalization: Option<personalization::PersonalizationBasis>) -> Result<Receipt> {
-        if inherit_source && launch.as_ref().is_none_or(|selection| selection.source.is_some() || selection.tools.iter().any(|tool| tool.name != questions::QUESTION_TOOL && tool.name != "native_memory")) {
+        if inherit_source && launch.as_ref().is_none_or(|selection| selection.source.is_some() || selection.tools.iter().any(|tool| !matches!(tool.name.as_str(), questions::QUESTION_TOOL | collaboration::STATUS_TOOL | collaboration::WAIT_TOOL | collaboration::REPORT_TOOL | "native_memory"))) {
             return Err(RuntimeError::Invalid("source inheritance requires an unoverridden model launch".into()));
         }
         if personalization.as_ref().is_some_and(|basis| basis.session_id != command.thread_id) {
@@ -251,12 +253,18 @@ impl Catalog {
             }
             if self.active_context(&command.branch_id)?.is_none() { Some(self.stage_context_with_personalization(proposal, personalization)?) } else { None }
         } else { None };
-        self.submit_admission(command, launch, false, inherit_source, staged)
+        self.submit_admission(command, launch, false, inherit_source, staged, None)
     }
-    fn submit_admission(&mut self, command: &SubmitInput, mut launch: Option<launches::LaunchSelection>, create_thread: bool, inherit_source: bool, initial_context: Option<(context::ContextCheckpoint, Value)>) -> Result<Receipt> {
+    fn submit_admission(&mut self, command: &SubmitInput, mut launch: Option<launches::LaunchSelection>, create_thread: bool, inherit_source: bool, initial_context: Option<(context::ContextCheckpoint, Value)>, child_operation: Option<&str>) -> Result<Receipt> {
         if let Some(selection)=launch.as_ref(){selection.validate()?;}
         execution_persistence::user_input_items("admission",&command.input)?;
-        let history_content = self.content.save_history(&command.input, &None)?;
+        let history_content = if let Some(operation_id) = child_operation {
+            let child = self.child_task(operation_id)?;
+            self.content.save_history(&serde_json::to_value(crate::execution::ConversationItem {
+                id: format!("child-input:{operation_id}"), provenance: crate::execution::Provenance::AgentMessage { thread_id: child.parent_thread_id },
+                content: crate::execution::Content::Text { text: child.input.task }, opaque: None,
+            })?, &None)?
+        } else { self.content.save_history(&command.input, &None)? };
         let input = if inherit_source { encode(&json!({"command":command,"launch":launch,"inherit_source":true}))? } else if let Some(selection)=launch.as_ref(){encode(&json!({"command":command,"launch":selection}))?}else{encode(command)?};
         let tx = self.db.transaction()?;
         let duplicate: Option<(String, String)> = tx
@@ -275,6 +283,7 @@ impl Catalog {
             return Ok(serde_json::from_str(&receipt)?);
         }
         context_jobs::require_regular_branch(&tx, &command.branch_id)?;
+        if let Some(operation_id) = child_operation { collaboration::validate_submission(&tx, operation_id, command)?; }
         if create_thread {
             tx.execute("INSERT INTO threads(id) VALUES(?1)", [&command.thread_id])?;
             tx.execute("INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,NULL)", params![command.branch_id, command.thread_id])?;
@@ -313,13 +322,13 @@ impl Catalog {
                 selection.validate()?;
             }
         }
-        let input_id = id();
+        let input_id = child_operation.map(|id| format!("child-input:{id}")).unwrap_or_else(id);
         let run_id = id();
         let history = HistoryItem {
             id: input_id.clone(),
             thread_id: thread.clone(),
             parent: head,
-            source: HistorySource::User,
+            source: if child_operation.is_some() { HistorySource::Agent } else { HistorySource::User },
             content: history_content,
             provider: None,
         };
@@ -379,6 +388,7 @@ impl Catalog {
             "INSERT INTO commands(id,input,receipt) VALUES(?1,?2,?3)",
             params![command.key, input, encode(&receipt)?],
         )?;
+        if let Some(operation_id) = child_operation { collaboration::publish_submission(&tx, operation_id, &receipt)?; }
         tx.commit()?;
         Ok(receipt)
     }
@@ -1332,3 +1342,5 @@ pub(crate) mod policy_model;
 
 #[path = "catalog_memory.rs"]
 pub mod memory;
+#[path = "catalog_collaboration.rs"]
+pub mod collaboration;

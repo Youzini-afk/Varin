@@ -1,5 +1,6 @@
 import { createPersonalizationContextResolver } from './lib/memory/personalization-context.js';
 import { createNativeMemoryOwner } from './lib/kernel/native-memory-owner.js';
+import { NativeThreadCollaboration } from './lib/kernel/native-thread-collaboration.js';
 import { createSemanticInferenceLedger } from './lib/knowledge/semantic/inference-ledger.js';
 import { createNativeSemanticInference } from './lib/knowledge/semantic/native-inference.js';
 import { createNativeRetrievalOwner } from './lib/kernel/native-retrieval-owner.js';
@@ -2947,6 +2948,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       console.error('[NativeThread] Launch preparation requires attention:', runId);
     }, createNativeThreadSourcePreparer({ documents: documentsAuthority, liveSources: nativeLiveSources, workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter) }),
     nativeContext);
+  const nativeCollaboration = new NativeThreadCollaboration({ runtime: nativeRuntime, models: nativeModelAuthority,
+    workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter), prepareContext: nativeContext,
+    admitSource: async source => { await documentsAuthority.inspectWorkspace(source.workspaceId); await documentsAuthority.inspectWorkspace(source.executionWorkspaceId); },
+    onError: (operationId, _error) => console.error('[NativeCollaboration] Preparation or delivery requires attention:', operationId ?? 'discovery'),
+  });
+  void nativeCollaboration.recover();
   refreshNativePersonalization = () => nativeThreads.refreshPersonalization();
   void refreshNativePersonalization().catch(() => console.error('[NativeThread] Personalization refresh requires attention'));
   void nativeThreads.recover().catch(() => console.error('[NativeThread] Saved launch discovery requires attention'));
@@ -4572,6 +4579,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // Stop timer/watcher producers before their runtime and storage
       // dependencies begin shutting down.
       nativeRunObservers.stop();
+      nativeCollaboration.stop();
       scheduledTasksRuntime.stop();
       await botService.dispose();
       followUpService.dispose();
