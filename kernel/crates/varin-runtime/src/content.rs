@@ -262,21 +262,16 @@ impl ContentStore {
             UNION ALL SELECT json_extract(p.value,'$.body') FROM run_launches l,json_each(l.body,'$.selection.policy_models') p");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.answer_ref') FROM operations WHERE json_extract(body,'$.executor')='ask_user' AND json_extract(body,'$.result.answer_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT state_ref FROM policy_checkpoints UNION ALL SELECT action_ref FROM policy_checkpoints");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.body_ref') FROM operations WHERE json_extract(body,'$.intent.kind') IN ('policy_read_graph_v1','policy_model_job_v1')
+            UNION ALL SELECT json_object('content_object',json_extract(receipt,'$.output.content_ref')) FROM policy_graph_nodes WHERE json_extract(receipt,'$.output.content_ref') IS NOT NULL");
         let mut references=Vec::new();
         let mut stmt=db.prepare(&roots)?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         for row in rows { references.push(serde_json::from_str::<Reference>(&row?)?); }
-        let mut operations=db.prepare("SELECT body FROM operations WHERE json_extract(body,'$.intent.kind')='policy_read_graph_v1'")?;
-        for row in operations.query_map([],|r|r.get::<_,String>(0))? {
-            let op:crate::types::Operation=serde_json::from_str(&row?)?;
-            let intent=crate::catalog::policy::graph_intent(&op)?.ok_or_else(||RuntimeError::Invalid("graph intent missing".into()))?;
-            let result=crate::catalog::policy::graph_result(&op,&intent)?;
-            for receipt in result.receipts.values() { if let Some(output)=&receipt.output {references.push(Reference{content_object:output.content_ref.clone()});} }
-        }
         let mut jobs=db.prepare("SELECT body FROM operations WHERE json_extract(body,'$.intent.kind')='policy_model_job_v1'")?;
         for row in jobs.query_map([],|r|r.get::<_,String>(0))? {
             let op:crate::types::Operation=serde_json::from_str(&row?)?;
-            crate::catalog::policy_model::model_intent(&op)?.ok_or_else(||RuntimeError::Invalid("planning intent missing".into()))?;
+            crate::catalog::policy_model::model_metadata(&op)?.ok_or_else(||RuntimeError::Invalid("planning intent missing".into()))?;
             let result=crate::catalog::policy_model::model_result(&op)?;
             references.push(serde_json::from_value(result.request_ref)?);
             if let Some(original)=result.original_ref{references.push(serde_json::from_value(original)?);}

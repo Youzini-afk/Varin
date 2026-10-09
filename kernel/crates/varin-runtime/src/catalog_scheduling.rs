@@ -82,20 +82,15 @@ impl Catalog {
                         "admission origin is not owned by this Run generation".into(),
                     ));
                 }
-                let intent = policy::graph_intent(&operation)?.ok_or_else(|| {
+                policy::graph_metadata(&operation)?.ok_or_else(|| {
                     RuntimeError::Invalid("origin is not a policy read graph".into())
                 })?;
-                if !intent
-                    .nodes()
-                    .iter()
-                    .any(|node| node.node.id == *node_id && node.node.call.call_id == call_id)
-                {
-                    return Err(RuntimeError::NotFound("policy graph tool call".into()));
-                }
-                let result = policy::graph_result(&operation, &intent)?;
+                let settled:bool = self.db.query_row("SELECT receipt IS NOT NULL FROM policy_graph_nodes WHERE action_id=?1 AND node_id=?2 AND call_id=?3",
+                    params![action_id,node_id,call_id],|row|row.get(0)).optional()?
+                    .ok_or_else(||RuntimeError::NotFound("policy graph tool call".into()))?;
                 (
                     format!("{action_id}:node:{node_id}"),
-                    result.receipts.contains_key(node_id),
+                    settled,
                 )
             }
         };

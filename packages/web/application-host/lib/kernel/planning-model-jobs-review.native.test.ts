@@ -261,7 +261,8 @@ async function graphPaths(f: Fixture, runId: string) {
   const events = await f.runtime.events(0, 256);
   const operations = await Promise.all(events.filter(event => event.kind === 'policy.graph_admitted'
     && (event.data as { run_id?: string }).run_id === runId).map(event => f.runtime.operation(event.subject)));
-  return operations.flatMap(operation => (operation.intent as { nodes: Array<{ node: { call: { arguments: { path: string } } } }> }).nodes
+  const bodies = await Promise.all(operations.map(operation => originalObject(f, (operation.intent as { body_ref: unknown }).body_ref)));
+  return bodies.flatMap(body => (body as { nodes: Array<{ node: { call: { arguments: { path: string } } } }> }).nodes
     .map(node => node.node.call.arguments.path));
 }
 

@@ -1157,7 +1157,7 @@ impl Catalog {
     ) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let mut op: Operation = super::record(&tx, "operations", operation_id)?;
-        if super::policy::graph_intent(&op)?.is_some() || super::policy_model::model_intent(&op)?.is_some() {return Err(RuntimeError::Invalid("policy graph cannot accept external executor receipts".into()));}
+        if super::policy::graph_metadata(&op)?.is_some() || super::policy_model::model_metadata(&op)?.is_some() {return Err(RuntimeError::Invalid("policy graph cannot accept external executor receipts".into()));}
         if receipt.identity != op.id
             || op.executor.as_deref() != Some(receipt.executor.as_str())
             || receipt.epoch.is_empty()
