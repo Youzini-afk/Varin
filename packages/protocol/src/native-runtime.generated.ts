@@ -71,6 +71,7 @@ export interface NativeThreadBranch {
 export interface NativeThreadSummary {
   thread_id: string;
   branches: NativeThreadBranch[];
+  observer_project_ids: Array<string | null>;
 }
 
 export type NativeRuntimeStreamEvent = {v: 1; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});

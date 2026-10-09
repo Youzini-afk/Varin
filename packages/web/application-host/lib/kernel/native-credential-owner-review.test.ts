@@ -198,3 +198,33 @@ it.each([
   expect(selected.configuration.endpoint).toBe(endpoint);
   expect((await selected.credentialOwner.resolve(scope)).headers.authorization).toBe('Bearer fake-adc-bearer');
 });
+
+it('private dispatch accepts only the digest contract and preserves request identity', async () => {
+  const replies: PrivateCredentialResponse[] = [];
+  const dispatches: unknown[] = [];
+  const credential = owner({ runtime: {
+    getAuth: async () => { throw new Error('dispatch must use request resolver'); },
+    resolveRequest: async (_provider, dispatch) => { dispatches.push(dispatch); return { auth: { apiKey: 'fake-dispatch-key' } }; },
+  } });
+  const bridge = new NativeCredentialBridge(() => 'digest-epoch', async reply => { replies.push(reply); }, () => { throw new Error('unexpected transport failure'); });
+  await bridge.register('digest-run', credential);
+  const request = { v: 1, kind: 'credential-request', id: 'same-request', kernelEpoch: 'digest-epoch', runId: 'digest-run', scope };
+  const valid = { method: 'POST', endpoint: 'https://model.example.test/v1/responses', payloadSha256: 'a'.repeat(64) };
+  for (const dispatch of [
+    { method: valid.method, endpoint: valid.endpoint, body: '{}' },
+    { ...valid, body: '{}' },
+    ...['', 'a'.repeat(63), 'a'.repeat(65), 'A'.repeat(64), 'g'.repeat(64)].map(payloadSha256 => ({ ...valid, payloadSha256 })),
+  ]) expect(bridge.consume({ ...request, dispatch })).toBe(true);
+  await Promise.resolve();
+  expect(dispatches).toEqual([]);
+  expect(replies).toEqual([]);
+  bridge.consume({ ...request, dispatch: valid });
+  await expect.poll(() => replies.length).toBe(1);
+  expect(dispatches).toEqual([valid]);
+  expect(replies[0]).toMatchObject({ id: request.id, kernelEpoch: request.kernelEpoch, ok: true, result: { scope } });
+  for (const payloadSha256 of ['', 'A'.repeat(64)]) {
+    await expect(credential.resolve(scope, undefined, { ...valid, payloadSha256 })).rejects.toMatchObject({ code: 'credential-request-payload-invalid' });
+  }
+  expect(dispatches).toHaveLength(1);
+  bridge.close();
+});

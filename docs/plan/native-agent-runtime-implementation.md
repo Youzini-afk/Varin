@@ -53,7 +53,7 @@
 | --- | --- | --- | --- | --- |
 | 扩设 §4–6、§10：同一能力合同与预绑定调用 | `kernel/crates/varin-runtime/src/composition.rs` 的 `CompositionRegistry`/pins；`composition/resolver.rs` 的根可达依赖图；`packages/extension-host/src/service-registry.ts` 的 provider/drain/候选替换 | `varin.context.fragments@1` 已贯穿真实 Host 安装/作用域选择、broker 声明、Rust resolver/registry、预绑定纯变换与实际模型请求；Host 显式 provider 直查及 service 索引已接通。通用检索/工具组合仍未完成，不能把静态工具选择视为统一 registry | 在已验收的 context、Decision、Observer 纵切上逐域接检索/工具合同；保持内部 Rust 直接调用、仅真实边界编码 | 两个项目选择不同实现；工具/调用方无需修改；加未使用扩展不改变调用扫描范围；普通缺失与选定实现失败分别呈现 |
 | 扩设 §5.2–5.4、§9：作用域、共享实例及局部准备 | resolver 已有 `ScopedSelection`/`PreparationKey`/`preparable`，把优先级解析明确交给现有 routing owner；Host supervisor 已有候选及 owner | `broker-supervisor.ts` 的公共 `#queue` 仍包住 prepare/activate/dispose；纯 resolver 的可并行节点不等于真实并行启用。父子作用域差量、共享实例准备仍需接线 | 耗时准备与释放移到实际实例/依赖范围，公共 owner 仅核对并发布选择；同共享键合并准备；不另外建安装器或配置库 | A 的 activate 或 dispose 未完成，独立 B 仍可启用/停用/调用；同依赖只启动一次；可选缺失不吞掉已选实现的启动失败；冲突选择给出实际来源 |
-| 扩设 §6：Provider / Transform / Decision / Observer 四类参与方式 | Rust `ModelProvider`、`ToolExecutor`、`AgentPolicy`、`ProgressSink` 和 Catalog durable events 各自存在；Host SDK 有 services/effect/Surface 贡献 | SDK 已有声明式 `provideContextFragments` 与同合同 inspect，内置默认/可安装项目实例经真实模型请求验收。Decision 与 Observer 已有真实 broker 作者合同、可安装示例及游标消费；多变换顺序/冲突、跨 branch/Run 的 Observer scope 和更广领域组合仍未完成；非阻塞 progress 不等于第三方执行隔离 | 在上述真实能力纵切中接入一个不可变 Transform、一个明确边界 Decision 和一个经 broker 消费提交事实的 Observer；复用事实游标与既有 worker，慢计算作为真实 Operation | 慢/同步阻塞观察插件不阻止工具提交与无关 worker；观察者重连按游标恢复；变换不修改原历史；决策只阻塞依赖自己的工作；观察者后续动作有新命令来源 |
+| 扩设 §6：Provider / Transform / Decision / Observer 四类参与方式 | Rust `ModelProvider`、`ToolExecutor`、`AgentPolicy`、`ProgressSink` 和 Catalog durable events 各自存在；Host SDK 有 services/effect/Surface 贡献 | SDK 已有声明式 `provideContextFragments` 与同合同 inspect，内置默认/可安装项目实例经真实模型请求验收。Decision 与 Observer 已有真实 broker 作者合同、可安装示例及游标消费；跨 branch/Run 的 Observer scope 已按不可变受理 checkpoint 接通；多变换顺序/冲突和更广领域组合仍未完成；非阻塞 progress 不等于第三方执行隔离 | 在上述真实能力纵切中接入一个不可变 Transform、一个明确边界 Decision 和一个经 broker 消费提交事实的 Observer；复用事实游标与既有 worker，慢计算作为真实 Operation | 慢/同步阻塞观察插件不阻止工具提交与无关 worker；观察者重连按游标恢复；变换不修改原历史；决策只阻塞依赖自己的工作；观察者后续动作有新命令来源 |
 | 总设 §11、扩设 §7：完整可替换 AgentPolicy | `execution.rs` 已有合法行动检查、版本化 `PolicyCheckpoint` 和默认循环；`model_session.rs` 默认绑定 `DefaultAgentPolicy` | `PolicyAction` 仅有 RequestModel/ExecuteTools/Wait/Complete/Fail；ExecuteTools 只解释模型给出的待结算批次。策略不能通过该合同提交独立工具图/子任务、多模型工作、交付或暂停；配置选择和安全边界替换未接通 | 以研究/计划执行的一条真实策略路径补行动受理与状态关联，接组合选择；慢规划模型用独立推理工作，不在 `decide()` 内做 I/O；保留核心交换配对 | 替换策略后原文/模型 opaque 仍可读；规划等待期间其他 Run 可执行；重开不会重做已受理行动；不兼容私有状态不伪造迁移；策略卸载不删除已受理子任务 |
 | 扩设 §9：热变更、旧调用及持久工作寿命 | Composition handle/lease/pins 区分 retired 与 revoked，按实际实现持有引用；HostServiceRegistry 有 inFlight/drain | Rust pins 尚未贯穿生产 Host/Surface 世代发布。现有局部通过不能证明模型生成时更新工具包、无 UI backend、独占资源交接和已提交选择重启恢复 | 让真实工具包的候选选择直接驱动组合发布；旧 ModelStep 保留 schema/实现，后续请求取新绑定；显式禁用沿执行身份取消；Surface 只作为声明的组依赖 | 候选失败保留旧组合；旧参数按旧实现完成；撤权后的新副作用被拒；关窗口不杀后台作业；旧无关实现引用释放；独占能力只暂停自己的新调用 |
 | 总设 §7–8：按真实资源的跨 Run 调度和便宜读取 | `execution.rs::execute_tools` 先建合同、按 `contracts_conflict` 排序、独立完成工具；`catalog_execution.rs` 已避免为普通只读结果建立持久 Operation | 当前依赖扫描限于单一模型批次，并为每项就绪工具启动线程。没有 runtime 级任务族公平准入；不同 Run 的同资源冲突不能由这个局部图解决。文件 CAS 是提交保证，不代替资源调度 | 把准入归到共享资源 owner：由已有可信资源计划确定 environment/view/真实目标，跨 Run 排队；短读保留内存身份；执行队列区分交互、阻塞 I/O、CPU 和维护，容量由资源/配置决定 | 两个 Run 的冲突写按资源顺序；不同资源继续；大量检索不会饿死另一个任务的交互；取消排队项不取消共享服务；无需给每个内部 helper 建 Operation |
@@ -116,6 +116,23 @@
 | Web/Electron/Mobile、远端、发行 | `application-client`/`protocol`、各surface、Host环境服务、kernel packaging | 同一后端生命周期；snapshot/cursor投影；环境绑定/fencing；平台驱动与安装升级实际验证 | 未完成 |
 | 用户资产与Pi退出 | Pi JSONL/配置/凭据引用/用户扩展源文件 | 一次性导入保留entry ID、分支、工具配对、压缩、opaque及未知项；原文件保留；切换结算在途工作 | 未开始 |
 
+## 已核验增量：不可变 Run 作用域与有界签名元数据
+
+- Observer 依据 Run 受理时固定的 context checkpoint 选择 project，包括排队等待的 NextRun；历史无项目 Run 不因以后发布上下文而被重新归属。checkpoint 的 project 元数据随原不可变正文原子发布，只用于查询，不是第二份项目配置权威。
+- 同一 Thread 的不同 branch/Run 可以分别选择项目 A、项目 B 或无项目 Observer；订阅、准备与消费独立。内核同时校验读取和 ACK 的精确 project/thread 范围，并保留 source reader 的 throughCursor 上界。
+- context domain 格式更新为 2；旧格式明确拒绝并保留已有数据库和内容，不猜测旧 Run 的归属，不添加内部迁移或静默重建。项目身份在受理处拒绝空白及边界 BOM 等非规范拼写，避免 Host 归一化后改变授权范围。
+- 独立真实 broker/内核测试 31/31 通过，含历史无项目、两个项目、排队受理、错误 scope/ACK、慢项目独立推进、重开去重、旧资产保留，以及实际 Host 的 BOM/NEL 边界反例。最终测试使用正式 Linux x64 release 内核，buildIdentity 0.9.24，SHA-256 `b5946c5ebe3210af91074382c7f6fa09c31d37d110685269e7c063f65b39b467`；Host 测试类型检查通过。
+- Bedrock 私有签名请求仅传 method、endpoint 与由实际请求序列化器计算的 payloadSha256，不再把完整模型正文塞入认证控制帧。Host 使用该散列进行 SigV4 签名并覆盖配置中的同名散列 header；签名元数据入共享写队列前使用同一 framing encoder 预检，失败沿原调用返回并释放等待者。
+- 签名独立检查 36 项通过：2 项真实 loopback HTTP 签名字节对照、23 项 Host owner/bridge、4 项 AWS/provider auth、7 项凭据权威检查。均使用假凭据；Unicode、转义正文与独立从实际 HTTP 正文计算的签名一致。超大正文端到端执行未运行，本结论不包含超大认证帧故障时的实际恢复，也不证明真实云账号接入。
+
+## 已核验增量：Linux 正式运行包
+
+- 使用受支持的 Web Host、CLI 和 UI 生产构建，以及正式 optimized release 内核完成真实 cloud runtime staging；冻结安装 665 个生产包，staged lock 与 canonical lock 逐字节一致。没有用 debug 内核替代发行产物。
+- 修复 workspace 依赖检查把合法子路径导入误判为未声明包的问题：按包根检查已声明依赖，错误仍报告原完整导入；12 项 layout/helper 检查通过，实际编译 Host 扫描无未声明项。
+- 发行内核 manifest smoke 验证无关 cwd、不可变分支、文件应用、搜索、Tree-sitter、shell exit 7、integrity 与错误 manifest 拒绝；复制包中的内置 LSP smoke、CLI help、Pi/扩展解析、PDF.js 和原生 Canvas 检查通过。
+- 隔离 HOME/data/agent 的实际 packaged HTTP 启动通过：health 为 ok，apiOnly 为 false，bundled Pi 1.0.4 与 Rust kernel 均 ready，首页和实际 main JS 返回 200，随后正常关闭。默认仍是现有 Pi 产品路径；此证据验证同包中原生内核和完整 UI 可交付，不表示已完成原生默认切换。
+- 此处是 Linux x64 源码构建、冻结安装与本地发行布局证据；未构建 Docker 镜像，未发布，也不替代 Windows/macOS 或真实模型账号验收。
+
 ## 已核验增量：各一条真实 Decision / Observer 消费路径
 
 这两条受限但实际运行的消费路径已接通，不代表任意工具图、子任务、多模型或完整领域覆盖已经完成。
@@ -127,7 +144,7 @@
 
 修复包括准备中取消泄漏 pin、旧 Run 拖住新 generation、未合作回调/释放器阻塞停机、初始读取失败后观察不恢复、微任务漏唤醒及跨 project scope 预读。Broker 清理宽限默认 5000 ms、可配置，只在进入释放后计时；强制终止须有实际退出证据，并保留 cleanup_unconfirmed 诊断，不宣称外部效果回滚。
 
-仍有限制：策略先按整个 Run 固定，未实现不兼容私有状态的热迁移；本 Observer 切片只支持单一 project/thread 范围。无上下文时 fork 后分别绑定不同项目的核心 Runs 仍可正常运行，但 Observer 必须撤回歧义订阅，不能把 B 的事实投给 A。最终还须按 branch/Run 的真实 scope 完成选择；这不是永久产品限制。外部副作用执行中崩溃的全部组合与跨平台发行尚未由本轮证明。
+仍有限制：策略先按整个 Run 固定，未实现不兼容私有状态的热迁移；独立工具图、子任务和辅助模型行动尚未接到策略合同。外部副作用执行中崩溃的全部组合与跨平台发行尚未由本轮证明。多项目 Observer 的原临时限制已由下述增量解除。
 
 ## 不可省略的实现决定
 

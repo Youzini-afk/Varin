@@ -148,7 +148,7 @@ configuration capacity is a supported Codex wire budget. Run-budget policy remai
 WebSocket incremental state, account-keyed socket pooling, zstd and full capability parity are not
 implemented by this SSE-only path. Real account authorization remains a separate acceptance gate; Host store wiring is now present; no live credentials were used to develop or validate these modules.
 
-## Bedrock ConverseStream bearer binding
+## Bedrock ConverseStream dispatch binding
 
 `bedrock-converse-stream` uses the actual `/model/{encodedModelId}/converse-stream` API and AWS
 binary eventstream, not SSE. The shared transport validates its content type; the decoder validates
@@ -160,10 +160,12 @@ complete JSON arguments and use consistent IDs on replay. Images use admitted in
 
 The production Host factory selects this family and resolves existing stored/configured bearer keys
 through the sole credential owner. Standard AWS endpoint region follows a model ARN or explicit owner
-region; custom registered endpoints remain intact. AWS profile/STS credential-chain identity and SigV4
-are pending a body-aware signing boundary. Native model-specific reasoning configuration, documents,
-cache policy and additional model fields are not yet equivalent to all SDK options. This bearer slice
-must not be described as complete Bedrock/cloud-auth parity.
+region; custom registered endpoints remain intact. AWS profile/default-chain identity and SigV4 use
+the existing Host credential owner and locked SDK signer (see `AUTH.md`). The private dispatch carries
+only method, registered endpoint and `payloadSha256`: a lowercase SHA-256 digest of the frozen HTTP
+bytes produced by the shared Rust serializer. Request content stays out of credential-control frames.
+Native model-specific reasoning configuration, documents, cache policy and additional model fields
+are not yet equivalent to all SDK options; live Bedrock/cloud-auth parity remains unverified.
 
 Protocol sources: locked Pi SDK 1.0.4 `api/bedrock-converse-stream.js`,
 https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_ConverseStream.html,

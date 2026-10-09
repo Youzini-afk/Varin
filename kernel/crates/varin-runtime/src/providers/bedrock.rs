@@ -164,8 +164,7 @@ impl ModelProvider for BedrockProvider {
         }
         let dispatch = CredentialDispatch {
             method: "POST".into(), endpoint: self.connection.endpoint.clone(),
-            body: String::from_utf8(request_body(&request.serialized)?)
-                .map_err(|_| failure("request_serialization", "model request is not UTF-8"))?,
+            payload_sha256: hex::encode(Sha256::digest(request_body(&request.serialized)?)),
         };
         let headers = self.connection.credentials.request_headers(
             request.view.binding.credential_ref.as_deref(), &dispatch, cancel)?;

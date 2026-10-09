@@ -11,6 +11,7 @@ import type { NativeThreadSummary } from './protocol.generated.js';
 
 interface Subscription {
   id: string;
+  key: string;
   threadId: string;
   scope: { sessionId: string; projectId?: string };
   binding: HostServiceBinding;
@@ -32,9 +33,8 @@ interface Selection {
 export class NativeRunObservers {
   private readonly subscriptions = new Map<string, Subscription>();
   private readonly preparing = new Map<string, number>();
-  private readonly pendingSelections = new Map<string, NativeThreadSummary>();
+  private readonly pendingSelections = new Map<string, { threadId: string; projectId: string | null }>();
   private readonly runThreads = new Map<string, string>();
-  private readonly branchThreads = new Map<string, string>();
   private readonly lifetime = new AbortController();
   private readonly removers: Array<() => void>;
   private selection: Selection | undefined;
@@ -101,12 +101,11 @@ export class NativeRunObservers {
     this.preparing.clear();
     this.pendingSelections.clear();
     this.runThreads.clear();
-    this.branchThreads.clear();
   }
 
-  private remove(threadId: string): void {
-    this.subscriptions.get(threadId)?.controller.abort();
-    this.subscriptions.delete(threadId);
+  private remove(key: string): void {
+    this.subscriptions.get(key)?.controller.abort();
+    this.subscriptions.delete(key);
   }
 
   private async refresh(): Promise<void> {
@@ -137,9 +136,9 @@ export class NativeRunObservers {
         // A normal generation replacement keeps the same stable selected provider and its pin.
         for (const subscription of this.subscriptions.values()) {
           try {
-            if (this.selectedProviderKey(this.selection, subscription.scope) !== subscription.binding.providerKey) this.remove(subscription.threadId);
+            if (this.selectedProviderKey(this.selection, subscription.scope) !== subscription.binding.providerKey) this.remove(subscription.key);
           } catch (error) {
-            this.remove(subscription.threadId);
+            this.remove(subscription.key);
             this.onError(subscription.threadId, error);
           }
         }
@@ -180,21 +179,26 @@ export class NativeRunObservers {
   private scheduleSelection(thread: NativeThreadSummary): void {
     if (!this.selection || this.lifetime.signal.aborted) return;
     for (const branch of thread.branches) {
-      this.branchThreads.set(branch.branch_id, thread.thread_id);
       if (branch.latest_run) this.runThreads.set(branch.latest_run.id, thread.thread_id);
     }
+    for (const projectId of thread.observer_project_ids) this.scheduleScope(thread.thread_id, projectId);
+  }
+
+  private scheduleScope(threadId: string, projectId: string | null): void {
+    if (!this.selection || this.lifetime.signal.aborted) return;
+    const key = JSON.stringify([threadId, projectId]);
     const revision = this.selection.revision;
-    this.pendingSelections.set(thread.thread_id, thread);
-    if (this.preparing.get(thread.thread_id) === revision) return;
-    this.pendingSelections.delete(thread.thread_id);
-    this.preparing.set(thread.thread_id, revision);
-    void this.select(thread, this.selection).catch(error => {
-      if (!this.lifetime.signal.aborted) this.onError(thread.thread_id, error);
+    this.pendingSelections.set(key, { threadId, projectId });
+    if (this.preparing.get(key) === revision) return;
+    this.pendingSelections.delete(key);
+    this.preparing.set(key, revision);
+    void this.selectScope(threadId, projectId, this.selection).catch(error => {
+      if (!this.lifetime.signal.aborted) this.onError(threadId, error);
     }).finally(() => {
-      if (this.preparing.get(thread.thread_id) === revision) {
-        this.preparing.delete(thread.thread_id);
-        const pending = this.pendingSelections.get(thread.thread_id);
-        if (pending) this.scheduleSelection(pending);
+      if (this.preparing.get(key) === revision) {
+        this.preparing.delete(key);
+        const pending = this.pendingSelections.get(key);
+        if (pending) this.scheduleScope(pending.threadId, pending.projectId);
       }
     });
   }
@@ -218,39 +222,28 @@ export class NativeRunObservers {
     return providerKey;
   }
 
-  private async select(thread: NativeThreadSummary, selection: Selection): Promise<void> {
-    const epoch = this.epoch;
-    const projects = new Set<string>();
-    for (const branch of thread.branches) {
-      const context = await this.runtime.context(branch.branch_id, epoch.signal);
-      epoch.signal.throwIfAborted();
-      if (context?.personalization?.projectId) projects.add(context.personalization.projectId);
-    }
-    if (this.selection !== selection || this.lifetime.signal.aborted || this.pendingSelections.has(thread.thread_id)) return;
-    if (projects.size > 1) {
-      this.remove(thread.thread_id);
-      throw new Error('Activity subscription requires an unambiguous thread project scope');
-    }
-    const projectId = [...projects][0];
-    const routing = { sessionId: thread.thread_id, ...(projectId ? { projectId } : {}) };
+  private async selectScope(threadId: string, projectId: string | null, selection: Selection): Promise<void> {
+    if (this.selection !== selection || this.lifetime.signal.aborted) return;
+    const key = JSON.stringify([threadId, projectId]);
+    const routing = { sessionId: threadId, ...(projectId !== null ? { projectId } : {}) };
     const providerKey = this.selectedProviderKey(selection, routing);
-    if (!providerKey) { this.remove(thread.thread_id); return; }
-    const id = JSON.stringify([`${VARIN_RUN_ACTIVITY_SERVICE_ID}@${VARIN_RUN_ACTIVITY_VERSION}`, providerKey, thread.thread_id, projectId ?? '']);
-    const previous = this.subscriptions.get(thread.thread_id);
-    if (previous && previous.id !== id) this.remove(thread.thread_id);
+    if (!providerKey) { this.remove(key); return; }
+    const id = JSON.stringify([`${VARIN_RUN_ACTIVITY_SERVICE_ID}@${VARIN_RUN_ACTIVITY_VERSION}`, providerKey, threadId, projectId]);
+    const previous = this.subscriptions.get(key);
+    if (previous && previous.id !== id) this.remove(key);
     const binding = await this.extensions.prepareService({ serviceId: VARIN_RUN_ACTIVITY_SERVICE_ID,
       version: VARIN_RUN_ACTIVITY_VERSION, method: 'observe', args: [], routing });
-    if (this.selection !== selection || this.lifetime.signal.aborted || this.pendingSelections.has(thread.thread_id)) return;
+    if (this.selection !== selection || this.lifetime.signal.aborted) return;
     if (binding.providerKey !== providerKey) throw new Error('Activity observer selection changed during preparation');
-    const current = this.subscriptions.get(thread.thread_id);
+    const current = this.subscriptions.get(key);
     if (current?.id === id) {
       // Ordinary replacement keeps the old invocation pin alive. New facts use the new binding.
       current.binding = binding;
       this.kick(current);
     } else {
-      const subscription: Subscription = { id, threadId: thread.thread_id, scope: routing, binding,
+      const subscription: Subscription = { id, key, threadId, scope: routing, binding,
         controller: new AbortController(), dirty: false, pumping: false };
-      this.subscriptions.set(thread.thread_id, subscription);
+      this.subscriptions.set(key, subscription);
       this.kick(subscription);
     }
   }
@@ -272,25 +265,6 @@ export class NativeRunObservers {
             const thread = await this.runtime.thread(event.subject, epoch.signal);
             epoch.signal.throwIfAborted();
             this.scheduleSelection(thread);
-          } else if (event.kind === 'branch.created') {
-            const data = event.data as { source?: unknown } | null;
-            const threadId = data && typeof data.source === 'string' ? this.branchThreads.get(data.source) : undefined;
-            if (threadId) this.remove(threadId);
-            const thread = threadId ? await this.runtime.thread(threadId, epoch.signal)
-              : (await this.runtime.threads(epoch.signal)).find(candidate => candidate.branches.some(branch => branch.branch_id === event.subject));
-            epoch.signal.throwIfAborted();
-            if (thread) { this.remove(thread.thread_id); this.scheduleSelection(thread); }
-          } else if (event.kind === 'context.published') {
-            const threadId = this.branchThreads.get(event.subject);
-            if (threadId) {
-              // Context publication can change the project scope. Close old admission and late
-              // ACK authority now, before awaiting the new scope. Same-provider code replacement
-              // does not use this path and retains its ordinary draining pin.
-              this.remove(threadId);
-              const thread = await this.runtime.thread(threadId, epoch.signal);
-              epoch.signal.throwIfAborted();
-              this.scheduleSelection(thread);
-            }
           } else if (VARIN_RUN_ACTIVITY_KINDS.includes(event.kind as typeof VARIN_RUN_ACTIVITY_KINDS[number])) {
             let threadId = this.runThreads.get(event.subject);
             if (!threadId) {
@@ -299,16 +273,17 @@ export class NativeRunObservers {
               this.runThreads.set(event.subject, threadId);
             }
             wakeThread = threadId;
-            if (!this.subscriptions.has(threadId)) {
-              const thread = await this.runtime.thread(threadId, epoch.signal);
-              epoch.signal.throwIfAborted();
-              this.scheduleSelection(thread);
-            }
+            // Admission may introduce a new project on another branch. Discovery includes every
+            // admitted scope; preparation is independent and never blocks this source reader.
+            const thread = await this.runtime.thread(threadId, epoch.signal);
+            epoch.signal.throwIfAborted();
+            this.scheduleSelection(thread);
           }
           this.sourceCursor = event.cursor;
           if (wakeThread) {
-            const subscription = this.subscriptions.get(wakeThread);
-            if (subscription) this.kick(subscription);
+            for (const subscription of this.subscriptions.values()) {
+              if (subscription.threadId === wakeThread) this.kick(subscription);
+            }
           }
         }
       }
@@ -345,7 +320,7 @@ export class NativeRunObservers {
       subscription.dirty = false;
       const throughCursor = this.sourceCursor;
       if (throughCursor === undefined) return;
-      // Never prefetch past scope-change facts the single source reader has not processed yet.
+      // Never prefetch past committed facts the single source reader has not processed yet.
       const facts = await this.runtime.observerEvents(subscription.id, subscription.threadId, 64, signal, throughCursor);
       for (const fact of facts) {
         signal.throwIfAborted();
@@ -359,7 +334,7 @@ export class NativeRunObservers {
           if (acknowledgement.subscriptionId !== delivery.subscriptionId || acknowledgement.deliveryId !== delivery.deliveryId
             || acknowledgement.cursor !== fact.cursor) throw new Error('Activity acknowledgement does not match the exact delivery');
           signal.throwIfAborted();
-          if (this.subscriptions.get(subscription.threadId) !== subscription) throw new Error('Activity subscription was superseded');
+          if (this.subscriptions.get(subscription.key) !== subscription) throw new Error('Activity subscription was superseded');
           pin.assertAvailable();
           // ACK ADMISSION: the exact receipt and its original pin are valid in this synchronous
           // Host turn. The following request only persists this established fact. Later revocation

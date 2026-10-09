@@ -23,6 +23,24 @@ writing Pi session files or the Host harness's existing execution records.
 The wire source remains `kernel/protocol/schema.json`; it generates the native state enums and the
 Host request/response DTOs. Domain implementation types remain private to Rust.
 
+## Run activity scope
+
+Each Run pins the context checkpoint present in its admission transaction, including queued
+NextRun admission. The reference records provenance; it does not stop ordinary execution context
+refreshes. An absent admission checkpoint stays unscoped even if its branch later gains context.
+Immutable checkpoint publication indexes its project identity beside the content reference, so
+observer discovery, reads, and ACK checks need no prompt-body hydration or mutable branch lookup.
+Context domain format 2 owns these columns; unsupported older internal formats fail without a
+scope migration or inferred historical binding.
+
+Host subscriptions select independently for each admitted Thread/project scope. Their stable
+identity includes service, selected provider, Thread and the exact nullable project (`null` means
+no project). Admission requires the project owner’s canonical, non-empty IDs; blank or padded
+project IDs fail explicitly instead of being trimmed or treated as no project.
+The native read and delivery authorities enforce the same scope, reuse original event
+cursors and delivery records, and apply the Host's processed `throughCursor` fence. A new branch
+or context cannot revoke or relabel another Run's historical activity.
+
 ## Immutable conversation and model bodies
 
 Model-step metadata holds content references for frozen requests and provider originals. History

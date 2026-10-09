@@ -136,6 +136,27 @@ describe('Varin cloud runtime layout', () => {
     ]);
   });
 
+  it('resolves subpath imports against the owning production package without accepting undeclared siblings', () => {
+    const fixture = createFixture();
+    const serverDir = path.join(fixture, 'packages', 'web', 'server');
+    const manifest = readJson(path.join(fixture, 'packages', 'web', 'package.json'));
+    manifest.dependencies['@varin/pi-host'] = 'workspace:*';
+    fs.writeFileSync(path.join(serverDir, 'subpaths.js'), [
+      "import { McpAuthority } from '@varin/pi-host/mcp-authority';",
+      "export { contract } from '@varin/extension-contract/nested/contract';",
+    ].join('\n'));
+    expect(findUndeclaredWorkspaceImports(serverDir, manifest)).toEqual([]);
+
+    fs.appendFileSync(path.join(serverDir, 'subpaths.js'), [
+      "\nimport '@varin/pi-host-extra/mcp-authority';",
+      "import { missing } from '@varin/missing-runtime/nested/entry';",
+    ].join('\n'));
+    expect(findUndeclaredWorkspaceImports(serverDir, manifest)).toEqual([
+      'subpaths.js -> @varin/pi-host-extra/mcp-authority',
+      'subpaths.js -> @varin/missing-runtime/nested/entry',
+    ]);
+  });
+
   it('ships the same pinned Pi SDK in the production dependency graph for every distribution', () => {
     const hostManifest = readJson(path.join(repoRoot, 'packages', 'pi-host', 'package.json'));
     for (const name of [

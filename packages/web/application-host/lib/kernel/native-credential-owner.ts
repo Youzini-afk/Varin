@@ -8,7 +8,7 @@ export interface NativeCredentialScope {
   account: string;
   generation: number;
 }
-export interface NativeCredentialDispatch { method: string; endpoint: string; body: string }
+export interface NativeCredentialDispatch { method: string; endpoint: string; payloadSha256: string }
 interface NativeResolvedAuth {
   auth: { apiKey?: string; headers?: Record<string, string | null>; baseUrl?: string };
   source?: string;
@@ -99,6 +99,9 @@ export class ExistingHostCredentialOwner {
       if (!sameScope(before, expected)) return fail('credential-scope-changed');
       if (dispatch && (dispatch.method !== 'POST' || registeredEndpoint(dispatch.endpoint).toString() !== this.#endpoint.toString())) {
         return fail('credential-request-target-changed');
+      }
+      if (dispatch && (typeof dispatch.payloadSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(dispatch.payloadSha256))) {
+        return fail('credential-request-payload-invalid');
       }
       const resolved = dispatch && this.#options.runtime.resolveRequest
         ? await this.#options.runtime.resolveRequest(this.#options.providerId, dispatch)
