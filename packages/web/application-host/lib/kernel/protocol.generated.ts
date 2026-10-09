@@ -160,6 +160,7 @@ export type KernelMethod =
   | "runtime.child.fail"
   | "runtime.child.cancel"
   | "runtime.child.release"
+  | "runtime.process.wait.reconcile"
   | "runtime.child.reconcile"
   | "runtime.child.wait.cancel";
 
@@ -2102,6 +2103,7 @@ export type KernelMethodParams = {
   "runtime.child.fail": NativeChildFailParams;
   "runtime.child.cancel": NativeOperationParams;
   "runtime.child.release": NativeOperationParams;
+  "runtime.process.wait.reconcile": KernelEmptyParams;
   "runtime.child.reconcile": KernelEmptyParams;
   "runtime.child.wait.cancel": NativeChildWaitParams;
 };
@@ -3463,6 +3465,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.child.release";
       params: NativeOperationParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.process.wait.reconcile";
+      params: KernelEmptyParams;
       epoch?: string;
       grantId?: string;
     }

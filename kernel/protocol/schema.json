@@ -165,6 +165,7 @@
     "runtime.child.fail": "NativeChildFailParams",
     "runtime.child.cancel": "NativeOperationParams",
     "runtime.child.release": "NativeOperationParams",
+    "runtime.process.wait.reconcile": "KernelEmptyParams",
     "runtime.child.reconcile": "KernelEmptyParams",
     "runtime.child.wait.cancel": "NativeChildWaitParams"
   },
@@ -800,6 +801,7 @@
     "runtime.child.fail": "Native collaboration authority: fail",
     "runtime.child.cancel": "Native collaboration authority: cancel",
     "runtime.child.release": "Native collaboration authority: release",
+    "runtime.process.wait.reconcile": "Deliver durable native process observations without restarting processes",
     "runtime.child.reconcile": "Native collaboration authority: reconcile",
     "runtime.child.wait.cancel": "Native collaboration authority: wait.cancel"
   }

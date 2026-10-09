@@ -14,7 +14,7 @@ interface Owners {
   admitSource(source: NativeThreadSource, identity: NativeThreadIdentity): Promise<void>;
   onError(operationId: string | undefined, error: unknown): void;
 }
-/** Consumes committed child facts, including startup backlog. Maps hold only cancellable live
+/** Consumes committed child/process-wait facts, including startup backlog. Maps hold only cancellable live
  * work; Catalog owns task identities, preparation receipts, reports and Wait delivery. */
 export class NativeThreadCollaboration {
   private readonly tasks = new Map<string, { controller: AbortController; work: Promise<void> }>();
@@ -57,7 +57,7 @@ export class NativeThreadCollaboration {
     try {
       while (this.dirty && !epoch.signal.aborted) {
         this.dirty = false;
-        const resumed = await this.owners.runtime.reconcileChildren(epoch.signal);
+        const resumed = [...new Set([...await this.owners.runtime.reconcileChildren(epoch.signal), ...await this.owners.runtime.reconcileProcessWaits(epoch.signal)])];
         const children = await this.owners.runtime.children(epoch.signal);
         const unaccepted = await this.owners.runtime.unacceptedChildSources(epoch.signal);
         for (const source of unaccepted) {
@@ -179,6 +179,14 @@ export class NativeThreadCollaboration {
           executionWorkspaceId: source.execution_workspace_id, branchId: source.branch_id, revision: source.revision, tools: [] },
         { runtime: 'nativeThread', threadId: run.thread_id, branchId: run.branch_id }), signal);
       }
+      // Process continuation must re-admit the current Host source before a fresh grant
+      // can observe the original process. Historical ownership is not current trust.
+      if (source?.mode === 'materialized' && source.branch_id !== null && source.revision !== null) {
+        await waitWithSignal(this.owners.admitSource({ mode: 'materialized', workspaceId: source.workspace_id,
+          executionWorkspaceId: source.execution_workspace_id, branchId: source.branch_id, revision: source.revision, tools: [] },
+        { runtime: 'nativeThread', threadId: run.thread_id, branchId: run.branch_id }), signal);
+      }
+      // live_root is revalidated by rebindLaunch's existing NativeLiveSource owner.
       const owner = await waitWithSignal(models.rebindModel(run.configuration as NativeModelSessionConfiguration, launch.selection.credential_scope), signal);
       signal.throwIfAborted();
       if (run.state === 'runnable') runtime.releaseRunCredentialOwner(runId);
