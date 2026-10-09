@@ -58,9 +58,10 @@ Host request/response DTOs. Domain implementation types remain private to Rust.
 Each Run pins the context checkpoint present in its admission transaction, including queued
 NextRun admission. The reference records provenance; it does not stop ordinary execution context
 refreshes. An absent admission checkpoint stays unscoped even if its branch later gains context.
-Immutable checkpoint publication indexes its project identity beside the content reference, so
-observer discovery, reads, and ACK checks need no prompt-body hydration or mutable branch lookup.
-Context domain format 3 owns these columns and the scoped ordinary-memory projection; unsupported older internal formats fail without a
+Immutable checkpoint publication indexes project, mode, role and session scope beside the content
+reference. Observer discovery, plan authorization and memory-tool scope checks need no prompt-body
+hydration or mutable branch lookup. Body reads verify these derived facts against the referenced value.
+Context domain format 4 owns these columns and referenced ordinary-memory projections; unsupported older internal formats fail without a
 scope migration or inferred historical binding.
 
 Host subscriptions select independently for each admitted Thread/project scope. Their stable
@@ -90,15 +91,23 @@ input for its current public API; cancellation preserves its content reference. 
 and tool-receipt records remain their existing inline domains in this slice.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 6 stores context-job ownership, source-part and immutable recipe references separately from model
+Catalog version 7 stores context-job ownership, source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. `Catalog::collect_content_objects` marks requests, provider originals,
 history, all model outputs (including rejected output), queued-history references, context
-checkpoints, summary recipes and source parts, and strictly typed policy-graph node and planning-model request/output references. It verifies every live object
+checkpoints, memory projections, summary recipes and source parts, and strictly typed policy-graph node and planning-model request/output references. It verifies every live object
 before sweeping and preserves unknown files; it never deletes history or invokes system-kernel GC.
 
 Provider serialization still visits and sends full legal requests; chunk reuse is not remote
 incremental-context support or a measured speedup claim.
+
+Memory synchronization and confirmed-receipt merges capture immutable references under Catalog,
+then load, validate, merge and stage bodies on the worker. Publication compares the actual state and,
+for synchronization, active checkpoint identities. A changed basis causes a fresh owner read; an
+unchanged owner revision regression remains an error. Late confirmed receipts may settle after Run
+cancellation, without reviving the Run or overwriting a newer note. Context compilation reads trusted
+receipt bodies on its read worker. First-input/context staging and conversation-fork body work remain
+separate unfinished control-path boundaries.
 
 ## Execution and trust
 

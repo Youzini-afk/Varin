@@ -58,89 +58,6 @@ pub fn allowed(basis: &personalization::PersonalizationBasis, scope: &Value) -> 
             _ => false,
         }
 }
-impl Catalog {
-    pub fn memory_state(&self, branch: &str) -> Result<Option<MemoryState>> {
-        let raw: Option<String> = self
-            .db
-            .query_row(
-                "SELECT body FROM memory_states WHERE branch_id=?1",
-                [branch],
-                |row| row.get(0),
-            )
-            .optional()?;
-        raw.map(|raw| serde_json::from_str(&raw).map_err(Into::into))
-            .transpose()
-    }
-    pub fn synchronize_memory(
-        &mut self,
-        run_id: &str,
-        epoch: u64,
-        mut state: MemoryState,
-    ) -> Result<()> {
-        let run = self.run(run_id)?;
-        fence(&run, epoch)?;
-        let context = self
-            .active_context(&run.branch_id)?
-            .ok_or_else(|| RuntimeError::Invalid("memory requires an admitted context".into()))?;
-        let basis = context
-            .personalization
-            .ok_or_else(|| RuntimeError::Invalid("memory requires owned personalization".into()))?;
-        if basis.session_id != run.thread_id {
-            return Err(RuntimeError::Conflict(
-                "memory scope differs from admitted thread".into(),
-            ));
-        }
-        state.known.clear();
-        let previous = self.memory_state(&run.branch_id)?;
-        if let Some(previous) = &previous {
-            if state.revision < previous.revision {
-                return Err(RuntimeError::Conflict(
-                    "memory owner revision moved backwards".into(),
-                ));
-            }
-            state.known = previous.known.clone();
-        }
-        for note in basis.memory_snapshot.memories.iter().chain(&state.memories) {
-            let id = note_id(note)?;
-            if !allowed(&basis, &note["scope"]) {
-                return Err(RuntimeError::Invalid(
-                    "memory projection contains another scope".into(),
-                ));
-            }
-            state.known.insert(
-                format!("{}:{id}", scope_key(&note["scope"])?),
-                json!({"id":id,"scope":note["scope"]}),
-            );
-        }
-        if basis.mode == "bot" && (!state.memories.is_empty() || !state.known.is_empty()) {
-            return Err(RuntimeError::Invalid(
-                "ordinary memory cannot enter Bot context".into(),
-            ));
-        }
-        if state
-            .note_revisions
-            .values()
-            .any(|revision| *revision > state.revision)
-        {
-            return Err(RuntimeError::Invalid(
-                "memory entry revision exceeds owner revision".into(),
-            ));
-        }
-        // Keep metadata only for IDs this branch is entitled to know.
-        let ids: std::collections::BTreeSet<String> = state
-            .known
-            .values()
-            .filter_map(|note| note["id"].as_u64().map(|id| id.to_string()))
-            .collect();
-        state.note_revisions.retain(|id, _| ids.contains(id));
-        if previous.as_ref() == Some(&state) {
-            return Ok(());
-        }
-        self.db.execute("INSERT INTO memory_states(branch_id,body) VALUES(?1,?2) ON CONFLICT(branch_id) DO UPDATE SET body=excluded.body", params![run.branch_id, encode(&state)?])?;
-        Ok(())
-    }
-}
-
 pub(super) fn project(
     state: Option<&MemoryState>,
     basis: Option<&personalization::PersonalizationBasis>,
@@ -232,74 +149,6 @@ pub(super) fn project(
         });
     }
     Ok(result)
-}
-
-impl Catalog {
-    pub fn run_personalization(
-        &self,
-        run_id: &str,
-    ) -> Result<Option<personalization::PersonalizationBasis>> {
-        let reference: Option<String> = self.db.query_row("SELECT c.body FROM runs r LEFT JOIN context_checkpoints c ON c.id=r.context_checkpoint_id WHERE r.id=?1", [run_id], |row| row.get(0))?;
-        reference
-            .map(|reference| {
-                let checkpoint: context::ContextCheckpoint =
-                    serde_json::from_value(self.content.load(&serde_json::from_str(&reference)?)?)?;
-                Ok(checkpoint.personalization)
-            })
-            .transpose()
-            .map(Option::flatten)
-    }
-    pub fn observe_memory_receipt(&mut self, run_id: &str, receipt: &Value) -> Result<()> {
-        let run = self.run(run_id)?;
-        let basis = self
-            .run_personalization(run_id)?
-            .ok_or_else(|| RuntimeError::Invalid("memory receipt has no admitted scope".into()))?;
-        let revision = receipt["revision"]
-            .as_u64()
-            .ok_or_else(|| RuntimeError::Invalid("memory receipt revision missing".into()))?;
-        let changes = receipt["changes"]
-            .as_array()
-            .ok_or_else(|| RuntimeError::Invalid("memory receipt changes missing".into()))?;
-        let mut state = self.memory_state(&run.branch_id)?.unwrap_or(MemoryState {
-            revision: basis.memory_snapshot.revision,
-            memories: basis.memory_snapshot.memories.clone(),
-            note_revisions: BTreeMap::new(),
-            known: BTreeMap::new(),
-        });
-        for change in changes {
-            let id = change["id"]
-                .as_u64()
-                .ok_or_else(|| RuntimeError::Invalid("memory receipt identity missing".into()))?;
-            if !allowed(&basis, &change["scope"]) {
-                return Err(RuntimeError::Invalid(
-                    "memory receipt is outside admitted scope".into(),
-                ));
-            }
-            let key = scope_key(&change["scope"])?;
-            state.known.insert(
-                format!("{key}:{id}"),
-                json!({"id":id,"scope":change["scope"]}),
-            );
-            if state
-                .note_revisions
-                .get(&id.to_string())
-                .is_none_or(|old| *old <= revision)
-            {
-                state.memories.retain(|note| {
-                    !(note["id"].as_u64() == Some(id)
-                        && scope_key(&note["scope"]).ok().as_deref() == Some(&key))
-                });
-                if !change["note"].is_null() {
-                    note_id(&change["note"])?;
-                    state.memories.push(change["note"].clone());
-                }
-                state.note_revisions.insert(id.to_string(), revision);
-            }
-        }
-        state.revision = state.revision.max(revision);
-        self.db.execute("INSERT INTO memory_states(branch_id,body) VALUES(?1,?2) ON CONFLICT(branch_id) DO UPDATE SET body=excluded.body", params![run.branch_id, encode(&state)?])?;
-        Ok(())
-    }
 }
 
 /// Worker-prepared candidates only. Operation ownership is still checked in the transaction;
@@ -497,31 +346,32 @@ fn owned_receipt(
     }
     Ok(Some(receipt))
 }
-impl Catalog {
-    pub(super) fn trusted_memory_receipts(&self, thread: &str) -> Result<BTreeMap<String, Value>> {
-        let mut statement = self.db.prepare("SELECT o.body FROM operations o JOIN runs r ON r.id=o.run_id WHERE json_extract(r.body,'$.thread_id')=?1 AND json_extract(o.body,'$.executor')='memory' AND json_extract(o.body,'$.outcome')='succeeded' AND json_extract(o.body,'$.effect')='confirmed'")?;
-        let rows = statement
-            .query_map([thread], |row| row.get::<_, String>(0))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        let mut receipts = BTreeMap::new();
-        for row in rows {
-            let operation: Operation = serde_json::from_str(&row)?;
-            let tool: crate::execution::AdmittedTool =
-                serde_json::from_value(operation.intent.clone())?;
-            if tool.call.name != "memory" {
-                continue;
-            }
-            if let Some(receipt) = operation
-                .result
-                .and_then(|result| result.get("memoryReceipt").cloned())
+pub(super) fn trusted_memory_receipts(
+    database: &Connection,
+    thread: &str,
+) -> Result<BTreeMap<String, Value>> {
+    let mut statement = database.prepare("SELECT o.body FROM operations o JOIN runs r ON r.id=o.run_id WHERE json_extract(r.body,'$.thread_id')=?1 AND json_extract(o.body,'$.executor')='memory' AND json_extract(o.body,'$.outcome')='succeeded' AND json_extract(o.body,'$.effect')='confirmed'")?;
+    let rows = statement
+        .query_map([thread], |row| row.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let mut receipts = BTreeMap::new();
+    for row in rows {
+        let operation: Operation = serde_json::from_str(&row)?;
+        let tool: crate::execution::AdmittedTool =
+            serde_json::from_value(operation.intent.clone())?;
+        if tool.call.name != "memory" {
+            continue;
+        }
+        if let Some(receipt) = operation
+            .result
+            .and_then(|result| result.get("memoryReceipt").cloned())
+        {
+            if receipt["origin"].as_str()
+                == Some(&format!("run:{}:{}", operation.run_id, operation.id))
             {
-                if receipt["origin"].as_str()
-                    == Some(&format!("run:{}:{}", operation.run_id, operation.id))
-                {
-                    receipts.insert(operation.id, receipt);
-                }
+                receipts.insert(operation.id, receipt);
             }
         }
-        Ok(receipts)
     }
+    Ok(receipts)
 }

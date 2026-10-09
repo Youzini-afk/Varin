@@ -994,8 +994,10 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
             }
             let initial_personalization = p.initial_context.as_ref().and_then(|context| context.personalization.clone())
                 .map(personalization_basis).transpose()?;
-            let plan_basis = match &initial_personalization { Some(basis) => Some(basis.clone()),
-                None => catalog.active_context(&p.branch_id).map_err(domain)?.and_then(|context|context.personalization) };
+            let plan_basis = match catalog.capture_active_checkpoint(&p.branch_id).map_err(domain)? {
+                Some(context)=>context.scope,
+                None=>initial_personalization.as_ref().map(varin_runtime::catalog::context::ContextScope::from),
+            };
             let plan_eligible = plan_basis.as_ref().is_some_and(|basis|basis.mode == "agent" && basis.thread_role == "main" && basis.session_id == p.thread_id);
             let inherit_source = p.launch.as_ref().and_then(|launch| launch.inherit_source).unwrap_or(false);
             let launch = p

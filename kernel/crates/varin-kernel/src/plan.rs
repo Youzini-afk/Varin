@@ -71,7 +71,7 @@ pub(crate) fn schema() -> ToolSchema {
 pub(crate) fn eligible(catalog: &Catalog, run_id: &str) -> Result<bool, ExecutionError> {
     let run = catalog.run(run_id).map_err(error)?;
     if catalog.is_context_job(run_id).map_err(error)? {return Ok(false);}
-    let basis = catalog.run_personalization(run_id).map_err(error)?;
+    let basis = catalog.run_context_scope(run_id).map_err(error)?;
     Ok(
         basis.is_some_and(|basis| {
             basis.mode == "agent"

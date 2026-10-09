@@ -3,7 +3,7 @@ use super::host_query::OwnerChannel;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
-use varin_runtime::catalog::{memory::MemoryState, personalization::PersonalizationBasis};
+use varin_runtime::catalog::{context::ContextScope,memory::MemoryState, personalization::PersonalizationBasis};
 use varin_runtime::execution::*;
 use varin_runtime::{Catalog, Effect, Lifetime, Outcome};
 const TOOL: &str = "memory";
@@ -45,13 +45,12 @@ pub(crate) fn schema(mutations: bool) -> ToolSchema {
         "properties":{"action":{"type":"string","enum":if mutations {vec!["read","search","save","delete"]} else {vec!["read","search"]}},"scope":{"type":"string","enum":["global","project","currentThread"]},"id":{"type":"integer","minimum":1},"content":{"type":"string"},"query":{"type":"string"},"revision":{"type":"integer","minimum":0}},"required":["action"],"additionalProperties":false}),
     }
 }
-fn scope(basis: &PersonalizationBasis) -> Value {
+fn scope(basis: &ContextScope) -> Value {
     json!({"mode":basis.mode,"sessionId":basis.session_id,"projectId":basis.project_id})
 }
-fn basis(catalog: &Arc<Mutex<Catalog>>, run_id: &str) -> Result<Option<PersonalizationBasis>, ExecutionError> {
-    let (run, read) = {let catalog = catalog.lock().map_err(error)?;
-        (catalog.run(run_id).map_err(error)?, catalog.capture_admitted_checkpoint(run_id).map_err(error)?)};
-    let basis = read.map(|read|read.load()).transpose().map_err(error)?.and_then(|checkpoint|checkpoint.personalization);
+fn basis(catalog: &Arc<Mutex<Catalog>>, run_id: &str) -> Result<Option<ContextScope>, ExecutionError> {
+    let (run, basis) = {let catalog = catalog.lock().map_err(error)?;
+        (catalog.run(run_id).map_err(error)?, catalog.run_context_scope(run_id).map_err(error)?)};
     if basis
         .as_ref()
         .is_some_and(|basis| basis.session_id != run.thread_id)
@@ -59,6 +58,13 @@ fn basis(catalog: &Arc<Mutex<Catalog>>, run_id: &str) -> Result<Option<Personali
         return Err(error("memory admission belongs to another thread"));
     }
     Ok(basis)
+}
+fn observe_receipt(catalog:&Arc<Mutex<Catalog>>,run_id:&str,receipt:&Value)->Result<(),ExecutionError> {
+    loop {
+        let preparation=catalog.lock().map_err(error)?.prepare_memory_receipt(run_id,receipt.clone()).map_err(error)?;
+        let prepared=preparation.load().map_err(error)?;
+        if catalog.lock().map_err(error)?.publish_memory_state(prepared).map_err(error)? {return Ok(());}
+    }
 }
 pub(crate) fn declaration(catalog: Arc<Mutex<Catalog>>, bridge: OwnerChannel, mutations: bool)
     -> varin_runtime::composition::tools::ToolDeclaration {
@@ -132,11 +138,7 @@ impl ToolExecutor for MemoryTools {
             let origin = format!("run:{}:{}", context.run_id, context.operation_id);
             let value = self.bridge.query(json!({"action":"tool","runId":context.run_id,"scope":scope(&basis),"origin":origin,"arguments":call.arguments}), cancel)?;
             if value["status"] == "ready" && !value["memoryReceipt"].is_null() {
-                self.catalog
-                    .lock()
-                    .map_err(error)?
-                    .observe_memory_receipt(&context.run_id, &value["memoryReceipt"])
-                    .map_err(error)?;
+                observe_receipt(&self.catalog,&context.run_id,&value["memoryReceipt"])?;
             }
             Ok::<_, ExecutionError>(value)
         })();
@@ -209,14 +211,16 @@ impl ContextPreparation for Prepare {
             if cancel.is_cancelled() {
                 return Err(error("context preparation cancelled"));
             }
-            let checkpoint = {
+            let (checkpoint,memory_basis) = {
                 let catalog = self.catalog.lock().map_err(error)?;
                 let run = catalog.run(run_id).map_err(error)?;
                 if run.epoch != owner_generation {
                     return Err(error("context owner generation changed"));
                 }
-                catalog.capture_active_checkpoint(&run.branch_id).map_err(error)?.ok_or_else(|| error("active context missing"))?
-            }.load().map_err(error)?;
+                (catalog.capture_active_checkpoint(&run.branch_id).map_err(error)?.ok_or_else(|| error("active context missing"))?,
+                    catalog.memory_state_identity(&run.branch_id).map_err(error)?)
+            };
+            let checkpoint=checkpoint.load().map_err(error)?;
             let reply = self.bridge.query(json!({"action":"synchronize","runId":run_id,"scope":scope(&admitted),"checkpoint":checkpoint}), cancel)?;
             if reply["status"] != "ready" {
                 return Err(error(
@@ -236,6 +240,7 @@ impl ContextPreparation for Prepare {
                 let catalog = self.catalog.lock().map_err(error)?;
                 let current = catalog.capture_active_checkpoint(&checkpoint.proposal.branch_id).map_err(error)?.ok_or_else(||error("context disappeared"))?;
                 if current.revision != checkpoint.revision {continue;}
+                if catalog.memory_state_identity(&checkpoint.proposal.branch_id).map_err(error)?!=memory_basis {continue;}
                 catalog.prepare_personalization_refresh(&checkpoint.proposal.branch_id,checkpoint.revision,
                     prepared.effective_system_prompt,prepared.instruction_sources,prepared.memory_checkpoint,prepared.personalization).map_err(error)?
             }.load().map_err(error)?;
@@ -251,10 +256,13 @@ impl ContextPreparation for Prepare {
             if current.revision != checkpoint.revision {
                 continue;
             }
+            if catalog.memory_state_identity(&checkpoint.proposal.branch_id).map_err(error)?!=memory_basis {continue;}
             catalog.publish_personalization_refresh(refresh).map_err(error)?;
-            catalog
-                .synchronize_memory(run_id, owner_generation, state)
-                .map_err(error)?;
+            let memory=catalog.prepare_memory_sync(run_id,owner_generation,state).map_err(error)?;
+            drop(catalog);
+            let memory=memory.load().map_err(error)?;
+            if cancel.is_cancelled(){return Err(error("context preparation cancelled"));}
+            if !self.catalog.lock().map_err(error)?.publish_memory_state(memory).map_err(error)? {continue;}
             return Ok(());
         }
     }
@@ -285,8 +293,9 @@ pub(crate) fn reconcile(
                 let origin = format!("run:{run_id}:{}", operation.id);
                 let response = bridge.query(json!({"action":"receipt","runId":run_id,"scope":scope(&admitted),"origin":origin,"arguments":tool.call.arguments}), &CancellationToken::default())?;
                 if response["status"] != "ready" || response["memoryReceipt"].is_null() { unresolved.push(operation.id); continue; }
-                let owner = runtime.catalog(); let mut catalog = owner.lock().map_err(error)?;
-                catalog.observe_memory_receipt(&run_id, &response["memoryReceipt"]).map_err(error)?;
+                let owner = runtime.catalog();
+                observe_receipt(&owner,&run_id,&response["memoryReceipt"])?;
+                let mut catalog=owner.lock().map_err(error)?;
                 catalog.record_external_receipt(&operation.id, varin_runtime::ExternalReceipt { identity: operation.id.clone(), executor: TOOL.into(), epoch: origin, outcome: Outcome::Succeeded, effect: Effect::Confirmed, result: response }).map_err(error)?;
                 reconciled.push(operation.id);
             }

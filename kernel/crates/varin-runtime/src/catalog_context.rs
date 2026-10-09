@@ -23,27 +23,139 @@ pub struct ContextCheckpoint {
     pub personalization: Option<super::personalization::PersonalizationBasis>,
 }
 
+/// Scope metadata derived from the exact immutable checkpoint at publication.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextScope {
+    pub mode: String,
+    pub thread_role: String,
+    pub session_id: String,
+    pub project_id: Option<String>,
+}
+impl From<&super::personalization::PersonalizationBasis> for ContextScope {
+    fn from(basis: &super::personalization::PersonalizationBasis) -> Self {
+        Self {
+            mode: basis.mode.clone(),
+            thread_role: basis.thread_role.clone(),
+            session_id: basis.session_id.clone(),
+            project_id: basis.project_id.clone(),
+        }
+    }
+}
+
 /// Read-only guard before opening a writable connection or checkpointing committed WAL.
 pub(super) fn check_format(db: &Connection) -> Result<()> {
-    let version: i64 = db.query_row("SELECT version FROM runtime_domains WHERE name='context_checkpoints'", [], |row| row.get(0))?;
-    if version != 3 { return Err(RuntimeError::Invalid("unsupported context checkpoint format; data preserved".into())); }
+    let version: i64 = db.query_row(
+        "SELECT version FROM runtime_domains WHERE name='context_checkpoints'",
+        [],
+        |row| row.get(0),
+    )?;
+    if version != 4 {
+        return Err(RuntimeError::Invalid(
+            "unsupported context checkpoint format; data preserved".into(),
+        ));
+    }
     for (table, expected, foreign_keys) in [
-        ("context_checkpoints", vec![("id","TEXT",0,1),("branch_id","TEXT",1,0),("revision","INTEGER",1,0),("through_id","TEXT",0,0),("body","TEXT",1,0),("project_id","TEXT",0,0)], vec![("branches","branch_id","id"),("history","through_id","id")]),
-        ("active_contexts", vec![("branch_id","TEXT",0,1),("checkpoint_id","TEXT",1,0)], vec![("branches","branch_id","id"),("context_checkpoints","checkpoint_id","id")]),
-        ("runs", vec![("id","TEXT",0,1),("branch_id","TEXT",1,0),("body","TEXT",1,0),("context_checkpoint_id","TEXT",0,0)], vec![("branches","branch_id","id"),("context_checkpoints","context_checkpoint_id","id")]),
-        ("memory_states", vec![("branch_id","TEXT",0,1),("body","TEXT",1,0)], vec![("branches","branch_id","id")]),
+        (
+            "context_checkpoints",
+            vec![
+                ("id", "TEXT", 0, 1),
+                ("branch_id", "TEXT", 1, 0),
+                ("revision", "INTEGER", 1, 0),
+                ("through_id", "TEXT", 0, 0),
+                ("body", "TEXT", 1, 0),
+                ("project_id", "TEXT", 0, 0),
+                ("scope", "TEXT", 0, 0),
+            ],
+            vec![
+                ("branches", "branch_id", "id"),
+                ("history", "through_id", "id"),
+            ],
+        ),
+        (
+            "active_contexts",
+            vec![("branch_id", "TEXT", 0, 1), ("checkpoint_id", "TEXT", 1, 0)],
+            vec![
+                ("branches", "branch_id", "id"),
+                ("context_checkpoints", "checkpoint_id", "id"),
+            ],
+        ),
+        (
+            "runs",
+            vec![
+                ("id", "TEXT", 0, 1),
+                ("branch_id", "TEXT", 1, 0),
+                ("body", "TEXT", 1, 0),
+                ("context_checkpoint_id", "TEXT", 0, 0),
+            ],
+            vec![
+                ("branches", "branch_id", "id"),
+                ("context_checkpoints", "context_checkpoint_id", "id"),
+            ],
+        ),
+        (
+            "memory_states",
+            vec![("branch_id", "TEXT", 0, 1), ("body", "TEXT", 1, 0)],
+            vec![("branches", "branch_id", "id")],
+        ),
     ] {
-        let table_type: Option<String> = db.query_row("SELECT type FROM sqlite_master WHERE name=?1", [table], |row| row.get(0)).optional()?;
+        let table_type: Option<String> = db
+            .query_row(
+                "SELECT type FROM sqlite_master WHERE name=?1",
+                [table],
+                |row| row.get(0),
+            )
+            .optional()?;
         let mut statement = db.prepare(&format!("PRAGMA table_info({table})"))?;
-        let columns = statement.query_map([], |r| Ok((r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(5)?)))?.collect::<std::result::Result<Vec<_>, _>>()?;
-        let expected = expected.into_iter().map(|(name, kind, required, pk)| (name.to_string(),kind.to_string(),required,pk)).collect::<Vec<_>>();
+        let columns = statement
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(5)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let expected = expected
+            .into_iter()
+            .map(|(name, kind, required, pk)| (name.to_string(), kind.to_string(), required, pk))
+            .collect::<Vec<_>>();
         let mut statement = db.prepare(&format!("PRAGMA foreign_key_list({table})"))?;
-        let mut actual_keys = statement.query_map([], |r| Ok((r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, String>(4)?, r.get::<_, String>(5)?, r.get::<_, String>(6)?, r.get::<_, String>(7)?)))?.collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut actual_keys = statement
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, String>(5)?,
+                    r.get::<_, String>(6)?,
+                    r.get::<_, String>(7)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         actual_keys.sort();
-        let mut expected_keys = foreign_keys.into_iter().map(|(target, from, to)| (target.to_string(),from.to_string(),to.to_string(),"NO ACTION".to_string(),"NO ACTION".to_string(),"NONE".to_string())).collect::<Vec<_>>();
+        let mut expected_keys = foreign_keys
+            .into_iter()
+            .map(|(target, from, to)| {
+                (
+                    target.to_string(),
+                    from.to_string(),
+                    to.to_string(),
+                    "NO ACTION".to_string(),
+                    "NO ACTION".to_string(),
+                    "NONE".to_string(),
+                )
+            })
+            .collect::<Vec<_>>();
         expected_keys.sort();
-        if table_type.as_deref() != Some("table") || columns != expected || actual_keys != expected_keys {
-            return Err(RuntimeError::Invalid("context checkpoint schema is malformed; data preserved".into()));
+        if table_type.as_deref() != Some("table")
+            || columns != expected
+            || actual_keys != expected_keys
+        {
+            return Err(RuntimeError::Invalid(
+                "context checkpoint schema is malformed; data preserved".into(),
+            ));
         }
     }
     for (table, columns, primary) in [
@@ -54,7 +166,9 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
         ("memory_states", vec!["branch_id"], true),
     ] {
         if !has_canonical_unique_index(db, table, &columns, primary)? {
-            return Err(RuntimeError::Invalid("context key schema is unsupported; data preserved".into()));
+            return Err(RuntimeError::Invalid(
+                "context key schema is unsupported; data preserved".into(),
+            ));
         }
     }
     Ok(())
@@ -63,16 +177,50 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
 // These domain keys are TEXT primary keys or an explicit compound UNIQUE, so each
 // has a physical index. Partial uniqueness is insufficient; collation and direction
 // are part of this format's canonical DDL (DESC alone does not weaken uniqueness).
-fn has_canonical_unique_index(db: &Connection, table: &str, columns: &[&str], primary: bool) -> Result<bool> {
-    let mut statement = db.prepare("SELECT name, [unique], origin, partial FROM pragma_index_list(?1)")?;
-    let indexes = statement.query_map([table], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?, row.get::<_, i64>(3)?)))?.collect::<std::result::Result<Vec<_>, _>>()?;
+fn has_canonical_unique_index(
+    db: &Connection,
+    table: &str,
+    columns: &[&str],
+    primary: bool,
+) -> Result<bool> {
+    let mut statement =
+        db.prepare("SELECT name, [unique], origin, partial FROM pragma_index_list(?1)")?;
+    let indexes = statement
+        .query_map([table], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
     for (name, unique, origin, partial) in indexes {
-        if unique != 1 || partial != 0 || (primary && origin != "pk") { continue; }
-        let mut statement = db.prepare("SELECT name, coll, [desc] FROM pragma_index_xinfo(?1) WHERE [key]=1 ORDER BY seqno")?;
-        let keys = statement.query_map([name], |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?)))?.collect::<std::result::Result<Vec<_>, _>>()?;
-        if keys.len() == columns.len() && keys.iter().zip(columns).all(|((name, collation, descending), column)| {
-            name.as_deref() == Some(*column) && collation == "BINARY" && *descending == 0
-        }) { return Ok(true); }
+        if unique != 1 || partial != 0 || (primary && origin != "pk") {
+            continue;
+        }
+        let mut statement = db.prepare(
+            "SELECT name, coll, [desc] FROM pragma_index_xinfo(?1) WHERE [key]=1 ORDER BY seqno",
+        )?;
+        let keys = statement
+            .query_map([name], |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        if keys.len() == columns.len()
+            && keys
+                .iter()
+                .zip(columns)
+                .all(|((name, collation, descending), column)| {
+                    name.as_deref() == Some(*column) && collation == "BINARY" && *descending == 0
+                })
+        {
+            return Ok(true);
+        }
     }
     Ok(false)
 }
@@ -88,9 +236,9 @@ pub(super) fn initialize(db: &mut Connection) -> Result<()> {
         .optional()?;
     match version {
         None => {
-            tx.execute_batch("CREATE TABLE memory_states(branch_id TEXT PRIMARY KEY REFERENCES branches(id),body TEXT NOT NULL); CREATE TABLE context_checkpoints(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),revision INTEGER NOT NULL,through_id TEXT REFERENCES history(id),body TEXT NOT NULL,project_id TEXT,UNIQUE(branch_id,revision)); CREATE TABLE active_contexts(branch_id TEXT PRIMARY KEY REFERENCES branches(id),checkpoint_id TEXT NOT NULL REFERENCES context_checkpoints(id)); INSERT INTO runtime_domains(name,version) VALUES('context_checkpoints',3);")?;
+            tx.execute_batch("CREATE TABLE memory_states(branch_id TEXT PRIMARY KEY REFERENCES branches(id),body TEXT NOT NULL); CREATE TABLE context_checkpoints(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),revision INTEGER NOT NULL,through_id TEXT REFERENCES history(id),body TEXT NOT NULL,project_id TEXT,scope TEXT,UNIQUE(branch_id,revision)); CREATE TABLE active_contexts(branch_id TEXT PRIMARY KEY REFERENCES branches(id),checkpoint_id TEXT NOT NULL REFERENCES context_checkpoints(id)); INSERT INTO runtime_domains(name,version) VALUES('context_checkpoints',4);")?;
         }
-        Some(3) => {}
+        Some(4) => {}
         Some(_) => {
             return Err(RuntimeError::Invalid(
                 "unsupported context checkpoint format; data preserved".into(),
@@ -100,10 +248,21 @@ pub(super) fn initialize(db: &mut Connection) -> Result<()> {
     for (table, expected) in [
         (
             "context_checkpoints",
-            vec!["id", "branch_id", "revision", "through_id", "body", "project_id"],
+            vec![
+                "id",
+                "branch_id",
+                "revision",
+                "through_id",
+                "body",
+                "project_id",
+                "scope",
+            ],
         ),
         ("active_contexts", vec!["branch_id", "checkpoint_id"]),
-        ("runs", vec!["id", "branch_id", "body", "context_checkpoint_id"]),
+        (
+            "runs",
+            vec!["id", "branch_id", "body", "context_checkpoint_id"],
+        ),
     ] {
         let mut statement = tx.prepare(&format!("PRAGMA table_info({table})"))?;
         let columns = statement
@@ -128,18 +287,43 @@ impl Catalog {
         ).optional()?.ok_or_else(|| RuntimeError::NotFound(run_id.into()))
     }
     pub fn active_context(&self, branch_id: &str) -> Result<Option<ContextCheckpoint>> {
-        self.capture_active_checkpoint(branch_id)?.map(CheckpointRead::load).transpose()
+        self.capture_active_checkpoint(branch_id)?
+            .map(CheckpointRead::load)
+            .transpose()
+    }
+    pub fn run_context_scope(&self, run_id: &str) -> Result<Option<ContextScope>> {
+        let value:Option<String>=self.db.query_row("SELECT c.scope FROM runs r LEFT JOIN context_checkpoints c ON c.id=r.context_checkpoint_id WHERE r.id=?1",[run_id],|row|row.get(0))?;
+        value
+            .map(|value| serde_json::from_str(&value).map_err(Into::into))
+            .transpose()
     }
     pub fn capture_active_checkpoint(&self, branch_id: &str) -> Result<Option<CheckpointRead>> {
-        self.capture_checkpoint("SELECT c.id,c.revision,c.body FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",branch_id)
+        self.capture_checkpoint("SELECT c.id,c.revision,c.body,c.scope FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",branch_id)
     }
     pub fn capture_admitted_checkpoint(&self, run_id: &str) -> Result<Option<CheckpointRead>> {
-        self.capture_checkpoint("SELECT c.id,c.revision,c.body FROM runs r JOIN context_checkpoints c ON c.id=r.context_checkpoint_id WHERE r.id=?1",run_id)
+        self.capture_checkpoint("SELECT c.id,c.revision,c.body,c.scope FROM runs r JOIN context_checkpoints c ON c.id=r.context_checkpoint_id WHERE r.id=?1",run_id)
     }
     fn capture_checkpoint(&self, sql: &str, id: &str) -> Result<Option<CheckpointRead>> {
-        let metadata: Option<(String,u64,String)> = self.db.query_row(sql,[id],|row| Ok((row.get(0)?,read_number(row,1)?,row.get(2)?))).optional()?;
-        metadata.map(|(id, revision, reference)| Ok(CheckpointRead {id,revision,reference:serde_json::from_str(&reference)?,
-            content:self.content.clone(),_publication:self.content.begin_publication()})).transpose()
+        let metadata: Option<(String, u64, String, Option<String>)> = self
+            .db
+            .query_row(sql, [id], |row| {
+                Ok((row.get(0)?, read_number(row, 1)?, row.get(2)?, row.get(3)?))
+            })
+            .optional()?;
+        metadata
+            .map(|(id, revision, reference, scope)| {
+                Ok(CheckpointRead {
+                    id,
+                    revision,
+                    scope: scope
+                        .map(|value| serde_json::from_str(&value))
+                        .transpose()?,
+                    reference: serde_json::from_str(&reference)?,
+                    content: self.content.clone(),
+                    _publication: self.content.begin_publication(),
+                })
+            })
+            .transpose()
     }
     /// A candidate fixes an ancestor, not a moving leaf. Appended tail input remains untouched.
     pub fn publish_context(&mut self, proposal: ContextProposal) -> Result<ContextCheckpoint> {
@@ -160,7 +344,9 @@ impl Catalog {
         proposal: ContextProposal,
         personalization: Option<super::personalization::PersonalizationBasis>,
     ) -> Result<(ContextCheckpoint, Value)> {
-        if let Some(basis) = &personalization { basis.validate()?; }
+        if let Some(basis) = &personalization {
+            basis.validate()?;
+        }
         let duplicate: Option<String> = self
             .db
             .query_row(
@@ -172,7 +358,11 @@ impl Catalog {
         if let Some(reference) = duplicate {
             let previous: ContextCheckpoint =
                 serde_json::from_value(self.content.load(&serde_json::from_str(&reference)?)?)?;
-            return if previous.proposal == proposal && personalization.as_ref().is_none_or(|basis| previous.personalization.as_ref() == Some(basis)) {
+            return if previous.proposal == proposal
+                && personalization
+                    .as_ref()
+                    .is_none_or(|basis| previous.personalization.as_ref() == Some(basis))
+            {
                 Ok((previous, serde_json::from_str(&reference)?))
             } else {
                 Err(RuntimeError::Conflict(
@@ -204,7 +394,9 @@ impl Catalog {
             .ok_or_else(|| RuntimeError::Invalid("context revision exhausted".into()))?;
         let personalization = match personalization {
             Some(basis) => Some(basis),
-            None => self.active_context(&proposal.branch_id)?.and_then(|context| context.personalization),
+            None => self
+                .active_context(&proposal.branch_id)?
+                .and_then(|context| context.personalization),
         };
         let checkpoint = ContextCheckpoint {
             id: proposal.key.clone(),
@@ -228,15 +420,24 @@ impl Catalog {
                 "context branch changed during preparation".into(),
             ));
         }
-        let capture = |kind| -> Result<ContextRead> { Ok(ContextRead { kind,
-            database:self.db.path().ok_or_else(||RuntimeError::Invalid("Catalog has no database".into()))?.into(),
-            _publication:self.content.begin_publication() }) };
+        let capture = |kind| -> Result<ContextRead> {
+            Ok(ContextRead {
+                kind,
+                database: self
+                    .db
+                    .path()
+                    .ok_or_else(|| RuntimeError::Invalid("Catalog has no database".into()))?
+                    .into(),
+                _publication: self.content.begin_publication(),
+            })
+        };
         if self.is_context_job(run_id)? {
-            let(part,previous)=self.context_job_input(run_id)?;
+            let (part, previous) = self.context_job_input(run_id)?;
             return Ok(Some(capture(ContextReadKind::Summary {
                 content: self.content.clone(),
-                job:self.capture_context_job(run_id)?,
-                part,previous,
+                job: self.capture_context_job(run_id)?,
+                part,
+                previous,
             })?));
         }
         let active:Option<(String,Option<String>,String)>=self.db.query_row("SELECT c.id,c.through_id,c.body FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",[&run.branch_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
@@ -246,12 +447,13 @@ impl Catalog {
         Ok(Some(capture(ContextReadKind::Checkpoint {
             compositions: self.context_compositions.clone(),
             branch_id: run.branch_id.clone(),
-            memory: self.memory_state(&run.branch_id)?,
-            trusted_receipts: self.trusted_memory_receipts(&run.thread_id)?,
+            memory: self.capture_memory_state(&run.branch_id)?,
+            thread_id: run.thread_id.clone(),
             content: self.content.clone(),
             checkpoint_id,
             reference: serde_json::from_str(&reference)?,
-            head:expected_head.map(str::to_owned), through_id,
+            head: expected_head.map(str::to_owned),
+            through_id,
         })?))
     }
 }
@@ -285,7 +487,7 @@ pub(super) fn publish_prepared(
     }
     // Searchable metadata is derived from this exact immutable body in the same publication.
     // It is not an independently editable project/configuration store.
-    tx.execute("INSERT INTO context_checkpoints(id,branch_id,revision,through_id,body,project_id) VALUES(?1,?2,?3,?4,?5,?6)",params![checkpoint.id,checkpoint.proposal.branch_id,sql_number(checkpoint.revision)?,checkpoint.proposal.through_id,encode(reference)?,checkpoint.personalization.as_ref().and_then(|basis| basis.project_id.as_deref())])?;
+    tx.execute("INSERT INTO context_checkpoints(id,branch_id,revision,through_id,body,project_id,scope) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![checkpoint.id,checkpoint.proposal.branch_id,sql_number(checkpoint.revision)?,checkpoint.proposal.through_id,encode(reference)?,checkpoint.personalization.as_ref().and_then(|basis| basis.project_id.as_deref()),checkpoint.personalization.as_ref().map(ContextScope::from).map(|scope|encode(&scope)).transpose()?])?;
     tx.execute("INSERT INTO active_contexts(branch_id,checkpoint_id) VALUES(?1,?2) ON CONFLICT(branch_id) DO UPDATE SET checkpoint_id=excluded.checkpoint_id",params![checkpoint.proposal.branch_id,checkpoint.id])?;
     event(
         tx,
@@ -300,12 +502,19 @@ pub(super) fn publish_prepared(
 pub struct CheckpointRead {
     pub id: String,
     pub revision: u64,
+    pub scope: Option<ContextScope>,
     reference: Value,
     content: crate::content::ContentStore,
     _publication: crate::content::ContentPublication,
 }
 impl CheckpointRead {
-    pub fn load(self) -> Result<ContextCheckpoint> { Ok(serde_json::from_value(self.content.load(&self.reference)?)?) }
+    pub fn load(self) -> Result<ContextCheckpoint> {
+        let checkpoint:ContextCheckpoint=serde_json::from_value(self.content.load(&self.reference)?)?;
+        if checkpoint.id!=self.id || checkpoint.revision!=self.revision || checkpoint.personalization.as_ref().map(ContextScope::from)!=self.scope {
+            return Err(RuntimeError::Invalid("context checkpoint differs from its ownership metadata".into()));
+        }
+        Ok(checkpoint)
+    }
 }
 
 pub struct ContextRead {
@@ -316,44 +525,84 @@ pub struct ContextRead {
 
 enum ContextReadKind {
     Checkpoint {
-        memory: Option<super::memory::MemoryState>,
-        trusted_receipts: std::collections::BTreeMap<String, Value>,
+        memory: Option<super::memory_state::MemoryStateRead>,
+        thread_id: String,
         compositions: std::sync::Arc<crate::composition::context::ContextCompositions>,
         branch_id: String,
         content: crate::content::ContentStore,
         checkpoint_id: String,
         reference: Value,
-        head: Option<String>, through_id: Option<String>,
+        head: Option<String>,
+        through_id: Option<String>,
     },
     Summary {
         content: crate::content::ContentStore,
-        job:super::context_jobs::ContextJobRead,
-        part:Value,
-        previous:Option<(String,Value)>,
+        job: super::context_jobs::ContextJobRead,
+        part: Value,
+        previous: Option<(String, Value)>,
     },
 }
 impl ContextRead {
     pub fn load(self) -> Result<ContextProjection> {
-        let Self {kind,database,_publication} = self;
-        let (content, checkpoint_id, reference, suffix, compositions, branch_id, memory, trusted_receipts) = match kind {
+        let Self {
+            kind,
+            database,
+            _publication,
+        } = self;
+        let (
+            content,
+            checkpoint_id,
+            reference,
+            suffix,
+            compositions,
+            branch_id,
+            memory,
+            trusted_receipts,
+        ) = match kind {
             ContextReadKind::Checkpoint {
-                compositions, branch_id, memory, trusted_receipts,
+                compositions,
+                branch_id,
+                memory,
+                thread_id,
                 content,
                 checkpoint_id,
                 reference,
-                head, through_id,
+                head,
+                through_id,
             } => {
-                let database = Connection::open_with_flags(database,
-                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
-                let suffix = super::context_jobs::source_metadata_until(&database, head.as_deref(), through_id.as_deref())?;
-                (content, checkpoint_id, reference, suffix, compositions, branch_id, memory, trusted_receipts)
-            },
+                let database = Connection::open_with_flags(
+                    database,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                        | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                )?;
+                let trusted_receipts =
+                    super::memory::trusted_memory_receipts(&database, &thread_id)?;
+                let memory = memory
+                    .map(super::memory_state::MemoryStateRead::load)
+                    .transpose()?;
+                let suffix = super::context_jobs::source_metadata_until(
+                    &database,
+                    head.as_deref(),
+                    through_id.as_deref(),
+                )?;
+                (
+                    content,
+                    checkpoint_id,
+                    reference,
+                    suffix,
+                    compositions,
+                    branch_id,
+                    memory,
+                    trusted_receipts,
+                )
+            }
             ContextReadKind::Summary {
                 content,
                 job,
-                part,previous,
+                part,
+                previous,
             } => {
-                let request=job.request()?;
+                let request = job.request()?;
                 let mut history = vec![ConversationItem {
                     id: format!("context-job:{}:system", request.key),
                     provenance: Provenance::SystemInstruction {
@@ -364,15 +613,18 @@ impl ContextRead {
                     },
                     opaque: None,
                 }];
-                if let Some((request_id,reference)) = previous {
-                    let summary=crate::context_material::summary_text(&content,&reference)?;
+                if let Some((request_id, reference)) = previous {
+                    let summary = crate::context_material::summary_text(&content, &reference)?;
                     history.push(ConversationItem {
-                        id:format!("context-job:{}:summary-so-far:{request_id}",request.key),
-                        provenance:Provenance::ExternalData {source:format!("model-output:{request_id}")},
-                        content:Content::Text {text:summary}, opaque:None,
+                        id: format!("context-job:{}:summary-so-far:{request_id}", request.key),
+                        provenance: Provenance::ExternalData {
+                            source: format!("model-output:{request_id}"),
+                        },
+                        content: Content::Text { text: summary },
+                        opaque: None,
                     });
                 }
-                let material:Vec<ConversationItem>=serde_json::from_value(content.load(&part)?)?;
+                let material: Vec<ConversationItem> = serde_json::from_value(content.load(&part)?)?;
                 history.extend(material);
                 history.push(ConversationItem {
                     id: format!("context-job:{}:request", request.key),
@@ -396,12 +648,21 @@ impl ContextRead {
         let mut history = Vec::new();
         // Body hydration, composition assembly and the pure typed transform execute outside
         // the Catalog mutex. The cache reuses unchanged selected handles across model requests.
-        let composition = checkpoint.personalization.as_ref().and_then(|basis| basis.context_composition.as_ref());
-        let fragments = compositions.bind(&branch_id, composition).map_err(RuntimeError::Invalid)?;
+        let composition = checkpoint
+            .personalization
+            .as_ref()
+            .and_then(|basis| basis.context_composition.as_ref());
+        let fragments = compositions
+            .bind(&branch_id, composition)
+            .map_err(RuntimeError::Invalid)?;
         let mut instruction_sources = checkpoint.proposal.instruction_sources.clone();
         if let Some(composition) = composition {
-            instruction_sources.push(format!("{}:{}:{}", crate::composition::context::CAPABILITY,
-                composition.provider_id, composition.content_version));
+            instruction_sources.push(format!(
+                "{}:{}:{}",
+                crate::composition::context::CAPABILITY,
+                composition.provider_id,
+                composition.content_version
+            ));
         }
         if !checkpoint.proposal.effective_system_prompt.is_empty() {
             history.push(ConversationItem {
@@ -416,7 +677,11 @@ impl ContextRead {
             });
         }
         if let Some(fragments) = fragments {
-            history.extend(fragments.apply(&checkpoint.id).map_err(RuntimeError::Invalid)?);
+            history.extend(
+                fragments
+                    .apply(&checkpoint.id)
+                    .map_err(RuntimeError::Invalid)?,
+            );
         }
         if checkpoint.proposal.through_id.is_some() {
             history.push(ConversationItem {
@@ -441,7 +706,12 @@ impl ContextRead {
                 history.push(serde_json::from_value(item.content)?);
             }
         }
-        history.extend(super::memory::project(memory.as_ref(), checkpoint.personalization.as_ref(), &history, &trusted_receipts)?);
+        history.extend(super::memory::project(
+            memory.as_ref(),
+            checkpoint.personalization.as_ref(),
+            &history,
+            &trusted_receipts,
+        )?);
         Ok(ContextProjection {
             checkpoint_id,
             history,
