@@ -87,7 +87,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@tailwindcss/postcss": "^4.0.0",
-    "@types/node": "^24.3.1",
+    "@types/node": "^26.6.4",
     "@types/novnc__novnc": "1.6.0",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19.3.0",
