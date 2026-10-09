@@ -42,6 +42,8 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "process.subscription.unsubscribe",
 ];
 pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
+    ("runtime.thread.create", "branchId"),
+    ("runtime.branch.fork", "branchId"),
     ("runtime.input.submit", "branchId"),
     ("runtime.input.enqueue", "branchId"),
     ("runtime.input.edit", "inputId"),
