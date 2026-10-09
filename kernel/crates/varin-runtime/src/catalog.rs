@@ -29,7 +29,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 11;
+pub(crate) const FORMAT: i64 = 12;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -112,6 +112,8 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
     if version == FORMAT {
         inputs::check_format(db)?;
         db.prepare("SELECT run_id,identity,state_ref,action_ref FROM policy_checkpoints")?;
+        db.prepare("SELECT action_id,node_id,call_id,position,receipt,outcome FROM policy_graph_nodes")?;
+        db.prepare("SELECT action_id,node_id,dependency_id FROM policy_graph_dependencies")?;
         db.prepare("SELECT id,run_id,revision,status,active,body FROM model_selections")?;
         context_jobs::check_format(db)?;
         launches::check_format(db)?;
@@ -661,7 +663,7 @@ impl Catalog {
     ) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let mut op: Operation = record(&tx, "operations", key)?;
-        if policy::graph_intent(&op)?.is_some() || policy_model::model_intent(&op)?.is_some(){return Err(RuntimeError::Invalid("policy actions require their typed dispatch owner".into()));}
+        if policy::graph_metadata(&op)?.is_some() || policy_model::model_metadata(&op)?.is_some(){return Err(RuntimeError::Invalid("policy actions require their typed dispatch owner".into()));}
         let run: Run = record(&tx, "runs", &op.run_id)?;
         if !op.handed_off {
             fence(&run, epoch)?;
@@ -705,7 +707,7 @@ impl Catalog {
     ) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let mut op: Operation = record(&tx, "operations", key)?;
-        if policy::graph_intent(&op)?.is_some() || policy_model::model_intent(&op)?.is_some() {return Err(RuntimeError::Invalid("policy graph settles through node receipts only".into()));}
+        if policy::graph_metadata(&op)?.is_some() || policy_model::model_metadata(&op)?.is_some() {return Err(RuntimeError::Invalid("policy graph settles through node receipts only".into()));}
         if op.epoch != epoch {
             return Err(RuntimeError::Conflict("stale operation executor".into()));
         }
@@ -1168,7 +1170,7 @@ impl Catalog {
         }
         let operations: Vec<Operation> = read_all(&tx, "operations")?;
         for mut op in operations {
-            if policy_model::model_intent(&op)?.is_some() {
+            if policy_model::model_metadata(&op)?.is_some() {
                 let mut result=policy_model::model_result(&op)?;
                 if result.dispatch==crate::execution::PolicyModelDispatch::Dispatched && result.receipt.is_none() {
                     let output:crate::execution::PolicyModelOutput=result.original_ref.as_ref().map(|r|self.content.load(r).and_then(|v|Ok(serde_json::from_value(v)?))).transpose()?.unwrap_or_default();
@@ -1180,8 +1182,8 @@ impl Catalog {
                 }
                 op.epoch=self.epoch;put(&tx,"operations",&op.id,&op)?;continue;
             }
-            if let Some(intent)=policy::graph_intent(&op)? {
-                policy::graph_result(&op,&intent)?;
+            if let Some(intent)=policy::graph_metadata(&op)? {
+                policy_body::PolicyGraphProgress::read(&op,&intent)?;
                 // No external effect exists: retry only missing pure reads, retaining settled receipts.
                 op.epoch=self.epoch;
                 put(&tx,"operations",&op.id,&op)?;
@@ -1266,6 +1268,8 @@ CREATE UNIQUE INDEX model_steps_active ON model_steps(run_id) WHERE state IN ('p
 CREATE TABLE model_outputs(request_id TEXT PRIMARY KEY REFERENCES model_steps(id),body TEXT NOT NULL);
 CREATE TABLE tool_calls(request_id TEXT NOT NULL REFERENCES model_steps(id),call_id TEXT NOT NULL,body TEXT NOT NULL,receipt TEXT,committed INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(request_id,call_id));
 CREATE TABLE policy_checkpoints(run_id TEXT PRIMARY KEY REFERENCES runs(id),identity TEXT NOT NULL,state_ref TEXT NOT NULL,action_ref TEXT NOT NULL);
+CREATE TABLE policy_graph_nodes(action_id TEXT NOT NULL REFERENCES operations(id),node_id TEXT NOT NULL,call_id TEXT NOT NULL,position INTEGER NOT NULL,receipt TEXT,outcome TEXT,PRIMARY KEY(action_id,node_id),UNIQUE(action_id,call_id),UNIQUE(action_id,position));
+CREATE TABLE policy_graph_dependencies(action_id TEXT NOT NULL,node_id TEXT NOT NULL,dependency_id TEXT NOT NULL,PRIMARY KEY(action_id,node_id,dependency_id),FOREIGN KEY(action_id,node_id) REFERENCES policy_graph_nodes(action_id,node_id),FOREIGN KEY(action_id,dependency_id) REFERENCES policy_graph_nodes(action_id,node_id));
 CREATE TABLE events(cursor INTEGER PRIMARY KEY AUTOINCREMENT,subject TEXT NOT NULL,revision INTEGER NOT NULL,kind TEXT NOT NULL,data TEXT NOT NULL);
 CREATE INDEX events_condition ON events(subject,kind,cursor);
 CREATE TABLE waits(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),body TEXT NOT NULL);
@@ -1293,6 +1297,8 @@ pub mod launch_content;
 
 #[path="catalog_policy_checkpoint.rs"]
 pub(crate) mod policy_checkpoint;
+#[path="catalog_policy_body.rs"]
+pub(crate) mod policy_body;
 
 #[path="catalog_tools.rs"]
 pub mod tools;

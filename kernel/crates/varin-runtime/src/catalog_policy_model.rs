@@ -2,25 +2,13 @@
 use super::*;
 use crate::execution::*;
 
-pub(crate) fn model_intent(op: &Operation) -> Result<Option<PolicyModelIntent>> {
-    let kind = op.intent.get("kind").and_then(Value::as_str).unwrap_or("");
-    if !kind.starts_with("policy_model_job") {
-        return Ok(None);
-    }
-    if kind != "policy_model_job_v1" {
-        return Err(RuntimeError::Invalid(
-            "unsupported policy model format; data preserved".into(),
-        ));
-    }
-    let intent: PolicyModelIntent = serde_json::from_value(op.intent.clone())?;
-    if op.id != intent.action_id()
-        || op.lifetime != Lifetime::Run
-        || op.effect != Effect::None
-        || op.executor.as_deref() != Some("policy-model.v1")
-    {
-        return Err(RuntimeError::Invalid("policy model owner malformed".into()));
-    }
-    Ok(Some(intent))
+pub(crate) fn model_metadata(
+    op: &Operation,
+) -> Result<Option<super::policy_body::PolicyActionMetadata>> {
+    Ok(
+        super::policy_body::PolicyActionMetadata::from_operation(op)?
+            .filter(|metadata| metadata.graph_nodes().is_none()),
+    )
 }
 pub(crate) fn model_result(op: &Operation) -> Result<PolicyModelResult> {
     let result: PolicyModelResult = serde_json::from_value(
@@ -46,22 +34,39 @@ pub(crate) fn model_result(op: &Operation) -> Result<PolicyModelResult> {
 pub(crate) struct PolicyModelRead {
     content: crate::content::ContentStore,
     _publication: crate::content::ContentPublication,
-    pub(crate) intent: PolicyModelIntent,
+    pub(crate) metadata: super::policy_body::PolicyActionMetadata,
     pub(crate) result: PolicyModelResult,
     checkpoint: Option<super::policy_checkpoint::PolicyCheckpointRead>,
     pub(crate) cancel_requested: bool,
 }
 impl PolicyModelRead {
     pub(crate) fn load(self) -> Result<PolicyModelState> {
+        let intent = self.metadata.load_model(&self.content)?;
         let snapshot = serde_json::from_value(self.content.load(&self.result.request_ref)?)?;
-        let output = self.result.original_ref.as_ref()
-            .map(|reference| self.content.load(reference).and_then(|value| Ok(serde_json::from_value(value)?)))
-            .transpose()?.unwrap_or_default();
-        let decision = self.checkpoint.map(|checkpoint|checkpoint.load_pending()).transpose()?.flatten()
-            .filter(|decision|!matches!(decision.action,PolicyAction::RequestModelJob {..}));
+        let output = self
+            .result
+            .original_ref
+            .as_ref()
+            .map(|reference| {
+                self.content
+                    .load(reference)
+                    .and_then(|value| Ok(serde_json::from_value(value)?))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let decision = self
+            .checkpoint
+            .map(|checkpoint| checkpoint.load_pending())
+            .transpose()?
+            .flatten()
+            .filter(|decision| !matches!(decision.action, PolicyAction::RequestModelJob { .. }));
         Ok(PolicyModelState {
-            intent: self.intent, result: self.result, snapshot, output,
-            decision, cancel_requested: self.cancel_requested,
+            intent,
+            result: self.result,
+            snapshot,
+            output,
+            decision,
+            cancel_requested: self.cancel_requested,
         })
     }
 }
@@ -69,14 +74,70 @@ impl PolicyModelRead {
 pub(crate) struct PolicyModelAdmissionReferences {
     request: Value,
     capability: Value,
+    metadata: super::policy_body::PolicyActionMetadata,
     checkpoint: super::policy_checkpoint::PolicyCheckpointReferences,
 }
 impl PolicyModelAdmissionReferences {
-    pub fn write(content: &crate::content::ContentStore, intent: &PolicyModelIntent, snapshot: &RequestSnapshot) -> Result<Self> {
-        let PolicyModelIntent::PolicyModelJobV1 {state,capability,instructions,evidence,..} = intent;
-        let action = PolicyAction::RequestModelJob {capability_id:capability.capability_id.clone(),instructions:instructions.clone(),evidence:evidence.clone()};
-        Ok(Self {request:content.save(&serde_json::to_value(snapshot)?)?,capability:content.save(&serde_json::to_value(capability)?)?,
-            checkpoint:super::policy_checkpoint::PolicyCheckpointReferences::write(content,state,&action)?})
+    pub fn write(
+        content: &crate::content::ContentStore,
+        intent: &PolicyModelIntent,
+        snapshot: &RequestSnapshot,
+    ) -> Result<Self> {
+        let PolicyModelIntent::PolicyModelJobV1 {
+            action_id,
+            boundary,
+            identity,
+            state,
+            capability,
+            instructions,
+            evidence,
+        } = intent;
+        let mut expected = capability
+            .binding
+            .clone()
+            .ok_or_else(|| RuntimeError::Invalid("planning binding missing".into()))?;
+        expected.history_range = snapshot.view.binding.history_range.clone();
+        expected.instruction_sources = instructions.clone();
+        expected.memory_checkpoint = snapshot.view.binding.memory_checkpoint.clone();
+        if expected != snapshot.view.binding
+            || capability.status != PolicyModelStatus::Available
+            || capability.purpose != "planning"
+            || capability.supported_operation != "tool_free_text"
+            || instructions.is_empty()
+            || !snapshot.view.binding.tools.is_empty()
+        {
+            return Err(RuntimeError::Conflict(
+                "planning request differs from frozen capability".into(),
+            ));
+        }
+        if snapshot.view.origin
+            != (RequestOrigin::PolicyModelJob {
+                action_id: action_id.clone(),
+                purpose: capability.purpose.clone(),
+                boundary_id: boundary.id.clone(),
+            })
+        {
+            return Err(RuntimeError::Invalid("planning origin mismatch".into()));
+        }
+        let metadata = super::policy_body::PolicyActionMetadata::PolicyModelJobV1 {
+            action_id: action_id.clone(),
+            boundary: boundary.clone(),
+            identity: identity.clone(),
+            body_ref: content.save(&serde_json::to_value(intent)?)?,
+        };
+        let action = PolicyAction::RequestModelJob {
+            capability_id: capability.capability_id.clone(),
+            instructions: instructions.clone(),
+            evidence: evidence.clone(),
+        };
+        Ok(Self {
+            metadata,
+            request: content.save(&serde_json::to_value(snapshot)?)?,
+            capability: content.save(&serde_json::to_value(capability)?)?,
+            checkpoint: super::policy_checkpoint::PolicyCheckpointReferences::write(
+                content, state, &action,
+            )?,
+        })
     }
 }
 
@@ -92,25 +153,39 @@ impl PolicyModelOutputReferences {
     ) -> Result<Self> {
         let original = content.save(&serde_json::to_value(output)?)?;
         let evidence = if receipt.is_some_and(|receipt| receipt.usable) {
-            let text = output.items.iter().filter_map(|item| match &item.content {
-                Content::Text { text } => Some(text.as_str()), _ => None,
-            }).collect::<Vec<_>>().join("\n");
+            let text = output
+                .items
+                .iter()
+                .filter_map(|item| match &item.content {
+                    Content::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
             Some(content.save(&json!({"kind":"model_derived_evidence","text":text}))?)
-        } else { None };
+        } else {
+            None
+        };
         Ok(Self { original, evidence })
     }
 }
 impl Catalog {
     pub fn policy_model_job(&self, run_id: &str, epoch: u64) -> Result<Option<PolicyModelState>> {
-        self.prepare_policy_model_read(run_id, epoch)?.map(PolicyModelRead::load).transpose()
+        self.prepare_policy_model_read(run_id, epoch)?
+            .map(PolicyModelRead::load)
+            .transpose()
     }
-    pub(crate) fn prepare_policy_model_read(&self, run_id: &str, epoch: u64) -> Result<Option<PolicyModelRead>> {
+    pub(crate) fn prepare_policy_model_read(
+        &self,
+        run_id: &str,
+        epoch: u64,
+    ) -> Result<Option<PolicyModelRead>> {
         fence(&self.run(run_id)?, epoch)?;
         // The latest action across both domains owns the decision boundary.
         let key:Option<String>=self.db.query_row("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_read_graph_v1','policy_model_job_v1') ORDER BY rowid DESC LIMIT 1",[run_id],|r|r.get(0)).optional()?;
         let Some(key) = key else { return Ok(None) };
         let op: Operation = record(&self.db, "operations", &key)?;
-        let Some(intent) = model_intent(&op)? else {
+        let Some(metadata) = model_metadata(&op)? else {
             return Ok(None);
         };
         let result = model_result(&op)?;
@@ -119,14 +194,23 @@ impl Catalog {
         if result.receipt.is_some() && consumed > admitted {
             return Ok(None);
         }
-        let checkpoint = if result.receipt.is_some() { self.capture_policy_checkpoint(run_id)? } else { None };
-        if checkpoint.as_ref().is_some_and(|saved| &saved.identity != intent.checkpoint().0) {
-            return Err(RuntimeError::Conflict("policy checkpoint identity changed".into()));
+        let checkpoint = if result.receipt.is_some() {
+            self.capture_policy_checkpoint(run_id)?
+        } else {
+            None
+        };
+        if checkpoint
+            .as_ref()
+            .is_some_and(|saved| &saved.identity != metadata.identity())
+        {
+            return Err(RuntimeError::Conflict(
+                "policy checkpoint identity changed".into(),
+            ));
         }
         Ok(Some(PolicyModelRead {
             content: self.content.clone(),
             _publication: self.content.begin_publication(),
-            intent,
+            metadata,
             result,
             checkpoint,
             cancel_requested: op.cancel_requested,
@@ -141,8 +225,9 @@ impl Catalog {
     ) -> Result<PolicyModelState> {
         let _publication = self.content.begin_publication();
         let deliveries = super::memory::PreparedMemoryDeliveries::prepare(snapshot)?;
-        let references = PolicyModelAdmissionReferences::write(&self.content,intent,snapshot)?;
-        self.admit_policy_model_reference(run_id, epoch, intent, snapshot, references, deliveries)?.load()
+        let references = PolicyModelAdmissionReferences::write(&self.content, intent, snapshot)?;
+        self.admit_policy_model_reference(run_id, epoch, intent, snapshot, references, deliveries)?
+            .load()
     }
     pub(crate) fn admit_policy_model_reference(
         &mut self,
@@ -153,20 +238,25 @@ impl Catalog {
         references: PolicyModelAdmissionReferences,
         deliveries: super::memory::PreparedMemoryDeliveries,
     ) -> Result<PolicyModelRead> {
-        let PolicyModelAdmissionReferences {request:reference,capability:capability_ref,checkpoint} = references;
+        let PolicyModelAdmissionReferences {
+            request: reference,
+            capability: capability_ref,
+            metadata,
+            checkpoint,
+        } = references;
         let PolicyModelIntent::PolicyModelJobV1 {
             action_id,
             boundary,
             identity,
             state: _,
             capability,
-            instructions,
+            instructions: _,
             evidence,
         } = intent;
         let run = self.run(run_id)?;
         fence(&run, epoch)?;
         if let Some(op) = optional_record::<Operation>(&self.db, "operations", action_id)? {
-            if model_intent(&op)?.as_ref() != Some(intent) || op.run_id != run_id {
+            if model_metadata(&op)?.as_ref() != Some(&metadata) || op.run_id != run_id {
                 return Err(RuntimeError::Conflict(
                     "policy boundary intent changed".into(),
                 ));
@@ -192,35 +282,12 @@ impl Catalog {
         {
             return Err(RuntimeError::Conflict("planning boundary changed".into()));
         }
-        let mut expected = capability
-            .binding
-            .clone()
-            .ok_or_else(|| RuntimeError::Invalid("planning binding missing".into()))?;
-        expected.history_range = snapshot.view.binding.history_range.clone();
-        expected.instruction_sources = instructions.clone();
-        expected.memory_checkpoint = snapshot.view.binding.memory_checkpoint.clone();
-        if expected != snapshot.view.binding
-            || capability.status != PolicyModelStatus::Available
-            || capability.purpose != "planning"
-            || capability.supported_operation != "tool_free_text"
-            || instructions.is_empty()
-        {
-            return Err(RuntimeError::Conflict(
-                "planning request differs from frozen capability".into(),
-            ));
-        }
-        if snapshot.view.origin
-            != (RequestOrigin::PolicyModelJob {
-                action_id: action_id.clone(),
-                purpose: capability.purpose.clone(),
-                boundary_id: boundary.id.clone(),
-            })
-        {
-            return Err(RuntimeError::Invalid("planning origin mismatch".into()));
-        }
         if let Some(launch) = self.launch_metadata(run_id)? {
             if launch.selection.policy != *identity
-                || !launch.selection.policy_models.iter().any(|selected| selected.capability_id == capability.capability_id && selected.body == capability_ref)
+                || !launch.selection.policy_models.iter().any(|selected| {
+                    selected.capability_id == capability.capability_id
+                        && selected.body == capability_ref
+                })
             {
                 return Err(RuntimeError::Conflict(
                     "planning capability differs from pinned launch".into(),
@@ -250,7 +317,7 @@ impl Catalog {
             handed_off: false,
             executor: Some("policy-model.v1".into()),
             waiting_on: None,
-            intent: serde_json::to_value(intent)?,
+            intent: serde_json::to_value(&metadata)?,
             result: Some(serde_json::to_value(&result)?),
             external_receipt: None,
         };
@@ -278,12 +345,18 @@ impl Catalog {
         {
             return Err(RuntimeError::Conflict("policy identity changed".into()));
         }
-        checkpoint.publish(&tx,run_id,identity)?;
+        checkpoint.publish(&tx, run_id, identity)?;
         tx.execute(
             "INSERT INTO operations(id,run_id,body) VALUES(?1,?2,?3)",
             params![action_id, run_id, encode(&op)?],
         )?;
-        super::memory::record_deliveries(&tx, deliveries, &run, action_id, DeliveryState::Selected)?;
+        super::memory::record_deliveries(
+            &tx,
+            deliveries,
+            &run,
+            action_id,
+            DeliveryState::Selected,
+        )?;
         event(
             &tx,
             action_id,
@@ -300,25 +373,36 @@ impl Catalog {
         let reference = self.policy_model_request_reference(run_id, epoch, action)?;
         let snapshot = serde_json::from_value(self.content.load(&reference)?)?;
         let deliveries = super::memory::PreparedMemoryDeliveries::prepare(&snapshot)?;
-        self.dispatch_policy_model_prepared(run_id, epoch, action, &reference, &snapshot, deliveries)
+        self.dispatch_policy_model_prepared(
+            run_id, epoch, action, &reference, &snapshot, deliveries,
+        )
     }
-    pub(crate) fn policy_model_request_reference(&self, run_id: &str, epoch: u64, action: &str) -> Result<Value> {
+    pub(crate) fn policy_model_request_reference(
+        &self,
+        run_id: &str,
+        epoch: u64,
+        action: &str,
+    ) -> Result<Value> {
         fence(&self.run(run_id)?, epoch)?;
         let op: Operation = record(&self.db, "operations", action)?;
-        if model_intent(&op)?.is_none() || op.run_id != run_id || op.epoch != epoch {
+        if model_metadata(&op)?.is_none() || op.run_id != run_id || op.epoch != epoch {
             return Err(RuntimeError::Conflict("planning owner changed".into()));
         }
         Ok(model_result(&op)?.request_ref)
     }
     pub(crate) fn dispatch_policy_model_prepared(
-        &mut self, run_id: &str, epoch: u64, action: &str,
-        request_ref: &Value, snapshot: &RequestSnapshot,
+        &mut self,
+        run_id: &str,
+        epoch: u64,
+        action: &str,
+        request_ref: &Value,
+        snapshot: &RequestSnapshot,
         deliveries: super::memory::PreparedMemoryDeliveries,
     ) -> Result<()> {
         let run = self.run(run_id)?;
         fence(&run, epoch)?;
         let mut op: Operation = record(&self.db, "operations", action)?;
-        if model_intent(&op)?.is_none() || op.run_id != run_id || op.epoch != epoch {
+        if model_metadata(&op)?.is_none() || op.run_id != run_id || op.epoch != epoch {
             return Err(RuntimeError::Conflict("planning owner changed".into()));
         }
         let mut result = model_result(&op)?;
@@ -331,7 +415,9 @@ impl Catalog {
             ));
         }
         if &result.request_ref != request_ref || snapshot.view.request_id != action {
-            return Err(RuntimeError::Conflict("frozen planning request changed".into()));
+            return Err(RuntimeError::Conflict(
+                "frozen planning request changed".into(),
+            ));
         }
         result.dispatch = PolicyModelDispatch::Dispatched;
         op.result = Some(serde_json::to_value(result)?);
@@ -344,7 +430,8 @@ impl Catalog {
         // Admission froze this conversation boundary. Hydrating the request can race a new
         // history owner/head, so verify it again before recording paid dispatch intent.
         let (thread_id, head, active): (String, Option<String>, Option<String>) = tx.query_row(
-            "SELECT thread_id,head,active_run FROM branches WHERE id=?1", [&run.branch_id],
+            "SELECT thread_id,head,active_run FROM branches WHERE id=?1",
+            [&run.branch_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
         if active.as_deref() != Some(run_id)
@@ -354,7 +441,9 @@ impl Catalog {
             || snapshot.view.binding.history_range.branch_id != run.branch_id
             || snapshot.view.binding.history_range.leaf_id != head
         {
-            return Err(RuntimeError::Conflict("planning dispatch boundary changed".into()));
+            return Err(RuntimeError::Conflict(
+                "planning dispatch boundary changed".into(),
+            ));
         }
         put(&tx, "operations", action, &op)?;
         super::memory::record_deliveries(&tx, deliveries, &run, action, DeliveryState::Sent)?;
@@ -379,21 +468,37 @@ impl Catalog {
         let _publication = self.content.begin_publication();
         let reference = self.policy_model_request_reference(run_id, epoch, action)?;
         let snapshot = serde_json::from_value(self.content.load(&reference)?)?;
-        let deliveries = receipt.filter(|receipt| receipt.usable)
-            .map(|_| super::memory::PreparedMemoryDeliveries::prepare(&snapshot)).transpose()?;
+        let deliveries = receipt
+            .filter(|receipt| receipt.usable)
+            .map(|_| super::memory::PreparedMemoryDeliveries::prepare(&snapshot))
+            .transpose()?;
         let output_refs = PolicyModelOutputReferences::write(&self.content, output, receipt)?;
-        self.record_policy_model_prepared(run_id, epoch, action, output, receipt, &reference, deliveries, output_refs)
+        self.record_policy_model_prepared(
+            run_id,
+            epoch,
+            action,
+            output,
+            receipt,
+            &reference,
+            deliveries,
+            output_refs,
+        )
     }
     pub(crate) fn record_policy_model_prepared(
-        &mut self, run_id: &str, epoch: u64, action: &str, output: &PolicyModelOutput,
-        receipt: Option<&PolicyModelReceipt>, request_ref: &Value,
+        &mut self,
+        run_id: &str,
+        epoch: u64,
+        action: &str,
+        output: &PolicyModelOutput,
+        receipt: Option<&PolicyModelReceipt>,
+        request_ref: &Value,
         deliveries: Option<super::memory::PreparedMemoryDeliveries>,
         output_refs: PolicyModelOutputReferences,
     ) -> Result<()> {
         let run = self.run(run_id)?;
         fence(&run, epoch)?;
         let mut op: Operation = record(&self.db, "operations", action)?;
-        if model_intent(&op)?.is_none() || op.run_id != run_id || op.epoch != epoch {
+        if model_metadata(&op)?.is_none() || op.run_id != run_id || op.epoch != epoch {
             return Err(RuntimeError::Conflict("planning owner changed".into()));
         }
         let mut result = model_result(&op)?;
@@ -401,7 +506,9 @@ impl Catalog {
             return Err(RuntimeError::Conflict("planning already settled".into()));
         }
         if &result.request_ref != request_ref {
-            return Err(RuntimeError::Conflict("frozen planning request changed".into()));
+            return Err(RuntimeError::Conflict(
+                "frozen planning request changed".into(),
+            ));
         }
         result.original_ref = Some(output_refs.original);
         if let Some(receipt) = receipt {
@@ -428,7 +535,9 @@ impl Catalog {
                 {
                     return Err(RuntimeError::Invalid("unusable planning result".into()));
                 }
-                let reference = output_refs.evidence.ok_or_else(|| RuntimeError::Invalid("planning evidence reference missing".into()))?;
+                let reference = output_refs.evidence.ok_or_else(|| {
+                    RuntimeError::Invalid("planning evidence reference missing".into())
+                })?;
                 receipt.output = Some(PolicyEvidenceRef {
                     action_id: action.into(),
                     node_id: "output".into(),
@@ -450,9 +559,15 @@ impl Catalog {
         let tx = self.db.transaction()?;
         put(&tx, "operations", action, &op)?;
         if receipt.is_some_and(|receipt| receipt.usable) {
-            super::memory::record_deliveries(&tx,
-                deliveries.ok_or_else(|| RuntimeError::Invalid("prepared memory delivery missing".into()))?,
-                &run, action, DeliveryState::Committed)?;
+            super::memory::record_deliveries(
+                &tx,
+                deliveries.ok_or_else(|| {
+                    RuntimeError::Invalid("prepared memory delivery missing".into())
+                })?,
+                &run,
+                action,
+                DeliveryState::Committed,
+            )?;
         }
         event(
             &tx,

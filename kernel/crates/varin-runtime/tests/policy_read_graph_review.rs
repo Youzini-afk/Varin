@@ -46,6 +46,33 @@ fn body_publication_keeps_policy_node_alive_and_receipt_idempotent() {
     assert!(serde_json::to_string(&evidence.content).unwrap().contains(value["evidence"].as_str().unwrap()));
 }
 
+#[test]
+fn graph_cancellation_and_node_settlement_do_not_hydrate_the_definition() {
+    let f = Fixture::new();
+    let intent = admitted(&f,vec![node("a",&[]),node("b",&["a"])]);
+    let run = &f.input.run_id;
+    let epoch = f.input.owner_generation;
+    f.db.admit_policy_graph(run,epoch,&intent).unwrap();
+    let action = intent.action_id();
+    let operation = f.db.lock().unwrap().operation(action).unwrap();
+    assert!(operation.intent.get("nodes").is_none());
+    let hash = operation.intent["body_ref"]["content_object"].as_str().unwrap().strip_prefix("sha256-").unwrap();
+    std::fs::write(f.root.join("content/objects").join(&hash[..2]).join(&hash[2..]),b"damaged definition").unwrap();
+    assert!(f.db.policy_graph(run,epoch).is_err());
+    let origin = ToolOrigin::PolicyAction {action_id:action.into(),node_id:"a".into()};
+    assert_eq!(f.db.lock().unwrap().inspect_admission(run,epoch,&origin,"a").unwrap()["state"],"not_active");
+    f.db.lock().unwrap().request_cancel_operation(action).unwrap();
+    for node in ["a","b"] {
+        let receipt = f.db.settle_policy_node(run,epoch,action,node,&ToolCompletion::NotDispatched {reason:"cancelled".into()}).unwrap();
+        assert_eq!(receipt.outcome,Outcome::Cancelled);
+    }
+    let operation = f.db.lock().unwrap().operation(action).unwrap();
+    assert_eq!(operation.phase,OperationPhase::Terminal);
+    assert_eq!(operation.outcome,Some(Outcome::Cancelled));
+    assert_eq!(f.db.lock().unwrap().inspect_admission(run,epoch,&origin,"a").unwrap()["state"],"settled");
+    f.db.lock().unwrap().create_thread("independent","independent-main").unwrap();
+}
+
 struct Fixture {
     root: std::path::PathBuf,
     db: Arc<Mutex<Catalog>>,
@@ -1013,9 +1040,12 @@ fn durable_operation_cancellation_before_worker_exists_prevents_recovered_reads(
     f.db.lock().unwrap().collect_content_objects().unwrap();
     let operation = f.db.lock().unwrap().operation(&action_id).unwrap();
     assert_eq!(operation.phase, OperationPhase::Terminal);
-    let result: PolicyGraphResult = serde_json::from_value(operation.result.unwrap()).unwrap();
-    assert_eq!(result.receipts.len(), 2);
-    assert!(result.receipts.values().all(|r| r.output.is_none()));
+    let database = rusqlite::Connection::open_with_flags(f.root.join("conversation.sqlite"),rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let mut statement = database.prepare("SELECT receipt FROM policy_graph_nodes WHERE action_id=?1 ORDER BY position").unwrap();
+    let receipts: Vec<PolicyNodeReceipt> = statement.query_map([&action_id],|row|row.get::<_,String>(0)).unwrap()
+        .map(|row|serde_json::from_str(&row.unwrap()).unwrap()).collect();
+    assert_eq!(receipts.len(), 2);
+    assert!(receipts.iter().all(|receipt| receipt.outcome == Outcome::Cancelled && receipt.output.is_none()));
 }
 
 // Inject real durable commands at exact worker interleavings. No fabricated Catalog errors.

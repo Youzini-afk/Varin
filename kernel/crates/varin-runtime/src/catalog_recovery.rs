@@ -525,10 +525,10 @@ impl Catalog {
         // output are restored by the engine's policy Persistence call after releasing Catalog.
         let policy_job = self.prepare_policy_model_read(run_id, self.epoch)?;
         let policy_identity = if let Some(job) = policy_job {
-            Some(job.intent.checkpoint().0.clone())
+            Some(job.metadata.identity().clone())
         } else {
             self.prepare_policy_graph_read(run_id, self.epoch)?
-                .map(|graph| graph.intent.checkpoint().0.clone())
+                .map(|graph| graph.metadata.identity().clone())
         };
         let kind = if let Some(identity) = policy_identity {
             if identity != policy {

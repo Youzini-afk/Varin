@@ -126,12 +126,13 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 8 and input domain 2 store input intents/queue bodies and context-job ownership,
+Catalog version 12 and input domain 2 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. `Catalog::collect_content_objects` marks requests, provider originals,
 history, all model outputs (including rejected output), original command intents, queued-history references, context
-checkpoints, memory projections, summary recipes and source parts, and strictly typed policy-graph node and planning-model request/output references. It verifies every live object
+checkpoints, memory projections, summary recipes and source parts, policy action/checkpoint bodies,
+and indexed graph receipts and planning-model request/output references. It verifies every live object
 before sweeping and preserves unknown files; it never deletes history or invokes system-kernel GC.
 
 Provider serialization still visits and sends full legal requests; chunk reuse is not remote
@@ -183,7 +184,10 @@ read-only Result capabilities is eligible; untrusted read-only annotations confe
 requests, tool exchanges or user messages.
 
 Core derives the action identity from the durable Run decision boundary. One Run-owned Operation
-stores the strictly tagged `PolicyReadGraphV1` intent and committed node receipts. Admission and the
+stores strictly tagged ownership, an immutable definition reference and progress counts. The definition
+stores the shared frozen tool directory once. Nodes, dependencies and individual receipts have indexed
+rows in the same Catalog; settling a node does not parse the definition or rewrite other receipts.
+Admission and the
 versioned private policy checkpoint commit atomically; changed intent at the same identity conflicts.
 Independent nodes share existing ResourceAdmission and can overlap. Each receipt commits before any
 dependent can start. Failed prerequisites produce explicit nonexecution receipts. Grants are checked
@@ -196,7 +200,9 @@ enters `RequestModelWithEvidence` as labeled ExternalData, without synthetic pro
 pairing. Output references are checked against Run, action and node; no arbitrary object-hash reader
 is granted. Chunk/evidence reads and new graph output writes happen outside the Catalog mutex.
 The publication reference protects uncommitted objects until the short receipt transaction commits.
-Graph definition admission still validates all nodes before accepting the graph.
+Graph definition preparation validates all nodes on the worker before atomic admission. Worker reads
+restore the exact definition and receipts; cancellation and admission queries require only metadata.
+Private policy state and actions are immutable references, loaded outside Catalog when continuing.
 
 ## Policy-originated planning models
 
@@ -207,7 +213,9 @@ ModelProvider adapters, credential owners, content store and UsageReceipt remain
 Provider construction is shared with ordinary chat; no implicit main-model fallback exists.
 
 Admission freezes the current committed context as quoted source data, the exact model/config/account
-binding, instructions, evidence, serialized request and private policy checkpoint atomically. Typed
+binding, instructions, evidence, serialized request and private policy checkpoint atomically. Instructions,
+capability configuration and private state reside in the immutable action body. The Operation retains
+ownership and references, so dispatch/cancel/recovery checks do not decode that body. Typed
 request origin distinguishes conversation requests from policy model work. Graph and model actions
 share a decision boundary and latest-action recovery selection. Provider I/O runs on the existing
 Run worker, outside the Catalog/control lock, so a stalled planner does not occupy other Runs.
