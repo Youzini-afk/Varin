@@ -169,7 +169,8 @@ impl Catalog {
             let configuration=command.configuration.clone().or_else(||owner.as_ref().map(|run|run.configuration.clone()))
                 .ok_or_else(||RuntimeError::Invalid("an idle branch requires an explicit launch configuration".into()))?;
             let next=Run{id:id(),thread_id:thread,branch_id:command.branch_id.clone(),state:RunState::Accepted,revision:1,epoch:self.epoch,configuration,cancel_requested:false,waiting_on:None};
-            tx.execute("INSERT INTO runs(id,branch_id,body) VALUES(?1,?2,?3)",params![next.id,next.branch_id,encode(&next)?])?;
+            // Queued Runs own their admission scope now, not when eventually promoted.
+            tx.execute("INSERT INTO runs(id,branch_id,body,context_checkpoint_id) VALUES(?1,?2,?3,(SELECT checkpoint_id FROM active_contexts WHERE branch_id=?2))",params![next.id,next.branch_id,encode(&next)?])?;
             if let Some(previous)=predecessor.as_ref().filter(|previous|previous.configuration==next.configuration) {
                 if let Some(mut launch)=optional_record::<super::launches::LaunchIntent>(&tx,"run_launches",&previous.id)? {
                     if let Some(source)=launch.selection.source.as_mut().filter(|source|source.materialized) {

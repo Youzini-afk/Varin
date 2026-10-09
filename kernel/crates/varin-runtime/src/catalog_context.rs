@@ -34,31 +34,31 @@ pub(super) fn initialize(db: &mut Connection) -> Result<()> {
         .optional()?;
     match version {
         None => {
-            tx.execute_batch("CREATE TABLE context_checkpoints(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),revision INTEGER NOT NULL,through_id TEXT REFERENCES history(id),body TEXT NOT NULL,UNIQUE(branch_id,revision)); CREATE TABLE active_contexts(branch_id TEXT PRIMARY KEY REFERENCES branches(id),checkpoint_id TEXT NOT NULL REFERENCES context_checkpoints(id)); INSERT INTO runtime_domains(name,version) VALUES('context_checkpoints',1);")?;
+            tx.execute_batch("CREATE TABLE context_checkpoints(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),revision INTEGER NOT NULL,through_id TEXT REFERENCES history(id),body TEXT NOT NULL,project_id TEXT,UNIQUE(branch_id,revision)); CREATE TABLE active_contexts(branch_id TEXT PRIMARY KEY REFERENCES branches(id),checkpoint_id TEXT NOT NULL REFERENCES context_checkpoints(id)); INSERT INTO runtime_domains(name,version) VALUES('context_checkpoints',2);")?;
         }
-        Some(1) => {
-            for (table, expected) in [
-                (
-                    "context_checkpoints",
-                    vec!["id", "branch_id", "revision", "through_id", "body"],
-                ),
-                ("active_contexts", vec!["branch_id", "checkpoint_id"]),
-            ] {
-                let mut statement = tx.prepare(&format!("PRAGMA table_info({table})"))?;
-                let columns = statement
-                    .query_map([], |r| r.get::<_, String>(1))?
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
-                if columns != expected {
-                    return Err(RuntimeError::Invalid(
-                        "context checkpoint schema is malformed; data preserved".into(),
-                    ));
-                }
-            }
-        }
+        Some(2) => {}
         Some(_) => {
             return Err(RuntimeError::Invalid(
                 "unsupported context checkpoint format; data preserved".into(),
             ))
+        }
+    }
+    for (table, expected) in [
+        (
+            "context_checkpoints",
+            vec!["id", "branch_id", "revision", "through_id", "body", "project_id"],
+        ),
+        ("active_contexts", vec!["branch_id", "checkpoint_id"]),
+        ("runs", vec!["id", "branch_id", "body", "context_checkpoint_id"]),
+    ] {
+        let mut statement = tx.prepare(&format!("PRAGMA table_info({table})"))?;
+        let columns = statement
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        if columns != expected {
+            return Err(RuntimeError::Invalid(
+                "context checkpoint schema is malformed; data preserved".into(),
+            ));
         }
     }
     tx.commit()?;
@@ -225,7 +225,9 @@ pub(super) fn publish_prepared(
             "active context checkpoint changed".into(),
         ));
     }
-    tx.execute("INSERT INTO context_checkpoints(id,branch_id,revision,through_id,body) VALUES(?1,?2,?3,?4,?5)",params![checkpoint.id,checkpoint.proposal.branch_id,sql_number(checkpoint.revision)?,checkpoint.proposal.through_id,encode(reference)?])?;
+    // Searchable metadata is derived from this exact immutable body in the same publication.
+    // It is not an independently editable project/configuration store.
+    tx.execute("INSERT INTO context_checkpoints(id,branch_id,revision,through_id,body,project_id) VALUES(?1,?2,?3,?4,?5,?6)",params![checkpoint.id,checkpoint.proposal.branch_id,sql_number(checkpoint.revision)?,checkpoint.proposal.through_id,encode(reference)?,checkpoint.personalization.as_ref().and_then(|basis| basis.project_id.as_deref())])?;
     tx.execute("INSERT INTO active_contexts(branch_id,checkpoint_id) VALUES(?1,?2) ON CONFLICT(branch_id) DO UPDATE SET checkpoint_id=excluded.checkpoint_id",params![checkpoint.proposal.branch_id,checkpoint.id])?;
     event(
         tx,

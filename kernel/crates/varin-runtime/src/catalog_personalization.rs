@@ -36,6 +36,14 @@ impl PersonalizationBasis {
         if self.session_id.is_empty() || self.original_sections.iter().any(|section| section.name.is_empty()) {
             return Err(RuntimeError::Invalid("personalization basis needs explicit scope and section identities".into()));
         }
+        // Project IDs participate in the existing service-routing identity contract. An absent
+        // project is None; accept only the canonical, non-empty IDs supplied by the project owner.
+        // The Host's JavaScript trim also removes edge U+FEFF, which Rust str::trim preserves.
+        // Reject that noncanonical edge spelling without changing opaque interior characters.
+        if self.project_id.as_ref().is_some_and(|project| project.trim().is_empty()
+            || project.trim() != project || project.starts_with('\u{feff}') || project.ends_with('\u{feff}')) {
+            return Err(RuntimeError::Invalid("personalization project identity must be canonical and non-empty".into()));
+        }
         let mut names = std::collections::HashSet::new();
         if self.original_sections.iter().any(|section| !names.insert(&section.name)) {
             return Err(RuntimeError::Invalid("personalization basis repeats a system section".into()));

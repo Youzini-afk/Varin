@@ -249,7 +249,9 @@ export const findUndeclaredWorkspaceImports = (serverDir, manifest) => {
       } else if (entry.isFile() && entry.name.endsWith('.js')) {
         const source = readFileSync(entryPath, 'utf8');
         for (const match of source.matchAll(/(?:from|import)\s*['"](@varin\/[^'"]+)['"]/g)) {
-          if (!productionDependencies.has(match[1])) {
+          // dependencies name the package; an exported subpath is not another dependency.
+          const packageName = match[1].split('/').slice(0, 2).join('/');
+          if (!productionDependencies.has(packageName)) {
             offenders.push(`${path.relative(serverDir, entryPath)} -> ${match[1]}`);
           }
         }

@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export interface NativeCredentialDispatch { method: string; endpoint: string; body: string }
+export interface NativeCredentialDispatch { method: string; endpoint: string; payloadSha256: string }
 interface AwsCredentials { accessKeyId: string; secretAccessKey: string; sessionToken?: string }
 interface AwsClient {
   config: { credentials: () => Promise<AwsCredentials>; region: () => Promise<string>; sha256: unknown };
@@ -72,6 +72,7 @@ export class NativeAwsCredentialOwner {
   }
   async sign(source: Source, dispatch: NativeCredentialDispatch, headers: Record<string, string>, selectedRegion?: string): Promise<Record<string, string>> {
     try {
+      if (typeof dispatch.payloadSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(dispatch.payloadSha256)) return fail('aws-request-payload-invalid');
       const client = await source.client;
       const url = new URL(dispatch.endpoint);
       const endpointRegion = /^bedrock-runtime\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?$/.exec(url.hostname)?.[1];
@@ -80,9 +81,14 @@ export class NativeAwsCredentialOwner {
       const signing = new signer.SignatureV4({ credentials: client.config.credentials, region, service: 'bedrock', sha256: client.config.sha256 });
       const query: Record<string, string[]> = Object.create(null);
       for (const [name, value] of url.searchParams) (query[name] ??= []).push(value);
+      // Smithy's getPayloadHash uses this header verbatim. It is computed by the trusted
+      // native serializer; configured case variants must not shadow the frozen payload hash.
+      const signingHeaders = Object.fromEntries(Object.entries(headers)
+        .filter(([name]) => name.toLowerCase() !== 'x-amz-content-sha256'));
       const signed = await signing.sign({ method: dispatch.method, protocol: url.protocol, hostname: url.hostname,
-        ...(url.port ? { port: Number(url.port) } : {}), path: url.pathname, query, body: dispatch.body,
-        headers: { ...headers, host: url.host, 'content-type': 'application/json', accept: 'application/vnd.amazon.eventstream' } });
+        ...(url.port ? { port: Number(url.port) } : {}), path: url.pathname, query,
+        headers: { ...signingHeaders, host: url.host, 'content-type': 'application/json',
+          accept: 'application/vnd.amazon.eventstream', 'x-amz-content-sha256': dispatch.payloadSha256 } });
       return signed.headers;
     } catch { return fail('aws-credential-signing-failed'); }
   }

@@ -31,7 +31,12 @@ impl CredentialBridge {
     pub(crate) fn initialize(&self, epoch: &str) -> Result<(), ModelFailure> {
         let events = self.events.clone();
         let next = HostCredentialChannel::new(epoch, move |request| {
-            events.lock().map_err(|_|failed("credential_channel_failed"))?.as_ref().ok_or_else(||failed("credential_channel_closed"))?.send(json!({"v":1,"kind":"credential-request","id":request.request_id,"kernelEpoch":request.epoch,"runId":request.run_id,"scope":request.scope,"dispatch":request.dispatch}))
+            let value = json!({"v":1,"kind":"credential-request","id":request.request_id,"kernelEpoch":request.epoch,"runId":request.run_id,"scope":request.scope,"dispatch":request.dispatch});
+            // Reject preparation failures at the calling request, before the shared writer.
+            // The real framing encoder enforces the existing cap and exact JSON escaping.
+            crate::protocol::write_frame(&mut std::io::sink(), &value)
+                .map_err(|_| failed("credential_request_frame_invalid"))?;
+            events.lock().map_err(|_|failed("credential_channel_failed"))?.as_ref().ok_or_else(||failed("credential_channel_closed"))?.send(value)
                 .map_err(|_|failed("credential_channel_closed"))
         })?;
         let mut current = self

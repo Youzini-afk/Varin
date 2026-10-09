@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { mkdtemp, rm, writeFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -11,10 +12,15 @@ test('AWS owner pins credential source inputs without persisting tokens and chan
  const owner=new NativeAwsCredentialOwner();const source=await owner.source('fixture',env);
  assert.equal((await owner.source('fixture',env)).identity,source.identity);
  assert.equal(await owner.region(source),'us-west-2');
- const dispatch={method:'POST',endpoint:'https://bedrock-runtime.us-west-2.amazonaws.com/model/fixture/converse-stream',body:'{"messages":[{"role":"user","content":[{"text":"原文 café 🧪"}]}]}'};
- const headers=await owner.sign(source,dispatch,{});
+ const dispatch={method:'POST',endpoint:'https://bedrock-runtime.us-west-2.amazonaws.com/model/fixture/converse-stream',payloadSha256:createHash('sha256').update('{"messages":[{"role":"user","content":[{"text":"原文 café 🧪"}]}]}').digest('hex')};
+ const headers=await owner.sign(source,dispatch,{'X-Amz-Content-Sha256':'wrong-upper','x-amz-content-sha256':'wrong-lower','X-AMZ-CONTENT-SHA256':'wrong-all-caps'});
  assert.match(headers.authorization!,/^AWS4-HMAC-SHA256 Credential=FAKE_SOURCE_KEY\//);
  assert.equal(headers['x-amz-security-token'],env.AWS_SESSION_TOKEN);
+ assert.equal(headers['x-amz-content-sha256'],dispatch.payloadSha256);
+ assert.deepEqual(Object.keys(headers).filter(name=>name.toLowerCase()==='x-amz-content-sha256'),['x-amz-content-sha256']);
+ for(const payloadSha256 of ['', 'a'.repeat(63), 'a'.repeat(65), 'A'.repeat(64), 'g'.repeat(64)]) {
+  await assert.rejects(owner.sign(source,{...dispatch,payloadSha256},{}),{code:'aws-credential-signing-failed'});
+ }
  assert.equal((await owner.source('fixture',env)).identity,source.identity);
  const changed=await owner.source('fixture',{...env,AWS_SESSION_TOKEN:'fake-rotated-source-session'});
  assert.notEqual(changed.identity,source.identity);

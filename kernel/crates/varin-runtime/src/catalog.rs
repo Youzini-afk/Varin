@@ -316,8 +316,10 @@ impl Catalog {
             configuration: command.configuration.clone(),
             cancel_requested: false,
         };
+        // Freeze admission provenance, not the evolving execution context. Historical Run
+        // activity must never inherit a project first attached to this branch later.
         tx.execute(
-            "INSERT INTO runs(id,branch_id,body) VALUES(?1,?2,?3)",
+            "INSERT INTO runs(id,branch_id,body,context_checkpoint_id) VALUES(?1,?2,?3,(SELECT checkpoint_id FROM active_contexts WHERE branch_id=?2))",
             params![run_id, command.branch_id, encode(&run)?],
         )?;
         tx.execute(
@@ -1217,8 +1219,10 @@ CREATE TABLE runtime_meta(id INTEGER PRIMARY KEY CHECK(id=1),epoch INTEGER NOT N
 INSERT INTO runtime_meta VALUES(1,0);
 CREATE TABLE threads(id TEXT PRIMARY KEY);
 CREATE TABLE branches(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES threads(id),head TEXT,active_run TEXT);
+CREATE INDEX branches_thread ON branches(thread_id);
 CREATE TABLE history(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES threads(id),parent TEXT REFERENCES history(id),body TEXT NOT NULL);
-CREATE TABLE runs(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),body TEXT NOT NULL);
+CREATE TABLE runs(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),body TEXT NOT NULL,context_checkpoint_id TEXT REFERENCES context_checkpoints(id));
+CREATE INDEX runs_branch ON runs(branch_id);
 CREATE TABLE commands(id TEXT PRIMARY KEY,input TEXT NOT NULL,receipt TEXT NOT NULL);
 CREATE TABLE operations(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),body TEXT NOT NULL);
 CREATE INDEX operations_run ON operations(run_id);

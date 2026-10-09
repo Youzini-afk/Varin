@@ -42,8 +42,8 @@ export class NativeCredentialBridge {
       || Object.keys(value).some(key => !['v', 'kind', 'id', 'kernelEpoch', 'runId', 'scope', 'dispatch'].includes(key))) return true;
     if (value.dispatch !== undefined && value.dispatch !== null && (!record(value.dispatch)
       || value.dispatch.method !== 'POST' || typeof value.dispatch.endpoint !== 'string'
-      || typeof value.dispatch.body !== 'string'
-      || Object.keys(value.dispatch).some(key => !['method', 'endpoint', 'body'].includes(key)))) return true;
+      || typeof value.dispatch.payloadSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.dispatch.payloadSha256)
+      || Object.keys(value.dispatch).some(key => !['method', 'endpoint', 'payloadSha256'].includes(key)))) return true;
     const request = value as unknown as Request;
     const entry = this.#owners.get(request.runId);
     if (!entry || entry.epoch !== request.kernelEpoch || !same(entry.scope, request.scope)) {

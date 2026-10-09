@@ -77,8 +77,9 @@ account change advance it in the same credential write. Verified provider accoun
 and Codex requires it. Native model selection comes from the trusted Host catalog; endpoints cannot be
 supplied by the renderer. Durable launch selection pins the scope used when rebinding after restart.
 
-The native kernel rendezvous carries scope and, for body-signed requests, exact serialized request bytes
-outward and transient header replies inward; neither body nor credentials enter public events. Host HTTP credential writes and utility OAuth refresh also use the shared owner. Standalone
+The native kernel rendezvous carries scope and, for body-signed requests, the SHA-256 digest of the
+exact serialized request bytes outward and transient header replies inward; neither body nor credentials
+enter public events or credential request frames. Host HTTP credential writes and utility OAuth refresh also use the shared owner. Standalone
 Pi launches retain their existing owner because they have no parent Application Host channel.
 Credential helper/env keys preserve existing Pi resolution in the child. Literal `models.json`
 keys use the same Host authority and the existing configuration lock/JSONC writer. Their provider
@@ -119,9 +120,16 @@ Independent review used a temporary fake ADC file and loopback token endpoint to
 loading, refresh, stable scope, sanitized invalid-grant failure and no bearer persistence.
 
 Bedrock IAM/profile/default-chain credentials now use the locked SDK's Bedrock client credential
-provider and Smithy SigV4 signer. The private request carries method, registered endpoint and the exact
-serialized body. The Host checks the frozen endpoint before signing. One Rust serializer supplies both
-signature input and outbound HTTP bytes; the native transport sends those bytes without JSON rewriting.
+provider and Smithy SigV4 signer. The private request carries method, registered endpoint and a
+64-character lowercase hexadecimal `payloadSha256`, never the serialized body. The Host checks the
+frozen endpoint and digest shape before signing. One Rust serializer supplies both the hashed bytes
+and outbound HTTP bytes from the same immutable request; the native transport sends those bytes
+without JSON rewriting. The existing Smithy signer uses `x-amz-content-sha256` as its canonical payload
+hash. The Host overrides configured case variants of that header with the dispatch digest, keeping
+SigV4 bound to the native request without copying content across the credential control channel.
+The credential bridge preflights its envelope through the existing bounded frame encoder before
+queueing it. A preparation failure returns to that request rather than terminating the shared stdout
+writer. Durable `ModelDispatched` ordering and conservative interrupted-dispatch recovery are unchanged.
 The Host source identity is pinned independently of SDK-refreshed temporary credentials, and ARN region
 precedes endpoint/owner region. Headers and signatures are transient. No standalone AWS credential
 store, new grant, user token or paid request is needed for this integration.

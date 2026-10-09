@@ -20,10 +20,12 @@ use serde_json::Value;
 use std::sync::{Arc, OnceLock};
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CredentialDispatch {
     pub method: String,
     pub endpoint: String,
-    pub body: String,
+    /// SHA-256 of the exact frozen HTTP bytes, never the request body on the control channel.
+    pub payload_sha256: String,
 }
 /// One serializer supplies both the signature input and the HTTP request bytes.
 fn request_body(body: &Value) -> Result<Vec<u8>, ModelFailure> {

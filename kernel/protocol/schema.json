@@ -166,7 +166,7 @@
     "NativeLaunchFailedParams": {"fields":{"runId":{"type":"string"},"code":{"type":"string"}}},
     "NativeThreadParams": {"fields":{"threadId":{"type":"string"}}},
     "NativeThreadBranch": {"fields":{"branch_id":{"type":"string"},"head":{"type":"string | null"},"active_run_id":{"type":"string | null"},"latest_run":{"type":"NativeRun | null"}}},
-    "NativeThreadSummary": {"fields":{"thread_id":{"type":"string"},"branches":{"type":"NativeThreadBranch[]"}}},
+    "NativeThreadSummary": {"fields":{"thread_id":{"type":"string"},"branches":{"type":"NativeThreadBranch[]"},"observer_project_ids":{"type":"Array<string | null>"}}},
     "NativeRuntimeStreamEvent": {"raw":"export type NativeRuntimeStreamEvent = {v: 1; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});"},
     "NativeLaunchSourceParams": {"fields":{"environmentRunId":{"type":"string","optional":true},"materialized":{"type":"boolean"},"workspaceId":{"type":"string"},"executionWorkspaceId":{"type":"string"},"branchId":{"type":"string | null"},"revision":{"type":"number | null"}}},
     "NativeLaunchSelectParams": {"fields":{"runId":{"type":"string"},"source":{"type":"NativeLaunchSourceParams | null"},"enabledTools":{"type":"string[]"},"credentialScope":{"type":"NativeCredentialScope","optional":true}}},
