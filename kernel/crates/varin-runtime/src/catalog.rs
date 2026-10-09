@@ -121,6 +121,33 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
     Ok(version)
 }
 
+/// Installing the catalog is one commit. A failed first open must leave a new, empty
+/// database rather than a collection of independently committed domain fragments.
+fn initialize_metadata(db: &mut Connection, version: i64, content: &crate::content::ContentStore) -> Result<u64> {
+    let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    if version == 0 {
+        tx.execute_batch(SCHEMA)?;
+        tx.execute_batch("CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY REFERENCES input_queue(id),body TEXT NOT NULL); CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,3);")?;
+        tx.pragma_update(None, "user_version", FORMAT)?;
+        context_jobs::initialize_new(&tx)?;
+    }
+    tx.execute_batch("CREATE TABLE IF NOT EXISTS resource_occupancy (operation_id TEXT PRIMARY KEY REFERENCES operations(id), claims TEXT NOT NULL)")?;
+    inputs::initialize(&tx)?;
+    crate::content::initialize(&tx, content)?;
+    launches::initialize(&tx)?;
+    context::initialize(&tx)?;
+    if version == 0 {
+        collaboration::initialize_new(&tx)?;
+    }
+    let epoch = tx.query_row(
+        "UPDATE runtime_meta SET epoch=epoch+1 WHERE id=1 RETURNING epoch",
+        [],
+        |row| read_number(row, 0),
+    )?;
+    tx.commit()?;
+    Ok(epoch)
+}
+
 /// Sole writer of conversation and coordination facts. Holding this value (or its mutex)
 /// across model, extension or tool execution is forbidden: all methods are bounded local transactions.
 /// Its database is separate from the replaceable system-kernel cache and is never recreated on error.
@@ -155,24 +182,9 @@ impl Catalog {
         db.pragma_update(None, "foreign_keys", true)?;
         db.pragma_update(None, "journal_mode", "WAL")?;
         db.pragma_update(None, "synchronous", "FULL")?;
-        if version == 0 {
-            db.execute_batch(SCHEMA)?;
-            db.execute_batch("CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY REFERENCES input_queue(id),body TEXT NOT NULL); CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,3); PRAGMA user_version=7;")?;
-            context_jobs::initialize_new(&db)?;
-        }
-        db.execute_batch("CREATE TABLE IF NOT EXISTS resource_occupancy (operation_id TEXT PRIMARY KEY REFERENCES operations(id), claims TEXT NOT NULL)")?;
         let resource_admission = std::sync::Arc::new(crate::resource_admission::ResourceAdmission::default());
         let content = crate::content::ContentStore::open(root.as_ref().join("content"))?;
-        inputs::initialize(&mut db)?;
-        crate::content::initialize(&mut db, &content)?;
-        launches::initialize(&mut db)?;
-        context::initialize(&mut db)?;
-        if version == 0 { collaboration::initialize_new(&db)?; }
-        let epoch: u64 = db.query_row(
-            "UPDATE runtime_meta SET epoch=epoch+1 WHERE id=1 RETURNING epoch",
-            [],
-            |r| read_number(r, 0),
-        )?;
+        let epoch = initialize_metadata(&mut db, version, &content)?;
         let mut this = Self {
             db,
             content,
@@ -1296,7 +1308,6 @@ fn read_all<T: DeserializeOwned>(db: &Connection, table: &str) -> Result<Vec<T>>
     Ok(result)
 }
 const SCHEMA: &str = r#"
-BEGIN IMMEDIATE;
 CREATE TABLE runtime_meta(id INTEGER PRIMARY KEY CHECK(id=1),epoch INTEGER NOT NULL);
 INSERT INTO runtime_meta VALUES(1,0);
 CREATE TABLE threads(id TEXT PRIMARY KEY);
@@ -1321,8 +1332,6 @@ CREATE INDEX events_condition ON events(subject,kind,cursor);
 CREATE TABLE waits(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),body TEXT NOT NULL);
 CREATE TABLE resumptions(wait_id TEXT PRIMARY KEY REFERENCES waits(id),run_id TEXT NOT NULL REFERENCES runs(id),trigger_cursor INTEGER NOT NULL REFERENCES events(cursor),claimed INTEGER NOT NULL,acknowledged INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE deliveries(observer TEXT NOT NULL,fact_cursor INTEGER NOT NULL REFERENCES events(cursor),request TEXT NOT NULL,state TEXT NOT NULL,PRIMARY KEY(observer,fact_cursor,request));
-PRAGMA user_version=1;
-COMMIT;
 "#;
 #[cfg(test)]
 #[path = "catalog_tests.rs"]

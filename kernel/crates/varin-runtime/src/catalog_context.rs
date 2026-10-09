@@ -225,8 +225,7 @@ fn has_canonical_unique_index(
     Ok(false)
 }
 
-pub(super) fn initialize(db: &mut Connection) -> Result<()> {
-    let tx = db.transaction()?;
+pub(super) fn initialize(tx: &Transaction<'_>) -> Result<()> {
     let version: Option<i64> = tx
         .query_row(
             "SELECT version FROM runtime_domains WHERE name='context_checkpoints'",
@@ -274,7 +273,6 @@ pub(super) fn initialize(db: &mut Connection) -> Result<()> {
             ));
         }
     }
-    tx.commit()?;
     Ok(())
 }
 impl Catalog {

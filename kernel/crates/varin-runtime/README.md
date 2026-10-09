@@ -8,6 +8,8 @@ writing Pi session files or the Host harness's existing execution records.
 
 - `Catalog` locks one `conversation.sqlite` owner and uses SQLite WAL/FULL short transactions.
   Unsupported formats are errors; this user-history database is never recreated as a cache.
+  New catalogs install all domains and the initial owner epoch in one transaction; an interrupted
+  installation cannot publish a partial internal format.
 - Input admission, branch ownership, operations, model request snapshots, waits/resumptions and
   delivery identities survive reopening. Events commit with the corresponding facts.
 - `execution` drives a bound model provider and tool executor on a worker. Tool results have stable

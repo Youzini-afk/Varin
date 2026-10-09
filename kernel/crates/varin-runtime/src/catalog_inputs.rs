@@ -33,8 +33,7 @@ pub struct InputReceipt {
 
 /// This additive user-content domain is installed atomically. Existing unrecognized tables,
 /// partial domains and future versions are preserved and rejected, never replaced with empty data.
-pub(super) fn initialize(db: &mut Connection) -> Result<()> {
-    let tx = db.transaction()?;
+pub(super) fn initialize(tx: &Transaction<'_>) -> Result<()> {
     let domains: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_domains')",
         [],
@@ -110,7 +109,6 @@ pub(super) fn initialize(db: &mut Connection) -> Result<()> {
             )))
         }
     }
-    tx.commit()?;
     Ok(())
 }
 fn write_input(tx: &Transaction<'_>, input: &QueuedInput) -> Result<()> {

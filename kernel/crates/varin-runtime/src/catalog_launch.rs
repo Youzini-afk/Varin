@@ -202,8 +202,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
     }
     Ok(())
 }
-pub(super) fn initialize(db: &mut Connection) -> Result<()> {
-    let tx = db.transaction()?;
+pub(super) fn initialize(tx: &Transaction<'_>) -> Result<()> {
     let version: Option<i64> = tx
         .query_row(
             "SELECT version FROM runtime_domains WHERE name='run_launches'",
@@ -220,10 +219,9 @@ pub(super) fn initialize(db: &mut Connection) -> Result<()> {
         .optional()?;
     match version {
         None if existing.is_none() => tx.execute_batch("CREATE TABLE run_launches(id TEXT PRIMARY KEY REFERENCES runs(id),body TEXT NOT NULL); INSERT INTO runtime_domains(name,version) VALUES('run_launches',2);")?,
-        Some(2) if existing.as_deref() == Some("table") => check_format(&tx)?,
+        Some(2) if existing.as_deref() == Some("table") => check_format(tx)?,
         _ => return Err(RuntimeError::Invalid("unrecognized launch domain; data preserved".into())),
     }
-    tx.commit()?;
     Ok(())
 }
 impl Catalog {
