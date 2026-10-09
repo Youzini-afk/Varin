@@ -72,6 +72,9 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
     },
     rebindModel: async () => owner,
   }, async source => { await documents.inspectWorkspace(source.workspaceId); await documents.inspectWorkspace(source.executionWorkspaceId); }, (_runId, error) => { launchErrors.push(error); }, prepare, prepareContext);
+  const submissionErrors: string[] = [];
+  const submit = adapter.submit.bind(adapter);
+  adapter.submit = async input => { try { return await submit(input); } catch (error) { submissionErrors.push(String(error)); throw error; } };
   const app = express();
   registerCommonRequestMiddleware(app, { express });
   registerNativeThreadRoutes(app, adapter, (request, response, next) => {
@@ -81,13 +84,13 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const hostUrl = await listen(createServer(app));
   configureRuntimeUrlResolver({ apiBaseUrl: hostUrl, realtimeBaseUrl: hostUrl });
   setRuntimeExtraHeaders({ 'x-fixture-auth': 'fixture-client' });
-  return { endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createNativeThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
+  return { prepareContext, submissionErrors, endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createNativeThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
 }
 
 const model = { providerId: 'fixture-provider', modelId: 'fixture-model' };
 const messages = (body: Record<string, unknown>) => body.input as Array<{ role?: string; content?: unknown }>;
 const system = (body: Record<string, unknown>) => messages(body).filter(value => value.role === 'system');
-it('initial native context uses frozen personalization and pinned AGENTS in system roles across retry, restart, compaction and an earlier fork', async () => {
+it('initial native context preserves pinned AGENTS and request roles while current personalization survives retry, restart, compaction and fork', async () => {
   let serial = 0;
   const reply = (body: Record<string, unknown>, response: ServerResponse) => {
     const text = JSON.stringify(body).includes('Produce a faithful continuation summary') ? 'GENERATED CONTINUATION SUMMARY' : 'ordinary answer';
@@ -124,30 +127,43 @@ it('initial native context uses frozen personalization and pinned AGENTS in syst
   await f.personalization.saveNote({ scope: { kind: 'global' }, content: 'NEW NOTE AFTER ACCEPTANCE' });
   expect(await f.api.submit(request)).toEqual(receipt);
   expect(f.requests).toHaveLength(1);
+  expect(JSON.stringify(system(f.requests[0]!.body))).toBe(prompt);
+  const updated = (await f.api.snapshot(identity)).context.checkpoint!;
+  expect(updated.proposal.effective_system_prompt).toContain('CHANGED GLOBAL PROFILE');
+  expect(updated.proposal.effective_system_prompt).toContain('NEW NOTE AFTER ACCEPTANCE');
+  expect(updated.proposal.effective_system_prompt).toContain('PINNED WORKSPACE INSTRUCTIONS');
+  expect(updated.personalization?.originalSections).toEqual(frozen.personalization?.originalSections);
   await f.close();
   const reopened = await fixture(reply, f.root, f.endpoint);
-  expect(await reopened.api.submit(request)).toEqual(receipt);
-  expect((await reopened.api.snapshot(identity)).context.checkpoint).toEqual(frozen);
+  const restored = await reopened.prepareContext.refresh!(updated);
+  expect(restored.effectiveSystemPrompt).toBe(updated.proposal.effective_system_prompt);
+  expect(restored.instructionSources).toEqual(updated.proposal.instruction_sources);
+  expect(restored.memoryCheckpoint).toBe(updated.proposal.memory_checkpoint);
+  expect(await reopened.api.submit(request).catch(error => { throw new Error(`${String(error)}: ${reopened.submissionErrors.join('; ')}`); })).toEqual(receipt);
+  expect((await reopened.api.snapshot(identity)).context.checkpoint).toEqual(updated);
   const next = await reopened.api.submit({ ...identity, key: 'next-context-turn', expectedHead: before.historyPage.head, text: 'NEXT USER MESSAGE', model });
   await expect.poll(async () => (await reopened.api.run(next.run_id)).state).toBe('completed');
-  expect(JSON.stringify(system(f.requests.at(-1)!.body))).toBe(prompt);
-  const job = await reopened.api.compact({ ...identity, key: 'initial-context-summary', throughId: before.historyPage.head!, expectedRevision: 1, model });
+  const updatedPrompt = JSON.stringify(system(f.requests.at(-1)!.body));
+  expect(updatedPrompt).toContain('CHANGED GLOBAL PROFILE');
+  expect(updatedPrompt).toContain('NEW NOTE AFTER ACCEPTANCE');
+  expect(updatedPrompt).not.toContain('LATER DISK INSTRUCTIONS');
+  const job = await reopened.api.compact({ ...identity, key: 'initial-context-summary', throughId: before.historyPage.head!, expectedRevision: updated.revision, model });
   await expect.poll(async () => (await reopened.api.snapshot(identity)).context.jobs.find(value => value.job.receipt.run_id === job.receipt.run_id)?.run.state).toBe('completed');
   const checkpoint = await reopened.api.publishContext(identity, job.receipt.run_id);
-  expect(checkpoint.revision).toBe(2);
-  expect(checkpoint.proposal.effective_system_prompt).toBe(frozen.proposal.effective_system_prompt);
-  expect(checkpoint.proposal.memory_checkpoint).toBe(frozen.proposal.memory_checkpoint);
+  expect(checkpoint.revision).toBe(updated.revision + 1);
+  expect(checkpoint.proposal.effective_system_prompt).toBe(updated.proposal.effective_system_prompt);
+  expect(checkpoint.proposal.memory_checkpoint).toBe(updated.proposal.memory_checkpoint);
   const fork = await reopened.api.fork({ ...identity, key: 'earlier-context-fork', headId: receipt.input_id });
   const forkView = await reopened.api.snapshot(fork);
-  expect(forkView.context.checkpoint?.proposal).toMatchObject({ through_id: null, summary: '', effective_system_prompt: frozen.proposal.effective_system_prompt, memory_checkpoint: frozen.proposal.memory_checkpoint });
+  expect(forkView.context.checkpoint?.proposal).toMatchObject({ through_id: null, summary: '', effective_system_prompt: updated.proposal.effective_system_prompt, memory_checkpoint: updated.proposal.memory_checkpoint });
   const forkRun = await reopened.api.submit({ ...fork, key: 'earlier-fork-input', expectedHead: receipt.input_id, text: 'FORK USER MESSAGE', model });
   await expect.poll(async () => (await reopened.api.run(forkRun.run_id)).state).toBe('completed');
-  expect(JSON.stringify(system(f.requests.at(-1)!.body))).toBe(prompt);
+  expect(JSON.stringify(system(f.requests.at(-1)!.body))).toBe(updatedPrompt);
   expect(JSON.stringify(f.requests.at(-1)!.body)).not.toContain('GENERATED CONTINUATION SUMMARY');
   const latest = await reopened.api.snapshot(identity);
   const finalRun = await reopened.api.submit({ ...identity, key: 'after-summary-input', expectedHead: latest.historyPage.head, text: 'AFTER SUMMARY USER MESSAGE', model });
   await expect.poll(async () => (await reopened.api.run(finalRun.run_id)).state).toBe('completed');
-  expect(JSON.stringify(system(f.requests.at(-1)!.body))).toBe(prompt);
+  expect(JSON.stringify(system(f.requests.at(-1)!.body))).toBe(updatedPrompt);
   expect(JSON.stringify(messages(f.requests.at(-1)!.body).filter(value => value.role !== 'system'))).toContain('GENERATED CONTINUATION SUMMARY');
   expect((await reopened.api.snapshot(identity)).history.slice(0, before.history.length)).toEqual(before.history);
   expect(reopened.launchErrors).toEqual([]);

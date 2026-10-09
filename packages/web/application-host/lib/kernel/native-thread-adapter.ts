@@ -5,6 +5,7 @@ import type { NativeThreadIdentity, NativeThreadSubmit, NativeThreadSource, Nati
 import type { NativeInputMode, NativeInitialContext, NativeModelSessionConfiguration, NativeCredentialScope, NativeRuntimeStreamEvent } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './native-credential-owner.js';
 import { NativeRuntimeClient } from './native-runtime-client.js';
+import type { NativeContextPreparer } from './native-thread-context.js';
 
 export interface NativeThreadModelAuthority {
   listModels?(): Promise<Array<{ providerId: string; modelId: string; name?: string; acceptsImages?: boolean }>>;
@@ -18,7 +19,44 @@ export class NativeThreadAdapter {
     private readonly admitSource: (source: NativeThreadSource) => Promise<void>,
     private readonly onLaunchError: (runId: string, error: unknown) => void,
     private readonly prepareWorkspace?: (input: NativeThreadPrepareSource) => Promise<NativeThreadPreparedSource>,
-    private readonly prepareContext?: (identity: NativeThreadIdentity, source: NativeThreadSource | null) => Promise<NativeInitialContext>) {}
+    private readonly prepareContext?: NativeContextPreparer) {}
+
+  private readonly contextRefreshes = new Map<string, Promise<void>>();
+  /** Serialize refresh reads per branch; an edit arriving during a read gets another fresh read. */
+  private async refreshContext(identity: NativeThreadIdentity): Promise<void> {
+    if (!this.prepareContext?.refresh) return;
+    const previous = this.contextRefreshes.get(identity.branchId) ?? Promise.resolve();
+    const work = previous.catch(() => undefined).then(async () => {
+      for (;;) {
+        const checkpoint = await this.runtime.context(identity.branchId);
+        if (!checkpoint) return;
+        const context = await this.prepareContext!.refresh!(checkpoint);
+        if (context.effectiveSystemPrompt === checkpoint.proposal.effective_system_prompt
+          && JSON.stringify(context.instructionSources) === JSON.stringify(checkpoint.proposal.instruction_sources)
+          && context.memoryCheckpoint === checkpoint.proposal.memory_checkpoint
+          && JSON.stringify(context.personalization) === JSON.stringify(checkpoint.personalization)) return;
+        try {
+          await this.runtime.refreshContext({ branchId: identity.branchId, expectedRevision: checkpoint.revision, context });
+          return;
+        } catch (error) {
+          const latest = await this.runtime.context(identity.branchId);
+          // Only a real concurrent context commit warrants re-reading/retrying. Other failures
+          // remain visible, and later input admission retries from the durable authority.
+          if (!latest || latest.revision === checkpoint.revision) throw error;
+        }
+      }
+    });
+    this.contextRefreshes.set(identity.branchId, work);
+    try { await work; }
+    finally { if (this.contextRefreshes.get(identity.branchId) === work) this.contextRefreshes.delete(identity.branchId); }
+  }
+  async refreshPersonalization(): Promise<void> {
+    if (!this.prepareContext?.refresh) return;
+    const threads = await this.runtime.threads();
+    const results = await Promise.allSettled(threads.filter(thread => thread.thread_id.startsWith('nativeThread:'))
+      .flatMap(thread => thread.branches.map(branch => this.refreshContext({ runtime: 'nativeThread', threadId: thread.thread_id, branchId: branch.branch_id }))));
+    if (results.some(result => result.status === 'rejected')) throw new Error('Native personalization refresh requires attention');
+  }
 
   private readonly questionResumptions = new Map<string, Promise<void>>();
   private async continueQuestion(runId: string): Promise<void> {
@@ -35,6 +73,13 @@ export class NativeThreadAdapter {
     })();
     this.questionResumptions.set(runId, work);
     try { await work; } finally { if (this.questionResumptions.get(runId) === work) this.questionResumptions.delete(runId); }
+  }
+  async decidePermission(input: NativeThreadIdentity & { operationId: string; permissionId: string; decision: 'allow_once' | 'deny' }) {
+    await this.requireIdentity(input);
+    const operation = await this.requireOperation(input.operationId);
+    const run = await this.requireRun(operation.run_id);
+    if (run.branch_id !== input.branchId || run.thread_id !== input.threadId) throw new Error('Permission belongs to another branch');
+    return this.runtime.decidePermission(input.operationId, input.permissionId, input.decision);
   }
   async answerQuestion(input: NativeThreadIdentity & { operationId: string; answer: string }) {
     await this.requireIdentity(input);
@@ -71,6 +116,7 @@ export class NativeThreadAdapter {
 
   async fork(input: NativeThreadIdentity & { key: string; headId: string | null }): Promise<NativeThreadIdentity> {
     await this.requireIdentity(input);
+    await this.refreshContext(input);
     const digest = createHash('sha256').update(JSON.stringify([input.threadId, input.branchId, input.headId, input.key])).digest('hex');
     const result = await this.runtime.forkBranch(input.branchId, `nativeBranch:${digest}`, input.headId);
     return { runtime: 'nativeThread', ...result };
@@ -78,6 +124,7 @@ export class NativeThreadAdapter {
 
   async compact(input: NativeThreadCompact) {
     await this.requireIdentity(input);
+    await this.refreshContext(input);
     const key = createHash('sha256').update(JSON.stringify([input.threadId, input.branchId, input.key])).digest('hex');
     const [checkpoint, jobs] = await Promise.all([this.runtime.context(input.branchId), this.runtime.contextJobs(input.branchId)]);
     // An uncertain create retry keeps its original prompt/memory recipe even after publication.
@@ -139,6 +186,7 @@ export class NativeThreadAdapter {
 
   async submit(input: NativeThreadSubmit) {
     const thread = await this.requireIdentity(input);
+    await this.refreshContext(input);
     if (input.source) await this.admitSource(input.source);
     const model = await this.models.resolveModel(input.model);
     this.assertImagesSupported(input.images, model.configuration);
@@ -166,6 +214,9 @@ export class NativeThreadAdapter {
         branchId: input.source.branchId, revision: input.source.revision, materialized: input.source.mode === 'materialized',
       } : null, enabledTools: input.source?.tools ?? [], credentialScope: await model.credentialOwner.scope() },
     });
+    // Close the first-admission gap: a note commit can occur after assembly while no checkpoint
+    // yet exists for the background refresh. Never launch that missed revision indefinitely.
+    await this.refreshContext(input);
     const run = await this.runtime.run(receipt.run_id);
     if (run.state === 'accepted' || run.state === 'preparing' || run.state === 'runnable') {
       const launch = this.runtime.rebindLaunch(receipt.run_id, { credentialOwner: model.credentialOwner });
@@ -176,6 +227,7 @@ export class NativeThreadAdapter {
 
   async enqueue(input: NativeThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; mode: NativeInputMode }) {
     const thread = await this.requireIdentity(input);
+    await this.refreshContext(input);
     const branch = thread.branches.find(candidate => candidate.branch_id === input.branchId)!;
     const previous = branch.active_run_id ? await this.runtime.run(branch.active_run_id) : branch.latest_run;
     if (!previous) throw new Error('An initial model selection is required');
@@ -291,6 +343,7 @@ export class NativeThreadAdapter {
   async resume(runId: string): Promise<void> {
     const run = await this.runtime.run(runId);
     if (!run.thread_id.startsWith('nativeThread:')) throw new Error('Run is not owned by a nativeThread');
+    await this.refreshContext({ runtime: 'nativeThread', threadId: run.thread_id, branchId: run.branch_id });
     const launch = await this.runtime.launch(runId);
     if (!launch?.selection.credential_scope) throw new Error('Run has no durable credential binding; resubmit its original input key');
     const owner = await this.models.rebindModel(run.configuration as NativeModelSessionConfiguration, launch.selection.credential_scope);

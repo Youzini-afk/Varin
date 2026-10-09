@@ -45,7 +45,7 @@ function fixture(active = false) {
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
   const api: NativeThreadsAPI = { listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
-    answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, events: async () => [],
+    decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
   };
   return { api, view, submit, enqueue, editInput, cancelInput, cancelRun, emit: (event: Parameters<NativeThreadsAPI['observe']>[1] extends (value: infer T) => void ? T : never) => listener?.(event) };
@@ -389,4 +389,28 @@ it('keeps a sibling branch question non-actionable while viewing an earlier conv
   expect(button('Cancel operation')).toBeUndefined();
   await submitForm(container.querySelector<HTMLFormElement>('form[aria-label="Answer agent question"]')!);
   expect(answer).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled();
+});
+
+it('permission UI sends only an explicit one-action decision and cannot approve a sibling Run', async () => {
+  const f = fixture(true);
+  f.view.activeRun!.state = 'executing';
+  const permission = { id: 'permission-1', call: { runId: 'ui-run', requestId: 'request-1', operationId: 'request-1:tool:call-1', callId: 'call-1', name: 'mcp_send', schemaVersion: 'schema-1', arguments: { recipient: 'chosen-target', body: 'exact content' } }, scope: { ownerReference: 'mcp-owner', ownerGeneration: 4, toolSchemaVersion: 'schema-1', policyGeneration: 'policy-generation', reason: 'External effect' }, actor: { account: 'selected-account', authority: 'fixture-authority' }, decision: null, consumed: false };
+  const operation: NativeThreadSnapshot['operations'][number] = { id: permission.call.operationId, run_id: 'ui-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'run', handed_off: false, executor: 'mcp_send', waiting_on: 'permission:permission-1', intent: {}, result: { permission }, external_receipt: null };
+  f.view.operations = [operation];
+  const answer = vi.fn<NativeThreadsAPI['answerQuestion']>(); f.api.answerQuestion = answer;
+  const decide = vi.fn<NativeThreadsAPI['decidePermission']>().mockRejectedValueOnce(new Error('decision transport unavailable')).mockImplementation(async () => {
+    f.view.operations = [{ ...operation, phase: 'accepted', waiting_on: null, result: { permission: { ...permission, decision: 'allow_once', consumed: true } } }]; return f.view.operations[0]!;
+  });
+  f.api.decidePermission = decide;
+  await act(async () => { root.render(<NativeThreadConversation api={f.api} identity={identity} />); });
+  expect(decide).not.toHaveBeenCalled(); expect(answer).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('chosen-target'); expect(container.textContent).toContain('selected-account');
+  await act(async () => { button('Allow once').click(); });
+  expect(container.textContent).toContain('decision transport unavailable');
+  await act(async () => { button('Allow once').click(); });
+  expect(decide.mock.calls[0]![0]).toEqual({ ...identity, operationId: operation.id, permissionId: permission.id, decision: 'allow_once' });
+  expect(decide.mock.calls[1]![0]).toEqual(decide.mock.calls[0]![0]); expect(answer).not.toHaveBeenCalled();
+  f.view.operations = [{ ...operation, run_id: 'sibling-run' }];
+  await act(async () => { f.emit({ cursor: 20, subject: 'sibling-run', revision: 2, kind: 'permission.opened', data: {} }); });
+  expect(button('Allow once').disabled).toBe(true); expect(button('Deny').disabled).toBe(true);
 });

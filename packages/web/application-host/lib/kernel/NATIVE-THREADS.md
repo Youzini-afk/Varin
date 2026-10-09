@@ -168,15 +168,33 @@ as empty instructions. This slice does not load ancestor/nested instruction file
 
 Rust commits the initial effective system prompt, instruction source identities and memory checkpoint
 in the same transaction as the first admitted input and launch selection. Failed admission publishes
-none of them. Replays keep the original checkpoint; later Runs and explicit compaction reuse it.
+none of them. Replays keep the admitted checkpoint; later Runs and explicit compaction use its
+current committed revision.
 User messages remain user instructions, while generated summaries remain external data. Forks carry
 the frozen system snapshot while replaying retained original conversation history. Context bodies
 use the existing immutable content store and GC roots, not a second memory database.
 
-This is a first-input snapshot. Memory/profile edits and workspace selections made afterward do not
-replace that frozen prefix, including at explicit compaction. A new conversation captures current
-notes and its selected workspace. Memory mutation delivery, snapshot refresh, native memory tools,
-and dynamic instruction loading remain separate work; this is not full Pi context parity.
+The checkpoint also records a typed personalization basis: original system sections, their immutable
+instruction identities, and the Host-resolved project/native-thread scopes. The original sections
+contain no note catalog. Committed profile/note changes re-render from this basis through the existing
+personalization owner, so deleting the last note removes its memory sections and resetting an override
+restores the real original section. A later workspace selection does not silently substitute a live
+file or change the checkpoint's original scope.
+
+The Host refreshes after committed personalization changes and before ordinary submit/enqueue, fork,
+compaction and explicit resume. A post-admission check closes the race where an edit arrived before
+the first checkpoint existed. Refresh reads are serialized per branch; failures remain visible and
+later admission retries the authoritative read. The kernel CAS rejects stale revisions or changed
+source/scope provenance and preserves the current summary, its through-message boundary, and tail.
+Already prepared/dispatched ModelStep requests retain their recorded contents and bindings; only later
+context compilation sees the new checkpoint. Compaction candidates based on a superseded checkpoint
+cannot publish over it, and an explicit compaction request may need retry after a concurrent edit.
+
+Native refresh replaces the system snapshot at a committed context boundary. It does not claim Pi's
+cache-prefix stability or its tail-message mutation-receipt algorithm. Native memory tools, dynamic
+workspace instruction reload, skills and Pi extension context remain separate work. Context without
+a typed personalization basis cannot be live-refreshed; no inference/import from edited system text
+is attempted.
 
 ## Native user clarification
 
@@ -199,3 +217,25 @@ cancellation. Cancelling an individual question records an explicit no-answer re
 cancelling its Run closes its unanswered questions without resuming. Clarifications never grant,
 expand or synthesize filesystem, process, network, or credential permissions. Permission prompting
 remains a separate capability owner.
+
+## Native MCP action permissions
+
+MCP's shared Host owner evaluates the existing permission policy before external dispatch. An
+`ask` decision opens a `permission:<nonce>` Wait on the already admitted tool Operation; it does
+not call `native_ask_user`, create a model message, or introduce a second permissions database.
+The persisted request binds the exact Run/request/operation/call/arguments, tool schema version,
+MCP owner reference and generation, policy generation, credential actor, and execution epoch.
+
+The authenticated `permission/decide` route checks the selected thread and branch and accepts only
+`allow_once` or `deny` for that exact permission ID. The conversation UI shows the tool owner and
+arguments with separate Allow once and Deny controls. The live authorizer awaits the decision
+without a catalog lock or resource claim; it consumes an allow-once decision before returning to
+dispatch. The MCP owner rechecks current owner and policy immediately at execution, failing closed
+on changes rather than reopening a prompt while holding resource claims. One approval cannot
+expand tool, file, process, network or credential authority or authorize a different call.
+
+This is an Operation wait inside an executing batch, not a parked Run or an extra model turn.
+Cancellation, owner loss and stale UI submissions cannot approve it. Restart invalidates all
+nondispatched permission decisions and returns those Operations to admission; recovery must bind
+fresh owners and evaluate current policy again. A Host map holds only live wakeup callbacks, never
+policy or durable approval authority. Opened/decided/consumed events retain the decision audit.

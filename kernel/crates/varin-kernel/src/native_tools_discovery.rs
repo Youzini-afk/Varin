@@ -1,7 +1,7 @@
 //! Model-facing discovery composes the existing admitted compute worker. The
 //! resource actor handles only admission and page reads, never waits for a scan.
 use super::*;
-use std::time::Duration;
+use crate::compute::ComputeWatch;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -64,6 +64,19 @@ impl FileQueryArgs {
 }
 
 impl NativeResourceClient {
+    fn observe_query(
+        &self,
+        binding: &NativeToolBinding,
+        context: &ToolExecutionContext,
+        cancel: &CancellationToken,
+    ) -> Result<ComputeWatch, ResourceFailure> {
+        let (reply, watch) = mpsc::channel();
+        self.call(binding, context, ResourceOperation::ObserveCompute { reply }, false, cancel)?;
+        watch.recv().map_err(|_| ResourceFailure {
+            error: KernelError::Storage("compute owner disconnected before observation".into()),
+            dispatched: true,
+        })
+    }
     fn query_control(
         &self,
         binding: &NativeToolBinding,
@@ -87,17 +100,14 @@ impl NativeResourceClient {
         binding: &NativeToolBinding,
         context: &ToolExecutionContext,
         stop: bool,
+        watch: &ComputeWatch,
     ) -> Result<(), ResourceFailure> {
         let cleanup = CancellationToken::default();
         if stop {
             self.query_control(binding, context, "compute.cancel", 0, &cleanup)?;
-            loop {
-                let page = self.query_control(binding, context, "compute.read", 0, &cleanup)?;
-                if !matches!(page["status"].as_str(), Some("queued" | "running")) {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(10));
-            }
+            // Cleanup has independent cancellation ownership. A cancelled tool
+            // still waits for the exact worker's terminal fact before releasing pins.
+            watch.wait(0, true, &cleanup);
         }
         self.query_control(binding, context, "compute.release", 0, &cleanup)
             .map(|_| ())
@@ -116,6 +126,16 @@ impl NativeResourceClient {
             false,
             cancel,
         )?;
+        // Acquire with independent control so cancellation racing start cannot
+        // abandon a successfully admitted compute reader before cleanup owns it.
+        let watch = match self.observe_query(binding, context, &CancellationToken::default()) {
+            Ok(watch) => watch,
+            Err(error) => {
+                // Revocation cancels and sweeps the job at its existing owner.
+                let _ = self.query_control(binding, context, "compute.cancel", 0, &CancellationToken::default());
+                return Err(error);
+            }
+        };
         let mut records = Vec::new();
         let mut bytes = 2usize;
         let budget = args.max_bytes.unwrap_or(65536);
@@ -163,17 +183,19 @@ impl NativeResourceClient {
                         "records":records,"scannedFiles":page["scannedFiles"],
                         "truncated":truncated || page["status"] == "partial",
                         "message":if truncated {json!("Output byte budget reached; narrow paths/globs/query or increase maxBytes")} else {page["message"].clone()}});
-                self.finish_query(binding, context, !terminal)?;
+                self.finish_query(binding, context, !terminal, &watch)?;
                 return Ok(output);
             }
-            if page["records"].as_array().is_none_or(Vec::is_empty) {
-                std::thread::sleep(Duration::from_millis(10));
+            // A nonempty page must first be acknowledged by the next read to
+            // free producer credit; only an already-empty page can park safely.
+            if page["records"].as_array().is_none_or(Vec::is_empty) && !watch.wait(cursor, false, cancel) {
+                return Err(ResourceFailure { error: KernelError::Cancelled, dispatched: true });
             }
             page = self.query_control(binding, context, "compute.read", cursor, cancel)?;
         })();
         if result.is_err() {
             // Grant revocation itself cancels and sweeps owned compute jobs.
-            let _ = self.finish_query(binding, context, true);
+            let _ = self.finish_query(binding, context, true, &watch);
         }
         result
     }

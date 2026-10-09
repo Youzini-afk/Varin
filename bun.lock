@@ -187,7 +187,10 @@
         "@earendil-works/pi-agent-core": "1.0.4",
         "@earendil-works/pi-ai": "1.0.4",
         "@earendil-works/pi-coding-agent": "1.0.4",
+        "@earendil-works/pi-mcp": "1.0.4",
         "@varin/protocol": "0.1.0",
+        "ajv": "^8.20.0",
+        "ajv-formats": "^3.0.1",
         "jsonc-parser": "^3.3.1",
         "proper-lockfile": "4.1.2",
         "typebox": "1.3.36",
@@ -339,6 +342,7 @@
         "@varin/extension-builtins": "workspace:*",
         "@varin/extension-contract": "workspace:*",
         "@varin/extension-host": "workspace:*",
+        "@varin/pi-host": "workspace:*",
         "@varin/protocol": "workspace:*",
         "@varin/runtime-broker": "workspace:*",
         "@varin/settings-store": "workspace:*",
@@ -419,6 +423,7 @@
     "@earendil-works/pi-coding-agent@1.0.4": "packages/pi-host/patches/@earendil-works%2Fpi-coding-agent@1.0.4.patch",
     "@earendil-works/pi-agent-core@1.0.4": "packages/pi-host/patches/@earendil-works%2Fpi-agent-core@1.0.4.patch",
     "braces@3.0.3": "bun-patches/braces@3.0.3.patch",
+    "@earendil-works/pi-mcp@1.0.4": "packages/pi-host/patches/@earendil-works%2Fpi-mcp@1.0.4.patch",
     "sprintf-js@1.1.3": "bun-patches/sprintf-js@1.1.3.patch",
   },
   "overrides": {
@@ -1569,6 +1574,8 @@
     "ajv": ["ajv@8.20.0", "", { "dependencies": { "fast-deep-equal": "^3.1.3", "fast-uri": "^3.0.1", "json-schema-traverse": "^1.0.0", "require-from-string": "^2.0.2" } }, "sha512-Thbli+OlOj+iMPYFBVBfJ3OmCAnaSyNn4M1vz9T6Gka5Jt9ba/HIR56joy65tY6kx/FCF5VXNB819Y7/GUrBGA=="],
 
     "ajv-draft-04": ["ajv-draft-04@1.0.0", "", { "peerDependencies": { "ajv": "^8.5.0" }, "optionalPeers": ["ajv"] }, "sha512-mv00Te6nmYbRp5DCwclxtt7yV/joXJPGS7nM+97GdxvuttCOfgI3K4U25zboyeX0O+myI8ERluxQe5wljMmVIw=="],
+
+    "ajv-formats": ["ajv-formats@3.0.1", "", { "dependencies": { "ajv": "^8.0.0" } }, "sha512-8iUql50EUR+uUcdRQ3HDqa6EVyo3docL8g5WJ3FNcWmu62IbkGUue/pEyLBW8VGKKucTPgqeks4fIU1DA4yowQ=="],
 
     "ajv-i18n": ["ajv-i18n@4.2.0", "", { "peerDependencies": { "ajv": "^8.0.0-beta.0" } }, "sha512-v/ei2UkCEeuKNXh8RToiFsUclmU+G57LO1Oo22OagNMENIw+Yb8eMwvHu7Vn9fmkjJyv6XclhJ8TbuigSglPkg=="],
 

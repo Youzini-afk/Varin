@@ -1,15 +1,22 @@
+import type { NativeMcpLease, NativeMcpBinding } from './native-mcp-bridge.js';
+import { nativePermissionService } from './native-permission-service.js';
 import type { NativeContextJob, NativeContextCheckpoint } from '@varin/application-client';
 import { startNativeRunFromSource, type NativeSourceLaunch } from './native-source-launch.js';
 import type { ExistingHostCredentialOwner } from './native-credential-owner.js';
 import type { KernelClient } from './kernel-client.js';
 import type {
-  NativeContextJobCreateParams, NativeHistoryPage, NativeHistoryPageParams, NativeHistoryReference, NativeHistoryBodyChunk, NativeRunReconcileResult, NativeThreadSummary, NativeLaunchIntent, NativeLaunchSelectParams, NativeInputSubmitParams, NativeReceipt, NativeRun, NativeOperation,
+  NativeContextRefreshParams, NativeContextJobCreateParams, NativeHistoryPage, NativeHistoryPageParams, NativeHistoryReference, NativeHistoryBodyChunk, NativeRunReconcileResult, NativeThreadSummary, NativeLaunchIntent, NativeLaunchSelectParams, NativeInputSubmitParams, NativeReceipt, NativeRun, NativeOperation,
   NativeHistoryItem, NativeEvent, NativeStatus, NativeRunStartReceipt, NativeInputEnqueueParams, NativeInputReceipt, NativeQueuedInput,
 } from './protocol.generated.js';
 
+export interface NativeMcpPreparation {
+  runId: string; threadId: string; source: NativeSourceLaunch | null; executionCwd?: string;
+}
+export type NativeMcpPreparer = (input: NativeMcpPreparation, signal?: AbortSignal) => Promise<NativeMcpLease | undefined>;
+
 /** Explicit native-authority client. Existing Pi thread routes are not silently redirected. */
 export class NativeRuntimeClient {
-  constructor(private readonly kernel: KernelClient) {}
+  constructor(private readonly kernel: KernelClient, private readonly prepareMcpOwner?: NativeMcpPreparer) {}
 
   onExit(listener: (error: Error) => void): () => void { return this.kernel.subscribeExit(listener); }
 
@@ -17,6 +24,9 @@ export class NativeRuntimeClient {
     return this.kernel.onNativeRuntimeEvent(listener);
   }
 
+  decidePermission(operationId: string, permissionId: string, decision: 'allow_once' | 'deny'): Promise<NativeOperation> {
+    return nativePermissionService(this.kernel).decide(operationId, permissionId, decision);
+  }
   answerQuestion(operationId: string, answer: string, signal?: AbortSignal): Promise<NativeOperation> {
     return this.kernel.nativeRuntimeRequest('runtime.question.answer', { operationId, answer }, signal);
   }
@@ -34,6 +44,9 @@ export class NativeRuntimeClient {
   }
   forkBranch(sourceBranchId: string, branchId: string, headId: string | null, signal?: AbortSignal): Promise<{ threadId: string; branchId: string }> {
     return this.kernel.nativeRuntimeRequest('runtime.branch.fork', { sourceBranchId, branchId, headId }, signal);
+  }
+  refreshContext(input: NativeContextRefreshParams, signal?: AbortSignal): Promise<NativeContextCheckpoint> {
+    return this.kernel.nativeRuntimeRequest('runtime.context.refresh', input, signal);
   }
   context(branchId: string, signal?: AbortSignal): Promise<NativeContextCheckpoint | null> {
     return this.kernel.nativeRuntimeRequest('runtime.context.inspect', { branchId }, signal);
@@ -77,6 +90,28 @@ export class NativeRuntimeClient {
   selectLaunch(params: NativeLaunchSelectParams, signal?: AbortSignal): Promise<NativeLaunchIntent> {
     return this.kernel.nativeRuntimeRequest('runtime.launch.select', params, signal);
   }
+  /** Slow connection/schema preparation happens after input admission, before the first model request. */
+  async prepareMcp(runId: string, source: NativeSourceLaunch | null, executionCwd?: string, signal?: AbortSignal): Promise<NativeMcpBinding | undefined> {
+    const existing = this.kernel.nativeMcpBinding(runId);
+    if (existing) return existing;
+    const saved = await this.launch(runId, signal);
+    if (!this.prepareMcpOwner) {
+      if (saved?.selection.mcp_binding) throw new Error('Saved MCP capabilities require their original Host owner');
+      return undefined;
+    }
+    const run = await this.run(runId, signal);
+    const lease = await this.prepareMcpOwner({ runId, threadId: run.thread_id, source, ...(executionCwd ? { executionCwd } : {}) }, signal);
+    if (!lease || lease.binding.tools.length === 0) {
+      lease?.release();
+      if (saved?.selection.mcp_binding) throw new Error('Saved MCP capabilities are unavailable');
+      return undefined;
+    }
+    try {
+      signal?.throwIfAborted();
+      await this.kernel.nativeRuntimeRequest('runtime.launch.mcp.prepare', { runId, binding: lease.binding }, signal);
+      return await this.kernel.registerNativeMcpOwner(runId, lease);
+    } catch (error) { lease.release(); throw error; }
+  }
   startFromSource(selection: NativeSourceLaunch, options: { credentialOwner?: ExistingHostCredentialOwner; signal?: AbortSignal } = {}): Promise<NativeRunStartReceipt> {
     return startNativeRunFromSource(this.kernel, this, selection, options);
   }
@@ -86,12 +121,14 @@ export class NativeRuntimeClient {
     if (!launch) throw new Error('Run has no durable launch selection');
     const source = launch.selection.source;
     if (!source) {
-      if (launch.selection.tools.some(tool => tool.name !== 'native_ask_user')) throw new Error('Saved tools require an explicit Host resource rebind');
+      const mcpNames = new Set(launch.selection.mcp_binding?.tools.map(tool => tool.name) ?? []);
+      if (launch.selection.tools.some(tool => tool.name !== 'native_ask_user' && !mcpNames.has(tool.name))) throw new Error('Saved tools require an explicit Host resource rebind');
+      await this.prepareMcp(runId, null, undefined, options.signal);
       return options.credentialOwner ? this.startRunWithCredentialOwner(runId, options.credentialOwner, options.signal) : this.startRun(runId, options.signal);
     }
     if (source.branch_id === null || source.revision === null) throw new Error('Saved environment requires its original Host resource owner');
     const names = { native_file_read: 'file_read', native_file_list: 'file_list', native_file_search: 'file_search', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn' } as const;
-    const tools = launch.selection.tools.filter(tool => tool.name !== 'native_ask_user').map(tool => {
+    const tools = launch.selection.tools.filter(tool => tool.name !== 'native_ask_user' && !launch.selection.mcp_binding?.tools.some(mcp => mcp.name === tool.name)).map(tool => {
       if (!(tool.name in names)) throw new Error('Saved capability requires its original extension owner');
       return names[tool.name as keyof typeof names];
     });
@@ -113,11 +150,12 @@ export class NativeRuntimeClient {
     if (!source) {
       const credentialScope = options.credentialOwner ? await options.credentialOwner.scope() : undefined;
       await this.selectLaunch({ runId, source: null, enabledTools: [], ...(credentialScope ? { credentialScope } : {}) }, options.signal);
+      await this.prepareMcp(runId, null, undefined, options.signal);
       return options.credentialOwner ? this.startRunWithCredentialOwner(runId, options.credentialOwner, options.signal) : this.startRun(runId, options.signal);
     }
     if (source.branch_id === null || source.revision === null) throw new Error('Environment continuation requires its original Host resource owner');
     const names = { native_file_read: 'file_read', native_file_list: 'file_list', native_file_search: 'file_search', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn' } as const;
-    const tools = previous.selection.tools.filter(tool => tool.name !== 'native_ask_user').map(tool => {
+    const tools = previous.selection.tools.filter(tool => tool.name !== 'native_ask_user' && !previous.selection.mcp_binding?.tools.some(mcp => mcp.name === tool.name)).map(tool => {
       if (!(tool.name in names)) throw new Error('Saved capability requires its original extension owner');
       return names[tool.name as keyof typeof names];
     });
@@ -132,13 +170,15 @@ export class NativeRuntimeClient {
     return this.kernel.nativeRuntimeRequest('runtime.launch.list', {}, signal);
   }
   startRun(runId: string, signal?: AbortSignal, toolBinding?: unknown): Promise<NativeRunStartReceipt> {
-    return this.kernel.nativeRuntimeRequest('runtime.run.start', { runId, ...(toolBinding === undefined ? {} : { toolBinding }) }, signal);
+    const mcpBinding = this.kernel.nativeMcpBinding(runId);
+    return this.kernel.nativeRuntimeRequest('runtime.run.start', { runId, ...(mcpBinding ? { mcpBinding } : {}), ...(toolBinding === undefined ? {} : { toolBinding }) }, signal);
   }
   /** Private Host path: only nonsecret pinned scope crosses admission; credentials resolve later. */
   async startRunWithCredentialOwner(runId: string, owner: ExistingHostCredentialOwner, signal?: AbortSignal, toolBinding?: unknown): Promise<NativeRunStartReceipt> {
     const credentialScope = await this.kernel.registerNativeCredentialOwner(runId, owner);
+    const mcpBinding = this.kernel.nativeMcpBinding(runId);
     try {
-      return await this.kernel.nativeRuntimeRequest('runtime.run.start', { runId, credentialScope,
+      return await this.kernel.nativeRuntimeRequest('runtime.run.start', { runId, credentialScope, ...(mcpBinding ? { mcpBinding } : {}),
         ...(toolBinding === undefined ? {} : { toolBinding }) }, signal);
     } catch (error) {
       this.kernel.unregisterNativeCredentialOwner(runId);
@@ -148,12 +188,12 @@ export class NativeRuntimeClient {
   releaseRunCredentialOwner(runId: string): void { this.kernel.unregisterNativeCredentialOwner(runId); }
   async run(runId: string, signal?: AbortSignal): Promise<NativeRun> {
     const run = await this.kernel.nativeRuntimeRequest<NativeRun, 'runtime.run.inspect'>('runtime.run.inspect', { runId }, signal);
-    if (['completed', 'failed', 'cancelled'].includes(run.state)) this.kernel.unregisterNativeCredentialOwner(runId);
+    if (['completed', 'failed', 'cancelled'].includes(run.state)) { this.kernel.unregisterNativeCredentialOwner(runId); this.kernel.unregisterNativeMcpOwner(runId); }
     return run;
   }
   async cancelRun(runId: string, signal?: AbortSignal): Promise<NativeRun> {
     const run = await this.kernel.nativeRuntimeRequest<NativeRun, 'runtime.run.cancel'>('runtime.run.cancel', { runId }, signal);
-    if (['completed', 'failed', 'cancelled'].includes(run.state)) this.kernel.unregisterNativeCredentialOwner(runId);
+    if (['completed', 'failed', 'cancelled'].includes(run.state)) { this.kernel.unregisterNativeCredentialOwner(runId); this.kernel.unregisterNativeMcpOwner(runId); }
     return run;
   }
   operation(operationId: string, signal?: AbortSignal): Promise<NativeOperation> {

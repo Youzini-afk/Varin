@@ -138,6 +138,7 @@ struct ProcessSpawnArgs {
 enum ResourceOperation {
     FileRead(FileReadArgs),
     FileQuery(FileQueryArgs),
+    ObserveCompute { reply: mpsc::Sender<crate::compute::ComputeWatch> },
     ComputeControl {
         method: &'static str,
         cursor: u64,
@@ -238,6 +239,9 @@ impl ResourceOperation {
     ) -> (&'static str, Value) {
         match self {
             Self::FileQuery(args) => ("compute.start", args.params(binding, context)),
+            Self::ObserveCompute { .. } => ("compute.read", json!({
+                "workspaceId": binding.workspace_id, "jobId": context.operation_id, "cursor": 0
+            })),
             Self::ComputeControl { method, cursor } => {
                 let mut params =
                     json!({"workspaceId":binding.workspace_id,"jobId":context.operation_id});
@@ -327,6 +331,7 @@ pub(crate) struct ResourceCall {
     pub context: ToolExecutionContext,
     operation: ResourceOperation,
     authorize_only: bool,
+    expected_resource_key: Option<String>,
     pub cancellation: CancellationToken,
     pub reply: mpsc::Sender<Result<Value, ResourceFailure>>,
 }
@@ -373,6 +378,13 @@ impl NativeResourceClient {
         authorize_only: bool,
         cancellation: &CancellationToken,
     ) -> Result<Value, ResourceFailure> {
+        self.call_checked(binding, context, operation, authorize_only, None, cancellation)
+    }
+    fn call_checked(
+        &self, binding: &NativeToolBinding, context: &ToolExecutionContext,
+        operation: ResourceOperation, authorize_only: bool, expected_resource_key: Option<String>,
+        cancellation: &CancellationToken,
+    ) -> Result<Value, ResourceFailure> {
         if cancellation.is_cancelled() {
             return Err(ResourceFailure {
                 error: KernelError::Cancelled,
@@ -386,6 +398,7 @@ impl NativeResourceClient {
             context: context.clone(),
             operation,
             authorize_only,
+            expected_resource_key,
             cancellation: cancellation.clone(),
             reply,
         })
@@ -524,84 +537,50 @@ impl NativeToolExecutor {
         ResourceOperation::parse(kind, &call.arguments)
     }
     fn contract(&self, call: &ToolCall, operation: &ResourceOperation) -> ToolContract {
-        let (resource, access, job) = match operation {
-            ResourceOperation::ReconcileMutation { .. }
-            | ResourceOperation::ComputeControl { .. } => {
-                unreachable!("private receipt queries have no model contract")
+        let job = matches!(operation, ResourceOperation::ProcessSpawn(_));
+        let read_only = !matches!(operation, ResourceOperation::FileMutation(_) | ResourceOperation::ProcessSpawn(_));
+        let key = |value: Value| value.to_string();
+        let (resource, access) = match operation {
+            ResourceOperation::ReconcileMutation { .. } | ResourceOperation::ComputeControl { .. } | ResourceOperation::ObserveCompute { .. } =>
+                unreachable!("private receipt queries have no model contract"),
+            // Discovery snapshots have their own short Storage coordination and consume fixed bytes.
+            // Their long search/scan wait must not hold a directory-wide write barrier.
+            ResourceOperation::FileQuery(_) => (key(json!(["discovery", self.binding.execution_workspace_id, self.binding.root_id, self.binding.file_source])), Access::Read),
+            ResourceOperation::FileMutation(mutation) => (key(json!(["unresolved-file", mutation.path()])), Access::Write),
+            ResourceOperation::FileRead(args) if self.binding.source_mode == NativeSourceMode::Materialized =>
+                (key(json!(["unresolved-file", args.path])), Access::Read),
+            ResourceOperation::FileRead(args) => {
+                let source = self.binding.file_source.as_ref().expect("validated source");
+                (key(json!(["fixed-file", self.binding.workspace_id, source.branch_id, source.revision, args.path])), Access::Read)
             }
-            ResourceOperation::FileQuery(_) => (
-                if self.binding.source_mode == NativeSourceMode::Materialized {
-                    format!("environment:{}", self.binding.execution_workspace_id)
-                } else {
-                    let source = self.binding.file_source.as_ref().expect("validated source");
-                    format!(
-                        "branch:{}:{}:{}",
-                        self.binding.workspace_id, source.branch_id, source.revision
-                    )
-                },
-                Access::Read,
-                false,
-            ),
-            ResourceOperation::FileMutation(_) => (
-                format!("environment:{}", self.binding.execution_workspace_id),
-                Access::Write,
-                false,
-            ),
-            ResourceOperation::FileRead(_)
-                if self.binding.source_mode == NativeSourceMode::Materialized =>
-            {
-                (
-                    format!("environment:{}", self.binding.execution_workspace_id),
-                    Access::Read,
-                    false,
-                )
-            }
-            ResourceOperation::FileRead(args) => (
-                format!(
-                    "file:{}:{}:{}",
-                    self.binding.workspace_id,
-                    self.binding
-                        .file_source
-                        .as_ref()
-                        .expect("validated source")
-                        .branch_id,
-                    args.path
-                ),
-                Access::Read,
-                false,
-            ),
-            ResourceOperation::ProcessInspect(args) => (
-                format!("process:{}:{}", self.binding.workspace_id, args.process_id),
-                Access::Read,
-                false,
-            ),
-            ResourceOperation::ProcessRead(args) => (
-                format!("process:{}:{}", self.binding.workspace_id, args.process_id),
-                Access::Read,
-                false,
-            ),
-            ResourceOperation::ProcessSpawn(_) => (
-                format!("environment:{}", self.binding.execution_workspace_id),
-                Access::Write,
-                true,
-            ),
+            ResourceOperation::ProcessInspect(args) => (key(json!(["process-output", self.binding.execution_workspace_id, args.process_id])), Access::Read),
+            ResourceOperation::ProcessRead(args) => (key(json!(["process-output", self.binding.execution_workspace_id, args.process_id])), Access::Read),
+            // Arbitrary programs have unknown write sets. Record shared writer activity, never
+            // pretend that an environment-wide mutex isolates their filesystem side effects.
+            ResourceOperation::ProcessSpawn(_) => (key(json!(["environment-writer-activity", self.binding.execution_workspace_id, self.binding.root_id])), Access::Read),
         };
         ToolContract {
-            name: call.name.clone(),
-            schema_version: "1".into(),
-            read_only: access == Access::Read,
-            completion: if job {
-                CompletionKind::Job
-            } else {
-                CompletionKind::Result
-            },
+            name: call.name.clone(), schema_version: "1".into(), read_only,
+            completion: if job { CompletionKind::Job } else { CompletionKind::Result },
             lifetime: if job { Lifetime::Thread } else { Lifetime::Run },
-            resources: vec![ResourceClaim {
-                key: resource,
-                access,
-            }],
+            resources: vec![ResourceClaim { key: resource, access }],
         }
     }
+    fn materialized_file(&self, operation: &ResourceOperation) -> bool {
+        matches!(operation, ResourceOperation::FileMutation(_))
+            || (matches!(operation, ResourceOperation::FileRead(_)) && self.binding.source_mode == NativeSourceMode::Materialized)
+    }
+    fn planned_contract(&self, context: &ToolExecutionContext, call: &ToolCall, operation: &ResourceOperation, cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
+        let mut contract = self.contract(call, operation);
+        if self.materialized_file(operation) {
+            let plan = self.resources.call(&self.binding, context, operation.clone(), true, cancel)
+                .map_err(|failure| ExecutionError::new(error_code(&failure.error), failure.error.to_string()))?;
+            contract.resources[0].key = plan.get("resourceKey").and_then(Value::as_str)
+                .ok_or_else(|| ExecutionError::new("invalid_resource_plan", "file owner omitted its canonical resource identity"))?.into();
+        }
+        Ok(contract)
+    }
+
 }
 impl ToolExecutor for NativeToolExecutor {
     fn prepare(
@@ -633,7 +612,10 @@ impl ToolExecutor for NativeToolExecutor {
                 "tool does not match the frozen request schema",
             ));
         }
-        Ok(self.contract(call, &operation))
+        self.planned_contract(&ToolExecutionContext {
+            run_id: self.binding.run_id.clone(), request_id: request.view.request_id.clone(),
+            operation_id: format!("{}:tool:{}", request.view.request_id, call.call_id),
+        }, call, &operation, &CancellationToken::default())
     }
     fn authorize(
         &self,
@@ -643,12 +625,13 @@ impl ToolExecutor for NativeToolExecutor {
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
         let operation = self.operation(Some(context), call)?;
-        if &self.contract(call, &operation) != contract {
+        if &self.planned_contract(context, call, &operation, cancel)? != contract {
             return Err(ExecutionError::new(
                 "stale_tool_contract",
                 "tool contract changed",
             ));
         }
+        if self.materialized_file(&operation) { return Ok(()); }
         self.resources
             .call(&self.binding, context, operation, true, cancel)
             .map(|_| ())
@@ -671,7 +654,9 @@ impl ToolExecutor for NativeToolExecutor {
                 }
             }
         };
-        if &self.contract(call, &operation) != contract {
+        let mut expected = self.contract(call, &operation);
+        if self.materialized_file(&operation) { expected.resources = contract.resources.clone(); }
+        if &expected != contract {
             return ToolCompletion::NotDispatched {
                 reason: "tool contract changed".into(),
             };
@@ -681,8 +666,10 @@ impl ToolExecutor for NativeToolExecutor {
         let result = if let ResourceOperation::FileQuery(args) = &operation {
             self.resources.query(&self.binding, context, args, cancel)
         } else {
-            self.resources
-                .call(&self.binding, context, operation, false, cancel)
+            let expected_key = if self.materialized_file(&operation) {
+                contract.resources.first().map(|claim| claim.key.clone())
+            } else { None };
+            self.resources.call_checked(&self.binding, context, operation, false, expected_key, cancel)
         };
         match result {
             Ok(result) if spawn => {
@@ -831,6 +818,18 @@ pub(crate) fn serve_resource(
             &params,
         )?;
         validate_binding(&grant, &request.binding, &request.context)?;
+        let file_path = match &request.operation {
+            ResourceOperation::FileMutation(mutation) => Some(mutation.path()),
+            ResourceOperation::FileRead(args) if request.binding.source_mode == NativeSourceMode::Materialized => Some(args.path.as_str()),
+            _ => None,
+        };
+        if let Some(path) = file_path {
+            let key = storage.native_file_resource_key(request.binding.root_id.as_deref().expect("validated materialized root"), path, &grant)?;
+            if request.authorize_only { return Ok(json!({"resourceKey":key})); }
+            if request.expected_resource_key.as_deref() != Some(key.as_str()) {
+                return Err(KernelError::Authorization("canonical file resource changed after admission".into()));
+            }
+        }
         if let ResourceOperation::ReconcileMutation { mutation, executor } = &request.operation {
             let root_id =
                 request.binding.root_id.as_deref().ok_or_else(|| {
@@ -874,6 +873,11 @@ pub(crate) fn serve_resource(
             return result;
         }
         if request.authorize_only {
+            return Ok(Value::Null);
+        }
+        if let ResourceOperation::ObserveCompute { reply } = &request.operation {
+            let watch = storage.watch_compute(&request.context.operation_id, &request.binding.workspace_id, &grant)?;
+            reply.send(watch).map_err(|_| KernelError::Storage("compute observer disconnected".into()))?;
             return Ok(Value::Null);
         }
         storage.set_cancellation(request.cancellation.shared_flag());

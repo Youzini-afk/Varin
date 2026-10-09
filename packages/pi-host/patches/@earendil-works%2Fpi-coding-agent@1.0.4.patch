@@ -931,12 +931,16 @@ index 494212e..64fcd82 100644
 \ No newline at end of file
 +//# sourceMappingURL=tool.js.map
 diff --git a/dist/extensions/mcp/index.d.ts b/dist/extensions/mcp/index.d.ts
-index 2ee96fa..885b074 100644
 --- a/dist/extensions/mcp/index.d.ts
 +++ b/dist/extensions/mcp/index.d.ts
-@@ -30,7 +30,26 @@ import { type LoadedMcpConfig, type McpServerConfigPatch, type McpServerEntry }
- import type { McpOAuthCredentialStore } from "./oauth.ts";
- import type { McpTransportFactory } from "./runtime.ts";
+@@ -27,10 +27,52 @@
+  */
+ import type { ExtensionContext, ExtensionFactory } from "../../core/extensions/types.ts";
+ import { type LoadedMcpConfig, type McpServerConfigPatch, type McpServerEntry } from "./config.ts";
+-import type { McpOAuthCredentialStore } from "./oauth.ts";
+-import type { McpTransportFactory } from "./runtime.ts";
++import type { McpOAuthCredentialStore, McpSignInPrompt } from "./oauth.ts";
++import type { McpServerConnection, McpTransportFactory } from "./runtime.ts";
  export type { McpTransportFactory } from "./runtime.ts";
 +export interface McpStateSnapshot {
 +    sessionId: string;
@@ -955,13 +959,36 @@ index 2ee96fa..885b074 100644
 +        resourceCount: number;
 +    }[];
 +}
++/** Connection view owned by an embedding Application Host, not an AgentSession. */
++export type McpConnectionHandle = Pick<McpServerConnection,
++    "entry" | "state" | "error" | "tools" | "hasResources" | "resources" | "resourceTemplates" |
++    "instructions" | "name" | "timeoutMs" | "oauthUrl" | "callTool" | "readResource" |
++    "resourcesPage" | "resourceTemplatesPage" | "allResources" | "allResourceTemplates" |
++    "reconnect" | "signOut" | "close"> & { getClient(): Promise<unknown>; credentialRevision?: string };
++export interface McpExtensionOwner {
++    /** Session start must not cross a Host bridge before its broker actor is registered. */
++    onPrepare(prepare: () => Promise<void>): void;
++    loadConfig(ctx: ExtensionContext): Promise<LoadedMcpConfig>;
++    createConnection(entry: McpServerEntry, callbacks: {
++        onTools(connection: McpConnectionHandle): void;
++        onChange(connection: McpConnectionHandle): void;
++    }): Promise<McpConnectionHandle>;
++    toolCaller(connection: McpConnectionHandle, tool: string): Pick<McpServerConnection, "callTool">;
++    updateConfig(entry: McpServerEntry, patch: McpServerConfigPatch): Promise<void>;
++    signIn(connection: McpConnectionHandle, prompt: McpSignInPrompt): Promise<void>;
++    signOut(connection: McpConnectionHandle): Promise<boolean>;
++    refresh(): Promise<void>;
++    close(): Promise<void>;
++}
  export interface McpExtensionOptions {
++    /** Embedders transfer configuration, transport and credential ownership together. */
++    owner?: McpExtensionOwner;
 +    /** Read-only, credential-free projection of this extension's live connections. */
 +    onState?: (snapshot: McpStateSnapshot) => void;
      /** Defaults to reading `mcp.json` from the agent directory and the trusted project. */
      loadConfig?: (ctx: ExtensionContext) => LoadedMcpConfig;
      /** Defaults to stdio and streamable HTTP transports built from the server config. */
-@@ -45,7 +64,7 @@ export interface McpExtensionOptions {
+@@ -45,7 +87,7 @@
       * Saves `/mcp` changes to the server's config file: its project `override` when set, else its
       * `source`. Defaults to editing that `mcp.json`.
       */
@@ -970,7 +997,7 @@ index 2ee96fa..885b074 100644
      /**
       * How long the first prompt waits for servers with `direct` tools that are still connecting at
       * startup, in milliseconds. Their tools become available when they connect. Other servers are
-@@ -76,4 +95,4 @@ export declare function renderServersSection(servers: readonly McpServerListing[
+@@ -76,4 +118,4 @@
  export declare function createMcpExtension(options?: McpExtensionOptions): ExtensionFactory;
  declare const _default: ExtensionFactory;
  export default _default;
@@ -978,29 +1005,37 @@ index 2ee96fa..885b074 100644
 \ No newline at end of file
 +//# sourceMappingURL=index.d.ts.map
 diff --git a/dist/extensions/mcp/index.js b/dist/extensions/mcp/index.js
-index fa266f3..a74bb16 100644
 --- a/dist/extensions/mcp/index.js
 +++ b/dist/extensions/mcp/index.js
-@@ -182,11 +182,14 @@ function attentionRank(server) {
+@@ -182,11 +182,14 @@
  }
  function describeTransport(entry) {
      const { config } = entry;
 -    if ("url" in config)
 -        return config.url;
 -    return [config.command, ...(config.args ?? [])].join(" ");
+-}
+-const MCP_USAGE = "Usage: /mcp, /mcp login [server], /mcp logout [server], /mcp reconnect [server]";
 +    if ("url" in config) {
 +        const url = new URL(config.url);
 +        url.username = ""; url.password = ""; url.search = ""; url.hash = "";
 +        return url.toString();
 +    }
 +    return config.command;
- }
--const MCP_USAGE = "Usage: /mcp, /mcp login [server], /mcp logout [server], /mcp reconnect [server]";
++}
 +const MCP_USAGE = "Usage: /mcp, /mcp login [server], /mcp logout [server], /mcp reconnect [server], /mcp enable <server>, /mcp disable <server>";
  export function createMcpExtension(options = {}) {
      return (pi) => {
          let servers = [];
-@@ -210,6 +213,7 @@ export function createMcpExtension(options = {}) {
+@@ -203,6 +206,7 @@
+         /** Whether the "codemode tools unreachable" warning was shown since the session started. */
+         let warnedUnreachable = false;
+         let pending;
++        let prepareOwner;
+         /** Whether a prompt already waited for the startup connections since the session started. */
+         let waitedForStartup = false;
+         const startupWaitMs = options.startupWaitMs ?? DEFAULT_STARTUP_WAIT_MS;
+@@ -210,17 +214,33 @@
          let generation = 0;
          /** Working directory of the session, for stdio servers. */
          let sessionCwd = process.cwd();
@@ -1008,7 +1043,12 @@ index fa266f3..a74bb16 100644
          let credentials = options.credentials;
          /** The session's model registry, which resolves `auth.provider` tokens. */
          let modelRegistry;
-@@ -221,6 +225,21 @@ export function createMcpExtension(options = {}) {
+         let serverLog;
+         const openUrl = options.openUrl ?? openBrowser;
+-        const updateConfig = options.updateConfig ??
++        const updateConfig = options.owner?.updateConfig.bind(options.owner) ?? options.updateConfig ??
+             ((entry, patch) => updateMcpServerConfig(entry.override ?? entry.source, entry.name, patch, {
+                 override: entry.override !== undefined,
              }));
          const listeners = new Set();
          const emitChange = () => {
@@ -1023,14 +1063,52 @@ index fa266f3..a74bb16 100644
 +                    } else transport = { kind: "stdio", command: entry.config.command };
 +                    return { name: entry.name, source: entry.source, scope: entry.scope,
 +                        disabled: entry.config.enabled === false, transport,
-+                        exposure: exposureOf(entry), status: entry.config.enabled === false ? "disabled" : connection?.state ?? "connecting",
++                        exposure: exposureOf(entry), status: entry.config.enabled === false ? "disabled" : connection?.state ?? (options.owner ? "disconnected" : "connecting"),
 +                        toolCount: connection?.tools.length ?? 0, resourceCount: connection?.resources.length ?? 0 };
 +                }),
 +            });
              for (const listener of listeners)
                  listener();
          };
-@@ -492,12 +511,12 @@ export function createMcpExtension(options = {}) {
+@@ -294,6 +314,7 @@
+                 return name;
+             };
+             for (const tool of connection.tools) {
++                const ownerCaller = options.owner?.toolCaller(connection, tool.name);
+                 const definition = createMcpToolDefinition({
+                     server,
+                     tool,
+@@ -301,7 +322,7 @@
+                     exposure: getMcpToolExposure(entry.config, tool.name),
+                     namespace,
+                     timeoutMs: connection.timeoutMs,
+-                    getClient: async () => connection,
++                    getClient: async () => ownerCaller ?? connection,
+                     readableResources: () => resourceServers().includes(connection),
+                 });
+                 definitions.set(definition.name, definition);
+@@ -402,6 +423,7 @@
+          */
+         const tokensAtSignIn = new Map();
+         const storedTokens = (connection) => {
++            if (options.owner) return connection.credentialRevision ?? "";
+             const url = connection.oauthUrl;
+             return url && credentials ? JSON.stringify(credentials.tokens(connection.name, url) ?? null) : "null";
+         };
+@@ -424,6 +446,12 @@
+         };
+         /** Create the server's connection, loading the MCP runtime on first use. */
+         const createConnection = async (server) => {
++            if (options.owner) {
++                const connection = await options.owner.createConnection(server.entry, { onTools: registerTools, onChange: onConnectionChange });
++                server.connection = connection;
++                emitChange();
++                return connection;
++            }
+             const runtime = await loadMcpRuntime();
+             const connection = new runtime.McpServerConnection({
+                 entry: server.entry,
+@@ -492,12 +520,12 @@
           * Save a config change; returns an error message when the file could not be updated. Changes to
           * registered servers only apply to the current session. `inProject` adds a project override.
           */
@@ -1038,14 +1116,47 @@ index fa266f3..a74bb16 100644
 +        const saveConfig = async (server, patch, inProject = false) => {
              const override = inProject ? projectConfig : server.entry.override;
              const entry = override ? { ...server.entry, override } : server.entry;
-             if (entry.scope !== "extension") {
+-            if (entry.scope !== "extension") {
++            if (entry.scope !== "extension" || options.owner) {
                  try {
 -                    updateConfig(entry, patch);
 +                    await updateConfig(entry, patch);
                  }
                  catch (error) {
                      return `Could not update ${entry.override ?? entry.source}: ${errorMessage(error)}`;
-@@ -559,7 +578,9 @@ export function createMcpExtension(options = {}) {
+@@ -507,6 +535,11 @@
+             return undefined;
+         };
+         const signIn = async (server, prompt) => {
++            if (options.owner) {
++                if (!server.connection?.oauthUrl) return `MCP server "${server.entry.name}" does not use OAuth.`;
++                try { await options.owner.signIn(server.connection, prompt); return undefined; }
++                catch (error) { return `Sign-in failed: ${errorMessage(error)}`; }
++            }
+             const connection = server.connection;
+             const url = connection?.oauthUrl;
+             if (!connection || !url)
+@@ -537,6 +570,7 @@
+             return undefined;
+         };
+         const signOut = async (server) => {
++            if (options.owner) return server.connection ? options.owner.signOut(server.connection) : false;
+             const connection = server.connection;
+             const url = connection?.oauthUrl;
+             if (!connection || !url)
+@@ -546,6 +580,11 @@
+             return removed;
+         };
+         const reconnect = async (server) => {
++            if (!server.connection && options.owner && isEnabled(server)) {
++                const current = generation;
++                await startConnection(server, () => current === generation);
++                return server.connection?.state === "connected" ? undefined : server.connection?.error ?? "MCP connection unavailable";
++            }
+             const connection = server.connection;
+             if (!connection)
+                 return `MCP server "${server.entry.name}" is disabled.`;
+@@ -559,7 +598,9 @@
          };
          /** Returns an error message when the config could not be saved; connection errors show in the state. */
          const setEnabled = async (server, enabled, inProject = false) => {
@@ -1056,7 +1167,7 @@ index fa266f3..a74bb16 100644
              if (failed)
                  return failed;
              if (!enabled) {
-@@ -573,8 +594,10 @@ export function createMcpExtension(options = {}) {
+@@ -573,8 +614,10 @@
              await startConnection(server, () => true);
              return undefined;
          };
@@ -1069,15 +1180,133 @@ index fa266f3..a74bb16 100644
              if (failed)
                  return failed;
              if (server.connection?.state === "connected")
-@@ -879,6 +902,7 @@ export function createMcpExtension(options = {}) {
+@@ -647,7 +690,7 @@
+                 if (state === "connected" && connection) {
+                     items.push({ value: "tools", label: "Tools", description: `${connection.tools.length} offered` });
+                 }
+-                if (state === "failed" || state === "disconnected" || state === "connected" || state === "needs-auth") {
++                if ((options.owner && state === undefined) || state === "failed" || state === "disconnected" || state === "connected" || state === "needs-auth") {
+                     items.push({ value: "reconnect", label: "Reconnect" });
+                 }
+                 if (state === "connected" && connection?.oauthUrl) {
+@@ -871,16 +914,18 @@
+             ensureDiscoveryActive(ctx);
+             ctx.ui.notify(`Signed in to MCP server "${name}" (${server.connection?.tools.length ?? 0} tools).`, "info");
+         };
+-        pi.on("session_start", (_event, ctx) => {
+-            const loaded = (options.loadConfig ?? defaultLoadConfig)(ctx);
++        const startSession = async (ctx, expectedGeneration) => {
++            const loaded = options.owner ? await options.owner.loadConfig(ctx) : (options.loadConfig ?? defaultLoadConfig)(ctx);
++            if (expectedGeneration !== generation) return;
+             configErrors = loaded.errors;
+             projectConfig = loaded.projectConfig;
+             autoEnableCodemode = loaded.autoEnableCodemode ?? true;
              warnedUnreachable = false;
              waitedForStartup = false;
              sessionCwd = ctx.cwd;
 +            sessionId = ctx.sessionManager.getSessionId();
              modelRegistry = ctx.modelRegistry;
-             const current = ++generation;
+-            const current = ++generation;
++            const current = generation;
              sessionActive = true;
-@@ -1023,14 +1047,14 @@ export function createMcpExtension(options = {}) {
+             configuredEntries = loaded.servers;
+             const registered = registeredServers();
+@@ -890,14 +935,14 @@
+             // Codemode or tool_search is activated from the config: the first prompt does not wait for
+             // servers whose tools are not declared to the model, and scripts or searches wait for them.
+             ensureDiscoveryActive(ctx);
+-            const enabled = servers.filter(isEnabled);
++            const enabled = servers.filter(server => isEnabled(server) && (!options.owner || hasDirectTools(server.entry)));
+             if (enabled.length === 0) {
+                 reportProblems(ctx);
+                 return;
+             }
+             // The MCP client loads only now, so sessions without servers never pay for it. Waiting one
+             // event loop turn lets the first render happen before loading and connecting.
+-            const runtime = new Promise((resolve) => setImmediate(resolve)).then(() => loadMcpRuntime());
++            const runtime = new Promise((resolve) => setImmediate(resolve)).then(() => options.owner ? undefined : loadMcpRuntime());
+             const isCurrent = () => current === generation;
+             pending = Promise.all(enabled.map((server) => startConnection(server, isCurrent, runtime)))
+                 .then(() => {
+@@ -911,6 +956,15 @@
+                 }
+                 catch { }
+             });
++        };
++        pi.on("session_start", (_event, ctx) => {
++            const current = ++generation;
++            if (!options.owner) return startSession(ctx, current);
++            // The broker pins the worker only after session creation returns. Installing this
++            // closure is synchronous; first prompt/manager/config access prepares after binding.
++            let preparing;
++            prepareOwner = () => preparing ??= startSession(ctx, current).catch(error => { preparing = undefined; throw error; });
++            options.owner.onPrepare(prepareOwner);
+         });
+         // The first prompt waits for servers whose tools are declared to the model, so they are declared
+         // in its first request, but not indefinitely: a slow or hanging server must not hold up the
+@@ -937,6 +991,8 @@
+         // Every prompt lists the servers in the `mcp_servers` section as they are when it starts. Pi
+         // appends the section to the conversation when it changed, for example after a server connected.
+         pi.on("before_agent_start", async (event, ctx) => {
++            await prepareOwner?.();
++            await options.owner?.refresh();
+             await waitForDirectServers(ctx);
+             const { sections } = event.systemPromptOptions;
+             const section = renderServersSection(servers);
+@@ -949,10 +1005,11 @@
+         // enumerates tools, so their tools are registered before the script runs. tool_search and the
+         // resource tools reach every server, so they wait for all of them.
+         pi.on("tool_call", async (event, ctx) => {
++            await prepareOwner?.();
+             const tool = pi.getAllTools().find((candidate) => candidate.name === event.toolName);
+             if (!tool)
+                 return;
+-            const pendingServers = servers.filter((server) => isEnabled(server) && server.connection?.state !== "connected" && server.ready);
++            const pendingServers = servers.filter((server) => isEnabled(server) && server.connection?.state !== "connected" && (server.ready || options.owner));
+             if (pendingServers.length === 0)
+                 return;
+             let waiting = [];
+@@ -964,10 +1021,16 @@
+             else if (isToolSearchTool(tool) || RESOURCE_TOOL_NAMES.has(tool.name)) {
+                 waiting = pendingServers;
+             }
++            if (options.owner) {
++                const current = generation;
++                for (const server of waiting) if (!server.ready) void startConnection(server, () => current === generation).catch(() => undefined);
++            }
+             await waitForServers(waiting, ctx.signal);
+         });
+         // Pick up sign-ins done outside the session, such as `pi mcp login` run by the agent.
+         pi.on("turn_start", async (_event, ctx) => {
++            await prepareOwner?.();
++            await options.owner?.refresh();
+             if (tokensAtSignIn.size > 0)
+                 await reconnectSignedIn(ctx);
+         });
+@@ -990,7 +1053,7 @@
+             emitChange();
+             ensureDiscoveryActive(ctx);
+             await Promise.all(removed.map((server) => server.connection?.close()));
+-            const connecting = added.filter(isEnabled);
++            const connecting = added.filter(server => isEnabled(server) && (!options.owner || hasDirectTools(server.entry)));
+             if (current !== generation || connecting.length === 0)
+                 return;
+             try {
+@@ -1010,11 +1073,13 @@
+         });
+         pi.on("session_shutdown", async () => {
+             sessionActive = false;
++            prepareOwner = undefined;
+             generation++;
+             const closing = connections();
+             servers = [];
+             emitChange();
+             await Promise.all(closing.map((connection) => connection.close()));
++            await options.owner?.close();
+         });
+         pi.registerCommand("mcp", {
+             description: "Manage MCP servers: sign in, reconnect, enable or disable, and change exposure",
+@@ -1023,14 +1088,14 @@
                  if (rest.length > 0)
                      return null;
                  if (server === undefined) {
@@ -1095,9 +1324,25 @@ index fa266f3..a74bb16 100644
                      .filter((candidate) => candidate.entry.name.startsWith(server))
                      .map((candidate) => ({
                      value: `${action} ${candidate.entry.name}`,
-@@ -1054,6 +1078,15 @@ export function createMcpExtension(options = {}) {
+@@ -1040,6 +1105,7 @@
+                 return items.length > 0 ? items : null;
+             },
+             handler: async (args, ctx) => {
++                await prepareOwner?.();
+                 await pending;
+                 const [action, name, ...extra] = args.trim().split(/\s+/).filter(Boolean);
+                 if (action === undefined) {
+@@ -1053,7 +1119,23 @@
+                     ctx.ui.notify(MCP_USAGE, "warning");
                      return;
                  }
++                if (options.owner && name && (action === "login" || action === "reconnect")) {
++                    const server = findServer(name);
++                    if (server && isEnabled(server) && !server.connection) {
++                        const current = generation;
++                        await startConnection(server, () => current === generation);
++                    }
++                }
                  switch (action) {
 +                    case "enable":
 +                    case "disable": {
@@ -1111,7 +1356,7 @@ index fa266f3..a74bb16 100644
                      case "login": {
                          const server = await pickServer(name, ctx, oauthPick);
                          if (server)
-@@ -1098,4 +1131,4 @@ function defaultLoadConfig(ctx) {
+@@ -1098,4 +1180,4 @@
      return loadMcpConfig({ agentDir: getAgentDir(), cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
  }
  export default createMcpExtension();
@@ -1119,10 +1364,9 @@ index fa266f3..a74bb16 100644
 \ No newline at end of file
 +//# sourceMappingURL=index.js.map
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index 9f9bd73..50f8b28 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
-@@ -30,6 +30,10 @@ export { type CodemodeExtensionOptions, createCodemodeExtension } from "./extens
+@@ -30,6 +30,10 @@
  export type { CodemodeStoreEntryData, CodemodeToolDetails } from "./extensions/codemode/tool.ts";
  export type { LoadedMcpConfig, McpExposure, McpServerConfig, McpServerEntry } from "./extensions/mcp/config.ts";
  export { createMcpExtension, type McpExtensionOptions, type McpTransportFactory } from "./extensions/mcp/index.ts";
@@ -1133,11 +1377,23 @@ index 9f9bd73..50f8b28 100644
  export { createToolSearchExtension } from "./extensions/tool-search/index.ts";
  export { type MainOptions, main } from "./main.ts";
  export { InteractiveMode, type InteractiveModeOptions, type JsonAgentSessionEvent, type ModelInfo, type PrintModeOptions, RpcClient, type RpcClientOptions, type RpcCommand, type RpcEventListener, type RpcExtensionUIRequest, type RpcExtensionUIResponse, type RpcResponse, type RpcSessionState, runPrintMode, runRpcMode, } from "./modes/index.ts";
+@@ -41,4 +45,10 @@
+ export { formatDimensionNote, type ResizedImage, resizeImage } from "./utils/image-resize.ts";
+ export { detectSupportedImageMimeTypeFromFile } from "./utils/mime.ts";
+ export { getPowerShellConfig, getShellConfig } from "./utils/shell.ts";
+-//# sourceMappingURL=index.d.ts.map
+\ No newline at end of file
++//# sourceMappingURL=index.d.ts.map
++export { loadMcpRuntime } from "./extensions/mcp/runtime.lazy.js";
++export { createMcpToolName } from "./extensions/mcp/tools.js";
++export { getMcpToolExposure, validateMcpServerConfig } from "./core/mcp-servers.js";
++export type { McpServerConnection } from "./extensions/mcp/runtime.js";
++export type { McpConnectionHandle, McpExtensionOwner } from "./extensions/mcp/index.js";
++export type { McpSignInPrompt } from "./extensions/mcp/oauth.js";
 diff --git a/dist/index.js b/dist/index.js
-index c48934f..4d7b30e 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -34,6 +34,9 @@ export { VIRTUAL_MODEL_STATE_ENTRY, } from "./core/virtual-models.js";
+@@ -34,6 +34,9 @@
  export { createCodemodeExtension } from "./extensions/codemode/index.js";
  export { createMcpExtension } from "./extensions/mcp/index.js";
  export { createToolSearchExtension } from "./extensions/tool-search/index.js";
@@ -1147,6 +1403,16 @@ index c48934f..4d7b30e 100644
  // Main entry point
  export { main } from "./main.js";
  // Run modes for programmatic SDK usage
+@@ -50,4 +53,7 @@
+ export { detectSupportedImageMimeTypeFromFile } from "./utils/mime.js";
+ // Shell utilities
+ export { getPowerShellConfig, getShellConfig } from "./utils/shell.js";
+-//# sourceMappingURL=index.js.map
+\ No newline at end of file
++//# sourceMappingURL=index.js.map
++export { loadMcpRuntime } from "./extensions/mcp/runtime.lazy.js";
++export { createMcpToolName } from "./extensions/mcp/tools.js";
++export { getMcpToolExposure, validateMcpServerConfig } from "./core/mcp-servers.js";
 diff --git a/docs/codemode.md b/docs/codemode.md
 index d79f987..cc00c96 100644
 --- a/docs/codemode.md
@@ -1228,3 +1494,132 @@ diff --git a/dist/core/compaction/compaction.d.ts b/dist/core/compaction/compact
 +    systemMessage?: import("@earendil-works/pi-ai").SystemMessage;
  }
  export interface CompactionSettings {
+diff --git a/dist/extensions/mcp/runtime.js b/dist/extensions/mcp/runtime.js
+--- a/dist/extensions/mcp/runtime.js
++++ b/dist/extensions/mcp/runtime.js
+@@ -191,22 +191,22 @@
+         return this.opening;
+     }
+     callTool(name, args, options) {
+-        return this.withClient((client) => client.callTool(name, args, options));
++        return this.withClient(async (client) => { await options.beforeDispatch?.(); return client.callTool(name, args, options); });
+     }
+     readResource(uri, options) {
+-        return this.withClient((client) => client.readResource(uri, options), true);
++        return this.withClient(async (client) => { await options.beforeDispatch?.(); return client.readResource(uri, options); }, true);
+     }
+     resourcesPage(cursor, options) {
+-        return this.withClient((client) => client.listResourcesPage(cursor, options), true);
++        return this.withClient(async (client) => { await options.beforeDispatch?.(); return client.listResourcesPage(cursor, options); }, true);
+     }
+     resourceTemplatesPage(cursor, options) {
+-        return this.withClient((client) => withoutTemplates(() => client.listResourceTemplatesPage(cursor, options), { resourceTemplates: [] }), true);
++        return this.withClient(async (client) => { await options.beforeDispatch?.(); return withoutTemplates(() => client.listResourceTemplatesPage(cursor, options), { resourceTemplates: [] }); }, true);
+     }
+     allResources(options) {
+-        return this.withClient((client) => client.listResources(options), true);
++        return this.withClient(async (client) => { await options.beforeDispatch?.(); return client.listResources(options); }, true);
+     }
+     allResourceTemplates(options) {
+-        return this.withClient((client) => listTemplates(client, options), true);
++        return this.withClient(async (client) => { await options.beforeDispatch?.(); return listTemplates(client, options); }, true);
+     }
+     /**
+      * Run a request, reconnecting when needed. `readOnly` requests are retried once after a transient
+diff --git a/dist/extensions/mcp/runtime.d.ts b/dist/extensions/mcp/runtime.d.ts
+--- a/dist/extensions/mcp/runtime.d.ts
++++ b/dist/extensions/mcp/runtime.d.ts
+@@ -68,12 +68,12 @@
+     get oauthUrl(): string | undefined;
+     oauthSettings(): McpOAuthSettings;
+     getClient(): Promise<McpClient>;
+-    callTool(name: string, args: Record<string, unknown>, options: McpRequestOptions): Promise<CallToolResult>;
+-    readResource(uri: string, options: McpRequestOptions): Promise<ReadResourceResult>;
+-    resourcesPage(cursor: string | undefined, options: McpRequestOptions): Promise<ListResourcesResult>;
+-    resourceTemplatesPage(cursor: string | undefined, options: McpRequestOptions): Promise<ListResourceTemplatesResult>;
+-    allResources(options: McpRequestOptions): Promise<Resource[]>;
+-    allResourceTemplates(options: McpRequestOptions): Promise<ResourceTemplate[]>;
++    callTool(name: string, args: Record<string, unknown>, options: McpRequestOptions & { beforeDispatch?: () => void | Promise<void> }): Promise<CallToolResult>;
++    readResource(uri: string, options: McpRequestOptions & { beforeDispatch?: () => void | Promise<void> }): Promise<ReadResourceResult>;
++    resourcesPage(cursor: string | undefined, options: McpRequestOptions & { beforeDispatch?: () => void | Promise<void> }): Promise<ListResourcesResult>;
++    resourceTemplatesPage(cursor: string | undefined, options: McpRequestOptions & { beforeDispatch?: () => void | Promise<void> }): Promise<ListResourceTemplatesResult>;
++    allResources(options: McpRequestOptions & { beforeDispatch?: () => void | Promise<void> }): Promise<Resource[]>;
++    allResourceTemplates(options: McpRequestOptions & { beforeDispatch?: () => void | Promise<void> }): Promise<ResourceTemplate[]>;
+     /**
+      * Run a request, reconnecting when needed. `readOnly` requests are retried once after a transient
+      * HTTP error; tool calls are not, since they may have run.
+diff --git a/dist/extensions/mcp/oauth.js b/dist/extensions/mcp/oauth.js
+--- a/dist/extensions/mcp/oauth.js
++++ b/dist/extensions/mcp/oauth.js
+@@ -9,7 +9,7 @@
+  *
+  * Credentials live in `<agent-dir>/mcp-auth.json`, keyed by server name and URL.
+  */
+-import { createHash } from "node:crypto";
++import { createHash, randomUUID } from "node:crypto";
+ import { mkdirSync } from "node:fs";
+ import { join } from "node:path";
+ import { oauthErrorHtml, oauthSuccessHtml } from "@earendil-works/pi-ai/utils/oauth-page";
+@@ -65,6 +65,13 @@
+     const parsed = JSON.parse(content);
+     return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+ }
++function credentialBinding(state) {
++    const binding = state?.$varinMcpBinding;
++    if (binding === undefined) return undefined;
++    if (!binding || typeof binding.reference !== "string" || !binding.reference || !Number.isSafeInteger(binding.generation) || binding.generation < 1)
++        throw new Error("Invalid MCP credential binding metadata");
++    return binding;
++}
+ function serializeStates(states) {
+     return `${JSON.stringify(states, null, 2)}\n`;
+ }
+@@ -98,7 +105,14 @@
+                 return { result: states[key], next: serializeStates(states) };
+             }),
+             save: (state) => this.write((states) => {
+-                states[key] = state;
++                const previous = states[key];
++                const binding = credentialBinding(previous);
++                // Refresh keeps the grant. A new PKCE authorization state is a new grant, even
++                // when the service keeps its client ID and the user selects another account.
++                const relink = previous && previous.oauthState !== state.oauthState;
++                states[key] = { ...state, $varinMcpBinding: !binding || relink
++                    ? { reference: randomUUID(), generation: (binding?.generation ?? 0) + 1 }
++                    : binding };
+             }),
+             withRefreshLock: (fn) => this.withRefreshLock(key, fn),
+         };
+@@ -130,6 +144,21 @@
+         finally {
+             await release().catch(() => undefined);
+         }
++    }
++    /** Opaque grant identity in the existing credential file; never derived from a token. */
++    binding(name, serverUrl) {
++        const { key, legacyKey } = storeKeys(name, serverUrl);
++        return this.backend.withLock((current) => {
++            const states = parseStates(current);
++            const storedKey = states[key] ? key : states[legacyKey] ? legacyKey : undefined;
++            if (!storedKey) return { result: undefined };
++            const state = states[storedKey];
++            const existing = credentialBinding(state);
++            if (existing) return { result: { ...existing } };
++            const binding = { reference: randomUUID(), generation: 1 };
++            states[storedKey] = { ...state, $varinMcpBinding: binding };
++            return { result: { ...binding }, next: serializeStates(states) };
++        });
+     }
+     /** The stored tokens of a server, for noticing sign-ins done by another process. Does not take over legacy state. */
+     tokens(name, serverUrl) {
+diff --git a/dist/extensions/mcp/oauth.d.ts b/dist/extensions/mcp/oauth.d.ts
+--- a/dist/extensions/mcp/oauth.d.ts
++++ b/dist/extensions/mcp/oauth.d.ts
+@@ -45,6 +45,7 @@
+      */
+     private withRefreshLock;
+     /** The stored tokens of a server, for noticing sign-ins done by another process. Does not take over legacy state. */
++    binding(name: string, serverUrl: string): { reference: string; generation: number } | undefined;
+     tokens(name: string, serverUrl: string): McpOAuthState["tokens"];
+     /** Returns whether credentials were stored for the server. Removes legacy state the server would take over. */
+     remove(name: string, serverUrl: string): boolean;

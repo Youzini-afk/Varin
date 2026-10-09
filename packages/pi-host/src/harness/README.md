@@ -282,6 +282,14 @@ Environment observations and current teammate snapshots carry their lifetime fac
 `pi_docs` applies the same shipped reference corrections in memory for an external SDK.
 The source installation remains unchanged; paging uses the adapted reference text.
 
+## Shared MCP ownership
+
+MCP connections, configuration and credentials belong to the Application Host's
+[shared MCP authority](../mcp-authority.md). Pi's built-in MCP extension projects that
+owner through `mcp.owner` and retains its native tool hooks, discovery and manager UI.
+Native tool execution leases the same owner without a Pi session loop. Tool annotations
+remain untrusted; a declared read-only hint never bypasses the permission gate.
+
 ## Extensions
 
 - `createToolResultTruncationExtension` — truncates large non-shell tool results,

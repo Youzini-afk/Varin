@@ -53,7 +53,12 @@ candidate selection. Native operations cover list/read/bytes/search and tree-sit
 
 Compute output uses bounded cursor records with backpressure. Two foreground workers are isolated from one
 background indexing worker, and cancellation reaches traversal/parser work before the reader reference is
-released. The Host still owns request policy, DTO projection, grammar installation admission, tokenizer-aware
+released. Native discovery obtains a typed observation handle from that same admitted job. Empty-page
+and terminal waits use coalescing notifications with registration before predicate recheck, outside the
+Storage actor; cancellation wakes the caller independently and cleanup retains the reader until the
+worker actually stops. Cursor acknowledgement releases producer credit before waiting for more output.
+Scoped cancellation registrations are removed on normal completion as well as cancellation.
+The Host still owns request policy, DTO projection, grammar installation admission, tokenizer-aware
 packing, embeddings/vector stores, TriviumDB, LSP protocol, and Pi/model orchestration. The kernel does not
 become another public search service or model runtime.
 
@@ -94,3 +99,56 @@ hash. It is rejected on Unix and PTY launches, which use their normal argument t
 Use `bun run kernel:build` to supply Application Host build identity and architecture. A plain
 Cargo build defaults to the crate identity and is not a production acceptance artifact. See
 [the Host consumer map](../packages/web/application-host/lib/process/DOCUMENTATION.md).
+
+## Native Run resource admission
+
+The Catalog instance owns one `ResourceAdmission` shared by every supervisor-launched execution
+engine. A complete canonical plan is acquired atomically after permission/service readiness, before
+durable dispatch. Conflicting pending plans preserve arrival order; unrelated eligible plans bypass
+them. Read/read claims overlap. Cancellation and releases notify waiters directly through bounded,
+coalescing control channels; waiting never holds a Catalog transaction or a partial resource plan.
+
+Trusted short read-only result calls own transient leases only. Effectful and job calls write
+`resource_occupancy` in their existing dispatch transaction; settlement removes synchronous occupancy
+in its existing receipt transaction. A background handoff retains operation-owned claims beyond the
+model exchange and Run. Cancellation is not stop evidence. Confirmed executor terminal receipts
+release occupancy, including receipts arriving before the exchange's handoff. A trusted process
+consumer passes actual tree-stop evidence separately from business outcome, so a stopped process
+with an indeterminate effect releases occupancy while an unconfirmed disappearance does not.
+Startup clears the dead local Result-contract dispatch windows and restores remaining Job occupancy
+before admitting new work; it never infers a detached executor stopped from a recovered
+indeterminate business effect. A returned synchronous result releases its local dispatch window even
+when the business effect is unknown; that outcome still requires reconciliation and is never replayed.
+
+Native file plans use Storage's existing canonical lease identity (including alias roots, parent
+symlinks and platform case handling), freeze it before admission, and recheck it at the actual file
+effect boundary. File CAS/journal and physical leases remain Storage authority. Fixed-source reads
+include immutable branch revision identity. Discovery consumes Storage snapshots without keeping a
+whole-directory lease while searching. Arbitrary spawned programs record shared environment writer
+activity; a long-lived development server does not exclusively lock every file or later process in
+its environment. Logical scheduling cannot isolate arbitrary third-party filesystem effects; use
+conditional file versions and real isolated environments where required.
+
+MCP ordinary RPC scope claims serialize local dispatch windows only. A disconnected or cancelled RPC
+cannot prove remote execution stopped; its unknown effect is retained without replay, and the scope
+claim must not be presented as a remote filesystem/desktop lock or an MCP Tasks terminal receipt.
+
+## Selected context composition
+
+Native context checkpoints retain an optional `personalization.contextComposition`: exact Host
+provider identity, immutable declaration digest, session scope, originating selection revision and
+named instruction/data sections. Ordinary Host service routing selects the brokered provider; the
+context contract accepts only a frozen declarative result, with no model/network/effect callback.
+The packaged default and `examples/extensions/project-context` use the same SDK contract.
+
+`composition/context.rs` uses the existing resolver and registry to prepare and publish the typed
+transform. A branch-local ephemeral cache reuses unchanged bindings; each context read pins its
+actual implementation. Body hydration and native transform invocation run outside the Catalog mutex.
+The compiled output becomes part of the normal immutable model snapshot; original history is not
+rewritten, and data fragments retain external-data provenance. A context-only selection change can
+advance its checkpoint without pretending ordinary memory changed. Invalid selected preparation
+preserves the previous checkpoint; ordinary absence is distinct from selected-provider failure.
+
+This is one production Provider/Transform slice, not a general policy/observer implementation or a
+claim that all extension services have moved into Rust. Independent review covers actual broker
+selection and captured model requests, replacement/failure, unchanged binding reuse and old pins.

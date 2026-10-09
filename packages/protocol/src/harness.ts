@@ -8,6 +8,9 @@
  * worker holding host credentials.
  */
 
+import type { McpOwnerRequest, McpOwnerResponse } from "./harness-mcp.js";
+export type { McpOwnerRequest, McpOwnerResponse, McpOwnerEntry, McpOwnerConnectionSnapshot, McpOwnerAuthState, McpOwnerConfig } from "./harness-mcp.js";
+
 import type { TodoItem } from "./harness-todo.js";
 import type {
   ThreadListParams,
@@ -1617,6 +1620,7 @@ export interface ExploreQueryFinishDetails {
 }
 
 export interface HarnessServiceMap {
+  "mcp.owner": { params: McpOwnerRequest; result: McpOwnerResponse };
   "permission.inspect": { params: PermissionInspectParams; result: PermissionInspectResult };
   "permission.audit": { params: PermissionAuditRecord; result: { accepted: boolean } };
 
@@ -1808,6 +1812,7 @@ export type HarnessMethod = keyof HarnessServiceMap;
  * remains owned by the Pi tool gate.
  */
 export type HarnessCapability =
+  | "control.mcp"
   | "context.session"
   | "control.experiment"
   | "read.experiment"
@@ -1831,6 +1836,7 @@ export type HarnessCapability =
   | "write.document";
 
 export const HARNESS_METHOD_CAPABILITY = {
+  "mcp.owner": "control.mcp",
   "permission.inspect": "context.session",
   "permission.audit": "context.session",
   "shell.exec": "process.shell",
@@ -1997,6 +2003,7 @@ export interface HarnessActorContext extends HarnessActorIdentity {
 }
 
 const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
+  "mcp.owner",
   "permission.inspect",
   "permission.audit",
   "shell.exec",

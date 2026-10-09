@@ -39,6 +39,7 @@ export function createNativeThreadsHttpAPI(): NativeThreadsAPI {
     snapshot: selected => post('snapshot', selected), run: runId => post('run', { runId }),
     cancelRun: runId => post('run/cancel', { runId }), operation: operationId => post('operation', { operationId }),
     cancelOperation: operationId => post('operation/cancel', { operationId }),
+    decidePermission: input => post('permission/decide', input),
     answerQuestion: input => post('question/answer', input),
     async resume(runId) { await post('run/resume', { runId }); }, events: cursor => post('events', { cursor }),
     async observe(cursor, listener, { signal }) {

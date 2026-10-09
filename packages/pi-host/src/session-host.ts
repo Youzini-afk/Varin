@@ -2742,6 +2742,11 @@ export class SessionHost {
     return this.#settingsSnapshot();
   }
 
+  getSettingsContext(): { cwd: string; projectTrusted: boolean } {
+    const runtime = this.runtime;
+    return { cwd: runtime.cwd, projectTrusted: runtime.services.settingsManager.isProjectTrusted() };
+  }
+
   async #settingsSnapshot(): Promise<PiSettingsSnapshot> {
     const settings = this.runtime.services.settingsManager;
     const [globalSource, projectSource] = await Promise.all([
@@ -3557,7 +3562,7 @@ export class SessionHost {
             {
               builtin: true,
               replaceable: true,
-              factory: createMcpExtension(mcpConfig.nativeOptions(agentDir, this.#emit)),
+              factory: createMcpExtension(mcpConfig.nativeOptions(agentDir, this.#emit, hostServicesBridge)),
               name: "mcp",
             },
             {

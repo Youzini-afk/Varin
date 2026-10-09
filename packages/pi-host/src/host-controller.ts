@@ -127,6 +127,9 @@ const OUT_OF_BAND_METHODS = new Set([
   "session.snapshot",
   "session.systemPrompt",
   "session.reconcile",
+  // Host-owned MCP preparation can query effective session-only project trust while a
+  // queued MCP manager/model preflight awaits its Host response. This is a synchronous read.
+  "settings.context",
   "agent.abort",
   "agent.queue.clear",
   "agent.queue.update",
@@ -1452,6 +1455,8 @@ export class HostController {
         return { cancelled: this.#sessionHost.cancelInference(readString(params, "batchId")) };
       case "settings.get":
         return this.#sessionHost.getSettings();
+      case "settings.context":
+        return this.#sessionHost.getSettingsContext();
       case "settings.update": {
         const scope = readString(params, "scope");
         if (scope !== "global" && scope !== "project") {

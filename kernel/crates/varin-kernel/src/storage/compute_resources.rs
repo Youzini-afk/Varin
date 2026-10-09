@@ -11,6 +11,13 @@ fn relative(value:&str)->Result<String,KernelError>{
     Ok(path.split('/').filter(|s|!s.is_empty()&&*s!=".").collect::<Vec<_>>().join("/"))
 }
 impl Storage {
+    pub(crate) fn watch_compute(&self, id: &str, workspace_id: &str, grant: &Grant) -> Result<crate::compute::ComputeWatch, KernelError> {
+        let job = self.computations.jobs.get(id).ok_or_else(|| failure("Computation handle is not available in this epoch"))?;
+        if job.grant_id != grant.grant_id || job.workspace_id != workspace_id || job.epoch != grant.kernel_epoch {
+            return Err(KernelError::Authorization("Computation handle belongs to another actor/workspace/epoch".into()));
+        }
+        Ok(job.watch())
+    }
     pub(crate) fn sweep_compute_readers(&mut self)->Result<(),KernelError>{
         let done=self.computations.jobs.iter().filter(|(_,job)|job.done()).map(|(id,job)|(id.clone(),job.pin_id.clone(),job.revoked)).collect::<Vec<_>>();
         for(id,pin,revoked)in done{

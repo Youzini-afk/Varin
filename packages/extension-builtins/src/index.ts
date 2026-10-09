@@ -50,6 +50,7 @@ export const VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID = "varin.builtin.typ
 export const VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_VERSION = "5.3.0+typescript.5.9.3.varin.1";
 export const VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID = "varin.builtin.language-servers";
 export const VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_VERSION = "0.1.0";
+export const VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION_ID = "varin.builtin.context-fragments";
 export const VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID = "varin.builtin.recovery";
 export const VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_VERSION = "0.4.0";
 
@@ -577,6 +578,16 @@ export const VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION: VarinBuiltinExtensionDefi
   },
 };
 
+export const VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: {
+    id: VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION_ID, displayName: "Varin Context Guidance",
+    version: "1.0.0", schemaVersion: 1, engines: { varin: "*" },
+    entrypoints: { host: { activation: ["service-request"], file: "host.cjs", mode: "brokered" } },
+    provides: { services: [{ id: "varin.context.fragments", version: 1, multiple: true }] },
+  },
+};
+
 export const VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION: VarinBuiltinExtensionDefinition = {
   enabledByDefault: true,
   manifest: {
@@ -639,6 +650,7 @@ export const VARIN_BUILTIN_EXTENSION_DEFINITIONS: readonly VarinBuiltinExtension
   VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION,
   VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION,
   VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION,
+  VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION,
   VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION,
   VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION,
   VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION,

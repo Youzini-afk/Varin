@@ -24,6 +24,7 @@ const identity = (body: Record<string, unknown>): NativeThreadIdentity => {
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
 export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAdapter, requireAuth: RequestHandler): void {
   const fields: Record<string, readonly string[]> = {
+    'permission/decide': ['runtime', 'threadId', 'branchId', 'operationId', 'permissionId', 'decision'],
     'question/answer': ['runtime', 'threadId', 'branchId', 'operationId', 'answer'],
     'source/prepare': ['runtime', 'threadId', 'branchId', 'key', 'path', 'mode'],
     'context/compact': ['runtime', 'threadId', 'branchId', 'key', 'throughId', 'expectedRevision', 'model'],
@@ -49,6 +50,10 @@ export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAd
       }
     });
   };
+  post('permission/decide', body => {
+    if (body.decision !== 'allow_once' && body.decision !== 'deny') throw new Error('Invalid permission decision');
+    return adapter.decidePermission({ ...identity(body), operationId: text(body.operationId), permissionId: text(body.permissionId), decision: body.decision });
+  });
   post('question/answer', body => adapter.answerQuestion({ ...identity(body), operationId: text(body.operationId), answer: text(body.answer) }));
   post('models', () => adapter.listModels());
   post('list', async () => (await adapter.runtime.threads()).filter(thread => thread.thread_id.startsWith('nativeThread:')));

@@ -3,11 +3,10 @@ import type {
   ExtensionContext,
   ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
-import { FileAuthStorageBackend, loadMcpConfig, McpOAuthCredentialStore,
-  type McpExtensionOptions, type McpStateSnapshot } from "@earendil-works/pi-coding-agent";
+import { type McpExtensionOptions, type McpStateSnapshot } from "@earendil-works/pi-coding-agent";
 import { join } from "node:path";
-import { applyEdits, modify } from "jsonc-parser";
-import { ConfigTextFileEditor, resolveConfigDocumentPath } from "./config-text-file-editor.js";
+import { createHostMcpOwner, type HostMcpOwner } from "./mcp-host-owner.js";
+import type { HostServicesBridge } from "./harness/host-services-bridge.js";
 import {
   parsePiMcpConfigCatalog,
   type HostEvent, type HostEventData, type PiMcpConfigSource,
@@ -139,41 +138,26 @@ export class PiMcpConfigBridge {
   #pendingReady: unknown;
   #ready: ReadyState | undefined;
   #sessionId: string | undefined;
+  #hostOwner: HostMcpOwner | undefined;
   #native: { state: McpStateSnapshot; snapshot: PiMcpConfigSnapshot } | undefined;
 
-  /** Observe the native owner; no additional MCP clients or connection state. */
-  nativeOptions(agentDir: string, emit: <E extends HostEvent>(event: E, data: HostEventData<E>) => void): McpExtensionOptions {
+  /** Observe the Host-owned connections; Pi only projects tools, discovery and manager UI. */
+  nativeOptions(agentDir: string, emit: <E extends HostEvent>(event: E, data: HostEventData<E>) => void,
+    bridge: Pick<HostServicesBridge, "request">): McpExtensionOptions {
     let sources: PiMcpConfigSource[] = [];
-    return {
-      credentials: new McpOAuthCredentialStore(new FileAuthStorageBackend(join(agentDir, "mcp-auth.json")), agentDir),
-      logPath: join(agentDir, "mcp.log"),
-      updateConfig: async (entry, patch) => {
-        const source = sources.find(candidate => candidate.displayPath === (entry.override ?? entry.source));
-        if (!source) throw new Error("MCP configuration source is no longer active");
-        const location = await resolveConfigDocumentPath(source.scope === "user" ? agentDir : this.#cwd!, source.target.path, { extensions: [".json"] });
-        const editor = new ConfigTextFileEditor(location.path, "json");
-        const current = await editor.read();
-        let content = current.content;
-        for (const [key, value] of Object.entries(patch)) {
-          content = applyEdits(content, modify(content, ["mcpServers", entry.name, key],
-            !entry.override && (key === "enabled" && value === true || key === "exposure" && value === "codemode") ? undefined : value,
-            { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
-        }
-        await editor.update(content, current.revision);
-      },
-      loadConfig: ctx => {
-        const globalConfig = loadMcpConfig({ agentDir, cwd: ctx.cwd, projectTrusted: false });
-        const loaded = ctx.isProjectTrusted()
-          ? loadMcpConfig({ agentDir, cwd: ctx.cwd, projectTrusted: true }) : globalConfig;
+    const owner = createHostMcpOwner(bridge, loaded => {
         sources = [
           { id: "native:user", displayPath: join(agentDir, "mcp.json"), order: 0, scope: "user",
-            serverNames: globalConfig.servers.map(entry => entry.name), target: { root: "agent", path: "mcp.json", format: "json" } },
-          ...(ctx.isProjectTrusted() ? [{ id: "native:project", displayPath: join(ctx.cwd, ".pi", "mcp.json"), order: 1, scope: "project" as const,
+            serverNames: loaded.servers.filter(entry => entry.scope === "global").map(entry => entry.name),
+            target: { root: "agent", path: "mcp.json", format: "json" } },
+          ...(loaded.projectConfig ? [{ id: "native:project", displayPath: loaded.projectConfig, order: 1, scope: "project" as const,
             serverNames: loaded.servers.filter(entry => entry.scope === "project" || entry.override !== undefined).map(entry => entry.name),
             target: { root: "project" as const, path: ".pi/mcp.json", format: "json" as const } }] : []),
         ];
-        return loaded;
-      },
+      });
+    this.#hostOwner = owner;
+    return {
+      owner,
       onState: state => {
         if (!state.active) {
           this.#native = undefined;
@@ -237,6 +221,10 @@ export class PiMcpConfigBridge {
   async snapshot(sessionId: string): Promise<PiMcpConfigSnapshot> {
     if (this.#sessionId !== sessionId || !this.#events) {
       return unavailable("Open a Pi session or workspace context to inspect MCP configuration");
+    }
+    if (this.#hostOwner?.isSelected()) {
+      try { await this.#hostOwner.prepare(); }
+      catch { return { provider: { owner: "native", state: "degraded", issue: "MCP owner preparation failed" } }; }
     }
     if (this.#native?.state.sessionId === sessionId && this.#native.state.cwd === this.#cwd) return this.#native.snapshot;
     if (!this.#ready) {

@@ -1,3 +1,4 @@
+import { NativeThreadPermission } from './NativeThreadPermission';
 import { NativeThreadQuestion } from './NativeThreadQuestion';
 import { NativeThreadSourcePicker } from './NativeThreadSourcePicker';
 import type { ImageAttachment } from '@varin/protocol';
@@ -143,6 +144,7 @@ export function NativeThreadConversation({ api, identity, onBranchCreated, initi
       </article>)}
       {!historyView && progress && <article className="mx-auto max-w-3xl" aria-label="Streaming assistant response"><MarkdownRenderer messageId={`${identity.threadId}:progress`} isStreaming content={progress} /></article>}
       {snapshot?.operations.map(operation => <div key={operation.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
+        <NativeThreadPermission operation={operation} enabled={!pending && operation.run_id === run?.id && !run?.cancel_requested} onDecide={(permissionId, decision) => act(() => api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }))} />
         {operation.executor === 'native_ask_user' && <NativeThreadQuestion operation={operation} enabled={!pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on} onAnswer={answer => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}
         <div>Background operation · {operation.phase} · {operation.outcome ?? 'In progress'} · effect: {operation.effect}</div>
         {operation.external_receipt && <div className="text-xs text-muted-foreground">{operation.external_receipt.executor} · {operation.external_receipt.outcome}</div>}

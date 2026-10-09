@@ -65,6 +65,11 @@ with a faux provider; UI `AgentSettings.behavior.test.tsx` covers editing and sc
 Native conversations now read this same catalog through `kernel/native-thread-context.ts` at first
 input admission. Rust atomically stores the resulting system snapshot alongside the native input;
 project scope comes from Host-admitted workspace membership and session scope is the native thread ID.
-The snapshot survives subsequent Runs, explicit compaction and conversation forks. This initial
-native slice does not yet deliver live memory changes or refresh snapshots at compaction; the Pi
-mutation/receipt behavior described above remains Pi-specific. No native memory catalog is added.
+The checkpoint carries the typed original-section and scope basis through subsequent Runs, explicit
+compaction and conversation forks. Committed note/profile edits trigger Host refresh through this
+same catalog; later admission and resume also await refresh. Native refresh CAS replaces only the
+system snapshot and its provenance, preserving any summary and original tail, and never rewrites
+prepared/dispatched ModelStep requests. Removing notes and resetting profiles re-render from the
+original sections. Failed refreshes are retried at later admission rather than treated as delivered.
+The Pi tail-message mutation/receipt and cache-prefix behavior above remains Pi-specific. Native
+memory tools are not implied, and no native memory catalog is added.

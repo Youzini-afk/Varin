@@ -15,6 +15,7 @@ export type KernelMethod =
   | "runtime.context_job.list"
   | "runtime.context_job.publish"
   | "runtime.context.inspect"
+  | "runtime.context.refresh"
   | "runtime.history.page"
   | "runtime.history.body"
   | "runtime.thread.operations.active"
@@ -23,6 +24,7 @@ export type KernelMethod =
   | "runtime.thread.inspect"
   | "runtime.thread.list"
   | "runtime.launch.select"
+  | "runtime.launch.mcp.prepare"
   | "runtime.launch.inspect"
   | "runtime.launch.list"
   | "runtime.input.enqueue"
@@ -36,6 +38,9 @@ export type KernelMethod =
   | "runtime.input.submit"
   | "runtime.run.inspect"
   | "runtime.run.cancel"
+  | "runtime.permission.open"
+  | "runtime.permission.decide"
+  | "runtime.permission.consume"
   | "runtime.question.answer"
   | "runtime.operation.inspect"
   | "runtime.operation.cancel"
@@ -252,7 +257,20 @@ export interface NativeLaunchPolicy {
   version: string;
 }
 
+export interface NativeMcpBinding {
+  resources: Record<string, string>;
+  reference: string;
+  generation: number;
+  tools: NativeLaunchTool[];
+}
+
+export interface NativeMcpPrepareParams {
+  runId: string;
+  binding: NativeMcpBinding;
+}
+
 export interface NativeLaunchSelection {
+  mcp_binding: NativeMcpBinding | null;
   credential_scope: NativeCredentialScope | null;
   connection_identity: string;
   provider_family: string;
@@ -389,6 +407,7 @@ export interface NativeContextJobCreateParams {
 }
 
 export interface NativeRunStartParams {
+  mcpBinding?: NativeMcpBinding;
   runId: string;
   toolBinding?: unknown;
   credentialScope?: NativeCredentialScope;
@@ -445,7 +464,42 @@ export interface NativeThreadCreateParams {
   branchId: string;
 }
 
+export interface NativeSystemSection {
+  name: string;
+  content: string;
+}
+
+export interface NativeContextFragment {
+  name: string;
+  kind: string;
+  content: string;
+}
+
+export interface NativeContextComposition {
+  providerId: string;
+  contentVersion: string;
+  scopeId: string;
+  selectionRevision: number;
+  sections: NativeContextFragment[];
+}
+
+export interface NativeContextPersonalization {
+  contextComposition?: NativeContextComposition;
+  revision: number;
+  sessionId: string;
+  projectId: string | null;
+  originalSections: NativeSystemSection[];
+  instructionSources: string[];
+}
+
+export interface NativeContextRefreshParams {
+  branchId: string;
+  expectedRevision: number;
+  context: NativeInitialContext;
+}
+
 export interface NativeInitialContext {
+  personalization?: NativeContextPersonalization;
   effectiveSystemPrompt: string;
   instructionSources: string[];
   memoryCheckpoint: string | null;
@@ -464,6 +518,19 @@ export interface NativeInputSubmitParams {
 
 export interface NativeRunParams {
   runId: string;
+}
+
+export interface NativePermissionOpenParams {
+  operationId: string;
+  permissionId: string;
+  call: unknown;
+  scope: unknown;
+}
+
+export interface NativePermissionDecideParams {
+  operationId: string;
+  permissionId: string;
+  decision: string;
 }
 
 export interface NativeQuestionAnswerParams {
@@ -1681,6 +1748,7 @@ export type KernelMethodParams = {
   "runtime.context_job.list": NativeHistoryParams;
   "runtime.context_job.publish": NativeRunParams;
   "runtime.context.inspect": NativeHistoryParams;
+  "runtime.context.refresh": NativeContextRefreshParams;
   "runtime.history.page": NativeHistoryPageParams;
   "runtime.history.body": NativeHistoryBodyParams;
   "runtime.thread.operations.active": NativeThreadParams;
@@ -1694,6 +1762,7 @@ export type KernelMethodParams = {
   "runtime.input.inspect": NativeInputHandleParams;
   "runtime.input.list": NativeHistoryParams;
   "runtime.launch.select": NativeLaunchSelectParams;
+  "runtime.launch.mcp.prepare": NativeMcpPrepareParams;
   "runtime.launch.inspect": NativeRunParams;
   "runtime.launch.list": KernelEmptyParams;
   "runtime.run.start": NativeRunStartParams;
@@ -1702,6 +1771,9 @@ export type KernelMethodParams = {
   "runtime.input.submit": NativeInputSubmitParams;
   "runtime.run.inspect": NativeRunParams;
   "runtime.run.cancel": NativeRunParams;
+  "runtime.permission.open": NativePermissionOpenParams;
+  "runtime.permission.decide": NativePermissionDecideParams;
+  "runtime.permission.consume": NativePermissionOpenParams;
   "runtime.question.answer": NativeQuestionAnswerParams;
   "runtime.operation.inspect": NativeOperationParams;
   "runtime.operation.cancel": NativeOperationParams;
@@ -1867,6 +1939,15 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "runtime.context.refresh";
+      params: NativeContextRefreshParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "runtime.history.page";
       params: NativeHistoryPageParams;
       epoch?: string;
@@ -1984,6 +2065,15 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "runtime.launch.mcp.prepare";
+      params: NativeMcpPrepareParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "runtime.launch.inspect";
       params: NativeRunParams;
       epoch?: string;
@@ -2049,6 +2139,33 @@ export type KernelRequest =
       id: string;
       method: "runtime.run.cancel";
       params: NativeRunParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.permission.open";
+      params: NativePermissionOpenParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.permission.decide";
+      params: NativePermissionDecideParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.permission.consume";
+      params: NativePermissionOpenParams;
       epoch?: string;
       grantId?: string;
     }

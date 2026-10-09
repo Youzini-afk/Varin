@@ -95,6 +95,7 @@ pub(crate) fn spawn(
     control: NativeControl,
     resources: crate::native_tools::NativeResourceClient,
     credential_bridge: crate::credential_bridge::CredentialBridge,
+    mcp_bridge: crate::native_mcp::McpBridge,
     responses: mpsc::SyncSender<Value>,
     finished: impl Fn(&str) + Send + Sync + 'static,
 ) -> JoinHandle<()> {
@@ -306,6 +307,13 @@ pub(crate) fn spawn(
                                 .map_err(|e| KernelError::Operation(e.to_string()))?;
                             return Ok(serde_json::to_value(input)?);
                         }
+                        if method == "runtime.launch.mcp.prepare" {
+                            let p: NativeMcpPrepareParams = serde_json::from_value(params)?;
+                            let binding = native_mcp_binding(p.binding)?;
+                            let result = runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?
+                                .prepare_mcp_launch(&p.run_id, binding).map_err(domain)?;
+                            return Ok(serde_json::to_value(result)?);
+                        }
                         if matches!(method, "runtime.run.start" | "runtime.launch.select") {
                             let selected: Option<NativeLaunchSelectParams> =
                                 if method == "runtime.launch.select" {
@@ -318,6 +326,7 @@ pub(crate) fn spawn(
                                     run_id: selected.run_id.clone(),
                                     credential_scope: selected.credential_scope.clone(),
                                     tool_binding: None,
+                                    mcp_binding: None,
                                 }
                             } else {
                                 serde_json::from_value(params)?
@@ -330,7 +339,7 @@ pub(crate) fn spawn(
                                 catalog.run(&p.run_id).map_err(domain)?
                             };
                             let is_context_job = run.configuration.get("context_job").is_some();
-                            if is_context_job && (selected.is_some() || p.tool_binding.is_some()) {
+                            if is_context_job && (selected.is_some() || p.tool_binding.is_some() || p.mcp_binding.is_some()) {
                                 return Err(KernelError::Protocol(
                                     "context jobs use their fixed tool-free launch".into(),
                                 ));
@@ -493,6 +502,16 @@ pub(crate) fn spawn(
                                 start.tools = crate::native_questions::wrap_tools(start.tools, runtime.catalog());
                                 start.binding.tools.push(crate::native_questions::schema());
                             }
+                            let mcp_binding = p.mcp_binding.map(native_mcp_binding).transpose()?;
+                            if let Some(binding) = &mcp_binding {
+                                binding.validate().map_err(domain)?;
+                                if binding.tools.iter().any(|tool| start.binding.tools.iter().any(|existing| existing.name == tool.name)) {
+                                    return Err(KernelError::Protocol("MCP tool collides with another selected capability".into()));
+                                }
+                                start.binding.tools.extend(binding.tools.iter().cloned());
+                                start.tools = mcp_bridge.wrap(p.run_id.clone(), binding.clone(), start.tools)
+                                    .map_err(|error| KernelError::Authorization(error.to_string()))?;
+                            }
                             {
                                 let mut selection =
                                     varin_runtime::catalog::launches::LaunchSelection::from_binding(
@@ -500,6 +519,7 @@ pub(crate) fn spawn(
                                         start.policy.identity(),
                                         launch_source,
                                     );
+                                selection.mcp_binding = mcp_binding;
                                 selection.credential_scope = selected_credential_scope;
                                 runtime
                                     .catalog()
@@ -524,7 +544,21 @@ pub(crate) fn spawn(
                             let handle = runtime
                                 .start(&p.run_id, start)
                                 .map_err(|e| KernelError::Operation(e.to_string()))?;
-                            return Ok(json!({"runId":handle.run_id,"epoch":handle.epoch}));
+                            let receipt = json!({"runId":handle.run_id,"epoch":handle.epoch});
+                            let completion_responses = responses.clone();
+                            let completion_epoch = epoch.clone();
+                            let completion_run = handle.run_id.clone();
+                            let completion_catalog = runtime.catalog();
+                            thread::spawn(move || {
+                                let _ = handle.wait();
+                                let terminal = completion_catalog.lock().ok().and_then(|catalog| catalog.run(&completion_run).ok())
+                                    .is_some_and(|run| run.state.terminal());
+                                if terminal {
+                                    let _ = completion_responses.send(json!({"v":1,"kind":"mcp-owner-release",
+                                        "kernelEpoch":completion_epoch,"runId":completion_run}));
+                                }
+                            });
+                            return Ok(receipt);
                         }
                         if method == "runtime.history.body" {
                             let p: NativeHistoryBodyParams = serde_json::from_value(params)?;
@@ -622,6 +656,23 @@ pub(crate) fn spawn(
                                     .map_err(domain)?,
                             )?);
                         }
+                        if matches!(method, "runtime.permission.open" | "runtime.permission.consume") {
+                            let p: NativePermissionOpenParams = serde_json::from_value(params)?;
+                            let catalog = runtime.catalog();
+                            let mut db = catalog.lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?;
+                            let result = if method == "runtime.permission.open" {
+                                db.open_permission(&p.operation_id, &p.permission_id, p.call, p.scope)
+                            } else {
+                                db.consume_permission(&p.operation_id, &p.permission_id, p.call, p.scope)
+                            }.map_err(domain)?;
+                            return Ok(serde_json::to_value(result)?);
+                        }
+                        if method == "runtime.permission.decide" {
+                            let p: NativePermissionDecideParams = serde_json::from_value(params)?;
+                            let result = runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?
+                                .decide_permission(&p.operation_id, &p.permission_id, &p.decision).map_err(domain)?;
+                            return Ok(serde_json::to_value(result)?);
+                        }
                         if method == "runtime.question.answer" {
                             let p: NativeQuestionAnswerParams = serde_json::from_value(params)?;
                             runtime.quiesce_question(&p.operation_id).map_err(|e| KernelError::Operation(e.to_string()))?;
@@ -704,6 +755,16 @@ pub(crate) fn spawn(
         }
     })
 }
+fn native_mcp_binding(binding: NativeMcpBinding) -> Result<crate::native_mcp::McpBinding, KernelError> {
+    Ok(crate::native_mcp::McpBinding {
+        reference: binding.reference,
+        generation: u64::try_from(binding.generation).map_err(|_| KernelError::Protocol("MCP generation must be nonnegative".into()))?,
+        resources: binding.resources,
+        tools: binding.tools.into_iter().map(|tool| varin_runtime::execution::ToolSchema {
+            name: tool.name, version: tool.version, schema: tool.schema,
+        }).collect(),
+    })
+}
 fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value, KernelError> {
     if method == "runtime.branch.fork" {
         let p: NativeBranchForkParams = serde_json::from_value(params)?;
@@ -718,6 +779,16 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         return Ok(serde_json::to_value(
             catalog.context_jobs(&p.branch_id).map_err(domain)?,
         )?);
+    }
+    if method == "runtime.context.refresh" {
+        let p: NativeContextRefreshParams = serde_json::from_value(params)?;
+        let basis = p.context.personalization.ok_or_else(|| KernelError::Protocol("personalization basis is required".into()))?;
+        return Ok(serde_json::to_value(catalog.refresh_personalization(
+            &p.branch_id,
+            u64::try_from(p.expected_revision).map_err(|_| KernelError::Protocol("context revision must be nonnegative".into()))?,
+            p.context.effective_system_prompt, p.context.instruction_sources, p.context.memory_checkpoint.0,
+            native_personalization_basis(basis)?,
+        ).map_err(domain)?)?);
     }
     if method == "runtime.context.inspect" {
         let p: NativeHistoryParams = serde_json::from_value(params)?;
@@ -762,6 +833,7 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         }
         .map_err(|error| KernelError::Protocol(error.to_string()))?;
         let launch = varin_runtime::catalog::launches::LaunchSelection {
+            mcp_binding: None,
             credential_scope: scope,
             connection_identity: identity,
             provider_family: configuration.provider_family,
@@ -919,6 +991,7 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                         ));
                     }
                     Ok::<_, KernelError>(varin_runtime::catalog::launches::LaunchSelection {
+                        mcp_binding: None,
                         credential_scope: scope,
                         connection_identity: identity,
                         provider_family: configuration.provider_family,
@@ -937,6 +1010,8 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                 .transpose()?;
             let command = SubmitInput { key:p.key, thread_id:p.thread_id, branch_id:p.branch_id,
                 expected_head:p.expected_head.0, input:p.input, configuration:p.configuration };
+            let personalization = p.initial_context.as_ref().and_then(|context| context.personalization.clone())
+                .map(native_personalization_basis).transpose()?;
             let initial = p.initial_context.map(|context| varin_runtime::catalog::context::ContextProposal {
                 key: format!("initial-context:{}", command.branch_id), branch_id: command.branch_id.clone(),
                 through_id: None, expected_revision: 0, summary: String::new(),
@@ -944,7 +1019,7 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                 instruction_sources: context.instruction_sources,
                 memory_checkpoint: context.memory_checkpoint.0,
             });
-            let receipt = catalog.submit_with_initial_context(&command, launch, inherit_source, initial).map_err(domain)?;
+            let receipt = catalog.submit_with_context_snapshot(&command, launch, inherit_source, initial, personalization).map_err(domain)?;
             Ok(serde_json::to_value(receipt)?)
         }
         "runtime.run.inspect" | "runtime.run.cancel" => {
@@ -1056,7 +1131,7 @@ fn apply_process_terminal(
         Outcome::Indeterminate
     };
     catalog
-        .record_external_receipt(
+        .record_external_receipt_with_stop(
             &fact.process_id,
             ExternalReceipt {
                 executor: "native_process_spawn".into(),
@@ -1072,6 +1147,7 @@ fn apply_process_terminal(
                 },
                 result: fact.receipt.clone(),
             },
+            confirmed,
         )
         .map_err(domain)?;
     Ok(())
@@ -1085,4 +1161,27 @@ fn validate_configuration(configuration: &Value) -> Result<(), KernelError> {
             .map_err(|e| KernelError::Protocol(e.to_string()))?;
     }
     Ok(())
+}
+
+fn native_personalization_basis(value: NativeContextPersonalization) -> Result<varin_runtime::catalog::personalization::PersonalizationBasis, KernelError> {
+    Ok(varin_runtime::catalog::personalization::PersonalizationBasis {
+        revision: u64::try_from(value.revision).map_err(|_| KernelError::Protocol("personalization revision must be nonnegative".into()))?,
+        context_composition: value.context_composition.map(|composition| {
+            use varin_runtime::composition::context::{ContextComposition, ContextFragment, FragmentKind};
+            Ok::<_, KernelError>(ContextComposition {
+                provider_id: composition.provider_id, content_version: composition.content_version,
+                scope_id: composition.scope_id,
+                selection_revision: composition.selection_revision.try_into().map_err(|_| KernelError::Protocol("context selection revision must be nonnegative".into()))?,
+                sections: composition.sections.into_iter().map(|section| Ok::<_, KernelError>(ContextFragment {
+                    name: section.name, content: section.content, kind: match section.kind.as_str() {
+                        "instruction" => FragmentKind::Instruction, "data" => FragmentKind::Data,
+                        _ => return Err(KernelError::Protocol("invalid context fragment kind".into())),
+                    },
+                })).collect::<Result<_, _>>()?,
+            })
+        }).transpose()?,
+        session_id: value.session_id, project_id: value.project_id.0,
+        original_sections: value.original_sections.into_iter().map(|section| varin_runtime::catalog::personalization::SystemSection { name: section.name, content: section.content }).collect(),
+        instruction_sources: value.instruction_sources,
+    })
 }

@@ -111,7 +111,20 @@ export interface NativeLaunchPolicy {
   version: string;
 }
 
+export interface NativeMcpBinding {
+  resources: Record<string, string>;
+  reference: string;
+  generation: number;
+  tools: NativeLaunchTool[];
+}
+
+export interface NativeMcpPrepareParams {
+  runId: string;
+  binding: NativeMcpBinding;
+}
+
 export interface NativeLaunchSelection {
+  mcp_binding: NativeMcpBinding | null;
   credential_scope: NativeCredentialScope | null;
   connection_identity: string;
   provider_family: string;
@@ -212,6 +225,7 @@ export interface NativeContextJobCreateParams {
 }
 
 export interface NativeRunStartParams {
+  mcpBinding?: NativeMcpBinding;
   runId: string;
   toolBinding?: unknown;
   credentialScope?: NativeCredentialScope;
@@ -268,7 +282,42 @@ export interface NativeThreadCreateParams {
   branchId: string;
 }
 
+export interface NativeSystemSection {
+  name: string;
+  content: string;
+}
+
+export interface NativeContextFragment {
+  name: string;
+  kind: string;
+  content: string;
+}
+
+export interface NativeContextComposition {
+  providerId: string;
+  contentVersion: string;
+  scopeId: string;
+  selectionRevision: number;
+  sections: NativeContextFragment[];
+}
+
+export interface NativeContextPersonalization {
+  contextComposition?: NativeContextComposition;
+  revision: number;
+  sessionId: string;
+  projectId: string | null;
+  originalSections: NativeSystemSection[];
+  instructionSources: string[];
+}
+
+export interface NativeContextRefreshParams {
+  branchId: string;
+  expectedRevision: number;
+  context: NativeInitialContext;
+}
+
 export interface NativeInitialContext {
+  personalization?: NativeContextPersonalization;
   effectiveSystemPrompt: string;
   instructionSources: string[];
   memoryCheckpoint: string | null;
@@ -287,6 +336,19 @@ export interface NativeInputSubmitParams {
 
 export interface NativeRunParams {
   runId: string;
+}
+
+export interface NativePermissionOpenParams {
+  operationId: string;
+  permissionId: string;
+  call: unknown;
+  scope: unknown;
+}
+
+export interface NativePermissionDecideParams {
+  operationId: string;
+  permissionId: string;
+  decision: string;
 }
 
 export interface NativeQuestionAnswerParams {

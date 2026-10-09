@@ -1,4 +1,4 @@
-import type { NativeEvent, NativeHistoryItem, NativeInputMode, NativeInputReceipt, NativeQueuedInput, NativeReceipt, NativeRun, NativeOperation, NativeRuntimeStreamEvent, NativeThreadSummary, NativeLaunchIntent, ImageAttachment } from '@varin/protocol';
+import type { NativeContextPersonalization, NativeEvent, NativeHistoryItem, NativeInputMode, NativeInputReceipt, NativeQueuedInput, NativeReceipt, NativeRun, NativeOperation, NativeRuntimeStreamEvent, NativeThreadSummary, NativeLaunchIntent, ImageAttachment } from '@varin/protocol';
 
 /** Explicit authority selection. A nativeThread never opens a Pi session. */
 export interface NativeThreadIdentity { runtime: 'nativeThread'; threadId: string; branchId: string }
@@ -40,6 +40,7 @@ export interface NativeContextJob {
   receipt: NativeReceipt;
 }
 export interface NativeContextCheckpoint {
+  personalization?: NativeContextPersonalization;
   id: string;
   revision: number;
   proposal: { key: string; branch_id: string; through_id: string | null; expected_revision: number;
@@ -87,6 +88,7 @@ export interface NativeThreadsAPI {
   cancelRun(runId: string): Promise<NativeRun>;
   operation(operationId: string): Promise<NativeOperation>;
   cancelOperation(operationId: string): Promise<NativeOperation>;
+  decidePermission(input: NativeThreadIdentity & { operationId: string; permissionId: string; decision: 'allow_once' | 'deny' }): Promise<NativeOperation>;
   answerQuestion(input: NativeThreadIdentity & { operationId: string; answer: string }): Promise<NativeOperation>;
   resume(runId: string): Promise<void>;
   events(cursor: number): Promise<NativeEvent[]>;
