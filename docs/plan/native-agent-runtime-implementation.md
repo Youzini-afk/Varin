@@ -608,3 +608,35 @@ watch/family/acquire 返回后重读真实取消 token；明确取消走既有�
 仍被持有时立即唤醒排队调用，尚未端到端实证。真实 Storage 撤权后拒派发、真实 Supervisor
 取消已分别实证。此首切不覆盖所有 compute 消费者、OS 线程创建失败注入、完整重启矩阵、
 统一有界 worker 执行器、优先级老化、性能比较或完整设计交付；下一进程持久等待增量独立推进。
+
+## 2026-10-09 原生进程持久等待与公平主线综合
+
+新增 `native_wait_process`，从已有同 Run 的 native_process_spawn Operation 观察真实 executor
+终态回执，复用 Catalog Wait/原模型工具交换/Host continuation，不以模型反复 inspect 作为
+等待实现，不新建第二进程表。观察取消不等于停止进程，Run 取消不在迟到终态后自动续接；
+输出仍由原进程 owner 保留，只交付有界且带来源的生命周期事实与读输出引用。
+
+合法同 Run rebind 后，通过真实 Catalog 原 Operation 与当前合法 source 绑定，只允许精确
+原进程的 inspect/read。Storage 每次核原/当前 grant、真实 Run/Thread/source 与物理根；不
+复活旧授权、不新建持久 observer grant、不扩 kill/stdin/write/跨 Run 权限。原或当前 grant
+显式撤销均拒绝。现有运行中部署 trust/root 变化没有即时撤 grant 监听，该边界仍明确保留。
+
+独立分支已验证 Runtime 7、真实 Host 5、原 source-picker consumer 1，修复恢复伪终态、
+观察取消事务窗口和 signal 字符串丢失。与公平主线合并后，在实际
+Native→Questions→Collaboration→ProcessWait→Memory（可选 MCP 最外）链上补齐双 hook 透传。
+综合 **Host 5、Runtime 7、真实 kernel wrapper 3，共 15 项行为**一次通过，窄测试类型、
+定点 lint、协议生成及 diff 检查通过，生产 Host bundle 重新构建通过。kernel 三例保留
+确定性 held permit、搜索排队、取消与 guard 释放、真实 Storage 撤权拒派发，以及 memory
+read/Prepare 可达断言；未用无关全套重跑代替这些实际接缝。
+
+恢复合同分开验证：仅 Host continuation service 重建，原 kernel 与进程仍活，可在同 Run
+继续等待并读到原输出；kernel 关闭会按既有生命周期停止进程，重开交付真实 Failed/Killed
+及不完整输出，不重 spawn、不伪称成功。已到达终态、重复终态、提交交付后失续接与观察取消
+均有持久反例；原始错误 fixture 和失败日志保留。
+
+综合 0.9.24 debug binary SHA256：
+`38245890771009ab23e50c9858256ea5fea495c254de47a3a279f20c8aab8128`。
+最终 5198 文件源码摘要 `58f96c5f3867a3d08d02475f1ca6522e532cb8a857694857f69b1bcce6af75c1`。
+构建期间仅 cfg(test) 模块接线变化，生产输入稳定；最终验收与构建 after 源码相同，运行收据
+绑定专属 binary 和 14 个实际依赖输出目录。验收后仅追加本节文档。
+这不是跨 kernel 存活保证、全部进程控制/UI、完整恢复矩阵、跨平台或完整两份设计交付。

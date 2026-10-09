@@ -266,9 +266,19 @@ fn combined(ending: Ending) {
         },
         db.clone(),
     );
-    start.tools =
-        crate::native_collaboration::wrap_tools(start.tools, db.clone(), Some(binding), client);
+    start = crate::native_collaboration::configure(start, db.clone());
+    start = crate::native_process_wait::configure(start, db.clone());
+    start.tools = crate::native_collaboration::wrap_tools(
+        start.tools,
+        db.clone(),
+        Some(binding.clone()),
+        client.clone(),
+    );
     start.binding.tools = crate::native_collaboration::schemas(start.binding.tools, true);
+    // Match source-backed main launch: Native -> Questions -> Collaboration ->
+    // ProcessWait -> Memory. The new wrapper must preserve inner scheduling hooks.
+    start.tools = crate::native_process_wait::wrap_tools(start.tools, db.clone(), binding, client);
+    start.binding.tools = crate::native_process_wait::schemas(start.binding.tools);
     let start = configure(start, db.clone(), bridge.clone(), true);
     input.binding = start.binding.clone();
     let tools = start.tools.clone();
@@ -348,7 +358,7 @@ fn combined(ending: Ending) {
         persistence: db.clone(),
         provider: Arc::new(Provider(AtomicUsize::new(0))),
         tools: tools.clone(),
-        policy: Arc::new(DefaultAgentPolicy),
+        policy: start.policy.clone(),
         progress: ProgressSink::default(),
     };
     let worker = {
