@@ -1106,7 +1106,7 @@ fn durable_launch_rebind_is_exact_idempotent_and_carries_no_live_credentials() {
     let f = Fixture::new();
     let mut db = f.open();
     let receipt = submit(&mut db);
-    let selection: LaunchSelection = serde_json::from_value(json!({"connection_identity":"pinned-public-digest","provider_family":"fixture","model":"test-model","configuration_generation":1,"tool_schema_generation":1,"tools":[{"name":"read","version":"1","schema":{"type":"object"}}],"policy":{"name":"agent","version":"1"},"source":{"workspace_id":"workspace","execution_workspace_id":"execution","branch_id":"branch","revision":5,"materialized":false}})).unwrap();
+    let selection: LaunchSelection = serde_json::from_value(json!({"connection_identity":"pinned-public-digest","provider_family":"fixture","model":"test-model","configuration_generation":1,"tool_schema_generation":1,"tools":[{"name":"read","version":"1","schema":{"type":"object"}}],"policy":{"name":"agent","version":"1"},"source":{"workspace_id":"workspace","execution_workspace_id":"execution","branch_id":"branch","revision":5,"mode":"fixed_branch","live_root":null}})).unwrap();
     let first = db.bind_launch(&receipt.run_id, selection.clone()).unwrap();
     assert_eq!(
         first,
@@ -1233,7 +1233,8 @@ fn successor_environment_selection_reuses_only_its_original_thread_source() {
         },
         Some(SourceSelection {
             environment_run_id: None,
-            materialized: true,
+            mode: crate::SourceMode::Materialized,
+            live_root: None,
             workspace_id: "workspace".into(),
             execution_workspace_id: "execution".into(),
             branch_id: Some("source".into()),

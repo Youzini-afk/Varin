@@ -363,6 +363,15 @@ fn create_symlink(target: &str, path: &Path) -> Result<(), KernelError> {
 }
 
 impl Storage {
+    pub(crate) fn validate_native_live_root(&self, identity: &varin_runtime::catalog::launches::LiveRoot,
+        grant: &Grant, host_id: &str) -> Result<(), KernelError> {
+        let root = self.registered_file_root(&identity.root_id, grant)?;
+        if identity.host_id != host_id || root.canonical_root != Path::new(&identity.canonical_root) {
+            return Err(KernelError::Authorization("live source environment identity changed".into()));
+        }
+        Ok(())
+    }
+
     pub(super) fn registered_file_root(
         &self,
         root_id: &str,
@@ -2443,7 +2452,8 @@ pub(super) fn resolve_admitted_resource(
 impl Storage {
     /// Typed native adapter entry point. This is deliberately not a wire method:
     /// the bound Run supplies the root, and the existing grant/root/lease owner
-    /// still admits every read. Materialized sources observe their actual disk.
+    /// still admits every read. The caller adds its selected source mode; this owner
+    /// only establishes the actual physical root and observed file revision.
     pub(crate) fn native_file_read(
         &mut self,
         params: &Value,
@@ -2451,7 +2461,7 @@ impl Storage {
         read_body: bool,
     ) -> Result<Value, KernelError> {
         let root_id = params["rootId"].as_str().ok_or_else(|| {
-            KernelError::Authorization("materialized source root is missing".into())
+            KernelError::Authorization("physical source root is missing".into())
         })?;
         let path = params["path"]
             .as_str()
@@ -2470,7 +2480,7 @@ impl Storage {
         if !read_body {
             return Ok(Value::Null);
         }
-        let source = json!({"mode":"materialized","rootId":root_id});
+        let source = json!({"rootId":root_id});
         let metadata = match fs::symlink_metadata(&resource.absolute) {
             Ok(value) => value,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {

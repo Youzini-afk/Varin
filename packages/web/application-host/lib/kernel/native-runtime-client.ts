@@ -1,3 +1,4 @@
+import type { NativeLiveSourceResolver } from './native-live-source.js';
 import type { NativePolicyModelPreparer } from './native-policy-models.js';
 import { waitWithSignal } from '../cancellation.js';
 import type { NativeAgentPolicyLease, NativeAgentPolicyBinding } from './native-agent-policy.js';
@@ -20,7 +21,7 @@ export type NativeMcpPreparer = (input: NativeMcpPreparation, signal?: AbortSign
 
 /** Explicit native-authority client. Existing Pi thread routes are not silently redirected. */
 export class NativeRuntimeClient {
-  constructor(private readonly kernel: KernelClient, private readonly prepareMcpOwner?: NativeMcpPreparer, private readonly preparePolicyOwner?: NativeRunPolicyPreparer, private readonly preparePolicyModels?: NativePolicyModelPreparer) {}
+  constructor(private readonly kernel: KernelClient, private readonly prepareMcpOwner?: NativeMcpPreparer, private readonly preparePolicyOwner?: NativeRunPolicyPreparer, private readonly preparePolicyModels?: NativePolicyModelPreparer, private readonly resolveLiveSource?: NativeLiveSourceResolver) {}
 
   private async withRunPreparation<T>(runId: string, callerSignal: AbortSignal | undefined, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
     const registration = this.kernel.beginNativeRunPreparation(runId);
@@ -129,7 +130,7 @@ export class NativeRuntimeClient {
     });
   }
   startFromSource(selection: NativeSourceLaunch, options: { credentialOwner?: ExistingHostCredentialOwner; signal?: AbortSignal } = {}): Promise<NativeRunStartReceipt> {
-    return this.withRunPreparation(selection.runId, options.signal, signal => startNativeRunFromSource(this.kernel, this, selection, { ...options, signal }));
+    return this.withRunPreparation(selection.runId, options.signal, signal => startNativeRunFromSource(this.kernel, this, selection, { ...options, signal, ...(this.resolveLiveSource ? { resolveLiveSource: this.resolveLiveSource } : {}) }));
   }
   /** Reacquire fresh authority from a saved selection; unresolved model/effect waits still reject start. */
   async rebindLaunch(runId: string, options: { credentialOwner?: ExistingHostCredentialOwner; signal?: AbortSignal } = {}): Promise<NativeRunStartReceipt> {
@@ -144,15 +145,13 @@ export class NativeRuntimeClient {
         await this.prepareMcp(runId, null, undefined, options.signal);
         return options.credentialOwner ? this.startRunWithCredentialOwner(runId, options.credentialOwner, options.signal) : this.startRun(runId, options.signal);
       }
-      if (source.branch_id === null || source.revision === null) throw new Error('Saved environment requires its original Host resource owner');
+
       const names = { native_file_read: 'file_read', native_file_list: 'file_list', native_file_search: 'file_search', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn' } as const;
       const tools = launch.selection.tools.filter(tool => tool.name !== 'native_ask_user' && !launch.selection.mcp_binding?.tools.some(mcp => mcp.name === tool.name)).map(tool => {
         if (!(tool.name in names)) throw new Error('Saved capability requires its original extension owner');
         return names[tool.name as keyof typeof names];
     });
-    return this.startFromSource({ runId, workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id,
-      branchId: source.branch_id, revision: source.revision, mode: source.materialized ? 'materialized' : 'fixed_branch', tools,
-      ...(source.environment_run_id ? { environmentRunId: source.environment_run_id } : {}) }, options);
+    return this.startFromSource(this.sourceLaunch(runId, source, tools), options);
     });
   }
   /** Carry a thread's actual materialized environment into an admitted successor Run. */
@@ -174,16 +173,26 @@ export class NativeRuntimeClient {
         await this.prepareMcp(runId, null, undefined, options.signal);
         return options.credentialOwner ? this.startRunWithCredentialOwner(runId, options.credentialOwner, options.signal) : this.startRun(runId, options.signal);
       }
-      if (source.branch_id === null || source.revision === null) throw new Error('Environment continuation requires its original Host resource owner');
+
       const names = { native_file_read: 'file_read', native_file_list: 'file_list', native_file_search: 'file_search', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn' } as const;
       const tools = previous.selection.tools.filter(tool => tool.name !== 'native_ask_user' && !previous.selection.mcp_binding?.tools.some(mcp => mcp.name === tool.name)).map(tool => {
         if (!(tool.name in names)) throw new Error('Saved capability requires its original extension owner');
         return names[tool.name as keyof typeof names];
     });
-    return this.startFromSource({ runId, workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id,
-      branchId: source.branch_id, revision: source.revision, mode: source.materialized ? 'materialized' : 'fixed_branch', tools,
-      ...(source.materialized ? { environmentRunId: source.environment_run_id ?? previousRunId } : {}) }, options);
+    return this.startFromSource(this.sourceLaunch(runId, source, tools, previousRunId), options);
     });
+  }
+  private sourceLaunch(runId: string, source: NonNullable<NativeLaunchIntent['selection']['source']>,
+    tools: NativeSourceLaunch['tools'], previousRunId?: string): NativeSourceLaunch {
+    const base = { runId, workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id, tools };
+    if (source.mode === 'live_root') {
+      if (!source.live_root || source.branch_id !== null || source.revision !== null || source.environment_run_id) throw new Error('Saved live environment is incomplete');
+      return { ...base, mode: 'live_root', liveRoot: source.live_root };
+    }
+    if (source.branch_id === null || source.revision === null || source.live_root) throw new Error('Saved fixed environment is incomplete');
+    const environmentRunId = source.environment_run_id ?? previousRunId;
+    return { ...base, mode: source.mode, branchId: source.branch_id, revision: source.revision,
+      ...(source.mode === 'materialized' && environmentRunId ? { environmentRunId } : {}) };
   }
   launch(runId: string, signal?: AbortSignal): Promise<NativeLaunchIntent | null> {
     return this.kernel.nativeRuntimeRequest('runtime.launch.inspect', { runId }, signal);

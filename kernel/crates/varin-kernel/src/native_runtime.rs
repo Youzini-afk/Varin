@@ -434,7 +434,11 @@ pub(crate) fn spawn(
                                         Ok::<_, KernelError>(
                                             varin_runtime::catalog::launches::SourceSelection {
                                                 environment_run_id: source.environment_run_id,
-                                                materialized: source.materialized,
+                                                mode: source.mode,
+                                                live_root: source.live_root.and_then(|root| root.0).map(|root|
+                                                    varin_runtime::catalog::launches::LiveRoot {
+                                                        host_id: root.host_id, canonical_root: root.canonical_root, root_id: root.root_id,
+                                                    }),
                                                 workspace_id: source.workspace_id,
                                                 execution_workspace_id: source
                                                     .execution_workspace_id,
@@ -489,32 +493,7 @@ pub(crate) fn spawn(
                                         "tool binding does not belong to the admitted Run".into(),
                                     ));
                                 }
-                                launch_source =
-                                    Some(varin_runtime::catalog::launches::SourceSelection {
-                                        environment_run_id: binding.environment_run_id.clone(),
-                                        materialized: binding.source_mode
-                                            == crate::native_tools::NativeSourceMode::Materialized,
-                                        workspace_id: binding.workspace_id.clone(),
-                                        execution_workspace_id: binding
-                                            .execution_workspace_id
-                                            .clone(),
-                                        branch_id: binding
-                                            .file_source
-                                            .as_ref()
-                                            .or(binding.materialized_source.as_ref())
-                                            .map(|source| source.branch_id.clone()),
-                                        revision: binding
-                                            .file_source
-                                            .as_ref()
-                                            .or(binding.materialized_source.as_ref())
-                                            .map(|source| u64::try_from(source.revision))
-                                            .transpose()
-                                            .map_err(|_| {
-                                                KernelError::Protocol(
-                                                    "source revision must be nonnegative".into(),
-                                                )
-                                            })?,
-                                    });
+                                launch_source = Some(binding.source_selection()?);
                                 let tools = crate::native_tools::NativeToolExecutor::new(
                                     binding,
                                     resources.clone(),
@@ -659,6 +638,11 @@ pub(crate) fn spawn(
                                     return Err(KernelError::Authorization(
                                         "reconciliation binding belongs to another Run".into(),
                                     ));
+                                }
+                                let launch = catalog.launch_intent(&run.id).map_err(domain)?
+                                    .ok_or_else(|| KernelError::Authorization("reconciliation requires a durable source selection".into()))?;
+                                if launch.selection.source.as_ref() != Some(&binding.source_selection()?) {
+                                    return Err(KernelError::Authorization("reconciliation cannot change the durable source selection".into()));
                                 }
                                 catalog
                                     .pending_run_operations(&run.id)
@@ -1022,7 +1006,11 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                             Ok::<_, KernelError>(
                                 varin_runtime::catalog::launches::SourceSelection {
                                     environment_run_id: source.environment_run_id,
-                                    materialized: source.materialized,
+                                    mode: source.mode,
+                                    live_root: source.live_root.and_then(|root| root.0).map(|root|
+                                        varin_runtime::catalog::launches::LiveRoot {
+                                            host_id: root.host_id, canonical_root: root.canonical_root, root_id: root.root_id,
+                                        }),
                                     workspace_id: source.workspace_id,
                                     execution_workspace_id: source.execution_workspace_id,
                                     branch_id: source.branch_id.0,

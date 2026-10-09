@@ -13,7 +13,7 @@ export function NativeThreadSourcePicker({ api, identity, initialPath, active, l
   onPreparingChange(value: boolean): void;
 }) {
   const [path, setPath] = React.useState(initialPath ?? '');
-  const [mode, setMode] = React.useState<'fixed_branch' | 'materialized'>('fixed_branch');
+  const [mode, setMode] = React.useState<'fixed_branch' | 'materialized' | 'live_root'>('fixed_branch');
   const [preparing, setPreparing] = React.useState(false);
   const [error, setError] = React.useState<string>();
   const generation = React.useRef(0);
@@ -44,9 +44,9 @@ export function NativeThreadSourcePicker({ api, identity, initialPath, active, l
   };
   const source = launch?.selection.source;
   return <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">
-    <summary className="cursor-pointer">Workspace · {prepared ? 'Prepared for next run' : source ? source.materialized ? 'Isolated editable copy' : 'Read-only snapshot' : 'Chat only'}</summary>
+    <summary className="cursor-pointer">Workspace · {prepared ? 'Prepared for next run' : source ? source.mode === 'live_root' ? 'Live workspace' : source.mode === 'materialized' ? 'Isolated editable copy' : 'Read-only snapshot' : 'Chat only'}</summary>
     <div className="space-y-2 py-2">
-      {source && <p>Current source: workspace {source.workspace_id} · revision {source.revision}. {source.materialized ? 'Following runs keep this working copy.' : 'Following runs read the same fixed snapshot.'}</p>}
+      {source && <p>Current source: workspace {source.workspace_id}{source.mode !== 'live_root' && ` · revision ${source.revision}`}. {source.mode === 'live_root' ? 'Following runs use this same live workspace. Edits change its actual files.' : source.mode === 'materialized' ? 'Following runs keep this working copy.' : 'Following runs read the same fixed snapshot.'}</p>}
       <label className="block">Workspace folder
         <input aria-label="Native workspace folder" className="mt-1 w-full rounded border bg-background px-2 py-1 text-sm"
           disabled={active || preparing} value={path} onChange={event => setPath(event.target.value)} />
@@ -56,13 +56,14 @@ export function NativeThreadSourcePicker({ api, identity, initialPath, active, l
         value={mode} onChange={event => setMode(event.target.value as typeof mode)}>
         <option value="fixed_branch">Read-only file snapshot: read, list and search</option>
         <option value="materialized">Isolated editable copy and commands</option>
+        <option value="live_root">Live workspace: edit actual files and run commands</option>
       </select>
-      <p>Captures saved files using the workspace inventory. Unsaved editor changes are not included.</p>
+      {mode === 'live_root' ? <p>Uses saved files directly, without capturing a snapshot. External file and dependency changes remain live; unsaved editor changes are not included. Edits change the selected workspace immediately. Commands can have external effects; this is not a security sandbox.</p> : <p>Captures saved files using the workspace inventory. Unsaved editor changes are not included.</p>}
       {mode === 'materialized' && <p>File edits start in a separate working copy. Commands can have external effects; this is not a security sandbox. Changes are not copied back automatically.</p>}
       {active && <p>Workspace selection applies to a new run. Wait for the current run to finish before preparing another source.</p>}
-      <Button type="button" variant="outline" size="sm" disabled={active || preparing || !path.trim()} onClick={() => void prepare()}>{preparing ? 'Preparing workspace snapshot' : 'Prepare workspace'}</Button>
+      <Button type="button" variant="outline" size="sm" disabled={active || preparing || !path.trim()} onClick={() => void prepare()}>{preparing ? 'Preparing workspace' : 'Prepare workspace'}</Button>
       {prepared && <div aria-label="Prepared native workspace">
-        <p>{prepared.path} · {prepared.source.mode === 'materialized' ? 'Editable copy and commands' : 'Read-only'} · ready for the next send</p>
+        <p>{prepared.path} · {prepared.source.mode === 'live_root' ? 'Live files and commands' : prepared.source.mode === 'materialized' ? 'Editable copy and commands' : 'Read-only'} · ready for the next send</p>
         <Button type="button" variant="ghost" size="sm" disabled={preparing} onClick={() => onPrepared(null)}>{source ? 'Keep current workspace' : 'Remove prepared workspace'}</Button>
       </div>}
       {error && <p role="alert" className="text-destructive">{error}</p>}

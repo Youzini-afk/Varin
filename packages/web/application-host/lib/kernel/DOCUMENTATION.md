@@ -307,3 +307,43 @@ scope, kernel epoch and optional endpoint/payload digest for signing. Run cancel
 transport shutdown retire every bound owner. Parked Run resumption re-prepares the pinned policy and
 all its owners. Tokens remain transient private replies, never launch or policy data. Production Pi,
 the default native policy, and policies without declared planning duties do not prepare this role.
+
+## Native live workspace selection
+
+Native Threads expose three explicit source modes: `fixed_branch` reads its immutable revision;
+`materialized` creates and continues the existing isolated working copy from a fixed baseline;
+`live_root` operates on the selected workspace's actual saved files. The default remains the fixed
+snapshot. Selecting live access does not capture the directory or include unsaved editor buffers.
+File edits affect the real workspace. Shell cwd and process management are not an OS sandbox.
+Live identity pins the admitted canonical pathname on its Host, not a directory inode or a whole-project
+snapshot. Native Run preparation observes cancellation and revokes failed launch grants; the public
+source preparation/submission API does not promise a general pre-admission AbortSignal contract.
+
+`native-live-source.ts` is an admission adapter, not a registry. Documents retains the durable
+host/workspace/root mapping; Rust retains file/process authority. The Run's existing launch intent
+records live mode plus nonsecret host ID, canonical root and deterministic Rust root ID. Submit,
+continuation and restart revalidate the exact Documents mapping; each launch gets a fresh scoped
+grant and registers that same root. A changed host/root/registration is unavailable, never a reason
+to substitute the current project, infer a snapshot, or recapture files. Rust compares the complete
+source at launch and mutation reconciliation and validates the registered root on actual access.
+The Rust tool boundary rejects process spawning for fixed sources even if a caller supplies a valid
+physical root. Read/list/search provenance comes from the verified binding: live results carry their
+actual mode/root ID/live descriptor, never a materialized label. File read versions remain observations
+of the actual live file; the frozen instruction checkpoint does not pin later file reads.
+
+The initial live AGENTS.md is read through Documents and its actual revision is frozen in the
+existing context checkpoint. Later disk changes remain live for file tools but do not retroactively
+rewrite that instruction checkpoint. Ordinary instruction/memory refresh retains its existing owner.
+
+This slice does not add native LSP tools. A subsequent live-environment integration must reuse
+LanguageSupervisor/LanguageViewBinder, admit every returned resource and report live dependency
+semantics. Materialized files do not pin external symlinks, project configuration outside the copy,
+or compiler libraries; a workspace cwd does not establish a fixed dependency closure.
+
+The experimental native `run_launches` domain is now format 2; catalog/content remain 3/3.
+This is an intentional incompatible internal encoding change from the old `materialized` boolean.
+Existing format 1, missing or malformed launch metadata is rejected before writable SQLite access,
+epoch advancement or recovery. Read-only preflight observes committed WAL pages. Original database,
+WAL and content assets are preserved; there is no migration, silent inference or alternate reader.
+The persisted `live_root` field is required: fixed/materialized encode explicit null and live mode
+encodes the exact descriptor. Missing fields do not silently manufacture a legacy source identity.

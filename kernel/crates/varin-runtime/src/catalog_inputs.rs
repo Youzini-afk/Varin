@@ -173,7 +173,7 @@ impl Catalog {
             tx.execute("INSERT INTO runs(id,branch_id,body,context_checkpoint_id) VALUES(?1,?2,?3,(SELECT checkpoint_id FROM active_contexts WHERE branch_id=?2))",params![next.id,next.branch_id,encode(&next)?])?;
             if let Some(previous)=predecessor.as_ref().filter(|previous|previous.configuration==next.configuration) {
                 if let Some(mut launch)=optional_record::<super::launches::LaunchIntent>(&tx,"run_launches",&previous.id)? {
-                    if let Some(source)=launch.selection.source.as_mut().filter(|source|source.materialized) {
+                    if let Some(source)=launch.selection.source.as_mut().filter(|source|source.mode == crate::SourceMode::Materialized) {
                         if source.environment_run_id.is_none(){source.environment_run_id=Some(previous.id.clone());}
                     }
                     launch.run_id=next.id.clone();launch.revision=1;launch.bound_epoch=None;launch.requires_rebind=true;launch.preparation_failure=None;

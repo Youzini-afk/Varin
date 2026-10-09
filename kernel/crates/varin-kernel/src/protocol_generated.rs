@@ -1215,11 +1215,12 @@ pub(crate) struct NativeInitialContext {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeLaunchSourceParams {
     pub(crate) environment_run_id: Option<String>,
-    pub(crate) materialized: bool,
     pub(crate) workspace_id: String,
     pub(crate) execution_workspace_id: String,
     pub(crate) branch_id: RequiredNullable<String>,
     pub(crate) revision: RequiredNullable<i64>,
+    pub(crate) mode: varin_runtime::SourceMode,
+    pub(crate) live_root: Option<RequiredNullable<NativeLiveRoot>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1412,6 +1413,14 @@ pub(crate) struct NativeContextPersonalization {
     pub(crate) project_id: RequiredNullable<String>,
     pub(crate) original_sections: Vec<NativeSystemSection>,
     pub(crate) instruction_sources: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeLiveRoot {
+    pub(crate) host_id: String,
+    pub(crate) canonical_root: String,
+    pub(crate) root_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]

@@ -11,9 +11,9 @@ impl NativeResourceClient {
         binding: NativeToolBinding,
         operations: Vec<Operation>,
     ) -> Result<Vec<(String, ExternalReceipt)>, KernelError> {
-        if binding.source_mode != NativeSourceMode::Materialized {
+        if binding.source_mode == NativeSourceMode::FixedBranch {
             return Err(KernelError::Authorization(
-                "mutation recovery requires the original materialized source".into(),
+                "mutation recovery requires the original physical source".into(),
             ));
         }
         let executor = NativeToolExecutor::new(binding.clone(), self.clone())

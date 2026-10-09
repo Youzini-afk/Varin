@@ -414,3 +414,24 @@ it('permission UI sends only an explicit one-action decision and cannot approve 
   await act(async () => { f.emit({ cursor: 20, subject: 'sibling-run', revision: 2, kind: 'permission.opened', data: {} }); });
   expect(button('Allow once').disabled).toBe(true); expect(button('Deny').disabled).toBe(true);
 });
+
+it('requires an explicit live workspace choice and discloses direct effects before sending its prepared identity', async () => {
+  const f = fixture();
+  const prepared = { path: '/workspace/project', source: { workspaceId: 'live-workspace', executionWorkspaceId: 'live-workspace', mode: 'live_root' as const,
+    liveRoot: { hostId: 'selected-host', canonicalRoot: '/workspace/project', rootId: 'registered-root' }, tools: ['file_read' as const, 'file_write' as const] } };
+  f.api.prepareSource = vi.fn().mockResolvedValue(prepared);
+  await act(async () => { root.render(<NativeThreadConversation api={f.api} identity={identity} initialWorkspacePath="/workspace/project" />); });
+  expect(container.querySelector<HTMLSelectElement>('[aria-label="Native workspace access"]')!.value).toBe('fixed_branch');
+  expect(f.api.prepareSource).not.toHaveBeenCalled();
+  await edit('[aria-label="Native workspace access"]', 'live_root', 'change');
+  expect(container.textContent).toContain('Edits change the selected workspace immediately');
+  expect(container.textContent).toContain('not a security sandbox');
+  expect(f.submit).not.toHaveBeenCalled();
+  await act(async () => { button('Prepare workspace').click(); });
+  expect(f.api.prepareSource).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ...identity, path: '/workspace/project', mode: 'live_root' }));
+  expect(container.querySelector('[aria-label="Prepared native workspace"]')?.textContent).toContain('Live files and commands');
+  await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
+  await edit('[aria-label="Message native thread"]', 'work on these actual files');
+  await submitForm(container.querySelector('form')!);
+  expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ source: prepared.source, text: 'work on these actual files' }));
+});

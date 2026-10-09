@@ -1,3 +1,4 @@
+import { createNativeLiveSourceOwner } from './lib/kernel/native-live-source.js';
 import { createNativeThreadSourcePreparer } from './lib/kernel/native-thread-sources.js';
 import { createNativeThreadContext } from './lib/kernel/native-thread-context.js';
 import { createNativeContextComposition } from './lib/kernel/native-context-composition.js';
@@ -2871,6 +2872,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const prepareNativePolicy = createNativeAgentPolicy(extensionRuntime);
   const nativeModelAuthority = createNativeModelAuthority(hostCredentialAuthority);
+  const nativeLiveSources = createNativeLiveSourceOwner({ documents: documentsAuthority, kernel: kernelClient });
   const nativeRuntime: NativeRuntimeClient = new NativeRuntimeClient(kernelClient, async (input, signal) => {
     // A read-only fixed branch has no executable filesystem view. Global MCP capabilities run
     // in the neutral Host scope; they must not borrow the mutable project directory.
@@ -2909,20 +2911,22 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }, createNativePolicyModelPreparer({ models: nativeModelAuthority,
     // This is a user-scoped role. Native Threads do not impersonate Pi sessions.
     settings: () => piRuntimeBroker.requestCatalog('settings.get', {}),
-  }));
+  }), nativeLiveSources.validate);
   const nativeRunObservers = new NativeRunObservers(nativeRuntime, extensionRuntime, (threadId, _error) => {
     console.error('[NativeObserver] Activity projection requires attention:', threadId ?? 'selection');
   });
   const nativeThreads = new NativeThreadAdapter(nativeRuntime,
-    nativeModelAuthority, async source => {
+    nativeModelAuthority, async (source, identity) => {
+      if (source.mode === 'live_root') return nativeLiveSources.admit(source, identity.threadId);
       // Public source coordinates identify existing Host workspaces, never arbitrary roots/grants.
       await documentsAuthority.inspectWorkspace(source.workspaceId);
       await documentsAuthority.inspectWorkspace(source.executionWorkspaceId);
     }, (runId, _error) => {
       // Durable launch remains inspectable/resumable. Never log credentials or provider responses.
       console.error('[NativeThread] Launch preparation requires attention:', runId);
-    }, createNativeThreadSourcePreparer({ documents: documentsAuthority, workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter) }),
+    }, createNativeThreadSourcePreparer({ documents: documentsAuthority, liveSources: nativeLiveSources, workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter) }),
     createNativeThreadContext({ personalization: agentPersonalization,
+      liveSource: { documents: documentsAuthority, validate: nativeLiveSources.validate },
       composition: createNativeContextComposition(extensionRuntime),
       workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter),
       projectForWorkspace: async workspaceId => {

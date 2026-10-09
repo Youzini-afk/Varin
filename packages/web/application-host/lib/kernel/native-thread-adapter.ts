@@ -16,7 +16,7 @@ export interface NativeThreadModelAuthority {
 /** Projection and admission only: Rust owns all conversation, queue and execution facts. */
 export class NativeThreadAdapter {
   constructor(readonly runtime: NativeRuntimeClient, private readonly models: NativeThreadModelAuthority,
-    private readonly admitSource: (source: NativeThreadSource) => Promise<void>,
+    private readonly admitSource: (source: NativeThreadSource, identity: NativeThreadIdentity) => Promise<void>,
     private readonly onLaunchError: (runId: string, error: unknown) => void,
     private readonly prepareWorkspace?: (input: NativeThreadPrepareSource) => Promise<NativeThreadPreparedSource>,
     private readonly prepareContext?: NativeContextPreparer) {}
@@ -187,7 +187,7 @@ export class NativeThreadAdapter {
   async submit(input: NativeThreadSubmit) {
     const thread = await this.requireIdentity(input);
     await this.refreshContext(input);
-    if (input.source) await this.admitSource(input.source);
+    if (input.source) await this.admitSource(input.source, input);
     const model = await this.models.resolveModel(input.model);
     this.assertImagesSupported(input.images, model.configuration);
     let initialContext: NativeInitialContext | undefined;
@@ -197,11 +197,13 @@ export class NativeThreadAdapter {
         const latest = thread.branches.find(branch => branch.branch_id === input.branchId)?.latest_run;
         const previous = latest ? await this.runtime.launch(latest.id) : null;
         const inherited = previous?.selection.source;
-        if (inherited?.branch_id && inherited.revision !== null) source = {
-          workspaceId: inherited.workspace_id, executionWorkspaceId: inherited.execution_workspace_id,
-          branchId: inherited.branch_id, revision: inherited.revision,
-          mode: inherited.materialized ? 'materialized' : 'fixed_branch', tools: [],
-        };
+        if (inherited) {
+          const base = { workspaceId: inherited.workspace_id, executionWorkspaceId: inherited.execution_workspace_id, tools: [] };
+          if (inherited.mode === 'live_root' && inherited.live_root) source = { ...base, mode: 'live_root', liveRoot: inherited.live_root };
+          else if (inherited.mode !== 'live_root' && inherited.branch_id && inherited.revision !== null) source = {
+            ...base, branchId: inherited.branch_id, revision: inherited.revision, mode: inherited.mode,
+          };
+        }
       }
       initialContext = await this.prepareContext(input, source);
     }
@@ -211,7 +213,7 @@ export class NativeThreadAdapter {
       ...(initialContext ? { initialContext } : {}),
       launch: { inheritSource: input.source === undefined, source: input.source ? {
         workspaceId: input.source.workspaceId, executionWorkspaceId: input.source.executionWorkspaceId,
-        branchId: input.source.branchId, revision: input.source.revision, materialized: input.source.mode === 'materialized',
+        branchId: input.source.branchId ?? null, revision: input.source.revision ?? null, mode: input.source.mode, liveRoot: input.source.liveRoot ?? null,
       } : null, enabledTools: input.source?.tools ?? [], credentialScope: await model.credentialOwner.scope() },
     });
     // Close the first-admission gap: a note commit can occur after assembly while no checkpoint

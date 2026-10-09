@@ -245,3 +245,32 @@
 - 共享取消桥已统一native token通知，外部wire分lane credits与Host独立窗口对齐；相关进程/IPC并发回归已在冻结构建通过，后续协议变化仍须复验
 - RequestSnapshot、history正文/provider originals、model_outputs及队列交付正文已持久化为不可变manifest/chunks，ModelStep相位写入保留短引用；追加历史可复用内容块，读取保留完整原文。当前仍全量序列化/读取请求，未实现完整内存工作集优化；跨 Run 基础原子/FIFO 资源准入已验证，更完整的调度优先级、能力准备和成本证据仍需补齐
 - 完整恢复驱动（已完成模型结果/部分工具回执的原生续接已通过，Host完整恢复编排仍未完成）、输入队列的产品接线、自动压缩与完整记忆流程、全部 provider/OAuth 实际部署、MCP Tasks/持久脚本及扩展领域覆盖、LSP/捕获迁移、UI投影、Pi用户资产导入、跨平台发布和最终Pi退出仍须按能力矩阵交付
+
+## 已核验增量：显式 live-root 来源与精确重绑
+
+本纵切新增显式 `live_root`，沿已有 Documents 登记和 Rust file-resource/process owner 访问实际保存文件；
+不执行目录捕获，也不改变默认固定快照或既有 Pi 路由。`fixed_branch`、`materialized` 与 `live_root`
+分别表达固定读取、独立工作副本和直接修改现场。Run launch 保存真实 host/root 身份，恢复只能重新授权同一来源，
+不能把同名目录、当前侧栏选择或物化失败替换成原来源。最初 AGENTS.md 从 Documents 读取并以实际 revision 固定在已有 context checkpoint。
+
+旧实验性原生 launch domain 1 的布尔编码由 domain 2 显式来源模式替代；catalog/content 仍为 3/3。
+已有库先以只读 SQLite 检查 domain/表结构及已提交 WAL，再允许可写打开、epoch 变更或恢复。
+旧格式、缺失或损坏结构保留原资产并拒绝，不提供静默推断、内部迁移或双读合同。
+
+当前尚不接入原生 LSP。后续 live 环境语言服务必须复用现有 LanguageSupervisor/LanguageViewBinder，
+且每个返回位置仍经资源授权。外部 symlink、tsconfig 依赖和编译器库可能来自现场，不能宣称全工程固定；
+cwd 不是 OS sandbox。
+
+独立验收：Rust 91 项通过（79 个既有 unit、10 个新增来源/格式检查、2 个来源继承检查）；
+Host 21 项在同一修正后的真实内核构建通过（10 个新增 live-source、6 个固定来源/继承/context、5 个 process/CAS）；
+UI 16 项通过。内核二进制 SHA-256 为 `ef9c0c1d75d465ddd9d9f012a07c12f763f1b5cdcee4951d293654f1b7bb56b6`。
+生产 Host、UI 与最终 Host tests 类型检查、共享协议/client 构建、协议生成一致性及 diff 空白检查通过。
+模型侧使用本地 fixture；没有真实付费模型调用。本轮运行证据为 Linux，不代表完整跨平台或原生默认路由验收。
+来源身份固定 Host 登记的规范路径与 Rust root ID，不固定目录 inode 或承诺整个工程的原子快照；
+当前公共来源准备/提交接口没有通用的受理前 AbortSignal 保证，取消验证针对实际 Run 准备链。
+
+本轮真实反例促成的修复包括：缺少 runs 外键的同列 launch 表曾被接受；旧 domain 拒绝过程中可写 SQLite
+连接关闭会 checkpoint 已提交 WAL，现改为真正只读预检，保持数据库/WAL 资产；持久 `live_root` 缺字段曾隐式成为 null，
+现与协议一致要求显式 null/描述符；即使提供有效 rootId，Rust 也拒绝以 `fixed_branch` 启动进程；
+live read 曾误标 materialized，现 read/list/search 统一从已验证绑定输出真实 mode/rootId/liveRoot。
+读取不同文件状态、实时文件变化、冻结 AGENTS revision、后续 Run、重启/排队重绑、伪造来源拒绝与准备取消后的 grant 撤销均有本轮独立行为证据。

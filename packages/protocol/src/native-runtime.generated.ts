@@ -76,13 +76,22 @@ export interface NativeThreadSummary {
 
 export type NativeRuntimeStreamEvent = {v: 1; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
+export type NativeSourceMode = 'fixed_branch' | 'materialized' | 'live_root';
+
+export interface NativeLiveRoot {
+  hostId: string;
+  canonicalRoot: string;
+  rootId: string;
+}
+
 export interface NativeLaunchSourceParams {
   environmentRunId?: string;
-  materialized: boolean;
   workspaceId: string;
   executionWorkspaceId: string;
   branchId: string | null;
   revision: number | null;
+  mode: NativeSourceMode;
+  liveRoot?: NativeLiveRoot | null;
 }
 
 export interface NativeLaunchSelectParams {
@@ -94,11 +103,12 @@ export interface NativeLaunchSelectParams {
 
 export interface NativeLaunchSource {
   environment_run_id?: string | null;
-  materialized: boolean;
   workspace_id: string;
   execution_workspace_id: string;
   branch_id: string | null;
   revision: number | null;
+  mode: NativeSourceMode;
+  live_root: NativeLiveRoot | null;
 }
 
 export interface NativeLaunchTool {
