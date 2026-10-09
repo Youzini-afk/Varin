@@ -353,6 +353,8 @@ impl<
                                                         error.code, error.message
                                                     ),
                                                 }
+                                            } else if token.is_cancelled() {
+                                                ToolCompletion::NotDispatched { reason: "cancelled".into() }
                                             } else {
                                                 std::panic::catch_unwind(
                                                     std::panic::AssertUnwindSafe(|| {

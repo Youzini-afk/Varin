@@ -1861,6 +1861,15 @@ impl<
                 );
             }
             if !tool.contract.read_only || tool.contract.completion == CompletionKind::Job {
+                // Authorization may have waited or synchronously requested cancellation.
+                // Successful authorization is not evidence that this call is still wanted.
+                if cancel.is_cancelled() {
+                    return self.settle_tool(input, tool, ToolResult {
+                        request_id: snapshot.view.request_id.clone(),
+                        call_id: tool.call.call_id.clone(),
+                        completion: ToolCompletion::NotDispatched { reason: "cancelled".into() },
+                    });
+                }
                 self.commit(
                     input,
                     ExecutionRecord::ToolDispatched {
@@ -1873,10 +1882,12 @@ impl<
                 }
             }
             // Only this operation's resource plan is held; no catalog or tool-environment mutex.
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let result = if cancel.is_cancelled() {
+                Ok(ToolCompletion::NotDispatched { reason: "cancelled".into() })
+            } else { std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.tools
                     .execute(&context, &tool.call, &tool.contract, cancel)
-            }));
+            })) };
             match result {
                 Ok(completion) => {
                     let confirmed_no_effect = !tool.contract.read_only
