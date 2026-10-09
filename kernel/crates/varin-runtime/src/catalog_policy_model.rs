@@ -48,7 +48,7 @@ pub(crate) struct PolicyModelRead {
     _publication: crate::content::ContentPublication,
     pub(crate) intent: PolicyModelIntent,
     pub(crate) result: PolicyModelResult,
-    pub(crate) decision: Option<PolicyDecision>,
+    checkpoint: Option<super::policy_checkpoint::PolicyCheckpointRead>,
     pub(crate) cancel_requested: bool,
 }
 impl PolicyModelRead {
@@ -57,10 +57,26 @@ impl PolicyModelRead {
         let output = self.result.original_ref.as_ref()
             .map(|reference| self.content.load(reference).and_then(|value| Ok(serde_json::from_value(value)?)))
             .transpose()?.unwrap_or_default();
+        let decision = self.checkpoint.map(|checkpoint|checkpoint.load_pending()).transpose()?.flatten()
+            .filter(|decision|!matches!(decision.action,PolicyAction::RequestModelJob {..}));
         Ok(PolicyModelState {
             intent: self.intent, result: self.result, snapshot, output,
-            decision: self.decision, cancel_requested: self.cancel_requested,
+            decision, cancel_requested: self.cancel_requested,
         })
+    }
+}
+
+pub(crate) struct PolicyModelAdmissionReferences {
+    request: Value,
+    capability: Value,
+    checkpoint: super::policy_checkpoint::PolicyCheckpointReferences,
+}
+impl PolicyModelAdmissionReferences {
+    pub fn write(content: &crate::content::ContentStore, intent: &PolicyModelIntent, snapshot: &RequestSnapshot) -> Result<Self> {
+        let PolicyModelIntent::PolicyModelJobV1 {state,capability,instructions,evidence,..} = intent;
+        let action = PolicyAction::RequestModelJob {capability_id:capability.capability_id.clone(),instructions:instructions.clone(),evidence:evidence.clone()};
+        Ok(Self {request:content.save(&serde_json::to_value(snapshot)?)?,capability:content.save(&serde_json::to_value(capability)?)?,
+            checkpoint:super::policy_checkpoint::PolicyCheckpointReferences::write(content,state,&action)?})
     }
 }
 
@@ -103,38 +119,16 @@ impl Catalog {
         if result.receipt.is_some() && consumed > admitted {
             return Ok(None);
         }
-        let saved: (String, String) = self.db.query_row(
-            "SELECT state,action FROM policy_checkpoints WHERE run_id=?1",
-            [run_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
-        let action: PolicyAction = serde_json::from_str(&saved.1)?;
-        let mut decision = if result.receipt.is_some()
-            && !matches!(action, PolicyAction::RequestModelJob { .. })
-        {
-            Some(PolicyDecision {
-                state: serde_json::from_str(&saved.0)?,
-                action,
-            })
-        } else {
-            None
-        };
-        if let Some(PolicyDecision {
-            action: PolicyAction::Wait { wait_id },
-            ..
-        }) = &decision
-        {
-            let wait: Wait = record(&self.db, "waits", wait_id)?;
-            if wait.trigger_cursor.is_some() || wait.cancelled {
-                decision = None;
-            }
+        let checkpoint = if result.receipt.is_some() { self.capture_policy_checkpoint(run_id)? } else { None };
+        if checkpoint.as_ref().is_some_and(|saved| &saved.identity != intent.checkpoint().0) {
+            return Err(RuntimeError::Conflict("policy checkpoint identity changed".into()));
         }
         Ok(Some(PolicyModelRead {
             content: self.content.clone(),
             _publication: self.content.begin_publication(),
             intent,
             result,
-            decision,
+            checkpoint,
             cancel_requested: op.cancel_requested,
         }))
     }
@@ -147,9 +141,8 @@ impl Catalog {
     ) -> Result<PolicyModelState> {
         let _publication = self.content.begin_publication();
         let deliveries = super::memory::PreparedMemoryDeliveries::prepare(snapshot)?;
-        let reference = self.content.save(&serde_json::to_value(snapshot)?)?;
-        let capability_ref = self.content.save(&serde_json::to_value(intent.capability())?)?;
-        self.admit_policy_model_reference(run_id, epoch, intent, snapshot, reference, capability_ref, deliveries)?.load()
+        let references = PolicyModelAdmissionReferences::write(&self.content,intent,snapshot)?;
+        self.admit_policy_model_reference(run_id, epoch, intent, snapshot, references, deliveries)?.load()
     }
     pub(crate) fn admit_policy_model_reference(
         &mut self,
@@ -157,15 +150,15 @@ impl Catalog {
         epoch: u64,
         intent: &PolicyModelIntent,
         snapshot: &RequestSnapshot,
-        reference: Value,
-        capability_ref: Value,
+        references: PolicyModelAdmissionReferences,
         deliveries: super::memory::PreparedMemoryDeliveries,
     ) -> Result<PolicyModelRead> {
+        let PolicyModelAdmissionReferences {request:reference,capability:capability_ref,checkpoint} = references;
         let PolicyModelIntent::PolicyModelJobV1 {
             action_id,
             boundary,
             identity,
-            state,
+            state: _,
             capability,
             instructions,
             evidence,
@@ -285,12 +278,7 @@ impl Catalog {
         {
             return Err(RuntimeError::Conflict("policy identity changed".into()));
         }
-        let action = PolicyAction::RequestModelJob {
-            capability_id: capability.capability_id.clone(),
-            instructions: instructions.clone(),
-            evidence: evidence.clone(),
-        };
-        tx.execute("INSERT INTO policy_checkpoints(run_id,identity,state,action) VALUES(?1,?2,?3,?4) ON CONFLICT(run_id) DO UPDATE SET identity=excluded.identity,state=excluded.state,action=excluded.action",params![run_id,encode(identity)?,encode(state)?,encode(&action)?])?;
+        checkpoint.publish(&tx,run_id,identity)?;
         tx.execute(
             "INSERT INTO operations(id,run_id,body) VALUES(?1,?2,?3)",
             params![action_id, run_id, encode(&op)?],

@@ -29,7 +29,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 10;
+pub(crate) const FORMAT: i64 = 11;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -111,6 +111,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
     }
     if version == FORMAT {
         inputs::check_format(db)?;
+        db.prepare("SELECT run_id,identity,state_ref,action_ref FROM policy_checkpoints")?;
         db.prepare("SELECT id,run_id,revision,status,active,body FROM model_selections")?;
         context_jobs::check_format(db)?;
         launches::check_format(db)?;
@@ -1264,7 +1265,7 @@ CREATE UNIQUE INDEX model_selections_active ON model_selections(run_id) WHERE ac
 CREATE UNIQUE INDEX model_steps_active ON model_steps(run_id) WHERE state IN ('prepared','dispatched');
 CREATE TABLE model_outputs(request_id TEXT PRIMARY KEY REFERENCES model_steps(id),body TEXT NOT NULL);
 CREATE TABLE tool_calls(request_id TEXT NOT NULL REFERENCES model_steps(id),call_id TEXT NOT NULL,body TEXT NOT NULL,receipt TEXT,committed INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(request_id,call_id));
-CREATE TABLE policy_checkpoints(run_id TEXT PRIMARY KEY REFERENCES runs(id),identity TEXT NOT NULL,state TEXT NOT NULL,action TEXT NOT NULL);
+CREATE TABLE policy_checkpoints(run_id TEXT PRIMARY KEY REFERENCES runs(id),identity TEXT NOT NULL,state_ref TEXT NOT NULL,action_ref TEXT NOT NULL);
 CREATE TABLE events(cursor INTEGER PRIMARY KEY AUTOINCREMENT,subject TEXT NOT NULL,revision INTEGER NOT NULL,kind TEXT NOT NULL,data TEXT NOT NULL);
 CREATE INDEX events_condition ON events(subject,kind,cursor);
 CREATE TABLE waits(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),body TEXT NOT NULL);
@@ -1289,6 +1290,9 @@ pub mod launches;
 
 #[path="catalog_launch_content.rs"]
 pub mod launch_content;
+
+#[path="catalog_policy_checkpoint.rs"]
+pub(crate) mod policy_checkpoint;
 
 #[path="catalog_tools.rs"]
 pub mod tools;
