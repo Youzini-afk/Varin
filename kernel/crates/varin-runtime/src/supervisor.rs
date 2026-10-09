@@ -47,7 +47,8 @@ fn supervisor_error(value: impl ToString) -> ExecutionError {
 struct PendingLaunch {
     epoch: u64,
     cancel: CancellationToken,
-    start: RunStart,
+    start: Box<dyn FnOnce(&CancellationToken) -> Result<RunStart> + Send>,
+    policy_state: Value,
     completion: mpsc::Sender<Result<ExecutionReport>>,
 }
 struct Worker {
@@ -91,6 +92,24 @@ impl RunSupervisor {
         Ok(())
     }
     pub fn start(&self, run_id: &str, start: RunStart) -> Result<RunHandle> {
+        let policy_state = start.policy_state.clone();
+        self.admit_start(run_id, Box::new(move |_| Ok(start)), policy_state)
+    }
+    /// Reserve the Run before cold assembly. The factory executes on its supervised worker,
+    /// after queued admission is promoted, with the same cancellation owner as execution.
+    pub fn prepare_start(
+        &self,
+        run_id: &str,
+        prepare: impl FnOnce(&CancellationToken) -> Result<RunStart> + Send + 'static,
+    ) -> Result<RunHandle> {
+        self.admit_start(run_id, Box::new(prepare), Value::Null)
+    }
+    fn admit_start(
+        &self,
+        run_id: &str,
+        start: Box<dyn FnOnce(&CancellationToken) -> Result<RunStart> + Send>,
+        policy_state: Value,
+    ) -> Result<RunHandle> {
         self.reap()?;
         let cancel = CancellationToken::default();
         {
@@ -135,12 +154,21 @@ impl RunSupervisor {
             }
         };
         let (completion, receiver) = mpsc::channel();
-        let pending = PendingLaunch { epoch, cancel: cancel.clone(), start, completion };
+        let pending = PendingLaunch {
+            epoch,
+            cancel: cancel.clone(),
+            start,
+            policy_state,
+            completion,
+        };
         if queued {
             let mut workers = self.workers.lock().map_err(error)?;
-            let worker = workers.get_mut(run_id).filter(|worker| same_reservation(&worker.cancel, &cancel)).ok_or_else(|| {
-                ExecutionError::new("supervisor_stopped", "queued admission was cancelled")
-            })?;
+            let worker = workers
+                .get_mut(run_id)
+                .filter(|worker| same_reservation(&worker.cancel, &cancel))
+                .ok_or_else(|| {
+                    ExecutionError::new("supervisor_stopped", "queued admission was cancelled")
+                })?;
             worker.pending = Some(pending);
             // Promotion/cancellation can commit between admission and installing this launch.
             // Recheck on an actual notification after its reservation becomes visible.
@@ -158,31 +186,35 @@ impl RunSupervisor {
             completion: receiver,
         })
     }
-    fn remove_reservation(&self, run_id: &str, cancel: &CancellationToken) -> Result<Option<Worker>> {
+    fn remove_reservation(
+        &self,
+        run_id: &str,
+        cancel: &CancellationToken,
+    ) -> Result<Option<Worker>> {
         let mut workers = self.workers.lock().map_err(error)?;
-        Ok(if workers.get(run_id).is_some_and(|worker| same_reservation(&worker.cancel, cancel)) {
-            workers.remove(run_id)
-        } else { None })
+        Ok(
+            if workers
+                .get(run_id)
+                .is_some_and(|worker| same_reservation(&worker.cancel, cancel))
+            {
+                workers.remove(run_id)
+            } else {
+                None
+            },
+        )
     }
     fn launch_ready(&self, run_id: &str, pending: PendingLaunch) -> Result<()> {
         // Keep only this short reservation/spawn publication under the control registry. In
         // particular shutdown cannot remove the reservation before its JoinHandle is published.
         let mut workers = self.workers.lock().map_err(error)?;
-        let worker = workers.get_mut(run_id).filter(|worker| same_reservation(&worker.cancel, &pending.cancel)).ok_or_else(|| {
-            ExecutionError::new("supervisor_stopped", "worker reservation is gone")
-        })?;
+        let worker = workers
+            .get_mut(run_id)
+            .filter(|worker| same_reservation(&worker.cancel, &pending.cancel))
+            .ok_or_else(|| {
+                ExecutionError::new("supervisor_stopped", "worker reservation is gone")
+            })?;
         let cancel = worker.cancel.clone();
         let epoch = pending.epoch;
-        let binding = pending.start.binding;
-        let policy_state = pending.start.policy_state;
-        let engine = ExecutionEngine {
-            persistence: self.catalog.clone(),
-            context_preparation: pending.start.context_preparation,
-            provider: pending.start.provider,
-            tools: pending.start.tools,
-            policy: pending.start.policy,
-            progress: pending.start.progress,
-        };
         let failures = self.failures.clone();
         let catalog = self.catalog.clone();
         let identity = run_id.to_string();
@@ -190,21 +222,103 @@ impl RunSupervisor {
         let join = thread::Builder::new()
             .name(format!("run-{run_id}"))
             .spawn(move || {
+                let mut assembly_complete = false;
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    if cancel.is_cancelled() {
+                        if let Some(run) = catalog
+                            .lock()
+                            .map_err(error)?
+                            .cancel_preparing_execution(&identity, epoch)
+                            .map_err(error)?
+                        {
+                            return Ok(ExecutionReport {
+                                state: run.state,
+                                history: vec![],
+                                policy_state: pending.policy_state,
+                                model_steps: 0,
+                                waiting_on: run.waiting_on,
+                                failure: None,
+                            });
+                        }
+                    }
+                    {
+                        let mut owner = catalog.lock().map_err(error)?;
+                        let run = owner.run(&identity).map_err(error)?;
+                        if !run.cancel_requested && run.state == RunState::Accepted {
+                            owner
+                                .transition_run(&identity, epoch, run.revision, RunState::Preparing)
+                                .map_err(error)?;
+                        }
+                    }
+                    let start = match (pending.start)(&cancel) {
+                        Ok(start) => start,
+                        Err(failure) if cancel.is_cancelled() => {
+                            if let Some(run) = catalog
+                                .lock()
+                                .map_err(error)?
+                                .cancel_preparing_execution(&identity, epoch)
+                                .map_err(error)?
+                            {
+                                return Ok(ExecutionReport {
+                                    state: run.state,
+                                    history: vec![],
+                                    policy_state: pending.policy_state,
+                                    model_steps: 0,
+                                    waiting_on: run.waiting_on,
+                                    failure: None,
+                                });
+                            }
+                            return Err(failure);
+                        }
+                        Err(failure) => return Err(failure),
+                    };
+                    assembly_complete = true;
+                    {
+                        let mut owner = catalog.lock().map_err(error)?;
+                        let run = owner.run(&identity).map_err(error)?;
+                        if !run.cancel_requested && run.state == RunState::Preparing {
+                            owner.transition_run(&identity, epoch, run.revision, RunState::Runnable).map_err(error)?;
+                        }
+                    }
+                    let binding = start.binding;
+                    let policy_state = start.policy_state;
+                    let engine = ExecutionEngine {
+                        persistence: catalog.clone(),
+                        context_preparation: start.context_preparation,
+                        provider: start.provider,
+                        tools: start.tools,
+                        policy: start.policy,
+                        progress: start.progress,
+                    };
                     loop {
                         if cancel.is_cancelled() {
-                            let settled = catalog.lock().map_err(error)?
-                                .cancel_preparing_execution(&identity, epoch).map_err(error)?;
+                            let settled = catalog
+                                .lock()
+                                .map_err(error)?
+                                .cancel_preparing_execution(&identity, epoch)
+                                .map_err(error)?;
                             if let Some(run) = settled {
                                 return Ok(ExecutionReport {
-                                    state: run.state, history: vec![], policy_state,
-                                    model_steps: 0, waiting_on: run.waiting_on, failure: None,
+                                    state: run.state,
+                                    history: vec![],
+                                    policy_state,
+                                    model_steps: 0,
+                                    waiting_on: run.waiting_on,
+                                    failure: None,
                                 });
                             }
                         }
-                        let preparation = catalog.lock().map_err(error)?.capture_recovered_execution(
-                            &identity, binding.clone(), engine.policy.identity(), policy_state.clone(), true,
-                        ).map_err(error)?;
+                        let preparation = catalog
+                            .lock()
+                            .map_err(error)?
+                            .capture_recovered_execution(
+                                &identity,
+                                binding.clone(),
+                                engine.policy.identity(),
+                                policy_state.clone(),
+                                true,
+                            )
+                            .map_err(error)?;
                         if preparation.cancel_requested() && !cancel.is_cancelled() {
                             cancel.cancel();
                             continue;
@@ -217,17 +331,27 @@ impl RunSupervisor {
                             Ok(None) => continue,
                             Err(_) if !cancelled_before_read && cancel.is_cancelled() => continue,
                             Err(failure) => {
-                                if !catalog.lock().map_err(error)?.preparation_is_current(&boundary).map_err(error)? {
+                                if !catalog
+                                    .lock()
+                                    .map_err(error)?
+                                    .preparation_is_current(&boundary)
+                                    .map_err(error)?
+                                {
                                     continue;
                                 }
                                 return Err(error(failure));
                             }
                         };
-                        let launch = catalog.lock().map_err(error)?
-                            .publish_recovered_execution(prepared).map_err(error)?;
+                        let launch = catalog
+                            .lock()
+                            .map_err(error)?
+                            .publish_recovered_execution(prepared)
+                            .map_err(error)?;
                         let Some(launch) = launch else { continue };
-                        if launch.cancel_requested { cancel.cancel(); }
-                        return engine.run_recovered(launch.input, cancel, launch.recovery);
+                        if launch.cancel_requested {
+                            cancel.cancel();
+                        }
+                        return engine.run_recovered(launch.input, cancel.clone(), launch.recovery);
                     }
                 }))
                 .unwrap_or_else(|_| {
@@ -241,12 +365,35 @@ impl RunSupervisor {
                         failures.insert(identity.clone(), error.clone());
                     }
                     if let Ok(mut catalog) = catalog.lock() {
-                        if let Err(commit) = catalog.pause_failed_execution(
-                            &identity,
-                            epoch,
-                            &error.code,
-                            &error.message,
-                        ) {
+                        let commit = (|| -> std::result::Result<(), RuntimeError> {
+                            let run = catalog.run(&identity)?;
+                            let preparation = !assembly_complete
+                                && !run.cancel_requested
+                                && matches!(
+                                    run.state,
+                                    RunState::Accepted
+                                        | RunState::Preparing
+                                        | RunState::Runnable
+                                        | RunState::Waiting
+                                )
+                                && run
+                                    .waiting_on
+                                    .as_deref()
+                                    .is_none_or(|id| id == format!("preparation:{}", identity))
+                                && catalog.launch_intent(&identity)?.is_some();
+                            if preparation {
+                                catalog.fail_launch(&identity, "preparation_failed")?;
+                                Ok(())
+                            } else {
+                                catalog.pause_failed_execution(
+                                    &identity,
+                                    epoch,
+                                    &error.code,
+                                    &error.message,
+                                )
+                            }
+                        })();
+                        if let Err(commit) = commit {
                             if let Ok(mut failures) = failures.lock() {
                                 failures.insert(
                                     identity.clone(),
@@ -305,12 +452,16 @@ impl RunSupervisor {
                 continue;
             };
             if run.cancel_requested || run.state.terminal() {
-                let run = if run.state.terminal() { run } else { self.cancel(&id)? };
+                let run = if run.state.terminal() {
+                    run
+                } else {
+                    self.cancel(&id)?
+                };
                 self.remove_reservation(&id, &launch.cancel)?;
                 let _ = launch.completion.send(Ok(ExecutionReport {
                     state: run.state,
                     history: vec![],
-                    policy_state: launch.start.policy_state,
+                    policy_state: launch.policy_state,
                     model_steps: 0,
                     waiting_on: run.waiting_on,
                     failure: None,
@@ -318,16 +469,25 @@ impl RunSupervisor {
             } else {
                 let reply = launch.completion.clone();
                 let cancel = launch.cancel.clone();
-                let policy_state = launch.start.policy_state.clone();
+                let policy_state = launch.policy_state.clone();
                 if let Err(failure) = self.launch_ready(&id, launch) {
                     // Cancellation can remove a still-unspawned reservation after promotion.
                     // Its completion is the durable cancellation, not a preparation failure.
                     if cancel.is_cancelled() {
-                        if let Some(run) = self.catalog.lock().map_err(error)?
-                            .cancel_preparing_execution(&id, run.epoch).map_err(error)? {
+                        if let Some(run) = self
+                            .catalog
+                            .lock()
+                            .map_err(error)?
+                            .cancel_preparing_execution(&id, run.epoch)
+                            .map_err(error)?
+                        {
                             let _ = reply.send(Ok(ExecutionReport {
-                                state: run.state, history: vec![], policy_state, model_steps: 0,
-                                waiting_on: run.waiting_on, failure: None,
+                                state: run.state,
+                                history: vec![],
+                                policy_state,
+                                model_steps: 0,
+                                waiting_on: run.waiting_on,
+                                failure: None,
                             }));
                             continue;
                         }
@@ -384,34 +544,85 @@ impl RunSupervisor {
             let catalog = self.catalog.lock().map_err(error)?;
             let operation = catalog.operation(operation_id).map_err(error)?;
             let run = catalog.run(&operation.run_id).map_err(error)?;
-            if run.state != RunState::Waiting || run.waiting_on != operation.waiting_on
-                || operation.executor.as_deref() != Some("ask_user") { return Ok(()); }
+            if run.state != RunState::Waiting
+                || run.waiting_on != operation.waiting_on
+                || operation.executor.as_deref() != Some("ask_user")
+            {
+                return Ok(());
+            }
             run.id
         };
         let worker = self.workers.lock().map_err(error)?.remove(&run_id);
-        if let Some(mut worker) = worker { if let Some(join) = worker.join.take() { join.join().map_err(|_| error("question worker teardown failed"))?; } }
+        if let Some(mut worker) = worker {
+            if let Some(join) = worker.join.take() {
+                join.join()
+                    .map_err(|_| error("question worker teardown failed"))?;
+            }
+        }
         Ok(())
     }
     /// A persisted child Wait has relinquished the history writer. Join only final teardown,
     /// never a running model/tool, before its durable report makes that same Run runnable.
     pub fn quiesce_child_waits(&self) -> Result<()> {
-        let ids: Vec<String> = self.workers.lock().map_err(error)?.keys().cloned().collect();
+        let ids: Vec<String> = self
+            .workers
+            .lock()
+            .map_err(error)?
+            .keys()
+            .cloned()
+            .collect();
         for id in ids {
-            let run = self.catalog.lock().map_err(error)?.run(&id).map_err(error)?;
-            if run.state != RunState::Waiting || !run.waiting_on.as_deref().is_some_and(|id| id.starts_with("child-wait:")) { continue; }
+            let run = self
+                .catalog
+                .lock()
+                .map_err(error)?
+                .run(&id)
+                .map_err(error)?;
+            if run.state != RunState::Waiting
+                || !run
+                    .waiting_on
+                    .as_deref()
+                    .is_some_and(|id| id.starts_with("child-wait:"))
+            {
+                continue;
+            }
             if let Some(mut worker) = self.workers.lock().map_err(error)?.remove(&id) {
-                if let Some(join) = worker.join.take() { join.join().map_err(|_| error("child wait teardown failed"))?; }
+                if let Some(join) = worker.join.take() {
+                    join.join()
+                        .map_err(|_| error("child wait teardown failed"))?;
+                }
             }
         }
         Ok(())
     }
     pub fn quiesce_process_waits(&self) -> Result<()> {
-        let ids: Vec<String> = self.workers.lock().map_err(error)?.keys().cloned().collect();
+        let ids: Vec<String> = self
+            .workers
+            .lock()
+            .map_err(error)?
+            .keys()
+            .cloned()
+            .collect();
         for id in ids {
-            let run = self.catalog.lock().map_err(error)?.run(&id).map_err(error)?;
-            if run.state != RunState::Waiting || !run.waiting_on.as_deref().is_some_and(|id| id.starts_with("process-wait:")) { continue; }
+            let run = self
+                .catalog
+                .lock()
+                .map_err(error)?
+                .run(&id)
+                .map_err(error)?;
+            if run.state != RunState::Waiting
+                || !run
+                    .waiting_on
+                    .as_deref()
+                    .is_some_and(|id| id.starts_with("process-wait:"))
+            {
+                continue;
+            }
             if let Some(mut worker) = self.workers.lock().map_err(error)?.remove(&id) {
-                if let Some(join) = worker.join.take() { join.join().map_err(|_| error("process wait teardown failed"))?; }
+                if let Some(join) = worker.join.take() {
+                    join.join()
+                        .map_err(|_| error("process wait teardown failed"))?;
+                }
             }
         }
         Ok(())
@@ -465,7 +676,7 @@ impl RunSupervisor {
                 .map(|run| ExecutionReport {
                     state: run.state,
                     history: vec![],
-                    policy_state: launch.start.policy_state,
+                    policy_state: launch.policy_state,
                     model_steps: 0,
                     waiting_on: run.waiting_on.clone(),
                     failure: None,
@@ -526,9 +737,8 @@ impl RunSupervisor {
         };
         for (_, worker) in workers {
             if let Some(join) = worker.join {
-                join.join().map_err(|_| {
-                    ExecutionError::new("worker_panicked", "worker panicked")
-                })?;
+                join.join()
+                    .map_err(|_| ExecutionError::new("worker_panicked", "worker panicked"))?;
             }
         }
         Ok(())

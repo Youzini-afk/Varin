@@ -6,6 +6,7 @@ mod policy;
 mod error;
 mod model;
 mod agent_runtime;
+mod run_assembly;
 mod tools;
 mod questions;
 mod collaboration;
