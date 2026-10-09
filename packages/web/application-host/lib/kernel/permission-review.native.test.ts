@@ -77,7 +77,9 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const runtime = new AgentRuntimeClient(kernel, async () => {
     let released = false;
     const lease: McpAuthorityLease = {
+      implementationIdentity:'fixture-implementation',
       binding: { reference: 'fixture-mcp-owner', generation: 1,
+        serverSelections: [{ name: 'fixture-server', configurationVersion: 'fixture-config', hiddenTools: [] }],
         readiness: { configErrorCount: 0, configuredServerCount: 1, connectedServerCount: 1, cachedToolCount: 0, servers: [] },
         servers: [{ name: 'fixture-server', description: 'Fixture', resourceKey: 'fixture-server:effect', hasDirectTools: true, exposure: 'direct', configurationScope: 'global', executionScope: 'global', status: 'connected', cachedToolCount: 0, connectedToolCount: 1, selected: true }], tools: [{ name: 'fixture_send', server: 'fixture-server', tool: 'send', schemaVersion: 'schema-1', resourceKey: 'fixture-server:effect', configurationScope: 'global', executionScope: 'global', exposure: 'direct', description: 'Send exact text to the fixture sink', annotations: { readOnlyHint: true }, inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false } }] },
       inspect: () => ({ configErrorCount: 0, configuredServerCount: 1, connectedServerCount: 1, cachedToolCount: 0, servers: [] }),

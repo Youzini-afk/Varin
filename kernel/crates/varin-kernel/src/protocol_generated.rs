@@ -225,7 +225,7 @@ pub(crate) struct ToolSelectParams {
 pub(crate) struct ToolReadyParams {
     pub(crate) run_id: String,
     pub(crate) selection_id: String,
-    pub(crate) binding: Option<McpBinding>,
+    pub(crate) binding: Option<LiveMcpBinding>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -240,7 +240,7 @@ pub(crate) struct PolicyPrepareParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RunStartParams {
     pub(crate) policy_binding: Option<AgentPolicyBinding>,
-    pub(crate) mcp_binding: Option<McpBinding>,
+    pub(crate) mcp_binding: Option<LiveMcpBinding>,
     pub(crate) run_id: String,
     pub(crate) tool_binding: Option<Value>,
     pub(crate) credential_scope: Option<CredentialScope>,
@@ -1400,6 +1400,13 @@ pub(crate) struct McpBinding {
     pub(crate) reference: String,
     pub(crate) generation: i64,
     pub(crate) tools: Vec<LaunchTool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LiveMcpBinding {
+    pub(crate) owner_id: String,
+    pub(crate) binding: McpBinding,
 }
 
 #[derive(Clone, Debug, Deserialize)]

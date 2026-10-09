@@ -445,7 +445,7 @@ pub(crate) fn spawn(
                                 let result=(||->Result<Value,KernelError>{
                                     if cancelled.load(Ordering::Acquire) {return Err(KernelError::Cancelled);}
                                     let p:ToolReadyParams=serde_json::from_value(params)?;
-                                    let binding=p.binding.map(mcp_binding).transpose()?;
+                                    let binding=p.binding.map(live_mcp_binding).transpose()?;
                                     let ready=tools.ready(&p.run_id,&p.selection_id,binding,||cancelled.load(Ordering::Acquire))
                                         .map_err(|error|KernelError::Operation(error.to_string()))?;
                                     Ok(json!({"ready":ready}))
@@ -892,6 +892,10 @@ pub(crate) fn mcp_binding(binding: McpBinding) -> Result<crate::mcp::McpBinding,
             name: tool.name, version: tool.version, schema: tool.schema,
         }).collect(),
     })
+}
+pub(crate) fn live_mcp_binding(live: LiveMcpBinding)->Result<crate::mcp::LiveMcpBinding,KernelError> {
+    if live.owner_id.is_empty() {return Err(KernelError::Authorization("MCP live owner is required".into()));}
+    Ok(crate::mcp::LiveMcpBinding {owner_id:live.owner_id,binding:mcp_binding(live.binding)?})
 }
 fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value, KernelError> {
     if method == "runtime.plan.contains" {

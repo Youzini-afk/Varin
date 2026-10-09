@@ -1,6 +1,6 @@
 //! Scope-local ready directories. Configuration owners prepare independently; only the Run's
 //! closed request boundary activates a candidate. Neither calls nor observers scan providers.
-use crate::mcp::{McpBinding, McpBridge, McpGeneration};
+use crate::mcp::{LiveMcpBinding, McpBridge, McpGeneration};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -52,7 +52,7 @@ impl State {
     fn ready_status(
         &self,
         id: &str,
-        binding: Option<&McpBinding>,
+        binding: Option<&LiveMcpBinding>,
     ) -> Result<Option<bool>, ExecutionError> {
         if self.desired.as_deref() != Some(id) {
             return Ok(Some(false));
@@ -62,15 +62,19 @@ impl State {
             .as_ref()
             .filter(|candidate| candidate.id == id)
         {
-            Some(candidate.composition.composition().mcp_binding.as_ref())
+            Some(candidate.mcp.as_ref().map(|mcp| mcp.generation.as_ref()))
         } else {
             self.active
                 .as_ref()
                 .filter(|active| active.selection_id.as_deref() == Some(id))
-                .map(|active| active._mcp.as_ref().map(|mcp| mcp.generation.binding()))
+                .map(|active| active._mcp.as_ref().map(|mcp| mcp.generation.as_ref()))
         };
         if let Some(previous) = previous {
-            if previous != binding {
+            if !match (previous, binding) {
+                (Some(previous), Some(binding)) => previous.matches(binding),
+                (None, None) => true,
+                _ => false,
+            } {
                 return Err(failed("tool selection identity was reused"));
             }
             return Ok(Some(true));
@@ -117,7 +121,7 @@ impl RunTools {
     fn retain(
         &self,
         run: &str,
-        binding: Option<McpBinding>,
+        binding: Option<LiveMcpBinding>,
     ) -> Result<Option<RetainedMcp>, ExecutionError> {
         binding
             .map(|binding| {
@@ -133,7 +137,7 @@ impl RunTools {
         &self,
         run: &str,
         base: Vec<ToolDeclaration>,
-        binding: Option<McpBinding>,
+        binding: Option<LiveMcpBinding>,
     ) -> Result<PreparedRunTools, ExecutionError> {
         let mcp = self.retain(run, binding)?;
         let directory = Arc::new(ToolDirectory::assemble(declarations(&base, mcp.as_ref()))?);
@@ -201,7 +205,7 @@ impl RunTools {
         &self,
         run: &str,
         id: &str,
-        binding: Option<McpBinding>,
+        binding: Option<LiveMcpBinding>,
         cancelled: impl Fn() -> bool,
     ) -> Result<bool, ExecutionError> {
         let slot = self.slot(run)?;
@@ -227,9 +231,11 @@ impl RunTools {
             };
             let mut schemas = preparation.base().to_vec();
             if let Some(binding) = &binding {
-                schemas.extend(binding.tools.iter().cloned());
+                schemas.extend(binding.binding.tools.iter().cloned());
             }
-            let composition = preparation.load(schemas, binding.clone()).map_err(failed)?;
+            let composition = preparation
+                .load(schemas, binding.as_ref().map(|live| live.binding.clone()))
+                .map_err(failed)?;
             let mut state = slot.state.lock().map_err(failed)?;
             if cancelled() || state.desired.as_deref() != Some(id) {
                 return Ok(false);

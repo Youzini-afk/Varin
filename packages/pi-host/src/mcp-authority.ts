@@ -82,9 +82,12 @@ export interface McpAuthorityBinding {
   tools: readonly McpAuthorityTool[];
   readiness: McpAuthorityInspection;
   servers: readonly McpAuthorityServerReadiness[];
+  serverSelections: readonly { name: string; configurationVersion: string; hiddenTools: readonly string[] }[];
 }
+export type McpChange = { kind: 'configuration' | 'credentials' } | { kind: 'tools'; server: string };
 export interface McpAuthorityLease {
   readonly binding: McpAuthorityBinding;
+  readonly implementationIdentity: string;
   inspect(): McpAuthorityInspection;
   /** Explicit scoped discovery; no other configured server is started. */
   discover(server: string, signal: AbortSignal): Promise<readonly McpAuthorityTool[]>;
@@ -130,6 +133,7 @@ interface ConnectionRecord {
   revocationReason?: string;
   shutdown: AbortController;
   ready?: Promise<void>;
+  closing?: Promise<void>;
   credentialRevision: number;
   oauthGrant: string;
   provider: string | undefined;
@@ -183,21 +187,23 @@ export class McpAuthority {
   readonly #options: McpAuthorityOptions;
   readonly #scopes = new Map<string, ScopeRecord>();
   readonly #pool = new Map<string, ConnectionRecord>();
+  readonly #closings = new Set<Promise<void>>();
   readonly #selected = new Map<string, ConnectionRecord>();
   readonly #credentials = new Map<string, McpOAuthCredentialStore>();
   readonly #observations = new Map<string, { status: McpAuthorityServerReadiness['status']; toolCount: number }>();
-  readonly #subscribers = new Map<string, { scope: McpAuthorityScope; listeners: Set<() => void>; files: string[] }>();
+  readonly #subscribers = new Map<string, { scope: McpAuthorityScope; listeners: Set<(change: McpChange) => void>; files: string[] }>();
   readonly #fileWatches = new Map<string, SourceWatch>();
   readonly #configWatches = new ConfigWatchManager(subscription => {
     if (subscription.target.kind !== 'document') return;
-    for (const key of this.#fileWatches.get(subscription.target.path)?.keys ?? []) this.#changed(key);
+    for (const key of this.#fileWatches.get(subscription.target.path)?.keys ?? []) this.#changed(key,
+      { kind: subscription.target.path === join(this.#subscribers.get(key)!.scope.agentDir, 'mcp-auth.json') ? 'credentials' : 'configuration' });
   });
   #generation = 0;
   #closed = false;
   constructor(options: McpAuthorityOptions = {}) { this.#options = options; }
 
   /** Subscribers share watches for the actual configuration sources; no per-request probes. */
-  async subscribe(input: McpAuthorityScope, listener: () => void): Promise<() => void> {
+  async subscribe(input: McpAuthorityScope, listener: (change: McpChange) => void): Promise<() => void> {
     if (this.#closed) fail('mcp-owner-closed');
     const scope = normalizeScope(input); const key = scopeKey(scope);
     let group = this.#subscribers.get(key);
@@ -240,10 +246,10 @@ export class McpAuthority {
     if (this.#closed) { release(); fail('mcp-owner-closed'); }
     return release;
   }
-  #changed(key: string): void {
+  #changed(key: string, change: McpChange = { kind: 'configuration' }): void {
     queueMicrotask(() => {
       if (this.#closed) return;
-      for (const listener of this.#subscribers.get(key)?.listeners ?? []) { try { listener(); } catch { /* Observers cannot interrupt the authority. */ } }
+      for (const listener of this.#subscribers.get(key)?.listeners ?? []) { try { listener(change); } catch { /* Observers cannot interrupt the authority. */ } }
     });
   }
 
@@ -316,7 +322,7 @@ export class McpAuthority {
         }
         return tools;
       };
-      const tools = handles.flatMap(project);
+      const tools = handles.flatMap(project).sort((a,b)=>a.name.localeCompare(b.name));
       let released = false;
       const assert = (name: string, schemaVersion: string) => {
         if (released || record.released) fail('mcp-lease-released');
@@ -350,11 +356,15 @@ export class McpAuthority {
       };
       const readiness = this.#inspectScope(record, selected);
       return {
+        implementationIdentity: createHash('sha256').update(stable([record.key,handles.map(connection=>connection.handle).sort(),
+          [...record.entries.values()].map(entry=>this.#configurationIdentity(record,entry)).sort()])).digest('hex'),
         binding: freeze({ reference: `mcp-owner:${createHash('sha256').update(record.key).digest('hex')}`,
           generation: 1 + Number.parseInt(createHash('sha256').update(stable([record.key,
             [...record.entries.values()].map(entry => ({ name: entry.name, identity: this.#configurationIdentity(record, entry) })).sort((a, b) => a.name.localeCompare(b.name)),
             tools])).digest('hex').slice(0, 12), 16),
-          tools, readiness, servers: readiness.servers }),
+          tools, readiness, servers: readiness.servers,
+          serverSelections: [...record.entries.values()].map(entry=>({name:entry.name,configurationVersion:this.#configurationIdentity(record,entry),
+            hiddenTools:Object.entries(entry.config.toolExposure ?? {}).filter(([,exposure])=>exposure==='hidden').map(([name])=>name)})) }),
         inspect: () => { if (released || record.released) fail('mcp-lease-released'); return this.#inspectScope(record, selected); },
         discover,
         prepareTool: async (server, tool, schemaVersion, signal) => {
@@ -429,7 +439,7 @@ export class McpAuthority {
             const selected = this.#pool.get(key);
             if (!selected?.declarations || selected.revoked || selected.connection !== connection) return;
             const next = stable(connection.tools);
-            if (next !== selected.declarations) { selected.declarations = next; this.#changed(scope.key); }
+            if (next !== selected.declarations) { selected.declarations = next; this.#changed(scope.key,{kind:'tools',server:entry.name}); }
           },
         });
         record = { handle: randomUUID(), generation: ++this.#generation, key, configIdentity: this.#configurationIdentity(scope, entry), scopeKey: scope.key, scope: scope.scope,
@@ -524,7 +534,9 @@ export class McpAuthority {
 
   async reconnect(scopeHandle: string, handle: string): Promise<McpOwnerConnectionSnapshot> {
     const scope = this.#scope(scopeHandle); const record = this.#connection(scope, handle); this.#assertConnection(scope, record, undefined, undefined, true);
-    await record.connection.reconnect().catch(() => undefined); return this.snapshot(scopeHandle, handle);
+    await record.connection.reconnect().catch(() => undefined);
+    this.#changed(scope.key, { kind: 'tools', server: record.entry.name });
+    return this.snapshot(scopeHandle, handle);
   }
   async signIn(scopeHandle: string, handle: string, prompt: McpSignInPrompt): Promise<void> {
     const scope = this.#scope(scopeHandle); const record = this.#connection(scope, handle); this.#assertConnection(scope, record, undefined, undefined, true);
@@ -599,7 +611,7 @@ export class McpAuthority {
     this.#closed = true; this.#configWatches.close(); this.#fileWatches.clear(); this.#subscribers.clear();
     for (const scope of [...this.#scopes.values()]) this.closeScope(scope.handle);
     const records = [...this.#pool.values()]; for (const record of records) this.#revoke(record);
-    await Promise.all(records.map(record => record.connection.close())); this.#pool.clear(); this.#selected.clear();
+    await Promise.all(this.#closings); this.#pool.clear(); this.#selected.clear();
   }
   #fileRevision(paths: readonly string[]): string {
     return stable(paths.map(path => {
@@ -689,7 +701,8 @@ export class McpAuthority {
   #revoke(record: ConnectionRecord, reason = 'mcp-owner-revoked'): void {
     if (record.revoked) return;
     record.revoked = true; record.revocationReason = reason; record.shutdown.abort();
-    void record.connection.close().catch(() => undefined); this.#collect(record); this.#changed(record.scopeKey);
+    this.#closeConnection(record); this.#collect(record); this.#changed(record.scopeKey,
+      {kind:reason==='mcp-credential-revoked'?'credentials':'configuration'});
   }
   #releaseConnection(scope: ScopeRecord, record: ConnectionRecord): void {
     if (scope.connections.get(record.entry.name) !== record) return;
@@ -701,8 +714,16 @@ export class McpAuthority {
     this.#observations.set(record.key, { status: record.revoked ? 'closed' : record.connection.state === 'connected' ? 'unprepared' : record.connection.state, toolCount: record.connection.tools.length });
     if (this.#pool.get(record.key) === record) this.#pool.delete(record.key);
     const key = stable([record.scopeKey, record.entry.name]); if (this.#selected.get(key) === record) this.#selected.delete(key);
-    void record.connection.close().catch(() => undefined);
+    this.#closeConnection(record);
+  }
+  #closeConnection(record: ConnectionRecord): void {
+    if (record.closing) return;
+    const closing = record.connection.close().catch(() => undefined).finally(() => this.#closings.delete(closing));
+    record.closing = closing;
+    this.#closings.add(closing);
   }
 }
 
 export { mcpHostAgentDir, mcpHostProjectTrusted, readMcpHostPermissionPolicy } from './mcp-host-configuration.js';
+export { McpCompositions } from './mcp-compositions.js';
+export type { McpCompositionScope, McpCompositionSelection } from './mcp-compositions.js';

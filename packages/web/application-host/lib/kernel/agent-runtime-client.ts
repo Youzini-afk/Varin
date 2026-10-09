@@ -5,7 +5,8 @@ import type { LiveSourceResolver } from './live-source.js';
 import type { PolicyModelPreparer } from './policy-models.js';
 import { waitWithSignal } from '../cancellation.js';
 import type { AgentPolicyLease, AgentPolicyBinding } from './agent-policy.js';
-import type { McpLease, McpBinding } from './mcp-bridge.js';
+import type { McpLease, McpBinding, LiveMcpBinding } from './mcp-bridge.js';
+import type { McpCompositionSelection } from '@varin/pi-host/mcp-authority';
 import { permissionService } from './permission-service.js';
 import type { ContextJob, ContextCheckpoint } from '@varin/application-client';
 import { startRunFromSource, type SourceLaunch } from './source-launch.js';
@@ -19,6 +20,7 @@ import type {
 
 export interface McpPreparation {
   runId: string; threadId: string; source: SourceLaunch | null; executionCwd?: string;
+  requiredBinding?: McpCompositionSelection;
 }
 export type RunPolicyPreparer = (input: { runId: string; threadId: string }, signal?: AbortSignal) => Promise<AgentPolicyLease | undefined>;
 export type McpPreparer = (input: McpPreparation, signal?: AbortSignal) => Promise<McpLease | undefined>;
@@ -185,10 +187,11 @@ export class AgentRuntimeClient {
         return undefined;
       }
 
-      const preparation = this.prepareMcpOwner({ runId, threadId: run.thread_id, source, ...(executionCwd ? { executionCwd } : {}) }, signal);
+      const input={ runId, threadId: run.thread_id, source, ...(executionCwd ? { executionCwd } : {}) };
+      this.mcpPreparations.set(runId,input);
+      const preparation = this.prepareMcpOwner({...input,...(saved?.selection.mcp_binding?{requiredBinding:saved.selection.mcp_binding}:{})}, signal);
       void preparation.then(lease => { if (signal.aborted) lease?.release(); }, () => undefined);
       const lease = await waitWithSignal(preparation, signal);
-      this.mcpPreparations.set(runId, { runId, threadId: run.thread_id, source, ...(executionCwd ? { executionCwd } : {}) });
       if (!lease || lease.binding.tools.length === 0) {
         lease?.release();
         if (saved?.selection.mcp_binding) throw new Error('Saved MCP capabilities are unavailable');
@@ -215,8 +218,9 @@ export class AgentRuntimeClient {
         void work.then(lease => { if (signal.aborted) lease?.release(); }, () => undefined);
         const lease = await waitWithSignal(work, signal);
         const binding = lease?.binding;
-        if (isDeepStrictEqual(binding, this.kernel.mcpBinding(runId))) { lease?.release(); return; }
-        let retained: McpBinding | undefined;
+        if (isDeepStrictEqual(binding, this.kernel.mcpBinding(runId))
+          && lease?.implementationIdentity===this.kernel.mcpImplementationIdentity(runId)) { lease?.release(); return; }
+        let retained: LiveMcpBinding | undefined;
         try {
           signal.throwIfAborted();
           if (lease && binding?.tools.length) retained = await this.kernel.registerMcpCandidate(runId, lease);
@@ -359,7 +363,7 @@ export class AgentRuntimeClient {
   async startRun(runId: string, signal?: AbortSignal, toolBinding?: unknown): Promise<RunStartReceipt> {
     return this.withRunPreparation(runId, signal, async signal => {
       const policyBinding = await this.preparePolicy(runId, signal);
-      const mcpBinding = this.kernel.mcpBinding(runId);
+      const mcpBinding = this.kernel.mcpLiveBinding(runId);
       try {
         await this.reconcileMemory(runId, signal);
         await this.reconcilePlan(runId, signal);
@@ -374,7 +378,7 @@ export class AgentRuntimeClient {
       const credentialScope = await this.kernel.registerCredentialOwner(runId, owner, signal,selected.active?.binding_id);
       try {
         const policyBinding = await this.preparePolicy(runId, signal, credentialScope);
-        const mcpBinding = this.kernel.mcpBinding(runId);
+        const mcpBinding = this.kernel.mcpLiveBinding(runId);
         await this.reconcileMemory(runId, signal);
         await this.reconcilePlan(runId, signal);
         return await this.kernel.agentRuntimeRequest('runtime.run.start', { runId, credentialScope, ...(policyBinding ? { policyBinding } : {}), ...(mcpBinding ? { mcpBinding } : {}),

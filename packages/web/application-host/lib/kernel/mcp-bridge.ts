@@ -2,8 +2,10 @@
  * The shared MCP authority owns connections, frozen schemas, credentials and permission decisions.
  */
 import { isDeepStrictEqual } from 'node:util';
+import { randomUUID } from 'node:crypto';
 export interface McpToolSchema { name: string; version: string; schema: Record<string, unknown> }
 export interface McpBinding { reference: string; generation: number; resources: Record<string, string>; tools: McpToolSchema[] }
+export interface LiveMcpBinding { ownerId: string; binding: McpBinding }
 export interface McpCall {
   runId: string; requestId: string; operationId: string; callId: string;
   name: string; schemaVersion: string; arguments: Record<string, unknown>;
@@ -15,13 +17,14 @@ export type McpCompletion = { kind: 'not_dispatched'; reason: string } | {
 /** A retained generation from the sole shared MCP owner, never an independently opened client. */
 export interface McpLease {
   readonly binding: McpBinding;
+  readonly implementationIdentity: string;
   authorize(call: McpCall, signal: AbortSignal): Promise<void>;
   execute(call: McpCall, signal: AbortSignal): Promise<McpCompletion>;
   release(): void;
 }
 interface Request {
   v: 1; kind: 'mcp-tool-request'; id: string; kernelEpoch: string;
-  phase: 'authorize' | 'execute'; binding: { reference: string; generation: number; holderId: string }; call: McpCall;
+  phase: 'authorize' | 'execute'; binding: { ownerId: string; reference: string; generation: number; holderId: string }; call: McpCall;
 }
 export interface PrivateMcpResponse {
   v: 1; kind: 'mcp-tool-response'; id: string; kernelEpoch: string;
@@ -57,18 +60,20 @@ export class McpBridge {
   constructor(private readonly currentEpoch: () => string | null,
     private readonly send: (response: PrivateMcpResponse) => Promise<void>, private readonly transportFailed: () => void,
     private readonly released: (runId: string) => void = () => {}) {}
-  register(runId: string, lease: McpLease, selected = true): McpBinding {
+  register(runId: string, lease: McpLease, selected = true): LiveMcpBinding {
     const epoch = this.currentEpoch();
     const binding = structuredClone(lease.binding);
-    if (!epoch || !text(runId) || !text(binding.reference) || !generation(binding.generation)
+    if (!epoch || !text(runId) || !text(lease.implementationIdentity) || !text(binding.reference) || !generation(binding.generation)
       || !record(binding.resources) || Object.values(binding.resources).some(value => !text(value))
       || !Array.isArray(binding.tools) || binding.tools.some(tool => !text(tool.name)
         || !text(tool.version) || !record(tool.schema)) || new Set(binding.tools.map(tool => tool.name)).size !== binding.tools.length) {
       throw new Error('mcp_owner_registration_invalid');
     }
     const entries = this.#owners.get(runId) ?? new Map<string, OwnerEntry>();
-    const key = this.#key(binding);
-    const previous = entries.get(key);
+    const retained = [...entries].find(([,entry])=>entry.lease.implementationIdentity===lease.implementationIdentity
+      && !entry.closing && entry.epoch===epoch && isDeepStrictEqual(entry.binding,binding));
+    const key = retained?.[0] ?? randomUUID();
+    const previous = retained?.[1];
     if (previous) {
       if (previous.closing || previous.epoch !== epoch || !isDeepStrictEqual(previous.binding, binding)) {
         throw new Error('mcp_owner_generation_changed');
@@ -79,9 +84,8 @@ export class McpBridge {
       this.#owners.set(runId, entries);
     }
     if (selected) this.#activate(runId, key);
-    return structuredClone(binding);
+    return {ownerId:key,binding:structuredClone(binding)};
   }
-  #key(binding: { reference: string; generation: number }): string { return JSON.stringify([binding.reference, binding.generation]); }
   #activate(runId: string, key: string): void {
     const entries = this.#owners.get(runId);
     const entry = entries?.get(key);
@@ -103,15 +107,21 @@ export class McpBridge {
     entry.closing = true;
     entry.lease.release();
   }
-  discard(runId: string, binding: { reference: string; generation: number }): void {
-    const key = this.#key(binding);
+  discard(runId: string, binding: LiveMcpBinding): void {
+    const key = binding.ownerId;
     const entry = this.#owners.get(runId)?.get(key);
     if (entry) this.#collect(runId, key, entry);
   }
   binding(runId: string): McpBinding | undefined {
+    return this.liveBinding(runId)?.binding;
+  }
+  liveBinding(runId:string):LiveMcpBinding|undefined {
     const key = this.#selected.get(runId);
     const owner = key ? this.#owners.get(runId)?.get(key) : undefined;
-    return owner && !owner.closing && owner.epoch === this.currentEpoch() ? structuredClone(owner.binding) : undefined;
+    return owner && !owner.closing && owner.epoch === this.currentEpoch() ? {ownerId:key!,binding:structuredClone(owner.binding)} : undefined;
+  }
+  implementationIdentity(runId:string):string|undefined {
+    const key=this.#selected.get(runId);return key?this.#owners.get(runId)?.get(key)?.lease.implementationIdentity:undefined;
   }
   unregister(runId: string): void {
     const entries = this.#owners.get(runId);
@@ -146,9 +156,9 @@ export class McpBridge {
     }
     if (['mcp-binding-retain', 'mcp-binding-release', 'mcp-binding-activate'].includes(String(value.kind))) {
       if (value.v !== 1 || value.kernelEpoch !== this.currentEpoch() || !text(value.runId)
-        || !text(value.reference) || !generation(value.generation) || !text(value.holderId)
-        || !exact(value, ['v', 'kind', 'kernelEpoch', 'runId', 'reference', 'generation', 'holderId'])) return true;
-      const key = this.#key(value as { reference: string; generation: number });
+        || !text(value.ownerId) || !text(value.holderId)
+        || !exact(value, ['v', 'kind', 'kernelEpoch', 'runId', 'ownerId', 'holderId'])) return true;
+      const key = value.ownerId;
       const entry = this.#owners.get(value.runId)?.get(key);
       if (!entry || entry.closing || entry.epoch !== value.kernelEpoch) return true;
       if (value.kind === 'mcp-binding-retain') entry.holders.add(value.holderId);
@@ -166,12 +176,13 @@ export class McpBridge {
     }
     if (!exact(value, ['v', 'kind', 'id', 'kernelEpoch', 'phase', 'binding', 'call'])
       || !['authorize', 'execute'].includes(String(value.phase)) || !record(value.binding)
-      || !exact(value.binding, ['reference', 'generation', 'holderId']) || !text(value.binding.reference)
-      || !generation(value.binding.generation) || !text(value.binding.holderId) || !callValid(value.call)) return true;
+      || !exact(value.binding, ['ownerId', 'reference', 'generation', 'holderId']) || !text(value.binding.reference)
+      || !text(value.binding.ownerId) || !generation(value.binding.generation) || !text(value.binding.holderId) || !callValid(value.call)) return true;
     const request = value as unknown as Request;
-    const key = this.#key(request.binding);
+    const key = request.binding.ownerId;
     const entry = this.#owners.get(request.call.runId)?.get(key);
     if (!entry || entry.closing || entry.epoch !== request.kernelEpoch
+      || entry.binding.reference!==request.binding.reference || entry.binding.generation!==request.binding.generation
       || !entry.holders.has(request.binding.holderId)) {
       void this.#reply(request, { ok: false, error: { code: 'mcp_owner_unavailable' } });
       return true;

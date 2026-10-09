@@ -8,7 +8,7 @@ import type { RetrievalOwner } from './retrieval-owner.js';
 import { LanguageBridge, type PrivateLanguageResponse } from './language-bridge.js';
 import type { LanguageToolOwner } from './language-owner.js';
 import { AgentPolicyBridge, type AgentPolicyLease, type AgentPolicyBinding, type PrivatePolicyResponse } from './agent-policy.js';
-import { McpBridge, type McpLease, type McpBinding, type PrivateMcpResponse } from './mcp-bridge.js';
+import { McpBridge, type McpLease, type McpBinding, type LiveMcpBinding, type PrivateMcpResponse } from './mcp-bridge.js';
 import { CredentialBridge, type PrivateCredentialResponse } from "./credential-bridge.js";
 import type { ExistingHostCredentialOwner, CredentialScope } from "./credential-owner.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -620,13 +620,13 @@ export class KernelClient {
   unregisterCredentialOwner(runId: string, bindingId?: string): void { this.credentialBridge.unregister(runId, bindingId); }
   async registerMcpOwner(runId: string, lease: McpLease): Promise<McpBinding> {
     if (!this.handshakeResult) await this.start();
-    return this.mcpBridge.register(runId, lease);
+    return this.mcpBridge.register(runId, lease).binding;
   }
-  async registerMcpCandidate(runId: string, lease: McpLease): Promise<McpBinding> {
+  async registerMcpCandidate(runId: string, lease: McpLease): Promise<LiveMcpBinding> {
     if (!this.handshakeResult) await this.start();
     return this.mcpBridge.register(runId, lease, false);
   }
-  discardMcpCandidate(runId: string, binding: McpBinding): void { this.mcpBridge.discard(runId, binding); }
+  discardMcpCandidate(runId: string, binding: LiveMcpBinding): void { this.mcpBridge.discard(runId, binding); }
   onMcpReleased(listener: (runId: string) => void): () => void {
     this.mcpReleaseListeners.add(listener); return () => { this.mcpReleaseListeners.delete(listener); };
   }
@@ -649,6 +649,8 @@ export class KernelClient {
   setPlanOwner(owner: PlanOwner): void { this.planBridge.setOwner(owner); }
   setLanguageOwner(owner: LanguageToolOwner): void { this.languageBridge.setOwner(owner); }
   mcpBinding(runId: string): McpBinding | undefined { return this.mcpBridge.binding(runId); }
+  mcpLiveBinding(runId:string):LiveMcpBinding|undefined {return this.mcpBridge.liveBinding(runId);}
+  mcpImplementationIdentity(runId:string):string|undefined {return this.mcpBridge.implementationIdentity(runId);}
   unregisterMcpOwner(runId: string): void { this.mcpBridge.unregister(runId); }
 
   /** Ephemeral launch waits share the existing Run cancellation and kernel lifetime. */

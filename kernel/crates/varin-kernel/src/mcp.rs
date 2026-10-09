@@ -8,6 +8,11 @@ use varin_runtime::execution::*;
 use varin_runtime::{Effect, Lifetime, Outcome};
 
 pub(crate) use varin_runtime::catalog::launches::HostToolBinding as McpBinding;
+#[derive(Clone, PartialEq)]
+pub(crate) struct LiveMcpBinding {
+    pub owner_id: String,
+    pub binding: McpBinding,
+}
 struct State {
     epoch: Option<String>,
     pending: HashMap<String, Pending>,
@@ -101,14 +106,15 @@ impl McpBridge {
     }
     fn call(
         &self,
-        epoch: &str,
-        holder: &str,
+        generation: &McpGeneration,
         phase: &str,
-        binding: &McpBinding,
         context: &ToolExecutionContext,
         call: &ToolCall,
         cancel: &CancellationToken,
     ) -> Result<Reply, ExecutionError> {
+        let epoch = &generation.epoch;
+        let holder = &generation.holder;
+        let binding = &generation.binding;
         if cancel.is_cancelled() {
             return Err(failed("mcp_cancelled_before_dispatch"));
         }
@@ -133,7 +139,7 @@ impl McpBridge {
                 return Err(failed("mcp_cancelled_before_dispatch"));
             }
             self.send(json!({"v":1,"kind":"mcp-tool-request","id":id,"kernelEpoch":epoch,"phase":phase,
-                "binding":{"reference":binding.reference,"generation":binding.generation,"holderId":holder},
+                "binding":{"ownerId":generation.owner_id,"reference":binding.reference,"generation":binding.generation,"holderId":holder},
                 "call":{"runId":context.run_id,"requestId":match &context.origin { ToolOrigin::ModelStep { request_id } => request_id, _ => return Err(failed("mcp_policy_action_forbidden")) },"operationId":context.operation_id,
                     "callId":call.call_id,"name":call.name,"schemaVersion":call.schema_version,"arguments":call.arguments}}))
                 .map_err(|_| failed("mcp_not_dispatched"))?;
@@ -163,8 +169,12 @@ impl McpBridge {
     pub(crate) fn prepare_generation(
         &self,
         run_id: String,
-        binding: McpBinding,
+        live: LiveMcpBinding,
     ) -> Result<Arc<McpGeneration>, ExecutionError> {
+        if live.owner_id.is_empty() {
+            return Err(failed("mcp_live_owner_required"));
+        }
+        let binding = live.binding;
         binding
             .validate()
             .map_err(|_| failed("mcp_binding_invalid"))?;
@@ -176,14 +186,17 @@ impl McpBridge {
             .clone()
             .ok_or_else(|| failed("mcp_channel_unavailable"))?;
         let holder = uuid::Uuid::new_v4().to_string();
-        self.send(json!({"v":1,"kind":"mcp-binding-retain","kernelEpoch":epoch,
-            "runId":run_id,"reference":binding.reference,"generation":binding.generation,"holderId":holder}))?;
+        self.send(
+            json!({"v":1,"kind":"mcp-binding-retain","kernelEpoch":epoch,
+            "runId":run_id,"ownerId":live.owner_id,"holderId":holder}),
+        )?;
         Ok(Arc::new(McpGeneration {
             run_id,
             binding,
             bridge: self.clone(),
             epoch,
             holder,
+            owner_id: live.owner_id,
         }))
     }
     pub(crate) fn deactivate(&self, run_id: &str) -> Result<(), ExecutionError> {
@@ -230,10 +243,11 @@ pub(crate) struct McpGeneration {
     bridge: McpBridge,
     epoch: String,
     holder: String,
+    owner_id: String,
 }
 impl McpGeneration {
-    pub(crate) fn binding(&self) -> &McpBinding {
-        &self.binding
+    pub(crate) fn matches(&self, live: &LiveMcpBinding) -> bool {
+        self.owner_id == live.owner_id && self.binding == live.binding
     }
     pub(crate) fn declarations(
         self: &Arc<Self>,
@@ -257,16 +271,20 @@ impl McpGeneration {
             .collect()
     }
     pub(crate) fn activate(&self) -> Result<(), ExecutionError> {
-        self.bridge.send(json!({"v":1,"kind":"mcp-binding-activate","kernelEpoch":self.epoch,
-            "runId":self.run_id,"reference":self.binding.reference,"generation":self.binding.generation,"holderId":self.holder}))
+        self.bridge.send(
+            json!({"v":1,"kind":"mcp-binding-activate","kernelEpoch":self.epoch,
+            "runId":self.run_id,"ownerId":self.owner_id,"holderId":self.holder}),
+        )
     }
 }
 impl Drop for McpGeneration {
     fn drop(&mut self) {
         // Enqueue only. Retired endpoints can outlive the Run's current directory or a resumed
         // scope, so release the actual holder in its original epoch, never the current owner.
-        let _ = self.bridge.send(json!({"v":1,"kind":"mcp-binding-release","kernelEpoch":self.epoch,
-            "runId":self.run_id,"reference":self.binding.reference,"generation":self.binding.generation,"holderId":self.holder}));
+        let _ = self.bridge.send(
+            json!({"v":1,"kind":"mcp-binding-release","kernelEpoch":self.epoch,
+            "runId":self.run_id,"ownerId":self.owner_id,"holderId":self.holder}),
+        );
     }
 }
 struct McpTools {
@@ -360,15 +378,10 @@ impl ToolExecutor for McpTools {
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
         self.validate(context, call, contract)?;
-        let reply = self.generation.bridge.call(
-            &self.generation.epoch,
-            &self.generation.holder,
-            "authorize",
-            &self.generation.binding,
-            context,
-            call,
-            cancel,
-        )?;
+        let reply =
+            self.generation
+                .bridge
+                .call(&self.generation, "authorize", context, call, cancel)?;
         if !reply.ok || reply.completion.is_some() {
             return Err(failed("mcp_authorization_failed"));
         }
@@ -386,15 +399,11 @@ impl ToolExecutor for McpTools {
                 reason: "mcp_cancelled_or_binding_changed".into(),
             };
         }
-        match self.generation.bridge.call(
-            &self.generation.epoch,
-            &self.generation.holder,
-            "execute",
-            &self.generation.binding,
-            context,
-            call,
-            cancel,
-        ) {
+        match self
+            .generation
+            .bridge
+            .call(&self.generation, "execute", context, call, cancel)
+        {
             Ok(reply) if reply.ok => match reply.completion {
                 Some(completion @ ToolCompletion::NotDispatched { .. }) => completion,
                 Some(completion @ ToolCompletion::Result { .. }) => completion,
@@ -451,9 +460,15 @@ mod tests {
                 schema_version: "1".into(),
                 arguments: json!({}),
             };
-            let _ = done.send(bridge.call(
-                "epoch", "holder", "execute", &binding, &context, &call, &cancel,
-            ));
+            let generation = McpGeneration {
+                run_id: "run".into(),
+                binding,
+                bridge: bridge.clone(),
+                epoch: "epoch".into(),
+                holder: "holder".into(),
+                owner_id: "owner-id".into(),
+            };
+            let _ = done.send(bridge.call(&generation, "execute", &context, &call, &cancel));
         });
         result
     }
