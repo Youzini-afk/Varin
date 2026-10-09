@@ -574,7 +574,17 @@ export class KernelClient {
   constructor(options: KernelClientOptions) {
     this.options = options;
     this.spawnProcess = options.spawnProcess ?? spawn;
-    this.policyBridge = new NativeAgentPolicyBridge(() => this.epoch, response => this.write(response),
+    this.policyBridge = new NativeAgentPolicyBridge(() => this.epoch, response => {
+      // Preflight before writing anything. A policy's invalid/oversized decision is a local
+      // failure; actual stream failures still invalidate the shared transport below.
+      let encoded: Buffer;
+      try { encoded = frame(JSON.stringify(response)); }
+      catch {
+        return this.write({ v: 1, kind: 'agent-policy-response', id: response.id,
+          kernelEpoch: response.kernelEpoch, ok: false, error: { code: 'policy_frame_invalid' } });
+      }
+      return this.write(response, encoded);
+    },
       () => this.failAll(new KernelClientError({ code: "policy-channel-failed", message: "Private policy channel failed", retryable: false }), true));
     this.mcpBridge = new NativeMcpBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "mcp-channel-failed", message: "Private MCP channel failed", retryable: false }), true));

@@ -56,15 +56,18 @@ fn error(e: impl ToString) -> ExecutionError {
     ExecutionError::new("question", e.to_string())
 }
 impl ToolExecutor for Questions {
+    fn supports_policy_read(&self, context: &FrozenToolContext, call: &ToolCall, contract: &ToolContract) -> bool {
+        call.name != QUESTION_TOOL && self.inner.supports_policy_read(context, call, contract)
+    }
     fn prepare(
         &self,
         call: &ToolCall,
-        request: &RequestSnapshot,
+        request: &FrozenToolContext,
     ) -> Result<ToolContract, ExecutionError> {
         if call.name != QUESTION_TOOL {
             return self.inner.prepare(call, request);
         }
-        if call.schema_version != "1" || !request.view.binding.tools.iter().any(|s| s == &schema())
+        if call.schema_version != "1" || !request.tools.iter().any(|s| s == &schema())
         {
             return Err(error("question schema is not bound"));
         }

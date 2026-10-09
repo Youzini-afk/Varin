@@ -40,6 +40,10 @@ impl PolicyBridge {
         }
     }
     fn send(&self, value: Value) -> Result<(), ExecutionError> {
+        // Validate against the real transport framing contract before entering the shared writer.
+        // A bad/oversized policy checkpoint must fail this decision, not disconnect other Runs.
+        crate::protocol::write_frame(&mut std::io::sink(), &value)
+            .map_err(|_| failed("policy_frame_invalid"))?;
         self.events.lock().map_err(|_| failed("policy_channel_failed"))?.as_ref()
             .ok_or_else(|| failed("policy_channel_closed"))?.send(value).map_err(|_| failed("policy_channel_closed"))
     }
@@ -101,7 +105,9 @@ struct Reply { v: u64, kind: String, id: String, kernel_epoch: String, ok: bool,
 struct ErrorMarker { #[serde(rename = "code")] _code: String }
 fn failed(code: &str) -> ExecutionError { ExecutionError::new(code, code) }
 
-/// Decision input carries settlement facts, not result bodies, binary history or credentials.
+/// Graph settlement carries scoped references. Explicit own-result reads carry one bounded
+/// immutable content chunk through this same selected-policy binding; no general hash reader or
+/// full-result control frame is exposed. Model tool events remain settlement-only.
 fn event_view(event: &PolicyEvent) -> Value {
     match event {
         PolicyEvent::ToolsCompleted { results } => json!({"kind":"tools_completed","results":results.iter().map(|result| {

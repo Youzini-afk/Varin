@@ -75,7 +75,7 @@ impl ToolExecutor for Tools {
     fn prepare(
         &self,
         call: &ToolCall,
-        _: &RequestSnapshot,
+        _: &FrozenToolContext,
     ) -> Result<ToolContract, ExecutionError> {
         Ok(ToolContract {
             name: call.name.clone(),
@@ -549,7 +549,7 @@ fn independent_fast_tool_finishes_while_another_tool_is_still_running() {
         fn prepare(
             &self,
             call: &ToolCall,
-            _: &RequestSnapshot,
+            _: &FrozenToolContext,
         ) -> Result<ToolContract, ExecutionError> {
             Ok(ToolContract {
                 name: call.name.clone(),
@@ -686,7 +686,7 @@ fn cancelling_one_queued_operation_does_not_fail_its_run_or_execute_it() {
         fn prepare(
             &self,
             call: &ToolCall,
-            _: &RequestSnapshot,
+            _: &FrozenToolContext,
         ) -> Result<ToolContract, ExecutionError> {
             Ok(ToolContract {
                 name: call.name.clone(),

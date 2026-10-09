@@ -317,7 +317,7 @@ mod actual_engines {
         fn prepare(
             &self,
             c: &ToolCall,
-            _: &RequestSnapshot,
+            _: &FrozenToolContext,
         ) -> Result<ToolContract, ExecutionError> {
             Ok(ToolContract {
                 name: c.name.clone(),

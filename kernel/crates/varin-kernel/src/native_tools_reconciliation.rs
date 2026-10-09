@@ -44,7 +44,7 @@ impl NativeResourceClient {
                 })?;
             let context = ToolExecutionContext {
                 run_id: operation.run_id.clone(),
-                request_id: request_id.into(),
+                origin: ToolOrigin::ModelStep { request_id: request_id.into() },
                 operation_id: operation.id.clone(),
             };
             let original = executor

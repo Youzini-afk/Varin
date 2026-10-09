@@ -603,6 +603,21 @@ All four author commands accept `--quiet` for a stable compact result or `--json
 success/error value. These modes run the same validation and lifecycle checks as human output and keep
 non-zero exit codes on failure.
 
+## Native Agent policy decisions
+
+A brokered Host extension can provide `varin.agent.policy@1` with the SDK's `provideAgentPolicy`.
+Select it through ordinary project/session service routing. The native Run pins the selected
+artifact, immutable configuration and private-state version; updates use the existing installer
+and candidate lifecycle. No separate policy registry, credentials or filesystem capability is needed.
+
+Policies can request the selected model, settle its registered tool exchange, submit a fixed-source
+read graph before/between model requests, inspect committed own-Run result chunks, and request a
+model with core-resolved evidence references. Graph eligibility belongs to the trusted executor;
+MCP metadata cannot make a tool eligible. Large evidence stays in the core content store and enters
+the request as external data. See the [installed evidence-policy example](../../examples/extensions/evidence-policy/README.md)
+for the build/install route, complete content-dependent sequence, API fields and recovery boundary.
+Installation alone does not switch the product's default runtime to the native path.
+
 ## Install and development workflow
 
 Open **Settings → Varin Extensions → Install or update** and choose npm, Git, or local folder. The

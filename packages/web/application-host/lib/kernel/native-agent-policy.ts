@@ -1,5 +1,7 @@
 /** A selected policy is pinned for one Run. Its immutable configuration and installed artifact
- * participate in durable checkpoint identity; this is not a second policy state/config store. */
+ * participate in durable checkpoint identity; this is not a second policy state/config store.
+ * Graph receipts and scoped result-chunk decisions use this same lease, cancellation and epoch
+ * fence. The Host never resolves hashes or grants a general content-store capability. */
 import { waitWithSignal } from '../cancellation.js';
 import { createHash } from 'node:crypto';
 import { HostServiceBindingError, type ApplicationExtensionRuntime } from '@varin/extension-host';

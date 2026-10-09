@@ -8,7 +8,10 @@ export interface VarinAgentPolicyImplementation {
   identity: VarinAgentPolicyIdentity;
   configuration: JsonValue;
   /** Pure bounded decision. Request model/tool work through returned actions, never perform it here.
-   * Inputs are detached and recursively frozen; private state advances only when core commits it. */
+   * Inputs are detached and recursively frozen; private state advances only when core commits it.
+   * read_graph runs trusted fixed-source reads before/between models; read_result retrieves a
+   * committed own-Run chunk. Pass references to request_model_with_evidence instead of copying
+   * whole evidence bodies into the checkpoint or model instructions. */
   decide(input: Readonly<VarinAgentPolicyInput>, signal: AbortSignal, configuration: JsonValue): VarinAgentPolicyDecision | Promise<VarinAgentPolicyDecision>;
 }
 function freeze<T>(value: T): T {
