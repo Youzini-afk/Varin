@@ -69,13 +69,8 @@ pub(crate) struct FixedFileSource {
     pub branch_id: String,
     pub revision: i64,
 }
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum NativeSourceMode {
-    #[default]
-    FixedBranch,
-    Materialized,
-}
+pub(crate) use varin_runtime::SourceMode as NativeSourceMode;
+fn default_source_mode() -> NativeSourceMode { NativeSourceMode::FixedBranch }
 /// Supplied by the trusted Host after resolving its environment/source view, never by model args.
 /// A binding is not itself a grant: the Storage owner revalidates the persisted grant on every call.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -88,12 +83,34 @@ pub(crate) struct NativeToolBinding {
     pub execution_workspace_id: String,
     pub root_id: Option<String>,
     pub file_source: Option<FixedFileSource>,
-    #[serde(default)]
+    #[serde(default = "default_source_mode")]
     pub source_mode: NativeSourceMode,
     pub materialized_source: Option<FixedFileSource>,
+    pub live_root: Option<varin_runtime::catalog::launches::LiveRoot>,
     /// Source lineage only; resource admission always uses the registered root.
     pub environment_run_id: Option<String>,
     pub enabled_tools: BTreeSet<NativeToolKind>,
+}
+impl NativeToolBinding {
+    fn physical_source(&self) -> Value {
+        let mut source = json!({"mode":self.source_mode,"rootId":self.root_id});
+        if let Some(root) = &self.live_root { source["liveRoot"] = json!(root); }
+        if let Some(base) = &self.materialized_source { source["base"] = json!(base); }
+        source
+    }
+    pub(crate) fn source_selection(&self) -> Result<varin_runtime::catalog::launches::SourceSelection, KernelError> {
+        let fixed = self.file_source.as_ref().or(self.materialized_source.as_ref());
+        let source = varin_runtime::catalog::launches::SourceSelection {
+            environment_run_id: self.environment_run_id.clone(), mode: self.source_mode,
+            live_root: self.live_root.clone(), workspace_id: self.workspace_id.clone(),
+            execution_workspace_id: self.execution_workspace_id.clone(),
+            branch_id: fixed.map(|source| source.branch_id.clone()),
+            revision: fixed.map(|source| u64::try_from(source.revision)).transpose()
+                .map_err(|_| KernelError::Protocol("source revision must be nonnegative".into()))?,
+        };
+        source.validate().map_err(|error| KernelError::Protocol(error.to_string()))?;
+        Ok(source)
+    }
 }
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -261,7 +278,7 @@ impl ResourceOperation {
                 json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,
                 "path":mutation.path(),"operationId":context.operation_id}),
             ),
-            Self::FileRead(args) if binding.source_mode == NativeSourceMode::Materialized => {
+            Self::FileRead(args) if binding.source_mode != NativeSourceMode::FixedBranch => {
                 let mut params = json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,
                     "path":args.path,"offset":args.offset});
                 if let Some(length) = args.length {
@@ -455,24 +472,24 @@ impl NativeToolExecutor {
                 "file reads and discovery require a fixed branch revision",
             ));
         }
-        if binding.source_mode != NativeSourceMode::Materialized
+        if binding.source_mode == NativeSourceMode::FixedBranch
             && binding
                 .enabled_tools
                 .iter()
-                .any(|kind| matches!(kind, NativeToolKind::FileWrite | NativeToolKind::FileEdit))
+                .any(|kind| matches!(kind, NativeToolKind::FileWrite | NativeToolKind::FileEdit | NativeToolKind::ProcessSpawn))
         {
             return Err(ExecutionError::new(
                 "invalid_tool_binding",
-                "file mutation requires an explicit materialized source",
+                "file mutation and process spawning require an explicit physical source",
             ));
         }
-        if binding.source_mode == NativeSourceMode::Materialized
+        if binding.source_mode != NativeSourceMode::FixedBranch
             && (binding.file_source.is_some()
                 || binding.root_id.as_deref().is_none_or(str::is_empty))
         {
             return Err(ExecutionError::new(
                 "invalid_tool_binding",
-                "materialized source requires a registered root and no fixed branch source",
+                "physical source requires a registered root and no fixed branch source",
             ));
         }
         if binding.materialized_source.as_ref().is_some_and(|source| {
@@ -484,6 +501,12 @@ impl NativeToolExecutor {
                 "invalid_tool_binding",
                 "invalid materialization provenance",
             ));
+        }
+        if (binding.source_mode == NativeSourceMode::LiveRoot) != binding.live_root.is_some()
+            || binding.live_root.as_ref().is_some_and(|root| root.host_id.is_empty()
+                || root.canonical_root.is_empty() || Some(root.root_id.as_str()) != binding.root_id.as_deref())
+            || (binding.source_mode == NativeSourceMode::LiveRoot && binding.environment_run_id.is_some()) {
+            return Err(ExecutionError::new("invalid_tool_binding", "live source requires its exact registered environment identity"));
         }
         if binding
             .enabled_tools
@@ -547,7 +570,7 @@ impl NativeToolExecutor {
             // Their long search/scan wait must not hold a directory-wide write barrier.
             ResourceOperation::FileQuery(_) => (key(json!(["discovery", self.binding.execution_workspace_id, self.binding.root_id, self.binding.file_source])), Access::Read),
             ResourceOperation::FileMutation(mutation) => (key(json!(["unresolved-file", mutation.path()])), Access::Write),
-            ResourceOperation::FileRead(args) if self.binding.source_mode == NativeSourceMode::Materialized =>
+            ResourceOperation::FileRead(args) if self.binding.source_mode != NativeSourceMode::FixedBranch =>
                 (key(json!(["unresolved-file", args.path])), Access::Read),
             ResourceOperation::FileRead(args) => {
                 let source = self.binding.file_source.as_ref().expect("validated source");
@@ -566,13 +589,13 @@ impl NativeToolExecutor {
             resources: vec![ResourceClaim { key: resource, access }],
         }
     }
-    fn materialized_file(&self, operation: &ResourceOperation) -> bool {
+    fn physical_file(&self, operation: &ResourceOperation) -> bool {
         matches!(operation, ResourceOperation::FileMutation(_))
-            || (matches!(operation, ResourceOperation::FileRead(_)) && self.binding.source_mode == NativeSourceMode::Materialized)
+            || (matches!(operation, ResourceOperation::FileRead(_)) && self.binding.source_mode != NativeSourceMode::FixedBranch)
     }
     fn planned_contract(&self, context: &ToolExecutionContext, call: &ToolCall, operation: &ResourceOperation, cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
         let mut contract = self.contract(call, operation);
-        if self.materialized_file(operation) {
+        if self.physical_file(operation) {
             let plan = self.resources.call(&self.binding, context, operation.clone(), true, cancel)
                 .map_err(|failure| ExecutionError::new(error_code(&failure.error), failure.error.to_string()))?;
             contract.resources[0].key = plan.get("resourceKey").and_then(Value::as_str)
@@ -589,7 +612,8 @@ impl ToolExecutor for NativeToolExecutor {
         let Some(bound) = &self.binding.file_source else { return false; };
         context.run_id == self.binding.run_id
             && self.binding.source_mode == NativeSourceMode::FixedBranch
-            && !source.materialized
+            && source.mode == NativeSourceMode::FixedBranch
+            && source.live_root.is_none()
             && source.workspace_id == self.binding.workspace_id
             && source.execution_workspace_id == self.binding.execution_workspace_id
             && source.environment_run_id == self.binding.environment_run_id
@@ -647,7 +671,7 @@ impl ToolExecutor for NativeToolExecutor {
                 "tool contract changed",
             ));
         }
-        if self.materialized_file(&operation) { return Ok(()); }
+        if self.physical_file(&operation) { return Ok(()); }
         self.resources
             .call(&self.binding, context, operation, true, cancel)
             .map(|_| ())
@@ -671,7 +695,7 @@ impl ToolExecutor for NativeToolExecutor {
             }
         };
         let mut expected = self.contract(call, &operation);
-        if self.materialized_file(&operation) { expected.resources = contract.resources.clone(); }
+        if self.physical_file(&operation) { expected.resources = contract.resources.clone(); }
         if &expected != contract {
             return ToolCompletion::NotDispatched {
                 reason: "tool contract changed".into(),
@@ -682,7 +706,7 @@ impl ToolExecutor for NativeToolExecutor {
         let result = if let ResourceOperation::FileQuery(args) = &operation {
             self.resources.query(&self.binding, context, args, cancel)
         } else {
-            let expected_key = if self.materialized_file(&operation) {
+            let expected_key = if self.physical_file(&operation) {
                 contract.resources.first().map(|claim| claim.key.clone())
             } else { None };
             self.resources.call_checked(&self.binding, context, operation, false, expected_key, cancel)
@@ -834,13 +858,16 @@ pub(crate) fn serve_resource(
             &params,
         )?;
         validate_binding(&grant, &request.binding, &request.context)?;
+        if let Some(root) = &request.binding.live_root {
+            storage.validate_native_live_root(root, &grant, host_id)?;
+        }
         let file_path = match &request.operation {
             ResourceOperation::FileMutation(mutation) => Some(mutation.path()),
-            ResourceOperation::FileRead(args) if request.binding.source_mode == NativeSourceMode::Materialized => Some(args.path.as_str()),
+            ResourceOperation::FileRead(args) if request.binding.source_mode != NativeSourceMode::FixedBranch => Some(args.path.as_str()),
             _ => None,
         };
         if let Some(path) = file_path {
-            let key = storage.native_file_resource_key(request.binding.root_id.as_deref().expect("validated materialized root"), path, &grant)?;
+            let key = storage.native_file_resource_key(request.binding.root_id.as_deref().expect("validated physical root"), path, &grant)?;
             if request.authorize_only { return Ok(json!({"resourceKey":key})); }
             if request.expected_resource_key.as_deref() != Some(key.as_str()) {
                 return Err(KernelError::Authorization("canonical file resource changed after admission".into()));
@@ -849,7 +876,7 @@ pub(crate) fn serve_resource(
         if let ResourceOperation::ReconcileMutation { mutation, executor } = &request.operation {
             let root_id =
                 request.binding.root_id.as_deref().ok_or_else(|| {
-                    KernelError::Authorization("materialized root missing".into())
+                    KernelError::Authorization("physical root missing".into())
                 })?;
             storage.set_cancellation(request.cancellation.shared_flag());
             let result = storage.reconcile_native_mutation(
@@ -871,7 +898,7 @@ pub(crate) fn serve_resource(
                     .binding
                     .root_id
                     .as_deref()
-                    .expect("validated materialized root"),
+                    .expect("validated physical root"),
                 &request.context.operation_id,
                 mutation,
                 &grant,
@@ -886,7 +913,10 @@ pub(crate) fn serve_resource(
             let result = storage.native_file_read(&authorized, &grant, !request.authorize_only);
             storage.clear_cancellation();
             dispatched = !request.authorize_only;
-            return result;
+            return result.map(|mut result| {
+                if !request.authorize_only { result["source"] = request.binding.physical_source(); }
+                result
+            });
         }
         if request.authorize_only {
             return Ok(Value::Null);

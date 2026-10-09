@@ -93,6 +93,29 @@ fn fence(run: &Run, epoch: u64) -> Result<()> {
     Ok(())
 }
 
+/// A rejected database may contain committed WAL pages. Read-only validation must precede
+/// any write-capable SQLite handle: dropping a read/write connection can checkpoint its WAL.
+fn inspect_catalog_format(db: &Connection) -> Result<i64> {
+    let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    if version != 0 && version != 3 {
+        return Err(RuntimeError::Format(version));
+    }
+    let existing: i64 = db.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        [],
+        |r| r.get(0),
+    )?;
+    if version == 0 && existing != 0 {
+        return Err(RuntimeError::Format(0));
+    }
+    if version == 3 {
+        launches::check_format(db)?;
+        let content_format:i64=db.query_row("SELECT version FROM runtime_content_format WHERE id=1",[],|r|r.get(0))?;
+        if content_format!=3 {return Err(RuntimeError::Invalid("unsupported native content format; data was preserved".into()));}
+    }
+    Ok(version)
+}
+
 /// Sole writer of native conversation and coordination facts. Holding this value (or its mutex)
 /// across model, extension or tool execution is forbidden: all methods are bounded local transactions.
 /// Its database is separate from the replaceable system-kernel cache and is never recreated on error.
@@ -116,24 +139,14 @@ impl Catalog {
         owner
             .try_lock_exclusive()
             .map_err(|e| RuntimeError::Conflict(format!("runtime already owned: {e}")))?;
-        let mut db = Connection::open(root.as_ref().join("conversation.sqlite"))?;
+        let database_path = root.as_ref().join("conversation.sqlite");
+        let version = if database_path.try_exists()? {
+            let preflight = Connection::open_with_flags(&database_path,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+            inspect_catalog_format(&preflight)?
+        } else { 0 };
+        let mut db = Connection::open(&database_path)?;
         db.pragma_update(None, "foreign_keys", true)?;
-        let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version != 0 && version != 3 {
-            return Err(RuntimeError::Format(version));
-        }
-        let existing: i64 = db.query_row(
-            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-            [],
-            |r| r.get(0),
-        )?;
-        if version == 0 && existing != 0 {
-            return Err(RuntimeError::Format(0));
-        }
-        if version == 3 {
-            let content_format:i64=db.query_row("SELECT version FROM runtime_content_format WHERE id=1",[],|r|r.get(0))?;
-            if content_format!=3 {return Err(RuntimeError::Invalid("unsupported native content format; data was preserved".into()));}
-        }
         db.pragma_update(None, "journal_mode", "WAL")?;
         db.pragma_update(None, "synchronous", "FULL")?;
         if version == 0 {
@@ -285,7 +298,7 @@ impl Catalog {
                 let previous: launches::LaunchIntent = serde_json::from_str(&body)?;
                 selection.source = previous.selection.source;
                 if let Some(source) = selection.source.as_mut() {
-                    if source.materialized && source.environment_run_id.is_none() {
+                    if source.mode == crate::SourceMode::Materialized && source.environment_run_id.is_none() {
                         source.environment_run_id = Some(previous_run);
                     }
                     let mcp_names: std::collections::BTreeSet<String> = previous.selection.mcp_binding.as_ref()
@@ -337,7 +350,7 @@ impl Catalog {
                     let origin_run:Run=record(&tx,"runs",origin_id)?;
                     let origin:launches::LaunchIntent=record(&tx,"run_launches",origin_id)?;
                     let mut same_source=source.clone();same_source.environment_run_id=None;
-                    if origin_run.thread_id!=run.thread_id || !source.materialized || origin.selection.source.as_ref()!=Some(&same_source) {return Err(RuntimeError::Conflict("environment continuation must preserve the original thread source".into()));}
+                    if origin_run.thread_id!=run.thread_id || source.mode != crate::SourceMode::Materialized || origin.selection.source.as_ref()!=Some(&same_source) {return Err(RuntimeError::Conflict("environment continuation must preserve the original thread source".into()));}
                 }
             }
             let intent=launches::LaunchIntent{run_id:run_id.clone(),revision:1,selection,bound_epoch:None,requires_rebind:true,preparation_failure:None};

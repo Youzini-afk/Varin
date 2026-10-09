@@ -257,7 +257,7 @@ it.each([false, true])('native tool process settles OS and durable operation evi
   const grant = await f.host.issueGrant({ grantId: 'process-owner', threadId: 'process-thread', runId: receipt.run_id, owningWorkspace: 'process-workspace', executionWorkspace: 'process-workspace', capabilities: ['storage.read', 'storage.write', 'process'], pathScopes: [''] });
   const actor = f.host.scoped(grant);
   const registered = await actor.fileRootRegister({ workspaceId: 'process-workspace', executionWorkspaceId: 'process-workspace', canonicalRoot: workspace });
-  await f.native.startRun(receipt.run_id, undefined, { grantId: grant.grantId, runId: receipt.run_id, threadId: 'process-thread', workspaceId: 'process-workspace', executionWorkspaceId: 'process-workspace', rootId: registered.rootId, enabledTools: ['process_spawn'] });
+  await f.native.startRun(receipt.run_id, undefined, { grantId: grant.grantId, runId: receipt.run_id, threadId: 'process-thread', workspaceId: 'process-workspace', executionWorkspaceId: 'process-workspace', rootId: registered.rootId, sourceMode: 'live_root', liveRoot: { hostId: 'native-client-review', canonicalRoot: registered.canonicalRoot, rootId: registered.rootId }, enabledTools: ['process_spawn'] });
   await expect.poll(async () => (await f.native.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   expect(provider.requests).toHaveLength(2);
   const continuation = provider.requests[1]!.input as Array<Record<string, unknown>>;
@@ -457,7 +457,7 @@ it('native model interrupt preserves an accepted background process job until ex
   const grant = await f.host.issueGrant({ grantId: 'interrupt-job-owner', threadId: 'interrupt-job-thread', runId: run.run_id, owningWorkspace: 'interrupt-job-workspace', executionWorkspace: 'interrupt-job-workspace', capabilities: ['storage.read', 'storage.write', 'process'], pathScopes: [''] });
   const actor = f.host.scoped(grant);
   const root = await actor.fileRootRegister({ workspaceId: 'interrupt-job-workspace', executionWorkspaceId: 'interrupt-job-workspace', canonicalRoot: workspace });
-  await f.native.startRun(run.run_id, undefined, { grantId: grant.grantId, runId: run.run_id, threadId: 'interrupt-job-thread', workspaceId: 'interrupt-job-workspace', executionWorkspaceId: 'interrupt-job-workspace', rootId: root.rootId, enabledTools: ['process_spawn'] });
+  await f.native.startRun(run.run_id, undefined, { grantId: grant.grantId, runId: run.run_id, threadId: 'interrupt-job-thread', workspaceId: 'interrupt-job-workspace', executionWorkspaceId: 'interrupt-job-workspace', rootId: root.rootId, sourceMode: 'live_root', liveRoot: { hostId: 'native-client-review', canonicalRoot: root.canonicalRoot, rootId: root.rootId }, enabledTools: ['process_spawn'] });
   await expect.poll(() => provider.requests.length).toBe(2);
   const secondInput = provider.requests[1]!.input as Array<Record<string, unknown>>;
   const receipt = JSON.parse(String(secondInput.find(item => item.type === 'function_call_output')?.output)) as { operation_id: string };
@@ -585,7 +585,7 @@ it('source launch reads shell changes from materialized disk while fixed-branch 
     const run = await f.native.submit({ key: `source-${mode}-input`, threadId, branchId, expectedHead: null, input: { text: 'read selected source' }, configuration: { ...provider.configuration, model: mode === 'fixed_branch' ? 'fixed-source-model' : 'materialized-source-model' } });
     await f.native.startFromSource({ runId: run.run_id, workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'selected-source', revision, mode, tools: mode === 'materialized' ? ['file_read', 'process_spawn', 'process_inspect'] : ['file_read'] });
     await expect.poll(async () => (await f.native.run(run.run_id)).state, { timeout: 10_000 }).toBe('completed');
-    expect((await f.native.launch(run.run_id))?.selection.source).toMatchObject({ branch_id: 'selected-source', revision, materialized: mode === 'materialized' });
+    expect((await f.native.launch(run.run_id))?.selection.source).toMatchObject({ branch_id: 'selected-source', revision, mode, live_root: null });
   }
   expect(materializedRead).toContain('changed by actual shell');
   expect(fixedRead).toContain('immutable original source');

@@ -162,3 +162,17 @@ single-writer ownership transfer remain tracked in
 [`docs/plan/native-agent-runtime-implementation.md`](../../../docs/plan/native-agent-runtime-implementation.md).
 That matrix owns actual validation and incomplete capabilities. No measured speedup or platform
 acceptance follows from this implementation alone.
+
+## Explicit source identity and launch format
+
+Launch domain 2 replaces the old source `materialized` boolean with `fixed_branch`, `materialized`,
+and `live_root`. Fixed sources require a branch/revision; only materialized copies carry an originating
+Run. A live source instead requires its Host/canonical-root/Rust-root identity and cannot claim a fixed
+revision. Exact source comparison covers rebinding and inherited launches; live identity is not a grant.
+
+This intentionally breaks the earlier experimental launch encoding without changing catalog/content
+format 3. An existing database is opened read-only first, including its committed WAL, and launch
+metadata/table shape is validated before a writable connection, epoch update or recovery. Domain 1,
+missing and malformed metadata fail preserving assets; no conversion or fallback reader is provided.
+The launch preflight checks the real table, columns and runs foreign key including referential actions.
+Persisted source `live_root` is explicitly null for fixed/materialized modes; omitting it is invalid.

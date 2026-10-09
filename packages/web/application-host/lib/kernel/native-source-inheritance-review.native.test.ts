@@ -98,7 +98,7 @@ it('public completed-turn continuation preserves edited disk while explicit sour
   const next = await f.api.submit(nextRequest);
   await expect.poll(async () => (await f.api.run(next.run_id)).state, { timeout: 10_000 }).toBe('completed');
   expect(outputs[4]).toContain('persisted working edit');
-  expect((await f.runtime.launch(next.run_id))?.selection.source).toMatchObject({ branch_id: 'source-a', environment_run_id: initial.run_id, materialized: true });
+  expect((await f.runtime.launch(next.run_id))?.selection.source).toMatchObject({ branch_id: 'source-a', environment_run_id: initial.run_id, mode: 'materialized', live_root: null });
   const changed = await f.api.submit({ ...identity, key: 'override-source', expectedHead: (await f.api.snapshot(identity)).historyPage.head, text: 'read explicitly selected other source', model, source: { workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'source-b', revision: overrideRevision, mode: 'materialized', tools: ['file_read'] } });
   await expect.poll(async () => (await f.api.run(changed.run_id)).state, { timeout: 10_000 }).toBe('completed');
   expect(outputs[6]).toContain('explicit source B');

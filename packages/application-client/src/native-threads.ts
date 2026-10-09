@@ -1,16 +1,17 @@
-import type { NativeContextPersonalization, NativeEvent, NativeHistoryItem, NativeInputMode, NativeInputReceipt, NativeQueuedInput, NativeReceipt, NativeRun, NativeOperation, NativeRuntimeStreamEvent, NativeThreadSummary, NativeLaunchIntent, ImageAttachment } from '@varin/protocol';
+import type { NativeLiveRoot, NativeContextPersonalization, NativeEvent, NativeHistoryItem, NativeInputMode, NativeInputReceipt, NativeQueuedInput, NativeReceipt, NativeRun, NativeOperation, NativeRuntimeStreamEvent, NativeThreadSummary, NativeLaunchIntent, ImageAttachment } from '@varin/protocol';
 
 /** Explicit authority selection. A nativeThread never opens a Pi session. */
 export interface NativeThreadIdentity { runtime: 'nativeThread'; threadId: string; branchId: string }
 export interface NativeThreadModel { providerId: string; modelId: string }
-export interface NativeThreadSource {
+interface NativeThreadSourceBase {
   workspaceId: string;
   executionWorkspaceId: string;
-  branchId: string;
-  revision: number;
-  mode: 'fixed_branch' | 'materialized';
   tools: Array<'file_read' | 'file_list' | 'file_search' | 'file_write' | 'file_edit' | 'process_inspect' | 'process_read' | 'process_spawn'>;
 }
+export type NativeThreadSource = NativeThreadSourceBase & (
+  | { mode: 'fixed_branch' | 'materialized'; branchId: string; revision: number; liveRoot?: never }
+  | { mode: 'live_root'; liveRoot: NativeLiveRoot; branchId?: never; revision?: never }
+);
 export interface NativeThreadPrepareSource extends NativeThreadIdentity {
   key: string;
   path: string;

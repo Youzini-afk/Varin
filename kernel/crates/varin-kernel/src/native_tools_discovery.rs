@@ -41,7 +41,7 @@ impl FileQueryArgs {
             "paths":self.paths.clone().unwrap_or_else(|| vec![String::new()]),
             "maxResults":self.max_results.unwrap_or(100),"includeHidden":self.include_hidden.unwrap_or(true),
             "immediate":!self.recursive.unwrap_or(true)});
-        if binding.source_mode == NativeSourceMode::Materialized {
+        if binding.source_mode != NativeSourceMode::FixedBranch {
             params["rootId"] = json!(binding.root_id);
         } else {
             let source = binding.file_source.as_ref().expect("validated source");
@@ -178,7 +178,7 @@ impl NativeResourceClient {
                 }
                 let output = json!({"source":if binding.source_mode == NativeSourceMode::FixedBranch {
                         json!(binding.file_source)
-                    } else { json!({"mode":"materialized","rootId":binding.root_id,"base":binding.materialized_source}) },
+                    } else { binding.physical_source() },
                         "status":if truncated {"partial"} else {page["status"].as_str().unwrap_or("failed")},
                         "records":records,"scannedFiles":page["scannedFiles"],
                         "truncated":truncated || page["status"] == "partial",

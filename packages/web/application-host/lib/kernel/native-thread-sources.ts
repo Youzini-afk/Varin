@@ -1,3 +1,4 @@
+import type { NativeLiveSourceOwner } from './native-live-source.js';
 import { createHash } from 'node:crypto';
 import type { NativeThreadPrepareSource, NativeThreadPreparedSource } from '@varin/application-client';
 import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
@@ -8,16 +9,24 @@ interface SourcePreparationOwners {
     inspectWorkspace(workspaceId: string): Promise<{ root: string }>;
   };
   workingStates: WorkspaceWorkingStateRootAccess;
+  liveSources?: NativeLiveSourceOwner;
 }
 
 /** Preparation uses the existing Documents admission and native immutable WorkingState owner.
  * The map only joins concurrent requests; the branch's fixed base is the durable receipt.
  */
-export function createNativeThreadSourcePreparer({ documents, workingStates }: SourcePreparationOwners) {
+export function createNativeThreadSourcePreparer({ documents, workingStates, liveSources }: SourcePreparationOwners) {
   const preparing = new Map<string, Promise<NativeThreadPreparedSource>>();
   return async (input: NativeThreadPrepareSource): Promise<NativeThreadPreparedSource> => {
     const workspace = await documents.resolveWorkspace({ path: input.path });
     const { root } = await documents.inspectWorkspace(workspace.workspaceId);
+    if (input.mode === 'live_root') {
+      if (!liveSources) throw new Error('Live workspace access is unavailable');
+      const liveRoot = await liveSources.prepare(workspace.workspaceId, workspace.workspaceId, input.threadId);
+      return { path: root, source: { workspaceId: workspace.workspaceId, executionWorkspaceId: workspace.workspaceId,
+        mode: 'live_root', liveRoot, tools: ['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn'] } };
+    }
+    const mode = input.mode;
     const key = createHash('sha256').update(JSON.stringify([input.threadId, input.branchId, workspace.workspaceId, input.key, input.mode])).digest('hex');
     const current = preparing.get(key);
     if (current) return current;
@@ -31,8 +40,8 @@ export function createNativeThreadSourcePreparer({ documents, workingStates }: S
       // Branch creation durably publishes its immutable baseline at revision zero. Later retries
       // do not recapture a changed directory or substitute the branch's mutable write root.
       return { path: root, source: { workspaceId: workspace.workspaceId, executionWorkspaceId: workspace.workspaceId,
-        branchId: branch.branchId, revision: 0, mode: input.mode,
-        tools: input.mode === 'fixed_branch' ? ['file_read', 'file_list', 'file_search'] : ['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn'],
+        branchId: branch.branchId, revision: 0, mode,
+        tools: mode === 'fixed_branch' ? ['file_read', 'file_list', 'file_search'] : ['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn'],
       } } satisfies NativeThreadPreparedSource;
     }, 'shared', { threadId: input.threadId });
     preparing.set(key, preparation);

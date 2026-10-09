@@ -60,7 +60,7 @@ export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAd
   post('create', body => adapter.create(text(body.key)));
   post('fork', body => adapter.fork({ ...identity(body), key: text(body.key), headId: body.headId === null ? null : text(body.headId) }));
   post('source/prepare', body => {
-    if (body.mode !== 'fixed_branch' && body.mode !== 'materialized') throw new Error('Invalid source mode');
+    if (body.mode !== 'fixed_branch' && body.mode !== 'materialized' && body.mode !== 'live_root') throw new Error('Invalid source mode');
     return adapter.prepareSource({ ...identity(body), key: text(body.key), path: text(body.path), mode: body.mode });
   });
   post('context/compact', body => {
@@ -82,12 +82,20 @@ export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAd
       model: { providerId: text(model.providerId), modelId: text(model.modelId) } };
     if (body.source !== undefined) {
       const source = object(body.source);
-      if (Object.keys(source).some(key => !['workspaceId', 'executionWorkspaceId', 'branchId', 'revision', 'mode', 'tools'].includes(key))) throw new Error('Unsupported source selection field');
-      if (source.mode !== 'fixed_branch' && source.mode !== 'materialized') throw new Error('Invalid source mode');
+      if (Object.keys(source).some(key => !['workspaceId', 'executionWorkspaceId', 'branchId', 'revision', 'mode', 'tools', 'liveRoot'].includes(key))) throw new Error('Unsupported source selection field');
+      if (source.mode !== 'fixed_branch' && source.mode !== 'materialized' && source.mode !== 'live_root') throw new Error('Invalid source mode');
       if (!Array.isArray(source.tools) || source.tools.some(tool => !['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn'].includes(String(tool)))) throw new Error('Unsupported native tool');
-      input.source = { workspaceId: text(source.workspaceId), executionWorkspaceId: text(source.executionWorkspaceId),
-        branchId: text(source.branchId), revision: revision(source.revision), mode: source.mode,
+      const base = { workspaceId: text(source.workspaceId), executionWorkspaceId: text(source.executionWorkspaceId),
         tools: source.tools as NonNullable<NativeThreadSubmit['source']>['tools'] };
+      if (source.mode === 'live_root') {
+        if (source.branchId !== undefined || source.revision !== undefined) throw new Error('Live source cannot claim a fixed revision');
+        const root = object(source.liveRoot);
+        if (Object.keys(root).some(key => !['hostId', 'canonicalRoot', 'rootId'].includes(key))) throw new Error('Unsupported live root field');
+        input.source = { ...base, mode: 'live_root', liveRoot: { hostId: text(root.hostId), canonicalRoot: text(root.canonicalRoot), rootId: text(root.rootId) } };
+      } else {
+        if (source.liveRoot !== undefined) throw new Error('Fixed source cannot claim a live root');
+        input.source = { ...base, branchId: text(source.branchId), revision: revision(source.revision), mode: source.mode };
+      }
     }
     return adapter.submit(input);
   });

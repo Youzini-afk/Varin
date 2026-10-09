@@ -9,11 +9,41 @@ use serde::Deserialize;
 pub struct SourceSelection {
     #[serde(default)]
     pub environment_run_id: Option<String>,
-    pub materialized: bool,
+    pub mode: crate::SourceMode,
+    #[serde(deserialize_with = "required_live_root")]
+    pub live_root: Option<LiveRoot>,
     pub workspace_id: String,
     pub execution_workspace_id: String,
     pub branch_id: Option<String>,
     pub revision: Option<u64>,
+}
+/// Identity, not authority: the Host must reacquire a fresh Documents/Rust binding.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LiveRoot {
+    pub host_id: String,
+    pub canonical_root: String,
+    pub root_id: String,
+}
+fn required_live_root<'de, D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Option<LiveRoot>, D::Error> {
+    Option::<LiveRoot>::deserialize(deserializer)
+}
+impl SourceSelection {
+    pub fn validate(&self) -> Result<()> {
+        let fixed = self.branch_id.as_deref().is_some_and(|id| !id.is_empty()) && self.revision.is_some();
+        let live = self.live_root.as_ref().is_some_and(|root|
+            !root.host_id.is_empty() && !root.root_id.is_empty() && !root.canonical_root.is_empty());
+        if self.workspace_id.is_empty() || self.execution_workspace_id.is_empty()
+            || match self.mode {
+                crate::SourceMode::LiveRoot => !live || self.branch_id.is_some() || self.revision.is_some()
+                    || self.environment_run_id.is_some(),
+                crate::SourceMode::FixedBranch => !fixed || self.live_root.is_some() || self.environment_run_id.is_some(),
+                crate::SourceMode::Materialized => !fixed || self.live_root.is_some(),
+            } {
+            return Err(RuntimeError::Invalid("launch source requires an exact fixed revision or explicit live root identity".into()));
+        }
+        Ok(())
+    }
 }
 /// Credential-free retained Host MCP generation, frozen before any model request.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -99,15 +129,7 @@ impl LaunchSelection {
                 "launch tool identities must be unique and versioned".into(),
             ));
         }
-        if let Some(source) = &self.source {
-            if source.workspace_id.is_empty()
-                || source.execution_workspace_id.is_empty()
-                || source.branch_id.is_some() != source.revision.is_some()
-                || source.branch_id.as_deref() == Some("")
-            {
-                return Err(RuntimeError::Invalid("launch source requires workspace identity and a complete fixed branch revision".into()));
-            }
-        }
+        if let Some(source) = &self.source { source.validate()?; }
         Ok(())
     }
 }
@@ -160,6 +182,26 @@ pub struct LaunchIntent {
     pub requires_rebind: bool,
 }
 
+/// Read-only preflight before catalog setup, epoch advancement or recovery mutates an existing catalog.
+pub(super) fn check_format(db: &Connection) -> Result<()> {
+    let version: Option<i64> = db.query_row("SELECT version FROM runtime_domains WHERE name='run_launches'", [], |r| r.get(0)).optional()?;
+    let columns: Vec<(String, String, i64, i64)> = {
+        let mut statement = db.prepare("PRAGMA table_info(run_launches)")?;
+        let rows = statement.query_map([], |r| Ok((r.get(1)?, r.get(2)?, r.get(3)?, r.get(5)?)))?;
+        rows.collect::<std::result::Result<_, _>>()?
+    };
+    let table_type: Option<String> = db.query_row("SELECT type FROM sqlite_master WHERE name='run_launches'", [], |r| r.get(0)).optional()?;
+    let foreign_keys: Vec<(String, String, String, String, String)> = {
+        let mut statement = db.prepare("PRAGMA foreign_key_list(run_launches)")?;
+        let rows = statement.query_map([], |r| Ok((r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?;
+        rows.collect::<std::result::Result<_, _>>()?
+    };
+    if table_type.as_deref() != Some("table") || foreign_keys != vec![("runs".into(), "id".into(), "id".into(), "NO ACTION".into(), "NO ACTION".into())]
+        || version != Some(2) || columns != vec![("id".into(),"TEXT".into(),0,1),("body".into(),"TEXT".into(),1,0)] {
+        return Err(RuntimeError::Invalid("unsupported or malformed launch domain; user data was preserved".into()));
+    }
+    Ok(())
+}
 pub(super) fn initialize(db: &mut Connection) -> Result<()> {
     let tx = db.transaction()?;
     let version: Option<i64> = tx
@@ -177,11 +219,8 @@ pub(super) fn initialize(db: &mut Connection) -> Result<()> {
         )
         .optional()?;
     match version {
-        None if existing.is_none() => tx.execute_batch("CREATE TABLE run_launches(id TEXT PRIMARY KEY REFERENCES runs(id),body TEXT NOT NULL); INSERT INTO runtime_domains(name,version) VALUES('run_launches',1);")?,
-        Some(1) if existing.as_deref() == Some("table") => {
-            let columns:Vec<(String,String,i64,i64)> = { let mut s=tx.prepare("PRAGMA table_info(run_launches)")?; let rows=s.query_map([],|r|Ok((r.get(1)?,r.get(2)?,r.get(3)?,r.get(5)?)))?; rows.collect::<std::result::Result<_,_>>()? };
-            if columns != vec![("id".into(),"TEXT".into(),0,1),("body".into(),"TEXT".into(),1,0)] { return Err(RuntimeError::Invalid("malformed launch domain; data preserved".into())); }
-        },
+        None if existing.is_none() => tx.execute_batch("CREATE TABLE run_launches(id TEXT PRIMARY KEY REFERENCES runs(id),body TEXT NOT NULL); INSERT INTO runtime_domains(name,version) VALUES('run_launches',2);")?,
+        Some(2) if existing.as_deref() == Some("table") => check_format(&tx)?,
         _ => return Err(RuntimeError::Invalid("unrecognized launch domain; data preserved".into())),
     }
     tx.commit()?;
@@ -283,7 +322,7 @@ impl Catalog {
                 let mut same_source = source.clone();
                 same_source.environment_run_id = None;
                 if origin_run.thread_id != run.thread_id
-                    || !source.materialized
+                    || source.mode != crate::SourceMode::Materialized
                     || origin.selection.source.as_ref() != Some(&same_source)
                 {
                     return Err(RuntimeError::Conflict(
