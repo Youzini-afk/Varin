@@ -254,12 +254,14 @@ it('reopens a parked wait after kernel shutdown and delivers the original stoppe
     expect(context.queries.some(query => query.action === 'synchronize' && query.runId === receipt.run_id)).toBe(true);
     const items = JSON.parse(output) as Array<Record<string, unknown>>;
     const factText = String(items.find(item => typeof item.content === 'string' && item.content.startsWith('Process lifecycle data'))?.content);
-    const fact = JSON.parse(factText.split('\n').at(-1)!) as { outcome: string; signal: string; treeConfirmed: boolean };
-    expect(fact).toMatchObject({ outcome: 'failed', signal: 'Killed', treeConfirmed: true });
-    const read = JSON.parse(String(items.find(item => item.call_id === 'process_read-3' && item.type === 'function_call_output')?.output)) as { content: { outputComplete: boolean; outputError: string; process: { signal: string; writerActive: boolean } } };
+    const fact = JSON.parse(factText.split('\n').at(-1)!) as { outcome: string; signal: string | null; treeConfirmed: boolean; stopApplied: boolean };
+    // Windows TerminateProcess has an exit code, rather than a POSIX signal name.
+    const signal = process.platform === 'win32' ? null : 'Killed';
+    expect(fact).toMatchObject({ outcome: 'failed', signal, treeConfirmed: true, stopApplied: true });
+    const read = JSON.parse(String(items.find(item => item.call_id === 'process_read-3' && item.type === 'function_call_output')?.output)) as { content: { outputComplete: boolean; outputError: string; process: { signal: string | null; writerActive: boolean; stopApplied: boolean } } };
     expect(read.content.outputComplete).toBe(false);
     expect(read.content.outputError).toContain('without a durable completion marker');
-    expect(read.content.process).toMatchObject({ signal: 'Killed', writerActive: false });
+    expect(read.content.process).toMatchObject({ signal, writerActive: false, stopApplied: true });
     expect(await fs.readFile(path.join(f.root, 'spawn-count'), 'utf8')).toBe('1');
     expect((await runtime.operation(processId)).outcome).toBe('failed');
     expect((await runtime.history(identity.branchId)).filter(item => JSON.stringify(item.content).includes('Process lifecycle data'))).toHaveLength(1);

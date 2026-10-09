@@ -332,6 +332,7 @@ impl Catalog {
             let result = json!({"processId":process.id,"outcome":process.outcome,"effect":process.effect,
                 "exitCode":data.and_then(|data|data.get("exitCode")).and_then(Value::as_i64),
                 "signal":data.and_then(|data|data.get("signal")).and_then(Value::as_str),
+                "stopApplied":data.and_then(|data|data.get("stopApplied")).and_then(Value::as_bool),
                 "treeConfirmed":data.and_then(|data|data.get("treeConfirmed")).and_then(Value::as_bool),
                 "output":{"processId":process.id,"reader":"process_read",
                     "available":data.and_then(|data|data.get("outputAvailable")).and_then(Value::as_bool)}});

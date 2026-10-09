@@ -113,7 +113,7 @@ impl Storage {
                 if gone {
                     if let Some(receipt) = receipt {
                         self.processes.replay_terminal(id, epoch, receipt.clone());
-                        for key in ["status", "pid", "exitCode", "signal", "reason"] {
+                        for key in ["status", "pid", "exitCode", "signal", "reason", "stopApplied"] {
                             record[key] = receipt[key].clone();
                         }
                     } else {
