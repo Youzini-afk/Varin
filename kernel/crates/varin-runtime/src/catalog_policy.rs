@@ -100,7 +100,7 @@ impl Catalog {
                 |r| r.get(0),
             )
             .optional()?;
-        let previous:Option<String>=self.db.query_row("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind')='policy_read_graph_v1' AND json_extract(body,'$.phase')='terminal' ORDER BY rowid DESC LIMIT 1",[run_id],|r|r.get(0)).optional()?;
+        let previous:Option<String>=self.db.query_row("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_read_graph_v1','policy_model_job_v1') AND json_extract(body,'$.phase')='terminal' ORDER BY rowid DESC LIMIT 1",[run_id],|r|r.get(0)).optional()?;
         let id = hex::encode(Sha256::digest(serde_json::to_vec(&(
             run_id,
             self.head(&run.branch_id)?,
@@ -115,11 +115,10 @@ impl Catalog {
     pub fn policy_graph(&self, run_id: &str, epoch: u64) -> Result<Option<PolicyGraphState>> {
         let run = self.run(run_id)?;
         fence(&run, epoch)?;
-        let key:Option<String>=self.db.query_row("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind')='policy_read_graph_v1' ORDER BY rowid DESC LIMIT 1",[run_id],|r|r.get(0)).optional()?;
+        let key:Option<String>=self.db.query_row("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_read_graph_v1','policy_model_job_v1') ORDER BY rowid DESC LIMIT 1",[run_id],|r|r.get(0)).optional()?;
         let Some(key) = key else { return Ok(None) };
         let op: Operation = record(&self.db, "operations", &key)?;
-        let intent = graph_intent(&op)?
-            .ok_or_else(|| RuntimeError::Invalid("graph intent missing".into()))?;
+        let Some(intent) = graph_intent(&op)? else { return Ok(None); };
         let result = graph_result(&op, &intent)?;
         let admitted:u64=self.db.query_row("SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND kind='policy.graph_admitted'",[&key],|r|read_number(r,0))?;
         let delivered:u64=self.db.query_row("SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND kind='input.delivered'",[run_id],|r|read_number(r,0))?;
@@ -239,6 +238,8 @@ impl Catalog {
         if super::inputs::has_boundary_inputs(&tx, run_id)? {
             return Err(RuntimeError::InputPending);
         }
+        let pending_action:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_read_graph_v1','policy_model_job_v1') AND json_extract(body,'$.phase')!='terminal')",[run_id],|r|r.get(0))?;
+        if pending_action{return Err(RuntimeError::Conflict("policy action is unsettled".into()));}
         let unpaired:i64=tx.query_row("SELECT count(*) FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0",[run_id],|r|r.get(0))?;
         let unresolved:i64=tx.query_row("SELECT count(*) FROM model_steps WHERE run_id=?1 AND state!='completed' AND json_extract(body,'$.superseded_by_input') IS NULL",[run_id],|r|r.get(0))?;
         if unpaired != 0 || unresolved != 0 {
@@ -426,6 +427,11 @@ impl Catalog {
         reference: &PolicyEvidenceRef,
     ) -> Result<Value> {
         let op: Operation = record(&self.db, "operations", &reference.action_id)?;
+        if super::policy_model::model_intent(&op)?.is_some() {
+            let result=super::policy_model::model_result(&op)?;
+            if op.run_id!=run_id || !result.receipt.as_ref().is_some_and(|r|r.usable&&r.output.as_ref()==Some(reference)){return Err(RuntimeError::Conflict("planning evidence is not owned by this Run".into()));}
+            return Ok(json!({"content_object":reference.content_ref}));
+        }
         let intent =
             graph_intent(&op)?.ok_or_else(|| RuntimeError::Invalid("not a policy graph".into()))?;
         let result = graph_result(&op, &intent)?;
@@ -461,6 +467,7 @@ impl Catalog {
             index,
         )
     }
+    pub(crate) fn is_policy_model_reference(&self, reference:&PolicyEvidenceRef)->Result<bool> {let op:Operation=record(&self.db,"operations",&reference.action_id)?;Ok(super::policy_model::model_intent(&op)?.is_some())}
     pub fn policy_evidence(
         &self,
         run_id: &str,
@@ -471,6 +478,6 @@ impl Catalog {
         let content = self
             .content
             .load(&self.owned_policy_reference(run_id, reference)?)?;
-        Ok(policy_evidence_item(reference, content))
+        Ok(if self.is_policy_model_reference(reference)? {policy_model_evidence_item(reference,content)} else {policy_evidence_item(reference,content)})
     }
 }

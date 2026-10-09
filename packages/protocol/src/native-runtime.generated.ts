@@ -117,9 +117,24 @@ export interface NativeAgentPolicyBinding {
   identity: NativeLaunchPolicy;
 }
 
+export interface NativePolicyModelCapability {
+  capability_id: string;
+  purpose: string;
+  status: NativePolicyModelStatus;
+  binding_id: string | null;
+  configuration_identity: string | null;
+  supported_operation: string;
+  binding: unknown;
+  configuration: NativeModelSessionConfiguration | null;
+  credential_scope: NativeCredentialScope | null;
+}
+
+export type NativePolicyModelStatus = 'available' | 'disabled' | 'unconfigured' | 'invalid' | 'unavailable';
+
 export interface NativePolicyPrepareParams {
   runId: string;
   identity: NativeLaunchPolicy;
+  policyModels?: unknown;
 }
 
 export interface NativeMcpBinding {
@@ -135,6 +150,7 @@ export interface NativeMcpPrepareParams {
 }
 
 export interface NativeLaunchSelection {
+  policy_models: NativePolicyModelCapability[];
   mcp_binding: NativeMcpBinding | null;
   credential_scope: NativeCredentialScope | null;
   connection_identity: string;

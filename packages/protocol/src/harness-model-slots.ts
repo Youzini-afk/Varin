@@ -13,6 +13,7 @@ export type HarnessModelPreset = "anthropic" | "openai" | "gemini";
 export type HarnessModelSlots = Partial<Record<HarnessModelRole, HarnessModelBinding>>;
 
 export const HARNESS_MODEL_ROLES: readonly HarnessModelRole[] = [
+  "agentPlanning",
   "explore",
   "retrievalAgent",
   "worker",

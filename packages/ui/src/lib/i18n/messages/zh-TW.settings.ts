@@ -3891,6 +3891,8 @@ export const settingsDict = {
   "settings.harness.role.worker.description": "完成委派工作，理解整體目標並協調相關變更。",
   "settings.harness.role.reader": "閱讀輔助",
   "settings.harness.role.reader.description": "輔助閱讀與整理材料。",
+  "settings.harness.role.agentPlanning": "Agent 规划模型",
+  "settings.harness.role.agentPlanning.description": "仅在所选原生 Agent 策略请求规划时使用。需要明确选择模型；未配置时不会改用主模型。",
   "settings.harness.role.memoryOrganizer": "記憶整理器",
   "settings.harness.role.memoryOrganizer.description": "從會話與觀察中整理持久的後台記憶。",
   "settings.harness.role.nextStep": "下一步選擇",

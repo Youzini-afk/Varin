@@ -130,11 +130,15 @@ impl Catalog {
         if version == 0 && existing != 0 {
             return Err(RuntimeError::Format(0));
         }
+        if version == 3 {
+            let content_format:i64=db.query_row("SELECT version FROM runtime_content_format WHERE id=1",[],|r|r.get(0))?;
+            if content_format!=3 {return Err(RuntimeError::Invalid("unsupported native content format; data was preserved".into()));}
+        }
         db.pragma_update(None, "journal_mode", "WAL")?;
         db.pragma_update(None, "synchronous", "FULL")?;
         if version == 0 {
             db.execute_batch(SCHEMA)?;
-            db.execute_batch("CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY REFERENCES input_queue(id),body TEXT NOT NULL); CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,2); PRAGMA user_version=3;")?;
+            db.execute_batch("CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY REFERENCES input_queue(id),body TEXT NOT NULL); CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,3); PRAGMA user_version=3;")?;
         }
         db.execute_batch("CREATE TABLE IF NOT EXISTS resource_occupancy (operation_id TEXT PRIMARY KEY REFERENCES operations(id), claims TEXT NOT NULL)")?;
         let resource_admission = std::sync::Arc::new(crate::resource_admission::ResourceAdmission::default());
@@ -597,7 +601,7 @@ impl Catalog {
         lifetime: Lifetime,
         intent: Value,
     ) -> Result<Operation> {
-        if intent.get("kind").and_then(Value::as_str).is_some_and(|kind|kind.starts_with("policy_read_graph")) {return Err(RuntimeError::Invalid("policy graph requires atomic typed admission".into()));}
+        if intent.get("kind").and_then(Value::as_str).is_some_and(|kind|kind.starts_with("policy_read_graph")||kind.starts_with("policy_model_job")) {return Err(RuntimeError::Invalid("policy graph requires atomic typed admission".into()));}
         let tx = self.db.transaction()?;
         let run: Run = record(&tx, "runs", run_id)?;
         fence(&run, epoch)?;
@@ -653,6 +657,7 @@ impl Catalog {
     ) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let mut op: Operation = record(&tx, "operations", key)?;
+        if policy::graph_intent(&op)?.is_some() || policy_model::model_intent(&op)?.is_some(){return Err(RuntimeError::Invalid("policy actions require their typed dispatch owner".into()));}
         let run: Run = record(&tx, "runs", &op.run_id)?;
         if !op.handed_off {
             fence(&run, epoch)?;
@@ -696,7 +701,7 @@ impl Catalog {
     ) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let mut op: Operation = record(&tx, "operations", key)?;
-        if policy::graph_intent(&op)?.is_some() {return Err(RuntimeError::Invalid("policy graph settles through node receipts only".into()));}
+        if policy::graph_intent(&op)?.is_some() || policy_model::model_intent(&op)?.is_some() {return Err(RuntimeError::Invalid("policy graph settles through node receipts only".into()));}
         if op.epoch != epoch {
             return Err(RuntimeError::Conflict("stale operation executor".into()));
         }
@@ -792,7 +797,7 @@ impl Catalog {
     ) -> Result<ModelStep> {
         let request_ref = self.content.save(&request)?;
         let tx = self.db.transaction()?;
-        let graph_pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind')='policy_read_graph_v1' AND json_extract(body,'$.phase')!='terminal')",[run_id],|r|r.get(0))?;
+        let graph_pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_read_graph_v1','policy_model_job_v1') AND json_extract(body,'$.phase')!='terminal')",[run_id],|r|r.get(0))?;
         if graph_pending {return Err(RuntimeError::Conflict("policy graph is unsettled".into()));}
         let run: Run = record(&tx, "runs", run_id)?;
         fence(&run, epoch)?;
@@ -1159,6 +1164,18 @@ impl Catalog {
         }
         let operations: Vec<Operation> = read_all(&tx, "operations")?;
         for mut op in operations {
+            if policy_model::model_intent(&op)?.is_some() {
+                let mut result=policy_model::model_result(&op)?;
+                if result.dispatch==crate::execution::PolicyModelDispatch::Dispatched && result.receipt.is_none() {
+                    let output:crate::execution::PolicyModelOutput=result.original_ref.as_ref().map(|r|self.content.load(r).and_then(|v|Ok(serde_json::from_value(v)?))).transpose()?.unwrap_or_default();
+                    result.dispatch=crate::execution::PolicyModelDispatch::Interrupted;
+                    result.receipt=Some(crate::execution::PolicyModelReceipt{dispatch:crate::execution::PolicyModelDispatch::Interrupted,outcome:Outcome::Indeterminate,output:None,usage:output.usage,finish_reason:None,failure:Some(crate::execution::ModelFailure{code:"planning_interrupted".into(),message:"dispatch intent was durable; completion is unknown and request will not replay".into(),retry_after_ms:None,provider_request_id:None}),usable:false});
+                    op.phase=OperationPhase::Terminal;op.outcome=Some(Outcome::Indeterminate);op.revision+=1;
+                    op.result=Some(serde_json::to_value(result)?);
+                    event(&tx,&op.id,op.revision,"policy.model_interrupted",Value::Null)?;
+                }
+                op.epoch=self.epoch;put(&tx,"operations",&op.id,&op)?;continue;
+            }
             if let Some(intent)=policy::graph_intent(&op)? {
                 policy::graph_result(&op,&intent)?;
                 // No external effect exists: retry only missing pure reads, retaining settled receipts.
@@ -1291,3 +1308,6 @@ pub mod permissions;
 
 #[path="catalog_policy.rs"]
 pub(crate) mod policy;
+
+#[path="catalog_policy_model.rs"]
+pub(crate) mod policy_model;

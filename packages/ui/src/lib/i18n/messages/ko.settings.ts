@@ -3886,6 +3886,8 @@ export const settingsDict = {
   "settings.harness.role.worker.description": "위임된 작업을 수행하고 관련 변경을 조율합니다.",
   "settings.harness.role.reader": "읽기 도우미",
   "settings.harness.role.reader.description": "자료 읽기와 정리를 돕습니다.",
+  "settings.harness.role.agentPlanning": "Agent planning model",
+  "settings.harness.role.agentPlanning.description": "Used only when the selected native Agent policy requests planning. Select a model explicitly; an unconfigured role never uses the main model.",
   "settings.harness.role.memoryOrganizer": "메모리 구성기",
   "settings.harness.role.memoryOrganizer.description": "세션과 관찰에서 지속적인 백그라운드 메모리를 정리합니다.",
   "settings.harness.role.nextStep": "Next-step selection",

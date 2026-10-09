@@ -147,6 +147,7 @@ pub(crate) struct NativeMcpPrepareParams {
 pub(crate) struct NativePolicyPrepareParams {
     pub(crate) run_id: String,
     pub(crate) identity: NativeLaunchPolicy,
+    pub(crate) policy_models: Option<Value>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

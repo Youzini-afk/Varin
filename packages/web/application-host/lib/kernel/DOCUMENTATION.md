@@ -285,3 +285,25 @@ memory observations. Corpus creation and object upload are outside timing. The O
 The owning Rust tests count successful query compilations across distinct documents and check recipe
 replacement/revisit semantics, corrupt content rejection and cancellation; latency by itself is not a
 compilation/hash counter.
+
+## Selected native policy planning models
+
+The installed `varin.agent.policy` service may declare `capabilities: ['agentPlanning']` in its
+pinned description. Only that selected policy triggers planning preparation. The Host reads the
+existing authenticated `settings.get` catalog path, validates `harness.models.agentPlanning` using
+`parseHarnessModelSlots`, and resolves it with `resolveHarnessModelSlot(..., null)`. The role has an
+explicit model picker in Context settings and never inherits the main model. Disabled, unconfigured,
+invalid settings, unavailable catalog/auth, and available selections remain distinct.
+
+`native-policy-models.ts` resolves registered IDs through `native-model-authority.ts` and freezes the
+configuration identity, purpose, supported operation and nonsecret binding ID. Rust derives the actual
+tool-free request binding and retains the selection with the launch. Policies receive only capability
+IDs and availability descriptors, never endpoints, provider selectors or credentials. Rebinding
+verifies both the selected role and original configuration/account scope; it cannot select a replacement.
+
+The existing private credential bridge keys owners by Run and frozen binding ID. The main owner has
+its own empty binding slot; auxiliary registration cannot replace it. Requests retain their exact
+scope, kernel epoch and optional endpoint/payload digest for signing. Run cancellation, release and
+transport shutdown retire every bound owner. Parked Run resumption re-prepares the pinned policy and
+all its owners. Tokens remain transient private replies, never launch or policy data. Production Pi,
+the default native policy, and policies without declared planning duties do not prepare this role.

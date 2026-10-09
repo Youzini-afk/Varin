@@ -1,6 +1,7 @@
 import { createNativeThreadSourcePreparer } from './lib/kernel/native-thread-sources.js';
 import { createNativeThreadContext } from './lib/kernel/native-thread-context.js';
 import { createNativeContextComposition } from './lib/kernel/native-context-composition.js';
+import { createNativePolicyModelPreparer } from './lib/kernel/native-policy-models.js';
 import { createNativeAgentPolicy } from './lib/kernel/native-agent-policy.js';
 import { NativeRunObservers } from './lib/kernel/native-run-observers.js';
 import { McpAuthority, mcpHostAgentDir, mcpHostProjectTrusted, readMcpHostPermissionPolicy } from '@varin/pi-host/mcp-authority';
@@ -2869,6 +2870,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     credentialScope: async (_scope, provider) => hostCredentialAuthority.currentScope(provider),
   });
   const prepareNativePolicy = createNativeAgentPolicy(extensionRuntime);
+  const nativeModelAuthority = createNativeModelAuthority(hostCredentialAuthority);
   const nativeRuntime: NativeRuntimeClient = new NativeRuntimeClient(kernelClient, async (input, signal) => {
     // A read-only fixed branch has no executable filesystem view. Global MCP capabilities run
     // in the neutral Host scope; they must not borrow the mutable project directory.
@@ -2904,12 +2906,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const checkpoint = await nativeRuntime.context(run.branch_id, signal);
     const projectId = checkpoint?.personalization?.projectId;
     return prepareNativePolicy({ sessionId: input.threadId, ...(projectId ? { projectId } : {}) }, signal);
-  });
+  }, createNativePolicyModelPreparer({ models: nativeModelAuthority,
+    // This is a user-scoped role. Native Threads do not impersonate Pi sessions.
+    settings: () => piRuntimeBroker.requestCatalog('settings.get', {}),
+  }));
   const nativeRunObservers = new NativeRunObservers(nativeRuntime, extensionRuntime, (threadId, _error) => {
     console.error('[NativeObserver] Activity projection requires attention:', threadId ?? 'selection');
   });
   const nativeThreads = new NativeThreadAdapter(nativeRuntime,
-    createNativeModelAuthority(hostCredentialAuthority), async source => {
+    nativeModelAuthority, async source => {
       // Public source coordinates identify existing Host workspaces, never arbitrary roots/grants.
       await documentsAuthority.inspectWorkspace(source.workspaceId);
       await documentsAuthority.inspectWorkspace(source.executionWorkspaceId);

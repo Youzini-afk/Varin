@@ -3886,6 +3886,8 @@ export const settingsDict = {
   "settings.harness.role.worker.description": "Wykonuje powierzone zadania i koordynuje powiązane zmiany.",
   "settings.harness.role.reader": "Pomoc w czytaniu",
   "settings.harness.role.reader.description": "Pomaga czytać i porządkować materiały.",
+  "settings.harness.role.agentPlanning": "Agent planning model",
+  "settings.harness.role.agentPlanning.description": "Used only when the selected native Agent policy requests planning. Select a model explicitly; an unconfigured role never uses the main model.",
   "settings.harness.role.memoryOrganizer": "Organizator pamięci",
   "settings.harness.role.memoryOrganizer.description": "Organizuje trwałą pamięć w tle na podstawie sesji i obserwacji.",
   "settings.harness.role.nextStep": "Next-step selection",

@@ -4,6 +4,10 @@ use crate::execution::*;
 use std::sync::Mutex;
 
 impl Persistence for Mutex<Catalog> {
+    fn policy_model_job(&self,run:&str, epoch:u64)->std::result::Result<Option<PolicyModelState>,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.policy_model_job(run,epoch).map_err(policy_error)}
+    fn admit_policy_model(&self,run:&str,epoch:u64,intent:&PolicyModelIntent,snapshot:&RequestSnapshot)->std::result::Result<PolicyModelState,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.admit_policy_model(run,epoch,intent,snapshot).map_err(policy_error)}
+    fn dispatch_policy_model(&self,run:&str,epoch:u64,action:&str)->std::result::Result<(),ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.dispatch_policy_model(run,epoch,action).map_err(policy_error)}
+    fn record_policy_model(&self,run:&str,epoch:u64,action:&str,output:&PolicyModelOutput,receipt:Option<&PolicyModelReceipt>)->std::result::Result<(),ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.record_policy_model(run,epoch,action,output,receipt).map_err(policy_error)}
     fn policy_boundary(&self, run:&str, epoch:u64)->std::result::Result<PolicyBoundary,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.policy_boundary(run,epoch).map_err(policy_error)}
     fn policy_graph(&self, run:&str, epoch:u64)->std::result::Result<Option<PolicyGraphState>,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.policy_graph(run,epoch).map_err(policy_error)}
     fn admit_policy_graph(&self,run:&str,epoch:u64,intent:&PolicyGraphIntent)->std::result::Result<PolicyGraphState,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.admit_policy_graph(run,epoch,intent).map_err(policy_error)}
@@ -13,9 +17,9 @@ impl Persistence for Mutex<Catalog> {
         self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.settle_policy_node(run,epoch,action,node,completion).map_err(policy_error)
     }
     fn policy_evidence(&self,run:&str,epoch:u64,reference:&PolicyEvidenceRef)->std::result::Result<ConversationItem,ExecutionError>{
-        let (content,owned)={let catalog=self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?;fence(&catalog.run(run).map_err(policy_error)?,epoch).map_err(policy_error)?;(catalog.content.clone(),catalog.owned_policy_reference(run,reference).map_err(policy_error)?)};
+        let (content,owned,model)={let catalog=self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?;fence(&catalog.run(run).map_err(policy_error)?,epoch).map_err(policy_error)?;(catalog.content.clone(),catalog.owned_policy_reference(run,reference).map_err(policy_error)?,catalog.is_policy_model_reference(reference).map_err(policy_error)?)};
         let value=content.load(&owned).map_err(policy_error)?;
-        Ok(policy_evidence_item(reference,value))
+        Ok(if model {policy_model_evidence_item(reference,value)} else {policy_evidence_item(reference,value)})
     }
     fn policy_chunk(&self,run:&str,epoch:u64,reference:&PolicyEvidenceRef,index:usize)->std::result::Result<crate::content::ContentChunk,ExecutionError>{
         let (content,owned)={let catalog=self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?;fence(&catalog.run(run).map_err(policy_error)?,epoch).map_err(policy_error)?;(catalog.content.clone(),catalog.owned_policy_reference(run,reference).map_err(policy_error)?)};
@@ -262,10 +266,11 @@ impl Catalog {
                 put(&tx, "runs", run_id, &run)?;
             }
             ExecutionRecord::RequestPrepared { snapshot } => {
-                let graph_pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind')='policy_read_graph_v1' AND json_extract(body,'$.phase')!='terminal')",[run_id],|r|r.get(0))?;
+                let graph_pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_read_graph_v1','policy_model_job_v1') AND json_extract(body,'$.phase')!='terminal')",[run_id],|r|r.get(0))?;
                 if graph_pending {return Err(RuntimeError::Conflict("policy graph is unsettled".into()));}
                 if super::inputs::has_boundary_inputs(&tx,run_id)?{return Err(RuntimeError::InputPending);}
 
+                if !matches!(&snapshot.view.origin, RequestOrigin::Conversation{history_range,..} if history_range == &snapshot.view.binding.history_range) {return Err(RuntimeError::Invalid("conversation request origin mismatch".into()));}
                 if run.cancel_requested
                     || snapshot.view.run_id != run_id
                     || snapshot.view.binding.history_range.branch_id != run.branch_id
@@ -997,7 +1002,7 @@ impl Catalog {
     ) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let mut op: Operation = super::record(&tx, "operations", operation_id)?;
-        if super::policy::graph_intent(&op)?.is_some() {return Err(RuntimeError::Invalid("policy graph cannot accept external executor receipts".into()));}
+        if super::policy::graph_intent(&op)?.is_some() || super::policy_model::model_intent(&op)?.is_some() {return Err(RuntimeError::Invalid("policy graph cannot accept external executor receipts".into()));}
         if receipt.identity != op.id
             || op.executor.as_deref() != Some(receipt.executor.as_str())
             || receipt.epoch.is_empty()

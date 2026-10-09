@@ -299,7 +299,7 @@ fn request_snapshot(receipt: &Receipt) -> crate::execution::RequestSnapshot {
         view: RequestView {
             request_id: "model-1".into(),
             run_id: receipt.run_id.clone(),
-            step: 1,
+            origin: RequestOrigin::Conversation { step: 1, history_range: HistoryRange { branch_id: receipt.branch_id.clone(), ancestor_id: None, leaf_id: Some(receipt.input_id.clone()) } },
             binding: RequestBinding {
                 connection_identity: "fixture-connection".into(),
                 provider_family: "test".into(),

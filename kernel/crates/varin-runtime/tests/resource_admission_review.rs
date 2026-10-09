@@ -16,7 +16,7 @@ fn request_snapshot(receipt: &Receipt) -> varin_runtime::execution::RequestSnaps
         view: RequestView {
             request_id: "model-1".into(),
             run_id: receipt.run_id.clone(),
-            step: 1,
+            origin: RequestOrigin::Conversation { step: 1, history_range: HistoryRange { branch_id: receipt.branch_id.clone(), ancestor_id: None, leaf_id: Some(receipt.input_id.clone()) } },
             binding: RequestBinding {
                 connection_identity: "fixture-connection".into(),
                 provider_family: "test".into(),
@@ -281,7 +281,7 @@ mod actual_engines {
             let first = self.0.fetch_add(1, Ordering::SeqCst) == 0;
             emit(ProviderEvent::ItemCompleted {
                 item: ProviderItem {
-                    id: format!("{}-{}", r.view.run_id, r.view.step),
+                    id: format!("{}-{}", r.view.run_id, r.view.request_id),
                     content: if first {
                         Content::ToolCall {
                             call: ToolCall {

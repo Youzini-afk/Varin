@@ -1,3 +1,4 @@
+import type { NativePolicyModelPreparer } from './native-policy-models.js';
 import { waitWithSignal } from '../cancellation.js';
 import type { NativeAgentPolicyLease, NativeAgentPolicyBinding } from './native-agent-policy.js';
 import type { NativeMcpLease, NativeMcpBinding } from './native-mcp-bridge.js';
@@ -19,7 +20,7 @@ export type NativeMcpPreparer = (input: NativeMcpPreparation, signal?: AbortSign
 
 /** Explicit native-authority client. Existing Pi thread routes are not silently redirected. */
 export class NativeRuntimeClient {
-  constructor(private readonly kernel: KernelClient, private readonly prepareMcpOwner?: NativeMcpPreparer, private readonly preparePolicyOwner?: NativeRunPolicyPreparer) {}
+  constructor(private readonly kernel: KernelClient, private readonly prepareMcpOwner?: NativeMcpPreparer, private readonly preparePolicyOwner?: NativeRunPolicyPreparer, private readonly preparePolicyModels?: NativePolicyModelPreparer) {}
 
   private async withRunPreparation<T>(runId: string, callerSignal: AbortSignal | undefined, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
     const registration = this.kernel.beginNativeRunPreparation(runId);
@@ -214,12 +215,32 @@ export class NativeRuntimeClient {
         if (expectsPolicy) throw new Error('Saved policy is unavailable');
         return undefined;
       }
+      const registered: string[] = [];
       try {
         signal?.throwIfAborted();
         if (!saved) await this.selectLaunch({ runId, source: null, enabledTools: [], ...(credentialScope ? { credentialScope } : {}) }, signal);
-        await this.kernel.nativeRuntimeRequest('runtime.launch.policy.prepare', { runId, identity: lease.binding.identity }, signal);
+        const roles = lease.requestedModelRoles ?? [];
+        if (roles.length && !this.preparePolicyModels) throw new Error('Planning model preparation is unavailable');
+        const prepared = this.preparePolicyModels ? await this.preparePolicyModels({ threadId: run.thread_id,
+          requestedModelRoles: roles, ...(expectsPolicy ? { savedCapabilities: saved.selection.policy_models } : {}) }, signal) : [];
+        for (const entry of prepared) {
+          if (entry.capability.status !== 'available') continue;
+          if (!entry.credentialOwner || !entry.capability.binding_id) throw new Error('Planning credential owner is missing');
+          const scope = await this.kernel.registerNativeCredentialOwner(runId, entry.credentialOwner, signal, entry.capability.binding_id);
+          registered.push(entry.capability.binding_id);
+          const expected = entry.capability.credential_scope;
+          if (!expected || scope.reference !== expected.reference || scope.authority !== expected.authority
+            || scope.account !== expected.account || scope.generation !== expected.generation) throw new Error('Planning credential scope changed');
+        }
+        // Rust constructs and checks the tool-free binding; the Host never supplies one.
+        await this.kernel.nativeRuntimeRequest('runtime.launch.policy.prepare', { runId, identity: lease.binding.identity,
+          policyModels: prepared.map(entry => ({ ...entry.capability, binding: null })) }, signal);
+        signal.throwIfAborted();
         return await this.kernel.registerNativePolicyOwner(runId, lease);
-      } catch (error) { lease.release(); throw error; }
+      } catch (error) {
+        for (const bindingId of registered) this.kernel.unregisterNativeCredentialOwner(runId, bindingId);
+        lease.release(); throw error;
+      }
     } finally { preparation.release(); }
   }
 
@@ -229,7 +250,7 @@ export class NativeRuntimeClient {
       const mcpBinding = this.kernel.nativeMcpBinding(runId);
       try {
         return await this.kernel.nativeRuntimeRequest('runtime.run.start', { runId, ...(policyBinding ? { policyBinding } : {}), ...(mcpBinding ? { mcpBinding } : {}), ...(toolBinding === undefined ? {} : { toolBinding }) }, signal);
-      } catch (error) { this.kernel.unregisterNativePolicyOwner(runId); throw error; }
+      } catch (error) { this.kernel.unregisterNativeCredentialOwner(runId); this.kernel.unregisterNativePolicyOwner(runId); throw error; }
     });
   }
   /** Private Host path: only nonsecret pinned scope crosses admission; credentials resolve later. */
@@ -248,7 +269,11 @@ export class NativeRuntimeClient {
       }
     });
   }
-  releaseRunCredentialOwner(runId: string): void { this.kernel.unregisterNativeCredentialOwner(runId); }
+  releaseRunCredentialOwner(runId: string): void {
+    this.kernel.unregisterNativeCredentialOwner(runId);
+    // A parked Run resumes with every frozen planning credential owner freshly rebound.
+    this.kernel.unregisterNativePolicyOwner(runId);
+  }
   async run(runId: string, signal?: AbortSignal): Promise<NativeRun> {
     const run = await this.kernel.nativeRuntimeRequest<NativeRun, 'runtime.run.inspect'>('runtime.run.inspect', { runId }, signal);
     if (['completed', 'failed', 'cancelled'].includes(run.state)) { this.kernel.cancelNativeRunPreparation(runId); this.kernel.unregisterNativeCredentialOwner(runId); this.kernel.unregisterNativeMcpOwner(runId); this.kernel.unregisterNativePolicyOwner(runId); }
