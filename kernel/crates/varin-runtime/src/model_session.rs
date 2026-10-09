@@ -43,7 +43,7 @@ fn build(configuration:ModelSessionConfiguration,credentials:Arc<dyn CredentialR
     connection.accepts_images=configuration.accepts_images;
     let provider:Arc<dyn ModelProvider>=match configuration.provider_family.as_str(){
         responses::FAMILY=>{let mut provider=responses::ResponsesProvider::new(connection);provider.max_output_tokens=configuration.max_output_tokens;Arc::new(provider)},
-        anthropic::FAMILY=>Arc::new(anthropic::AnthropicProvider::new(connection,configuration.max_output_tokens.ok_or_else(||ExecutionError::new("output_capacity_required","Anthropic requires an explicit positive output capacity"))?)),
+        anthropic::FAMILY=>{let mut provider=anthropic::AnthropicProvider::new(connection,configuration.max_output_tokens.ok_or_else(||ExecutionError::new("output_capacity_required","Anthropic requires an explicit positive output capacity"))?);provider.oauth=configuration.anthropic_oauth.unwrap_or(false);Arc::new(provider)},
         chat::FAMILY=>{let mut provider=chat::ChatProvider::new(connection);provider.max_output_tokens=configuration.max_output_tokens;provider.legacy_max_tokens=configuration.legacy_max_tokens.unwrap_or(false);provider.include_stream_usage=configuration.include_stream_usage.unwrap_or(true);provider.reasoning_effort=configuration.reasoning_effort;Arc::new(provider)},
         azure::FAMILY=>{
             let deployment=configuration.azure_deployment.clone().filter(|s|!s.trim().is_empty()).ok_or_else(||ExecutionError::new("azure_configuration","Azure requires an explicit deployment"))?;

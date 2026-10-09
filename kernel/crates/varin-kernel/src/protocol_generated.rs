@@ -1064,6 +1064,8 @@ pub(crate) struct KernelComputeStartParams {
     pub(crate) job_id: String,
     pub(crate) lane: String,
     pub(crate) operation: String,
+    pub(crate) branch_id: Option<String>,
+    pub(crate) revision: Option<i64>,
     pub(crate) pin_id: Option<String>,
     pub(crate) root_id: Option<String>,
     pub(crate) objects: Option<Vec<KernelComputeObject>>,
@@ -1146,6 +1148,7 @@ pub(crate) struct NativeLaunchSourceParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeSubmitLaunch {
+    pub(crate) inherit_source: Option<bool>,
     pub(crate) source: RequiredNullable<NativeLaunchSourceParams>,
     pub(crate) enabled_tools: Vec<String>,
     pub(crate) credential_scope: Option<NativeCredentialScope>,

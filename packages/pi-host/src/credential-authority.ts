@@ -1,3 +1,4 @@
+import { NativeAnthropicCredentialOwner, type AnthropicFederationSource } from './native-anthropic-auth.js';
 import { NativeAwsCredentialOwner, type NativeCredentialDispatch } from './native-aws-auth.js';
 import { NativeGoogleCredentialOwner } from './native-google-auth.js';
 import { credentialValueResolver } from './credential-value-resolver.js';
@@ -41,6 +42,7 @@ export class HostCredentialAuthority implements CredentialStore {
   readonly #intent = new AsyncLocalStorage<CredentialMutationIntent>();
   // Values are compared only in owner memory. A restart intentionally requires dynamic-source
   // rebinding; no token-derived identity or resolved secret is persisted.
+  readonly #anthropicCredentials = new NativeAnthropicCredentialOwner();
   readonly #awsCredentials = new NativeAwsCredentialOwner();
   readonly #googleCredentials = new NativeGoogleCredentialOwner();
   readonly #ambientBindings = new Map<string, { value: string; handle: string; result: AuthResult }>();
@@ -98,6 +100,8 @@ export class HostCredentialAuthority implements CredentialStore {
         this.#headerBindings.delete(JSON.stringify([providerId, modelId ?? null]));
         if (await this.#isVertexAdc(providerId, modelId)) return this.#googleScope(providerId);
         if (await this.#isBedrockChain(providerId, modelId)) return this.#awsScope(providerId);
+        const federation = await this.#anthropicSource(providerId, modelId);
+        if (federation) return this.#anthropicScope(providerId, federation);
         return this.#ambientScope(providerId);
       }
       scope = { reference: `provider:${providerId}`, authority: `${this.authorityId}:models`,
@@ -107,6 +111,9 @@ export class HostCredentialAuthority implements CredentialStore {
         scope = await this.#googleScope(providerId, scope);
       } else if (!configured.headers.authorization && await this.#isBedrockChain(providerId, modelId)) {
         scope = await this.#awsScope(providerId, scope);
+      } else if (!['authorization', 'x-api-key'].some(name => configured.headers[name])) {
+        const federation = await this.#anthropicSource(providerId, modelId);
+        if (federation) scope = this.#anthropicScope(providerId, federation, scope);
       }
     } else {
       scope = { reference: `provider:${providerId}`, authority: this.authorityId, account: binding.handle, generation: binding.generation };
@@ -117,7 +124,11 @@ export class HostCredentialAuthority implements CredentialStore {
         else if ((await this.#modelRuntime()).getModels(providerId).some(model => model.api === 'bedrock-converse-stream')
           && (record.env?.AWS_BEARER_TOKEN_BEDROCK || process.env.AWS_BEARER_TOKEN_BEDROCK)) {
           scope = await this.#sourceScope(providerId, scope, '$AWS_BEARER_TOKEN_BEDROCK', record.env);
-        } else throw publicFailure('credential-source-binding-required');
+        } else {
+          const federation = await this.#anthropicSource(providerId, modelId, record.env);
+          if (!federation) throw publicFailure('credential-source-binding-required');
+          scope = this.#anthropicScope(providerId, federation, scope);
+        }
       }
     }
     const id = JSON.stringify([providerId, modelId ?? null]);
@@ -143,8 +154,54 @@ export class HostCredentialAuthority implements CredentialStore {
     const old = this.#headerBindings.get(id);
     const handle = old?.source === source && JSON.stringify(old.values) === JSON.stringify(values) ? old.handle : randomUUID();
     if (dynamic) scope = { ...scope, account: `${scope.account}:header-lease:${handle}` };
-    this.#headerBindings.set(id, { source, values, handle, headerOnly: !binding && configured.key === undefined && !scope.account.includes(':adc:') && !scope.account.includes(':aws:'), generatedAuthorization: configured.generatedAuthorization });
+    this.#headerBindings.set(id, { source, values, handle, headerOnly: !binding && configured.key === undefined && !scope.account.includes(':adc:') && !scope.account.includes(':aws:') && !scope.account.includes(':federation:'), generatedAuthorization: configured.generatedAuthorization });
     return scope;
+  }
+  async #anthropicSource(providerId: string, modelId?: string, env?: Record<string, string>): Promise<AnthropicFederationSource | undefined> {
+    // The locked SDK enables this first-party exchange only for Anthropic, never a custom
+    // provider that happens to speak Messages. Resolved key/bearer sources retain precedence.
+    if (providerId !== 'anthropic' || ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']
+      .some(name => env?.[name] || process.env[name])) return undefined;
+    const runtime = await this.#modelRuntime();
+    const model = modelId ? runtime.getModel(providerId, modelId) : runtime.getModels(providerId)[0];
+    if (model?.api !== 'anthropic-messages') return undefined;
+    return this.#anthropicCredentials.source(model.baseUrl, env);
+  }
+  #anthropicScope(providerId: string, source: AnthropicFederationSource, scope?: HostCredentialScope): HostCredentialScope {
+    return scope ? { ...scope, account: `${scope.account}:federation:${source.identity}` }
+      : { reference: `provider:${providerId}`, authority: `${this.authorityId}:anthropic-federation`, account: source.identity, generation: 1 };
+  }
+  /** The locked Messages adapter selects the Claude subscription wire contract by token kind. */
+  async anthropicAuthentication(providerId: string, modelId?: string): Promise<'oauth' | 'api-key'> {
+    if (providerId === 'github-copilot') return 'api-key';
+    const stored = await this.readRaw(providerId);
+    let key: string | undefined;
+    if (stored?.type === 'oauth') key = typeof stored.access === 'string' ? stored.access : undefined;
+    else if (stored?.type === 'api_key') {
+      if (stored.key) key = (await credentialValueResolver()).resolveConfigValue(stored.key, stored.env);
+    } else {
+      const configured = this.#modelsPath ? await (await import('./provider-configuration.js'))
+        .configuredCredentialBinding(this.#modelsPath, providerId, modelId === undefined ? {} : { modelId }) : undefined;
+      if (configured?.key) key = (await credentialValueResolver()).resolveConfigValue(configured.key);
+      else if (providerId === 'anthropic' && !process.env.ANTHROPIC_AUTH_TOKEN) {
+        key = process.env.ANTHROPIC_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY;
+      }
+    }
+    return key?.includes('sk-ant-oat') ? 'oauth' : 'api-key';
+  }
+  async #nativeAuthResult(providerId: string, modelId: string | undefined, result: AuthResult | undefined): Promise<AuthResult | undefined> {
+    if (!result?.auth.apiKey?.includes('sk-ant-oat') || providerId === 'github-copilot') return result;
+    const runtime = await this.#modelRuntime();
+    const model = modelId ? runtime.getModel(providerId, modelId) : runtime.getModels(providerId)[0];
+    if (model?.api !== 'anthropic-messages') return result;
+    // Defaults match the locked SDK's Claude OAuth client; explicit configured headers win.
+    const headers = new Headers({ authorization: `Bearer ${result.auth.apiKey}`, accept: 'application/json',
+      'anthropic-dangerous-direct-browser-access': 'true', 'user-agent': 'claude-cli/2.1.280', 'x-app': 'cli',
+      'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20' });
+    for (const [name, value] of Object.entries(result.auth.headers ?? {})) {
+      if (value === null) headers.delete(name); else headers.set(name, value);
+    }
+    return { ...result, auth: { ...result.auth, headers: Object.fromEntries(headers) } };
   }
   async #isBedrockChain(providerId: string, modelId?: string): Promise<boolean> {
     const runtime = await this.#modelRuntime();
@@ -264,7 +321,7 @@ export class HostCredentialAuthority implements CredentialStore {
   /** Existing SDK resolution uses this SAME authority; no independent authPath store is opened. */
   async getAuth(providerId: string, modelId?: string, dispatch?: NativeCredentialDispatch): Promise<AuthResult | undefined> {
     const scope = await this.currentScope(providerId, modelId);
-    if (scope.authority === `${this.authorityId}:ambient`) return this.#ambientBindings.get(providerId)!.result;
+    if (scope.authority === `${this.authorityId}:ambient`) return this.#nativeAuthResult(providerId, modelId, this.#ambientBindings.get(providerId)!.result);
     const headerBinding = this.#headerBindings.get(JSON.stringify([providerId, modelId ?? null]));
     const lease = this.#dynamicLeases.get(providerId);
     const pinned = lease && scope.account.includes(`:lease:${lease.handle}`) ? lease.value : undefined;
@@ -286,16 +343,28 @@ export class HostCredentialAuthority implements CredentialStore {
       return { auth: { headers: { ...headerOnly.values } }, source: 'configured headers' };
     }
     let result: AuthResult | undefined;
-    if (scope.authority === `${this.authorityId}:aws` || scope.account.includes(':aws:')) {
+    if (scope.authority === `${this.authorityId}:anthropic-federation` || scope.account.includes(':federation:')) {
+      if (headerBinding?.generatedAuthorization) throw publicFailure('configured-authorization-key-required');
+      const source = await this.#anthropicSource(providerId, modelId, stored?.type === 'api_key' ? stored.env : undefined);
+      if (!source || (scope.account !== source.identity && !scope.account.includes(`:federation:${source.identity}`))) {
+        throw publicFailure('anthropic-federation-source-changed');
+      }
+      const headers = await this.#anthropicCredentials.headers(source);
+      const configuredBeta = headerBinding?.values['anthropic-beta'];
+      const beta = [...new Set([...(configuredBeta?.split(',').map(value => value.trim()).filter(Boolean) ?? []), headers['anthropic-beta']!])].join(',');
+      result = { auth: { headers: { ...headers, ...headerBinding?.values, 'anthropic-beta': beta } }, source: 'Anthropic federation' };
+    } else if (scope.authority === `${this.authorityId}:aws` || scope.account.includes(':aws:')) {
       if (!dispatch) throw publicFailure('aws-signed-request-required');
       if (headerBinding?.generatedAuthorization) throw publicFailure('configured-authorization-key-required');
       const source = await this.#awsCredentials.source(providerId, stored?.type === 'api_key' ? stored.env : undefined);
+      if (scope.account !== source.identity && !scope.account.includes(`:aws:${source.identity}`)) throw publicFailure('credential-source-changed');
       const region = /^arn:aws(?:-[a-z0-9-]+)?:bedrock:([a-z0-9-]+):/.exec(modelId ?? '')?.[1];
       const headers = await this.#awsCredentials.sign(source, dispatch, headerBinding?.values ?? {}, region);
       result = { auth: { headers }, source: 'AWS SigV4' };
     } else if (scope.authority === `${this.authorityId}:google-adc` || scope.account.includes(':adc:')) {
       if (headerBinding?.generatedAuthorization) throw publicFailure('configured-authorization-key-required');
       const source = await this.#googleCredentials.source(stored?.type === 'api_key' ? stored.env : undefined);
+      if (scope.account !== source.identity && !scope.account.includes(`:adc:${source.identity}`)) throw publicFailure('credential-source-changed');
       const headers = await this.#googleCredentials.headers(source);
       result = { auth: { headers: { ...headers, ...headerBinding?.values } },
         ...(stored?.type === 'api_key' && stored.env ? { env: stored.env } : {}), source: 'Google ADC' };
@@ -307,12 +376,16 @@ export class HostCredentialAuthority implements CredentialStore {
       for (const [name, value] of Object.entries(result.auth.headers ?? {})) if (value !== null) actual.set(name, value);
       for (const [name, value] of Object.entries(headerBinding.values)) {
         if (name === 'authorization' && headerBinding.generatedAuthorization) continue;
+        if (name === 'anthropic-beta' && result.source === 'Anthropic federation') {
+          const actualValues = new Set(actual.get(name)?.split(',').map(value => value.trim()));
+          if (value.split(',').map(value => value.trim()).filter(Boolean).every(value => actualValues.has(value))) continue;
+        }
         // Header helpers follow the SDK's uncached semantics. If a helper changes account
         // between binding and dispatch, do not send its result with the old opaque snapshot.
         if (actual.get(name) !== value) throw publicFailure('credential-source-changed');
       }
     }
-    return result;
+    return this.#nativeAuthResult(providerId, modelId, result);
   }
   async selectedModel(providerId: string, modelId: string): Promise<HostSelectedModel> {
     const runtime = await this.#modelRuntime();

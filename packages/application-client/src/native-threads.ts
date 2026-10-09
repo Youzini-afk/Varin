@@ -9,7 +9,16 @@ export interface NativeThreadSource {
   branchId: string;
   revision: number;
   mode: 'fixed_branch' | 'materialized';
-  tools: Array<'file_read' | 'file_write' | 'file_edit' | 'process_inspect' | 'process_read' | 'process_spawn'>;
+  tools: Array<'file_read' | 'file_list' | 'file_search' | 'file_write' | 'file_edit' | 'process_inspect' | 'process_read' | 'process_spawn'>;
+}
+export interface NativeThreadPrepareSource extends NativeThreadIdentity {
+  key: string;
+  path: string;
+  mode: NativeThreadSource['mode'];
+}
+export interface NativeThreadPreparedSource {
+  path: string;
+  source: NativeThreadSource;
 }
 export interface NativeThreadSubmit extends NativeThreadIdentity {
   key: string;
@@ -61,6 +70,7 @@ export interface NativeThreadsAPI {
   listModels(): Promise<Array<NativeThreadModel & { name?: string; acceptsImages?: boolean }>>;
   list(): Promise<NativeThreadSummary[]>;
   create(key: string): Promise<NativeThreadIdentity>;
+  prepareSource(input: NativeThreadPrepareSource): Promise<NativeThreadPreparedSource>;
   /** Fork immutable conversation ancestry; live runs and resource grants are not copied. */
   fork(input: NativeThreadIdentity & { key: string; headId: string | null }): Promise<NativeThreadIdentity>;
   compact(input: NativeThreadCompact): Promise<NativeContextJob>;

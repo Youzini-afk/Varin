@@ -1,3 +1,4 @@
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import React from 'react';
 import type { NativeThreadIdentity } from '@varin/application-client';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -14,6 +15,7 @@ export const MOBILE_WORKSPACE_DISCONNECTED_EVENT = 'varin:mobile-workspace-disco
 
 export const AgentWorkspaceShell: React.FC<Record<string, unknown>> = () => {
   const { nativeThreads } = useRuntimeAPIs();
+  const workspacePath = useDirectoryStore(state => state.currentDirectory);
   const [selected, setSelected] = React.useState<NativeThreadIdentity>();
   const [available, setAvailable] = React.useState<NativeThreadIdentity[]>([]);
   const [error, setError] = React.useState<string>();
@@ -72,7 +74,7 @@ export const AgentWorkspaceShell: React.FC<Record<string, unknown>> = () => {
       {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
     </div>}
     <div className="min-h-0 flex-1"><MainLayout renderConversation={active => selected && nativeThreads
-      ? <NativeThreadConversation key={selected.branchId} api={nativeThreads} identity={selected} onBranchCreated={created => { navigationGeneration.current += 1; setSelected(created); void load(); }} />
+      ? <NativeThreadConversation key={selected.branchId} api={nativeThreads} identity={selected} initialWorkspacePath={workspacePath} onBranchCreated={created => { navigationGeneration.current += 1; setSelected(created); void load(); }} />
       : <RegularChatView active={active} />} /></div>
   </div>;
 };

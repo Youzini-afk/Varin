@@ -1,7 +1,7 @@
 import type { ImageAttachment } from '@varin/protocol';
 import { nativeThreadInput } from './native-thread-images.js';
 import { createHash } from 'node:crypto';
-import type { NativeThreadIdentity, NativeThreadSubmit, NativeThreadSource, NativeThreadSnapshot, NativeThreadHistoryPage, NativeThreadCompact, NativeThreadContextState } from '@varin/application-client';
+import type { NativeThreadIdentity, NativeThreadSubmit, NativeThreadSource, NativeThreadSnapshot, NativeThreadHistoryPage, NativeThreadCompact, NativeThreadContextState, NativeThreadPrepareSource, NativeThreadPreparedSource } from '@varin/application-client';
 import type { NativeInputMode, NativeModelSessionConfiguration, NativeCredentialScope, NativeRuntimeStreamEvent } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './native-credential-owner.js';
 import { NativeRuntimeClient } from './native-runtime-client.js';
@@ -16,7 +16,8 @@ export interface NativeThreadModelAuthority {
 export class NativeThreadAdapter {
   constructor(readonly runtime: NativeRuntimeClient, private readonly models: NativeThreadModelAuthority,
     private readonly admitSource: (source: NativeThreadSource) => Promise<void>,
-    private readonly onLaunchError: (runId: string, error: unknown) => void) {}
+    private readonly onLaunchError: (runId: string, error: unknown) => void,
+    private readonly prepareWorkspace?: (input: NativeThreadPrepareSource) => Promise<NativeThreadPreparedSource>) {}
 
   async listModels() {
     if (!this.models.listModels) throw new Error('Model catalog is unavailable');
@@ -28,6 +29,12 @@ export class NativeThreadAdapter {
     const identity: NativeThreadIdentity = { runtime: 'nativeThread', threadId: `nativeThread:${digest}`, branchId: `nativeBranch:${digest}` };
     await this.runtime.createThread(identity.threadId, identity.branchId);
     return identity;
+  }
+
+  async prepareSource(input: NativeThreadPrepareSource): Promise<NativeThreadPreparedSource> {
+    await this.requireIdentity(input);
+    if (!this.prepareWorkspace) throw new Error('Workspace source preparation is unavailable');
+    return this.prepareWorkspace(input);
   }
 
   async fork(input: NativeThreadIdentity & { key: string; headId: string | null }): Promise<NativeThreadIdentity> {
@@ -106,16 +113,14 @@ export class NativeThreadAdapter {
     // The same Rust transaction accepts input and pins source/credential/tool selection.
     const receipt = await this.runtime.submit({ key: input.key, threadId: input.threadId, branchId: input.branchId,
       expectedHead: input.expectedHead, input: nativeThreadInput(input.text, input.images), configuration: model.configuration,
-      launch: { source: input.source ? {
+      launch: { inheritSource: input.source === undefined, source: input.source ? {
         workspaceId: input.source.workspaceId, executionWorkspaceId: input.source.executionWorkspaceId,
         branchId: input.source.branchId, revision: input.source.revision, materialized: input.source.mode === 'materialized',
       } : null, enabledTools: input.source?.tools ?? [], credentialScope: await model.credentialOwner.scope() },
     });
     const run = await this.runtime.run(receipt.run_id);
     if (run.state === 'accepted' || run.state === 'preparing' || run.state === 'runnable') {
-      const launch = input.source
-        ? this.runtime.startFromSource({ runId: receipt.run_id, ...input.source }, { credentialOwner: model.credentialOwner })
-        : this.runtime.startRunWithCredentialOwner(receipt.run_id, model.credentialOwner);
+      const launch = this.runtime.rebindLaunch(receipt.run_id, { credentialOwner: model.credentialOwner });
       void launch.catch(error => this.recordLaunchFailure(receipt.run_id, error));
     }
     return receipt;

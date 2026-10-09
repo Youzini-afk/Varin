@@ -118,4 +118,5 @@ pub struct ModelSessionConfiguration {
     pub legacy_max_tokens: Option<bool>,
     pub include_stream_usage: Option<bool>,
     pub reasoning_effort: Option<String>,
+    pub anthropic_oauth: Option<bool>,
 }

@@ -186,6 +186,7 @@ export interface NativeRunReconcileResult {
 }
 
 export interface NativeSubmitLaunch {
+  inheritSource?: boolean;
   source: NativeLaunchSourceParams | null;
   enabledTools: string[];
   credentialScope?: NativeCredentialScope;
@@ -414,6 +415,7 @@ export interface NativeModelSessionConfiguration {
   legacyMaxTokens?: boolean;
   includeStreamUsage?: boolean;
   reasoningEffort?: string | null;
+  anthropicOauth?: boolean;
 }
 
 export interface NativeRunStartReceipt {
@@ -1584,6 +1586,8 @@ export interface KernelComputeStartParams {
   jobId: string;
   lane: string;
   operation: string;
+  branchId?: string;
+  revision?: number;
   pinId?: string;
   rootId?: string;
   objects?: KernelComputeObject[];

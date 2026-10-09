@@ -10,6 +10,7 @@ interface ModelAuthority extends ExistingModelAuthRuntime {
   currentScope(providerId: string, modelId?: string): Promise<NativeCredentialScope>;
   currentProviderAccount(providerId: string): Promise<string | undefined>;
   routingEnvironment(providerId: string): Promise<Record<string, string>>;
+  anthropicAuthentication?(providerId: string, modelId?: string): Promise<'oauth' | 'api-key'>;
   vertexAuthentication?(providerId: string, modelId?: string): Promise<'api-key' | 'adc'>;
 }
 const families = new Set(['openai-responses', 'openai-completions', 'anthropic-messages', 'azure-openai-responses',
@@ -35,6 +36,7 @@ export function createNativeModelAuthority(authority: ModelAuthority) {
   async function configurationFor(model: SelectedModel): Promise<NativeModelSessionConfiguration> {
     if (!families.has(model.api)) return failed('native-model-protocol-unavailable');
     const env = await authority.routingEnvironment(model.providerId);
+    const anthropicOauth = model.api === 'anthropic-messages' && await authority.anthropicAuthentication?.(model.providerId, model.modelId) === 'oauth';
     const vertexAdc = model.api === 'google-vertex' && await authority.vertexAuthentication?.(model.providerId, model.modelId) === 'adc';
     const vertexDefault = model.api === 'google-vertex' && (!model.baseUrl.trim() || model.baseUrl.includes('{location}'));
     const vertexLocation = env.GOOGLE_CLOUD_LOCATION;
@@ -100,16 +102,28 @@ export function createNativeModelAuthority(authority: ModelAuthority) {
     const legacy = model.compat?.maxTokensField === 'max_tokens';
     const streamUsage = model.compat?.supportsUsageInStreaming !== false;
     const generation = Number.parseInt(createHash('sha256').update(JSON.stringify({ providerId: model.providerId,
-      family: model.api, model: model.modelId, endpoint, max, deployment, apiVersion, legacy, streamUsage, acceptsImages })).digest('hex').slice(0, 12), 16);
+      family: model.api, model: model.modelId, endpoint, max, deployment, apiVersion, legacy, streamUsage, acceptsImages, ...(model.api === 'anthropic-messages' ? { anthropicOauth } : {}) })).digest('hex').slice(0, 12), 16);
     return { providerId: model.providerId, providerFamily: model.api, model: model.modelId, endpoint,
       credentialEnvironment: null, allowAnonymous: false, acceptsImages, configurationGeneration: generation, maxOutputTokens: max,
+      ...(model.api === 'anthropic-messages' ? { anthropicOauth } : {}),
       ...(deployment ? { azureDeployment: deployment } : {}), ...(apiVersion ? { azureApiVersion: apiVersion } : {}),
       ...(model.api === 'openai-completions' ? { legacyMaxTokens: legacy, includeStreamUsage: streamUsage } : {}) };
   }
   function ownerFor(configuration: NativeModelSessionConfiguration): ExistingHostCredentialOwner {
     const providerId = configuration.providerId || failed('native-provider-identity-required');
-    return new ExistingHostCredentialOwner({ runtime: { getAuth: (provider) => authority.getAuth(provider, configuration.model),
-      resolveRequest: (provider, dispatch) => authority.getAuth(provider, configuration.model, dispatch) }, providerId,
+    const getAuth = async (provider: string, dispatch?: NativeCredentialDispatch) => {
+      const checkMode = async () => {
+        if (configuration.providerFamily === 'anthropic-messages' && authority.anthropicAuthentication) {
+          const oauth = await authority.anthropicAuthentication(provider, configuration.model) === 'oauth';
+          if (oauth !== (configuration.anthropicOauth ?? false)) failed('native-model-auth-mode-changed');
+        }
+      };
+      await checkMode();
+      const result = await authority.getAuth(provider, configuration.model, dispatch);
+      await checkMode();
+      return result;
+    };
+    return new ExistingHostCredentialOwner({ runtime: { getAuth, resolveRequest: getAuth }, providerId,
       providerFamily: configuration.providerFamily, endpoint: configuration.endpoint,
       currentScope: () => authority.currentScope(providerId, configuration.model),
       currentProviderAccount: () => authority.currentProviderAccount(providerId) });

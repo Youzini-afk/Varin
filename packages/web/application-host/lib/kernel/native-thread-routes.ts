@@ -24,6 +24,7 @@ const identity = (body: Record<string, unknown>): NativeThreadIdentity => {
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
 export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAdapter, requireAuth: RequestHandler): void {
   const fields: Record<string, readonly string[]> = {
+    'source/prepare': ['runtime', 'threadId', 'branchId', 'key', 'path', 'mode'],
     'context/compact': ['runtime', 'threadId', 'branchId', 'key', 'throughId', 'expectedRevision', 'model'],
     'context/publish': ['runtime', 'threadId', 'branchId', 'runId'], 'context/cancel': ['runtime', 'threadId', 'branchId', 'runId'], 'context/resume': ['runtime', 'threadId', 'branchId', 'runId'],
     fork: ['runtime', 'threadId', 'branchId', 'key', 'headId'],
@@ -51,6 +52,10 @@ export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAd
   post('list', async () => (await adapter.runtime.threads()).filter(thread => thread.thread_id.startsWith('nativeThread:')));
   post('create', body => adapter.create(text(body.key)));
   post('fork', body => adapter.fork({ ...identity(body), key: text(body.key), headId: body.headId === null ? null : text(body.headId) }));
+  post('source/prepare', body => {
+    if (body.mode !== 'fixed_branch' && body.mode !== 'materialized') throw new Error('Invalid source mode');
+    return adapter.prepareSource({ ...identity(body), key: text(body.key), path: text(body.path), mode: body.mode });
+  });
   post('context/compact', body => {
     const model = object(body.model);
     if (Object.keys(model).some(key => !['providerId', 'modelId'].includes(key))) throw new Error('Unsupported model selection field');
@@ -72,7 +77,7 @@ export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAd
       const source = object(body.source);
       if (Object.keys(source).some(key => !['workspaceId', 'executionWorkspaceId', 'branchId', 'revision', 'mode', 'tools'].includes(key))) throw new Error('Unsupported source selection field');
       if (source.mode !== 'fixed_branch' && source.mode !== 'materialized') throw new Error('Invalid source mode');
-      if (!Array.isArray(source.tools) || source.tools.some(tool => !['file_read', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn'].includes(String(tool)))) throw new Error('Unsupported native tool');
+      if (!Array.isArray(source.tools) || source.tools.some(tool => !['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn'].includes(String(tool)))) throw new Error('Unsupported native tool');
       input.source = { workspaceId: text(source.workspaceId), executionWorkspaceId: text(source.executionWorkspaceId),
         branchId: text(source.branchId), revision: revision(source.revision), mode: source.mode,
         tools: source.tools as NonNullable<NativeThreadSubmit['source']>['tools'] };

@@ -124,3 +124,28 @@ It does not retry unknown model effects or select a replacement paid model.
 This is explicit user-triggered compaction, not automatic budget management, prompt/skill loading,
 Agent memory CRUD, or parity with Pi context behavior. Source branches and ongoing runs remain
 independent of the summary job; only a successful explicit publication changes later context views.
+
+
+## Workspace source preparation
+
+The native composer exposes `Prepare workspace`: select a Host workspace folder and either a
+read-only file snapshot (read, directory listing and text search) or an isolated editable copy with file and process tools. The public
+`source/prepare` route accepts the native conversation identity, a stable request key, folder path
+and mode. The Host resolves and admits the folder through Documents, then uses the existing
+KernelStorageAdapter WorkingState inventory/capture and branch creation. It returns real workspace,
+branch and immutable baseline revision identities; the renderer does not invent them. Unsaved
+Document Registry buffers are explicitly excluded from this saved-file preparation.
+
+Concurrent retries join the same preparation. A successful branch creation is its durable baseline
+receipt at revision zero; a retry after completion or Host restart does not recapture changed files.
+No separate source catalog or filesystem writer is introduced. Preparation is an explicit step before
+message admission, with the UI reporting its actual pending state. The prepared source is attached
+to the next acknowledged submit and then cleared from the draft, so later submits use the core's
+source inheritance rather than resetting the materialized directory. An active Run keeps its own
+source; a newly prepared selection cannot be silently discarded into queued input.
+
+Editable copies are separate working directories, not security sandboxes, and commands may have
+external effects. Changes are not automatically copied into the selected original folder. Source
+snapshots remain rooted alongside the native conversation; native conversation deletion and source
+release UI are not delivered by this preparation path. Remote environment mapping, dirty-buffer
+capture and work-result integration retain their separate implementation requirements.

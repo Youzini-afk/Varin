@@ -192,13 +192,20 @@ impl Catalog {
         self.submit_with_launch(command, None)
     }
     pub fn submit_with_launch(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>) -> Result<Receipt> {
-        self.submit_admission(command, launch, false)
+        self.submit_admission(command, launch, false, false)
     }
-    fn submit_admission(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>, create_thread: bool) -> Result<Receipt> {
+    /// Inherit the last committed source within admission, while retaining the new model/credential selection.
+    pub fn submit_with_inherited_source(&mut self, command: &SubmitInput, launch: launches::LaunchSelection) -> Result<Receipt> {
+        if launch.source.is_some() || !launch.tools.is_empty() {
+            return Err(RuntimeError::Invalid("source inheritance cannot also override source or tools".into()));
+        }
+        self.submit_admission(command, Some(launch), false, true)
+    }
+    fn submit_admission(&mut self, command: &SubmitInput, mut launch: Option<launches::LaunchSelection>, create_thread: bool, inherit_source: bool) -> Result<Receipt> {
         if let Some(selection)=launch.as_ref(){selection.validate()?;}
         execution_persistence::user_input_items("admission",&command.input)?;
         let history_content = self.content.save_history(&command.input, &None)?;
-        let input = if let Some(selection)=launch.as_ref(){encode(&json!({"command":command,"launch":selection}))?}else{encode(command)?};
+        let input = if inherit_source { encode(&json!({"command":command,"launch":launch,"inherit_source":true}))? } else if let Some(selection)=launch.as_ref(){encode(&json!({"command":command,"launch":selection}))?}else{encode(command)?};
         let tx = self.db.transaction()?;
         let duplicate: Option<(String, String)> = tx
             .query_row(
@@ -230,6 +237,24 @@ impl Catalog {
             return Err(RuntimeError::Conflict(
                 "branch head or execution owner changed".into(),
             ));
+        }
+        if inherit_source {
+            let previous: Option<(String, String)> = tx.query_row(
+                "SELECT r.id,l.body FROM runs r JOIN run_launches l ON l.id=r.id WHERE r.branch_id=?1 ORDER BY r.rowid DESC LIMIT 1",
+                [&command.branch_id], |row| Ok((row.get(0)?,row.get(1)?)),
+            ).optional()?;
+            if let (Some(selection), Some((previous_run, body))) = (launch.as_mut(), previous) {
+                let previous: launches::LaunchIntent = serde_json::from_str(&body)?;
+                selection.source = previous.selection.source;
+                if let Some(source) = selection.source.as_mut() {
+                    if source.materialized && source.environment_run_id.is_none() {
+                        source.environment_run_id = Some(previous_run);
+                    }
+                    selection.tools = previous.selection.tools;
+                    selection.tool_schema_generation = selection.configuration_generation;
+                }
+                selection.validate()?;
+            }
         }
         let input_id = id();
         let run_id = id();

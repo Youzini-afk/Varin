@@ -6,6 +6,7 @@ pub struct AnthropicProvider {
     pub connection: Connection,
     pub max_tokens: u64,
     pub thinking: Option<Value>,
+    pub oauth: bool,
 }
 impl AnthropicProvider {
     pub fn new(connection: Connection, max_tokens: u64) -> Self {
@@ -13,8 +14,22 @@ impl AnthropicProvider {
             connection,
             max_tokens,
             thinking: None,
+            oauth: false,
         }
     }
+}
+// Locked Pi Messages adapter's Claude subscription tool naming contract.
+fn oauth_tool_name(name: &str) -> &str {
+    const NAMES: &[&str] = &["Read", "Write", "Edit", "Bash", "Grep", "Glob", "AskUserQuestion",
+        "EnterPlanMode", "ExitPlanMode", "KillShell", "NotebookEdit", "Skill", "Task", "TaskOutput",
+        "TodoWrite", "WebFetch", "WebSearch"];
+    NAMES.iter().copied().find(|candidate| candidate.eq_ignore_ascii_case(name)).unwrap_or(name)
+}
+fn registered_tool_name<'a>(name: &'a str, view: &'a RequestView, oauth: bool) -> &'a str {
+    if oauth {
+        view.binding.tools.iter().find(|tool| tool.name.eq_ignore_ascii_case(name))
+            .map(|tool| tool.name.as_str()).unwrap_or(name)
+    } else { name }
 }
 fn push_block(messages: &mut Vec<Value>, role: &str, block: Value) {
     if let Some(last) = messages.last_mut().filter(|m| m["role"] == role) {
@@ -38,6 +53,9 @@ impl ModelProvider for AnthropicProvider {
         }
         let mut messages = Vec::new();
         let mut system = Vec::new();
+        if self.oauth {
+            system.push(json!({"type":"text","text":"You are Claude Code, Anthropic's official CLI for Claude."}));
+        }
         for item in compile_history(&view.history, FAMILY, &view.binding.connection_identity) {
             if let Some(original) = item.opaque {
                 if original.adapter_version != "1" {
@@ -64,7 +82,7 @@ impl ModelProvider for AnthropicProvider {
                     block
                 }
                 Content::ToolCall { call } => {
-                    json!({"type":"tool_use","id":call.call_id,"name":call.name,"input":call.arguments})
+                    json!({"type":"tool_use","id":call.call_id,"name":if self.oauth { oauth_tool_name(&call.name) } else { &call.name },"input":call.arguments})
                 }
                 Content::ToolResult { result } => {
                     json!({"type":"tool_result","tool_use_id":result.call_id,"content":serde_json::to_string(&result.completion).map_err(|_|ExecutionError::new("serialize","invalid tool result"))?,"is_error":matches!(result.completion,ToolCompletion::Result{outcome:crate::types::Outcome::Failed|crate::types::Outcome::Cancelled|crate::types::Outcome::Indeterminate,..})})
@@ -111,7 +129,7 @@ impl ModelProvider for AnthropicProvider {
             .binding
             .tools
             .iter()
-            .map(|t| json!({"name":t.name,"input_schema":t.schema}))
+            .map(|t| json!({"name":if self.oauth { oauth_tool_name(&t.name) } else { &t.name },"input_schema":t.schema}))
             .collect();
         let mut result = json!({"model":view.binding.model,"messages":messages,"system":system,"tools":tools,"max_tokens":self.max_tokens,"stream":true});
         if let Some(thinking) = &self.thinking {
@@ -128,7 +146,7 @@ impl ModelProvider for AnthropicProvider {
         if request.view.binding.provider_family != FAMILY {
             return Err(failure("provider_family_mismatch", "wrong adapter family"));
         }
-        let mut state = StreamState::default();
+        let mut state = StreamState { oauth: self.oauth, ..Default::default() };
         self.connection.run(
             request,
             cancel,
@@ -152,6 +170,7 @@ struct Block {
 }
 #[derive(Default)]
 struct StreamState {
+    oauth: bool,
     id: Option<String>,
     blocks: BTreeMap<u64, Block>,
     finish: Option<FinishReason>,
@@ -330,7 +349,7 @@ impl StreamState {
                 }
                 let content = match required(&block.value, "type")? {
                     "tool_use" => {
-                        let name = required(&block.value, "name")?;
+                        let name = registered_tool_name(required(&block.value, "name")?, view, self.oauth);
                         if !block.value["input"].is_object() {
                             return Err(failure(
                                 "invalid_tool_arguments",

@@ -17,13 +17,18 @@ use varin_runtime::execution::{
 };
 use varin_runtime::{Effect, Lifetime, Outcome};
 
+#[path = "native_tools_discovery.rs"]
+mod discovery;
 #[path = "native_tools_reconciliation.rs"]
 mod reconciliation;
+use discovery::FileQueryArgs;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum NativeToolKind {
     FileRead,
+    FileList,
+    FileSearch,
     FileWrite,
     FileEdit,
     ProcessInspect,
@@ -34,6 +39,8 @@ impl NativeToolKind {
     fn name(self) -> &'static str {
         match self {
             Self::FileRead => "native_file_read",
+            Self::FileList => "native_file_list",
+            Self::FileSearch => "native_file_search",
             Self::FileWrite => "native_file_write",
             Self::FileEdit => "native_file_edit",
             Self::ProcessInspect => "native_process_inspect",
@@ -44,6 +51,8 @@ impl NativeToolKind {
     fn from_name(name: &str) -> Option<Self> {
         [
             Self::FileRead,
+            Self::FileList,
+            Self::FileSearch,
             Self::FileWrite,
             Self::FileEdit,
             Self::ProcessInspect,
@@ -128,6 +137,11 @@ struct ProcessSpawnArgs {
 #[derive(Debug, Clone)]
 enum ResourceOperation {
     FileRead(FileReadArgs),
+    FileQuery(FileQueryArgs),
+    ComputeControl {
+        method: &'static str,
+        cursor: u64,
+    },
     FileMutation(NativeTextMutation),
     ReconcileMutation {
         mutation: NativeTextMutation,
@@ -149,6 +163,12 @@ impl ResourceOperation {
             ));
         }
         let parsed = match kind {
+            NativeToolKind::FileList | NativeToolKind::FileSearch => {
+                serde_json::from_value::<FileQueryArgs>(args.clone()).map(|mut args| {
+                    args.search = kind == NativeToolKind::FileSearch;
+                    Self::FileQuery(args)
+                })
+            }
             NativeToolKind::FileRead => serde_json::from_value(args.clone()).map(Self::FileRead),
             NativeToolKind::FileWrite => {
                 serde_json::from_value::<NativeFileWriteArgs>(args.clone())
@@ -168,6 +188,7 @@ impl ResourceOperation {
         }
         .map_err(|error| ExecutionError::new("invalid_tool_arguments", error.to_string()))?;
         match &parsed {
+            Self::FileQuery(args) => args.validate()?,
             Self::FileRead(args) => {
                 normalized_path(&args.path, false)?;
             }
@@ -216,6 +237,16 @@ impl ResourceOperation {
         context: &ToolExecutionContext,
     ) -> (&'static str, Value) {
         match self {
+            Self::FileQuery(args) => ("compute.start", args.params(binding, context)),
+            Self::ComputeControl { method, cursor } => {
+                let mut params =
+                    json!({"workspaceId":binding.workspace_id,"jobId":context.operation_id});
+                if *method == "compute.read" {
+                    params["cursor"] = json!(cursor);
+                    params["maxBytes"] = json!(65536);
+                }
+                (method, params)
+            }
             Self::ReconcileMutation { mutation, .. } => (
                 "file.operation.reconcile",
                 json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,
@@ -395,8 +426,12 @@ impl NativeToolExecutor {
                 "tool binding identities must be nonempty",
             ));
         }
-        if binding.enabled_tools.contains(&NativeToolKind::FileRead)
-            && binding.source_mode == NativeSourceMode::FixedBranch
+        if binding.enabled_tools.iter().any(|kind| {
+            matches!(
+                kind,
+                NativeToolKind::FileRead | NativeToolKind::FileList | NativeToolKind::FileSearch
+            )
+        }) && binding.source_mode == NativeSourceMode::FixedBranch
             && !binding
                 .file_source
                 .as_ref()
@@ -404,7 +439,7 @@ impl NativeToolExecutor {
         {
             return Err(ExecutionError::new(
                 "invalid_tool_binding",
-                "file read requires a fixed branch revision",
+                "file reads and discovery require a fixed branch revision",
             ));
         }
         if binding.source_mode != NativeSourceMode::Materialized
@@ -490,9 +525,23 @@ impl NativeToolExecutor {
     }
     fn contract(&self, call: &ToolCall, operation: &ResourceOperation) -> ToolContract {
         let (resource, access, job) = match operation {
-            ResourceOperation::ReconcileMutation { .. } => {
+            ResourceOperation::ReconcileMutation { .. }
+            | ResourceOperation::ComputeControl { .. } => {
                 unreachable!("private receipt queries have no model contract")
             }
+            ResourceOperation::FileQuery(_) => (
+                if self.binding.source_mode == NativeSourceMode::Materialized {
+                    format!("environment:{}", self.binding.execution_workspace_id)
+                } else {
+                    let source = self.binding.file_source.as_ref().expect("validated source");
+                    format!(
+                        "branch:{}:{}:{}",
+                        self.binding.workspace_id, source.branch_id, source.revision
+                    )
+                },
+                Access::Read,
+                false,
+            ),
             ResourceOperation::FileMutation(_) => (
                 format!("environment:{}", self.binding.execution_workspace_id),
                 Access::Write,
@@ -629,10 +678,13 @@ impl ToolExecutor for NativeToolExecutor {
         }
         let spawn = matches!(operation, ResourceOperation::ProcessSpawn(_));
         let mutation = matches!(operation, ResourceOperation::FileMutation(_));
-        match self
-            .resources
-            .call(&self.binding, context, operation, false, cancel)
-        {
+        let result = if let ResourceOperation::FileQuery(args) = &operation {
+            self.resources.query(&self.binding, context, args, cancel)
+        } else {
+            self.resources
+                .call(&self.binding, context, operation, false, cancel)
+        };
+        match result {
             Ok(result) if spawn => {
                 let phase = result.get("status").and_then(Value::as_str);
                 if result.get("processId").and_then(Value::as_str)
@@ -702,6 +754,9 @@ impl ToolExecutor for NativeToolExecutor {
 
 fn tool_schema(kind: NativeToolKind) -> Value {
     let (properties, required) = match kind {
+        NativeToolKind::FileList | NativeToolKind::FileSearch => {
+            return discovery::schema(kind == NativeToolKind::FileSearch)
+        }
         NativeToolKind::FileWrite => (
             json!({"path":{"type":"string"},"readVersion":{"type":"string","minLength":1},"content":{"type":"string"}}),
             vec!["path", "readVersion", "content"],

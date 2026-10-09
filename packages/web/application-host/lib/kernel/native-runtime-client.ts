@@ -87,7 +87,7 @@ export class NativeRuntimeClient {
       return options.credentialOwner ? this.startRunWithCredentialOwner(runId, options.credentialOwner, options.signal) : this.startRun(runId, options.signal);
     }
     if (source.branch_id === null || source.revision === null) throw new Error('Saved environment requires its original Host resource owner');
-    const names = { native_file_read: 'file_read', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn' } as const;
+    const names = { native_file_read: 'file_read', native_file_list: 'file_list', native_file_search: 'file_search', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn' } as const;
     const tools = launch.selection.tools.map(tool => {
       if (!(tool.name in names)) throw new Error('Saved capability requires its original extension owner');
       return names[tool.name as keyof typeof names];
@@ -113,7 +113,7 @@ export class NativeRuntimeClient {
       return options.credentialOwner ? this.startRunWithCredentialOwner(runId, options.credentialOwner, options.signal) : this.startRun(runId, options.signal);
     }
     if (source.branch_id === null || source.revision === null) throw new Error('Environment continuation requires its original Host resource owner');
-    const names = { native_file_read: 'file_read', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn' } as const;
+    const names = { native_file_read: 'file_read', native_file_list: 'file_list', native_file_search: 'file_search', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn' } as const;
     const tools = previous.selection.tools.map(tool => {
       if (!(tool.name in names)) throw new Error('Saved capability requires its original extension owner');
       return names[tool.name as keyof typeof names];
