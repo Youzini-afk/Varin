@@ -383,3 +383,87 @@ Native live-language acceptance is recorded by suite in the
 Rust rendezvous/framing 5; native controlled-owner 20, source entry 1, real bundled TypeScript loop 1;
 portable owner 12 and bridge 3; existing Pi navigation 15 and diagnostics adapter 4; UI 18.
 These are focused checks, not an all-repository, fixed-dependency-closure or cross-platform pass.
+
+## Native code retrieval
+
+`native_code_retrieval` is a live-root read tool. Its private query carries explicit native Run,
+Thread, grant and root identities. It does not create a Pi session/worker or reuse a Pi Explore actor.
+`native-retrieval-owner.ts` reuses `createExploreQueryRun`, Documents, the existing structure facade,
+and Rust compute. Keyword jobs use the actual Run's scoped client, never the Host-wide directory
+compute grant. `file.read.check` admits each candidate's canonical resource and regular-file status
+under that same grant before Documents reads it; the post-read check rejects changed identities.
+No file lease spans structure, semantic or model waits. The kernel re-admits the Run after the Host
+wait, checks every returned path/revision/range, and reconstructs source text from observed bytes
+rather than trusting a provider's result body. Unknown nested payloads do not enter tool history.
+
+`harness/retrieval-pipeline.ts` holds immutable selected method handles and a `PipelinePlan` with
+configuration identity/generation. A query captures its selected immutable service artifact and plan
+before retrieval I/O. The composition caller prepares a replacement through its existing capability owner, then publishes it;
+failed or superseded candidates preserve the previous selection. This adapter is not another index,
+parser, configuration file, or background preparation service. Shared grammar/runtime preparation
+still belongs to Structure/KernelComputeService; cancelling a retrieval only detaches that query.
+
+The production selection comes from `varin.retrieval.plan@1` through the existing extension service
+routing/configuration path. Two lazy built-ins expose keyword+structure and keyword-only declarations;
+no query or source text is sent to the declarative selector. The query's real native Thread key,
+accepted Run checkpoint project and admitted canonical workspace directory fix routing scope.
+`plan.selection` records provider key, artifact/configuration identity and routing revision. A service
+pin survives normal generation retirement for old queries; explicit revocation invalidates its use.
+Preparation failure reports failure and preserves the previous published plan without treating it as
+the failed new selection. Semantic and model stages are explicitly disabled in these built-ins. The composition seam can bind an existing semantic recall handle
+or an explicitly selected model selector. It does not resolve Pi model settings, start an embedding
+index, wait for first publication, choose another paid model, or call a fallback model. Semantic
+candidates are only hints: authorization precedes Documents access; a chunk's SHA-256 content hash
+is verified against its current span, separately from the file's Documents revision. Stale indexed
+spans are omitted, not silently relabeled. Model selection receives only admitted source snippets
+and may select/reorder indexes; failure retains source ranking and reports partial coverage.
+
+Results record per-stage availability and omissions. Cold/missing/unsupported/failed stages do not
+become successful empty recall. Large structure units retain the slicer's real kept ranges: native
+snippets are contiguous spans, with hit-bearing ranges delivered before signatures under a caller's
+snippet cap. Omitted unit bodies are not filled back in. The existing Explore byte budget bounds the
+Host pack; framing/reconstructed-body budgets fail or report partial without killing the shared writer.
+Each snippet has path, inclusive one-based line bounds and actual Documents revision for a later
+`native_file_read`. Its `readVersion` is a separate authority-bound mutation CAS token, not the
+Documents content revision; verify a follow-up full read against the snippet's content digest/bytes.
+Live observations do not claim an atomic workspace snapshot.
+
+This increment does not connect production semantic/model selection settings, fixed/materialized
+retrieval, a complete fixed LSP dependency closure or remote retrieval. The existing semantic wrapper
+waits for Pi configuration refresh and resolves its backend at search time; its storage generation is
+not an immutable query-start publication snapshot. Native semantic integration therefore needs the
+existing owner to expose a published-reader/backend lease and an authorized candidate reader before
+source/model access, rather than wrapping a mutable callback and calling it frozen. The default Pi route is unchanged. Query bindings retain old handles, but opaque mutable
+state inside a supplied provider must still obey that provider owner's generation/lifetime contract.
+
+### Model item identity and committed-history recovery
+
+Provider item IDs are scoped to their response, not globally unique history keys. Native history
+uses a deterministic length-prefixed `(requestId, providerItemId)` identity, shared by Catalog append
+and the execution cursor. The conversation request identity is the owned Run/epoch/ModelStep; auxiliary
+model-purpose operations use their own receipt path. Provider IDs, opaque payloads and durable model
+outputs remain unmodified. Duplicate item IDs are rejected within one output batch. Repeating the
+exact same committed ModelFinished receipt is a read-only idempotent acknowledgment; a changed body,
+owner or epoch is a conflict.
+
+Recovery uses the actual committed history owner rather than recomputing a historical ID. It verifies
+the exact consecutive model rows immediately after the frozen request leaf, with branch/thread
+ownership, row/header identity, order, content, opaque originals and tool-call sequence. Later tool
+results or another step cannot be selected as this output. Only candidate row bodies are hydrated;
+unrelated ancestry uses metadata. The actual persisted head then gates continuation. Existing rows
+are neither rewritten nor recognized by an old-ID pattern, and inconsistent anchors/bodies fail
+explicitly. This changes no Catalog/content format and introduces no migration or alternate reader.
+
+### Acceptance for this increment
+
+The final 0.9.24 kernel has SHA-256
+`d04874a6c88c42c32704db2afc3c92609554bf9a16a47a74e661fc1d08b4c630`. Independent acceptance
+passed 21 new native authority/pipeline/composition cases, 3 portable pipeline cases, and 2 actual
+UI-selector/Host-routing cases. Existing native consumers passed 7 selected cases: live-source and
+language concurrency (2), context/initial-context/reopen (3), durable history (1), and pinned history
+pagination (1). Rust catalog passed 31 cases, including 4 independent identity/recovery cases;
+execution passed 12. The unchanged content owner retained its earlier 7 passing cases. These are
+scoped suites, not whole-repository or visual UI acceptance. The [implementation plan](../../../../../docs/plan/native-agent-runtime-implementation.md)
+records the initial provider-ID collision and corrected candidate-publication fixture sequence;
+neither initial failure is counted as a passing run. No paid models or huge-frame/kill experiments
+were used. Production semantic/model and fixed-source limits above remain in force.

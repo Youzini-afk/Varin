@@ -2450,6 +2450,23 @@ pub(super) fn resolve_admitted_resource(
 }
 
 impl Storage {
+    /// Private read-only Host admission before Documents accesses a retrieval candidate.
+    /// The persisted Run grant and physical lease owner remain authoritative; no body is read.
+    pub(crate) fn native_file_read_check(&mut self, params: &Value, grant: &Grant) -> Result<Value, KernelError> {
+        let args: crate::protocol_generated::KernelFileReadCheckParams = parse_file_params(params)?;
+        let key = self.native_file_resource_key(&args.root_id, &args.path, grant)?;
+        self.native_file_read(params, grant, false)?;
+        let resource = self.resolve_file_resource(&args.root_id, &args.path, grant, false)?;
+        let metadata = fs::symlink_metadata(&resource.absolute)?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err(KernelError::Authorization("retrieval read admission requires a regular file, not a symlink".into()));
+        }
+        // Parent symlinks may have changed while the permission/lease checks ran.
+        if self.native_file_resource_key(&args.root_id, &args.path, grant)? != key {
+            return Err(KernelError::Authorization("canonical file resource changed during admission".into()));
+        }
+        Ok(json!({"resourceKey":key}))
+    }
     /// Typed native adapter entry point. This is deliberately not a wire method:
     /// the bound Run supplies the root, and the existing grant/root/lease owner
     /// still admits every read. The caller adds its selected source mode; this owner

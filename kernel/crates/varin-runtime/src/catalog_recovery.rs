@@ -10,6 +10,69 @@ pub struct ExecutionRecovery {
 }
 
 impl Catalog {
+    /// Model output commits exactly N consecutive assistant rows after its frozen leaf. Resolve
+    /// those already-committed identities from the owner, never by regenerating a history key.
+    /// This is the same ancestry/body validation for all durable rows; no ID-format fallback.
+    fn committed_model_history_head(&self, run: &Run, request_id: &str, snapshot: &RequestSnapshot, items: &[ProviderItem]) -> Result<Option<String>> {
+        let anchor = &snapshot.view.binding.history_range.leaf_id;
+        if self.branch_thread_id(&run.branch_id)? != run.thread_id
+            || snapshot.view.request_id != request_id || snapshot.view.run_id != run.id
+            || snapshot.view.binding.history_range.branch_id != run.branch_id
+            || !matches!(&snapshot.view.origin, RequestOrigin::Conversation { history_range, .. } if history_range == &snapshot.view.binding.history_range) {
+            return Err(RuntimeError::Conflict("committed model request ownership changed".into()));
+        }
+        let mut cursor = self.head(&run.branch_id)?;
+        let mut rows = std::collections::VecDeque::new();
+        let mut visited = std::collections::BTreeSet::new();
+        // Keep only the N rows nearest the anchor while traversing metadata. Later tool results,
+        // input, or another ModelStep are neither skipped nor hydrated as candidate output.
+        while &cursor != anchor {
+            let key = cursor.ok_or_else(|| RuntimeError::Conflict("committed model anchor is not on its branch".into()))?;
+            if !visited.insert(key.clone()) { return Err(RuntimeError::Invalid("history ancestry contains a cycle".into())); }
+            let (thread_id, parent, body): (String, Option<String>, String) = self.db.query_row(
+                "SELECT thread_id,parent,body FROM history WHERE id=?1", [&key],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            let metadata: HistoryItem = serde_json::from_str(&body)?;
+            if metadata.id != key || metadata.thread_id != thread_id || metadata.parent != parent || thread_id != run.thread_id {
+                return Err(RuntimeError::Invalid("history metadata does not match its row".into()));
+            }
+            cursor = parent;
+            rows.push_back(metadata);
+            if rows.len() > items.len() { rows.pop_front(); }
+        }
+        // The anchor itself and every later ancestor must retain the Run's thread owner.
+        // Its content is not part of this ModelStep and is deliberately never hydrated here.
+        if let Some(key) = anchor {
+            let (thread_id, parent, body): (String, Option<String>, String) = self.db.query_row(
+                "SELECT thread_id,parent,body FROM history WHERE id=?1", [key],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            let metadata: HistoryItem = serde_json::from_str(&body)?;
+            if metadata.id != *key || metadata.thread_id != thread_id || metadata.parent != parent || thread_id != run.thread_id {
+                return Err(RuntimeError::Invalid("committed model anchor ownership changed".into()));
+            }
+        }
+        if rows.len() != items.len() { return Err(RuntimeError::Conflict("committed model history count changed".into())); }
+        let mut head = anchor.clone();
+        for (metadata, expected) in rows.into_iter().rev().zip(items) {
+            if metadata.thread_id != run.thread_id || metadata.parent != head || metadata.source != HistorySource::Assistant {
+                return Err(RuntimeError::Conflict("committed model history boundary changed".into()));
+            }
+            let stored = self.content.hydrate_history(metadata)?;
+            let item: ConversationItem = serde_json::from_value(stored.content)?;
+            let original = expected.opaque.as_ref().map(|opaque| ProviderOriginal {
+                connection_identity: opaque.connection_identity.clone(), adapter: opaque.family.clone(),
+                version: opaque.adapter_version.clone(), item: opaque.value.clone(),
+            });
+            if item.id != stored.id || item.provenance != Provenance::Assistant
+                || item.content != expected.content || item.opaque != expected.opaque || stored.provider != original {
+                return Err(RuntimeError::Conflict("committed model history content changed".into()));
+            }
+            head = Some(stored.id);
+        }
+        Ok(head)
+    }
     pub fn prepare_recovered_execution(
         &mut self,
         run_id: &str,
@@ -65,6 +128,9 @@ impl Catalog {
                 .map(|input| (input, None));
         };
         let mut step: ModelStep = record(&self.db, "model_steps", &request_id)?;
+        if step.id != request_id || step.run_id != run_id {
+            return Err(RuntimeError::Conflict("model step ownership changed".into()));
+        }
         if step.state != ModelStepState::Completed || step.superseded_by_input.is_some() {
             return self
                 .prepare_execution(run_id, binding, policy, initial_policy_state)
@@ -109,6 +175,7 @@ impl Catalog {
                 .ok_or_else(|| RuntimeError::Invalid("model output record missing".into()))?,
         )?;
         let ExecutionRecord::ModelFinished {
+            request_id: completed_request_id,
             outcome: ModelOutcome::Completed,
             finish_reason: Some(reason),
             items,
@@ -119,6 +186,9 @@ impl Catalog {
                 "model output is not complete".into(),
             ));
         };
+        if completed_request_id != request_id {
+            return Err(RuntimeError::Conflict("model output receipt belongs to another request".into()));
+        }
         let mut calls = Vec::new();
         let mut receipts = std::collections::BTreeMap::new();
         let mut committed = 0;
@@ -148,6 +218,13 @@ impl Catalog {
                 calls.push(call);
             }
         }
+        let expected_calls: Vec<_> = items.iter().filter_map(|item| {
+            if let Content::ToolCall { call } = &item.content { Some(call.clone()) } else { None }
+        }).collect();
+        if calls != expected_calls {
+            return Err(RuntimeError::Conflict("committed tool call identities differ from model output".into()));
+        }
+        let model_head = self.committed_model_history_head(&run, &request_id, &snapshot, &items)?;
         if committed != 0 && committed != calls.len() {
             return Err(RuntimeError::Invalid(
                 "tool history has a partial batch commit".into(),
@@ -214,12 +291,7 @@ impl Catalog {
                 calls.last().unwrap().call_id
             ))
         } else {
-            items.last().map(|item| item.id.clone()).or(snapshot
-                .view
-                .binding
-                .history_range
-                .leaf_id
-                .clone())
+            model_head
         };
         let head = self.head(&run.branch_id)?;
         if head != expected_head {

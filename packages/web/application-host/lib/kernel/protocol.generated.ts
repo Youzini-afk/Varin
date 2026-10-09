@@ -74,6 +74,7 @@ export type KernelMethod =
   | "storage.blob.release"
   | "storage.getBlob"
   | "storage.object.rebindOwner"
+  | "file.read.check"
   | "file.root.register"
   | "file.operation.list"
   | "file.operation.reconcile"
@@ -148,6 +149,29 @@ export type KernelMethod =
   | "compute.cancel"
   | "compute.release"
   | "compute.grammar.register";
+
+export interface NativeRetrievalQuery {
+  runId: string;
+  threadId: string;
+  workspaceId: string;
+  executionWorkspaceId: string;
+  liveRoot: NativeLiveRoot;
+  grantId: string;
+  projectId: string | null;
+  question: string;
+  paths?: string[];
+  limit?: number;
+}
+
+export interface KernelFileReadCheckParams {
+  workspaceId: string;
+  rootId: string;
+  path: string;
+}
+
+export interface KernelFileReadCheckResult {
+  resourceKey: string;
+}
 
 export interface NativeLanguageQuery {
   runId: string;
@@ -1875,6 +1899,7 @@ export type KernelMethodParams = {
   "storage.blob.release": KernelBlobReleaseParams;
   "storage.getBlob": KernelGetBlobParams;
   "storage.object.rebindOwner": KernelObjectOwnerRebindParams;
+  "file.read.check": KernelFileReadCheckParams;
   "file.root.register": KernelFileRootRegisterParams;
   "file.operation.list": KernelFileOperationListParams;
   "file.operation.reconcile": KernelFileOperationReconcileParams;
@@ -2534,6 +2559,15 @@ export type KernelRequest =
       id: string;
       method: "storage.object.rebindOwner";
       params: KernelObjectOwnerRebindParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.read.check";
+      params: KernelFileReadCheckParams;
       epoch?: string;
       grantId?: string;
     }

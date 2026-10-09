@@ -3378,6 +3378,8 @@ export const settingsDict = {
   'settings.varin.extensions.routing.automatic': 'Automático',
   'settings.varin.extensions.routing.missing': 'Proveedor no disponible',
   'settings.varin.extensions.routing.status.ready': 'Disponible',
+  'settings.varin.extensions.routing.status.declared': 'Instalado; se activa al usarse',
+  'settings.varin.extensions.routing.retrieval': 'Recuperación nativa de código',
   'settings.varin.extensions.routing.status.choose': 'Elige un proveedor',
   'settings.varin.extensions.routing.status.unavailable': 'Proveedor no disponible',
   'settings.varin.extensions.workbench.title': 'Espacio de trabajo',

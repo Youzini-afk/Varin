@@ -35,7 +35,7 @@ pub(super) fn schema(kind: NativeToolKind) -> Value {
         "required":if navigation { vec!["path","line","character"] } else { vec!["path"] }})
 }
 #[derive(Clone)]
-struct Observation { revision: String, text: String }
+pub(super) struct Observation { pub(super) revision: String, pub(super) text: String }
 fn observation(value: Value) -> Result<Observation, ExecutionError> {
     let bytes = if let Some(text) = value["content"]["text"].as_str() { text.as_bytes().to_vec() }
         else if let Some(encoded) = value["content"]["bytesBase64"].as_str() {
@@ -73,7 +73,7 @@ impl NativeToolExecutor {
             .map_err(|failure| ExecutionError::new(error_code(&failure.error), failure.error.to_string()))?;
         value["resourceKey"].as_str().map(str::to_owned).ok_or_else(|| ExecutionError::new("language_resource_invalid", "Missing canonical resource identity"))
     }
-    fn observe_language_path(&self, context: &ToolExecutionContext, path: &str, cancel: &CancellationToken) -> Result<Observation, ExecutionError> {
+    pub(super) fn observe_language_path(&self, context: &ToolExecutionContext, path: &str, cancel: &CancellationToken) -> Result<Observation, ExecutionError> {
         let key = self.admit_language_path(context, path, cancel)?;
         let value = self.resources.call_checked(&self.binding, context,
             ResourceOperation::FileRead(FileReadArgs { path: path.into(), offset: 0, length: None }), false, Some(key), cancel)

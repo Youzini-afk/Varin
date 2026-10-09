@@ -71,6 +71,13 @@ continuous transition without being recreated by a temporary blank outer shell.
 
 ## Module map
 
+Varin Extensions' service-routing picker includes enabled installed Host service declarations before
+their lazy activation, and merges those stable keys with actual active-generation providers. It labels
+unprepared declarations separately from ready providers. Selection still writes the existing revisioned
+user/workspace routing rules; the Host prepares and validates the selected generation on use. Disabled
+or removed selections remain visible as unavailable rules. Native code retrieval offers the packaged
+keyword-and-structure default and keyword-only declaration through this same picker.
+
 `components/sections/assistant` owns the ordinary Agent memory and system-prompt settings pages.
 Memory CRUD and scope changes use the Host personalization authority; the editor stores only changed
 native prompt sections. Full previews include current project files, skills and memories, while the

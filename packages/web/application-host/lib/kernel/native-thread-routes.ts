@@ -84,7 +84,7 @@ export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAd
       const source = object(body.source);
       if (Object.keys(source).some(key => !['workspaceId', 'executionWorkspaceId', 'branchId', 'revision', 'mode', 'tools', 'liveRoot'].includes(key))) throw new Error('Unsupported source selection field');
       if (source.mode !== 'fixed_branch' && source.mode !== 'materialized' && source.mode !== 'live_root') throw new Error('Invalid source mode');
-      if (!Array.isArray(source.tools) || source.tools.some(tool => !['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn', 'language_definition', 'language_references', 'language_diagnostics'].includes(String(tool)))) throw new Error('Unsupported native tool');
+      if (!Array.isArray(source.tools) || source.tools.some(tool => !['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn', 'language_definition', 'language_references', 'language_diagnostics', 'code_retrieval'].includes(String(tool)))) throw new Error('Unsupported native tool');
       const base = { workspaceId: text(source.workspaceId), executionWorkspaceId: text(source.executionWorkspaceId),
         tools: source.tools as NonNullable<NativeThreadSubmit['source']>['tools'] };
       if (source.mode === 'live_root') {

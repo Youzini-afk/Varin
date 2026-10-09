@@ -638,6 +638,46 @@ planning → evidence graph → main-answer path. Cancellation, pinned generatio
 remain part of the existing operation lifecycle, not an extension-owned task or credential store.
 
 
+## Native retrieval plans
+
+A brokered Host extension can provide `varin.retrieval.plan@1` with
+`provideRetrievalPlan(context, { configurationId: 'my-plan-v1', structure: 'native' })`.
+Use `structure: 'disabled'` for keyword-only retrieval. Declare the service with `multiple: true`
+in the manifest and activate on `service-request`. `inspect([])` exposes the shared schemas;
+`describe([])` accepts no arguments and returns only those two fields. The declaration must be
+immutable for the selected artifact. It is not a callback for reading files or calling models.
+
+Open **Settings → Varin Extensions → Service routing → Native code retrieval**. Select
+**Native Retrieval: Keyword and Structure** or **Native Retrieval: Keyword Only** for **My default**
+or **This workspace**. Installed declarations are listed before activation; their status says they
+activate when used. The built-in structured package is the automatic default. An explicitly selected
+disabled, missing or invalid provider fails preparation instead of silently using another plan.
+
+The existing routing API can select a project or native Thread with a revision-checked rule:
+
+```json
+{
+  "serviceId": "varin.retrieval.plan",
+  "version": 1,
+  "providerKey": "varin.builtin.retrieval-keyword:host:varin.retrieval.plan@1",
+  "scope": { "projectId": "YOUR_PROJECT_ID" },
+  "allowFallback": false
+}
+```
+
+Pass the routing document's current `expectedRevision` with the update. A Thread override uses its
+real native Thread ID in the existing routing `sessionId` dimension; it does not create a Pi session.
+The UI's workspace dimension is the canonical directory, distinct from a native workspace ID.
+Project scope comes from the Run's accepted context. Installing an unrelated provider does not select it.
+
+Each native query freezes the selected provider generation, executing artifact, configuration,
+stage method handles and plan provenance. A failed or superseded candidate leaves the previous
+prepared plan intact, but the failing query reports the error. Existing queries retain their own
+generation pins across ordinary package replacement; explicit disable/crash revokes them. The caller
+releases its pin on settlement or cancellation. Keyword/structure work remains with the existing
+Run-granted compute and Documents owners. Production semantic and model stages stay disabled; this
+contract neither consults Pi model settings nor launches an index or paid inference.
+
 ## Install and development workflow
 
 Open **Settings → Varin Extensions → Install or update** and choose npm, Git, or local folder. The

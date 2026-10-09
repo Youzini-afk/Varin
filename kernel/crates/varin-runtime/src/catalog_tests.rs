@@ -1333,3 +1333,137 @@ fn initial_input_and_launch_are_one_durable_idempotent_admission() {
         admitted
     );
 }
+
+// Independent regression evidence from native retrieval concurrency acceptance. Provider item
+// identity is local to the model exchange; the conversation graph has its own durable identity.
+fn independent_finished_item(text: &str) -> crate::execution::ProviderItem {
+    crate::execution::ProviderItem {
+        id: "provider-reused-id".into(),
+        content: crate::execution::Content::Text { text: text.into() },
+        opaque: Some(crate::execution::OpaqueProviderItem {
+            connection_identity: "fixture-connection".into(), family: "test".into(), adapter_version: "1".into(),
+            value: json!({"id":"provider-reused-id","opaque":{"signature":"untouched","values":[null,7]}}),
+        }),
+    }
+}
+fn independent_finish(request_id: &str, text: &str) -> crate::execution::ExecutionRecord {
+    crate::execution::ExecutionRecord::ModelFinished {
+        request_id: request_id.into(), outcome: crate::execution::ModelOutcome::Completed,
+        finish_reason: Some(crate::execution::FinishReason::Stop), items: vec![independent_finished_item(text)],
+        interrupted_deltas: vec![], usage: crate::execution::UsageReceipt::default(), failure: None,
+    }
+}
+fn independent_prepare(db: &mut Catalog, receipt: &Receipt, snapshot: crate::execution::RequestSnapshot) {
+    use crate::execution::ExecutionRecord;
+    let epoch = db.epoch(); let request_id = snapshot.view.request_id.clone();
+    db.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::RequestPrepared { snapshot }).unwrap();
+    db.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::ModelDispatched { request_id }).unwrap();
+}
+
+#[test]
+fn independent_model_finished_retry_is_exactly_idempotent_and_conflicting_retry_preserves_history() {
+    let f = Fixture::new(); let mut db = f.open(); let receipt = submit(&mut db); let epoch = db.epoch();
+    independent_prepare(&mut db, &receipt, request_snapshot(&receipt));
+    let finish = independent_finish("model-1", "accepted output");
+    db.commit_execution(&receipt.run_id, epoch, &finish).unwrap();
+    let history = db.history("main").unwrap(); let output = db.model_output("model-1").unwrap();
+    let events = db.events_after(0, 1000).unwrap();
+    db.commit_execution(&receipt.run_id, epoch, &finish).unwrap();
+    assert_eq!(db.history("main").unwrap(), history);
+    assert_eq!(db.model_output("model-1").unwrap(), output);
+    assert_eq!(db.events_after(0, 1000).unwrap(), events);
+    assert!(db.commit_execution(&receipt.run_id, epoch, &independent_finish("model-1", "conflicting replacement")).is_err());
+    assert_eq!(db.history("main").unwrap(), history);
+    assert_eq!(db.model_output("model-1").unwrap(), output);
+    assert_eq!(history.last().unwrap().provider.as_ref().unwrap().item, independent_finished_item("accepted output").opaque.unwrap().value);
+}
+
+#[test]
+fn independent_reused_provider_id_across_model_steps_preserves_each_original_and_branch_chain() {
+    let f = Fixture::new(); let mut db = f.open(); let receipt = submit(&mut db); let epoch = db.epoch();
+    independent_prepare(&mut db, &receipt, request_snapshot(&receipt));
+    db.commit_execution(&receipt.run_id, epoch, &independent_finish("model-1", "first answer")).unwrap();
+    let first = db.history("main").unwrap().last().unwrap().clone();
+    let mut second_snapshot = request_snapshot(&receipt);
+    second_snapshot.view.request_id = "model-2".into();
+    second_snapshot.view.binding.history_range.leaf_id = Some(first.id.clone());
+    second_snapshot.view.history = db.execution_history("main").unwrap();
+    second_snapshot.view.origin = crate::execution::RequestOrigin::Conversation {
+        step: 2, history_range: second_snapshot.view.binding.history_range.clone(),
+    };
+    independent_prepare(&mut db, &receipt, second_snapshot);
+    db.commit_execution(&receipt.run_id, epoch, &independent_finish("model-2", "second answer")).unwrap();
+    let history = db.history("main").unwrap(); let second = history.last().unwrap();
+    assert_ne!(first.id, second.id); assert_eq!(second.parent.as_deref(), Some(first.id.as_str()));
+    assert_eq!(first.provider, second.provider);
+    assert_eq!(db.model_output("model-1").unwrap().unwrap()["record"]["items"][0]["id"], "provider-reused-id");
+    assert_eq!(db.model_output("model-2").unwrap().unwrap()["record"]["items"][0]["id"], "provider-reused-id");
+    db.fork_branch("main", "reused-provider-fork", Some(&second.id)).unwrap();
+    assert_eq!(db.history("reused-provider-fork").unwrap(), history);
+}
+
+#[test]
+fn independent_recovery_uses_the_saved_contiguous_row_identity_and_rejects_changed_content() {
+    use crate::execution::PolicyIdentity;
+    let f = Fixture::new(); let mut db = f.open(); let receipt = submit(&mut db); let epoch = db.epoch();
+    let snapshot = request_snapshot(&receipt);
+    independent_prepare(&mut db, &receipt, snapshot.clone());
+    db.commit_execution(&receipt.run_id, epoch, &independent_finish("model-1", "durable older output")).unwrap();
+    let mut saved = db.history("main").unwrap().last().unwrap().clone();
+    let generated_id = saved.id.clone();
+    // Construct already-committed data whose graph row uses the provider's original ID,
+    // as the prior runtime did. The product recovery path must read actual row authority,
+    // not guess a migration branch or recompute a replacement graph ID.
+    saved.id = "provider-reused-id".into(); saved.content["id"] = json!(saved.id);
+    saved.content = db.content.save_history(&saved.content, &saved.provider).unwrap(); saved.provider = None;
+    {
+        let tx = db.db.transaction().unwrap(); tx.execute_batch("PRAGMA defer_foreign_keys=ON").unwrap();
+        tx.execute("UPDATE history SET id=?1,body=?2 WHERE id=?3", params![saved.id, encode(&saved).unwrap(), generated_id]).unwrap();
+        tx.execute("UPDATE branches SET head=?1 WHERE head=?2", params![saved.id, generated_id]).unwrap(); tx.commit().unwrap();
+    }
+    let policy = PolicyIdentity { name: "default".into(), version: "1".into() };
+    let (input, recovery) = db.prepare_recovered_execution(&receipt.run_id, snapshot.view.binding.clone(), policy.clone(), Value::Null).unwrap();
+    assert!(recovery.is_some());
+    assert_eq!(input.binding.history_range.leaf_id.as_deref(), Some("provider-reused-id"));
+    assert_eq!(input.history.last().unwrap().id, "provider-reused-id");
+    assert_eq!(db.head("main").unwrap().as_deref(), Some("provider-reused-id"));
+    let mut damaged = db.history("main").unwrap().last().unwrap().clone();
+    damaged.content["content"]["text"] = json!("unrelated replacement");
+    damaged.content = db.content.save_history(&damaged.content, &damaged.provider).unwrap(); damaged.provider = None;
+    db.db.execute("UPDATE history SET body=?1 WHERE id=?2", params![encode(&damaged).unwrap(), damaged.id]).unwrap();
+    assert!(db.prepare_recovered_execution(&receipt.run_id, snapshot.view.binding, policy, Value::Null).is_err());
+}
+
+#[test]
+fn independent_recovery_rejects_corrupted_branch_anchor_and_foreign_suffix_ownership() {
+    use crate::execution::{Content, ConversationItem, PolicyIdentity, Provenance};
+    for corruption in ["branch-owner", "anchor-header", "anchor-owner", "suffix-owner"] {
+        let f = Fixture::new(); let mut db = f.open(); let receipt = submit(&mut db); let epoch = db.epoch();
+        let snapshot = request_snapshot(&receipt);
+        independent_prepare(&mut db, &receipt, snapshot.clone());
+        db.commit_execution(&receipt.run_id, epoch, &independent_finish("model-1", "owned output")).unwrap();
+        db.create_thread("foreign-thread", "foreign-branch").unwrap();
+        if corruption == "branch-owner" {
+            db.db.execute("UPDATE branches SET thread_id='foreign-thread' WHERE id='main'", []).unwrap();
+        } else {
+            let target = if corruption == "suffix-owner" {
+                let suffix = db.append_history(&receipt.run_id, epoch, db.head("main").unwrap().as_deref(), HistorySource::Environment,
+                    serde_json::to_value(ConversationItem { id: "later-environment".into(), provenance: Provenance::EnvironmentFact { event_id: "later-event".into() },
+                        content: Content::Text { text: "later source observation".into() }, opaque: None }).unwrap(), None).unwrap();
+                suffix.id
+            } else { receipt.input_id.clone() };
+            let body: String = db.db.query_row("SELECT body FROM history WHERE id=?1", [&target], |row| row.get(0)).unwrap();
+            let mut metadata: HistoryItem = serde_json::from_str(&body).unwrap();
+            if corruption == "anchor-header" {
+                metadata.id = "wrong-anchor-header".into();
+                db.db.execute("UPDATE history SET body=?1 WHERE id=?2", params![encode(&metadata).unwrap(), target]).unwrap();
+            } else {
+                metadata.thread_id = "foreign-thread".into();
+                db.db.execute("UPDATE history SET thread_id=?1,body=?2 WHERE id=?3", params![metadata.thread_id, encode(&metadata).unwrap(), target]).unwrap();
+            }
+        }
+        let result = db.prepare_recovered_execution(&receipt.run_id, snapshot.view.binding,
+            PolicyIdentity { name: "default".into(), version: "1".into() }, Value::Null);
+        assert!(result.is_err(), "recovery accepted {corruption}");
+    }
+}

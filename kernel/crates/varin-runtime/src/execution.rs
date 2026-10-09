@@ -311,6 +311,19 @@ pub struct ProviderItem {
     pub opaque: Option<OpaqueProviderItem>,
 }
 
+/// Provider IDs are local to one ModelStep. Internal history keys are an injective,
+/// deterministic tuple of the globally owned request ID and the unmodified provider ID.
+/// Length-prefixing the request makes delimiters inside either component unambiguous.
+/// Opaque originals and the durable ProviderItem record retain provider-native IDs verbatim.
+pub(crate) fn model_history_item(request_id: &str, item: &ProviderItem) -> ConversationItem {
+    ConversationItem {
+        id: format!("model-item:{}:{}:{}", request_id.len(), request_id, item.id),
+        provenance: Provenance::Assistant,
+        content: item.content.clone(),
+        opaque: item.opaque.clone(),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProviderEvent {
@@ -1200,13 +1213,10 @@ impl<
                         Err(failure) => finish!('agent, RunState::Failed, None,
                             Some(ExecutionError::new(failure.code, failure.message))),
                     };
-                    history_cursor = items.last().map(|item| item.id.clone()).or(history_cursor);
-                    history.extend(items.into_iter().map(|item| ConversationItem {
-                        id: item.id,
-                        provenance: Provenance::Assistant,
-                        content: item.content,
-                        opaque: item.opaque,
-                    }));
+                    let committed: Vec<_> = items.iter()
+                        .map(|item| model_history_item(&snapshot.view.request_id, item)).collect();
+                    history_cursor = committed.last().map(|item| item.id.clone()).or(history_cursor);
+                    history.extend(committed);
                     event = PolicyEvent::ModelCompleted {
                         reason,
                         tool_calls: calls.len(),
@@ -1625,7 +1635,8 @@ fn validate_model_items(
     items: &[ProviderItem],
     snapshot: &RequestSnapshot,
 ) -> Result<Vec<ToolCall>, ExecutionError> {
-    let mut item_ids: BTreeSet<_> = snapshot.view.history.iter().map(|item| &item.id).collect();
+    // Provider IDs must be unique within this response, not across independent requests.
+    let mut item_ids = BTreeSet::new();
     let mut call_ids = BTreeSet::new();
     let mut calls = Vec::new();
     for item in items {

@@ -125,9 +125,8 @@ fn provider_originals(items: &[ProviderItem]) -> Vec<ProviderOriginal> {
 }
 fn history_items(record: &ExecutionRecord) -> Vec<ConversationItem> {
     match record {
-        ExecutionRecord::ModelFinished { outcome: ModelOutcome::Completed, items, .. } => items.iter().map(|item| ConversationItem {
-            id: item.id.clone(), provenance: Provenance::Assistant, content: item.content.clone(), opaque: item.opaque.clone(),
-        }).collect(),
+        ExecutionRecord::ModelFinished { request_id, outcome: ModelOutcome::Completed, items, .. } => items.iter()
+            .map(|item| model_history_item(request_id, item)).collect(),
         ExecutionRecord::ToolBatchCommitted { request_id, results } => results.iter().map(|result| ConversationItem {
             id: format!("{}:result:{}", request_id, result.call_id),
             provenance: Provenance::ToolData { call_id: result.call_id.clone() },
@@ -157,6 +156,26 @@ impl Catalog {
         epoch: u64,
         record: &ExecutionRecord,
     ) -> Result<()> {
+        // A receipt retry is a read, not a second completion. Keep exact request/owner fencing,
+        // reject altered output, and never rewrite history or resubmit a provider request.
+        if let ExecutionRecord::ModelFinished { request_id, outcome, .. } = record {
+            if let Some(previous) = self.model_output(request_id)? {
+                let run = self.run(run_id)?;
+                let step: ModelStep = super::record(&self.db, "model_steps", request_id)?;
+                let expected_state = match outcome {
+                    ModelOutcome::Completed => ModelStepState::Completed,
+                    ModelOutcome::Interrupted => ModelStepState::Interrupted,
+                    ModelOutcome::Failed => ModelStepState::Failed,
+                    ModelOutcome::Cancelled => ModelStepState::Cancelled,
+                };
+                if run.epoch == epoch && step.id == *request_id && step.run_id == run_id && step.epoch == epoch
+                    && step.state == expected_state
+                    && previous == json!({"status":"committed","record":record}) {
+                    return Ok(());
+                }
+                return Err(RuntimeError::Conflict("model completion receipt changed or belongs to another execution".into()));
+            }
+        }
         // Body durability precedes the metadata transaction; rollback leaves a safe orphan.
         let prepared_request = match record {
             ExecutionRecord::RequestPrepared { snapshot } => {
@@ -375,16 +394,12 @@ impl Catalog {
                 // Completion, original output, semantic history and unresolved call identities commit together.
                 if *outcome == ModelOutcome::Completed {
                     for item in items {
+                        let history_item = model_history_item(request_id, item);
                         append_item(
                             &tx,
                             &run,
-                            &ConversationItem {
-                                id: item.id.clone(),
-                                provenance: Provenance::Assistant,
-                                content: item.content.clone(),
-                                opaque: item.opaque.clone(),
-                            },
-                            prepared_history.get(&item.id).ok_or_else(|| RuntimeError::Invalid("prepared history body missing".into()))?,
+                            &history_item,
+                            prepared_history.get(&history_item.id).ok_or_else(|| RuntimeError::Invalid("prepared history body missing".into()))?,
                         )?;
                         if let Content::ToolCall { call } = &item.content {
                             tx.execute(

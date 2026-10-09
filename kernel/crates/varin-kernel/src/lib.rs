@@ -10,6 +10,7 @@ mod native_tools;
 mod native_questions;
 mod native_mcp;
 mod native_language;
+mod native_retrieval;
 mod process;
 mod protocol;
 mod protocol_generated;

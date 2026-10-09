@@ -439,6 +439,14 @@ pub(crate) struct KernelObjectOwnerRebindParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelFileReadCheckParams {
+    pub(crate) workspace_id: String,
+    pub(crate) root_id: String,
+    pub(crate) path: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelFileRootRegisterParams {
     pub(crate) workspace_id: String,
     pub(crate) execution_workspace_id: String,
@@ -1777,6 +1785,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "file.read.check" => serde_json::from_value::<KernelFileReadCheckParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "file.root.register" => {
             serde_json::from_value::<KernelFileRootRegisterParams>(params.clone())
                 .map(|_| ())

@@ -65,6 +65,14 @@ pub(super) fn initialize(db: &mut Connection) -> Result<()> {
     Ok(())
 }
 impl Catalog {
+    /// Run admission pins project scope independently of later branch context publication.
+    /// Read its small immutable checkpoint metadata, never the prompt body or current UI selection.
+    pub fn run_project_id(&self, run_id: &str) -> Result<Option<String>> {
+        self.db.query_row(
+            "SELECT c.project_id FROM runs r LEFT JOIN context_checkpoints c ON c.id=r.context_checkpoint_id WHERE r.id=?1",
+            [run_id], |row| row.get(0),
+        ).optional()?.ok_or_else(|| RuntimeError::NotFound(run_id.into()))
+    }
     pub fn active_context(&self, branch_id: &str) -> Result<Option<ContextCheckpoint>> {
         let reference:Option<String>=self.db.query_row("SELECT c.body FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",[branch_id],|r|r.get(0)).optional()?;
         reference

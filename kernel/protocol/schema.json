@@ -79,6 +79,7 @@
     "storage.blob.release": "KernelBlobReleaseParams",
     "storage.getBlob": "KernelGetBlobParams",
     "storage.object.rebindOwner": "KernelObjectOwnerRebindParams",
+    "file.read.check": "KernelFileReadCheckParams",
     "file.root.register": "KernelFileRootRegisterParams",
     "file.operation.list": "KernelFileOperationListParams",
     "file.operation.reconcile": "KernelFileOperationReconcileParams",
@@ -155,6 +156,9 @@
     "compute.grammar.register": "KernelComputeGrammarParams"
   },
   "dto": {
+    "NativeRetrievalQuery": {"fields":{"runId":{"type":"string"},"threadId":{"type":"string"},"workspaceId":{"type":"string"},"executionWorkspaceId":{"type":"string"},"liveRoot":{"type":"NativeLiveRoot"},"grantId":{"type":"string"},"projectId":{"type":"string | null"},"question":{"type":"string"},"paths":{"type":"string[]","optional":true},"limit":{"type":"number","optional":true}}},
+    "KernelFileReadCheckParams": {"fields":{"workspaceId":{"type":"string"},"rootId":{"type":"string"},"path":{"type":"string"}}},
+    "KernelFileReadCheckResult": {"fields":{"resourceKey":{"type":"string"}}},
     "NativeLanguageQuery": {"fields":{"runId":{"type":"string"},"threadId":{"type":"string"},"workspaceId":{"type":"string"},"executionWorkspaceId":{"type":"string"},"liveRoot":{"type":"NativeLiveRoot"},"method":{"type":"string"},"path":{"type":"string"},"line":{"type":"number","optional":true},"character":{"type":"number","optional":true}}},
     "NativeHistoryPageParams": {"fields":{"branchId":{"type":"string"},"headId":{"type":"string","optional":true},"beforeId":{"type":"string","optional":true},"limit":{"type":"number"}}},
     "NativeHistoryBodyParams": {"fields":{"itemId":{"type":"string"},"chunkIndex":{"type":"number"}}},
@@ -684,6 +688,7 @@
     "storage.blob.release": "release a temporary content owner",
     "storage.getBlob": "read a content object or byte range",
     "storage.object.rebindOwner": "rebind one temporary workspace object owner to the current authorized grant",
+    "file.read.check": "authorize a read without reading its body and return the current canonical resource identity",
     "file.root.register": "register one Documents-authorized canonical filesystem root for this kernel epoch",
     "file.operation.list": "page unresolved durable filesystem operations with identity and disposition",
     "file.operation.reconcile": "retry proof-based reconciliation for one unresolved filesystem operation",

@@ -1,3 +1,5 @@
+import { createNativeRetrievalOwner } from './lib/kernel/native-retrieval-owner.js';
+import { createNativeRetrievalComposition } from './lib/kernel/native-retrieval-composition.js';
 import { createNativeLanguageOwner } from './lib/kernel/native-language-owner.js';
 import { createNativeLiveSourceOwner } from './lib/kernel/native-live-source.js';
 import { createNativeThreadSourcePreparer } from './lib/kernel/native-thread-sources.js';
@@ -3345,6 +3347,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       resolveTarget: sourceViewRuntime.resolveLanguageTarget,
     }),
   ]);
+  const nativeRetrievalComposition = createNativeRetrievalComposition(extensionRuntime, { structure: structureSource });
+  kernelClient.setNativeRetrievalOwner(createNativeRetrievalOwner({ documents: documentsAuthority, kernel: kernelClient,
+    validateSource: nativeLiveSources.validate,
+    preparePipeline: (query, signal) => nativeRetrievalComposition.prepare({ threadId: query.threadId,
+      workspaceId: query.liveRoot.canonicalRoot, ...(query.projectId ? { projectId: query.projectId } : {}) }, signal),
+  }));
   const projectDirectories = (settings: { projects?: unknown }) => (sanitizeProjects(settings.projects) ?? []).flatMap(projectFolders);
   const languagePrewarm = createLanguagePrewarm({
     documents: documentsAuthority, languages: languageSupportRuntime, supervisor: languageSupervisor,

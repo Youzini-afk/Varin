@@ -320,3 +320,45 @@ Rust 对超过实际帧预算的 transient progress 不入共享 writer，durabl
 该增量限于 live_root 三工具，不证明 fixed_branch/materialized 的 imports、配置、链接和编译器库闭包；
 不完成其他 LSP、结构/语义检索、远端、任务族公平、完整恢复、领域迁移、代表性成本或跨平台发布。
 两份完整设计的其余矩阵仍适用，默认运行时与 Pi 退出状态未变。本轮模型侧只有本地 fixture，没有真实付费模型调用。
+
+## 已验收增量：live-root 可组合代码检索
+
+`native_code_retrieval` 接入真实原生工具/历史路径，复用 Explore 算法、Documents、既有 Structure 和 Rust compute。
+私有查询显式携带原生 Run/Thread/来源及真实 grant，不伪造 Pi session/worker。关键词 compute 使用 Run scope；
+候选路径在 Documents 读取及可选模型选材之前经同一 grant 的 `file.read.check`，返回后 Rust 再逐项验证来源、
+真实 revision 和行范围并从已核对字节重建正文。固定/物化来源明确拒绝，不暗用 live 索引。
+
+查询捕获不可变 `PipelinePlan` 和选定 stage 方法句柄；配置候选准备成功后才发布，新查询可使用新世代，旧查询仍按
+原绑定完成。共享语法准备继续归原 owner，取消单个等待者不关闭公共准备。冷缺、不支持、部分覆盖、失效和失败
+分别保留；结构大单元使用原 slicer 保留范围的连续片段，不补回省略区再截掉命中。
+
+生产通过既有扩展 service routing 选择 `varin.retrieval.plan@1`，内置 keyword+structure 与 keyword-only
+两个惰性声明均可在既有服务配置中选取。查询使用真实 native Thread、Run受理checkpoint项目及已授权canonical目录，
+不读取后来侧栏选择；结果记录选定provider/artifact/configuration及路由revision，正常退休和明确撤权分开处理。
+生产内置 semantic/model 明确 disabled。可组合 seam 支持显式既有语义 handle 与仅针对已授权
+片段的模型选材；语义块 SHA-256 与文件 Documents revision 分别验证。尚未接生产语义/模型设置、扩展 worker 的
+完整恢复、固定依赖闭包、远端或最终产品默认路由。没有运行真实付费模型。本增量不等同两份完整设计交付。
+
+本轮并发真实反例还暴露原有全局history ID缺陷：不同Run的provider都返回 `item-1` 时，第二个Run曾因
+`history.id`唯一约束进入execution-recovery等待，不能误报为检索阶段锁竞争。修复将内部history身份按
+真实request/ModelStep与provider item ID确定性分域，原provider ID/opaque/model_outputs原样保留；精确重复
+ModelFinished为只读幂等，差异回执冲突。恢复统一读取冻结leaf后精确连续的真实已提交模型行，核对归属/内容/
+原文/工具序列后使用实际row ID，不按新公式猜历史head，不重写既有资产或增加格式迁移。独立同ID并发、
+后续step、旧已提交ID及恢复继续追加反例均在修复后重新验收；初轮失败不算通过。
+
+最终内核以正式 build identity `0.9.24` 构建，SHA-256 为
+`d04874a6c88c42c32704db2afc3c92609554bf9a16a47a74e661fc1d08b4c630`。独立验证按范围分别记录：
+
+- 同一最终内核上的新增 native authority / pipeline / composition 三套共 21 项通过，覆盖真实关键词→结构→
+  原生历史→read、逐项权限/撤权、陈旧命中、冷缺阶段、共享准备取消、慢查询并行及实际扩展候选发布/失败保留。
+- 既有 native 消费者共 7 项通过：live-source/read-edit 与 language 并行 2 项、HTTP context/
+  initial-context 冻结及 reopen/retry/fork 3 项、durable assistant history 1 项、12 回合 pinned-history 分页 1 项。
+- portable pipeline 3 项、实际 UI selector 加 Host 路由 2 项通过。
+- Rust catalog 31 项（包含独立身份/旧行恢复/错误归属 4 项）、execution 12 项通过；
+  此前 v2 的未再修改 content 7 项已通过，不把这些重复算作新增测试。
+- protocol/client、扩展 contract/SDK/builtins 和 Host 生产类型构建、完整 Host tests/UI 类型检查、
+  协议生成检查、相关 lint、文档和 diff 检查通过。
+
+实际扩展候选 fixture 曾等待候选切换完成却仍持有待退休旧 pin，形成测试自身等待；修正为既有发布/退休
+合同的顺序：先观察新代发布、验证旧 pin 可续用，再释放旧 pin 并等待退休。没有延长 timeout 或修改产品以绕过该验证。
+以上不是全仓、完整恢复矩阵、真实付费模型或跨平台发布验收。

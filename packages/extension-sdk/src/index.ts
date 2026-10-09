@@ -709,3 +709,5 @@ export * from "./context-fragments.js";
 export * from "./agent-policy.js";
 
 export * from "./run-activity.js";
+
+export * from "./retrieval-plan.js";

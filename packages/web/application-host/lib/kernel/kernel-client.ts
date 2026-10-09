@@ -1,3 +1,5 @@
+import { NativeRetrievalBridge, unavailableRetrievalResult, type PrivateRetrievalResponse } from './native-retrieval-bridge.js';
+import type { NativeRetrievalOwner } from './native-retrieval-owner.js';
 import { NativeLanguageBridge, unavailableLanguageResult, type PrivateLanguageResponse } from './native-language-bridge.js';
 import type { NativeLanguageOwner } from './native-language-owner.js';
 import { NativeAgentPolicyBridge, type NativeAgentPolicyLease, type NativeAgentPolicyBinding, type PrivatePolicyResponse } from './native-agent-policy.js';
@@ -134,6 +136,10 @@ export class KernelScopedClient {
 
   constructor(private readonly owner: KernelClient, grant: KernelGrantHandle) {
     this.grant = owner.assertGrantForScope(grant);
+  }
+
+  fileReadCheck(params: KernelMethodParams["file.read.check"], signal?: AbortSignal): Promise<{ resourceKey: string }> {
+    return this.owner.fileReadCheck(params, this.grant, signal);
   }
 
   computeStart(params: KernelMethodParams["compute.start"], signal?: AbortSignal): Promise<KernelComputeReadResult> {
@@ -552,6 +558,8 @@ export class KernelClient {
   private readonly credentialBridge: NativeCredentialBridge;
   private readonly mcpBridge: NativeMcpBridge;
   private readonly languageBridge: NativeLanguageBridge;
+  private readonly retrievalBridge: NativeRetrievalBridge;
+  private readonly issuedGrants = new Map<string, KernelGrantHandle>();
   private readonly policyBridge: NativeAgentPolicyBridge;
   private readonly nativePreparations = new Map<string, Set<AbortController>>();
   private window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
@@ -589,6 +597,13 @@ export class KernelClient {
       return this.write(response, encoded);
     },
       () => this.failAll(new KernelClientError({ code: "policy-channel-failed", message: "Private policy channel failed", retryable: false }), true));
+    this.retrievalBridge = new NativeRetrievalBridge(() => this.epoch, response => {
+      let encoded: Buffer;
+      try { encoded = frame(JSON.stringify(response)); }
+      catch { return this.write({ v: 1, kind: 'retrieval-response', id: response.id, kernelEpoch: response.kernelEpoch,
+        result: unavailableRetrievalResult('Retrieval result exceeds the transport frame budget or is not serializable') }); }
+      return this.write(response, encoded);
+    }, () => this.failAll(new KernelClientError({ code: 'retrieval-channel-failed', message: 'Private retrieval channel failed', retryable: false }), true));
     this.languageBridge = new NativeLanguageBridge(() => this.epoch, response => {
       // Check serialization/frame budget before touching the shared writer. A large language
       // result fails only its caller; chunked language results are not implemented yet.
@@ -622,6 +637,20 @@ export class KernelClient {
   async registerNativeMcpOwner(runId: string, lease: NativeMcpLease): Promise<NativeMcpBinding> {
     if (!this.handshakeResult) await this.start();
     return this.mcpBridge.register(runId, lease);
+  }
+  setNativeRetrievalOwner(owner: NativeRetrievalOwner): void { this.retrievalBridge.setOwner(owner); }
+  /** Resolve only an actual Host-issued native Run grant, never caller-created scope metadata. */
+  nativeRetrievalGrant(query: { grantId: string; runId: string; threadId: string; workspaceId: string; executionWorkspaceId: string }): KernelGrantHandle {
+    const grant = this.issuedGrants.get(query.grantId);
+    if (!grant || this.revokedGrants.has(query.grantId) || grant.runId !== query.runId || grant.threadId !== query.threadId
+      || grant.owningWorkspace !== query.workspaceId || grant.executionWorkspace !== query.executionWorkspaceId
+      || grant.sessionId !== null || grant.workerId !== null) {
+      throw new KernelClientError({ code: 'forbidden', message: 'Native retrieval Run grant is unavailable or mismatched' });
+    }
+    return this.assertGrant(grant);
+  }
+  async fileReadCheck(params: KernelMethodParams["file.read.check"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<{ resourceKey: string }> {
+    return this.requestRaw<{ resourceKey: string }>("file.read.check", params, { signal, grant });
   }
   setNativeLanguageOwner(owner: NativeLanguageOwner): void { this.languageBridge.setOwner(owner); }
   nativeMcpBinding(runId: string): NativeMcpBinding | undefined { return this.mcpBridge.binding(runId); }
@@ -833,7 +862,7 @@ export class KernelClient {
       let response: KernelResponse | KernelProcessStreamEvent | NativeRuntimeStreamEvent;
       try { response = JSON.parse(body.toString("utf8")) as KernelResponse | KernelProcessStreamEvent | NativeRuntimeStreamEvent; }
       catch (error) { this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: `Invalid Rust kernel response: ${String(error)}`, retryable: false }), true); return; }
-      if (this.credentialBridge.consume(response) || this.languageBridge.consume(response) || this.mcpBridge.consume(response) || this.policyBridge.consume(response)) continue;
+      if (this.credentialBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.mcpBridge.consume(response) || this.policyBridge.consume(response)) continue;
       if (response.kind === "runtime-event") {
         if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch
           || !["durable", "progress"].includes(response.stream)
@@ -905,6 +934,8 @@ export class KernelClient {
     this.credentialBridge.close();
     this.mcpBridge.close();
     this.languageBridge.close();
+    this.retrievalBridge.close();
+    this.issuedGrants.clear();
     this.policyBridge.close();
     for (const runId of this.nativePreparations.keys()) this.cancelNativeRunPreparation(runId);
     this.window.close(error);
@@ -924,7 +955,7 @@ export class KernelClient {
     if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
-  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateMcpResponse | PrivatePolicyResponse | PrivateLanguageResponse, encoded?: Buffer): Promise<void> {
+  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateMcpResponse | PrivatePolicyResponse | PrivateLanguageResponse | PrivateRetrievalResponse, encoded?: Buffer): Promise<void> {
     const stdin = this.child?.stdin;
     if (!stdin || stdin.destroyed) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel stdin is unavailable", retryable: true });
     const writable = stdin as Writable;
@@ -1443,12 +1474,15 @@ export class KernelClient {
       ...(params.workerGeneration === undefined ? {} : { workerGeneration: params.workerGeneration }),
     }, { signal });
     this.revokedGrants.delete(String(grant.grant_id));
-    return this.grantFromResponse(grant);
+    const handle = this.grantFromResponse(grant);
+    this.issuedGrants.set(handle.grantId, handle);
+    return handle;
   }
 
   async revokeGrant(grantId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     if (!this.handshakeResult) await this.start();
     this.revokedGrants.add(grantId);
+    this.issuedGrants.delete(grantId);
     for (const [id, entry] of this.processSubscriptions) {
       if (entry.grant.grantId !== grantId) continue;
       entry.closed = true; this.processSubscriptions.delete(id);
@@ -1528,6 +1562,8 @@ export class KernelClient {
     this.credentialBridge.close();
     this.mcpBridge.close();
     this.languageBridge.close();
+    this.retrievalBridge.close();
+    this.issuedGrants.clear();
     this.policyBridge.close();
     for (const runId of this.nativePreparations.keys()) this.cancelNativeRunPreparation(runId);
     this.window.close(new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closing" }));

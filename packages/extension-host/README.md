@@ -63,8 +63,9 @@ The first production native consumer is `varin.context.fragments@1`: existing sc
 one brokered package, its frozen declaration crosses the private context boundary, and Rust's existing
 composition resolver/registry binds a typed immutable transform. The SDK's `provideContextFragments`
 helper and `inspect` metadata share the contract; the packaged default and installable project example
-use the ordinary lifecycle. This does not yet provide general Decision/Observer author contracts or
-arbitrary retrieval/tool composition. See `examples/extensions/project-context` for the actual author
+use the ordinary lifecycle. `varin.retrieval.plan@1` also uses this binding path: its declarative
+stage choices are frozen with the executing artifact and a separate pin for every native query.
+It supplies no filesystem or model capability to the extension. See `examples/extensions/project-context` for the actual author
 and project-selection path.
 
 Brokered process shutdown has a configurable `brokerShutdownGraceMs` (default 5000 ms).

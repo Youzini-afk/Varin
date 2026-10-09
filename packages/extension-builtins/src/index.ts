@@ -28,6 +28,8 @@ import {
   VARIN_WORKBENCH_REPLACEMENT_TARGETS,
   VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
   VARIN_WORKBENCH_SLOTS,
+  VARIN_RETRIEVAL_PLAN_SERVICE_ID,
+  VARIN_RETRIEVAL_PLAN_VERSION,
 } from "@varin/extension-contract";
 
 export interface VarinBuiltinExtensionDefinition {
@@ -51,6 +53,9 @@ export const VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_VERSION = "5.3.0+typesc
 export const VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID = "varin.builtin.language-servers";
 export const VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_VERSION = "0.1.0";
 export const VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION_ID = "varin.builtin.context-fragments";
+export const VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION_ID = "varin.builtin.retrieval-structured";
+export const VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION_ID = "varin.builtin.retrieval-keyword";
+export const VARIN_BUILTIN_RETRIEVAL_DEFAULT_PROVIDER_KEY = `${VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION_ID}:host:${VARIN_RETRIEVAL_PLAN_SERVICE_ID}@${VARIN_RETRIEVAL_PLAN_VERSION}`;
 export const VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID = "varin.builtin.recovery";
 export const VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_VERSION = "0.4.0";
 
@@ -588,6 +593,22 @@ export const VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION: VarinBuiltinExtensionDef
   },
 };
 
+const retrievalPlanDefinition = (id: string, displayName: string): VarinBuiltinExtensionDefinition => ({
+  enabledByDefault: true,
+  manifest: {
+    id, displayName, version: "1.0.0", schemaVersion: 1, engines: { varin: "*" },
+    entrypoints: { host: { activation: ["service-request"], file: "host.cjs", mode: "brokered" } },
+    provides: { services: [{ id: VARIN_RETRIEVAL_PLAN_SERVICE_ID, version: VARIN_RETRIEVAL_PLAN_VERSION, multiple: true }] },
+  },
+});
+
+export const VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION = retrievalPlanDefinition(
+  VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION_ID, "Native Retrieval: Keyword and Structure",
+);
+export const VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION = retrievalPlanDefinition(
+  VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION_ID, "Native Retrieval: Keyword Only",
+);
+
 export const VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION: VarinBuiltinExtensionDefinition = {
   enabledByDefault: true,
   manifest: {
@@ -651,6 +672,8 @@ export const VARIN_BUILTIN_EXTENSION_DEFINITIONS: readonly VarinBuiltinExtension
   VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION,
   VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION,
   VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION,
+  VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION,
+  VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION,
   VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION,
   VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION,
   VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION,

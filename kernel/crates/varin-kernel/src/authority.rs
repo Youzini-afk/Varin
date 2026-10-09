@@ -23,6 +23,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "working.review.list"
         | "file.scan"
         | "file.read"
+        | "file.read.check"
         | "file.measure"
         | "file.operation.list" => "storage.read",
         "storage.putBlob.begin"

@@ -1,5 +1,18 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export interface NativeRetrievalQuery {
+  runId: string;
+  threadId: string;
+  workspaceId: string;
+  executionWorkspaceId: string;
+  liveRoot: NativeLiveRoot;
+  grantId: string;
+  projectId: string | null;
+  question: string;
+  paths?: string[];
+  limit?: number;
+}
+
 export interface NativeLanguageQuery {
   runId: string;
   threadId: string;
