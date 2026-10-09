@@ -100,6 +100,10 @@ so edited input never replaces its original idempotency identity. Host input off
 arrival order before body encoding/upload/hydration; unrelated branches bypass them. Cancellation
 wakes/removes the existing resource reservation. Full input validation and public body hydration run
 on request workers rather than the Agent actor. Test-only fixture drivers exercise these same APIs.
+Conversation forks capture the source head, context and memory references, then validate ancestry/tool
+pairing and stage their new prompt on a worker. The commit uses that frozen cut even if the source
+appends history or publishes a later context. Branch creation participates in the same ingress ordering;
+retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
 Catalog version 8 and input domain 2 store input intents/queue bodies and context-job ownership,
@@ -118,8 +122,8 @@ then load, validate, merge and stage bodies on the worker. Publication compares 
 for synchronization, active checkpoint identities. A changed basis causes a fresh owner read; an
 unchanged owner revision regression remains an error. Late confirmed receipts may settle after Run
 cancellation, without reviving the Run or overwriting a newer note. Context compilation reads trusted
-receipt bodies on its read worker. Full child-task records, conversation-fork body work and content
-collection remain separate unfinished control-path boundaries.
+receipt bodies on its read worker. Full child-task records and content collection remain separate
+unfinished control-path boundaries.
 
 ## Execution and trust
 

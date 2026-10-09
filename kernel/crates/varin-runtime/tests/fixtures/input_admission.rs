@@ -13,6 +13,7 @@ type Result<T> = std::result::Result<T, RuntimeError>;
 
 #[allow(dead_code)]
 pub trait InputAdmission {
+    fn fork_branch(&mut self, source: &str, target: &str, head: Option<&str>) -> Result<()>;
     fn submit(&mut self, command: &SubmitInput) -> Result<Receipt>;
     fn submit_with_launch(
         &mut self,
@@ -60,6 +61,12 @@ pub trait InputAdmission {
     ) -> Result<ChildTask>;
 }
 impl InputAdmission for Catalog {
+    fn fork_branch(&mut self, source: &str, target: &str, head: Option<&str>) -> Result<()> {
+        let prepared = self
+            .prepare_branch_fork(source, target, head, None)?
+            .load()?;
+        self.admit_branch_fork(prepared).map(|_| ())
+    }
     fn submit(&mut self, command: &SubmitInput) -> Result<Receipt> {
         self.submit_with_launch(command, None)
     }

@@ -357,7 +357,7 @@ pub(crate) fn spawn(
                         let params = value.get_mut("params").map(Value::take).unwrap_or_else(|| json!({}));
                         // Typed body contracts are consumed once on their independent worker.
                         // Generated validation would otherwise clone all input/attachment content here.
-                        if !matches!(method,"runtime.input.submit"|"runtime.input.enqueue"|"runtime.input.edit"|"runtime.child.prepare") {
+                        if !matches!(method,"runtime.thread.create"|"runtime.input.submit"|"runtime.input.enqueue"|"runtime.input.edit"|"runtime.child.prepare") {
                             validate_method_params(method, &params)?;
                         }
                         if let Some(failure) = &initialization_failure {
@@ -382,13 +382,45 @@ pub(crate) fn spawn(
                             catalog.reconcile_child_reports().map_err(domain)?;
                             return Ok(serde_json::to_value(catalog.child_task(&p.operation_id).map_err(domain)?)?);
                         }
-                        if matches!(method,"runtime.input.submit"|"runtime.input.enqueue"|"runtime.input.edit"|"runtime.input.cancel"|"runtime.input.inspect"|"runtime.input.list"|"runtime.child.prepare") {
+                        if matches!(method,"runtime.thread.create"|"runtime.input.submit"|"runtime.input.enqueue"|"runtime.input.edit"|"runtime.input.cancel"|"runtime.input.inspect"|"runtime.input.list"|"runtime.child.prepare") {
                             let order=input_order;
                             let runtime=runtime.clone();let method=method.to_owned();
                             let response_id=id.clone();let response_sender=responses.clone();let done=finished.clone();
                             let cancelled=cancellation.clone();
                             thread::spawn(move||{
                                 let result=input_commands::execute(runtime,&method,params,cancelled,order);
+                                let response=match result{Ok(value)=>response_ok(&response_id,value),Err(error)=>response_error(&response_id,&error)};
+                                done(&response_id);let _=response_sender.send(response);
+                            });
+                            deferred=true;return Ok(Value::Null);
+                        }
+                        if method == "runtime.branch.fork" {
+                            let order=input_order;
+                            if let Some(capture)=params.get("planCapture") {
+                                if !capture.is_object() || ["headId","inheritedRef","capturedRef"].iter().any(|field|capture.get(*field).is_none()) {
+                                    return Err(KernelError::Protocol("planCapture requires the complete immutable capture, including explicit null references".into()));
+                                }
+                            }
+                            let p:BranchForkParams=serde_json::from_value(params)?;
+                            let capture=p.plan_capture.map(|value|varin_runtime::catalog::plan::PlanForkCapture {
+                                source_thread_id:value.source_thread_id,source_branch_id:value.source_branch_id,target_branch_id:value.target_branch_id,
+                                head_id:value.head_id.0,inherited_ref:value.inherited_ref.0,captured_ref:value.captured_ref.0,
+                            });
+                            let catalog=runtime.catalog();
+                            let preparation=catalog.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?
+                                .prepare_branch_fork(&p.source_branch_id,&p.branch_id,p.head_id.0.as_deref(),capture).map_err(domain)?;
+                            let response_id=id.clone();let response_sender=responses.clone();let done=finished.clone();
+                            let cancelled=cancellation.clone();
+                            thread::spawn(move||{
+                                let result=(||->Result<Value,KernelError>{
+                                    if cancelled.load(Ordering::Acquire) {return Err(KernelError::Cancelled);}
+                                    let prepared=preparation.load().map_err(domain)?;
+                                    let _order=input_commands::await_input_order(order)?;
+                                    let receipt={let mut owner=catalog.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?;
+                                        if cancelled.load(Ordering::Acquire) {return Err(KernelError::Cancelled);}
+                                        owner.admit_branch_fork(prepared).map_err(domain)?};
+                                    Ok(serde_json::to_value(receipt)?)
+                                })();
                                 let response=match result{Ok(value)=>response_ok(&response_id,value),Err(error)=>response_error(&response_id,&error)};
                                 done(&response_id);let _=response_sender.send(response);
                             });
@@ -849,22 +881,6 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         let head = if p.current { catalog.head(&p.branch_id).map_err(domain)? } else { p.head_id.0 };
         return Ok(serde_json::to_value(catalog.plan_view(&p.branch_id, head.as_deref()).map_err(domain)?)?);
     }
-    if method == "runtime.branch.fork" {
-        if let Some(capture) = params.get("planCapture") {
-            if !capture.is_object() || ["headId", "inheritedRef", "capturedRef"].iter().any(|field| capture.get(*field).is_none()) {
-                return Err(KernelError::Protocol("planCapture requires the complete immutable capture, including explicit null references".into()));
-            }
-        }
-        let p: BranchForkParams = serde_json::from_value(params)?;
-        let capture = p.plan_capture.map(|value| varin_runtime::catalog::plan::PlanForkCapture {
-            source_thread_id:value.source_thread_id, source_branch_id:value.source_branch_id, target_branch_id:value.target_branch_id,
-            head_id:value.head_id.0, inherited_ref:value.inherited_ref.0, captured_ref:value.captured_ref.0 });
-        catalog
-            .fork_branch_with_plan(&p.source_branch_id, &p.branch_id, p.head_id.0.as_deref(), capture)
-            .map_err(domain)?;
-        let thread_id = catalog.branch_thread_id(&p.branch_id).map_err(domain)?;
-        return Ok(json!({"threadId":thread_id,"branchId":p.branch_id}));
-    }
     if method == "runtime.history.page" {
         let p: HistoryPageParams = serde_json::from_value(params)?;
         let limit = u32::try_from(p.limit)
@@ -945,18 +961,6 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                 return Err(KernelError::Protocol("admission identity exceeds the protocol response budget".into()));
             }
             Ok(result)
-        }
-        "runtime.thread.create" => {
-            let p: ThreadCreateParams = serde_json::from_value(params)?;
-            if p.thread_id.trim().is_empty() || p.branch_id.trim().is_empty() {
-                return Err(KernelError::Protocol(
-                    "thread and branch identities cannot be empty".into(),
-                ));
-            }
-            catalog
-                .create_thread(&p.thread_id, &p.branch_id)
-                .map_err(domain)?;
-            Ok(json!({"threadId":p.thread_id,"branchId":p.branch_id}))
         }
         "runtime.run.inspect" | "runtime.run.cancel" => {
             let p: RunParams = serde_json::from_value(params)?;

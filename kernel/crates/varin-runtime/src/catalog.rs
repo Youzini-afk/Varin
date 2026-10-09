@@ -606,112 +606,6 @@ impl Catalog {
             |row| row.get(0),
         ).optional()?.ok_or_else(|| RuntimeError::NotFound(branch_id.into()))
     }
-    pub fn fork_branch(
-        &mut self,
-        source: &str,
-        new_branch: &str,
-        head: Option<&str>,
-    ) -> Result<()> {
-        self.fork_branch_with_plan(source, new_branch, head, None)
-    }
-    pub fn fork_branch_with_plan(
-        &mut self,
-        source: &str,
-        new_branch: &str,
-        head: Option<&str>,
-        plan_capture: Option<plan::PlanForkCapture>,
-    ) -> Result<()> {
-        // Creation identity is immutable even when either branch later advances.
-        let creation: Option<String> = self.db.query_row(
-            "SELECT data FROM events WHERE subject=?1 AND kind='branch.created' ORDER BY cursor LIMIT 1",
-            [new_branch],
-            |row| row.get(0),
-        ).optional()?;
-        let mut identity = json!({"source":source,"head":head});
-        if let Some(capture) = &plan_capture {
-            let source_view = self.plan_view(source, head)?;
-            if capture.source_thread_id != source_view.thread_id || capture.source_branch_id != source
-                || capture.target_branch_id != new_branch || capture.head_id.as_deref() != head
-                || capture.inherited_ref != source_view.inherited_ref {
-                return Err(RuntimeError::Conflict("plan capture does not identify the source fork".into()));
-            }
-            identity["planCapture"] = serde_json::to_value(capture)?;
-        }
-        if let Some(creation) = creation {
-            if serde_json::from_str::<Value>(&creation)? == identity {
-                return Ok(());
-            }
-            return Err(RuntimeError::Conflict("branch identity has different fork input".into()));
-        }
-        let exists: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM branches WHERE id=?1)",
-            [new_branch],
-            |row| row.get(0),
-        )?;
-        if exists {
-            return Err(RuntimeError::Conflict("branch identity already exists".into()));
-        }
-        let (thread, mut cursor): (String, Option<String>) = self.db.query_row(
-            "SELECT thread_id,head FROM branches WHERE id=?1",
-            [source],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        ).optional()?.ok_or_else(|| RuntimeError::NotFound(source.into()))?;
-        if let Some(head) = head {
-            // Membership uses immutable ancestry columns, never hydrated source bodies.
-            while cursor.as_deref() != Some(head) {
-                let key = cursor.ok_or_else(|| RuntimeError::Invalid("fork head is not an ancestor".into()))?;
-                cursor = self.db.query_row(
-                    "SELECT parent FROM history WHERE id=?1",
-                    [&key],
-                    |row| row.get(0),
-                ).optional()?.ok_or_else(|| RuntimeError::NotFound(key))?;
-            }
-        }
-        if head.is_some() {
-            // A fork is a replayable conversation cut, not a continuation of live tool work.
-            // Only hydrate the selected prefix to apply the existing pairing rules.
-            let mut metadata = Vec::new();
-            while let Some(key) = cursor {
-                let item: HistoryItem = record(&self.db, "history", &key)?;
-                cursor = item.parent.clone();
-                metadata.push(item);
-            }
-            metadata.reverse();
-            let history = context_jobs::hydrate_source(&self.content, metadata)?;
-            crate::execution::validate_history_pairs(&history)
-                .map_err(|error| RuntimeError::Invalid(error.to_string()))?;
-        }
-        let fork_context = self.active_context(source)?.map(|checkpoint| {
-            let proposal = context::ContextProposal {
-                key: format!("fork-context:{new_branch}"), branch_id: new_branch.into(),
-                through_id: None, expected_revision: 0, summary: String::new(),
-                effective_system_prompt: checkpoint.proposal.effective_system_prompt,
-                instruction_sources: checkpoint.proposal.instruction_sources,
-                memory_checkpoint: checkpoint.proposal.memory_checkpoint,
-            };
-            let checkpoint = context::ContextCheckpoint { id: proposal.key.clone(), revision: 1, proposal, personalization: checkpoint.personalization };
-            let reference = self.content.save(&serde_json::to_value(&checkpoint)?)?;
-            Ok::<_, RuntimeError>((checkpoint, reference))
-        }).transpose()?;
-        let tx = self.db.transaction()?;
-        tx.execute(
-            "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,?3)",
-            params![new_branch, thread, head],
-        )?;
-        tx.execute("INSERT INTO memory_states(branch_id,body) SELECT ?1,body FROM memory_states WHERE branch_id=?2", params![new_branch, source])?;
-        if let Some((checkpoint, reference)) = fork_context {
-            context::publish_prepared(&tx, &checkpoint, &reference)?;
-        }
-        event(
-            &tx,
-            new_branch,
-            1,
-            "branch.created",
-            identity,
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
     pub fn admit_operation(
         &mut self,
         key: &str,
@@ -1414,6 +1308,9 @@ pub mod context;
 
 #[path="catalog_history.rs"]
 pub mod history_views;
+
+#[path="catalog_fork.rs"]
+pub mod forks;
 
 #[path="catalog_context_jobs.rs"]
 pub mod context_jobs;

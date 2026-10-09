@@ -170,7 +170,7 @@ fn submit_input(
     Ok(serde_json::to_value(receipt)?)
 }
 
-fn await_input_order(
+pub(super) fn await_input_order(
     order: Option<varin_runtime::resource_admission::ResourceReservation>,
 ) -> Result<Option<varin_runtime::resource_admission::ResourceLease>, KernelError> {
     order
@@ -195,6 +195,25 @@ pub(super) fn execute(
     }
     let catalog = runtime.catalog();
     match method {
+        "runtime.thread.create" => {
+            let p: ThreadCreateParams = serde_json::from_value(params)?;
+            if p.thread_id.trim().is_empty() || p.branch_id.trim().is_empty() {
+                return Err(KernelError::Protocol(
+                    "thread and branch identities cannot be empty".into(),
+                ));
+            }
+            let _order = await_input_order(order)?;
+            let mut owner = catalog
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            if cancelled.load(Ordering::Acquire) {
+                return Err(KernelError::Cancelled);
+            }
+            owner
+                .create_thread(&p.thread_id, &p.branch_id)
+                .map_err(domain)?;
+            Ok(json!({"threadId":p.thread_id,"branchId":p.branch_id}))
+        }
         "runtime.input.submit" => submit_input(catalog, params, cancelled, order),
         "runtime.child.prepare" => prepare_child_input(catalog, params, cancelled),
         "runtime.input.enqueue" => {
