@@ -57,6 +57,10 @@ struct Worker {
     join: Option<JoinHandle<()>>,
     pending: Option<PendingLaunch>,
 }
+struct RunDrain {
+    serial: Mutex<()>,
+    active: AtomicBool,
+}
 fn same_reservation(left: &CancellationToken, right: &CancellationToken) -> bool {
     Arc::ptr_eq(&left.shared_flag(), &right.shared_flag())
 }
@@ -71,6 +75,7 @@ pub struct RunSupervisor {
     stopping: AtomicBool,
     catalog: Arc<Mutex<Catalog>>,
     workers: Mutex<HashMap<String, Worker>>,
+    quiescence: Mutex<HashMap<String, Arc<RunDrain>>>,
     failures: Arc<Mutex<HashMap<String, ExecutionError>>>,
     wake: Arc<Mutex<Option<mpsc::Sender<()>>>>,
 }
@@ -80,6 +85,7 @@ impl RunSupervisor {
             stopping: AtomicBool::new(false),
             catalog: Arc::new(Mutex::new(catalog)),
             workers: Mutex::new(HashMap::new()),
+            quiescence: Mutex::new(HashMap::new()),
             failures: Arc::new(Mutex::new(HashMap::new())),
             wake: Arc::new(Mutex::new(None)),
         }
@@ -114,6 +120,10 @@ impl RunSupervisor {
         self.reap()?;
         let cancel = CancellationToken::default();
         {
+            let quiescence = self.quiescence.lock().map_err(error)?;
+            if quiescence.get(run_id).is_some_and(|drain|drain.active.load(Ordering::Acquire)) {
+                return Err(ExecutionError::new("run_already_owned", "the previous Run worker is still relinquishing ownership"));
+            }
             let mut workers = self.workers.lock().map_err(error)?;
             if self.stopping.load(Ordering::Acquire) {
                 return Err(ExecutionError::new(
@@ -603,14 +613,8 @@ impl RunSupervisor {
             }
             run.id
         };
-        let worker = self.workers.lock().map_err(error)?.remove(&run_id);
-        if let Some(mut worker) = worker {
-            if let Some(join) = worker.join.take() {
-                join.join()
-                    .map_err(|_| error("question worker teardown failed"))?;
-            }
-        }
-        Ok(())
+        self.quiesce_run(&run_id, |run| run.state == RunState::Waiting
+            && run.waiting_on.as_deref() == Some(&format!("question:{operation_id}")))
     }
     pub fn quiesce_context_job(&self, job_id: &str) -> Result<()> {
         let parent = self
@@ -622,80 +626,47 @@ impl RunSupervisor {
         let Some(parent) = parent else {
             return Ok(());
         };
-        let worker = self.workers.lock().map_err(error)?.remove(&parent);
-        if let Some(mut worker) = worker {
-            if let Some(join) = worker.join.take() {
-                join.join()
-                    .map_err(|_| error("context wait teardown failed"))?;
+        let wait_id = format!("context-wait:{parent}:{job_id}");
+        self.quiesce_run(&parent, |run| run.state == RunState::Waiting && run.waiting_on.as_deref() == Some(&wait_id))
+    }
+    /// Each waiter shares its Run's teardown. No Catalog or global worker lock crosses join.
+    fn quiesce_run(&self, run_id: &str, waiting: impl Fn(&Run) -> bool) -> Result<()> {
+        let serial = self.quiescence.lock().map_err(error)?.entry(run_id.into())
+            .or_insert_with(||Arc::new(RunDrain { serial: Mutex::new(()), active: AtomicBool::new(true) })).clone();
+        let guard = serial.serial.lock().map_err(error)?;
+        let result = (|| {
+            if !waiting(&self.catalog.lock().map_err(error)?.run(run_id).map_err(error)?) { return Ok(()); }
+            serial.active.store(true, Ordering::Release);
+            let worker = self.workers.lock().map_err(error)?.remove(run_id);
+            if let Some(mut worker) = worker {
+                if let Some(join) = worker.join.take() { join.join().map_err(|_|error("Run wait teardown failed"))?; }
             }
+            Ok(())
+        })();
+        // Other callers may still be leaving this rendezvous; only the real worker blocks start.
+        serial.active.store(false, Ordering::Release);
+        drop(guard);
+        let mut entries = self.quiescence.lock().map_err(error)?;
+        if Arc::strong_count(&serial) == 2 { entries.remove(run_id); }
+        result
+    }
+    fn quiesce_waits(&self, prefix: &str) -> Result<()> {
+        let mut ids: std::collections::BTreeSet<String> = self.workers.lock().map_err(error)?.keys().cloned().collect();
+        ids.extend(self.quiescence.lock().map_err(error)?.keys().cloned());
+        for id in ids {
+            let waiting = |run: &Run| run.state == RunState::Waiting
+                && run.waiting_on.as_deref().is_some_and(|key|key.starts_with(prefix));
+            if waiting(&self.catalog.lock().map_err(error)?.run(&id).map_err(error)?) { self.quiesce_run(&id, waiting)?; }
         }
         Ok(())
     }
     /// A persisted child Wait has relinquished the history writer. Join only final teardown,
     /// never a running model/tool, before its durable report makes that same Run runnable.
     pub fn quiesce_child_waits(&self) -> Result<()> {
-        let ids: Vec<String> = self
-            .workers
-            .lock()
-            .map_err(error)?
-            .keys()
-            .cloned()
-            .collect();
-        for id in ids {
-            let run = self
-                .catalog
-                .lock()
-                .map_err(error)?
-                .run(&id)
-                .map_err(error)?;
-            if run.state != RunState::Waiting
-                || !run
-                    .waiting_on
-                    .as_deref()
-                    .is_some_and(|id| id.starts_with("child-wait:"))
-            {
-                continue;
-            }
-            if let Some(mut worker) = self.workers.lock().map_err(error)?.remove(&id) {
-                if let Some(join) = worker.join.take() {
-                    join.join()
-                        .map_err(|_| error("child wait teardown failed"))?;
-                }
-            }
-        }
-        Ok(())
+        self.quiesce_waits("child-wait:")
     }
     pub fn quiesce_process_waits(&self) -> Result<()> {
-        let ids: Vec<String> = self
-            .workers
-            .lock()
-            .map_err(error)?
-            .keys()
-            .cloned()
-            .collect();
-        for id in ids {
-            let run = self
-                .catalog
-                .lock()
-                .map_err(error)?
-                .run(&id)
-                .map_err(error)?;
-            if run.state != RunState::Waiting
-                || !run
-                    .waiting_on
-                    .as_deref()
-                    .is_some_and(|id| id.starts_with("process-wait:"))
-            {
-                continue;
-            }
-            if let Some(mut worker) = self.workers.lock().map_err(error)?.remove(&id) {
-                if let Some(join) = worker.join.take() {
-                    join.join()
-                        .map_err(|_| error("process wait teardown failed"))?;
-                }
-            }
-        }
-        Ok(())
+        self.quiesce_waits("process-wait:")
     }
     pub fn cancel_operation(&self, operation_id: &str) -> Result<crate::Operation> {
         self.cancel_operation_control(operation_id);
@@ -829,3 +800,7 @@ impl From<RuntimeError> for ExecutionError {
         error(value)
     }
 }
+
+#[cfg(test)]
+#[path="supervisor_wait_tests.rs"]
+mod wait_tests;

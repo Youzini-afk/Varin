@@ -772,6 +772,7 @@ impl ProcessManager {
         }
         Ok(Some(
             json!({"status":status, "pid":buffer.pid, "exitCode":exit_code, "signal":signal,
+            "stopApplied":buffer.receipt.as_ref().and_then(|receipt|receipt.get("stopApplied")).and_then(Value::as_bool),
             "reason":reason, "writerActive":!matches!(status,"exited"|"failed"), "outputAvailable":true,
             "outputComplete":buffer.output_closed && buffer.output_error.is_none(),"outputError":buffer.output_error}),
         ))
@@ -893,16 +894,14 @@ impl ProcessManager {
     pub(crate) fn shutdown(&mut self) -> Result<(), KernelError> {
         for live in self.live.values_mut() {
             live.shared.lock().discard = true;
-            // EOF is a native guardian stop request, not a fabricated exit.
+            // Keep control alive until the guardian can durably report the actual tree stop.
+            // Windows EOF aborts the whole Job, including the guardian that writes that receipt.
             if !live.guardian_exited {
                 let _ = live.control.stop(true);
             }
-            if let Ok(mut input) = live.input.lock() {
-                input.take();
-            }
         }
         let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
+        let result = (|| -> Result<(), KernelError> { loop {
             let mut pending = false;
             let ids: Vec<_> = self.live.keys().cloned().collect();
             for id in ids {
@@ -922,7 +921,12 @@ impl ProcessManager {
                 ));
             }
             thread::sleep(Duration::from_millis(10));
+        } })();
+        // A failed stop remains uncertain. Closing control still invokes the guardian's loss path.
+        for live in self.live.values_mut() {
+            if let Ok(mut input) = live.input.lock() { input.take(); }
         }
+        result
     }
 }
 impl Drop for ProcessManager {

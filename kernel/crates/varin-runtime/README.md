@@ -24,6 +24,10 @@ writing Pi session files or the Host harness's existing execution records.
   The default policy is replaceable; it does not own or mutate the catalog itself.
 - `catalog_execution` commits model output, immutable conversation items and unresolved call identities
   together. A frozen request cannot publish against a changed history head.
+- User answers prepare content outside Catalog and commit its identity with the original question,
+  branch, wait and owner guards. Equal retries deliver once; conflicting answers and late cancelled
+  work fail. Waiting/cancellation lookup selects the actual Run's questions instead of decoding all
+  operations. Wait teardown is coordinated per Run outside the global worker/control locks.
 - `composition` prepares and publishes revision-checked bindings. Retired model pins preserve the
   actual schema/implementation; explicit revocation still rejects execution.
 - The kernel's control worker is independent of its Storage queue. The Host client has separate

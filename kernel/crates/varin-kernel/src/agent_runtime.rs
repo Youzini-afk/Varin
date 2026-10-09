@@ -19,6 +19,9 @@ use varin_runtime::{model_session, supervisor::RunSupervisor, Catalog, SubmitInp
 #[path="agent_inputs.rs"]
 mod input_commands;
 
+#[path="agent_controls.rs"]
+mod control_commands;
+
 fn run_cancellation_receipt(run: &varin_runtime::Run) -> Value {
     json!({"id":run.id,"thread_id":run.thread_id,"branch_id":run.branch_id,"state":run.state,
         "revision":run.revision,"epoch":run.epoch,"cancel_requested":run.cancel_requested,"waiting_on":run.waiting_on})
@@ -359,7 +362,7 @@ pub(crate) fn spawn(
                         let params = value.get_mut("params").map(Value::take).unwrap_or_else(|| json!({}));
                         // Typed body contracts are consumed once on their independent worker.
                         // Generated validation would otherwise clone all input/attachment content here.
-                        if !matches!(method,"runtime.thread.create"|"runtime.input.submit"|"runtime.input.enqueue"|"runtime.input.edit"|"runtime.child.prepare"|"runtime.tools.ready"|"runtime.launch.mcp.prepare"|"runtime.launch.policy.prepare") {
+                        if !matches!(method,"runtime.thread.create"|"runtime.input.submit"|"runtime.input.enqueue"|"runtime.input.edit"|"runtime.child.prepare"|"runtime.tools.ready"|"runtime.launch.mcp.prepare"|"runtime.launch.policy.prepare"|"runtime.question.answer") {
                             validate_method_params(method, &params)?;
                         }
                         if let Some(failure) = &initialization_failure {
@@ -369,20 +372,20 @@ pub(crate) fn spawn(
                         runtime
                             .reap()
                             .map_err(|e| KernelError::Operation(e.to_string()))?;
-                        if matches!(method, "runtime.child.reconcile" | "runtime.child.wait.cancel") {
-                            runtime.quiesce_child_waits().map_err(|e| KernelError::Operation(e.to_string()))?;
-                        }
-                        if method == "runtime.process.wait.reconcile" {
-                            runtime.quiesce_process_waits().map_err(|e| KernelError::Operation(e.to_string()))?;
-                        }
-                        if method == "runtime.child.cancel" {
-                            let p: OperationParams = serde_json::from_value(params.clone())?;
-                            let child = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.child_task(&p.operation_id).map_err(domain)?;
-                            runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.cancel_child(&p.operation_id).map_err(domain)?;
-                            if let Some(receipt) = child.receipt { runtime.cancel(&receipt.run_id).map_err(|e| KernelError::Operation(e.to_string()))?; }
-                            let catalog=runtime.catalog();let mut catalog=catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-                            catalog.reconcile_child_reports().map_err(domain)?;
-                            return Ok(serde_json::to_value(catalog.child_task(&p.operation_id).map_err(domain)?)?);
+                        if matches!(method, "runtime.question.answer" | "runtime.run.cancel" | "runtime.operation.cancel"
+                            | "runtime.child.cancel" | "runtime.child.reconcile" | "runtime.child.wait.cancel" | "runtime.process.wait.reconcile") {
+                            let commands = control_commands::ControlCommands { runtime: runtime.clone(), resources: resources.clone(),
+                                models: run_models.as_ref().expect("initialized runtime models").clone(),
+                                tools: run_tools.as_ref().expect("initialized runtime tools").clone() };
+                            commands.admit_cancellation(method, &params)?;
+                            let method = method.to_owned(); let response_id = id.clone(); let response_sender = responses.clone();
+                            let done = finished.clone(); let cancelled = cancellation.clone();
+                            thread::spawn(move || {
+                                let result = commands.execute(&method, params, &cancelled);
+                                let response = match result {Ok(value)=>response_ok(&response_id,value),Err(error)=>response_error(&response_id,&error)};
+                                done(&response_id); let _ = response_sender.send(response);
+                            });
+                            deferred = true; return Ok(Value::Null);
                         }
                         if matches!(method,"runtime.thread.create"|"runtime.input.submit"|"runtime.input.enqueue"|"runtime.input.edit"|"runtime.input.cancel"|"runtime.input.inspect"|"runtime.input.list"|"runtime.child.prepare") {
                             let order=input_order;
@@ -817,65 +820,6 @@ pub(crate) fn spawn(
                             let result = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                                 .decide_permission(&p.operation_id, &p.permission_id, &p.decision).map_err(domain)?;
                             return Ok(serde_json::to_value(result)?);
-                        }
-                        if method == "runtime.question.answer" {
-                            let p: QuestionAnswerParams = serde_json::from_value(params)?;
-                            runtime.quiesce_question(&p.operation_id).map_err(|e| KernelError::Operation(e.to_string()))?;
-                            let result = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                                .answer_question(&p.operation_id, &p.answer).map_err(domain)?;
-                            return Ok(serde_json::to_value(result)?);
-                        }
-                        if method == "runtime.run.cancel" {
-                            let p: RunParams = serde_json::from_value(params)?;
-                            let waiting = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                                .run(&p.run_id).map_err(domain)?.waiting_on;
-                            if waiting.as_deref().is_some_and(|id|id.starts_with("child-wait:")) {runtime.quiesce_child_waits().map_err(|e|KernelError::Operation(e.to_string()))?;}
-                            if waiting.as_deref().is_some_and(|id|id.starts_with("process-wait:")) {runtime.quiesce_process_waits().map_err(|e|KernelError::Operation(e.to_string()))?;}
-                            if let Some(operation_id) = waiting.as_deref().and_then(|id| id.strip_prefix("question:")) {
-                                runtime.quiesce_question(operation_id).map_err(|e| KernelError::Operation(e.to_string()))?;
-                            }
-                            let run = runtime.cancel(&p.run_id).map_err(|e| KernelError::Operation(e.to_string()))?;
-                            if run.state.terminal() {run_models.as_ref().expect("initialized runtime models").release(&run.id);run_tools.as_ref().expect("initialized runtime tools").release(&run.id);}
-                            return Ok(run_cancellation_receipt(&run));
-                        }
-                        if method == "runtime.operation.cancel" {
-                            let p: OperationParams = serde_json::from_value(params)?;
-                            if runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                                .operation(&p.operation_id).map_err(domain)?.executor.as_deref() == Some("wait_process") {
-                                runtime.quiesce_process_waits().map_err(|e|KernelError::Operation(e.to_string()))?;
-                                return Ok(operation_cancellation_receipt(&runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.cancel_process_wait(&p.operation_id).map_err(domain)?));
-                            }
-                            if runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                                .operation(&p.operation_id).map_err(domain)?.executor.as_deref() == Some("ask_user") {
-                                runtime.quiesce_question(&p.operation_id).map_err(|e| KernelError::Operation(e.to_string()))?;
-                                let operation = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                                    .cancel_question(&p.operation_id).map_err(domain)?;
-                                return Ok(operation_cancellation_receipt(&operation));
-                            }
-                            let operation = runtime
-                                .cancel_operation(&p.operation_id)
-                                .map_err(|e| KernelError::Operation(e.to_string()))?;
-                            if operation.cancel_requested
-                                && operation.executor.as_deref() == Some("process_spawn")
-                            {
-                                let known = resources.cancel_known_process(&operation.id)?;
-                                if !known
-                                    && matches!(
-                                        operation.phase,
-                                        varin_runtime::OperationPhase::Running
-                                            | varin_runtime::OperationPhase::Settling
-                                    )
-                                    && matches!(
-                                        operation.effect,
-                                        varin_runtime::Effect::Dispatched
-                                            | varin_runtime::Effect::Partial
-                                            | varin_runtime::Effect::Unknown
-                                    )
-                                {
-                                    resources.cancel_process(&operation.id, &operation.run_id)?;
-                                }
-                            }
-                            return Ok(operation_cancellation_receipt(&operation));
                         }
                         let catalog = runtime.catalog();
                         let mut catalog = catalog.lock().map_err(|_| {

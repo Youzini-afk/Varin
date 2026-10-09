@@ -4,6 +4,49 @@ use crate::execution::AdmittedTool;
 
 pub const QUESTION_TOOL: &str = "ask_user";
 
+pub struct QuestionAnswerPreparation {
+    operation_id: String,
+    run_id: String,
+    epoch: u64,
+    answer: Option<String>,
+    content: crate::content::ContentStore,
+    publication: crate::content::ContentPublication,
+}
+pub struct PreparedQuestionAnswer {
+    operation_id: String,
+    run_id: String,
+    epoch: u64,
+    content: Value,
+    result: Value,
+    outcome: Outcome,
+    _publication: crate::content::ContentPublication,
+}
+impl QuestionAnswerPreparation {
+    pub fn load(self) -> Result<PreparedQuestionAnswer> {
+        let answer = self.answer.as_deref().unwrap_or(
+            "The user cancelled this question. Continue without assuming an answer or permission.",
+        );
+        if answer.trim().is_empty() {
+            return Err(RuntimeError::Invalid("answer is empty".into()));
+        }
+        let content = self.content.save_history(&json!({"text":answer}), &None)?;
+        let (outcome, result) = if self.answer.is_some() {
+            (Outcome::Succeeded, json!({"answer_ref":content}))
+        } else {
+            (Outcome::Cancelled, json!({"cancelled":true}))
+        };
+        Ok(PreparedQuestionAnswer {
+            operation_id: self.operation_id,
+            run_id: self.run_id,
+            epoch: self.epoch,
+            content,
+            result,
+            outcome,
+            _publication: self.publication,
+        })
+    }
+}
+
 impl Catalog {
     pub fn open_question(&mut self, operation_id: &str, run_id: &str) -> Result<String> {
         let tx = self.db.transaction()?;
@@ -81,56 +124,71 @@ impl Catalog {
     }
 
     pub fn pending_question_wait(&self, run_id: &str) -> Result<Option<String>> {
-        let mut stmt = self
+        Ok(self
             .db
-            .prepare("SELECT body FROM operations WHERE run_id=?1 ORDER BY rowid")?;
-        for raw in stmt.query_map([run_id], |r| r.get::<_, String>(0))? {
-            let op: Operation = serde_json::from_str(&raw?)?;
-            if op.executor.as_deref() == Some(QUESTION_TOOL) && op.phase != OperationPhase::Terminal
-            {
-                if let Some(wait) = op.waiting_on {
-                    return Ok(Some(wait));
-                }
-            }
-        }
-        Ok(None)
+            .query_row(
+                "SELECT json_extract(body,'$.waiting_on') FROM operations WHERE run_id=?1
+            AND json_extract(body,'$.executor')=?2 AND json_extract(body,'$.phase')!='terminal'
+            AND json_extract(body,'$.waiting_on') IS NOT NULL ORDER BY rowid LIMIT 1",
+                params![run_id, QUESTION_TOOL],
+                |row| row.get(0),
+            )
+            .optional()?)
     }
 
     /// Answer receipt, conversation delivery, terminal operation and continuation commit together.
     /// Equal retries return the original receipt; cancellation and conflicting answers are rejected.
     pub fn answer_question(&mut self, operation_id: &str, answer: &str) -> Result<Operation> {
-        self.finish_question(operation_id, Some(answer))
+        let prepared = self
+            .prepare_question_answer(operation_id, Some(answer.into()))?
+            .load()?;
+        self.admit_question_answer(prepared)
     }
     pub fn cancel_question(&mut self, operation_id: &str) -> Result<Operation> {
-        self.finish_question(operation_id, None)
+        let prepared = self.prepare_question_answer(operation_id, None)?.load()?;
+        self.admit_question_answer(prepared)
     }
-    fn finish_question(&mut self, operation_id: &str, supplied: Option<&str>) -> Result<Operation> {
-        let answer = supplied.unwrap_or(
-            "The user cancelled this question. Continue without assuming an answer or permission.",
-        );
-        if answer.trim().is_empty() {
-            return Err(RuntimeError::Invalid("answer is empty".into()));
-        }
+    pub fn prepare_question_answer(
+        &self,
+        operation_id: &str,
+        answer: Option<String>,
+    ) -> Result<QuestionAnswerPreparation> {
         let original = self.operation(operation_id)?;
         if original.executor.as_deref() != Some(QUESTION_TOOL) {
             return Err(RuntimeError::Invalid("not a user question".into()));
         }
-        // Only the authenticated user's answer becomes user-instruction content. The model's
-        // question stays in its original tool call and must not be promoted to user authority.
-        let content = self.content.save_history(&json!({"text":answer}), &None)?;
+        Ok(QuestionAnswerPreparation {
+            operation_id: operation_id.into(),
+            run_id: original.run_id,
+            epoch: self.epoch,
+            answer,
+            content: self.content.clone(),
+            publication: self.content.begin_publication(),
+        })
+    }
+    /// Only the authenticated answer becomes user content; the receipt keeps its content identity.
+    /// The question remains in its original tool call and cannot acquire user authority.
+    pub fn admit_question_answer(&mut self, prepared: PreparedQuestionAnswer) -> Result<Operation> {
+        let PreparedQuestionAnswer {
+            operation_id,
+            run_id,
+            epoch,
+            content,
+            result,
+            outcome,
+            _publication,
+        } = prepared;
+        if epoch != self.epoch {
+            return Err(RuntimeError::Conflict(
+                "question answer belongs to a previous owner".into(),
+            ));
+        }
         let tx = self.db.transaction()?;
-        let mut op: Operation = record(&tx, "operations", operation_id)?;
+        let mut op: Operation = record(&tx, "operations", &operation_id)?;
+        if op.run_id != run_id || op.executor.as_deref() != Some(QUESTION_TOOL) {
+            return Err(RuntimeError::Conflict("question owner changed".into()));
+        }
         let mut run: Run = record(&tx, "runs", &op.run_id)?;
-        let result = if supplied.is_some() {
-            json!({"answer":answer})
-        } else {
-            json!({"cancelled":true})
-        };
-        let outcome = if supplied.is_some() {
-            Outcome::Succeeded
-        } else {
-            Outcome::Cancelled
-        };
         if op.phase == OperationPhase::Terminal {
             if op.outcome == Some(outcome) && op.result.as_ref() == Some(&result) {
                 return Ok(op);
@@ -143,7 +201,7 @@ impl Catalog {
             .ok_or_else(|| RuntimeError::Conflict("question is not ready".into()))?;
         let mut wait: Wait = record(&tx, "waits", &wait_id)?;
         if !op.handed_off
-            || op.cancel_requested
+            || (op.cancel_requested && outcome != Outcome::Cancelled)
             || run.cancel_requested
             || run.state != RunState::Waiting
             || run.waiting_on.as_deref() != Some(&wait_id)
@@ -184,10 +242,10 @@ impl Catalog {
         op.effect = Effect::None;
         op.result = Some(result);
         op.revision += 1;
-        put(&tx, "operations", operation_id, &op)?;
+        put(&tx, "operations", &operation_id, &op)?;
         let cursor = event(
             &tx,
-            operation_id,
+            &operation_id,
             op.revision,
             "operation.settled",
             serde_json::to_value(&op)?,
@@ -217,13 +275,18 @@ impl Catalog {
 
 /// Run cancellation closes unanswered questions and makes later responses inert.
 pub(super) fn cancel_run_questions(tx: &Transaction<'_>, run_id: &str) -> Result<()> {
-    for mut op in read_all::<Operation>(tx, "operations")? {
-        if op.run_id != run_id
-            || op.executor.as_deref() != Some(QUESTION_TOOL)
-            || op.phase == OperationPhase::Terminal
-        {
-            continue;
-        }
+    let ids = {
+        let mut statement = tx.prepare(
+            "SELECT id FROM operations WHERE run_id=?1
+            AND json_extract(body,'$.executor')=?2 AND json_extract(body,'$.phase')!='terminal'",
+        )?;
+        let rows = statement.query_map(params![run_id, QUESTION_TOOL], |row| {
+            row.get::<_, String>(0)
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()?
+    };
+    for operation_id in ids {
+        let mut op: Operation = record(tx, "operations", &operation_id)?;
         op.phase = OperationPhase::Terminal;
         op.outcome = Some(Outcome::Cancelled);
         op.cancel_requested = true;
