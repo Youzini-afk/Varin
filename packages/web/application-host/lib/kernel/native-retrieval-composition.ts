@@ -3,19 +3,23 @@ import type { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { VARIN_BUILTIN_RETRIEVAL_DEFAULT_PROVIDER_KEY } from '@varin/extension-builtins';
 import {
   parseVarinRetrievalPlan, VARIN_RETRIEVAL_PLAN_METHOD, VARIN_RETRIEVAL_PLAN_SERVICE_ID,
-  VARIN_RETRIEVAL_PLAN_VERSION,
+  VARIN_RETRIEVAL_PLAN_VERSION, type VarinRetrievalPlan,
 } from '@varin/extension-contract';
 import { waitWithSignal } from '../cancellation.js';
 import {
   createRetrievalPipelineOwner, type BoundRetrievalPipeline, type RetrievalPipelineConfiguration,
-  type RetrievalPipelineOwner,
+  type RetrievalPipelineOwner, type NativeRetrievalSemanticMetadata,
 } from '../harness/retrieval-pipeline.js';
+import type { NativeSemanticInferenceReceipt } from '../knowledge/semantic/native-inference.js';
+import type { NativeRetrievalQuery } from './protocol.generated.js';
 
 export interface NativeRetrievalCompositionScope {
   threadId: string;
   projectId?: string;
   /** The existing service-routing workspace identity is the canonical directory, not a native ID. */
   workspaceId?: string;
+  /** Original Run identity for the native capability owner; never sent to the declaration extension. */
+  query?: NativeRetrievalQuery;
 }
 export interface NativeRetrievalSelection {
   readonly providerId: string;
@@ -23,6 +27,14 @@ export interface NativeRetrievalSelection {
   readonly artifactId: string;
   readonly configurationId: string;
   readonly selectionRevision: number;
+}
+export interface NativeRetrievalSemanticLease {
+  readonly stage: NonNullable<RetrievalPipelineConfiguration['semantic']>;
+  readonly metadata: Readonly<NativeRetrievalSemanticMetadata>;
+  assertAvailable(): void;
+  validateAvailable(signal?: AbortSignal): Promise<void>;
+  inferenceReceipts?(): readonly NativeSemanticInferenceReceipt[];
+  release(): void;
 }
 export interface NativeRetrievalPipelineBinding extends BoundRetrievalPipeline {
   readonly selection: Readonly<NativeRetrievalSelection>;
@@ -35,7 +47,7 @@ interface ScopeCache {
   candidateKey?: string;
   candidate: number;
   owner?: RetrievalPipelineOwner;
-  current?: { selectedKey: string; selection: Readonly<NativeRetrievalSelection> };
+  current?: { selectedKey: string; selection: Readonly<NativeRetrievalSelection>; declaration: Readonly<VarinRetrievalPlan> };
   publishing?: { identity: string; result: Promise<void> };
 }
 
@@ -44,6 +56,8 @@ interface ScopeCache {
  * query retains its own real Host service generation pin until its caller releases the binding. */
 export function createNativeRetrievalComposition(runtime: ApplicationExtensionRuntime, options: {
   structure?: NonNullable<RetrievalPipelineConfiguration['structure']>['implementation'];
+  /** Capture only; preparation never embeds the question, reads candidate text or starts indexing. */
+  prepareSemantic?: (scope: NativeRetrievalCompositionScope, signal?: AbortSignal) => Promise<NativeRetrievalSemanticLease>;
 }) {
   const scopes = new Map<string, ScopeCache>();
   return {
@@ -66,6 +80,7 @@ export function createNativeRetrievalComposition(runtime: ApplicationExtensionRu
       const selected = await waitWithSignal(runtime.prepareService(request, prepareOptions), signal);
       signal?.throwIfAborted();
       const pin = selected.pin();
+      let semantic: NativeRetrievalSemanticLease | undefined;
       try {
         const provider = runtime.services.getSnapshot().providers.find(item => item.providerId === selected.providerId && item.status === 'active');
         const artifactId = provider && runtime.supervisor.getActiveArtifactIdentity(provider);
@@ -97,9 +112,28 @@ export function createNativeRetrievalComposition(runtime: ApplicationExtensionRu
             throw new Error('Retrieval plan selection changed during preparation');
           }
         };
+        const acquireSemantic = async (declaration: Readonly<VarinRetrievalPlan>): Promise<NativeRetrievalSemanticLease | undefined> => {
+          if (declaration.semantic !== 'native' || !options.prepareSemantic) return undefined;
+          const preparing = options.prepareSemantic(scope, signal);
+          let acquired: NativeRetrievalSemanticLease;
+          try { acquired = await waitWithSignal(preparing, signal); }
+          catch (error) { void preparing.then(late => late.release(), () => {}); throw error; }
+          try {
+            await assertSelection();
+            acquired.assertAvailable();
+            const stage = acquired.stage;
+            if (!stage.providerId.trim() || !stage.configurationId.trim()
+              || !['ready', 'disabled', 'unavailable', 'unsupported'].includes(stage.status)
+              || (stage.status === 'ready' && !stage.implementation)) {
+              throw new Error('Invalid native semantic lease stage');
+            }
+            return acquired;
+          } catch (error) { acquired.release(); throw error; }
+        };
         if (state.current?.selectedKey !== selectedKey) {
           const declaration = parseVarinRetrievalPlan(await waitWithSignal(pin.invoke(VARIN_RETRIEVAL_PLAN_METHOD, [], signal), signal));
           await assertSelection();
+          semantic = await acquireSemantic(declaration);
           const selection = Object.freeze({ providerId: selected.providerId, providerKey: selected.providerKey,
             artifactId, configurationId: declaration.configurationId, selectionRevision: routing.document.revision });
           // Unrelated routing edits do not change the effective immutable declaration identity.
@@ -110,6 +144,8 @@ export function createNativeRetrievalComposition(runtime: ApplicationExtensionRu
             structure: { providerId: declaration.structure === 'native' ? 'varin.kernel.structure' : 'none',
               configurationId: identity, status: declaration.structure === 'disabled' ? 'disabled' : options.structure ? 'ready' : 'unavailable',
               ...(declaration.structure === 'native' && options.structure ? { implementation: options.structure } : {}) },
+            ...(declaration.semantic === 'native' ? { semantic: { providerId: 'varin.native.semantic',
+              configurationId: 'native-semantic-v1', status: 'unavailable' as const } } : {}),
           };
           // Concurrent first queries of the same selected generation share only this short
           // publication. Their describe calls, cancellation and lifetime pins stay independent.
@@ -126,7 +162,7 @@ export function createNativeRetrievalComposition(runtime: ApplicationExtensionRu
                   assertPublication();
                   if (state.owner) await state.owner.replace(async () => configuration, assertPublication);
                   else state.owner = createRetrievalPipelineOwner(configuration);
-                  state.current = { selectedKey, selection };
+                  state.current = { selectedKey, selection, declaration: Object.freeze({ ...declaration }) };
                 } finally { publicationPin.release(); }
               };
               const publishing = { identity, result: publish() };
@@ -135,13 +171,45 @@ export function createNativeRetrievalComposition(runtime: ApplicationExtensionRu
             }
             await waitWithSignal(state.publishing.result, signal);
           }
-        } else await assertSelection();
+        } else {
+          await assertSelection();
+          semantic = await acquireSemantic(state.current.declaration);
+        }
         assertCandidate();
         if (state.current?.selectedKey !== selectedKey || !state.owner) throw new Error('Retrieval plan preparation was superseded');
         const pipeline = state.owner.capture();
-        return Object.freeze({ ...pipeline, plan: Object.freeze({ ...pipeline.plan, selection: state.current.selection }), selection: state.current.selection,
-          assertAvailable: () => pin.assertAvailable(), release: () => pin.release() });
-      } catch (error) { pin.release(); throw error; }
+        const selection = state.current.selection;
+        // Query resources never enter the shared publication. Each query captures and owns its
+        // real backend/reader lease, including independently acquired refs for identical plans.
+        const semanticStage = semantic?.stage;
+        const stages = semanticStage ? Object.freeze(pipeline.plan.stages.map(stage => stage.kind === 'semantic'
+          ? Object.freeze({ kind: 'semantic' as const, providerId: semanticStage.providerId,
+            configurationId: semanticStage.configurationId, status: semanticStage.status }) : stage)) : pipeline.plan.stages;
+        const metadata = semantic ? Object.freeze({ ...semantic.metadata,
+          ...(semantic.metadata.credential ? { credential: Object.freeze({ ...semantic.metadata.credential }) } : {}) }) : undefined;
+        const id = metadata ? createHash('sha256').update(JSON.stringify([pipeline.plan.id, stages, metadata])).digest('hex') : pipeline.plan.id;
+        const implementation = semanticStage?.status === 'ready' ? semanticStage.implementation : undefined;
+        const lease = semantic;
+        let released = false;
+        const assertAvailable = (): void => {
+          if (released) throw new Error('Native retrieval query binding was released');
+          signal?.throwIfAborted();
+          pin.assertAvailable();
+          lease?.assertAvailable();
+        };
+        return Object.freeze({ ...pipeline,
+          ...(implementation ? { semantic: Object.freeze({ search: implementation.search.bind(implementation) }) } : {}),
+          plan: Object.freeze({ ...pipeline.plan, id, stages, selection, ...(metadata ? { semantic: metadata } : {}) }), selection,
+          assertAvailable,
+          validateAvailable: async (validationSignal?: AbortSignal) => {
+            assertAvailable(); validationSignal?.throwIfAborted();
+            await lease?.validateAvailable(validationSignal ?? signal);
+            assertAvailable(); validationSignal?.throwIfAborted();
+          },
+          ...(lease?.inferenceReceipts ? { inferenceReceipts: () => lease.inferenceReceipts!() } : {}),
+          release: () => { if (released) return; released = true; try { lease?.release(); } finally { pin.release(); } },
+        });
+      } catch (error) { try { semantic?.release(); } finally { pin.release(); } throw error; }
     },
   };
 }

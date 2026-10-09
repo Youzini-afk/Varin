@@ -18,6 +18,7 @@
       "@varin/pi-host/mcp-authority": ["packages/pi-host/src/mcp-authority.ts"],
       "@varin/pi-host/credentials": ["packages/pi-host/src/credential-authority.ts"],
       "@varin/protocol": ["packages/protocol/src/index.ts"],
+      "@varin/protocol/node/embeddings": ["packages/protocol/src/node/embeddings.ts"],
       "@varin/runtime-client": ["packages/runtime-client/src/index.ts"]
     },
     "lib": ["ES2023"],

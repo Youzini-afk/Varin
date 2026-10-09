@@ -387,7 +387,9 @@ These are focused checks, not an all-repository, fixed-dependency-closure or cro
 ## Native code retrieval
 
 `native_code_retrieval` is a live-root read tool. Its private query carries explicit native Run,
-Thread, grant and root identities. It does not create a Pi session/worker or reuse a Pi Explore actor.
+Thread, grant and root identities, plus the real persisted invocation origin: ModelStep request and
+tool-call IDs, or policy action/node and tool-call IDs. The bridge UUID is transport-only and cannot
+identify an inference dispatch. It does not create a Pi session/worker or reuse a Pi Explore actor.
 `native-retrieval-owner.ts` reuses `createExploreQueryRun`, Documents, the existing structure facade,
 and Rust compute. Keyword jobs use the actual Run's scoped client, never the Host-wide directory
 compute grant. `file.read.check` admits each candidate's canonical resource and regular-file status
@@ -404,19 +406,36 @@ parser, configuration file, or background preparation service. Shared grammar/ru
 still belongs to Structure/KernelComputeService; cancelling a retrieval only detaches that query.
 
 The production selection comes from `varin.retrieval.plan@1` through the existing extension service
-routing/configuration path. Two lazy built-ins expose keyword+structure and keyword-only declarations;
+routing/configuration path. Three lazy built-ins expose keyword+structure, keyword-only and explicitly
+selected keyword+structure+semantic declarations;
 no query or source text is sent to the declarative selector. The query's real native Thread key,
 accepted Run checkpoint project and admitted canonical workspace directory fix routing scope.
 `plan.selection` records provider key, artifact/configuration identity and routing revision. A service
 pin survives normal generation retirement for old queries; explicit revocation invalidates its use.
 Preparation failure reports failure and preserves the previous published plan without treating it as
-the failed new selection. Semantic and model stages are explicitly disabled in these built-ins. The composition seam can bind an existing semantic recall handle
-or an explicitly selected model selector. It does not resolve Pi model settings, start an embedding
-index, wait for first publication, choose another paid model, or call a fallback model. Semantic
-candidates are only hints: authorization precedes Documents access; a chunk's SHA-256 content hash
-is verified against its current span, separately from the file's Documents revision. Stale indexed
-spans are omitted, not silently relabeled. Model selection receives only admitted source snippets
-and may select/reorder indexes; failure retains source ranking and reports partial coverage.
+the failed new selection. Keyword+structure remains the default; only the explicit semantic declaration
+acquires a native semantic owner lease. The declaration cache holds no query lease. Each query pins
+its actual backend/configuration/account and published-reader generation, records their nonsecret
+identity in `plan.semantic`, and releases that lease with its real service generation pin. The
+metadata retains explicit binding state, nullable unavailable backend IDs, and the captured
+publication's coverage/lifecycle; a capability implementation ID never substitutes for a missing
+model configuration. Cold or
+missing publications do not start indexing or wait for first publication. Semantic selection never
+chooses another model, silently selects local embeddings, or performs a paid preparation probe.
+The existing embedding settings configure the explicit remote backend; model reranking remains disabled.
+
+Semantic candidates contain index identities, not authoritative source bodies. The owner checks the
+original Run grant before query embedding, before and after authorized Documents reads, and before
+final delivery. Both the candidate's indexed file revision and the chunk's SHA-256 content hash/range
+must match the current admitted snapshot. Stale indexed spans are omitted, never relabeled. Async
+lease validation fences explicit backend disable, credential/account changes and owner/epoch loss;
+normal replacement retains the originally pinned backend/reader. Inference receipts retain actual
+dispatch attempts, known/unknown attempt counts, input item/byte counts, provider-measured or unknown
+usage, indeterminate outcomes and an explicit reuse flag for ledger/cache replay. Cancellation promptly detaches the
+query rendezvous even if an owner ignores its signal. The semantic store's durable inference ledger
+retains actual dispatch facts independently; a late owner settlement cannot revive source delivery.
+Rust rechecks the Run and suppresses source on cancellation/revocation, retaining safe inference
+receipts when its response was already received. No file lease spans those waits.
 
 Results record per-stage availability and omissions. Cold/missing/unsupported/failed stages do not
 become successful empty recall. Large structure units retain the slicer's real kept ranges: native
@@ -428,13 +447,11 @@ Each snippet has path, inclusive one-based line bounds and actual Documents revi
 Documents content revision; verify a follow-up full read against the snippet's content digest/bytes.
 Live observations do not claim an atomic workspace snapshot.
 
-This increment does not connect production semantic/model selection settings, fixed/materialized
-retrieval, a complete fixed LSP dependency closure or remote retrieval. The existing semantic wrapper
-waits for Pi configuration refresh and resolves its backend at search time; its storage generation is
-not an immutable query-start publication snapshot. Native semantic integration therefore needs the
-existing owner to expose a published-reader/backend lease and an authorized candidate reader before
-source/model access, rather than wrapping a mutable callback and calling it frozen. The default Pi route is unchanged. Query bindings retain old handles, but opaque mutable
-state inside a supplied provider must still obey that provider owner's generation/lifetime contract.
+This increment does not connect production model reranking, fixed/materialized retrieval, a complete
+fixed LSP dependency closure or remote retrieval. The default Pi route is unchanged; native recall
+uses its own explicit backend/published-reader acquisition through the existing semantic owner rather
+than the Pi wrapper that resolves a mutable backend at search time. Query bindings retain actual owner
+references, not a frozen wrapper around whichever backend/index happens to be current later.
 
 ### Model item identity and committed-history recovery
 
@@ -466,4 +483,4 @@ execution passed 12. The unchanged content owner retained its earlier 7 passing 
 scoped suites, not whole-repository or visual UI acceptance. The [implementation plan](../../../../../docs/plan/native-agent-runtime-implementation.md)
 records the initial provider-ID collision and corrected candidate-publication fixture sequence;
 neither initial failure is counted as a passing run. No paid models or huge-frame/kill experiments
-were used. Production semantic/model and fixed-source limits above remain in force.
+were used. The model reranking and fixed-source limits above remain in force; semantic lease acceptance is recorded separately.

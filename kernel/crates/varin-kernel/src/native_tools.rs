@@ -752,7 +752,7 @@ impl ToolExecutor for NativeToolExecutor {
                 reason: "tool contract changed".into(),
             };
         }
-        if let ResourceOperation::RetrievalQuery(args) = &operation { return self.execute_retrieval(context, args, cancel); }
+        if let ResourceOperation::RetrievalQuery(args) = &operation { return self.execute_retrieval(context, call, args, cancel); }
         if let ResourceOperation::LanguageQuery(args) = &operation { return self.execute_language(context, args, cancel); }
         let spawn = matches!(operation, ResourceOperation::ProcessSpawn(_));
         let mutation = matches!(operation, ResourceOperation::FileMutation(_));

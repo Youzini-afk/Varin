@@ -9,6 +9,7 @@ import { runKernelCompute } from './compute-runner.js';
 import type { KernelClient } from './kernel-client.js';
 import type { NativeLiveSourceResolver } from './native-live-source.js';
 import type { NativeLiveRoot, NativeRetrievalQuery } from './protocol.generated.js';
+import type { NativeSemanticInferenceReceipt } from '../knowledge/semantic/native-inference.js';
 
 export interface NativeRetrievalResult {
   status: Exclude<RetrievalStageStatus, 'disabled'>;
@@ -18,6 +19,7 @@ export interface NativeRetrievalResult {
   omissions: { outOfScope: number; stale: number; unavailable: number };
   stages: Array<{ kind: RetrievalStageKind; status: RetrievalStageStatus }>;
   message?: string;
+  inferenceReceipts?: readonly NativeSemanticInferenceReceipt[];
 }
 export type NativeRetrievalOwner = (query: NativeRetrievalQuery, signal: AbortSignal) => Promise<NativeRetrievalResult>;
 const relative = (path: string): string => {
@@ -66,9 +68,19 @@ export function createNativeRetrievalOwner({ documents, kernel, validateSource, 
       };
       signal.throwIfAborted();
       binding.assertAvailable?.();
-      await validateSource(query, signal);
+      await waitWithSignal(validateSource(query, signal), signal);
       const grant = kernel.nativeRetrievalGrant(query);
       const client = kernel.scoped(grant);
+      const validateBinding = async (): Promise<void> => {
+        signal.throwIfAborted();
+        binding.assertAvailable?.();
+        kernel.nativeRetrievalGrant(query);
+        if (binding.validateAvailable) await waitWithSignal(binding.validateAvailable(signal), signal);
+        signal.throwIfAborted();
+        binding.assertAvailable?.();
+        kernel.nativeRetrievalGrant(query);
+      };
+      await validateBinding();
       const grantedRoots = grant.pathScopes.map(relative);
       const roots = query.paths ? query.paths.map(relative) : grantedRoots;
       if (!roots.length || roots.some(root => !within(root, grantedRoots))) throw new Error('Retrieval roots are outside the Run grant');
@@ -83,13 +95,13 @@ export function createNativeRetrievalOwner({ documents, kernel, validateSource, 
         if (existing) return existing;
         const work = (async (): Promise<ExploreFileSnapshot> => {
           try {
-            signal.throwIfAborted();
-            binding.assertAvailable?.();
-            kernel.nativeRetrievalGrant(query);
+            await validateBinding();
             const address = { workspaceId: query.workspaceId, rootId: query.liveRoot.rootId, path };
             const before = await client.fileReadCheck(address, signal);
+            await validateBinding();
             const snapshot = await documents.readSnapshot({ workspaceId: query.workspaceId, resourceId: path }, { signal });
             const after = await client.fileReadCheck(address, signal);
+            await validateBinding();
             if (before.resourceKey !== after.resourceKey) { result.omissions.stale++; return { status: 'stale', message: 'Resource identity changed during retrieval' }; }
             if (snapshot.status !== 'ready') { result.omissions.unavailable++; return { status: 'unavailable', message: 'Candidate text is unavailable' }; }
             return { status: 'ready', content: snapshot.content, revision: snapshot.revision, source: 'disk' };
@@ -155,12 +167,15 @@ export function createNativeRetrievalOwner({ documents, kernel, validateSource, 
       }
       if (binding.semantic) deps.semantic = { search: async (question, limit) => {
         try {
-          // A selected provider is responsible for reporting published-index coverage, never implicitly changing models.
+          // This checks the original Run, source and backend owner before query embedding.
+          await validateBinding();
           const response = await waitWithSignal(binding.semantic!.search(question, limit, signal), signal);
+          await validateBinding();
           const hits = [];
           for (const hit of response.hits) {
             const snapshot = await read(hit.documentId);
             if (snapshot.status !== 'ready') continue;
+            if (hit.revision !== snapshot.revision) { result.omissions.stale++; continue; }
             const lines = snapshot.content.split('\n');
             if (!Number.isSafeInteger(hit.startLine) || !Number.isSafeInteger(hit.endLine) || hit.startLine < 1 || hit.endLine < hit.startLine || hit.endLine > lines.length) { result.omissions.stale++; continue; }
             const body = lines.slice(hit.startLine - 1, hit.endLine).join('\n');
@@ -217,7 +232,7 @@ export function createNativeRetrievalOwner({ documents, kernel, validateSource, 
           for (const path of new Set(result.snippets.map(item => item.path))) {
             await client.fileReadCheck({ workspaceId: query.workspaceId, rootId: query.liveRoot.rootId, path }, signal);
           }
-          binding.assertAvailable?.();
+          await validateBinding();
           try {
             const selection = await waitWithSignal(binding.model({ question: query.question, snippets: Object.freeze(result.snippets.map(item => Object.freeze({ ...item }))) }, signal), signal);
             if (!Array.isArray(selection) || selection.some(index => !Number.isSafeInteger(index) || index < 0 || index >= result.snippets.length) || new Set(selection).size !== selection.length) throw new Error('Invalid retrieval selection');
@@ -226,9 +241,12 @@ export function createNativeRetrievalOwner({ documents, kernel, validateSource, 
           } catch { signal.throwIfAborted(); stage('model', 'failed'); }
         }
         signal.throwIfAborted();
-        await validateSource(query, signal);
-        binding.assertAvailable?.();
-        kernel.nativeRetrievalGrant(query);
+        await waitWithSignal(validateSource(query, signal), signal);
+        await validateBinding();
+        for (const path of new Set(result.snippets.map(item => item.path))) {
+          await client.fileReadCheck({ workspaceId: query.workspaceId, rootId: query.liveRoot.rootId, path }, signal);
+        }
+        await validateBinding();
         const incomplete = explored.partial || explored.searchIncomplete || Object.values(result.omissions).some(count => count > 0)
           || result.stages.some(entry => !['ready','empty','disabled'].includes(entry.status));
         result.status = incomplete ? 'partial' : result.snippets.length ? 'ready' : 'empty';
@@ -237,7 +255,10 @@ export function createNativeRetrievalOwner({ documents, kernel, validateSource, 
       } catch {
         result.status = signal.aborted ? 'cancelled' : 'failed'; result.snippets = [];
         return result;
-      } finally { if (run.terminal() === 'active') run.cancel(); }
+      } finally {
+        if (run.terminal() === 'active') run.cancel();
+        if (binding.inferenceReceipts) result.inferenceReceipts = binding.inferenceReceipts();
+      }
     } finally { binding.release?.(); }
   };
 }

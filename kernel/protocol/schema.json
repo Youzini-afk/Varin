@@ -156,7 +156,8 @@
     "compute.grammar.register": "KernelComputeGrammarParams"
   },
   "dto": {
-    "NativeRetrievalQuery": {"fields":{"runId":{"type":"string"},"threadId":{"type":"string"},"workspaceId":{"type":"string"},"executionWorkspaceId":{"type":"string"},"liveRoot":{"type":"NativeLiveRoot"},"grantId":{"type":"string"},"projectId":{"type":"string | null"},"question":{"type":"string"},"paths":{"type":"string[]","optional":true},"limit":{"type":"number","optional":true}}},
+    "NativeRetrievalInvocation": {"raw":"export type NativeRetrievalInvocation = { kind: 'model_step'; requestId: string; toolCallId: string } | { kind: 'policy_action'; actionId: string; nodeId: string; toolCallId: string };"},
+    "NativeRetrievalQuery": {"fields":{"invocation":{"type":"NativeRetrievalInvocation"},"runId":{"type":"string"},"threadId":{"type":"string"},"workspaceId":{"type":"string"},"executionWorkspaceId":{"type":"string"},"liveRoot":{"type":"NativeLiveRoot"},"grantId":{"type":"string"},"projectId":{"type":"string | null"},"question":{"type":"string"},"paths":{"type":"string[]","optional":true},"limit":{"type":"number","optional":true}}},
     "KernelFileReadCheckParams": {"fields":{"workspaceId":{"type":"string"},"rootId":{"type":"string"},"path":{"type":"string"}}},
     "KernelFileReadCheckResult": {"fields":{"resourceKey":{"type":"string"}}},
     "NativeLanguageQuery": {"fields":{"runId":{"type":"string"},"threadId":{"type":"string"},"workspaceId":{"type":"string"},"executionWorkspaceId":{"type":"string"},"liveRoot":{"type":"NativeLiveRoot"},"method":{"type":"string"},"path":{"type":"string"},"line":{"type":"number","optional":true},"character":{"type":"number","optional":true}}},

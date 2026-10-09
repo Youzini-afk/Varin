@@ -84,6 +84,8 @@ struct Plan {
     stages: Vec<PlanStage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     selection: Option<Selection>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    semantic: Option<SemanticIdentity>,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -105,6 +107,140 @@ impl Selection {
             ]
             .iter()
             .all(|value| !value.trim().is_empty())
+    }
+}
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SemanticCredentialIdentity {
+    reference: String,
+    authority: String,
+    account: String,
+    generation: u64,
+}
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SemanticIdentity {
+    binding_state: String,
+    provider_id: Option<String>,
+    model_id: Option<String>,
+    configuration_id: Option<String>,
+    space_id: Option<String>,
+    recipe_id: Option<String>,
+    published_revision: Option<String>,
+    process_epoch: Option<String>,
+    coverage: String,
+    lifecycle: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    credential: Option<SemanticCredentialIdentity>,
+}
+impl SemanticIdentity {
+    fn valid(&self) -> bool {
+        matches!(
+            self.binding_state.as_str(),
+            "ready" | "unconfigured" | "disabled" | "invalid" | "unavailable"
+        ) && matches!(self.coverage.as_str(), "empty" | "partial" | "complete")
+            && matches!(
+                self.lifecycle.as_str(),
+                "idle" | "building" | "rebuilding" | "ready"
+            )
+            && (self.binding_state != "ready"
+                || [&self.provider_id, &self.model_id, &self.configuration_id]
+                    .iter()
+                    .all(|value| value.is_some()))
+            && [
+                &self.provider_id,
+                &self.model_id,
+                &self.configuration_id,
+                &self.space_id,
+                &self.recipe_id,
+                &self.published_revision,
+                &self.process_epoch,
+            ]
+            .iter()
+            .all(|value| value.as_ref().is_none_or(|value| !value.trim().is_empty()))
+            && self.credential.as_ref().is_none_or(|credential| {
+                credential.generation <= MAX_SAFE_INTEGER
+                    && [
+                        &credential.reference,
+                        &credential.authority,
+                        &credential.account,
+                    ]
+                    .iter()
+                    .all(|value| !value.trim().is_empty())
+            })
+    }
+}
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+enum InferenceUsage {
+    Unknown,
+    Known {
+        #[serde(rename = "inputTokens", skip_serializing_if = "Option::is_none")]
+        input_tokens: Option<u64>,
+        #[serde(rename = "totalTokens", skip_serializing_if = "Option::is_none")]
+        total_tokens: Option<u64>,
+    },
+}
+impl InferenceUsage {
+    fn valid(&self) -> bool {
+        match self {
+            Self::Unknown => true,
+            Self::Known {
+                input_tokens,
+                total_tokens,
+            } => {
+                (input_tokens.is_some() || total_tokens.is_some())
+                    && [input_tokens, total_tokens]
+                        .iter()
+                        .all(|value| value.is_none_or(|value| value <= MAX_SAFE_INTEGER))
+            }
+        }
+    }
+}
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InferenceReceipt {
+    batch_id: String,
+    purpose: String,
+    input_items: u64,
+    input_bytes: u64,
+    provider_id: String,
+    model_id: String,
+    configuration_id: String,
+    attempts: u64,
+    attempts_known: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reused: Option<bool>,
+    state: String,
+    usage: InferenceUsage,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    http_status: Option<u16>,
+}
+impl InferenceReceipt {
+    fn valid(&self) -> bool {
+        [
+            &self.batch_id,
+            &self.provider_id,
+            &self.model_id,
+            &self.configuration_id,
+        ]
+        .iter()
+        .all(|value| !value.trim().is_empty())
+            && self.attempts <= MAX_SAFE_INTEGER
+            && self.input_items <= MAX_SAFE_INTEGER
+            && self.input_bytes <= MAX_SAFE_INTEGER
+            && matches!(
+                self.purpose.as_str(),
+                "index-document-embedding" | "query-embedding"
+            )
+            && matches!(
+                self.state.as_str(),
+                "not-started" | "succeeded" | "failed" | "indeterminate" | "delivery-blocked"
+            )
+            && self.usage.valid()
+            && self
+                .http_status
+                .is_none_or(|status| (100..=599).contains(&status))
     }
 }
 #[derive(Deserialize, Serialize)]
@@ -155,6 +291,8 @@ struct Reply {
     snippets: Vec<Snippet>,
     omissions: Omissions,
     stages: Vec<Stage>,
+    #[serde(rename = "inferenceReceipts", default)]
+    inference_receipts: Vec<InferenceReceipt>,
 }
 fn exact_stages<'a>(kinds: impl Iterator<Item = &'a str>) -> bool {
     let kinds: Vec<_> = kinds.collect();
@@ -233,10 +371,11 @@ impl NativeToolExecutor {
     pub(super) fn execute_retrieval(
         &self,
         context: &ToolExecutionContext,
+        call: &ToolCall,
         args: &RetrievalQueryArgs,
         cancel: &CancellationToken,
     ) -> ToolCompletion {
-        match self.retrieval_query(context, args, cancel) {
+        match self.retrieval_query(context, call, args, cancel) {
             Ok(content) => ToolCompletion::Result {
                 outcome: match content["status"].as_str() {
                     Some("cancelled") => Outcome::Cancelled,
@@ -261,6 +400,7 @@ impl NativeToolExecutor {
     fn retrieval_query(
         &self,
         context: &ToolExecutionContext,
+        call: &ToolCall,
         args: &RetrievalQueryArgs,
         cancel: &CancellationToken,
     ) -> Result<Value, ExecutionError> {
@@ -271,7 +411,19 @@ impl NativeToolExecutor {
                 "Retrieval owner is not connected",
             )
         })?;
-        let mut query = json!({"runId":self.binding.run_id,"threadId":self.binding.thread_id,
+        // These identities already belong to the committed model exchange or policy graph.
+        // Recovery reuses them; the private bridge's random request ID is transport-only.
+        let invocation = match &context.origin {
+            ToolOrigin::ModelStep { request_id } => {
+                json!({"kind":"model_step", "requestId":request_id,
+                "toolCallId":call.call_id})
+            }
+            ToolOrigin::PolicyAction { action_id, node_id } => {
+                json!({"kind":"policy_action", "actionId":action_id,
+                "nodeId":node_id, "toolCallId":call.call_id})
+            }
+        };
+        let mut query = json!({"invocation":invocation,"runId":self.binding.run_id,"threadId":self.binding.thread_id,
             "workspaceId":self.binding.workspace_id,"executionWorkspaceId":self.binding.execution_workspace_id,
             "liveRoot":self.binding.live_root,"grantId":self.binding.grant_id,"projectId":self.retrieval_project_id,"question":args.question});
         if let Some(paths) = &args.paths {
@@ -281,11 +433,26 @@ impl NativeToolExecutor {
             query["limit"] = json!(limit);
         }
         let raw = bridge.query(query, cancel)?;
-        // A grant can be revoked or rebound while the Host is working, even for an empty answer.
-        self.admit_retrieval(context, args, cancel)?;
         let mut reply: Reply = serde_json::from_value(raw).map_err(|_| invalid())?;
-        if !STATUSES.contains(&reply.status.as_str()) || !reply.omissions.valid() {
+        if !STATUSES.contains(&reply.status.as_str())
+            || !reply.omissions.valid()
+            || reply
+                .inference_receipts
+                .iter()
+                .any(|receipt| !receipt.valid())
+        {
             return Err(invalid());
+        }
+        // A revoked Run cannot deliver source, but its already-dispatched nonsecret inference
+        // receipt is still an execution fact. Preserve it through failed/cancelled settlement.
+        if self.admit_retrieval(context, args, cancel).is_err() {
+            reply.status = if cancel.is_cancelled() {
+                "cancelled"
+            } else {
+                "failed"
+            }
+            .into();
+            reply.snippets.clear();
         }
         let content_status = matches!(reply.status.as_str(), "ready" | "empty" | "partial");
         if reply.plan.is_some() != reply.source.is_some()
@@ -301,6 +468,10 @@ impl NativeToolExecutor {
                     .selection
                     .as_ref()
                     .is_some_and(|selection| !selection.valid())
+                || plan
+                    .semantic
+                    .as_ref()
+                    .is_some_and(|semantic| !semantic.valid())
                 || !exact_stages(plan.stages.iter().map(|stage| stage.kind.as_str()))
                 || plan.stages.iter().any(|stage| {
                     stage.provider_id.trim().is_empty()
@@ -332,7 +503,8 @@ impl NativeToolExecutor {
         // complete projection by the existing wire-derived content budget, reserving 64
         // bytes for three growing safe-integer counters and the final status spelling.
         let metadata_size = serde_json::to_vec(&json!({"status":&reply.status,"snippets":[],
-            "plan":&reply.plan,"source":&reply.source,"omissions":&reply.omissions,"stages":&reply.stages}))
+            "plan":&reply.plan,"source":&reply.source,"omissions":&reply.omissions,"stages":&reply.stages,
+            "inferenceReceipts":&reply.inference_receipts}))
             .map_err(|_| invalid())?.len();
         let mut output_budget = crate::protocol::MAX_BLOB_RESPONSE_BYTES
             .checked_sub(metadata_size.saturating_add(64))
@@ -343,10 +515,9 @@ impl NativeToolExecutor {
             let mut observation: Option<(String, language::Observation)> = None;
             for item in reply.snippets {
                 if cancel.is_cancelled() {
-                    return Err(ExecutionError::new(
-                        "retrieval_cancelled",
-                        "Code retrieval cancelled",
-                    ));
+                    reply.status = "cancelled".into();
+                    snippets.clear();
+                    break;
                 }
                 if !valid_path(&item.path) || !args.contains(&item.path) {
                     counter(&mut reply.omissions.out_of_scope);
@@ -368,7 +539,9 @@ impl NativeToolExecutor {
                         }
                         Err(error) => {
                             if cancel.is_cancelled() {
-                                return Err(error);
+                                reply.status = "cancelled".into();
+                                snippets.clear();
+                                break;
                             }
                             if error.code == "unauthorized" {
                                 counter(&mut reply.omissions.out_of_scope);
@@ -416,7 +589,7 @@ impl NativeToolExecutor {
         }
         // A failed selected stage cannot masquerade as clean zero hits, even if its owner
         // forgot the corresponding omission counter. Disabled stages are ordinary absence.
-        if content_status {
+        if content_status && matches!(reply.status.as_str(), "ready" | "empty" | "partial") {
             if reply.stages.iter().any(|stage| stage.status == "stale")
                 && reply.omissions.stale == 0
             {
@@ -439,8 +612,19 @@ impl NativeToolExecutor {
         }
         // Revalidate the grant once more after observing every selected source. No permission
         // lease, Storage lock, or broad filesystem claim spans the Host pipeline wait.
-        self.admit_retrieval(context, args, cancel)?;
+        if self.admit_retrieval(context, args, cancel).is_err() {
+            reply.status = if cancel.is_cancelled() {
+                "cancelled"
+            } else {
+                "failed"
+            }
+            .into();
+            snippets.clear();
+        }
         let mut result = json!({"status":reply.status,"snippets":snippets,"omissions":reply.omissions,"stages":reply.stages});
+        if !reply.inference_receipts.is_empty() {
+            result["inferenceReceipts"] = json!(reply.inference_receipts);
+        }
         if let Some(plan) = reply.plan {
             result["plan"] = json!(plan);
         }

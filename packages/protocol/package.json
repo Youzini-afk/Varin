@@ -14,6 +14,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./node/embeddings": {
+      "types": "./dist/node/embeddings.d.ts",
+      "import": "./dist/node/embeddings.js"
     }
   },
   "scripts": {

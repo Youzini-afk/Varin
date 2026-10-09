@@ -142,6 +142,7 @@ const {
   VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION,
   VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION,
   VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION,
+  VARIN_BUILTIN_RETRIEVAL_SEMANTIC_EXTENSION,
 } = await import('../dist/index.js');
 const { VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE } = await import('../dist/host.js');
 
@@ -318,6 +319,7 @@ await writePackageFingerprint(contextOutputRoot, VARIN_BUILTIN_ARTIFACT_FINGERPR
 for (const [name, definition] of [
   ['retrieval-structured', VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION],
   ['retrieval-keyword', VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION],
+  ['retrieval-semantic', VARIN_BUILTIN_RETRIEVAL_SEMANTIC_EXTENSION],
 ]) {
   const outputRoot = join(builtinOutputRoot, name);
   await rm(outputRoot, { force: true, recursive: true });

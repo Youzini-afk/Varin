@@ -478,3 +478,29 @@ tests and is not Varin's production disk authority.
 `apply_patch` uses the same shared plan. Mixed surface/disk batches return per-path
 applied/conflict/compensated/needs-attention instead of a generic failure after a partial write, and the worker
 never performs a second direct-disk apply behind the Host.
+
+## Shared embedding transport and native Host leases
+
+`openai-embeddings.ts` is now an import seam for the single pure implementation at
+`@varin/protocol/node/embeddings`. Pi background inference keeps its existing broker
+contract and retry policy. Native source-index and query inference call the same wire
+implementation directly, with no Pi worker request, no paid readiness probe, and no
+automatic retry, adaptive resubmission or redirect.
+
+The existing `HostCredentialAuthority` resolves project-free user/operator provider
+capabilities and owns global inference settings and credential scope checks. Captured
+Host leases freeze the configured model, endpoint, protocol, dimensions and input window.
+Ordinary selection changes retire a lease; explicit capability disablement, provider
+removal and account/credential changes fence its later dispatch and delivery. Failed
+configuration candidates leave retained accepted bindings usable.
+
+Native inference records a durable intent in the original semantic storage process
+before dispatch. Recovery of an unresolved intent never automatically sends it again.
+An intent alone cannot prove the HTTP request started: recovered receipts explicitly
+mark the attempt count unknown. Index builds can resume a known zero-dispatch admission
+only after the transport has finalized without sending; the old no-send fact remains
+archived under the same durable owner. Native query invocations never restart automatically. Real transport completion may settle usage after a
+caller cancels, without delivering vectors to that caller. The Host's read-only
+`inferenceFacts()` exposes these facts by Run or source scope without vector contents.
+This ledger currently covers native query and source-index embeddings; legacy Pi
+queries and knowledge-vector broker calls retain their existing settlement path.
