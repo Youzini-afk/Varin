@@ -101,9 +101,9 @@ impl Catalog {
             reference: item.content,
         })
     }
-    pub fn active_thread_operations(&self, thread_id: &str) -> Result<Vec<Operation>> {
-        let mut statement=self.db.prepare("SELECT o.body FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=?1 AND (json_extract(o.body,'$.phase')!='terminal' OR json_extract(o.body,'$.outcome')='indeterminate') ORDER BY o.id")?;
-        let rows = statement.query_map([thread_id], |row| row.get::<_, String>(0))?;
+    pub fn active_thread_operations(&self, thread_id: &str, branch_id: Option<&str>) -> Result<Vec<Operation>> {
+        let mut statement=self.db.prepare("SELECT o.body FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=?1 AND (?2 IS NULL OR b.id=?2) AND (json_extract(o.body,'$.phase')!='terminal' OR json_extract(o.body,'$.outcome')='indeterminate') ORDER BY o.id")?;
+        let rows = statement.query_map(params![thread_id, branch_id], |row| row.get::<_, String>(0))?;
         rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
     }
 }

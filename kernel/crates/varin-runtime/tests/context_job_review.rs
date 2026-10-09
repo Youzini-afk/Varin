@@ -21,7 +21,7 @@ impl Drop for Fixture {
 }
 struct NoTools;
 impl ToolExecutor for NoTools {
-    fn prepare(&self, _: &ToolCall, _: &FrozenToolContext) -> Result<ToolContract, ExecutionError> {
+    fn prepare(&self, _: &ToolCall, _: &FrozenToolContext, _cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
         panic!("summary dispatched tool")
     }
     fn authorize(

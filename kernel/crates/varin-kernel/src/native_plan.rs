@@ -250,9 +250,10 @@ impl ToolExecutor for PlanTools {
         &self,
         call: &ToolCall,
         context: &FrozenToolContext,
+        _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
         if call.name != TOOL {
-            return self.inner.prepare(call, context);
+            return self.inner.prepare(call, context, _cancel);
         }
         if call.schema_version != "1"
             || !context.tools.contains(&schema())

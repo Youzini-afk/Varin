@@ -75,10 +75,17 @@ impl Persistence for Mutex<Catalog> {
         epoch: u64,
         record: &ExecutionRecord,
     ) -> std::result::Result<(), ExecutionError> {
+        let preparation = self
+            .lock()
+            .map_err(|_| ExecutionError::new("catalog_poisoned", "catalog owner failed"))?
+            .prepare_execution_bodies(record);
+        // Hashing, body serialization and durable object I/O belong to the executing worker.
+        // The publication lease keeps these objects alive until their metadata commits.
+        let prepared = preparation.and_then(|preparation| preparation.write(record));
         let mut catalog = self
             .lock()
             .map_err(|_| ExecutionError::new("catalog_poisoned", "catalog owner failed"))?;
-        match catalog.commit_execution(run_id, epoch, record) {
+        match prepared.and_then(|prepared| catalog.commit_prepared_execution(run_id, epoch, record, prepared)) {
             Ok(()) => Ok(()),
             Err(RuntimeError::InputPending) => Err(ExecutionError::new(
                 "input_pending",
@@ -159,6 +166,44 @@ fn history_items(record: &ExecutionRecord) -> Vec<ConversationItem> {
 fn operation_id(request: &str, call: &str) -> String {
     format!("{request}:tool:{call}")
 }
+
+struct ExecutionBodyPreparation {
+    content: crate::content::ContentStore,
+    publication: crate::content::ContentPublication,
+    frozen_request: Option<Value>,
+}
+struct PreparedExecutionBodies {
+    _publication: crate::content::ContentPublication,
+    request: Option<Value>,
+    snapshot: Option<RequestSnapshot>,
+    history: std::collections::HashMap<String, Value>,
+    originals: Option<Vec<ProviderOriginal>>,
+    output: Option<Value>,
+}
+impl ExecutionBodyPreparation {
+    fn write(self, record: &ExecutionRecord) -> Result<PreparedExecutionBodies> {
+        let request = match record {
+            ExecutionRecord::RequestPrepared { snapshot } => Some(self.content.save(&serde_json::to_value(snapshot)?)?),
+            _ => None,
+        };
+        let snapshot = self.frozen_request.as_ref()
+            .map(|reference| self.content.load(reference).and_then(|value| Ok(serde_json::from_value(value)?)))
+            .transpose()?;
+        let mut history = std::collections::HashMap::new();
+        for item in history_items(record) {
+            let provider = item.opaque.as_ref().map(|o| ProviderOriginal {
+                connection_identity: o.connection_identity.clone(), adapter: o.family.clone(),
+                version: o.adapter_version.clone(), item: o.value.clone(),
+            });
+            history.insert(item.id.clone(), self.content.save_history(&serde_json::to_value(&item)?, &provider)?);
+        }
+        let (originals, output) = if let ExecutionRecord::ModelFinished { items, .. } = record {
+            (Some(self.content.save_originals(&provider_originals(items))?),
+             Some(self.content.save(&json!({"status":"committed","record":record}))?))
+        } else { (None, None) };
+        Ok(PreparedExecutionBodies { _publication: self.publication, request, snapshot, history, originals, output })
+    }
+}
 impl Catalog {
     pub fn execution_history(&self, branch: &str) -> Result<Vec<ConversationItem>> {
         let mut result = Vec::new();
@@ -177,10 +222,34 @@ impl Catalog {
         epoch: u64,
         record: &ExecutionRecord,
     ) -> Result<()> {
-        // A receipt retry is a read, not a second completion. Keep exact request/owner fencing,
+        let prepared = self.prepare_execution_bodies(record)?.write(record)?;
+        self.commit_prepared_execution(run_id, epoch, record, prepared)
+    }
+    fn prepare_execution_bodies(&self, record: &ExecutionRecord) -> Result<ExecutionBodyPreparation> {
+        let frozen_request = match record {
+            ExecutionRecord::ModelFinished { request_id, .. } | ExecutionRecord::ModelDispatched { request_id } => {
+                Some(super::record::<ModelStep>(&self.db, "model_steps", request_id)?.request)
+            }
+            _ => None,
+        };
+        Ok(ExecutionBodyPreparation {
+            content: self.content.clone(), publication: self.content.begin_publication(), frozen_request,
+        })
+    }
+    fn commit_prepared_execution(
+        &mut self, run_id: &str, epoch: u64, record: &ExecutionRecord, prepared: PreparedExecutionBodies,
+    ) -> Result<()> {
+        let PreparedExecutionBodies {
+            _publication, request: prepared_request, snapshot: frozen_snapshot, history: prepared_history,
+            originals: prepared_originals, output: prepared_output,
+        } = prepared;
+        // A receipt retry confirms the original completion. Keep exact request/owner fencing,
         // reject altered output, and never rewrite history or resubmit a provider request.
         if let ExecutionRecord::ModelFinished { request_id, outcome, .. } = record {
-            if let Some(previous) = self.model_output(request_id)? {
+            let previous: Option<String> = self.db.query_row(
+                "SELECT body FROM model_outputs WHERE request_id=?1", [request_id], |row| row.get(0),
+            ).optional()?;
+            if let Some(previous) = previous {
                 let run = self.run(run_id)?;
                 let step: ModelStep = super::record(&self.db, "model_steps", request_id)?;
                 let expected_state = match outcome {
@@ -191,39 +260,13 @@ impl Catalog {
                 };
                 if run.epoch == epoch && step.id == *request_id && step.run_id == run_id && step.epoch == epoch
                     && step.state == expected_state
-                    && previous == json!({"status":"committed","record":record}) {
+                    && Some(serde_json::from_str::<Value>(&previous)?) == prepared_output {
                     return Ok(());
                 }
                 return Err(RuntimeError::Conflict("model completion receipt changed or belongs to another execution".into()));
             }
         }
-        // Body durability precedes the metadata transaction; rollback leaves a safe orphan.
-        let prepared_request = match record {
-            ExecutionRecord::RequestPrepared { snapshot } => {
-                Some(self.content.save(&serde_json::to_value(snapshot)?)?)
-            }
-            _ => None,
-        };
-        let frozen_snapshot = if let ExecutionRecord::ModelFinished { request_id, .. } | ExecutionRecord::ModelDispatched { request_id } = record {
-            let step: ModelStep = super::record(&self.db, "model_steps", request_id)?;
-            Some(serde_json::from_value::<RequestSnapshot>(
-                self.content.load(&step.request)?,
-            )?)
-        } else {
-            None
-        };
-        let mut prepared_history = std::collections::HashMap::new();
-        for item in history_items(record) {
-            let provider = item.opaque.as_ref().map(|o| ProviderOriginal {
-                connection_identity: o.connection_identity.clone(), adapter: o.family.clone(),
-                version: o.adapter_version.clone(), item: o.value.clone(),
-            });
-            prepared_history.insert(item.id.clone(), self.content.save_history(&serde_json::to_value(&item)?, &provider)?);
-        }
-        let (prepared_originals, prepared_output) = if let ExecutionRecord::ModelFinished { items, .. } = record {
-            (Some(self.content.save_originals(&provider_originals(items))?),
-             Some(self.content.save(&json!({"status":"committed","record":record}))?))
-        } else { (None, None) };
+        // Bodies are already durable. Only ownership, revisions and reference publication remain.
         let tx = self.db.transaction()?;
         let mut run: Run = record_value(&tx, run_id)?;
         fence(&run, epoch)?;
@@ -284,12 +327,11 @@ impl Catalog {
                         return Err(RuntimeError::InputPending);
                     }
 
-                    let ops: Vec<Operation> = read_all(&tx, "operations")?;
-                    if ops.iter().any(|op| {
-                        op.run_id == run.id
-                            && op.phase != OperationPhase::Terminal
-                            && !op.handed_off
-                    }) {
+                    let unsettled: bool = tx.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.phase')!='terminal' AND json_extract(body,'$.handed_off')=0)",
+                        [run_id], |row| row.get(0),
+                    )?;
+                    if unsettled {
                         return Err(RuntimeError::Invalid(
                             "foreground operation is unsettled".into(),
                         ));
@@ -703,7 +745,18 @@ impl Catalog {
             run_id,
             run.revision,
             "execution.committed",
-            json!({"kind":serde_json::to_value(record)?.get("kind")}),
+            json!({"kind":match record {
+                ExecutionRecord::StateChanged { .. } => "state_changed",
+                ExecutionRecord::ContextPreparationFailed { .. } => "context_preparation_failed",
+                ExecutionRecord::RequestPrepared { .. } => "request_prepared",
+                ExecutionRecord::ModelDispatched { .. } => "model_dispatched",
+                ExecutionRecord::ModelFinished { .. } => "model_finished",
+                ExecutionRecord::ToolsAdmitted { .. } => "tools_admitted",
+                ExecutionRecord::ToolDispatched { .. } => "tool_dispatched",
+                ExecutionRecord::ToolSettled { .. } => "tool_settled",
+                ExecutionRecord::ToolBatchCommitted { .. } => "tool_batch_committed",
+                ExecutionRecord::PolicyCheckpoint { .. } => "policy_checkpoint",
+            }}),
         )?;
         tx.commit()?;
         if let ExecutionRecord::ToolSettled { result } = record {

@@ -2,6 +2,8 @@
 
 状态：实施中，尚未切换生产运行时。更新：2026-10-09（Asia/Singapore）。
 
+当前综合审阅见[2026-10-09 实现审阅](../reviews/native-runtime-2026-10-09.md)：修正锁内正文提交、准备取消、输入回执、分支投影和扩展退役等问题。仍未满足两份设计的整体交付标准；本次仅源码与编译检查，未运行测试，下文历史验证记录不等同于本次结果。
+
 目标是完整实现[完整运行时设计](../design/native-agent-runtime-design.md)和[能力组合设计](../design/native-runtime-extensibility-design.md)共同定义的长期运行底座：及时交互、低开销执行、按真实资源调度、深层能力组合和可替换策略。完成聊天循环、迁移已有工具或删除 Pi 都不是单独的完成标准；Pi 退出是这套设计落地后的一个结果。当前生产仍使用 Pi session worker、TypeScript Host 协调和 Rust 资源内核；现有权威见[架构](../architecture.md)。
 
 ## 当前交付

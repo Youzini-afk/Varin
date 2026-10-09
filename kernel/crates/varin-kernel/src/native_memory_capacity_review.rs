@@ -325,7 +325,7 @@ fn combined(ending: Ending) {
         tools: vec![schema(true)],
         source: None,
     };
-    let contract = tools.prepare(&memory, &frozen).unwrap();
+    let contract = tools.prepare(&memory, &frozen, &CancellationToken::default()).unwrap();
     assert_eq!(
         tools.execution_class(&memory, &contract),
         ExecutionClass::Unmetered
@@ -343,7 +343,7 @@ fn combined(ending: Ending) {
     let plan_frozen = FrozenToolContext {
         tools: vec![crate::native_plan::schema()], ..frozen.clone()
     };
-    let plan_contract = tools.prepare(&plan, &plan_frozen).unwrap();
+    let plan_contract = tools.prepare(&plan, &plan_frozen, &CancellationToken::default()).unwrap();
     assert_eq!(tools.execution_class(&plan, &plan_contract), ExecutionClass::Unmetered);
     assert!(tools.watch_admission(&context, &plan, &plan_contract, &CancellationToken::default()).unwrap().is_none());
     // Actual plan execution is covered by Host IPC tests; this assertion is solely admission classification.

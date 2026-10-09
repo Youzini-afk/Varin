@@ -188,9 +188,10 @@ impl ToolExecutor for ProcessWaitTools {
         &self,
         call: &ToolCall,
         frozen: &FrozenToolContext,
+        _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
         if call.name != WAIT_TOOL {
-            return self.inner.prepare(call, frozen);
+            return self.inner.prepare(call, frozen, _cancel);
         }
         let schema = schemas(crate::native_tools::NativeToolExecutor::selected_schemas(
             &self.binding.enabled_tools,

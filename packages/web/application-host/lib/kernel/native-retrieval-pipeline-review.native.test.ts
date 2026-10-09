@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createRetrievalPipelineOwner } from '../harness/retrieval-pipeline.js';
 import { createStructureSource } from '../structure/source.js';
 import { createTreeSitterStructureProvider } from '../structure/tree-sitter-provider.js';
-import { createNativeRetrievalOwner } from './native-retrieval-owner.js';
+import { createNativeRetrievalOwner, type NativeRetrievalResult } from './native-retrieval-owner.js';
 import { retrievalFixture, responseTool, responseDone, latestOutput, deferred } from './native-retrieval-review.test-helper.js';
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -13,7 +13,11 @@ const once = (body: Record<string, unknown>, response: Parameters<typeof respons
 const sourceText = 'export function retrievalNeedle(input: number): number {\n  const adjusted = input + 41;\n  return adjusted;\n}\n';
 function install(f: Awaited<ReturnType<typeof fixture>>, pipelines: ReturnType<typeof createRetrievalPipelineOwner>) {
   const owner = createNativeRetrievalOwner({ documents: f.documents.authority, kernel: f.kernel, validateSource: f.liveSources.validate, pipelines });
-  f.kernel.setNativeRetrievalOwner(owner); return owner;
+  const results = new Map<string, NativeRetrievalResult>();
+  f.kernel.setNativeRetrievalOwner(async (query, signal) => {
+    const result = await owner(query, signal); results.set(query.runId, result); return result;
+  });
+  return results;
 }
 function actualStructure(f: Awaited<ReturnType<typeof fixture>>) {
   return { providerId: 'varin.tree-sitter', configurationId: 'bundled-test', status: 'ready' as const,
@@ -29,7 +33,7 @@ it('public HTTP runs keyword → actual Rust structure → durable native histor
     else responseDone(response);
   });
   await f.write('module.ts', sourceText);
-  const pipelines = createRetrievalPipelineOwner({ configurationId: 'actual-native', structure: actualStructure(f) }); install(f, pipelines);
+  const pipelines = createRetrievalPipelineOwner({ configurationId: 'actual-native', structure: actualStructure(f) }); const results = install(f, pipelines);
   const identity = await f.api.create('retrieval-public-http');
   const liveRoot = await f.liveSources.prepare(f.workspaceId, f.workspaceId, identity.threadId);
   const receipt = await f.api.submit({ ...identity, key: 'retrieval-http-input', expectedHead: null, text: 'Find retrievalNeedle and check the source', model: { providerId: 'fixture', modelId: 'retrieval-loopback' },
@@ -39,9 +43,13 @@ it('public HTTP runs keyword → actual Rust structure → durable native histor
   const retrieval = latestOutput(f.requests[1]!)!;
   expect(retrieval).toMatchObject({ outcome: 'succeeded', content: {
     source: { mode: 'live_root', workspaceId: f.workspaceId, liveRoot },
-    plan: { configurationGeneration: 1, stages: expect.arrayContaining([{ kind: 'structure', providerId: 'varin.tree-sitter', configurationId: 'bundled-test', status: 'ready' }]) },
     snippets: expect.arrayContaining([expect.objectContaining({ path: 'module.ts', startLine: 1, endLine: 4, content: sourceText.trimEnd() })]),
   } });
+  expect(results.get(receipt.run_id)?.plan).toMatchObject({ configurationGeneration: 1,
+    stages: expect.arrayContaining([{ kind: 'structure', providerId: 'varin.tree-sitter', configurationId: 'bundled-test', status: 'ready' }]) });
+  expect(retrieval.content).not.toHaveProperty('plan');
+  expect(retrieval.content).not.toHaveProperty('stages');
+  expect(retrieval.content).not.toHaveProperty('inferenceReceipts');
   const snippet = (retrieval.content as { snippets: Array<{ revision: string }> }).snippets[0]!;
   expect(JSON.stringify(latestOutput(f.requests[2]!))).toContain(sourceText.trimEnd().replaceAll('\n', '\\n'));
   expect(snippet.revision).toBe(`d1_${createHash('sha256').update(sourceText).digest('base64url')}`);
@@ -60,13 +68,15 @@ it('selected cold semantic/structure stages preserve useful keyword evidence and
   const pipelines = createRetrievalPipelineOwner({ configurationId: 'cold-selected',
     structure: { providerId: 'cold-grammar', configurationId: 'cold-1', status: 'unavailable' },
     semantic: { providerId: 'cold-index', configurationId: 'index-1', status: 'unavailable' },
-  }); install(f, pipelines);
+  }); const results = install(f, pipelines);
   const run = await f.admit('cold-selected-retrieval', ['code_retrieval']); await run.start();
   await expect.poll(async () => (await f.runtime.run(run.receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   expect(latestOutput(f.requests[1]!)).toMatchObject({ outcome: 'succeeded', content: { status: 'partial',
     snippets: expect.arrayContaining([expect.objectContaining({ path: 'module.ts' })]),
-    stages: expect.arrayContaining([expect.objectContaining({ kind: 'semantic', status: 'unavailable' }), expect.objectContaining({ kind: 'structure', status: 'unavailable' })]),
   } });
+  expect(results.get(run.receipt.run_id)?.stages).toEqual(expect.arrayContaining([
+    expect.objectContaining({ kind: 'semantic', status: 'unavailable' }), expect.objectContaining({ kind: 'structure', status: 'unavailable' }),
+  ]));
 }, 20_000);
 
 it('an in-flight Run retains its selected model handle/generation while a failed candidate leaves the current pipeline active', async () => {
@@ -75,7 +85,7 @@ it('an in-flight Run retains its selected model handle/generation while a failed
   const oldModel = vi.fn(async () => { oldEntered++; await gate.promise; oldCalls++; return [0]; });
   const newModel = vi.fn(async () => { newCalls++; return [0]; });
   const pipelines = createRetrievalPipelineOwner({ configurationId: 'old-config', model: { providerId: 'selected-old', configurationId: 'old-model-config', status: 'ready', implementation: oldModel } });
-  install(f, pipelines); const oldPlan = pipelines.capture().plan;
+  const results = install(f, pipelines); const oldPlan = pipelines.capture().plan;
   const oldRun = await f.admit('old-retrieval-generation', ['code_retrieval']);
   try {
     await oldRun.start(); await expect.poll(() => oldEntered, { timeout: 10_000 }).toBe(1);
@@ -88,8 +98,10 @@ it('an in-flight Run retains its selected model handle/generation while a failed
     gate.resolve(); await expect.poll(async () => (await f.runtime.run(oldRun.receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
     const oldHistory = JSON.stringify(await f.runtime.history(oldRun.branchId));
     const newHistory = JSON.stringify(await f.runtime.history(newRun.branchId));
-    expect(oldHistory).toContain(oldPlan.id); expect(oldHistory).not.toContain(published.id);
-    expect(newHistory).toContain(published.id); expect(newHistory).not.toContain(oldPlan.id);
+    expect(results.get(oldRun.receipt.run_id)?.plan?.id).toBe(oldPlan.id);
+    expect(results.get(newRun.receipt.run_id)?.plan?.id).toBe(published.id);
+    expect(oldHistory).toContain('retrievalNeedle'); expect(oldHistory).not.toContain(published.id);
+    expect(newHistory).toContain('retrievalNeedle'); expect(newHistory).not.toContain(oldPlan.id);
     expect(oldCalls).toBe(1); expect(f.requests).toHaveLength(4);
   } finally { gate.resolve(); }
 }, 25_000);
@@ -160,11 +172,12 @@ it('large structured units retain the actual distant hit instead of refilling om
 it('a selected model failure keeps verified source order and reports partial without invoking a fallback model', async () => {
   const f = await fixture(once); await f.write('module.ts', sourceText);
   const selected = vi.fn(async () => { throw new Error('selected model unavailable'); });
-  install(f, createRetrievalPipelineOwner({ configurationId: 'failing-selected-model', model: { providerId: 'explicit-model', configurationId: 'failed-generation', status: 'ready', implementation: selected } }));
+  const results = install(f, createRetrievalPipelineOwner({ configurationId: 'failing-selected-model', model: { providerId: 'explicit-model', configurationId: 'failed-generation', status: 'ready', implementation: selected } }));
   const run = await f.admit('failed-selected-model', ['code_retrieval']); await run.start();
   await expect.poll(async () => (await f.runtime.run(run.receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   expect(selected).toHaveBeenCalledTimes(1); expect(f.requests).toHaveLength(2);
   expect(latestOutput(f.requests[1]!)).toMatchObject({ outcome: 'succeeded', content: { status: 'partial',
-    snippets: expect.arrayContaining([expect.objectContaining({ path: 'module.ts' })]), stages: expect.arrayContaining([{ kind: 'model', status: 'failed' }]),
+    snippets: expect.arrayContaining([expect.objectContaining({ path: 'module.ts' })]),
   } });
+  expect(results.get(run.receipt.run_id)?.stages).toContainEqual({ kind: 'model', status: 'failed' });
 }, 20_000);

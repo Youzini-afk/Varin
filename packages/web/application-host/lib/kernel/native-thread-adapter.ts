@@ -23,6 +23,15 @@ export class NativeThreadAdapter {
     private readonly prepareContext?: NativeContextPreparer, private readonly plans?: NativePlanService) {}
 
   private readonly contextRefreshes = new Map<string, Promise<void>>();
+  private readonly admittedLaunches = new Map<string, Promise<void>>();
+  private launchAdmitted(runId: string, prepare: () => Promise<void>): void {
+    if (this.admittedLaunches.has(runId)) return;
+    const work = Promise.resolve().then(prepare).catch(error => this.recordLaunchFailure(runId, error));
+    this.admittedLaunches.set(runId, work);
+    void work.finally(() => {
+      if (this.admittedLaunches.get(runId) === work) this.admittedLaunches.delete(runId);
+    }).catch(() => undefined);
+  }
   /** Serialize refresh reads per branch; an edit arriving during a read gets another fresh read. */
   private async refreshContext(identity: NativeThreadIdentity): Promise<void> {
     if (!this.prepareContext?.refresh) return;
@@ -276,32 +285,37 @@ export class NativeThreadAdapter {
     });
     // Close the first-admission gap: a note commit can occur after assembly while no checkpoint
     // yet exists for the background refresh. Never launch that missed revision indefinitely.
-    await this.refreshContext(input);
-    const run = await this.runtime.run(receipt.run_id);
-    if (run.state === 'accepted' || run.state === 'preparing' || run.state === 'runnable') {
-      const launch = this.runtime.rebindLaunch(receipt.run_id, { credentialOwner: model.credentialOwner });
-      void launch.catch(error => this.recordLaunchFailure(receipt.run_id, error));
-    }
+    this.launchAdmitted(receipt.run_id, async () => {
+      await this.refreshContext(input);
+      const run = await this.runtime.run(receipt.run_id);
+      if (run.state === 'accepted' || run.state === 'preparing' || run.state === 'runnable') {
+        await this.runtime.rebindLaunch(receipt.run_id, { credentialOwner: model.credentialOwner });
+      }
+    });
     return receipt;
   }
 
   async enqueue(input: NativeThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; mode: NativeInputMode }) {
     const thread = await this.requireIdentity(input);
-    await this.refreshContext(input);
     const branch = thread.branches.find(candidate => candidate.branch_id === input.branchId)!;
     const previous = branch.active_run_id ? await this.runtime.run(branch.active_run_id) : branch.latest_run;
     if (!previous) throw new Error('An initial model selection is required');
     this.assertImagesSupported(input.images, previous.configuration);
     const receipt = await this.runtime.enqueue({ key: input.key, threadId: input.threadId, branchId: input.branchId,
       mode: input.mode, input: nativeThreadInput(input.text, input.images), configuration: previous.configuration });
-    const launch = await this.runtime.launch(receipt.run_id);
-    if (launch?.requires_rebind) {
-      const run = await this.runtime.run(receipt.run_id);
-      if (!launch.selection.credential_scope) throw new Error('Selected credential binding is unavailable');
-      const owner = await this.models.rebindModel(run.configuration as NativeModelSessionConfiguration, launch.selection.credential_scope);
-      try { await this.runtime.rebindLaunch(receipt.run_id, { credentialOwner: owner }); }
-      catch (error) { await this.recordLaunchFailure(receipt.run_id, error); throw error; }
-    }
+    // Context is synchronized by the Run's request preparation. An accepted input receipt
+    // must not wait for extension/MCP startup, source materialization or credential rebinding.
+    this.launchAdmitted(receipt.run_id, async () => {
+      const launch = await this.runtime.launch(receipt.run_id);
+      if (launch?.requires_rebind) {
+        const run = await this.runtime.run(receipt.run_id);
+        if (run.cancel_requested || ['completed', 'failed', 'cancelled'].includes(run.state)) return;
+        await this.refreshContext(input);
+        if (!launch.selection.credential_scope) throw new Error('Selected credential binding is unavailable');
+        const owner = await this.models.rebindModel(run.configuration as NativeModelSessionConfiguration, launch.selection.credential_scope);
+        await this.runtime.rebindLaunch(receipt.run_id, { credentialOwner: owner });
+      }
+    });
     return receipt;
   }
 
@@ -348,11 +362,12 @@ export class NativeThreadAdapter {
   }
 
   async snapshot(identity: NativeThreadIdentity): Promise<NativeThreadSnapshot> {
+    const { eventCursor } = await this.runtime.status();
     const thread = await this.requireIdentity(identity);
     const branch = thread.branches.find(branch => branch.branch_id === identity.branchId)!;
     const [page, inputs, activeOperations, context] = await Promise.all([
       this.readHistoryPage(identity.branchId, branch.head ? { headId: branch.head } : undefined),
-      this.runtime.inputs(identity.branchId), this.runtime.activeOperations(identity.threadId), this.context(identity),
+      this.runtime.inputs(identity.branchId), this.runtime.activeOperations(identity.threadId, identity.branchId), this.context(identity),
     ]);
     const history = page.items;
     if (history.some(item => item.thread_id !== identity.threadId) || inputs.some(item => item.thread_id !== identity.threadId)) {
@@ -365,12 +380,18 @@ export class NativeThreadAdapter {
       if (completion?.kind === 'job_accepted' && typeof completion.operation_id === 'string') operationIds.add(completion.operation_id);
     }
     const operations = new Map(activeOperations.map(operation => [operation.id, operation]));
-    const visible = await Promise.all([...operationIds].filter(id => !operations.has(id)).map(id => this.requireOperation(id)));
-    for (const operation of visible) operations.set(operation.id, operation);
+    const visible = await Promise.all([...operationIds].filter(id => !operations.has(id)).map(async id => {
+      const operation = await this.runtime.operation(id);
+      const run = await this.requireRun(operation.run_id);
+      // Forked history retains the original receipt, not control over the source branch's job.
+      return run.thread_id === identity.threadId && run.branch_id === identity.branchId ? operation : null;
+    }));
+    for (const operation of visible) if (operation) operations.set(operation.id, operation);
     const latest = branch.latest_run;
     const activeRun = branch.active_run_id ? await this.runtime.run(branch.active_run_id) : null;
     const launch = latest ? await this.runtime.launch(latest.id) : null;
-    return { identity, thread, activeRun, history, historyPage: { head: page.head, previous: page.previous }, inputs, operations: [...operations.values()], launch, context, children: await this.children(identity) };
+    return { identity, eventCursor, thread, activeRun, history, historyPage: { head: page.head, previous: page.previous }, inputs,
+      operations: [...operations.values()], launch, context, children: await this.children(identity) };
   }
 
   private async recordLaunchFailure(runId: string, error: unknown): Promise<void> {
@@ -386,7 +407,7 @@ export class NativeThreadAdapter {
     const pending = await this.runtime.pendingLaunches();
     await Promise.all(pending.map(async launch => {
       const run = await this.runtime.run(launch.run_id);
-      if (['completed', 'failed', 'cancelled'].includes(run.state) || (run.state === 'waiting' && (run.waiting_on?.startsWith('question:') || run.waiting_on?.startsWith('child-wait:')))) return;
+      if (['completed', 'failed', 'cancelled'].includes(run.state) || (run.state === 'waiting' && (run.waiting_on?.startsWith('question:') || run.waiting_on?.startsWith('child-wait:') || run.waiting_on?.startsWith('process-wait:')))) return;
       if (await this.runtime.childForThread(run.thread_id)) return;
       try {
         if (run.thread_id.startsWith('nativeThread:')) await this.resume(run.id);

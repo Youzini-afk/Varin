@@ -378,8 +378,8 @@ export class NativeRuntimeClient {
     const body = JSON.parse(bytes.toString('utf8')) as Pick<NativeHistoryItem, 'content' | 'provider'>;
     return { id: reference.id, thread_id: reference.thread_id, parent: reference.parent, source: reference.source, content: body.content, provider: body.provider };
   }
-  activeOperations(threadId: string, signal?: AbortSignal): Promise<NativeOperation[]> {
-    return this.kernel.nativeRuntimeRequest('runtime.thread.operations.active', { threadId }, signal);
+  activeOperations(threadId: string, branchId?: string, signal?: AbortSignal): Promise<NativeOperation[]> {
+    return this.kernel.nativeRuntimeRequest('runtime.thread.operations.active', { threadId, ...(branchId ? { branchId } : {}) }, signal);
   }
   history(branchId: string, signal?: AbortSignal): Promise<NativeHistoryItem[]> {
     return this.kernel.nativeRuntimeRequest('runtime.history.read', { branchId }, signal);

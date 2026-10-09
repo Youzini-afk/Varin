@@ -318,6 +318,7 @@ mod actual_engines {
             &self,
             c: &ToolCall,
             _: &FrozenToolContext,
+            _cancel: &CancellationToken,
         ) -> Result<ToolContract, ExecutionError> {
             Ok(ToolContract {
                 name: c.name.clone(),
@@ -380,6 +381,7 @@ mod actual_engines {
             let i = input(&db, name);
             let id = i.run_id.clone();
             let e = ExecutionEngine {
+                context_preparation: Arc::new(NoopContextPreparation),
                 persistence: db.clone(),
                 provider: Arc::new(Provider(AtomicUsize::new(0))),
                 tools: Arc::new(Tools {
@@ -422,6 +424,7 @@ mod actual_engines {
         let (started, events) = mpsc::channel();
         let (release, gate) = mpsc::channel();
         let e = ExecutionEngine {
+            context_preparation: Arc::new(NoopContextPreparation),
             persistence: db.clone(),
             provider: Arc::new(Provider(AtomicUsize::new(0))),
             tools: Arc::new(Tools {
@@ -459,6 +462,7 @@ mod actual_engines {
         let i = input(&db, "panic");
         let (started, _events) = mpsc::channel();
         let e = ExecutionEngine {
+            context_preparation: Arc::new(NoopContextPreparation),
             persistence: db.clone(),
             provider: Arc::new(Provider(AtomicUsize::new(0))),
             tools: Arc::new(Tools {

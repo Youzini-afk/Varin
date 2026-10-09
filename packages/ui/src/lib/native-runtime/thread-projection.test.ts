@@ -9,7 +9,7 @@ afterEach(() => { vi.useRealTimers(); });
 it('reconnects from the last durable cursor and replaces lossy progress with authoritative history', async () => {
   vi.useFakeTimers();
   const run = { id: 'run', thread_id: identity.threadId, branch_id: identity.branchId, state: 'generating' as const, revision: 1, epoch: 1, configuration: {}, cancel_requested: false, waiting_on: null };
-  const view: NativeThreadSnapshot = { identity, thread: { thread_id: identity.threadId, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: null, active_run_id: run.id, latest_run: run }] }, activeRun: run, history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], launch: null, context: { checkpoint: null, jobs: [] } };
+  const view: NativeThreadSnapshot = { identity, eventCursor: 6, thread: { thread_id: identity.threadId, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: null, active_run_id: run.id, latest_run: run }] }, activeRun: run, history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], launch: null, context: { checkpoint: null, jobs: [] } };
   const connections: Array<{ close(): void; listener: Parameters<NativeThreadsAPI['observe']>[1] }> = [];
   const observe = vi.fn(async (_cursor: number, listener: Parameters<NativeThreadsAPI['observe']>[1], { signal }: { signal: AbortSignal }) => {
     const pending = deferred();
@@ -23,6 +23,7 @@ it('reconnects from the last durable cursor and replaces lossy progress with aut
   try {
     projection.start();
     await vi.advanceTimersByTimeAsync(0);
+    expect(observe.mock.calls[0]![0]).toBe(6);
     connections[0]!.listener({ cursor: 7, subject: run.id, revision: 1, kind: 'run.changed', data: {} });
     await vi.advanceTimersByTimeAsync(0);
     connections[0]!.listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'progress', runId: run.id, streamId: 'first-stream', sequence: 1, event: { kind: 'provider', data: { kind: 'text_delta', item_id: 'assistant', text: 'unfinished display text' } } });

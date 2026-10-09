@@ -83,6 +83,13 @@ continuation state in the same transaction.
 Transient provider progress uses a bounded, nonblocking sink. Durable tool results and model output
 remain available independently of whether a viewer consumed progress.
 
+Ordinary execution commits stage immutable request, model-output and tool-batch bodies on the Run
+worker outside the Catalog mutex. A publication reference is acquired under Catalog ownership and
+retained until metadata commit; collection defers when such references exist, without waiting under
+the Catalog lock. Publication still rechecks the original execution/branch conditions. Policy-result
+publication and recovery hydration retain separate remaining lock-cost boundaries; see the
+[implementation review](../../../docs/reviews/native-runtime-2026-10-09.md).
+
 ## Policy-originated read graphs
 
 A pinned AgentPolicy may return `ReadGraph` before any model request. Nodes have unique identities,

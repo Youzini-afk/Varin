@@ -73,9 +73,10 @@ impl ToolExecutor for Questions {
         &self,
         call: &ToolCall,
         request: &FrozenToolContext,
+        _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
         if call.name != QUESTION_TOOL {
-            return self.inner.prepare(call, request);
+            return self.inner.prepare(call, request, _cancel);
         }
         if call.schema_version != "1" || !request.tools.iter().any(|s| s == &schema())
         {

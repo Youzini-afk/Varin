@@ -384,6 +384,23 @@ pub(crate) struct ResourceFailure {
     pub error: KernelError,
     pub dispatched: bool,
 }
+pub(crate) struct ResourceReply {
+    sender: Option<mpsc::Sender<Result<Value, ResourceFailure>>>,
+    wake: Option<mpsc::SyncSender<()>>,
+}
+impl ResourceReply {
+    pub(crate) fn send(mut self, value: Result<Value, ResourceFailure>)
+        -> Result<(), mpsc::SendError<Result<Value, ResourceFailure>>> {
+        self.sender.take().expect("resource reply sender").send(value)
+    }
+}
+impl Drop for ResourceReply {
+    fn drop(&mut self) {
+        // Close before notifying, including when the owner exits without a reply.
+        self.sender.take();
+        if let Some(wake) = &self.wake { let _ = wake.try_send(()); }
+    }
+}
 pub(crate) struct ResourceCall {
     pub admission_key: Option<String>,
     pub binding: NativeToolBinding,
@@ -392,7 +409,7 @@ pub(crate) struct ResourceCall {
     authorize_only: bool,
     expected_resource_key: Option<String>,
     pub cancellation: CancellationToken,
-    pub reply: mpsc::Sender<Result<Value, ResourceFailure>>,
+    pub reply: ResourceReply,
 }
 type AdmissionControl = dyn Fn(&NativeToolBinding, &CancellationToken)
     -> Result<varin_runtime::execution_capacity::AdmissionControlGuard, ExecutionError> + Send + Sync;
@@ -479,6 +496,8 @@ impl NativeResourceClient {
             });
         }
         let (reply, result) = mpsc::channel();
+        let wake = authorize_only.then(|| mpsc::sync_channel(1));
+        let _cancel_wait = wake.as_ref().map(|(sender, _)| cancellation.wake_on_cancel(sender.clone()));
         (self.send)(ResourceCall {
             admission_key: None,
             binding: binding.clone(),
@@ -487,12 +506,29 @@ impl NativeResourceClient {
             authorize_only,
             expected_resource_key,
             cancellation: cancellation.clone(),
-            reply,
+            reply: ResourceReply { sender: Some(reply), wake: wake.as_ref().map(|(sender, _)| sender.clone()) },
         })
         .map_err(|error| ResourceFailure {
             error,
             dispatched: false,
         })?;
+        if let Some((_, changed)) = wake {
+            loop {
+                if cancellation.is_cancelled() {
+                    return Err(ResourceFailure { error: KernelError::Cancelled, dispatched: false });
+                }
+                match result.try_recv() {
+                    Ok(receipt) => return receipt,
+                    Err(mpsc::TryRecvError::Disconnected) => return Err(ResourceFailure {
+                        error: KernelError::Storage("resource owner disconnected before receipt".into()), dispatched: false,
+                    }),
+                    Err(mpsc::TryRecvError::Empty) => {},
+                }
+                if changed.recv().is_err() {
+                    return Err(ResourceFailure { error: KernelError::Storage("resource observation closed".into()), dispatched: false });
+                }
+            }
+        }
         // Once admitted, cancellation is observed by the executing resource owner. Do not drop
         // ownership on a local timeout/abort while the process/file operation may still execute.
         result.recv().map_err(|_| ResourceFailure {
@@ -504,6 +540,7 @@ impl NativeResourceClient {
 
 pub(crate) struct NativeToolExecutor {
     binding: NativeToolBinding,
+    schemas: Vec<ToolSchema>,
     resources: NativeResourceClient,
     language: Option<crate::native_language::LanguageBridge>,
     retrieval: Option<crate::native_retrieval::RetrievalBridge>,
@@ -597,12 +634,13 @@ impl NativeToolExecutor {
         if binding.source_mode != NativeSourceMode::LiveRoot && binding.enabled_tools.contains(&NativeToolKind::CodeRetrieval) {
             return Err(ExecutionError::new("retrieval_source_unavailable", "Code retrieval requires live_root; fixed-source retrieval is not available"));
         }
-        Ok(Self { binding, resources, language: None, retrieval: None, retrieval_project_id: None })
+        let schemas = Self::selected_schemas(&binding.enabled_tools);
+        Ok(Self { binding, schemas, resources, language: None, retrieval: None, retrieval_project_id: None })
     }
     pub(crate) fn with_retrieval(mut self, bridge: crate::native_retrieval::RetrievalBridge, project_id: Option<String>) -> Self { self.retrieval = Some(bridge); self.retrieval_project_id = project_id; self }
     pub(crate) fn with_language(mut self, bridge: crate::native_language::LanguageBridge) -> Self { self.language = Some(bridge); self }
     pub(crate) fn schemas(&self) -> Vec<ToolSchema> {
-        Self::selected_schemas(&self.binding.enabled_tools)
+        self.schemas.clone()
     }
     pub(crate) fn selected_schemas(enabled_tools: &BTreeSet<NativeToolKind>) -> Vec<ToolSchema> {
         enabled_tools
@@ -731,6 +769,7 @@ impl ToolExecutor for NativeToolExecutor {
         &self,
         call: &ToolCall,
         request: &FrozenToolContext,
+        _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
         if request.run_id != self.binding.run_id {
             return Err(ExecutionError::new(
@@ -740,14 +779,14 @@ impl ToolExecutor for NativeToolExecutor {
         }
         let operation = self.operation(None, call)?;
         let expected = self
-            .schemas()
-            .into_iter()
+            .schemas
+            .iter()
             .find(|schema| schema.name == call.name)
             .expect("selected tool");
         if !request
             .tools
             .iter()
-            .any(|schema| schema == &expected)
+            .any(|schema| schema == expected)
         {
             return Err(ExecutionError::new(
                 "stale_tool_schema",
@@ -760,7 +799,7 @@ impl ToolExecutor for NativeToolExecutor {
                 ToolOrigin::ModelStep { request_id } => format!("{request_id}:tool:{}", call.call_id),
                 ToolOrigin::PolicyAction { action_id, node_id } => format!("{action_id}:node:{node_id}"),
             },
-        }, call, &operation, &CancellationToken::default())
+        }, call, &operation, _cancel)
     }
     fn authorize(
         &self,

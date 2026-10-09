@@ -125,7 +125,7 @@ impl AgentPolicy for SummaryPolicy {
 }
 struct NoTools;
 impl ToolExecutor for NoTools {
-    fn prepare(&self, _: &ToolCall, _: &FrozenToolContext) -> Result<ToolContract, ExecutionError> {
+    fn prepare(&self, _: &ToolCall, _: &FrozenToolContext, _cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
         Err(ExecutionError::new(
             "compaction_tools",
             "summary jobs cannot prepare tools",

@@ -496,13 +496,15 @@ pub trait ToolExecutor: Send + Sync {
     /// Trusted implementation opt-in, never inferred from untrusted MCP annotations.
     fn supports_policy_read(&self, _: &FrozenToolContext, _: &ToolCall, _: &ToolContract) -> bool { false }
 
-    /// Resolve an already-bound schema/contract and a pure canonical resource plan.
+    /// Resolve an already-bound schema/contract and the complete canonical resource plan.
+    /// Any resource-owner lookup must observe this call's cancellation.
     /// This must not start a service, refresh credentials, wait for permissions or send effects.
     /// Slow capability preparation belongs to the individual execution, outside batch planning.
     fn prepare(
         &self,
         call: &ToolCall,
         context: &FrozenToolContext,
+        _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError>;
     /// Re-check permission at dispatch, so revocation is not delayed by a frozen model schema.
     /// Validate the *complete* argument value against the frozen schema before returning Ok.
@@ -1070,7 +1072,7 @@ impl<
                     event = self.execute_model_job(&input, job, &cancel)?;
                 }
                 PolicyAction::ReadGraph { nodes } => {
-                    let graph=match self.admit_read_graph(&input,nodes,policy_state.clone()) {Ok(graph)=>graph,Err(error) if error.code=="input_pending"=>{policy_state=previous_policy_state;continue 'agent},Err(error)=>{policy_state=previous_policy_state;finish!('agent,RunState::Failed,None,Some(error))}};
+                    let graph=match self.admit_read_graph(&input,nodes,policy_state.clone(), &cancel) {Ok(graph)=>graph,Err(error) if error.code=="input_pending" || cancel.is_cancelled()=>{policy_state=previous_policy_state;continue 'agent},Err(error)=>{policy_state=previous_policy_state;finish!('agent,RunState::Failed,None,Some(error))}};
                     event=self.execute_read_graph(&input,graph,&cancel)?;
                 }
                 PolicyAction::ReadResult { reference,index } => {
@@ -1436,13 +1438,22 @@ impl<
     ) -> Result<Vec<ToolResult>, ExecutionError> {
         let mut admitted = Vec::new();
         let mut rejected = BTreeMap::new();
+        let frozen = FrozenToolContext {
+            run_id: input.run_id.clone(), origin: ToolOrigin::ModelStep { request_id: snapshot.view.request_id.clone() },
+            tools: snapshot.view.binding.tools.clone(), tool_schema_generation: snapshot.view.binding.tool_schema_generation,
+            source: self.persistence.tool_source(&input.run_id)?,
+        };
         // All contracts are resolved first; no effect can begin while the graph is still being built.
         for (index, call) in calls.iter().enumerate() {
             if cached.contains_key(&call.call_id) {
                 continue;
             }
+            if cancel.is_cancelled() {
+                rejected.insert(index, ToolCompletion::cancelled());
+                continue;
+            }
             match guarded("tool_prepare_panicked", || {
-                self.tools.prepare(call, &FrozenToolContext { run_id: input.run_id.clone(), origin: ToolOrigin::ModelStep { request_id: snapshot.view.request_id.clone() }, tools: snapshot.view.binding.tools.clone(), tool_schema_generation: snapshot.view.binding.tool_schema_generation, source: self.persistence.tool_source(&input.run_id)? })
+                self.tools.prepare(call, &frozen, cancel)
             }) {
                 Ok(contract)
                     if contract.name == call.name
@@ -1469,7 +1480,8 @@ impl<
                 Err(error) => {
                     rejected.insert(
                         index,
-                        ToolCompletion::failure(&error.code, &error.message, Effect::None),
+                        if cancel.is_cancelled() { ToolCompletion::cancelled() }
+                        else { ToolCompletion::failure(&error.code, &error.message, Effect::None) },
                     );
                 }
             }

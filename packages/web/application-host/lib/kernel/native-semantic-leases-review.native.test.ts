@@ -101,10 +101,10 @@ it('real configured inference, registered indexing and installed semantic select
   expect(f.workspace.indexStatuses()[0]?.status.coverage).toBe('complete');
   expect(f.wires.some(wire => wire.input.some(text => text.includes('ALPHA_SEMANTIC_EVIDENCE')))).toBe(true);
   const run = await f.run('semantic-installed-loop'); const history = JSON.stringify(await f.completed(run));
-  expect(history).toContain('ALPHA_SEMANTIC_EVIDENCE'); expect(history).toContain(semanticKey);
+  expect(history).toContain('ALPHA_SEMANTIC_EVIDENCE'); expect(f.selections[0]?.selection.providerKey).toBe(semanticKey);
   const output = f.requests.map(latestOutput).find(value => value?.outcome === 'succeeded') as { content?: { snippets?: Array<{ path: string }> } } | undefined;
   expect(output?.content?.snippets?.[0]?.path).toBe('alpha.ts');
-  expect(history).toContain('query-embedding'); expect(history).toContain('unknown');
+  expect(history).not.toContain('inferenceReceipts'); expect(history).not.toContain('query-embedding');
   expect(f.selections[0]?.plan.semantic?.publishedRevision).toBeTruthy();
   expect(f.selections[0]?.plan.semantic).toMatchObject({ bindingState: 'ready', coverage: 'complete', lifecycle: 'ready' });
   expect(f.selections[0]?.plan.stages.find(stage => stage.kind === 'model')?.status).toBe('disabled');
@@ -115,7 +115,7 @@ it('real configured inference, registered indexing and installed semantic select
   expect(f.forbiddenPi).not.toHaveBeenCalled(); expect(f.localCalls).not.toHaveBeenCalled();
   const sent = f.wires.length; f.scope.update([], [f.documents.workspaceRoot]); await f.workspace.refreshIndexScope();
   const pausedHistory = JSON.stringify(await f.completed(await f.run('semantic-paused-published')));
-  expect(pausedHistory).toContain('ALPHA_SEMANTIC_EVIDENCE'); expect(pausedHistory).toContain('"reused":true'); expect(f.wires).toHaveLength(sent);
+  expect(pausedHistory).toContain('ALPHA_SEMANTIC_EVIDENCE'); expect(pausedHistory).not.toContain('"reused":true'); expect(f.wires).toHaveLength(sent);
   expect(f.receipts.some(receipt => receipt.purpose === 'query-embedding' && receipt.state === 'succeeded' && receipt.attempts === 0 && receipt.attemptsKnown && receipt.reused)).toBe(true);
   await f.workspace.drain(); expect(await f.workspace.nativeQueryStats()).toMatchObject({ activeQueries: 0, activeReaders: 0 });
   await f.workspace.dispose(); expect(await f.workspace.nativeQueryStats()).toMatchObject({ activeQueries: 0, activeReaders: 0, retainedPublications: 0 });

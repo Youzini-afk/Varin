@@ -51,13 +51,13 @@ pub fn build_provider(configuration:ModelSessionConfiguration,credentials:Arc<dy
     let mut connection=Connection::new(configuration.endpoint.clone(),credentials,Arc::new(NativeHttpTransport::default()));
     connection.accepts_images=configuration.accepts_images;
     let provider:Arc<dyn ModelProvider>=match configuration.provider_family.as_str(){
-        responses::FAMILY=>{let mut provider=responses::ResponsesProvider::new(connection);provider.max_output_tokens=configuration.max_output_tokens;Arc::new(provider)},
+        responses::FAMILY=>{let mut provider=responses::ResponsesProvider::new(connection);provider.max_output_tokens=configuration.max_output_tokens;provider.reasoning=configuration.reasoning_effort.map(|effort|json!({"effort":effort}));Arc::new(provider)},
         anthropic::FAMILY=>{let mut provider=anthropic::AnthropicProvider::new(connection,configuration.max_output_tokens.ok_or_else(||ExecutionError::new("output_capacity_required","Anthropic requires an explicit positive output capacity"))?);provider.oauth=configuration.anthropic_oauth.unwrap_or(false);Arc::new(provider)},
         chat::FAMILY=>{let mut provider=chat::ChatProvider::new(connection);provider.max_output_tokens=configuration.max_output_tokens;provider.legacy_max_tokens=configuration.legacy_max_tokens.unwrap_or(false);provider.include_stream_usage=configuration.include_stream_usage.unwrap_or(true);provider.reasoning_effort=configuration.reasoning_effort;Arc::new(provider)},
         azure::FAMILY=>{
             let deployment=configuration.azure_deployment.clone().filter(|s|!s.trim().is_empty()).ok_or_else(||ExecutionError::new("azure_configuration","Azure requires an explicit deployment"))?;
             let version=configuration.azure_api_version.clone().filter(|s|!s.trim().is_empty()).ok_or_else(||ExecutionError::new("azure_configuration","Azure requires an explicit API version"))?;
-            let mut provider=azure::AzureResponsesProvider::new(connection,deployment,&version)?;if let Some(max)=configuration.max_output_tokens{provider.set_max_output_tokens(max);}Arc::new(provider)
+            let mut provider=azure::AzureResponsesProvider::new(connection,deployment,&version)?;if let Some(max)=configuration.max_output_tokens{provider.set_max_output_tokens(max);}provider.set_reasoning(configuration.reasoning_effort.map(|effort|json!({"effort":effort})));Arc::new(provider)
         },
         google::FAMILY=>{let mut provider=google::GoogleProvider::new(connection)?;provider.max_output_tokens=configuration.max_output_tokens;Arc::new(provider)},
         google::VERTEX_FAMILY=>{let mut provider=google::GoogleProvider::vertex(connection)?;provider.max_output_tokens=configuration.max_output_tokens;Arc::new(provider)},
@@ -79,7 +79,7 @@ pub fn build_provider(configuration:ModelSessionConfiguration,credentials:Arc<dy
 }
 struct NoTools;
 impl ToolExecutor for NoTools {
-    fn prepare(&self,_:&ToolCall,_:&FrozenToolContext)->Result<ToolContract,ExecutionError>{Err(ExecutionError::new("tool_unavailable","this binding has no tools"))}
+    fn prepare(&self,_:&ToolCall,_:&FrozenToolContext, _cancel: &CancellationToken)->Result<ToolContract,ExecutionError>{Err(ExecutionError::new("tool_unavailable","this binding has no tools"))}
     fn authorize(&self,_:&ToolExecutionContext,_:&ToolCall,_:&ToolContract,_:&CancellationToken)->Result<(),ExecutionError>{Err(ExecutionError::new("tool_unavailable","this binding has no tools"))}
     fn execute(&self,_:&ToolExecutionContext,_:&ToolCall,_:&ToolContract,_:&CancellationToken)->ToolCompletion{ToolCompletion::NotDispatched{reason:"no tool binding exists".into()}}
 }

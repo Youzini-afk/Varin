@@ -147,6 +147,7 @@ impl ToolExecutor for Tools {
         &self,
         call: &ToolCall,
         context: &FrozenToolContext,
+        _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
         assert!(
             matches!(context.origin, ToolOrigin::PolicyAction { .. }),
@@ -296,6 +297,7 @@ fn engine(
     policy: Arc<Policy>,
 ) -> ExecutionEngine<Mutex<Catalog>, Provider, Tools, Policy> {
     ExecutionEngine {
+        context_preparation: Arc::new(NoopContextPreparation),
         persistence: f.db.clone(),
         provider: Arc::new(Provider::default()),
         tools,
@@ -538,7 +540,7 @@ fn admitted(f: &Fixture, nodes: Vec<Value>) -> PolicyGraphIntent {
                 tools: f.input.binding.tools.clone(),
                 source: boundary.source.clone(),
             };
-            let contract = tools.prepare(&node.call, &context).unwrap();
+            let contract = tools.prepare(&node.call, &context, &CancellationToken::default()).unwrap();
             PolicyAdmittedNode {
                 node,
                 context,
@@ -840,6 +842,7 @@ fn newer_decision_checkpoint_after_graph_results_is_not_rolled_back_on_restart()
             },
         });
         let e = ExecutionEngine {
+            context_preparation: Arc::new(NoopContextPreparation),
             persistence: f.db.clone(),
             provider: Arc::new(Provider::default()),
             tools: Arc::new(Tools::new("must not rerun")),
@@ -1116,6 +1119,7 @@ fn operation_cancel_between_graph_load_and_child_registration_is_not_lost() {
     });
     let e = ExecutionEngine {
         persistence,
+        context_preparation: Arc::new(NoopContextPreparation),
         provider: Arc::new(Provider::default()),
         tools: Arc::new(Tools::new("must not read")),
         policy: Arc::new(Policy::new(vec![])),
@@ -1264,6 +1268,7 @@ fn actual_new_input_winning_graph_admission_preserves_previous_policy_checkpoint
         seen: Mutex::new(vec![]),
     });
     let e = ExecutionEngine {
+        context_preparation: Arc::new(NoopContextPreparation),
         persistence: persistence.clone(),
         provider: Arc::new(Provider::default()),
         tools: Arc::new(Tools::new("must not execute")),

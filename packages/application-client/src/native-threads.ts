@@ -66,6 +66,8 @@ export interface NativeThreadCollaborationAPI {
 }
 export interface NativeThreadSnapshot {
   identity: NativeThreadIdentity;
+  /** Read before the snapshot's component queries. Replay after this cursor covers concurrent commits. */
+  eventCursor: number;
   thread: NativeThreadSummary;
   activeRun: NativeRun | null;
   history: NativeHistoryItem[];

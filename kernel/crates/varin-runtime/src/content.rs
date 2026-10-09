@@ -7,10 +7,13 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
+    sync::{Arc, atomic::{AtomicUsize, Ordering}},
 };
+#[cfg(unix)]
+use std::fs::File;
 
 type Result<T> = std::result::Result<T, RuntimeError>;
 
@@ -54,6 +57,13 @@ struct Reference {
 #[derive(Clone)]
 pub(crate) struct ContentStore {
     root: PathBuf,
+    publications: Arc<AtomicUsize>,
+}
+/// Acquired under Catalog ownership, then retained across body I/O and reference commit.
+/// Collection defers while a publication is in flight; it never waits with Catalog locked.
+pub(crate) struct ContentPublication(Arc<AtomicUsize>);
+impl Drop for ContentPublication {
+    fn drop(&mut self) { self.0.fetch_sub(1, Ordering::Release); }
 }
 pub struct ContentChunk {
     pub content_ref:String,
@@ -63,6 +73,10 @@ pub struct ContentChunk {
     pub bytes:Vec<u8>,
 }
 impl ContentStore {
+    pub(crate) fn begin_publication(&self) -> ContentPublication {
+        self.publications.fetch_add(1, Ordering::Acquire);
+        ContentPublication(self.publications.clone())
+    }
     pub(crate) fn load_chunk(&self, reference:&Value, index:usize)->Result<ContentChunk>{
         let reference:Reference=serde_json::from_value(reference.clone())?;
         let manifest:Manifest=serde_json::from_slice(&self.read_bytes(&reference.content_object)?)?;
@@ -79,7 +93,7 @@ impl ContentStore {
         if let Some(parent) = root.parent() {
             sync_directory(parent)?;
         }
-        Ok(Self { root })
+        Ok(Self { root, publications: Arc::new(AtomicUsize::new(0)) })
     }
     fn put_bytes(&self, bytes: &[u8]) -> Result<String> {
         let hash = identity(bytes);
@@ -228,6 +242,9 @@ impl ContentStore {
     /// Called under the catalog's exclusive owner lock. Every retained content domain is a GC root;
     /// failures during mark abort sweep, and objects saved by a rolled-back commit are collectible.
     pub(crate) fn collect(&self, db: &Connection) -> Result<u64> {
+        // Admission of a publication and collection are serialized by Catalog. An in-flight
+        // writer can be waiting to commit its references: waiting here would deadlock it.
+        if self.publications.load(Ordering::Acquire) != 0 { return Ok(0); }
         let mut live = HashSet::new();
         let contexts:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='context_checkpoints')",[],|row|row.get(0))?;
         let mut roots = "SELECT json_extract(body,'$.request') FROM model_steps

@@ -111,9 +111,10 @@ impl ToolExecutor for CollaborationTools {
         &self,
         call: &ToolCall,
         request: &FrozenToolContext,
+        _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
         if !is_tool(&call.name) {
-            return self.inner.prepare(call, request);
+            return self.inner.prepare(call, request, _cancel);
         }
         let fixed = self
             .binding
