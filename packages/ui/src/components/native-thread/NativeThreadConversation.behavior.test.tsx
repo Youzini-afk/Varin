@@ -9,6 +9,7 @@ import { AgentWorkspaceShell } from '@/workbenches/agent/AgentWorkspaceShell';
 
 const runtimeState = vi.hoisted(() => ({ api: undefined as NativeThreadsAPI | undefined }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ nativeThreads: runtimeState.api }) }));
+vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: (selector: (state: { currentDirectory: string }) => unknown) => selector({ currentDirectory: '/workspace/project' }) }));
 vi.mock('@/stores/usePiSessionStore', () => ({ usePiSessionStore: { subscribe: () => () => {} } }));
 vi.mock('@/components/layout/MainLayout', () => ({ MainLayout: ({ renderConversation }: { renderConversation: (active: boolean) => React.ReactNode }) => <div>{renderConversation(true)}</div> }));
 vi.mock('@/components/views/RegularChatView', () => ({ RegularChatView: () => <div data-testid="existing-conversations" /> }));
@@ -44,7 +45,7 @@ function fixture(active = false) {
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
   const api: NativeThreadsAPI = { listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
-    fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, events: async () => [],
+    prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
   };
   return { api, view, submit, enqueue, editInput, cancelInput, cancelRun, emit: (event: Parameters<NativeThreadsAPI['observe']>[1] extends (value: infer T) => void ? T : never) => listener?.(event) };
@@ -281,4 +282,65 @@ it('retries summary generation without duplicating the job and applies its compl
   expect(container.querySelector('[aria-label="Active context summary"]')?.textContent).toContain('continuation summary');
   expect(container.textContent).toContain('original full message');
   expect(button('Apply context summary')).toBeUndefined();
+});
+
+it('prepares a real source selection, preserves it and the draft on uncertain send, then omits it for continuation', async () => {
+  const f = fixture();
+  const prepared = { path: '/workspace/project', source: { workspaceId: 'captured-workspace', executionWorkspaceId: 'captured-workspace', branchId: 'captured-branch', revision: 0, mode: 'fixed_branch' as const, tools: ['file_read' as const] } };
+  f.api.prepareSource = vi.fn().mockRejectedValueOnce(new Error('capture unavailable')).mockResolvedValue(prepared);
+  f.submit.mockRejectedValueOnce(new Error('send uncertain'));
+  await act(async () => { root.render(<NativeThreadConversation api={f.api} identity={identity} initialWorkspacePath="/workspace/project" />); });
+  await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
+  await edit('[aria-label="Message native thread"]', 'preserve this draft');
+  await act(async () => { button('Prepare workspace').click(); });
+  expect(container.textContent).toContain('capture unavailable');
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message native thread"]')!.value).toBe('preserve this draft');
+  await act(async () => { button('Prepare workspace').click(); });
+  const calls = vi.mocked(f.api.prepareSource).mock.calls;
+  expect(calls[1]![0]).toEqual(calls[0]![0]);
+  expect(calls[0]![0]).toMatchObject({ ...identity, path: '/workspace/project', mode: 'fixed_branch' });
+  await submitForm(container.querySelector('form')!);
+  expect(container.querySelector('[aria-label="Prepared native workspace"]')).not.toBeNull();
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message native thread"]')!.value).toBe('preserve this draft');
+  await submitForm(container.querySelector('form')!);
+  expect(f.submit.mock.calls[1]![0]).toEqual(f.submit.mock.calls[0]![0]);
+  expect(f.submit.mock.calls[1]![0].source).toEqual(prepared.source);
+  expect(container.querySelector('[aria-label="Prepared native workspace"]')).toBeNull();
+  await edit('[aria-label="Message native thread"]', 'next turn inherits');
+  await submitForm(container.querySelector('form')!);
+  expect(f.submit.mock.calls[2]![0].source).toBeUndefined();
+});
+
+it('discards in-flight source preparation when the native API owner changes', async () => {
+  const f = fixture();
+  let resolvePrepare!: (value: Awaited<ReturnType<NativeThreadsAPI['prepareSource']>>) => void;
+  f.api.prepareSource = () => new Promise(resolve => { resolvePrepare = resolve; });
+  await act(async () => { root.render(<NativeThreadConversation api={f.api} identity={identity} initialWorkspacePath="/old-host/project" />); });
+  await act(async () => { button('Prepare workspace').click(); });
+  const next = fixture();
+  await act(async () => { root.render(<NativeThreadConversation api={next.api} identity={identity} initialWorkspacePath="/new-host/project" />); });
+  await act(async () => { resolvePrepare({ path: '/old-host/project', source: { workspaceId: 'old-host-workspace', executionWorkspaceId: 'old-host-workspace', branchId: 'old-host-source', revision: 0, mode: 'fixed_branch', tools: ['file_read'] } }); });
+  expect(container.querySelector('[aria-label="Prepared native workspace"]')).toBeNull();
+  expect(button('Preparing workspace snapshot')).toBeUndefined();
+});
+
+it('does not silently discard a prepared workspace when a live run appears before send', async () => {
+  const f = fixture();
+  f.api.prepareSource = vi.fn().mockResolvedValue({ path: '/workspace/project', source: { workspaceId: 'prepared-ws', executionWorkspaceId: 'prepared-ws', branchId: 'prepared-source', revision: 0, mode: 'materialized', tools: ['file_read', 'file_write'] } });
+  await act(async () => { root.render(<NativeThreadConversation api={f.api} identity={identity} initialWorkspacePath="/workspace/project" />); });
+  await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
+  await edit('[aria-label="Message native thread"]', 'run on prepared workspace');
+  await act(async () => { button('Prepare workspace').click(); });
+  const active = initialSnapshot(true);
+  f.view.activeRun = active.activeRun;
+  f.view.thread.branches = active.thread.branches;
+  await act(async () => { f.emit({ cursor: 9, subject: 'ui-run', revision: 1, kind: 'run.accepted', data: {} }); });
+  expect(button('Queue message').disabled).toBe(true);
+  await submitForm(container.querySelector('form')!);
+  expect(f.enqueue).not.toHaveBeenCalled();
+  expect(f.submit).not.toHaveBeenCalled();
+  expect(container.querySelector('[aria-label="Prepared native workspace"]')).not.toBeNull();
+  await act(async () => { button('Remove prepared workspace').click(); });
+  await submitForm(container.querySelector('form')!);
+  expect(f.enqueue).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ text: 'run on prepared workspace' }));
 });

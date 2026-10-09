@@ -15,7 +15,7 @@ export interface NativeSourceLaunch {
   revision: number;
   environmentRunId?: string;
   mode: 'fixed_branch' | 'materialized';
-  tools: readonly ('file_read' | 'file_write' | 'file_edit' | 'process_inspect' | 'process_read' | 'process_spawn')[];
+  tools: readonly ('file_read' | 'file_list' | 'file_search' | 'file_write' | 'file_edit' | 'process_inspect' | 'process_read' | 'process_spawn')[];
 }
 
 /** Uses the existing Storage authority for source reads, materialization and process containment.
@@ -33,7 +33,7 @@ export async function startNativeRunFromSource(
     || !Number.isSafeInteger(selection.revision) || selection.revision < 0) throw new Error('Native launch requires a complete fixed source identity');
   if (selection.mode !== 'fixed_branch' && selection.mode !== 'materialized') throw new Error('Native source mode is unavailable');
   const tools = [...new Set(selection.tools)];
-  if (tools.some(tool => !['file_read', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn'].includes(tool))) throw new Error('Native source launch selected an unavailable tool');
+  if (tools.some(tool => !['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn'].includes(tool))) throw new Error('Native source launch selected an unavailable tool');
   if (selection.mode === 'fixed_branch' && tools.some(tool => ['process_spawn', 'file_write', 'file_edit'].includes(tool))) throw new Error('Mutating tools require the selected source to be materialized');
   const run = await runtime.run(selection.runId, signal);
   if (['completed', 'failed', 'cancelled'].includes(run.state) || run.cancel_requested) throw new Error('Native Run is closed to launch');

@@ -46,6 +46,7 @@ export interface NativeRunReconcileResult {
 }
 
 export interface NativeSubmitLaunch {
+  inheritSource?: boolean;
   source: NativeLaunchSourceParams | null;
   enabledTools: string[];
   credentialScope?: NativeCredentialScope;
@@ -238,6 +239,7 @@ export interface NativeModelSessionConfiguration {
   legacyMaxTokens?: boolean;
   includeStreamUsage?: boolean;
   reasoningEffort?: string | null;
+  anthropicOauth?: boolean;
 }
 
 export interface NativeRunStartReceipt {

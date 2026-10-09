@@ -831,6 +831,7 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                     "input idempotency key cannot be empty".into(),
                 ));
             }
+            let inherit_source = p.launch.as_ref().and_then(|launch| launch.inherit_source).unwrap_or(false);
             let launch = p
                 .launch
                 .map(|selected| {
@@ -912,21 +913,14 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                     })
                 })
                 .transpose()?;
-            Ok(serde_json::to_value(
-                catalog
-                    .submit_with_launch(
-                        &SubmitInput {
-                            key: p.key,
-                            thread_id: p.thread_id,
-                            branch_id: p.branch_id,
-                            expected_head: p.expected_head.0,
-                            input: p.input,
-                            configuration: p.configuration,
-                        },
-                        launch,
-                    )
-                    .map_err(domain)?,
-            )?)
+            let command = SubmitInput { key:p.key, thread_id:p.thread_id, branch_id:p.branch_id,
+                expected_head:p.expected_head.0, input:p.input, configuration:p.configuration };
+            let receipt = if inherit_source {
+                catalog.submit_with_inherited_source(&command, launch.ok_or_else(|| KernelError::Protocol("source inheritance requires a model launch".into()))?)
+            } else {
+                catalog.submit_with_launch(&command, launch)
+            }.map_err(domain)?;
+            Ok(serde_json::to_value(receipt)?)
         }
         "runtime.run.inspect" | "runtime.run.cancel" => {
             let p: NativeRunParams = serde_json::from_value(params)?;

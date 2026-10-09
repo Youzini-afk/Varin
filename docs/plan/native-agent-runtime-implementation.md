@@ -21,6 +21,14 @@
 - 凭据增量接入 configured provider/model headers、仅 header 的连接、环境 key/bearer 和 Vertex 显式 Cloud API key。独立测试使用假凭据；ADC、AWS SigV4 等接线及真实账号验收不包含在本段通过结论中
 - 这批工作尚未切换默认聊天、移除 Pi，或完成所有领域能力／平台发布验收。中断前未结束的测试没有计为通过
 
+## 后续已验证增量：来源与认证
+
+- 原生界面可通过现有 Documents/WorkingState 权威准备保存到磁盘的只读快照或可编辑副本；同键并发／重启重试保持同一基线，运行后的省略来源续接在内核受理事务内继承实际环境，不回退文件改动
+- 原生 file_list/file_search 复用 compute worker 与读取授权，支持固定修订和物化根；真实内核验证了来源一致性、取消／释放和跨工作区边界。UI/HTTP 已检查旧 Host 迟到准备结果被丢弃
+- 原生认证已接入现有 Host 的 Google ADC、AWS SigV4、Anthropic 工作负载身份与订阅 OAuth。独立检查使用官方依赖、假凭据和真实 loopback HTTP，包含签名字节核对、单飞刷新、身份切换、拒绝跨源重定向、工具名往返和签名内容保留；未使用真实账号
+- 本阶段完整 varin-runtime 测试通过，类型依赖构建、Host 声明／测试类型及受影响 UI 类型通过。来源 HTTP、compute、UI 和 provider 独立检查有各自记录；不等于各云端真实账号、跨平台代理或正式发行验收
+- 仍未自动同步副本回原目录，未完成副本与共享编辑器/Git/overview 绑定、实时记忆流程、默认聊天切换和 Pi 退出
+
 ## 实施顺序与出口
 
 | 顺序 | 要完成的工作 | 必须建立的合同和出口 | 当前状态 |

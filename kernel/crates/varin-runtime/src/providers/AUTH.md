@@ -126,8 +126,30 @@ The Host source identity is pinned independently of SDK-refreshed temporary cred
 precedes endpoint/owner region. Headers and signatures are transient. No standalone AWS credential
 store, new grant, user token or paid request is needed for this integration.
 
-Remaining credential integration: Anthropic workload-identity federation still requires its
-provider-specific token-exchange owner. Dynamic environment/helper, metadata ADC and AWS source scopes
+Anthropic workload-identity federation now uses the locked SDK's jwt-bearer exchange and TokenCache
+under the same Host owner. The source binds configured organization/workspace/federation rule/service
+account plus assertion issuer/subject/audience equality in memory. Unverified JWT claims identify only
+an owner-local source lease; the exchange service still validates signature and authorization. Expiry,
+JTI and projected-token file rotation for the same principal do not change scope; changing the source
+principal or target creates another opaque scope. Each refresh rechecks the assertion principal before
+sending it to the configured first-party Anthropic endpoint. No assertion, exchanged access token or
+claims are persisted, and no SDK credentials_path/disk cache is configured. SDK single-flight and
+advisory/mandatory refresh behavior is retained. Native request headers preserve configured beta values
+and append the SDK-required OAuth beta. Stored OAuth, API keys and explicit bearer headers retain
+precedence, and failed auth never falls through to federation. Independent review exercised the real
+locked SDK against a loopback token endpoint: concurrent single-flight, expiry and same-principal
+assertion rotation, changed-principal rejection before exchange, target changes, sanitized failures,
+configured beta preservation and no persisted bearer. This does not claim real organization access.
+
+Anthropic subscription tokens (`sk-ant-oat`, matching the locked SDK) select an explicit
+`anthropicOauth` model configuration. The mode participates in model generation and is rechecked around
+credential refresh. The existing SDK OAuth owner still owns refresh/persistence. Native auth uses
+Bearer, the locked Claude CLI identity headers and default Claude/OAuth betas, with configured header
+precedence. The native serializer prepends the SDK's Claude identity system block and translates known
+Claude tool names to canonical casing. Parsed client-tool calls map back to the registered native names;
+raw provider blocks, signatures and canonical wire names are preserved unchanged for continuation.
+API-key and workload-federation models do not receive the subscription body contract. Independent
+subscription fixture acceptance remains pending; no live subscription credential has been used. Dynamic environment/helper, metadata ADC and AWS source scopes
 require fresh selection after Host restart rather than silently adopting another identity. Real IAM,
 ADC, subscription accounts, proxies and platform-specific credential chains still need live acceptance;
 fixture evidence does not establish live-provider parity.

@@ -28,6 +28,7 @@ export function createNativeThreadsHttpAPI(): NativeThreadsAPI {
   return {
     list: () => post('list', {}), listModels: () => post('models', {}),
     create: key => post('create', { key }), fork: input => post('fork', input), submit: input => post('submit', input), enqueue: input => post('enqueue', input),
+    prepareSource: input => post('source/prepare', input),
     compact: input => post('context/compact', input),
     publishContext: (identity, runId) => post('context/publish', { ...identity, runId }),
     cancelContext: (identity, runId) => post('context/cancel', { ...identity, runId }),

@@ -1,21 +1,24 @@
+import { NativeThreadSourcePicker } from './NativeThreadSourcePicker';
 import type { ImageAttachment } from '@varin/protocol';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
 import { fileToImageAttachment } from '@/components/chat/composer/imageAttachments';
 import { useI18n } from '@/lib/i18n';
 import React from 'react';
 import { NativeThreadRequestError } from '@varin/application-client';
-import type { NativeThreadIdentity, NativeThreadSnapshot, NativeThreadsAPI, NativeThreadHistoryPage } from '@varin/application-client';
+import type { NativeThreadIdentity, NativeThreadSnapshot, NativeThreadsAPI, NativeThreadHistoryPage, NativeThreadPreparedSource } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { NativeThreadProjection, nativeHistoryText, nativeHistoryImages } from '@/lib/native-runtime/thread-projection';
 
-export function NativeThreadConversation({ api, identity, onBranchCreated }: { api: NativeThreadsAPI; identity: NativeThreadIdentity; onBranchCreated?: (identity: NativeThreadIdentity) => void }) {
+export function NativeThreadConversation({ api, identity, onBranchCreated, initialWorkspacePath }: { api: NativeThreadsAPI; identity: NativeThreadIdentity; onBranchCreated?: (identity: NativeThreadIdentity) => void; initialWorkspacePath?: string }) {
   const { t } = useI18n();
   const [images, setImages] = React.useState<ImageAttachment[]>([]);
   const fileInput = React.useRef<HTMLInputElement | null>(null);
   const fileReadGeneration = React.useRef(0);
   const [readingFiles, setReadingFiles] = React.useState(false);
+  const [preparedSource, setPreparedSource] = React.useState<NativeThreadPreparedSource | null>(null);
+  const [preparingSource, setPreparingSource] = React.useState(false);
   const [snapshot, setSnapshot] = React.useState<NativeThreadSnapshot>();
   const [historyView, setHistoryView] = React.useState<NativeThreadHistoryPage | null>(null);
   const [historyLoading, setHistoryLoading] = React.useState(false);
@@ -39,6 +42,7 @@ export function NativeThreadConversation({ api, identity, onBranchCreated }: { a
   React.useEffect(() => {
     identityGeneration.current += 1; forkKeys.current.clear(); compactionKeys.current.clear();
     historyGeneration.current += 1; setHistoryView(null); setHistoryLoading(false);
+    setPreparedSource(null); setPreparingSource(false);
     setSnapshot(undefined); setProgress(''); setImages([]); setReadingFiles(false); pendingInput.current = undefined; fileReadGeneration.current += 1;
     const view = new NativeThreadProjection(api, identity, setSnapshot, value => setError(value instanceof Error ? value.message : 'Native thread unavailable'), setProgress);
     projection.current = view; view.start();
@@ -111,6 +115,8 @@ export function NativeThreadConversation({ api, identity, onBranchCreated }: { a
   };
   const visibleHistory = historyView?.items ?? snapshot?.history ?? [];
   const previousHistory = historyView ? historyView.previous : snapshot?.historyPage.previous;
+  const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, text, images, providerId, modelId, inputMode, preparedSource?.source]);
+  const sourceCannotBeApplied = active && Boolean(preparedSource) && pendingInput.current?.fingerprint !== submissionFingerprint();
   return <section className="flex h-full min-h-0 flex-col" aria-label="Native thread conversation">
     <div className="border-b px-4 py-2 text-xs text-muted-foreground">nativeThread · {identity.threadId} · branch {identity.branchId.slice(-8)} · {run?.state ?? 'Ready'}{run?.waiting_on ? ` · ${run.waiting_on}` : ''}</div>
     <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4">
@@ -151,6 +157,8 @@ export function NativeThreadConversation({ api, identity, onBranchCreated }: { a
         <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelInput(input.id, input.revision))}>Cancel queued input</Button>
       </div>)}
     </div>
+    <NativeThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={initialWorkspacePath}
+      active={active || pending} launch={snapshot?.launch ?? null} prepared={preparedSource} onPrepared={setPreparedSource} onPreparingChange={setPreparingSource} />
     {snapshot && <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">
       <summary className="cursor-pointer">Context summaries · checkpoint {snapshot.context.checkpoint?.revision ?? 0} · {snapshot.context.jobs.length} jobs</summary>
       {snapshot.context.checkpoint && <div className="my-2" aria-label="Active context summary">
@@ -170,20 +178,22 @@ export function NativeThreadConversation({ api, identity, onBranchCreated }: { a
     </details>}
     <form className="mx-auto w-full max-w-3xl space-y-2 p-4" onSubmit={event => {
       event.preventDefault();
+      if (preparingSource || sourceCannotBeApplied) return;
       void act(async () => {
-        const fingerprint = JSON.stringify([identity.threadId, identity.branchId, text, images, providerId, modelId, inputMode]);
+        const fingerprint = submissionFingerprint();
         if (pendingInput.current?.fingerprint !== fingerprint) {
           const key = crypto.randomUUID();
-          const submit = { ...identity, key, text, images, expectedHead: branch?.head ?? null, model: { providerId, modelId } };
+          const submit = { ...identity, key, text, images, expectedHead: branch?.head ?? null, model: { providerId, modelId }, ...(preparedSource ? { source: preparedSource.source } : {}) };
           const queued = { ...identity, key, text, images, mode: inputMode };
           pendingInput.current = { fingerprint, send: active ? () => api.enqueue(queued) : () => api.submit(submit) };
         }
         await pendingInput.current.send();
-        pendingInput.current = undefined; returnToLatest();
+        pendingInput.current = undefined; setPreparedSource(null); returnToLatest();
         if (draftRef.current.text === text) setText('');
         setImages(current => current.filter(image => !images.includes(image)));
       });
     }}>
+      {sourceCannotBeApplied && <p role="status" className="text-sm text-muted-foreground">The prepared workspace needs a new run. Keep the current workspace to queue this message, or wait for this run to finish.</p>}
       {snapshot?.launch?.preparation_failure && <p role="alert" className="text-sm text-destructive">Preparation needs attention: {snapshot.launch.preparation_failure}</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <select aria-label="Registered model" disabled={active} className="w-full rounded border bg-background px-2 py-1 text-sm"
@@ -207,7 +217,7 @@ export function NativeThreadConversation({ api, identity, onBranchCreated }: { a
         onDrop={event => { const files = [...event.dataTransfer.files]; if (files.length) { event.preventDefault(); void addImages(files); } }} />
       <div className="flex gap-2">
         <Button type="button" variant="ghost" disabled={readingFiles || acceptsImages === false} onClick={() => fileInput.current?.click()}>Attach images</Button>
-        <Button type="submit" disabled={pending || readingFiles || (images.length > 0 && acceptsImages === false) || (!text.trim() && !images.length) || (!active && (!providerId || !modelId))}>{active ? 'Queue message' : 'Send'}</Button>
+        <Button type="submit" disabled={pending || preparingSource || sourceCannotBeApplied || readingFiles || (images.length > 0 && acceptsImages === false) || (!text.trim() && !images.length) || (!active && (!providerId || !modelId))}>{active ? 'Queue message' : 'Send'}</Button>
         {active && branch?.active_run_id && <Button type="button" variant="outline" onClick={() => void act(() => api.cancelRun(branch.active_run_id!))}>Stop run</Button>}
         {run && !['completed', 'cancelled', 'failed'].includes(run.state) && <Button type="button" variant="ghost" onClick={() => void act(() => api.resume(run.id))}>Resume preparation</Button>}
       </div>
