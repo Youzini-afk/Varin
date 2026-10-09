@@ -44,7 +44,7 @@ pub fn bind_provider_with_credentials(configuration:ModelSessionConfiguration,cr
 }
 fn build(configuration:ModelSessionConfiguration,credentials:Arc<dyn CredentialResolver>,credential_ref:Option<String>,identity:String)->Result<RunStart,ExecutionError>{
     let BoundModel{binding,provider}=build_provider(configuration,credentials,credential_ref,identity)?;
-    Ok(RunStart{binding,policy_state:Value::Null,provider,tools:Arc::new(NoTools),policy:Arc::new(DefaultAgentPolicy),progress:ProgressSink::default()})
+    Ok(RunStart{context_preparation:Arc::new(NoopContextPreparation),binding,policy_state:Value::Null,provider,tools:Arc::new(NoTools),policy:Arc::new(DefaultAgentPolicy),progress:ProgressSink::default()})
 }
 pub fn build_provider(configuration:ModelSessionConfiguration,credentials:Arc<dyn CredentialResolver>,credential_ref:Option<String>,identity:String)->Result<BoundModel,ExecutionError>{
     if configuration.model.trim().is_empty()||configuration.max_output_tokens==Some(0){return Err(ExecutionError::new("invalid_model_configuration","model and positive output capacity are required"));}

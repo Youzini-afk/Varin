@@ -8,6 +8,8 @@ use serde_json::Value;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ContextJobRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub personalization: Option<crate::catalog::personalization::PersonalizationBasis>,
     pub key: String,
     pub branch_id: String,
     pub through_id: String,
@@ -38,6 +40,7 @@ pub fn policy_identity() -> PolicyIdentity {
 /// The caller supplies an explicitly selected, authenticated model binding. This function never
 /// chooses a model, resolves credentials, starts a worker, or makes a provider request.
 pub fn configure_compaction_start(mut start: RunStart) -> RunStart {
+    start.context_preparation = Arc::new(NoopContextPreparation);
     start.binding.tools.clear();
     start.binding.tool_schema_generation = 0;
     start.provider = Arc::new(SummaryProvider(start.provider));

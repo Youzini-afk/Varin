@@ -416,9 +416,29 @@ impl Storage {
             None
         };
         if method == "operation.get" && workspace.is_none() {
-            return Err(KernelError::Authorization(
-                "operation is not owned by this storage authority".to_string(),
-            ));
+            let operation_id = params
+                .get("operationId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    KernelError::Authorization("operation identity is required".to_string())
+                })?;
+            let exists: bool = self.conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_id = ?1)",
+                params![operation_id],
+                |row| row.get(0),
+            )?;
+            if exists {
+                // An entity without ownership is not proof of absence. In particular,
+                // orphaned/uncertain operations must never permit a fresh mutation.
+                return Err(KernelError::Authorization(
+                    "operation is not owned by this storage authority".to_string(),
+                ));
+            }
+            // A genuinely missing operation may be read as null. authorize and dispatch
+            // run synchronously on the same sole Storage worker while its lifetime
+            // exclusive kernel.lock excludes other owners; no creation can interleave
+            // this check and operation_get. Foreign owned operations were resolved above
+            // and still undergo the workspace check below.
         }
         let workspace = workspace;
         if let Some(owning) = &grant.owning_workspace {

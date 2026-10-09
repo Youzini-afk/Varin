@@ -183,7 +183,7 @@ impl Catalog {
             }
             _ => None,
         };
-        let frozen_snapshot = if let ExecutionRecord::ModelFinished { request_id, .. } = record {
+        let frozen_snapshot = if let ExecutionRecord::ModelFinished { request_id, .. } | ExecutionRecord::ModelDispatched { request_id } = record {
             let step: ModelStep = super::record(&self.db, "model_steps", request_id)?;
             Some(serde_json::from_value::<RequestSnapshot>(
                 self.content.load(&step.request)?,
@@ -224,7 +224,18 @@ impl Catalog {
             }
         }
         match record {
-            ExecutionRecord::StateChanged { state, waiting_on } => {
+            ExecutionRecord::RequestPrepared { snapshot } => super::memory::record_deliveries(&tx, snapshot, &run.thread_id, DeliveryState::Selected)?,
+            ExecutionRecord::ModelDispatched { .. } => super::memory::record_deliveries(&tx, frozen_snapshot.as_ref().ok_or_else(|| RuntimeError::Invalid("memory delivery request missing".into()))?, &run.thread_id, DeliveryState::Sent)?,
+            ExecutionRecord::ModelFinished { outcome: ModelOutcome::Completed, .. } => super::memory::record_deliveries(&tx, frozen_snapshot.as_ref().ok_or_else(|| RuntimeError::Invalid("memory delivery request missing".into()))?, &run.thread_id, DeliveryState::Committed)?,
+            _ => (),
+        }
+        match record {
+            ExecutionRecord::StateChanged { .. } | ExecutionRecord::ContextPreparationFailed { .. } => {
+                let (state, waiting_on) = match record {
+                    ExecutionRecord::StateChanged { state, waiting_on } => (state, waiting_on),
+                    ExecutionRecord::ContextPreparationFailed { .. } => (&RunState::Failed, &None),
+                    _ => unreachable!(),
+                };
                 if *state != run.state && !run.state.permits(*state) {
                     return Err(RuntimeError::Invalid(
                         "illegal executor run transition".into(),
@@ -658,6 +669,9 @@ impl Catalog {
                 }
                 tx.execute("INSERT INTO policy_checkpoints(run_id,identity,state,action) VALUES(?1,?2,?3,?4) ON CONFLICT(run_id) DO UPDATE SET identity=excluded.identity,state=excluded.state,action=excluded.action",params![run_id,encode(identity)?,encode(state)?,encode(action)?])?;
             }
+        }
+        if let ExecutionRecord::ContextPreparationFailed { failure } = record {
+            event(&tx, run_id, run.revision, "context.preparation_failed", json!({"code": failure.code, "message": failure.message}))?;
         }
         event(
             &tx,

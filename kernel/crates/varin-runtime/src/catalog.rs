@@ -110,6 +110,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
     }
     if version == 3 {
         launches::check_format(db)?;
+        context::check_format(db)?;
         let content_format:i64=db.query_row("SELECT version FROM runtime_content_format WHERE id=1",[],|r|r.get(0))?;
         if content_format!=3 {return Err(RuntimeError::Invalid("unsupported native content format; data was preserved".into()));}
     }
@@ -227,7 +228,7 @@ impl Catalog {
     }
     /// Inherit the last committed source within admission, while retaining the new model/credential selection.
     pub fn submit_with_inherited_source(&mut self, command: &SubmitInput, launch: launches::LaunchSelection) -> Result<Receipt> {
-        if launch.source.is_some() || launch.tools.iter().any(|tool| tool.name != questions::QUESTION_TOOL) {
+        if launch.source.is_some() || launch.tools.iter().any(|tool| tool.name != questions::QUESTION_TOOL && tool.name != "native_memory") {
             return Err(RuntimeError::Invalid("source inheritance cannot also override source or tools".into()));
         }
         self.submit_admission(command, Some(launch), false, true, None)
@@ -238,8 +239,11 @@ impl Catalog {
         self.submit_with_context_snapshot(command, launch, inherit_source, initial, None)
     }
     pub fn submit_with_context_snapshot(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>, inherit_source: bool, initial: Option<context::ContextProposal>, personalization: Option<personalization::PersonalizationBasis>) -> Result<Receipt> {
-        if inherit_source && launch.as_ref().is_none_or(|selection| selection.source.is_some() || selection.tools.iter().any(|tool| tool.name != questions::QUESTION_TOOL)) {
+        if inherit_source && launch.as_ref().is_none_or(|selection| selection.source.is_some() || selection.tools.iter().any(|tool| tool.name != questions::QUESTION_TOOL && tool.name != "native_memory")) {
             return Err(RuntimeError::Invalid("source inheritance requires an unoverridden model launch".into()));
+        }
+        if personalization.as_ref().is_some_and(|basis| basis.session_id != command.thread_id) {
+            return Err(RuntimeError::Invalid("personalization scope must identify the admitted thread".into()));
         }
         let staged = if let Some(proposal) = initial {
             if proposal.branch_id != command.branch_id || proposal.through_id.is_some() || proposal.expected_revision != 0 || !proposal.summary.is_empty() {
@@ -593,6 +597,7 @@ impl Catalog {
             "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,?3)",
             params![new_branch, thread, head],
         )?;
+        tx.execute("INSERT INTO memory_states(branch_id,body) SELECT ?1,body FROM memory_states WHERE branch_id=?2", params![new_branch, source])?;
         if let Some((checkpoint, reference)) = fork_context {
             context::publish_prepared(&tx, &checkpoint, &reference)?;
         }
@@ -1324,3 +1329,6 @@ pub(crate) mod policy;
 
 #[path="catalog_policy_model.rs"]
 pub(crate) mod policy_model;
+
+#[path = "catalog_memory.rs"]
+pub mod memory;

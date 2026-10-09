@@ -1,3 +1,7 @@
+import { DatabaseSync } from 'node:sqlite';
+import { createAgentPersonalization } from '../memory/agent-personalization.js';
+import { createNativeThreadContext } from './native-thread-context.js';
+import { createNativeMemoryOwner } from './native-memory-owner.js';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { createNativeThreadsHttpAPI, configureRuntimeUrlResolver, setRuntimeExtraHeaders } from '@varin/application-client';
 import express from 'express';
@@ -76,7 +80,7 @@ type PolicyInput = {
 const mainSelection = { providerId: 'review-main', modelId: 'main-model' };
 const planningSelection = { providerId: 'review-planner', modelId: 'planning-model' };
 const configuredSettings = () => ({ global: { harness: { models: { agentPlanning: { ...planningSelection } } } } });
-async function fixture(options: { main?: Reply; planner?: Reply; planningAuth?: () => Promise<void>; settings?: unknown; initialContext?: NativeInitialContext; source?: boolean; failSettings?: boolean; failPlannerCatalog?: boolean; onDecision?: (input: PolicyInput) => void } = {}) {
+async function fixture(options: { main?: Reply; planner?: Reply; planningAuth?: () => Promise<void>; settings?: unknown; initialContext?: NativeInitialContext; source?: boolean; memory?: boolean; failSettings?: boolean; failPlannerCatalog?: boolean; onDecision?: (input: PolicyInput) => void } = {}) {
   await fs.access(kernelPath);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-planning-host-review-'));
   cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
@@ -115,15 +119,27 @@ async function fixture(options: { main?: Reply; planner?: Reply; planningAuth?: 
   } });
   const kernel = createKernelClient({ hostId: 'planning-host-review', storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   cleanups.push(() => kernel.close());
+  let closed = false;
   const workspace = path.join(root, 'workspace');
-  const documents = options.source ? createDocumentAuthority({ hostId: 'planning-host-review', dataDir: path.join(root, 'documents'),
+  const documents = options.source || options.memory ? createDocumentAuthority({ hostId: 'planning-host-review', dataDir: path.join(root, 'documents'),
     isAllowedRoot: async () => true, isTrusted: async () => true }) : undefined;
   const storage = documents ? new KernelStorageAdapter({ client: kernel, hostId: 'planning-host-review', storageRoot: root,
     resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root }) : undefined;
   const prepareSource = documents && storage ? createNativeThreadSourcePreparer({ documents, workingStates: createKernelWorkspaceWorkingStateAccess(storage) }) : undefined;
   if (documents && storage) {
     await fs.mkdir(workspace);
-    cleanups.push(async () => { await storage.dispose(); await documents.dispose(); });
+    cleanups.push(async () => { if (!closed) { await storage.dispose(); await documents.dispose(); } });
+  }
+  const personalization = options.memory ? createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'planning-review' }) }) : undefined;
+  const prepareContext = personalization && storage ? createNativeThreadContext({ personalization, workingStates: createKernelWorkspaceWorkingStateAccess(storage), projectForWorkspace: async () => 'planning-review' }) : undefined;
+  const memoryControl = { synchronizeFailure: undefined as 'reject' | 'throw' | undefined };
+  if (personalization && prepareContext) {
+    const owner = createNativeMemoryOwner({ personalization, prepareContext });
+    kernel.setNativeMemoryOwner(async (query, signal) => {
+      if (query.action === 'synchronize' && memoryControl.synchronizeFailure === 'reject') return { status: 'rejected', message: 'REVIEW_PLANNING_CONTEXT_REJECTED' };
+      if (query.action === 'synchronize' && memoryControl.synchronizeFailure === 'throw') throw new Error('REVIEW_PLANNING_CONTEXT_THROWN');
+      return owner(query, signal);
+    });
   }
   const extensions = await ApplicationExtensionRuntime.create({ dataDir: path.join(root, 'extensions'), varinVersion: buildVersion,
     brokerScript: path.join(repository, 'packages/extension-host/broker/broker-child.mjs') });
@@ -152,7 +168,7 @@ async function fixture(options: { main?: Reply; planner?: Reply; planningAuth?: 
     if (!documents) throw new Error('No workspace is admitted');
     await documents.inspectWorkspace(source.workspaceId); await documents.inspectWorkspace(source.executionWorkspaceId);
   }, (_runId, error) => { launchErrors.push(error); }, prepareSource,
-    options.initialContext ? async () => options.initialContext! : undefined);
+    prepareContext ?? (options.initialContext ? Object.assign(async () => options.initialContext!, { main: async () => options.initialContext! }) : undefined));
   const app = express(); registerCommonRequestMiddleware(app, { express });
   registerNativeThreadRoutes(app, adapter, (request, response, next) => {
     if (request.headers['x-fixture-auth'] !== 'planning-client') { response.status(401).json({ error: 'authentication required' }); return; }
@@ -164,11 +180,13 @@ async function fixture(options: { main?: Reply; planner?: Reply; planningAuth?: 
   cleanups.push(async () => {
     // An assertion failure must not leave a deliberately stalled fixture waiting on its socket.
     planner.disconnect(); main.disconnect();
+    if (closed) return;
     for (const thread of await runtime.threads()) for (const branch of thread.branches) {
       if (branch.active_run_id) await runtime.cancelRun(branch.active_run_id);
     }
   });
-  return { root, workspace, main, planner, models, prepareModels, mutable, scope, mainScope, fakeSecrets, authReads, catalogReads,
+  const closeKernel = async () => { if (closed) return; await storage?.dispose(); await documents?.dispose(); await kernel.close(); closed = true; };
+  return { closeKernel, memoryControl, personalization, prepareContext, root, workspace, main, planner, models, prepareModels, mutable, scope, mainScope, fakeSecrets, authReads, catalogReads,
     kernel, extensions, runtime, adapter, decisions, pins: () => pins, launchErrors, api: createNativeThreadsHttpAPI() };
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
@@ -220,7 +238,7 @@ async function submit(f: Fixture, key = 'planning-review', text = 'COMMITTED_USE
   return { identity, run };
 }
 async function terminal(f: Fixture, runId: string, state = 'completed') {
-  await expect.poll(async () => (await f.runtime.run(runId)).state).toBe(state);
+  await terminalFromEvents(f, runId, state);
   await expect.poll(() => f.pins()).toBe(0);
 }
 async function modelOperations(f: Fixture, runId: string) {
@@ -571,4 +589,97 @@ it('requires the exact auxiliary binding ID and scope in the Host credential bri
   await expect.poll(() => responses.length).toBe(5);
   expect(responses.find(response => response.id === 'after-release')!.ok).toBe(false);
   expect(responses.find(response => response.id === 'main-still-valid')!.result!.headers).toContainEqual({ name: 'authorization', value: 'Bearer fake-main' });
+});
+
+// These cases use real broker preparation. Wait on durable Run notifications instead of
+// assuming that a cold extension has completed within expect.poll's default one second.
+async function terminalFromEvents(f: Fixture, runId: string, state = 'completed') {
+  let unsubscribe = () => {}; let unsubscribeExit = () => {};
+  try {
+    const run = await new Promise<Awaited<ReturnType<typeof f.runtime.run>>>((resolve, reject) => {
+      const check = async () => {
+        const current = await f.runtime.run(runId);
+        if (['completed', 'failed', 'cancelled'].includes(current.state)) resolve(current);
+      };
+      unsubscribe = f.runtime.onEvent(event => { if (event.stream === 'durable') void check().catch(reject); });
+      unsubscribeExit = f.runtime.onExit(reject);
+      void check().catch(reject);
+    });
+    expect(run.state, JSON.stringify({ run, launchErrors: f.launchErrors.map(String), events: (await f.runtime.events(0, 256)).slice(-5) })).toBe(state);
+  } finally { unsubscribe(); unsubscribeExit(); }
+}
+
+it('independent planning preparation carries pending memory facts without changing the frozen memory system', async () => {
+  let held: ServerResponse | undefined;
+  const f = await fixture({ memory: true, main: (_request, response) => { held = response; } });
+  await f.personalization!.saveNote({ scope: { kind: 'global' }, content: 'PLANNING_FROZEN_MEMORY' });
+  await install(f, `
+    if(input.event.kind==='started') return {action:{kind:'request_model'},state:null};
+    if(input.event.kind==='model_completed') return {action:${job()},state:null};
+    return {action:{kind:'complete'},state:null};`);
+  const { identity, run } = await submit(f, 'planning-memory');
+  await expect.poll(() => Boolean(held)).toBe(true);
+  const frozenRequest = structuredClone(f.main.requests[0]!.body);
+  const before = (await f.api.snapshot(identity)).context.checkpoint!;
+  await f.personalization!.saveNote({ scope: { kind: 'global' }, content: 'PLANNING_NEW_MEMORY_FACT' });
+  complete(held!, 'MAIN_FINISHED');
+  await terminalFromEvents(f, run.run_id);
+  expect(f.main.requests).toHaveLength(1);
+  expect(f.main.requests[0]!.body).toEqual(frozenRequest);
+  expect(f.planner.requests).toHaveLength(1);
+  expect(JSON.stringify(f.planner.requests[0]!.body)).toContain('PLANNING_NEW_MEMORY_FACT');
+  const after = (await f.api.snapshot(identity)).context.checkpoint!;
+  expect(after.proposal.memory_checkpoint).toBe(before.proposal.memory_checkpoint);
+  expect(after.proposal.effective_system_prompt).toBe(before.proposal.effective_system_prompt);
+  expect(after.proposal.effective_system_prompt).not.toContain('PLANNING_NEW_MEMORY_FACT');
+  expect(after.proposal.effective_system_prompt).toContain('PLANNING_FROZEN_MEMORY');
+  const operations = await modelOperations(f, run.run_id);
+  expect(operations).toHaveLength(1);
+  const stored = await originalObject(f, (operations[0]!.result as { request_ref: unknown }).request_ref) as { view: { request_id: string; origin: { kind: string } } };
+  expect(stored.view.origin.kind).toBe('policy_model_job');
+  expect(JSON.stringify(stored)).toContain('PLANNING_NEW_MEMORY_FACT');
+  const database = new DatabaseSync(path.join(f.root, 'agent-runtime', 'conversation.sqlite'), { readOnly: true });
+  try {
+    const deliveries = database.prepare('SELECT state FROM deliveries WHERE request=? AND observer LIKE ?').all(stored.view.request_id, 'memory-delivery:%');
+    expect(deliveries).toEqual([{ state: '"committed"' }]);
+    expect(database.prepare('SELECT count(*) AS count FROM model_steps WHERE id=?').get(stored.view.request_id)).toEqual({ count: 0 });
+  } finally { database.close(); }
+});
+
+it.each(['read', 'save'] as const)('policy read graphs treat native memory %s according to its actual effect', async action => {
+  const f = await fixture({ memory: true });
+  const graph = { kind: 'read_graph', nodes: [{ id: 'memory-node', depends_on: [], call: {
+    call_id: 'memory-node', name: 'native_memory', schema_version: '1', arguments: action === 'read'
+      ? { action: 'read' } : { action: 'save', content: 'POLICY_MUST_NOT_WRITE_MEMORY', revision: 0 },
+  } }] };
+  await install(f, `return {action:input.event.kind==='started'?${JSON.stringify(graph)}:{kind:'complete'},state:null};`);
+  const { run } = await submit(f, `memory-read-graph-${action}`);
+  await terminalFromEvents(f, run.run_id, action === 'read' ? 'completed' : 'failed');
+  expect(f.main.requests).toHaveLength(0); expect(f.planner.requests).toHaveLength(0);
+  expect(await f.personalization!.catalog()).toEqual({ memories: [], prompts: {}, revision: 0 });
+  expect(f.decisions.some(input => input.event.kind === 'read_graph_completed')).toBe(action === 'read');
+});
+
+
+it.each(['reject', 'throw'] as const)('planning context owner %s durably fails before ModelJob admission and survives reopen', async failure => {
+  const f = await fixture({ memory: true });
+  await install(f, onlyPlan);
+  f.memoryControl.synchronizeFailure = failure;
+  const { identity, run } = await submit(f, `planner-context-failure-${failure}`);
+  const before = await f.runtime.context(identity.branchId);
+  await terminalFromEvents(f, run.run_id, 'failed');
+  expect(f.main.requests).toHaveLength(0); expect(f.planner.requests).toHaveLength(0);
+  expect(await modelOperations(f, run.run_id)).toEqual([]);
+  const failures = (await f.runtime.events(0, 256)).filter(event => event.subject === run.run_id && event.kind === 'context.preparation_failed');
+  expect(failures).toHaveLength(1);
+  expect(failures[0]!.data).toMatchObject({ code: 'context_preparation_failed', message: expect.any(String) });
+  expect(JSON.stringify(failures)).not.toContain('REVIEW_');
+  expect(await f.runtime.context(identity.branchId)).toEqual(before);
+  await f.closeKernel();
+  const reopened = createKernelClient({ hostId: 'planning-host-review', storageRoot: f.root, buildVersion, kernelPath, allowCargoDevRunner: false });
+  cleanups.push(() => reopened.close());
+  const runtime = new NativeRuntimeClient(reopened);
+  expect((await runtime.run(run.run_id)).state).toBe('failed');
+  expect((await runtime.events(0, 256)).filter(event => event.subject === run.run_id && event.kind === 'context.preparation_failed')).toEqual(failures);
+  expect(await runtime.context(identity.branchId)).toEqual(before);
 });

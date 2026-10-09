@@ -101,6 +101,7 @@ pub(crate) fn spawn(
     credential_bridge: crate::credential_bridge::CredentialBridge,
     mcp_bridge: crate::native_mcp::McpBridge,
     language_bridge: crate::native_language::LanguageBridge,
+    memory_bridge: crate::native_memory_bridge::MemoryBridge,
     retrieval_bridge: crate::native_retrieval::RetrievalBridge,
     policy_bridge: crate::native_policy::PolicyBridge,
     responses: mpsc::SyncSender<Value>,
@@ -417,7 +418,10 @@ pub(crate) fn spawn(
                                     varin_runtime::execution::PolicyIdentity { name: binding.identity.name, version: binding.identity.version })
                                     .map_err(|error| KernelError::Authorization(error.to_string()))?;
                             }
-                            if !is_context_job { start = crate::native_questions::configure(start, runtime.catalog()); }
+                            if !is_context_job {
+                                start = crate::native_questions::configure(start, runtime.catalog());
+                                start = crate::native_memory::configure(start, runtime.catalog(), memory_bridge.clone(), true);
+                            }
                             if let Some(selected) = selected {
                                 let kinds: std::collections::BTreeSet<
                                     crate::native_tools::NativeToolKind,
@@ -431,6 +435,7 @@ pub(crate) fn spawn(
                                         &kinds,
                                     );
                                 start.binding.tools.push(crate::native_questions::schema());
+                                start.binding.tools.push(crate::native_memory::schema(true));
                                 start.binding.tool_schema_generation =
                                     start.binding.configuration_generation;
                                 let source = selected
@@ -517,6 +522,7 @@ pub(crate) fn spawn(
                                 // The source executor replaced the initial built-ins; keep the existing policy wrapper.
                                 start.tools = crate::native_questions::wrap_tools(start.tools, runtime.catalog());
                                 start.binding.tools.push(crate::native_questions::schema());
+                                start = crate::native_memory::configure(start, runtime.catalog(), memory_bridge.clone(), true);
                             }
                             let mcp_binding = p.mcp_binding.map(native_mcp_binding).transpose()?;
                             if let Some(binding) = &mcp_binding {
@@ -637,6 +643,12 @@ pub(crate) fn spawn(
                                 let response=match result {Ok(value)=>response_ok(&response_id,value),Err(error)=>response_error(&response_id,&error)};
                                 done(&response_id);let _=response_sender.send(response);
                             })).map_err(|_|KernelError::Storage("native content reader unavailable".into()))?;
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
+                        if method == "runtime.memory.reconcile" {
+                            let p: NativeRunParams = serde_json::from_value(params)?;
+                            crate::native_memory::reconcile(runtime.clone(), memory_bridge.clone(), p.run_id, id.clone(), responses.clone(), finished.clone())?;
                             deferred = true;
                             return Ok(Value::Null);
                         }
@@ -900,6 +912,7 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
             source: None,
         };
         let request = varin_runtime::catalog::context_jobs::ContextJobRequest {
+            personalization: p.personalization.map(native_personalization_basis).transpose()?,
             key: p.key,
             branch_id: p.branch_id,
             through_id: p.through_id,
@@ -1062,7 +1075,7 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                         } else {
                             0
                         },
-                        tools: crate::native_questions::schemas(crate::native_tools::NativeToolExecutor::selected_schemas(&kinds)),
+                        tools: { let mut tools = crate::native_questions::schemas(crate::native_tools::NativeToolExecutor::selected_schemas(&kinds)); tools.push(crate::native_memory::schema(true)); tools },
                         policy: crate::native_questions::default_policy_identity(),
                         source,
                     })
@@ -1266,6 +1279,10 @@ fn validate_configuration(configuration: &Value) -> Result<(), KernelError> {
 
 fn native_personalization_basis(value: NativeContextPersonalization) -> Result<varin_runtime::catalog::personalization::PersonalizationBasis, KernelError> {
     Ok(varin_runtime::catalog::personalization::PersonalizationBasis {
+        configuration_digest: value.configuration_digest,
+        memory_snapshot: varin_runtime::catalog::memory::MemorySnapshot { revision: value.memory_snapshot.revision.try_into().map_err(|_| KernelError::Protocol("memory revision must be nonnegative".into()))?, memories: value.memory_snapshot.memories },
+        mode: value.mode,
+        thread_role: value.thread_role,
         revision: u64::try_from(value.revision).map_err(|_| KernelError::Protocol("personalization revision must be nonnegative".into()))?,
         context_composition: value.context_composition.map(|composition| {
             use varin_runtime::composition::context::{ContextComposition, ContextFragment, FragmentKind};

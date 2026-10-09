@@ -1,3 +1,5 @@
+import { NativeMemoryBridge, unavailableMemoryResult, type PrivateMemoryResponse } from './native-memory-bridge.js';
+import type { NativeMemoryOwner } from './native-memory-owner.js';
 import { NativeRetrievalBridge, unavailableRetrievalResult, type PrivateRetrievalResponse } from './native-retrieval-bridge.js';
 import type { NativeRetrievalOwner } from './native-retrieval-owner.js';
 import { NativeLanguageBridge, unavailableLanguageResult, type PrivateLanguageResponse } from './native-language-bridge.js';
@@ -558,6 +560,7 @@ export class KernelClient {
   private readonly credentialBridge: NativeCredentialBridge;
   private readonly mcpBridge: NativeMcpBridge;
   private readonly languageBridge: NativeLanguageBridge;
+  private readonly memoryBridge: NativeMemoryBridge;
   private readonly retrievalBridge: NativeRetrievalBridge;
   private readonly issuedGrants = new Map<string, KernelGrantHandle>();
   private readonly policyBridge: NativeAgentPolicyBridge;
@@ -604,6 +607,13 @@ export class KernelClient {
         result: unavailableRetrievalResult('Retrieval result exceeds the transport frame budget or is not serializable') }); }
       return this.write(response, encoded);
     }, () => this.failAll(new KernelClientError({ code: 'retrieval-channel-failed', message: 'Private retrieval channel failed', retryable: false }), true));
+    this.memoryBridge = new NativeMemoryBridge(() => this.epoch, response => {
+      let encoded: Buffer;
+      try { encoded = frame(JSON.stringify(response)); }
+      catch { return this.write({ v: 1, kind: 'memory-response', id: response.id, kernelEpoch: response.kernelEpoch,
+        result: unavailableMemoryResult('Memory result exceeds the transport frame budget; reconcile the original mutation receipt') }); }
+      return this.write(response, encoded);
+    }, () => this.failAll(new KernelClientError({ code: 'memory-channel-failed', message: 'Private memory channel failed', retryable: false }), true));
     this.languageBridge = new NativeLanguageBridge(() => this.epoch, response => {
       // Check serialization/frame budget before touching the shared writer. A large language
       // result fails only its caller; chunked language results are not implemented yet.
@@ -652,6 +662,7 @@ export class KernelClient {
   async fileReadCheck(params: KernelMethodParams["file.read.check"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<{ resourceKey: string }> {
     return this.requestRaw<{ resourceKey: string }>("file.read.check", params, { signal, grant });
   }
+  setNativeMemoryOwner(owner: NativeMemoryOwner): void { this.memoryBridge.setOwner(owner); }
   setNativeLanguageOwner(owner: NativeLanguageOwner): void { this.languageBridge.setOwner(owner); }
   nativeMcpBinding(runId: string): NativeMcpBinding | undefined { return this.mcpBridge.binding(runId); }
   unregisterNativeMcpOwner(runId: string): void { this.mcpBridge.unregister(runId); }
@@ -862,7 +873,7 @@ export class KernelClient {
       let response: KernelResponse | KernelProcessStreamEvent | NativeRuntimeStreamEvent;
       try { response = JSON.parse(body.toString("utf8")) as KernelResponse | KernelProcessStreamEvent | NativeRuntimeStreamEvent; }
       catch (error) { this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: `Invalid Rust kernel response: ${String(error)}`, retryable: false }), true); return; }
-      if (this.credentialBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.mcpBridge.consume(response) || this.policyBridge.consume(response)) continue;
+      if (this.credentialBridge.consume(response) || this.memoryBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.mcpBridge.consume(response) || this.policyBridge.consume(response)) continue;
       if (response.kind === "runtime-event") {
         if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch
           || !["durable", "progress"].includes(response.stream)
@@ -934,6 +945,7 @@ export class KernelClient {
     this.credentialBridge.close();
     this.mcpBridge.close();
     this.languageBridge.close();
+    this.memoryBridge.close();
     this.retrievalBridge.close();
     this.issuedGrants.clear();
     this.policyBridge.close();
@@ -955,7 +967,7 @@ export class KernelClient {
     if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
-  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateMcpResponse | PrivatePolicyResponse | PrivateLanguageResponse | PrivateRetrievalResponse, encoded?: Buffer): Promise<void> {
+  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateMcpResponse | PrivatePolicyResponse | PrivateMemoryResponse | PrivateLanguageResponse | PrivateRetrievalResponse, encoded?: Buffer): Promise<void> {
     const stdin = this.child?.stdin;
     if (!stdin || stdin.destroyed) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel stdin is unavailable", retryable: true });
     const writable = stdin as Writable;
@@ -1562,6 +1574,7 @@ export class KernelClient {
     this.credentialBridge.close();
     this.mcpBridge.close();
     this.languageBridge.close();
+    this.memoryBridge.close();
     this.retrievalBridge.close();
     this.issuedGrants.clear();
     this.policyBridge.close();

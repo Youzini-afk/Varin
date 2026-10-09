@@ -12,7 +12,11 @@ pub struct SystemSection {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PersonalizationBasis {
+    pub mode: String,
+    pub thread_role: String,
     pub revision: u64,
+    pub configuration_digest: String,
+    pub memory_snapshot: super::memory::MemorySnapshot,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_composition: Option<crate::composition::context::ContextComposition>,
     pub session_id: String,
@@ -22,11 +26,21 @@ pub struct PersonalizationBasis {
 }
 impl PersonalizationBasis {
     pub(super) fn same_scope_and_source(&self, other: &Self) -> bool {
-        self.session_id == other.session_id && self.project_id == other.project_id
+        self.mode == other.mode && self.thread_role == other.thread_role
+            && self.session_id == other.session_id && self.project_id == other.project_id
             && self.original_sections == other.original_sections
             && self.instruction_sources == other.instruction_sources
     }
     pub(super) fn validate(&self) -> Result<()> {
+        if !matches!(self.mode.as_str(), "agent" | "bot")
+            || !matches!(self.thread_role.as_str(), "main" | "worker" | "read-only") {
+            return Err(RuntimeError::Invalid("personalization admission role is invalid".into()));
+        }
+        if self.configuration_digest.is_empty() { return Err(RuntimeError::Invalid("personalization configuration identity is missing".into())); }
+        for note in &self.memory_snapshot.memories {
+            super::memory::note_id(note)?;
+            if !super::memory::allowed(self, &note["scope"]) { return Err(RuntimeError::Invalid("memory snapshot contains another scope".into())); }
+        }
         if let Some(composition) = &self.context_composition {
             composition.validate().map_err(RuntimeError::Invalid)?;
             if composition.scope_id != self.session_id {
@@ -70,6 +84,9 @@ impl Catalog {
         let previous = current.personalization.as_ref().ok_or_else(|| RuntimeError::Invalid("context has no owned personalization basis".into()))?;
         if !previous.same_scope_and_source(&personalization) {
             return Err(RuntimeError::Conflict("personalization scope or frozen instruction source changed".into()));
+        }
+        if personalization.memory_snapshot != previous.memory_snapshot || memory_checkpoint != current.proposal.memory_checkpoint {
+            return Err(RuntimeError::Conflict("ordinary refresh cannot replace the memory snapshot".into()));
         }
         if personalization.revision < previous.revision {
             return Err(RuntimeError::Conflict("personalization revision moved backwards".into()));

@@ -30,7 +30,7 @@ NextRun admission. The reference records provenance; it does not stop ordinary e
 refreshes. An absent admission checkpoint stays unscoped even if its branch later gains context.
 Immutable checkpoint publication indexes its project identity beside the content reference, so
 observer discovery, reads, and ACK checks need no prompt-body hydration or mutable branch lookup.
-Context domain format 2 owns these columns; unsupported older internal formats fail without a
+Context domain format 3 owns these columns and the scoped ordinary-memory projection; unsupported older internal formats fail without a
 scope migration or inferred historical binding.
 
 Host subscriptions select independently for each admitted Thread/project scope. Their stable
@@ -176,3 +176,25 @@ metadata/table shape is validated before a writable connection, epoch update or 
 missing and malformed metadata fail preserving assets; no conversion or fallback reader is provided.
 The launch preflight checks the real table, columns and runs foreign key including referential actions.
 Persisted source `live_root` is explicitly null for fixed/materialized modes; omitting it is invalid.
+
+
+## Ordinary memory request delivery
+
+The `agent.personalization` typed record remains the sole note mutation owner. The runtime's
+`catalog_memory` stores only scoped observed state, known-note identities and request delivery
+proofs. Context checkpoints separately retain their immutable memory snapshot, explicit profile
+identity and admitted role/project/thread. `ContextPreparation` synchronizes the trusted owner on
+the Run worker before freezing a new main or policy-planning request, never under the Catalog lock.
+Prepared requests are immutable. Notes newer than the checkpoint are EnvironmentFact tails in the
+frozen request, not raw-history rows; they remain in later requests until compaction covers them.
+
+Only the original confirmed native-memory Operation can authenticate a tool's receipt for tail
+deduplication. Arbitrary external tool JSON is data. The existing deliveries table uses actual
+memory.fact event cursors and records selected, sent and completed-request inclusion independently.
+A failed request does not acknowledge facts. Planning requests use their own real operation/request
+identity; their quoted source facts do not become instructions or fake ModelSteps.
+
+A successful explicit compaction atomically publishes its fixed candidate personalization together
+with the summary and system text. New notes do not advance the checkpoint CAS; explicit profile
+changes do. Context domain 3 is verified read-only before writable SQLite open, including table,
+key and revision uniqueness contracts. Older or malformed formats are preserved and rejected.

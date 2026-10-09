@@ -16,6 +16,7 @@ export type KernelMethod =
   | "runtime.context_job.publish"
   | "runtime.context.inspect"
   | "runtime.context.refresh"
+  | "runtime.memory.reconcile"
   | "runtime.history.page"
   | "runtime.history.body"
   | "runtime.thread.operations.active"
@@ -474,6 +475,7 @@ export interface NativeBranchForkResult {
 }
 
 export interface NativeContextJobCreateParams {
+  personalization?: NativeContextPersonalization;
   key: string;
   branchId: string;
   throughId: string;
@@ -563,7 +565,16 @@ export interface NativeContextComposition {
   sections: NativeContextFragment[];
 }
 
+export interface NativeMemorySnapshot {
+  revision: number;
+  memories: unknown[];
+}
+
 export interface NativeContextPersonalization {
+  memorySnapshot: NativeMemorySnapshot;
+  configurationDigest: string;
+  mode: string;
+  threadRole: string;
   contextComposition?: NativeContextComposition;
   revision: number;
   sessionId: string;
@@ -1844,6 +1855,7 @@ export type KernelMethodParams = {
   "runtime.context_job.publish": NativeRunParams;
   "runtime.context.inspect": NativeHistoryParams;
   "runtime.context.refresh": NativeContextRefreshParams;
+  "runtime.memory.reconcile": NativeRunParams;
   "runtime.history.page": NativeHistoryPageParams;
   "runtime.history.body": NativeHistoryBodyParams;
   "runtime.thread.operations.active": NativeThreadParams;
@@ -2040,6 +2052,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.context.refresh";
       params: NativeContextRefreshParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.memory.reconcile";
+      params: NativeRunParams;
       epoch?: string;
       grantId?: string;
     }

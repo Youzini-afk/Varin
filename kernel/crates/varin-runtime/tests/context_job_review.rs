@@ -176,6 +176,7 @@ fn exercise(mode: Mode) {
         })
         .unwrap();
     let request = ContextJobRequest {
+        personalization: None,
         key: "compact".into(),
         branch_id: "main".into(),
         through_id: source.input_id.clone(),
@@ -223,6 +224,7 @@ fn exercise(mode: Mode) {
     let (tx, rx) = mpsc::channel();
     let supervisor = RunSupervisor::new(db);
     let start = configure_compaction_start(RunStart {
+        context_preparation: Arc::new(NoopContextPreparation),
         binding: binding(),
         policy_state: Value::Null,
         provider: Arc::new(Provider {

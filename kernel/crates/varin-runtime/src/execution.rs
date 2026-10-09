@@ -535,6 +535,9 @@ pub enum ExecutionRecord {
         state: RunState,
         waiting_on: Option<String>,
     },
+    ContextPreparationFailed {
+        failure: ExecutionError,
+    },
     RequestPrepared {
         snapshot: RequestSnapshot,
     },
@@ -794,8 +797,19 @@ pub struct ExecutionReport {
     pub failure: Option<ExecutionError>,
 }
 
+/// Trusted context owner synchronization before a new request is frozen. This runs on
+/// the Run worker, outside Catalog transactions; prepared snapshots never pass through it.
+pub trait ContextPreparation: Send + Sync {
+    fn prepare(&self, run_id: &str, owner_generation: u64, cancel: &CancellationToken) -> Result<(), ExecutionError>;
+}
+pub struct NoopContextPreparation;
+impl ContextPreparation for NoopContextPreparation {
+    fn prepare(&self, _: &str, _: u64, _: &CancellationToken) -> Result<(), ExecutionError> { Ok(()) }
+}
+
 pub struct ExecutionEngine<P: ?Sized, M: ?Sized, T: ?Sized, A: ?Sized> {
     pub persistence: Arc<P>,
+    pub context_preparation: Arc<dyn ContextPreparation>,
     pub provider: Arc<M>,
     pub tools: Arc<T>,
     pub policy: Arc<A>,
@@ -879,6 +893,18 @@ impl<
                     Err(error) if error.code=="input_pending"=>continue $label,
                     Err(error)=>return Err(error),
                     Ok(())=>return Ok(ExecutionReport{state:next,history,policy_state,model_steps:steps,waiting_on,failure}),
+                }
+            }};
+        }
+        macro_rules! fail_context_preparation {
+            ($label:lifetime) => {{
+                // Host errors can contain external content or credentials. Persist a
+                // stable structural cause and a safe message, never the raw callback error.
+                let failure = ExecutionError::new("context_preparation_failed", "Context preparation failed before a new model request was admitted");
+                match self.commit(&input, ExecutionRecord::ContextPreparationFailed { failure: failure.clone() }) {
+                    Err(error) if error.code == "input_pending" => continue $label,
+                    Err(error) => return Err(error),
+                    Ok(()) => return Ok(ExecutionReport { state: RunState::Failed, history, policy_state, model_steps: steps, waiting_on: None, failure: Some(failure) }),
                 }
             }};
         }
@@ -1012,6 +1038,12 @@ impl<
                     finish!('agent, RunState::Waiting, Some(wait_id), None);
                 }
                 PolicyAction::RequestModelJob { capability_id, instructions, evidence } => {
+                    if self.context_preparation.prepare(&input.run_id, input.owner_generation, &cancel).is_err() {
+                        policy_state = previous_policy_state;
+                        if cancel.is_cancelled() { continue 'agent; }
+                        fail_context_preparation!('agent);
+                    }
+                    if cancel.is_cancelled() { policy_state = previous_policy_state; continue 'agent; }
                     let job = match self.admit_model_job(&input, &history, history_cursor.as_deref(), capability_id, instructions, evidence, policy_state.clone()) {
                         Ok(job) => job,
                         Err(error) if error.code == "input_pending" => { policy_state = previous_policy_state; continue 'agent; },
@@ -1029,6 +1061,12 @@ impl<
                 }
                 action @ (PolicyAction::RequestModel | PolicyAction::RequestModelWithEvidence { .. }) => {
                     let evidence=match action {PolicyAction::RequestModelWithEvidence{evidence}=>evidence,_=>Vec::new()};
+                    if self.context_preparation.prepare(&input.run_id, input.owner_generation, &cancel).is_err() {
+                        policy_state = previous_policy_state;
+                        if cancel.is_cancelled() { continue 'agent; }
+                        fail_context_preparation!('agent);
+                    }
+                    if cancel.is_cancelled() { policy_state = previous_policy_state; continue 'agent; }
                     steps = steps.checked_add(1).ok_or_else(|| {
                         ExecutionError::new("step_overflow", "model step identity exhausted")
                     })?;

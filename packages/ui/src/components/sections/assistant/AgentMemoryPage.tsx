@@ -8,13 +8,22 @@ import { useI18n } from '@/lib/i18n';
 import { AgentScopePicker } from './AgentScopePicker';
 import { useAgentSettings } from './agentSettings';
 
-export function AgentMemoryPage() {
+export function AgentMemoryPage({ initialScope, scopes, embedded = false }: {
+  initialScope?: AgentMemoryScope;
+  scopes?: Array<{ scope: AgentMemoryScope; label: string }>;
+  embedded?: boolean;
+} = {}) {
   const { t } = useI18n();
   const settings = useAgentSettings();
-  const [scope, setScope] = React.useState<AgentMemoryScope>({ kind: 'global' });
+  const [scope, setScope] = React.useState<AgentMemoryScope>(initialScope ?? { kind: 'global' });
   const [draft, setDraft] = React.useState<{ id?: number; content: string; scope: AgentMemoryScope; revision: number } | null>(null);
   const [query, setQuery] = React.useState('');
-  React.useEffect(() => { setDraft(null); setScope({ kind: 'global' }); }, [settings.runtime]);
+  const initialKind = initialScope?.kind ?? 'global';
+  const initialId = initialScope && 'id' in initialScope ? initialScope.id : '';
+  React.useEffect(() => {
+    setDraft(null);
+    setScope(initialKind === 'global' ? { kind: 'global' } : { kind: initialKind, id: initialId });
+  }, [settings.runtime, initialKind, initialId]);
   const items = settings.catalog?.memories.filter(note => agentScopeKey(note.scope) === agentScopeKey(scope)
     && note.content.toLowerCase().includes(query.toLowerCase())) ?? [];
   const save = async () => {
@@ -25,14 +34,21 @@ export function AgentMemoryPage() {
     if (!settings.catalog) return;
     await settings.update(`memory/${note.id}`, { revision: settings.catalog.revision }, 'DELETE');
   };
-  return <SettingsPageLayout title={t('assistant.memory.title')} description={t('assistant.memory.description')} showSaveStatus={false}>
+  const picker = (value: AgentMemoryScope, change: (scope: AgentMemoryScope) => void) => scopes
+    ? <select aria-label={t('assistant.scope')} disabled={settings.busy} value={agentScopeKey(value)}
+      onChange={event => { const selected = scopes.find(option => agentScopeKey(option.scope) === event.target.value); if (selected) change(selected.scope); }}
+      className="w-full rounded-md border bg-background px-2 py-2 typography-meta">
+      {scopes.map(option => <option key={agentScopeKey(option.scope)} value={agentScopeKey(option.scope)}>{option.label}</option>)}
+    </select>
+    : <AgentScopePicker scope={value} disabled={settings.busy} onChange={change} />;
+  const content = <>
     {settings.error ? <div role="alert" className="mb-4 text-destructive">{settings.error}
       <Button variant="ghost" size="sm" onClick={() => void settings.load()}>{t('assistant.reload')}</Button></div> : null}
     <div className="grid gap-6 md:grid-cols-[170px_minmax(0,1fr)]">
-      <AgentScopePicker scope={scope} disabled={settings.busy} onChange={next => {
+      {picker(scope, next => {
         if (draft && !window.confirm(t('assistant.discard'))) return;
         setDraft(null); setScope(next);
-      }} />
+      })}
       <div className="min-w-0 space-y-3">
         <div className="flex items-center gap-2">
           <input aria-label={t('assistant.search')} placeholder={t('assistant.search')} value={query}
@@ -45,7 +61,7 @@ export function AgentMemoryPage() {
           <Textarea autoFocus value={draft.content} rows={6} aria-label={t('assistant.memory.content')}
             onChange={event => setDraft({ ...draft, content: event.target.value })} disabled={settings.busy} />
           <details><summary className="cursor-pointer typography-meta text-muted-foreground">{t('assistant.move')}</summary>
-            <div className="mt-2 max-w-64"><AgentScopePicker scope={draft.scope} onChange={next => setDraft({ ...draft, scope: next })} disabled={settings.busy} /></div>
+            <div className="mt-2 max-w-64">{picker(draft.scope, next => setDraft({ ...draft, scope: next }))}</div>
           </details>
           <div className="flex justify-end gap-2"><Button variant="ghost" disabled={settings.busy} onClick={() => setDraft(null)}>{t('assistant.cancel')}</Button>
             <Button disabled={settings.busy || !draft.content.trim()} onClick={() => void save()}>{t('assistant.save')}</Button></div>
@@ -64,5 +80,6 @@ export function AgentMemoryPage() {
         </article>)}</div>
       </div>
     </div>
-  </SettingsPageLayout>;
+  </>;
+  return embedded ? content : <SettingsPageLayout title={t('assistant.memory.title')} description={t('assistant.memory.description')} showSaveStatus={false}>{content}</SettingsPageLayout>;
 }

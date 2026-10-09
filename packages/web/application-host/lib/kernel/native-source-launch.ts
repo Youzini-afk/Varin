@@ -54,7 +54,7 @@ export async function startNativeRunFromSource(
       || source.live_root?.hostId !== selection.liveRoot?.hostId || source.live_root?.canonicalRoot !== selection.liveRoot?.canonicalRoot || source.live_root?.rootId !== selection.liveRoot?.rootId
       || (source.environment_run_id ?? undefined) !== selection.environmentRunId) throw new Error('Native rebind cannot change its durable source selection');
     const selectedNames = tools.map(tool => `native_${tool}`).sort();
-    if (JSON.stringify(selectedNames) !== JSON.stringify(saved.selection.tools.filter(tool => tool.name !== 'native_ask_user' && !saved.selection.mcp_binding?.tools.some(mcp => mcp.name === tool.name)).map(tool => tool.name).sort())) throw new Error('Native rebind cannot change its durable tools');
+    if (JSON.stringify(selectedNames) !== JSON.stringify(saved.selection.tools.filter(tool => tool.name !== 'native_ask_user' && tool.name !== 'native_memory' && !saved.selection.mcp_binding?.tools.some(mcp => mcp.name === tool.name)).map(tool => tool.name).sort())) throw new Error('Native rebind cannot change its durable tools');
   }
   const credentialScope = options.credentialOwner ? await options.credentialOwner.scope() : undefined;
   if (!saved) await runtime.selectLaunch({ runId: run.id,

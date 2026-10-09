@@ -64,6 +64,18 @@ impl Catalog {
                 "active context checkpoint changed".into(),
             ));
         }
+        if request.personalization.is_none() && self.active_context(&request.branch_id)?.is_some_and(|checkpoint| checkpoint.personalization.is_some()) {
+            return Err(RuntimeError::Invalid("personalized compaction requires an explicit frozen candidate".into()));
+        }
+        if let Some(candidate) = &request.personalization {
+            candidate.validate()?;
+            let active = self.active_context(&request.branch_id)?.and_then(|checkpoint| checkpoint.personalization)
+                .ok_or_else(|| RuntimeError::Invalid("memory compaction needs an admitted personalization basis".into()))?;
+            if !active.same_scope_and_source(candidate) || active.configuration_digest != candidate.configuration_digest
+                || active.revision != candidate.revision || candidate.memory_snapshot.revision < active.memory_snapshot.revision {
+                return Err(RuntimeError::Conflict("memory compaction configuration or scope changed".into()));
+            }
+        }
         let source = self.context_source_metadata(&request.branch_id, &request.through_id)?;
         // Reject boundaries splitting tool exchanges before spending a model request.
         let history = hydrate_source(&self.content, source)?;
@@ -173,7 +185,7 @@ impl Catalog {
                 }
             }
         }
-        self.publish_context(context::ContextProposal {
+        let (checkpoint, reference) = self.stage_context_with_personalization(context::ContextProposal {
             key: job.request.key,
             branch_id: job.request.branch_id,
             through_id: Some(job.request.through_id),
@@ -182,7 +194,11 @@ impl Catalog {
             effective_system_prompt: job.request.effective_system_prompt,
             instruction_sources: job.request.instruction_sources,
             memory_checkpoint: job.request.memory_checkpoint,
-        })
+        }, job.request.personalization)?;
+        let tx = self.db.transaction()?;
+        context::publish_prepared(&tx, &checkpoint, &reference)?;
+        tx.commit()?;
+        Ok(checkpoint)
     }
 
     pub(super) fn context_source_metadata(
