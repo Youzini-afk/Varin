@@ -333,6 +333,21 @@ impl RunSupervisor {
             })
             .unwrap_or(false)
     }
+    /// The question wait was durably committed, so its worker has no further execution work.
+    /// Join its final teardown before an answer can make the same Run runnable again.
+    pub fn quiesce_question(&self, operation_id: &str) -> Result<()> {
+        let run_id = {
+            let catalog = self.catalog.lock().map_err(error)?;
+            let operation = catalog.operation(operation_id).map_err(error)?;
+            let run = catalog.run(&operation.run_id).map_err(error)?;
+            if run.state != RunState::Waiting || run.waiting_on != operation.waiting_on
+                || operation.executor.as_deref() != Some("native_ask_user") { return Ok(()); }
+            run.id
+        };
+        let worker = self.workers.lock().map_err(error)?.remove(&run_id);
+        if let Some(mut worker) = worker { if let Some(join) = worker.join.take() { join.join().map_err(|_| error("question worker teardown failed"))?; } }
+        Ok(())
+    }
     pub fn cancel_operation(&self, operation_id: &str) -> Result<crate::Operation> {
         self.cancel_operation_control(operation_id);
         self.catalog

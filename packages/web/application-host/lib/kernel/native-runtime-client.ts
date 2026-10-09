@@ -17,6 +17,9 @@ export class NativeRuntimeClient {
     return this.kernel.onNativeRuntimeEvent(listener);
   }
 
+  answerQuestion(operationId: string, answer: string, signal?: AbortSignal): Promise<NativeOperation> {
+    return this.kernel.nativeRuntimeRequest('runtime.question.answer', { operationId, answer }, signal);
+  }
   status(signal?: AbortSignal): Promise<NativeStatus> {
     return this.kernel.nativeRuntimeRequest('runtime.status', {}, signal);
   }
@@ -83,12 +86,12 @@ export class NativeRuntimeClient {
     if (!launch) throw new Error('Run has no durable launch selection');
     const source = launch.selection.source;
     if (!source) {
-      if (launch.selection.tools.length) throw new Error('Saved tools require an explicit Host resource rebind');
+      if (launch.selection.tools.some(tool => tool.name !== 'native_ask_user')) throw new Error('Saved tools require an explicit Host resource rebind');
       return options.credentialOwner ? this.startRunWithCredentialOwner(runId, options.credentialOwner, options.signal) : this.startRun(runId, options.signal);
     }
     if (source.branch_id === null || source.revision === null) throw new Error('Saved environment requires its original Host resource owner');
     const names = { native_file_read: 'file_read', native_file_list: 'file_list', native_file_search: 'file_search', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn' } as const;
-    const tools = launch.selection.tools.map(tool => {
+    const tools = launch.selection.tools.filter(tool => tool.name !== 'native_ask_user').map(tool => {
       if (!(tool.name in names)) throw new Error('Saved capability requires its original extension owner');
       return names[tool.name as keyof typeof names];
     });
@@ -114,7 +117,7 @@ export class NativeRuntimeClient {
     }
     if (source.branch_id === null || source.revision === null) throw new Error('Environment continuation requires its original Host resource owner');
     const names = { native_file_read: 'file_read', native_file_list: 'file_list', native_file_search: 'file_search', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn' } as const;
-    const tools = previous.selection.tools.map(tool => {
+    const tools = previous.selection.tools.filter(tool => tool.name !== 'native_ask_user').map(tool => {
       if (!(tool.name in names)) throw new Error('Saved capability requires its original extension owner');
       return names[tool.name as keyof typeof names];
     });

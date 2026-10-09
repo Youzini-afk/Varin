@@ -36,6 +36,7 @@ export type KernelMethod =
   | "runtime.input.submit"
   | "runtime.run.inspect"
   | "runtime.run.cancel"
+  | "runtime.question.answer"
   | "runtime.operation.inspect"
   | "runtime.operation.cancel"
   | "runtime.history.read"
@@ -444,7 +445,14 @@ export interface NativeThreadCreateParams {
   branchId: string;
 }
 
+export interface NativeInitialContext {
+  effectiveSystemPrompt: string;
+  instructionSources: string[];
+  memoryCheckpoint: string | null;
+}
+
 export interface NativeInputSubmitParams {
+  initialContext?: NativeInitialContext;
   launch?: NativeSubmitLaunch;
   key: string;
   threadId: string;
@@ -456,6 +464,11 @@ export interface NativeInputSubmitParams {
 
 export interface NativeRunParams {
   runId: string;
+}
+
+export interface NativeQuestionAnswerParams {
+  operationId: string;
+  answer: string;
 }
 
 export interface NativeOperationParams {
@@ -1689,6 +1702,7 @@ export type KernelMethodParams = {
   "runtime.input.submit": NativeInputSubmitParams;
   "runtime.run.inspect": NativeRunParams;
   "runtime.run.cancel": NativeRunParams;
+  "runtime.question.answer": NativeQuestionAnswerParams;
   "runtime.operation.inspect": NativeOperationParams;
   "runtime.operation.cancel": NativeOperationParams;
   "runtime.history.read": NativeHistoryParams;
@@ -2035,6 +2049,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.run.cancel";
       params: NativeRunParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.question.answer";
+      params: NativeQuestionAnswerParams;
       epoch?: string;
       grantId?: string;
     }

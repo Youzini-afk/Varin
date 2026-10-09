@@ -1,4 +1,5 @@
 import { createNativeThreadSourcePreparer } from './lib/kernel/native-thread-sources.js';
+import { createNativeThreadContext } from './lib/kernel/native-thread-context.js';
 import { sharedHostCredentialAuthority } from '@varin/runtime-broker';
 import { NativeRuntimeClient } from './lib/kernel/native-runtime-client.js';
 import { NativeThreadAdapter } from './lib/kernel/native-thread-adapter.js';
@@ -2859,7 +2860,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }, (runId, _error) => {
       // Durable launch remains inspectable/resumable. Never log credentials or provider responses.
       console.error('[NativeThread] Launch preparation requires attention:', runId);
-    }, createNativeThreadSourcePreparer({ documents: documentsAuthority, workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter) }));
+    }, createNativeThreadSourcePreparer({ documents: documentsAuthority, workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter) }),
+    createNativeThreadContext({ personalization: agentPersonalization,
+      workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter),
+      projectForWorkspace: async workspaceId => {
+        const { root } = await documentsAuthority.inspectWorkspace(workspaceId);
+        const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
+        return projects.find(project => projectContainsPath(project, root))?.id;
+      },
+    }));
   void nativeThreads.recover().catch(() => console.error('[NativeThread] Saved launch discovery requires attention'));
   registerNativeThreadRoutes(app, nativeThreads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerHarnessThreadRoutes(app, {

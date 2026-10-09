@@ -96,8 +96,9 @@ the returned branch through the same native conversation projection. Failed/unce
 retain their creation key; switching Host or conversation invalidates pending navigation.
 
 This action is explicitly conversation-only. It preserves original history and opaque provider
-items, but does not copy an active Run, process, workspace/tool grant, model selection or context
-checkpoint. The UI explains this before creation and asks for a model on the new branch. Resource
+items and the frozen system instructions/memory snapshot. It does not copy an active Run, process,
+workspace/tool grant, model selection or conversation summary. A fork replays its original history
+through the chosen cut, so a later summary cannot hide earlier messages. The UI explains this before creation and asks for a model on the new branch. Resource
 forking and default main-chat replacement remain distinct work; no Pi session is created or used
 as a fallback.
 
@@ -149,3 +150,52 @@ external effects. Changes are not automatically copied into the selected origina
 snapshots remain rooted alongside the native conversation; native conversation deletion and source
 release UI are not delivered by this preparation path. Remote environment mapping, dirty-buffer
 capture and work-result integration retain their separate implementation requirements.
+
+
+## Initial trusted context
+
+Production Host admission resolves ordinary main-thread context through `native-thread-context.ts`.
+It reads the existing `agent.personalization` catalog, applies the shared global → project → session
+section rules, and renders the matching notes with the existing protocol renderer. Native session
+scope uses the native thread ID; configured project membership is resolved by the Host from the admitted
+workspace, never from renderer-supplied project/profile text. Bot personas remain a separate owner.
+
+For a selected workspace, root `AGENTS.md` comes from its exact immutable WorkingState branch/revision
+pin. The request records the workspace/branch/revision/root and file-object identity, including an
+explicit absent-file identity. Symlinks, invalid text and unavailable content are not silently treated
+as empty instructions. This slice does not load ancestor/nested instruction files, `SYSTEM.md`,
+`APPEND_SYSTEM.md`, skills or Pi extension resources.
+
+Rust commits the initial effective system prompt, instruction source identities and memory checkpoint
+in the same transaction as the first admitted input and launch selection. Failed admission publishes
+none of them. Replays keep the original checkpoint; later Runs and explicit compaction reuse it.
+User messages remain user instructions, while generated summaries remain external data. Forks carry
+the frozen system snapshot while replaying retained original conversation history. Context bodies
+use the existing immutable content store and GC roots, not a second memory database.
+
+This is a first-input snapshot. Memory/profile edits and workspace selections made afterward do not
+replace that frozen prefix, including at explicit compaction. A new conversation captures current
+notes and its selected workspace. Memory mutation delivery, snapshot refresh, native memory tools,
+and dynamic instruction loading remain separate work; this is not full Pi context parity.
+
+## Native user clarification
+
+Ordinary native Runs include the built-in `native_ask_user` v1 tool, with a required `question`
+and optional string `options`. It accepts a durable question Operation and returns a real job
+acceptance, not an answer. The native policy parks on the matching existing Wait before another
+model request. No Pi session, Promise-owned question store, or additional database is involved.
+Compaction jobs do not receive this tool.
+
+The authenticated `question/answer` route requires the explicit native thread/branch identity,
+`operationId` and nonempty `answer`. Rust accepts an answer only for the currently waiting question.
+The answer history item, terminal Operation, acknowledged Wait and runnable continuation commit
+atomically. Identical answer retries return the same receipt; different or late cancelled answers
+conflict. Multiple questions are served sequentially through their own Waits. Source selection and
+credential identity are rebound from the existing launch record before continuation. Restart keeps
+unanswered questions parked and answers available; a committed answer survives a failed launch.
+
+The UI projects questions from Operations, allows suggested or free-text answers, and supports
+cancellation. Cancelling an individual question records an explicit no-answer result and continues;
+cancelling its Run closes its unanswered questions without resuming. Clarifications never grant,
+expand or synthesize filesystem, process, network, or credential permissions. Permission prompting
+remains a separate capability owner.

@@ -268,7 +268,14 @@ export interface NativeThreadCreateParams {
   branchId: string;
 }
 
+export interface NativeInitialContext {
+  effectiveSystemPrompt: string;
+  instructionSources: string[];
+  memoryCheckpoint: string | null;
+}
+
 export interface NativeInputSubmitParams {
+  initialContext?: NativeInitialContext;
   launch?: NativeSubmitLaunch;
   key: string;
   threadId: string;
@@ -280,6 +287,11 @@ export interface NativeInputSubmitParams {
 
 export interface NativeRunParams {
   runId: string;
+}
+
+export interface NativeQuestionAnswerParams {
+  operationId: string;
+  answer: string;
 }
 
 export interface NativeOperationParams {

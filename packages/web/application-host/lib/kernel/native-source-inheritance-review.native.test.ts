@@ -108,7 +108,7 @@ it('public completed-turn continuation preserves edited disk while explicit sour
   expect(f.requests).toHaveLength(calls);
   expect(f.launchErrors).toEqual([]);
 }, 45_000);
-it('first public submit without a source completes as model-only execution', async () => {
+it('first public submit without a source completes without resource capabilities', async () => {
   const f = await fixture((_body, response) => {
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'model-only-answer', type: 'message', content: [{ type: 'output_text', text: 'model only completed' }] }] } })}\n\n`);
@@ -116,6 +116,8 @@ it('first public submit without a source completes as model-only execution', asy
   const identity = await f.api.create('no-source-inheritance');
   const receipt = await f.api.submit({ ...identity, key: 'model-only-input', expectedHead: null, text: 'hello', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state).toBe('completed');
-  expect((await f.runtime.launch(receipt.run_id))?.selection).toMatchObject({ source: null, tools: [] });
+  const launch = (await f.runtime.launch(receipt.run_id))!;
+  expect(launch.selection.source).toBeNull();
+  expect(launch.selection.tools.map(tool => tool.name)).toEqual(['native_ask_user']);
   expect(f.launchErrors).toEqual([]);
 });

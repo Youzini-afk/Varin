@@ -244,7 +244,7 @@ impl Catalog {
         }
         let checkpoint_cursor:i64=self.db.query_row("SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND kind='execution.committed' AND json_extract(data,'$.kind')='policy_checkpoint'",[run_id],|r|r.get(0))?;
         let outcome_cursor:i64=self.db.query_row("SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND kind='execution.committed' AND json_extract(data,'$.kind') IN ('model_finished','tool_batch_committed')",[run_id],|r|r.get(0))?;
-        let decision = if checkpoint_cursor > outcome_cursor {
+        let mut decision = if checkpoint_cursor > outcome_cursor {
             saved
                 .as_ref()
                 .map(|(_, state, action)| {
@@ -257,6 +257,11 @@ impl Catalog {
         } else {
             None
         };
+        // A consumed durable wait must be decided again, never replayed as another park.
+        if let Some(PolicyDecision { action: PolicyAction::Wait { wait_id }, .. }) = &decision {
+            let wait: Wait = record(&self.db, "waits", wait_id)?;
+            if wait.trigger_cursor.is_some() || wait.cancelled { decision = None; }
+        }
         let recovery_event = if !calls.is_empty() && committed == calls.len() {
             PolicyEvent::ToolsCompleted {
                 results: calls

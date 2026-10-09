@@ -198,6 +198,7 @@ impl Catalog {
                     }
                 }
                 if state.terminal() {
+                    if matches!(state, RunState::Cancelled | RunState::Failed) { super::questions::cancel_run_questions(&tx, run_id)?; }
                     if matches!(state, RunState::Completed | RunState::Failed)
                         && super::inputs::has_boundary_inputs(&tx, run_id)?
                     {

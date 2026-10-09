@@ -2,7 +2,7 @@ import type { ImageAttachment } from '@varin/protocol';
 import { nativeThreadInput } from './native-thread-images.js';
 import { createHash } from 'node:crypto';
 import type { NativeThreadIdentity, NativeThreadSubmit, NativeThreadSource, NativeThreadSnapshot, NativeThreadHistoryPage, NativeThreadCompact, NativeThreadContextState, NativeThreadPrepareSource, NativeThreadPreparedSource } from '@varin/application-client';
-import type { NativeInputMode, NativeModelSessionConfiguration, NativeCredentialScope, NativeRuntimeStreamEvent } from './protocol.generated.js';
+import type { NativeInputMode, NativeInitialContext, NativeModelSessionConfiguration, NativeCredentialScope, NativeRuntimeStreamEvent } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './native-credential-owner.js';
 import { NativeRuntimeClient } from './native-runtime-client.js';
 
@@ -17,8 +17,40 @@ export class NativeThreadAdapter {
   constructor(readonly runtime: NativeRuntimeClient, private readonly models: NativeThreadModelAuthority,
     private readonly admitSource: (source: NativeThreadSource) => Promise<void>,
     private readonly onLaunchError: (runId: string, error: unknown) => void,
-    private readonly prepareWorkspace?: (input: NativeThreadPrepareSource) => Promise<NativeThreadPreparedSource>) {}
+    private readonly prepareWorkspace?: (input: NativeThreadPrepareSource) => Promise<NativeThreadPreparedSource>,
+    private readonly prepareContext?: (identity: NativeThreadIdentity, source: NativeThreadSource | null) => Promise<NativeInitialContext>) {}
 
+  private readonly questionResumptions = new Map<string, Promise<void>>();
+  private async continueQuestion(runId: string): Promise<void> {
+    const existing = this.questionResumptions.get(runId);
+    if (existing) return existing;
+    const work = (async () => {
+      const run = await this.runtime.run(runId);
+      if (run.state === 'runnable') {
+        // The answer transaction follows parked-worker quiescence. Replace only that finished
+        // worker's live bridge entry; resume still verifies the persisted principal/generation.
+        this.runtime.releaseRunCredentialOwner(runId);
+        await this.resume(runId);
+      }
+    })();
+    this.questionResumptions.set(runId, work);
+    try { await work; } finally { if (this.questionResumptions.get(runId) === work) this.questionResumptions.delete(runId); }
+  }
+  async answerQuestion(input: NativeThreadIdentity & { operationId: string; answer: string }) {
+    await this.requireIdentity(input);
+    const operation = await this.requireOperation(input.operationId);
+    const run = await this.requireRun(operation.run_id);
+    if (run.branch_id !== input.branchId || run.thread_id !== input.threadId) throw new Error('Question belongs to another branch');
+    const result = await this.runtime.answerQuestion(input.operationId, input.answer);
+    await this.continueQuestion(result.run_id);
+    return result;
+  }
+  async cancelOperation(operationId: string) {
+    await this.requireOperation(operationId);
+    const result = await this.runtime.cancelOperation(operationId);
+    if (result.executor === 'native_ask_user') await this.continueQuestion(result.run_id);
+    return result;
+  }
   async listModels() {
     if (!this.models.listModels) throw new Error('Model catalog is unavailable');
     return this.models.listModels();
@@ -106,13 +138,29 @@ export class NativeThreadAdapter {
   }
 
   async submit(input: NativeThreadSubmit) {
-    await this.requireIdentity(input);
+    const thread = await this.requireIdentity(input);
     if (input.source) await this.admitSource(input.source);
     const model = await this.models.resolveModel(input.model);
     this.assertImagesSupported(input.images, model.configuration);
-    // The same Rust transaction accepts input and pins source/credential/tool selection.
+    let initialContext: NativeInitialContext | undefined;
+    if (this.prepareContext && !await this.runtime.context(input.branchId)) {
+      let source = input.source ?? null;
+      if (!source) {
+        const latest = thread.branches.find(branch => branch.branch_id === input.branchId)?.latest_run;
+        const previous = latest ? await this.runtime.launch(latest.id) : null;
+        const inherited = previous?.selection.source;
+        if (inherited?.branch_id && inherited.revision !== null) source = {
+          workspaceId: inherited.workspace_id, executionWorkspaceId: inherited.execution_workspace_id,
+          branchId: inherited.branch_id, revision: inherited.revision,
+          mode: inherited.materialized ? 'materialized' : 'fixed_branch', tools: [],
+        };
+      }
+      initialContext = await this.prepareContext(input, source);
+    }
+    // The same Rust transaction accepts input, initial context and source/credential/tool selection.
     const receipt = await this.runtime.submit({ key: input.key, threadId: input.threadId, branchId: input.branchId,
       expectedHead: input.expectedHead, input: nativeThreadInput(input.text, input.images), configuration: model.configuration,
+      ...(initialContext ? { initialContext } : {}),
       launch: { inheritSource: input.source === undefined, source: input.source ? {
         workspaceId: input.source.workspaceId, executionWorkspaceId: input.source.executionWorkspaceId,
         branchId: input.source.branchId, revision: input.source.revision, materialized: input.source.mode === 'materialized',
@@ -226,7 +274,7 @@ export class NativeThreadAdapter {
     const pending = await this.runtime.pendingLaunches();
     await Promise.all(pending.map(async launch => {
       const run = await this.runtime.run(launch.run_id);
-      if (['completed', 'failed', 'cancelled'].includes(run.state)) return;
+      if (['completed', 'failed', 'cancelled'].includes(run.state) || (run.state === 'waiting' && run.waiting_on?.startsWith('question:'))) return;
       try {
         if (run.thread_id.startsWith('nativeThread:')) await this.resume(run.id);
         else if (run.thread_id.startsWith('context-job-thread:')) {
