@@ -1467,3 +1467,61 @@ fn independent_recovery_rejects_corrupted_branch_anchor_and_foreign_suffix_owner
         assert!(result.is_err(), "recovery accepted {corruption}");
     }
 }
+
+#[test]
+fn dispatched_no_effect_requires_exact_durable_executor_evidence() {
+    use crate::execution::*;
+    let f = Fixture::new(); let mut db = f.open(); let run = submit(&mut db); let epoch = db.epoch();
+    let mut snapshot = request_snapshot(&run);
+    snapshot.view.binding.tools = vec![ToolSchema { name:"cas-owner".into(), version:"1".into(), schema:json!({"type":"object"}) }];
+    independent_prepare(&mut db, &run, snapshot);
+    let calls: Vec<_> = ["conflict", "other"].into_iter().map(|call_id| ToolCall {
+        call_id:call_id.into(), name:"cas-owner".into(), schema_version:"1".into(), arguments:json!({"expectedRef":null}),
+    }).collect();
+    db.commit_execution(&run.run_id, epoch, &ExecutionRecord::ModelFinished {
+        request_id:"model-1".into(), outcome:ModelOutcome::Completed, finish_reason:Some(FinishReason::ToolCalls),
+        items:calls.iter().map(|call|ProviderItem { id:format!("item-{}",call.call_id), content:Content::ToolCall { call:call.clone() }, opaque:None }).collect(),
+        interrupted_deltas:vec![], usage:UsageReceipt::default(), failure:None,
+    }).unwrap();
+    db.commit_execution(&run.run_id, epoch, &ExecutionRecord::ToolsAdmitted {
+        request_id:"model-1".into(), tools:calls.into_iter().map(|call|AdmittedTool { call, contract:ToolContract {
+            name:"cas-owner".into(), schema_version:"1".into(), read_only:false, completion:CompletionKind::Result,
+            lifetime:Lifetime::Run, resources:vec![],
+        }}).collect(),
+    }).unwrap();
+    for call_id in ["conflict", "other"] {
+        db.commit_execution(&run.run_id, epoch, &ExecutionRecord::ToolDispatched { request_id:"model-1".into(), call_id:call_id.into() }).unwrap();
+    }
+    let owner = std::sync::Mutex::new(db);
+    let context = ToolExecutionContext { run_id:run.run_id.clone(), operation_id:"model-1:tool:conflict".into(),
+        origin:ToolOrigin::ModelStep { request_id:"model-1".into() } };
+    let content = json!({"status":"conflict","currentRef":"user-version"});
+    let completion = ToolCompletion::Result { outcome:Outcome::Failed, effect:Effect::None, content:content.clone() };
+    let settlement = |completion| ExecutionRecord::ToolSettled { result:ToolResult {
+        request_id:"model-1".into(), call_id:"conflict".into(), completion,
+    }};
+    // A tool's no-effect claim alone must neither bypass normalization nor settle a dispatch.
+    assert!(!owner.confirms_no_effect(&context, epoch, &completion).unwrap());
+    assert!(owner.lock().unwrap().commit_execution(&run.run_id, epoch, &settlement(completion.clone())).is_err());
+    let op = owner.lock().unwrap().operation(&context.operation_id).unwrap();
+    assert_eq!((op.phase,op.effect),(OperationPhase::Running,Effect::Dispatched));
+    owner.lock().unwrap().record_external_receipt(&context.operation_id, ExternalReceipt {
+        identity:context.operation_id.clone(), executor:"cas-owner".into(), epoch:"opaque-owner-epoch".into(),
+        outcome:Outcome::Failed, effect:Effect::None, result:content.clone(),
+    }).unwrap();
+    // Even authentic evidence cannot approve changed content or another Operation/generation.
+    let changed = ToolCompletion::Result { outcome:Outcome::Failed, effect:Effect::None, content:json!({"status":"conflict","currentRef":"forged"}) };
+    assert!(!owner.confirms_no_effect(&context, epoch, &changed).unwrap());
+    assert!(owner.lock().unwrap().commit_execution(&run.run_id, epoch, &settlement(changed)).is_err());
+    let mut foreign = context.clone(); foreign.operation_id="model-1:tool:other".into();
+    assert!(!owner.confirms_no_effect(&foreign, epoch, &completion).unwrap());
+    foreign = context.clone(); foreign.origin=ToolOrigin::ModelStep { request_id:"other-request".into() };
+    assert!(!owner.confirms_no_effect(&foreign, epoch, &completion).unwrap());
+    assert!(owner.confirms_no_effect(&context, epoch+1, &completion).is_err());
+    assert!(owner.confirms_no_effect(&context, epoch, &completion).unwrap());
+    owner.lock().unwrap().commit_execution(&run.run_id, epoch, &settlement(completion)).unwrap();
+    let op = owner.lock().unwrap().operation(&context.operation_id).unwrap();
+    assert_eq!((op.phase,op.outcome,op.effect),(OperationPhase::Terminal,Some(Outcome::Failed),Effect::None));
+    assert_eq!(op.result,Some(content));
+    assert_eq!(owner.lock().unwrap().operation("model-1:tool:other").unwrap().effect,Effect::Dispatched);
+}

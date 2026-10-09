@@ -1,3 +1,4 @@
+import type { NativePlanService } from './native-plan-service.js';
 import type { ImageAttachment } from '@varin/protocol';
 import { nativeThreadInput } from './native-thread-images.js';
 import { createHash } from 'node:crypto';
@@ -19,7 +20,7 @@ export class NativeThreadAdapter {
     private readonly admitSource: (source: NativeThreadSource, identity: NativeThreadIdentity) => Promise<void>,
     private readonly onLaunchError: (runId: string, error: unknown) => void,
     private readonly prepareWorkspace?: (input: NativeThreadPrepareSource) => Promise<NativeThreadPreparedSource>,
-    private readonly prepareContext?: NativeContextPreparer) {}
+    private readonly prepareContext?: NativeContextPreparer, private readonly plans?: NativePlanService) {}
 
   private readonly contextRefreshes = new Map<string, Promise<void>>();
   /** Serialize refresh reads per branch; an edit arriving during a read gets another fresh read. */
@@ -151,11 +152,24 @@ export class NativeThreadAdapter {
     return this.prepareWorkspace(input);
   }
 
-  async fork(input: NativeThreadIdentity & { key: string; headId: string | null }): Promise<NativeThreadIdentity> {
+  async readPlan(identity: NativeThreadIdentity, signal?: AbortSignal) {
+    await this.requireIdentity(identity);
+    if (!this.plans) throw new Error('Native plan owner is unavailable');
+    return this.plans.read(identity, signal);
+  }
+  async updatePlan(input: NativeThreadIdentity & { key: string; expectedHeadId: string | null; expectedRef: string | null; content: string }, signal?: AbortSignal) {
+    await this.requireIdentity(input);
+    if (!this.plans) throw new Error('Native plan owner is unavailable');
+    return this.plans.update(input, signal);
+  }
+  async fork(input: NativeThreadIdentity & { key: string; headId: string | null }, signal?: AbortSignal): Promise<NativeThreadIdentity> {
     await this.requireIdentity(input);
     await this.refreshContext(input);
     const digest = createHash('sha256').update(JSON.stringify([input.threadId, input.branchId, input.headId, input.key])).digest('hex');
-    const result = await this.runtime.forkBranch(input.branchId, `nativeBranch:${digest}`, input.headId);
+    const targetBranchId = `nativeBranch:${digest}`;
+    const capture = this.plans && await this.plans.supports(input)
+      ? await this.plans.capture(input, input.headId, targetBranchId, signal) : undefined;
+    const result = await this.runtime.forkBranch(input.branchId, targetBranchId, input.headId, signal, capture);
     return { runtime: 'nativeThread', ...result };
   }
 

@@ -2,6 +2,7 @@ import {
   KnowledgeBlockConflictError, KnowledgeMutationError,
   type Block, type BlockChange, type KnowledgeStore, type OpenWorkspaceKnowledgeDeps,
 } from "./store-contract.js";
+import type { NativePlanChanged } from "@varin/protocol";
 import type { AssociationRefreshPort } from "./association-refresh.js";
 
 export type DirectStoreMethod = Exclude<keyof KnowledgeStore, "dim" | "knowledgeRevision" | "resolveAssociationCandidates">;
@@ -12,6 +13,7 @@ export const STORE_METHODS: Record<DirectStoreMethod, true> = {
   getOrganizerProgress: true, putOrganizerProgress: true,
   listOrganizerProgress: true, getBlocks: true,
   upsertBlock: true, deleteBlock: true, putKnowledge: true,
+  readNativePlanCandidate: true, readNativePlan: true, mutateNativePlan: true, readNativePlanMutation: true, captureNativePlanFork: true,
   createKnowledgeIfAbsent: true, updateSuggestedKnowledge: true,
   updateAcceptedKnowledge: true, supersedeKnowledge: true,
   retireKnowledge: true, getKnowledge: true,
@@ -48,6 +50,7 @@ export type StoreResponse = { id: number; revision?: string } & (
   | { ok: false; error: StoreFailure }
 );
 export type StoreNotification =
+  | { type: "native-plan"; storeId: number; change: NativePlanChanged }
   | { type: "blocks"; storeId: number; sessionId: string; change: BlockChange }
   | { type: "knowledge"; storeId: number; ids: readonly number[]; revision: string }
   | { type: "persistence-error"; storeId: number; error: StoreFailure };
@@ -80,6 +83,8 @@ export const isStoreNotification = (value: unknown): value is StoreNotification 
   if (!value || typeof value !== "object") return false;
   const r = value as StoreNotification;
   if (!Number.isSafeInteger(r.storeId)) return false;
+  if (r.type === "native-plan") return Boolean(r.change && typeof r.change === "object"
+    && typeof r.change.threadId === "string" && typeof r.change.branchId === "string" && typeof r.change.ref === "string");
   if (r.type === "knowledge") return typeof r.revision === "string" && Array.isArray(r.ids) && r.ids.every(Number.isSafeInteger);
   if (r.type === "persistence-error") return isFailure(r.error);
   if (r.type !== "blocks" || typeof r.sessionId !== "string" || !r.change || typeof r.change !== "object") return false;

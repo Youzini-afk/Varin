@@ -65,6 +65,7 @@ type SessionCreatedEvent = {
 };
 
 export type VarinEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreatedEvent | HarnessThreadChangedEvent | HarnessBlocksChangedEvent | HarnessKnowledgeChangedEvent | HarnessExperimentChangedEvent | SettingsChangedEvent
+  | { type: 'native-plan-changed'; threadId: string; branchId: string; ref: string }
   | { type: 'agent-personalization-changed' }
   | { type: 'ssh-instance-status'; status: unknown }
   | { type: 'bot-changed'; botId: string }
@@ -189,6 +190,16 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'varin:event-stream-ready') {
     reconnectAttempt = 0;
     for (const listener of listeners) listener({ type: 'stream-ready' });
+    return;
+  }
+
+  if (envelope.type === 'varin:native-plan-changed') {
+    const properties = getEventProperties(envelope.properties);
+    if (typeof properties?.threadId === 'string' && properties.threadId
+      && typeof properties.branchId === 'string' && properties.branchId
+      && typeof properties.ref === 'string' && properties.ref) {
+      for (const listener of listeners) listener({ type: 'native-plan-changed', threadId: properties.threadId, branchId: properties.branchId, ref: properties.ref });
+    }
     return;
   }
 

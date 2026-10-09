@@ -1,4 +1,4 @@
-//! Combined production MemoryTools -> NativeToolExecutor admission checks.
+//! Combined production PlanTools -> MemoryTools -> ProcessWaitTools admission checks.
 //! The watcher below is an injected hook-contract witness, NOT runtime::run's private
 //! grant watcher. Storage revocation is real; immediate queued revoke wake is not tested.
 use super::*;
@@ -276,10 +276,14 @@ fn combined(ending: Ending) {
     );
     start.binding.tools = crate::native_collaboration::schemas(start.binding.tools, true);
     // Match source-backed main launch: Native -> Questions -> Collaboration ->
-    // ProcessWait -> Memory. The new wrapper must preserve inner scheduling hooks.
+    // ProcessWait -> Memory -> Plan. Every wrapper must preserve inner scheduling hooks.
     start.tools = crate::native_process_wait::wrap_tools(start.tools, db.clone(), binding, client);
     start.binding.tools = crate::native_process_wait::schemas(start.binding.tools);
     let start = configure(start, db.clone(), bridge.clone(), true);
+    let (plan_output, _plan_messages) = mpsc::sync_channel(8);
+    let plan_bridge = crate::native_plan_bridge::PlanBridge::new(plan_output);
+    plan_bridge.initialize(EPOCH);
+    let start = crate::native_plan::configure(start, db.clone(), plan_bridge);
     input.binding = start.binding.clone();
     let tools = start.tools.clone();
     let admission = db.lock().unwrap().resource_admission();
@@ -332,6 +336,17 @@ fn combined(ending: Ending) {
             .unwrap()
             .is_none()
     );
+    let plan = ToolCall {
+        call_id: "plan-read".into(), name: "native_todo".into(), schema_version: "1".into(),
+        arguments: json!({"action":"read"}),
+    };
+    let plan_frozen = FrozenToolContext {
+        tools: vec![crate::native_plan::schema()], ..frozen.clone()
+    };
+    let plan_contract = tools.prepare(&plan, &plan_frozen).unwrap();
+    assert_eq!(tools.execution_class(&plan, &plan_contract), ExecutionClass::Unmetered);
+    assert!(tools.watch_admission(&context, &plan, &plan_contract, &CancellationToken::default()).unwrap().is_none());
+    // Actual plan execution is covered by Host IPC tests; this assertion is solely admission classification.
     assert_eq!(registrations.load(Ordering::SeqCst), 0);
     tools
         .authorize(&context, &memory, &contract, &CancellationToken::default())

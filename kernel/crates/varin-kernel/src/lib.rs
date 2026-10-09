@@ -14,6 +14,8 @@ mod native_mcp;
 mod native_language;
 mod native_memory;
 mod native_memory_bridge;
+mod native_plan;
+mod native_plan_bridge;
 mod native_retrieval;
 mod process;
 mod protocol;

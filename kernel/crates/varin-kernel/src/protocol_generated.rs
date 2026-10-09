@@ -18,6 +18,24 @@ pub(crate) struct NativeBranchForkParams {
     pub(crate) source_branch_id: String,
     pub(crate) branch_id: String,
     pub(crate) head_id: RequiredNullable<String>,
+    pub(crate) plan_capture: Option<NativePlanForkCaptureParams>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativePlanViewParams {
+    pub(crate) branch_id: String,
+    pub(crate) head_id: RequiredNullable<String>,
+    pub(crate) current: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativePlanContainsParams {
+    pub(crate) branch_id: String,
+    pub(crate) head_id: RequiredNullable<String>,
+    pub(crate) candidate_head_id: RequiredNullable<String>,
+    pub(crate) cursor: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1245,6 +1263,17 @@ pub(crate) struct NativeChildWaitParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativePlanForkCaptureParams {
+    pub(crate) source_thread_id: String,
+    pub(crate) source_branch_id: String,
+    pub(crate) target_branch_id: String,
+    pub(crate) head_id: RequiredNullable<String>,
+    pub(crate) inherited_ref: RequiredNullable<String>,
+    pub(crate) captured_ref: RequiredNullable<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeContextPersonalization {
     pub(crate) memory_snapshot: NativeMemorySnapshot,
     pub(crate) configuration_digest: String,
@@ -1592,6 +1621,14 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.branch.fork" => serde_json::from_value::<NativeBranchForkParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.plan.view" => serde_json::from_value::<NativePlanViewParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.plan.contains" => {
+            serde_json::from_value::<NativePlanContainsParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.context_job.create" => {
             serde_json::from_value::<NativeContextJobCreateParams>(params.clone())
                 .map(|_| ())
@@ -1615,6 +1652,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map_err(|error| error.to_string())
         }
         "runtime.memory.reconcile" => serde_json::from_value::<NativeRunParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.plan.reconcile" => serde_json::from_value::<NativeRunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.history.page" => serde_json::from_value::<NativeHistoryPageParams>(params.clone())

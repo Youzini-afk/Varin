@@ -1,3 +1,4 @@
+import type { NativePlanView, NativePlanForkCapture } from '@varin/protocol';
 import type { NativeLiveSourceResolver } from './native-live-source.js';
 import type { NativePolicyModelPreparer } from './native-policy-models.js';
 import { waitWithSignal } from '../cancellation.js';
@@ -91,8 +92,14 @@ export class NativeRuntimeClient {
   createThread(threadId: string, branchId: string, signal?: AbortSignal): Promise<{ threadId: string; branchId: string }> {
     return this.kernel.nativeRuntimeRequest('runtime.thread.create', { threadId, branchId }, signal);
   }
-  forkBranch(sourceBranchId: string, branchId: string, headId: string | null, signal?: AbortSignal): Promise<{ threadId: string; branchId: string }> {
-    return this.kernel.nativeRuntimeRequest('runtime.branch.fork', { sourceBranchId, branchId, headId }, signal);
+  forkBranch(sourceBranchId: string, branchId: string, headId: string | null, signal?: AbortSignal, planCapture?: NativePlanForkCapture): Promise<{ threadId: string; branchId: string }> {
+    return this.kernel.nativeRuntimeRequest('runtime.branch.fork', { sourceBranchId, branchId, headId, ...(planCapture === undefined ? {} : { planCapture }) }, signal);
+  }
+  planContains(branchId: string, headId: string | null, candidateHeadId: string | null, cursor?: string, signal?: AbortSignal): Promise<{status:'pending';cursor:string}|{status:'ready';visible:boolean}> {
+    return this.kernel.nativeRuntimeRequest('runtime.plan.contains', {branchId,headId,candidateHeadId,...(cursor === undefined ? {} : {cursor})}, signal);
+  }
+  planView(branchId: string, headId?: string | null, signal?: AbortSignal): Promise<NativePlanView> {
+    return this.kernel.nativeRuntimeRequest('runtime.plan.view', { branchId, headId: headId ?? null, current: headId === undefined }, signal);
   }
   refreshContext(input: NativeContextRefreshParams, signal?: AbortSignal): Promise<NativeContextCheckpoint> {
     return this.kernel.nativeRuntimeRequest('runtime.context.refresh', input, signal);
@@ -129,6 +136,9 @@ export class NativeRuntimeClient {
   }
   inputs(branchId: string, signal?: AbortSignal): Promise<NativeQueuedInput[]> {
     return this.kernel.nativeRuntimeRequest('runtime.input.list', { branchId }, signal);
+  }
+  reconcilePlan(runId: string, signal?: AbortSignal): Promise<NativeRunReconcileResult> {
+    return this.kernel.nativeRuntimeRequest('runtime.plan.reconcile', { runId }, signal);
   }
   reconcileMemory(runId: string, signal?: AbortSignal): Promise<NativeRunReconcileResult> {
     return this.kernel.nativeRuntimeRequest('runtime.memory.reconcile', { runId }, signal);
@@ -185,13 +195,13 @@ export class NativeRuntimeClient {
       const source = launch.selection.source;
       if (!source) {
         const mcpNames = new Set(launch.selection.mcp_binding?.tools.map(tool => tool.name) ?? []);
-        if (launch.selection.tools.some(tool => !['native_ask_user', 'native_dispatch', 'native_child_status', 'native_wait_child', 'native_child_report', 'native_wait_process', 'native_memory'].includes(tool.name) && !mcpNames.has(tool.name))) throw new Error('Saved tools require an explicit Host resource rebind');
+        if (launch.selection.tools.some(tool => !['native_ask_user', 'native_dispatch', 'native_child_status', 'native_wait_child', 'native_child_report', 'native_wait_process', 'native_memory', 'native_todo'].includes(tool.name) && !mcpNames.has(tool.name))) throw new Error('Saved tools require an explicit Host resource rebind');
         await this.prepareMcp(runId, null, undefined, options.signal);
         return options.credentialOwner ? this.startRunWithCredentialOwner(runId, options.credentialOwner, options.signal) : this.startRun(runId, options.signal);
       }
 
       const names = { native_file_read: 'file_read', native_file_list: 'file_list', native_file_search: 'file_search', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn', native_language_definition: 'language_definition', native_language_references: 'language_references', native_language_diagnostics: 'language_diagnostics', native_code_retrieval: 'code_retrieval' } as const;
-      const tools = launch.selection.tools.filter(tool => !['native_ask_user', 'native_dispatch', 'native_child_status', 'native_wait_child', 'native_child_report', 'native_wait_process', 'native_memory'].includes(tool.name) && !launch.selection.mcp_binding?.tools.some(mcp => mcp.name === tool.name)).map(tool => {
+      const tools = launch.selection.tools.filter(tool => !['native_ask_user', 'native_dispatch', 'native_child_status', 'native_wait_child', 'native_child_report', 'native_wait_process', 'native_memory', 'native_todo'].includes(tool.name) && !launch.selection.mcp_binding?.tools.some(mcp => mcp.name === tool.name)).map(tool => {
         if (!(tool.name in names)) throw new Error('Saved capability requires its original extension owner');
         return names[tool.name as keyof typeof names];
     });
@@ -219,7 +229,7 @@ export class NativeRuntimeClient {
       }
 
       const names = { native_file_read: 'file_read', native_file_list: 'file_list', native_file_search: 'file_search', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn', native_language_definition: 'language_definition', native_language_references: 'language_references', native_language_diagnostics: 'language_diagnostics', native_code_retrieval: 'code_retrieval' } as const;
-      const tools = previous.selection.tools.filter(tool => !['native_ask_user', 'native_dispatch', 'native_child_status', 'native_wait_child', 'native_child_report', 'native_wait_process', 'native_memory'].includes(tool.name) && !previous.selection.mcp_binding?.tools.some(mcp => mcp.name === tool.name)).map(tool => {
+      const tools = previous.selection.tools.filter(tool => !['native_ask_user', 'native_dispatch', 'native_child_status', 'native_wait_child', 'native_child_report', 'native_wait_process', 'native_memory', 'native_todo'].includes(tool.name) && !previous.selection.mcp_binding?.tools.some(mcp => mcp.name === tool.name)).map(tool => {
         if (!(tool.name in names)) throw new Error('Saved capability requires its original extension owner');
         return names[tool.name as keyof typeof names];
     });
@@ -304,6 +314,7 @@ export class NativeRuntimeClient {
       const mcpBinding = this.kernel.nativeMcpBinding(runId);
       try {
         await this.reconcileMemory(runId, signal);
+        await this.reconcilePlan(runId, signal);
         return await this.kernel.nativeRuntimeRequest('runtime.run.start', { runId, ...(policyBinding ? { policyBinding } : {}), ...(mcpBinding ? { mcpBinding } : {}), ...(toolBinding === undefined ? {} : { toolBinding }) }, signal);
       } catch (error) { this.kernel.unregisterNativeCredentialOwner(runId); this.kernel.unregisterNativePolicyOwner(runId); throw error; }
     });
@@ -316,6 +327,7 @@ export class NativeRuntimeClient {
         const policyBinding = await this.preparePolicy(runId, signal, credentialScope);
         const mcpBinding = this.kernel.nativeMcpBinding(runId);
         await this.reconcileMemory(runId, signal);
+        await this.reconcilePlan(runId, signal);
         return await this.kernel.nativeRuntimeRequest('runtime.run.start', { runId, credentialScope, ...(policyBinding ? { policyBinding } : {}), ...(mcpBinding ? { mcpBinding } : {}),
           ...(toolBinding === undefined ? {} : { toolBinding }) }, signal);
       } catch (error) {

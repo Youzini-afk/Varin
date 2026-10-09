@@ -10,6 +10,8 @@ export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
 
 export type KernelMethod =
   | "runtime.branch.fork"
+  | "runtime.plan.view"
+  | "runtime.plan.contains"
   | "runtime.context_job.create"
   | "runtime.context_job.inspect"
   | "runtime.context_job.list"
@@ -17,6 +19,7 @@ export type KernelMethod =
   | "runtime.context.inspect"
   | "runtime.context.refresh"
   | "runtime.memory.reconcile"
+  | "runtime.plan.reconcile"
   | "runtime.history.page"
   | "runtime.history.body"
   | "runtime.thread.operations.active"
@@ -481,6 +484,29 @@ export interface NativeBranchForkParams {
   sourceBranchId: string;
   branchId: string;
   headId: string | null;
+  planCapture?: NativePlanForkCaptureParams;
+}
+
+export interface NativePlanForkCaptureParams {
+  sourceThreadId: string;
+  sourceBranchId: string;
+  targetBranchId: string;
+  headId: string | null;
+  inheritedRef: string | null;
+  capturedRef: string | null;
+}
+
+export interface NativePlanContainsParams {
+  branchId: string;
+  headId: string | null;
+  candidateHeadId: string | null;
+  cursor?: string;
+}
+
+export interface NativePlanViewParams {
+  branchId: string;
+  headId: string | null;
+  current: boolean;
 }
 
 export interface NativeBranchForkResult {
@@ -1987,6 +2013,8 @@ export interface NativeChildWait {
 
 export type KernelMethodParams = {
   "runtime.branch.fork": NativeBranchForkParams;
+  "runtime.plan.view": NativePlanViewParams;
+  "runtime.plan.contains": NativePlanContainsParams;
   "runtime.context_job.create": NativeContextJobCreateParams;
   "runtime.context_job.inspect": NativeRunParams;
   "runtime.context_job.list": NativeHistoryParams;
@@ -1994,6 +2022,7 @@ export type KernelMethodParams = {
   "runtime.context.inspect": NativeHistoryParams;
   "runtime.context.refresh": NativeContextRefreshParams;
   "runtime.memory.reconcile": NativeRunParams;
+  "runtime.plan.reconcile": NativeRunParams;
   "runtime.history.page": NativeHistoryPageParams;
   "runtime.history.body": NativeHistoryBodyParams;
   "runtime.thread.operations.active": NativeThreadParams;
@@ -2157,6 +2186,24 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "runtime.plan.view";
+      params: NativePlanViewParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.plan.contains";
+      params: NativePlanContainsParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "runtime.context_job.create";
       params: NativeContextJobCreateParams;
       epoch?: string;
@@ -2212,6 +2259,15 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.memory.reconcile";
+      params: NativeRunParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.plan.reconcile";
       params: NativeRunParams;
       epoch?: string;
       grantId?: string;

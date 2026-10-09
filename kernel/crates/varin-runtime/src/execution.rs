@@ -598,6 +598,11 @@ pub struct ContextProjection {
 }
 
 pub trait Persistence: Send + Sync {
+    /// Only durable executor evidence may refine dispatched work to a no-effect result.
+    /// Other persistence backends retain the conservative Unknown normalization.
+    fn confirms_no_effect(&self, _context: &ToolExecutionContext, _epoch: u64, _completion: &ToolCompletion)
+        -> Result<bool, ExecutionError> { Ok(false) }
+
     /// Native Catalog overrides this with its actual parent/child lineage and execution fence.
     fn task_family(&self, run: &str, _epoch: u64) -> Result<String, ExecutionError> { Ok(run.into()) }
 
@@ -1645,7 +1650,13 @@ impl<
                     .execute(&context, &tool.call, &tool.contract, cancel)
             }));
             match result {
-                Ok(completion) => normalize_completion(completion, &tool.contract),
+                Ok(completion) => {
+                    let confirmed_no_effect = !tool.contract.read_only
+                        && matches!(&completion, ToolCompletion::Result { effect: Effect::None, .. })
+                        && guarded("receipt_evidence_panicked", || self.persistence.confirms_no_effect(
+                            &context, input.owner_generation, &completion)).unwrap_or(false);
+                    normalize_completion(completion, &tool.contract, confirmed_no_effect)
+                },
                 Err(_) => ToolCompletion::failure(
                     "tool_panicked",
                     "tool worker stopped without a receipt",
@@ -1787,7 +1798,7 @@ fn contracts_conflict(a: &ToolContract, b: &ToolContract) -> bool {
     })
 }
 
-fn normalize_completion(completion: ToolCompletion, contract: &ToolContract) -> ToolCompletion {
+fn normalize_completion(completion: ToolCompletion, contract: &ToolContract, confirmed_no_effect: bool) -> ToolCompletion {
     match completion {
         ToolCompletion::JobAccepted {
             operation_id,
@@ -1820,7 +1831,7 @@ fn normalize_completion(completion: ToolCompletion, contract: &ToolContract) -> 
             effect: Effect::None,
             content,
             ..
-        } if !contract.read_only => ToolCompletion::Result {
+        } if !contract.read_only && !confirmed_no_effect => ToolCompletion::Result {
             outcome: Outcome::Indeterminate,
             effect: Effect::Unknown,
             content,
