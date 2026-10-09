@@ -5,6 +5,9 @@ use std::sync::{Arc, Mutex};
 use varin_runtime::execution::*;
 use varin_runtime::*;
 
+#[path = "fixtures/content_window.rs"]
+mod content_window;
+
 struct Fixture {
     root: std::path::PathBuf,
     db: Arc<Mutex<Catalog>>,
@@ -291,6 +294,129 @@ fn capability(f: &Fixture) -> PolicyModelCapability {
         credential_scope: None,
     }
 }
+
+fn frozen_job(f: &Fixture, serialized: Value) -> (PolicyModelIntent, RequestSnapshot) {
+    let boundary = f.db.policy_boundary(&f.input.run_id, f.input.owner_generation).unwrap();
+    let action_id = format!("{}:policy:{}", f.input.run_id, boundary.id);
+    let cap = capability(f);
+    let instructions = vec!["choose from the frozen source data".to_string()];
+    let mut binding = cap.binding.clone().unwrap();
+    binding.instruction_sources = instructions.clone();
+    let view = RequestView {
+        run_id: f.input.run_id.clone(),
+        request_id: action_id.clone(),
+        origin: RequestOrigin::PolicyModelJob {
+            action_id: action_id.clone(), purpose: "planning".into(), boundary_id: boundary.id.clone(),
+        },
+        binding,
+        history: vec![],
+    };
+    (PolicyModelIntent::PolicyModelJobV1 {
+        action_id, boundary, identity: identity(), state: json!({"proposed":true}),
+        capability: cap, instructions, evidence: vec![],
+    }, RequestSnapshot { view, serialized })
+}
+
+#[test]
+fn body_publication_rechecks_model_admission_after_input_or_head_changes() {
+    for boundary_input in [false, true] {
+        let f = Fixture::new();
+        let (intent, snapshot) = frozen_job(&f, json!({"body":content_window::large_text()}));
+        let action = intent.action_id().to_string();
+        let run = f.input.run_id.clone();
+        let epoch = f.input.owner_generation;
+        let head = f.input.binding.history_range.leaf_id.clone();
+        let result = content_window::during_write(&f.root, &f.db,
+            move |db| db.admit_policy_model(&run, epoch, &intent, &snapshot),
+            |catalog| {
+                assert!(catalog.operation(&action).is_err(), "body must precede metadata admission");
+                assert_eq!(catalog.collect_content_objects().unwrap(), 0);
+                catalog.create_thread("independent", "independent-main").unwrap();
+                if boundary_input {
+                    catalog.enqueue_input(&varin_runtime::catalog::inputs::EnqueueInput {
+                        key: "during-body".into(), thread_id: "thread".into(), branch_id: "main".into(),
+                        mode: InputMode::Boundary, input: json!("new input"), configuration: None,
+                    }).unwrap();
+                } else {
+                    catalog.append_history(&f.input.run_id, epoch, head.as_deref(),
+                        HistorySource::User, json!("new head"), None).unwrap();
+                }
+            });
+        let error = result.unwrap_err();
+        assert_eq!(error.code, if boundary_input { "input_pending" } else { "policy_graph" });
+        assert!(f.db.lock().unwrap().operation(&action).is_err());
+        assert!(f.db.lock().unwrap().events_after(0, 1000).unwrap().iter()
+            .all(|event| event.kind != "policy.model_admitted"));
+        assert!(f.db.lock().unwrap().collect_content_objects().unwrap() > 0,
+            "failed publication must release the GC guard and leave only collectible bodies");
+    }
+}
+
+#[test]
+fn body_publication_preserves_model_output_usage_and_evidence_through_gc() {
+    let f = Fixture::new();
+    let (intent, snapshot) = frozen_job(&f, json!({"small":"request"}));
+    let action = intent.action_id().to_string();
+    let run = f.input.run_id.clone();
+    let epoch = f.input.owner_generation;
+    f.db.admit_policy_model(&run, epoch, &intent, &snapshot).unwrap();
+    f.db.dispatch_policy_model(&run, epoch, &action).unwrap();
+    let output = PolicyModelOutput {
+        events: vec![],
+        items: vec![ProviderItem {
+            id: "large-plan".into(), content: Content::Text { text: content_window::large_text() },
+            opaque: Some(OpaqueProviderItem {
+                family: "test".into(), connection_identity: "planning-account".into(),
+                adapter_version: "1".into(), value: json!({"signed":[null,"保留",true]}),
+            }),
+        }],
+        usage: UsageReceipt {
+            measurement: UsageMeasurement::Actual, input_tokens: Some(31), output_tokens: Some(40),
+            raw: Some(json!({"provider_usage":{"not_lost":73}})), ..UsageReceipt::default()
+        },
+    };
+    let receipt = PolicyModelReceipt {
+        dispatch: PolicyModelDispatch::Completed, outcome: Outcome::Succeeded, output: None,
+        usage: output.usage.clone(), finish_reason: Some(FinishReason::Stop), failure: None, usable: true,
+    };
+    let worker_run = run.clone();
+    let worker_action = action.clone();
+    let worker_output = output.clone();
+    content_window::during_write(&f.root, &f.db,
+        move |db| db.record_policy_model(&worker_run, epoch, &worker_action, &worker_output, Some(&receipt)),
+        |catalog| {
+            let result: PolicyModelResult = serde_json::from_value(catalog.operation(&action).unwrap().result.unwrap()).unwrap();
+            assert!(result.original_ref.is_none(), "body must precede output reference publication");
+            assert_eq!(catalog.collect_content_objects().unwrap(), 0);
+            catalog.create_thread("independent", "independent-main").unwrap();
+            catalog.append_history(&run, epoch, snapshot.view.binding.history_range.leaf_id.as_deref(),
+                HistorySource::User, json!("correction after actual dispatch"), None).unwrap();
+        }).unwrap();
+    f.db.lock().unwrap().collect_content_objects().unwrap();
+    let saved = f.db.policy_model_job(&run, epoch).unwrap().unwrap();
+    assert_eq!(saved.output, output);
+    assert_eq!(saved.result.receipt.as_ref().unwrap().usage, output.usage);
+    let evidence = f.db.policy_evidence(&run, epoch,
+        saved.result.receipt.as_ref().unwrap().output.as_ref().unwrap()).unwrap();
+    let Content::Text { text } = &output.items[0].content else { unreachable!() };
+    assert!(serde_json::to_string(&evidence.content).unwrap().contains(text));
+    assert!(f.db.dispatch_policy_model(&run, epoch, &action).is_err(), "settled paid work cannot redispatch");
+}
+
+#[test]
+fn planning_dispatch_rejects_a_head_changed_since_admission() {
+    let f = Fixture::new();
+    let (intent, snapshot) = frozen_job(&f, json!({"frozen":true}));
+    let run = &f.input.run_id;
+    let epoch = f.input.owner_generation;
+    f.db.admit_policy_model(run, epoch, &intent, &snapshot).unwrap();
+    f.db.lock().unwrap().append_history(run, epoch,
+        snapshot.view.binding.history_range.leaf_id.as_deref(), HistorySource::User,
+        json!("correction after model admission"), None).unwrap();
+    assert!(f.db.dispatch_policy_model(run, epoch, intent.action_id()).is_err(),
+        "a request frozen before the current head must not start after the correction");
+}
+
 fn engine(
     f: &Fixture,
     planner: Arc<Provider>,

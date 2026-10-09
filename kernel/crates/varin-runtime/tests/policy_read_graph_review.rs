@@ -6,6 +6,43 @@ use std::time::Duration;
 use varin_runtime::execution::*;
 use varin_runtime::*;
 
+#[path = "fixtures/content_window.rs"]
+mod content_window;
+
+#[test]
+fn body_publication_keeps_policy_node_alive_and_receipt_idempotent() {
+    let f = Fixture::new();
+    let intent = admitted(&f, vec![node("large", &[])]);
+    let action = intent.action_id().to_string();
+    let run = f.input.run_id.clone();
+    let epoch = f.input.owner_generation;
+    f.db.admit_policy_graph(&run, epoch, &intent).unwrap();
+    let value = json!({"evidence":content_window::large_text()});
+    let completion = ToolCompletion::Result {
+        outcome: Outcome::Succeeded, effect: Effect::None, content: value.clone(),
+    };
+    let worker_run = run.clone();
+    let worker_action = action.clone();
+    let worker_completion = completion.clone();
+    let receipt = content_window::during_write(&f.root, &f.db,
+        move |db| db.settle_policy_node(&worker_run, epoch, &worker_action, "large", &worker_completion),
+        |catalog| {
+            let graph = catalog.policy_graph(&run, epoch).unwrap().unwrap();
+            assert!(graph.result.receipts.is_empty(), "body must precede receipt publication");
+            assert_eq!(catalog.collect_content_objects().unwrap(), 0);
+            catalog.create_thread("independent", "independent-main").unwrap();
+        }).unwrap();
+    let before = f.db.lock().unwrap().operation(&action).unwrap().revision;
+    assert_eq!(f.db.settle_policy_node(&run, epoch, &action, "large", &completion).unwrap(), receipt);
+    assert_eq!(f.db.lock().unwrap().operation(&action).unwrap().revision, before);
+    assert!(f.db.settle_policy_node(&run, epoch, &action, "large", &ToolCompletion::Result {
+        outcome: Outcome::Succeeded, effect: Effect::None, content: json!("different body"),
+    }).is_err());
+    f.db.lock().unwrap().collect_content_objects().unwrap();
+    let evidence = f.db.policy_evidence(&run, epoch, receipt.output.as_ref().unwrap()).unwrap();
+    assert!(serde_json::to_string(&evidence.content).unwrap().contains(value["evidence"].as_str().unwrap()));
+}
+
 struct Fixture {
     root: std::path::PathBuf,
     db: Arc<Mutex<Catalog>>,
