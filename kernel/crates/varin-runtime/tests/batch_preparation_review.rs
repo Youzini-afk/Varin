@@ -39,8 +39,8 @@ struct Store {
     fail_settlement: bool,
 }
 impl Persistence for Store {
-    fn resource_admission(&self) -> Option<Arc<ResourceAdmission>> {
-        Some(self.admission.clone())
+    fn resource_admission(&self) -> Arc<ResourceAdmission> {
+        self.admission.clone()
     }
     fn compile_context(
         &self,
