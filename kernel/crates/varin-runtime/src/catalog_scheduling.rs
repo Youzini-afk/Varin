@@ -8,7 +8,7 @@ impl Catalog {
     ) -> std::sync::Arc<crate::resource_admission::ResourceAdmission> {
         self.resource_admission.clone()
     }
-    /// Re-derived from committed native lineage. Projects, paths and model arguments are irrelevant.
+    /// Re-derived from committed lineage. Projects, paths and model arguments are irrelevant.
     pub fn task_family(&self, run_id: &str, epoch: u64) -> Result<String> {
         let run = self.run(run_id)?;
         fence(&run, epoch)?;
@@ -21,7 +21,7 @@ impl Catalog {
         let mut visited = BTreeSet::new();
         loop {
             if !visited.insert(thread.clone()) {
-                return Err(RuntimeError::Invalid("cyclic native task lineage".into()));
+                return Err(RuntimeError::Invalid("cyclic task lineage".into()));
             }
             let Some(child) = self.child_task_for_thread(&thread)? else {
                 return Ok(thread);
@@ -29,7 +29,7 @@ impl Catalog {
             let parent = self.run(&child.parent_run_id)?;
             if child.child_thread_id != thread || parent.thread_id != child.parent_thread_id {
                 return Err(RuntimeError::Invalid(
-                    "native task lineage does not match parent Run".into(),
+                    "task lineage does not match parent Run".into(),
                 ));
             }
             thread = parent.thread_id;

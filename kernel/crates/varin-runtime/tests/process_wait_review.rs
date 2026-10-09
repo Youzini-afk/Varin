@@ -21,7 +21,7 @@ impl Fixture {
         f.state(RunState::Runnable, None);
         // Real accepted external owner: the observer does not synthesize a process completion.
         f.db.admit_operation("process", &f.run, f.db.epoch(), Lifetime::Thread, json!({})).unwrap();
-        f.db.dispatch_operation("process", f.db.epoch(), "native_process_spawn", true).unwrap();
+        f.db.dispatch_operation("process", f.db.epoch(), "process_spawn", true).unwrap();
         f.db.handoff_operation("process", f.db.epoch()).unwrap();
         f
     }
@@ -54,7 +54,7 @@ impl Fixture {
         wait
     }
     fn terminal(&mut self) {
-        self.db.record_external_receipt_with_stop("process",ExternalReceipt{executor:"native_process_spawn".into(),identity:"process".into(),
+        self.db.record_external_receipt_with_stop("process",ExternalReceipt{executor:"process_spawn".into(),identity:"process".into(),
             epoch:"process-epoch".into(),outcome:Outcome::Succeeded,effect:Effect::Confirmed,
             result:json!({"processId":"process","kernelEpoch":"process-epoch","treeConfirmed":true,"exitCode":0,"signal":null,"outputAvailable":true})},true).unwrap();
     }
@@ -138,7 +138,7 @@ fn cancelled_run_never_resumes_from_late_process_terminal() {
 #[test]
 fn process_terminal_fact_preserves_the_guardians_string_signal() {
     let mut f=Fixture::new(); f.wait("signal");
-    f.db.record_external_receipt_with_stop("process",ExternalReceipt{executor:"native_process_spawn".into(),identity:"process".into(),
+    f.db.record_external_receipt_with_stop("process",ExternalReceipt{executor:"process_spawn".into(),identity:"process".into(),
         epoch:"process-epoch".into(),outcome:Outcome::Failed,effect:Effect::Confirmed,
         result:json!({"processId":"process","kernelEpoch":"process-epoch","treeConfirmed":true,"exitCode":null,"signal":"Killed"})},true).unwrap();
     f.db.deliver_process_waits().unwrap();

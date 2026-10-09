@@ -100,7 +100,7 @@ pub(super) fn initialize(db: &mut Connection) -> Result<()> {
             .collect::<Vec<_>>();
             if kind.as_deref() != Some("table") || columns != expected {
                 return Err(RuntimeError::Invalid(
-                    "native input queue schema is malformed; data was preserved".into(),
+                    "input queue schema is malformed; data was preserved".into(),
                 ));
             }
         }

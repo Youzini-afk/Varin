@@ -1,28 +1,28 @@
-import { createNativePlanOwner } from './lib/kernel/native-plan-owner.js';
-import { NativePlanService } from './lib/kernel/native-plan-service.js';
+import { createPlanOwner } from './lib/kernel/plan-owner.js';
+import { PlanService } from './lib/kernel/plan-service.js';
 import { createPersonalizationContextResolver } from './lib/memory/personalization-context.js';
-import { createNativeMemoryOwner } from './lib/kernel/native-memory-owner.js';
-import { NativeThreadCollaboration } from './lib/kernel/native-thread-collaboration.js';
+import { createMemoryOwner } from './lib/kernel/memory-owner.js';
+import { ThreadCollaboration } from './lib/kernel/thread-collaboration.js';
 import { createSemanticInferenceLedger } from './lib/knowledge/semantic/inference-ledger.js';
-import { createNativeSemanticInference } from './lib/knowledge/semantic/native-inference.js';
-import { createNativeRetrievalOwner } from './lib/kernel/native-retrieval-owner.js';
-import { createNativeRetrievalComposition } from './lib/kernel/native-retrieval-composition.js';
-import { createNativeLanguageOwner } from './lib/kernel/native-language-owner.js';
-import { createNativeLiveSourceOwner } from './lib/kernel/native-live-source.js';
-import { createNativeThreadSourcePreparer } from './lib/kernel/native-thread-sources.js';
-import { createNativeThreadContext } from './lib/kernel/native-thread-context.js';
-import { createNativeContextComposition } from './lib/kernel/native-context-composition.js';
-import { createNativePolicyModelPreparer } from './lib/kernel/native-policy-models.js';
-import { createNativeAgentPolicy } from './lib/kernel/native-agent-policy.js';
-import { NativeRunObservers } from './lib/kernel/native-run-observers.js';
+import { createSemanticInference } from './lib/knowledge/semantic/runtime-inference.js';
+import { createRetrievalOwner } from './lib/kernel/retrieval-owner.js';
+import { createRetrievalComposition } from './lib/kernel/retrieval-composition.js';
+import { createLanguageOwner } from './lib/kernel/language-owner.js';
+import { createLiveSourceOwner } from './lib/kernel/live-source.js';
+import { createThreadSourcePreparer } from './lib/kernel/thread-sources.js';
+import { createThreadContext } from './lib/kernel/thread-context.js';
+import { createContextComposition } from './lib/kernel/context-composition.js';
+import { createPolicyModelPreparer } from './lib/kernel/policy-models.js';
+import { createAgentPolicy } from './lib/kernel/agent-policy.js';
+import { RunObservers } from './lib/kernel/run-observers.js';
 import { McpAuthority, mcpHostAgentDir, mcpHostProjectTrusted, readMcpHostPermissionPolicy } from '@varin/pi-host/mcp-authority';
-import { createNativeMcpLease } from './lib/kernel/native-mcp-owner.js';
+import { createMcpLease } from './lib/kernel/mcp-owner.js';
 import { createMcpHarnessServices } from './lib/harness/mcp-service.js';
 import { sharedHostCredentialAuthority } from '@varin/runtime-broker';
-import { NativeRuntimeClient } from './lib/kernel/native-runtime-client.js';
-import { NativeThreadAdapter } from './lib/kernel/native-thread-adapter.js';
-import { registerNativeThreadRoutes } from './lib/kernel/native-thread-routes.js';
-import { createNativeModelAuthority } from './lib/kernel/native-model-authority.js';
+import { AgentRuntimeClient } from './lib/kernel/agent-runtime-client.js';
+import { ThreadAdapter } from './lib/kernel/thread-adapter.js';
+import { registerThreadRoutes } from './lib/kernel/thread-routes.js';
+import { createModelAuthority } from './lib/kernel/model-authority.js';
 import 'reflect-metadata';
 import { createBotDataCleanup } from './lib/bots/bot-data-cleanup.js';
 import { createKernelComputeService } from './lib/kernel/compute-service.js';
@@ -1410,7 +1410,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   if (fencedRecoveryOperations.length > 0) await combinedRecoveryStartup;
   else void combinedRecoveryStartup;
   extensionRuntime.workbench.setWorkspaceScopeResolver((scopeId: unknown) => documentsAuthority.resolveScopeId(scopeId));
-  const nativeProcesses = createKernelProcessService({
+  const kernelProcesses = createKernelProcessService({
     client: kernelClient,
     // Registry/admission are initialized before the first product process is
     // launched; keep that startup dependency explicit without creating a fake root.
@@ -1451,15 +1451,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return { workspaceId, executionWorkspaceId: workspaceId, canonicalRoot };
     },
   });
-  const nativeLanguageProviders = new Map(managedLanguageServers.languageIds.map((languageId) => [`varin.managed.${languageId}`, languageId]));
+  const managedLanguageProviders = new Map(managedLanguageServers.languageIds.map((languageId) => [`varin.managed.${languageId}`, languageId]));
   const languageSupervisor = createLanguageSupervisor({
     activateProviders: ({ languageId }) => extensionRuntime.activateForEvent('workspace-match', { languageId }),
     prepareProvider: (providerId, root, signal) => {
-      const languageId = nativeLanguageProviders.get(providerId);
+      const languageId = managedLanguageProviders.get(providerId);
       return languageId ? managedLanguageServers.ensure(languageId, root, signal) : Promise.resolve(null);
     },
     documents: documentsAuthority,
-    spawn: nativeProcesses.spawn,
+    spawn: kernelProcesses.spawn,
     pathModule: path,
     env: process.env,
     // Workspaces become executable only after their canonical root is an
@@ -1467,10 +1467,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // authority, so renderer or extension input cannot expand this boundary.
     isTrusted: workspaceRootGuard,
   });
-  for (const [providerId, languageId] of nativeLanguageProviders) {
+  for (const [providerId, languageId] of managedLanguageProviders) {
     languageSupervisor.registerProvider({ providerId, command: providerId, languageIds: [languageId], source: 'builtin' });
   }
-  const nativeCompute = createKernelComputeService({
+  const kernelCompute = createKernelComputeService({
     client: kernelClient,
     resolveIdentity: (cwd) => createKernelProcessIdentityResolver({
       documents: documentsAuthority, registry: threadRegistry,
@@ -1618,7 +1618,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   void managedRemoteExecution.reconcile().catch((error) => console.error("[VarinManagedRemote]", error.message));
-  const workspaceContentSearch = createWorkspaceContentSearch({ documents: documentsAuthority, compute: nativeCompute });
+  const workspaceContentSearch = createWorkspaceContentSearch({ documents: documentsAuthority, compute: kernelCompute });
   // ── Harness service host ──────────────────────────────────────────
   // Global services (output store, path locks, search, diagnostics) plus
   // per-session shell supervisors. Registered with the harness router
@@ -1891,9 +1891,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     readSettings: async () => await readSettingsFromDisk() as Record<string, unknown>,
     updateSettings: (mutator) => updateSettingsOnDisk((current) => mutator(current as Record<string, unknown>) as typeof current),
   });
-  const nativeComputerHolder = `native:${hostId}`;
+  const desktopControlHolder = `desktop:${hostId}`;
   const computerService = createComputerService({
-    localControlHolder: options.onComputerControlsReady ? nativeComputerHolder : undefined,
+    localControlHolder: options.onComputerControlsReady ? desktopControlHolder : undefined,
     resolveActor: (sessionId) => resolveComputerActor(threadRegistry, sessionId),
     bindDesktop: (actor, desktopId) => threadRegistry.setThreadEnvironment(actor.scopeId, actor.threadId, { desktopId }).then(() => {}),
     revokeSession: (actor) => piRuntimeBroker.requestForSession(actor.sessionId, 'session.computer.cancel', { sessionId: actor.sessionId, runId: actor.runId }).then(() => {}),
@@ -1945,9 +1945,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   void computerService.defaultDesktop().then(id => id ? computerService.prewarm(id) : undefined)
     .catch(error => console.error('[Computer] Desktop preparation failed:', errorMessage(error)));
   options.onComputerControlsReady?.({
-    holderId: nativeComputerHolder,
-    takeover: async () => { await computerService.takeover({ desktopId: 'local-console', holderId: nativeComputerHolder }); },
-    handback: async () => { await computerService.handback({ desktopId: 'local-console', holderId: nativeComputerHolder }); },
+    holderId: desktopControlHolder,
+    takeover: async () => { await computerService.takeover({ desktopId: 'local-console', holderId: desktopControlHolder }); },
+    handback: async () => { await computerService.handback({ desktopId: 'local-console', holderId: desktopControlHolder }); },
     cancel: async () => {
       await computerService.automation.cancelDesktop('local-console');
     },
@@ -1986,11 +1986,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     onError: (error) => console.error('[VarinMemory]', errorMessage(error)),
   });
-  let refreshNativePersonalization: (() => Promise<void>) | undefined;
-  let nativePersonalizationRuntime: NativeRuntimeClient | undefined = undefined;
+  let personalizationRuntime: AgentRuntimeClient | undefined = undefined;
   const agentPersonalization = createAgentPersonalization({
     client: kernelClient,
-    context: createPersonalizationContextResolver({ native: () => nativePersonalizationRuntime, legacy: async (sessionId) => {
+    context: createPersonalizationContextResolver({ runtime: () => personalizationRuntime, legacy: async (sessionId) => {
       const binding = await threadRegistry.getSessionBinding(sessionId);
       const thread = binding?.owner === 'spawned-child' ? await threadRegistry.getThreadById(binding.owningScopeId, binding.threadId) : null;
       if (binding?.owner === 'spawned-child' && !thread) throw new Error('The session thread configuration is unavailable');
@@ -2006,7 +2005,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     } }),
     onChanged: () => {
       broadcastGlobalUiEvent?.({ type: 'varin:agent-personalization-changed', properties: {} });
-      void refreshNativePersonalization?.().catch(() => console.error('[NativeThread] Personalization refresh requires attention'));
+      void refreshThreadPersonalization().catch(() => console.error('[Thread] Personalization refresh requires attention'));
     },
   });
   // Bot background memory organizer reads durable session/run sources.
@@ -2090,7 +2089,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     readSessionEntries: (sessionId) => piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'all'),
   });
   const threadWorktreeRuntime = createThreadWorktreeRuntime({
-    spawnProcess: nativeProcesses.spawn,
+    spawnProcess: kernelProcesses.spawn,
     authorizeManagedRoot: async (candidate) => {
       const normalize = (value: string) => {
         const resolved = path.resolve(value).replace(/\\/g, '/');
@@ -2881,11 +2880,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     providerToken: async (_scope, provider) => (await hostCredentialAuthority.getAuth(provider))?.auth.apiKey,
     credentialScope: async (_scope, provider) => hostCredentialAuthority.currentScope(provider),
   });
-  const prepareNativePolicy = createNativeAgentPolicy(extensionRuntime);
-  const nativeModelAuthority = createNativeModelAuthority(hostCredentialAuthority);
-  const nativeLiveSources = createNativeLiveSourceOwner({ documents: documentsAuthority, kernel: kernelClient });
-  kernelClient.setNativeLanguageOwner(createNativeLanguageOwner({ documents: documentsAuthority, supervisor: languageSupervisor, validateSource: nativeLiveSources.validate }));
-  const nativeRuntime: NativeRuntimeClient = new NativeRuntimeClient(kernelClient, async (input, signal) => {
+  const prepareAgentPolicy = createAgentPolicy(extensionRuntime);
+  const modelAuthority = createModelAuthority(hostCredentialAuthority);
+  const liveSources = createLiveSourceOwner({ documents: documentsAuthority, kernel: kernelClient });
+  kernelClient.setLanguageOwner(createLanguageOwner({ documents: documentsAuthority, supervisor: languageSupervisor, validateSource: liveSources.validate }));
+  const agentRuntime: AgentRuntimeClient = new AgentRuntimeClient(kernelClient, async (input, signal) => {
     // A read-only fixed branch has no executable filesystem view. Global MCP capabilities run
     // in the neutral Host scope; they must not borrow the mutable project directory.
     const workspace = input.source && input.executionCwd
@@ -2896,14 +2895,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       environmentId: workspace ? `${hostId}:${input.source!.executionWorkspaceId}` : `${hostId}:global`,
       executionScope: workspace ? 'workspace' as const : 'global' as const,
       projectTrusted: Boolean(workspace) && mcpHostProjectTrusted(mcpAgentDir, configCwd),
-      sessionId: `native:${input.threadId}`,
+      sessionId: `agent:${input.threadId}`,
     };
     const inspection = mcpAuthority.inspect(scope);
     const lease = await mcpAuthority.acquire(scope, {
       servers: inspection.servers.filter(server => server.hasDirectTools && server.status !== 'disabled' && server.exposure !== 'hidden').map(server => server.name),
       ...(signal ? { signal } : {}),
     });
-    return createNativeMcpLease({ lease, kernel: kernelClient,
+    return createMcpLease({ lease, kernel: kernelClient,
       ...(input.source && !input.executionCwd ? { unavailableWorkspaceScope: {
         workspaceId: input.source.workspaceId,
         reason: 'Project MCP capabilities require a prepared execution environment matching the pinned source. Only global Host MCP capabilities are available for this read-only source.',
@@ -2915,22 +2914,22 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       },
     });
   }, async (input, signal) => {
-    const run = await nativeRuntime.run(input.runId, signal);
+    const run = await agentRuntime.run(input.runId, signal);
     if (run.thread_id !== input.threadId) throw new Error('Native policy scope changed');
-    const checkpoint = await nativeRuntime.context(run.branch_id, signal);
+    const checkpoint = await agentRuntime.context(run.branch_id, signal);
     const projectId = checkpoint?.personalization?.projectId;
-    return prepareNativePolicy({ sessionId: input.threadId, ...(projectId ? { projectId } : {}) }, signal);
-  }, createNativePolicyModelPreparer({ models: nativeModelAuthority,
+    return prepareAgentPolicy({ sessionId: input.threadId, ...(projectId ? { projectId } : {}) }, signal);
+  }, createPolicyModelPreparer({ models: modelAuthority,
     // This is a user-scoped role. Native Threads do not impersonate Pi sessions.
     settings: () => piRuntimeBroker.requestCatalog('settings.get', {}),
-  }), nativeLiveSources.validate);
-  const nativeRunObservers = new NativeRunObservers(nativeRuntime, extensionRuntime, (threadId, _error) => {
-    console.error('[NativeObserver] Activity projection requires attention:', threadId ?? 'selection');
+  }), liveSources.validate);
+  const runObservers = new RunObservers(agentRuntime, extensionRuntime, (threadId, _error) => {
+    console.error('[RunObserver] Activity projection requires attention:', threadId ?? 'selection');
   });
-  nativePersonalizationRuntime = nativeRuntime;
-  const nativeContext = createNativeThreadContext({ personalization: agentPersonalization,
-      liveSource: { documents: documentsAuthority, validate: nativeLiveSources.validate },
-      composition: createNativeContextComposition(extensionRuntime),
+  personalizationRuntime = agentRuntime;
+  const threadContext = createThreadContext({ personalization: agentPersonalization,
+      liveSource: { documents: documentsAuthority, validate: liveSources.validate },
+      composition: createContextComposition(extensionRuntime),
       workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter),
       projectForWorkspace: async workspaceId => {
         const { root } = await documentsAuthority.inspectWorkspace(workspaceId);
@@ -2938,29 +2937,29 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         return projects.find(project => projectContainsPath(project, root))?.id;
       },
     });
-  kernelClient.setNativePlanOwner(createNativePlanOwner(getUserKnowledgeStore, nativeRuntime));
-  kernelClient.setNativeMemoryOwner(createNativeMemoryOwner({ personalization: agentPersonalization, prepareContext: nativeContext }));
-  const nativeThreads = new NativeThreadAdapter(nativeRuntime,
-    nativeModelAuthority, async (source, identity) => {
-      if (source.mode === 'live_root') return nativeLiveSources.admit(source, identity.threadId);
+  kernelClient.setPlanOwner(createPlanOwner(getUserKnowledgeStore, agentRuntime));
+  kernelClient.setMemoryOwner(createMemoryOwner({ personalization: agentPersonalization, prepareContext: threadContext }));
+  const threads = new ThreadAdapter(agentRuntime,
+    modelAuthority, async (source, identity) => {
+      if (source.mode === 'live_root') return liveSources.admit(source, identity.threadId);
       // Public source coordinates identify existing Host workspaces, never arbitrary roots/grants.
       await documentsAuthority.inspectWorkspace(source.workspaceId);
       await documentsAuthority.inspectWorkspace(source.executionWorkspaceId);
     }, (runId, _error) => {
       // Durable launch remains inspectable/resumable. Never log credentials or provider responses.
-      console.error('[NativeThread] Launch preparation requires attention:', runId);
-    }, createNativeThreadSourcePreparer({ documents: documentsAuthority, liveSources: nativeLiveSources, workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter) }),
-    nativeContext, new NativePlanService(nativeRuntime, getUserKnowledgeStore));
-  const nativeCollaboration = new NativeThreadCollaboration({ runtime: nativeRuntime, models: nativeModelAuthority,
-    workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter), prepareContext: nativeContext,
+      console.error('[Thread] Launch preparation requires attention:', runId);
+    }, createThreadSourcePreparer({ documents: documentsAuthority, liveSources: liveSources, workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter) }),
+    threadContext, new PlanService(agentRuntime, getUserKnowledgeStore));
+  const collaboration = new ThreadCollaboration({ runtime: agentRuntime, models: modelAuthority,
+    workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter), prepareContext: threadContext,
     admitSource: async source => { await documentsAuthority.inspectWorkspace(source.workspaceId); await documentsAuthority.inspectWorkspace(source.executionWorkspaceId); },
-    onError: (operationId, _error) => console.error('[NativeCollaboration] Preparation or delivery requires attention:', operationId ?? 'discovery'),
+    onError: (operationId, _error) => console.error('[Collaboration] Preparation or delivery requires attention:', operationId ?? 'discovery'),
   });
-  void nativeCollaboration.recover();
-  refreshNativePersonalization = () => nativeThreads.refreshPersonalization();
-  void refreshNativePersonalization().catch(() => console.error('[NativeThread] Personalization refresh requires attention'));
-  void nativeThreads.recover().catch(() => console.error('[NativeThread] Saved launch discovery requires attention'));
-  registerNativeThreadRoutes(app, nativeThreads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
+  void collaboration.recover();
+  const refreshThreadPersonalization = () => threads.refreshPersonalization();
+  void refreshThreadPersonalization().catch(() => console.error('[Thread] Personalization refresh requires attention'));
+  void threads.recover().catch(() => console.error('[Thread] Saved launch discovery requires attention'));
+  registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerHarnessThreadRoutes(app, {
     registry: threadRegistry,
     runtime: threadRuntime,
@@ -3182,7 +3181,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (userKnowledgeStore) return userKnowledgeStore;
     if (!userKnowledgeStoreLoad) {
       userKnowledgeStoreLoad = openUserKnowledgeStore({
-        onNativePlanChanged: change => broadcastGlobalUiEvent?.({ type: 'varin:native-plan-changed', properties: { ...change } }),
+        onPlanChanged: change => broadcastGlobalUiEvent?.({ type: 'varin:plan-changed', properties: { ...change } }),
         dataDir: VARIN_DATA_DIR,
         hostId,
         embedding: null,
@@ -3321,7 +3320,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     onError: (error) => console.error('[HarnessKnowledge] Observer failed:', errorMessage(error)),
   });
-  const catalogFileSearch = createFsSearchRuntimeFactory({ compute: nativeCompute });
+  const catalogFileSearch = createFsSearchRuntimeFactory({ compute: kernelCompute });
   // A grammar catalog must not be able to stop the Host from starting: an
   // unreadable manifest means "nothing is installable", not "no server".
   let grammarManifest = EMPTY_GRAMMAR_PACK_MANIFEST;
@@ -3354,7 +3353,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const structureSource = createStructureSource([
     createTreeSitterStructureProvider({
-      compute: nativeCompute,
+      compute: kernelCompute,
       onLanguageRequest: (languageId, workspaceId) => languageSupportRuntime.noteRequest(languageId, workspaceId),
       resolveInstalled: (fileName) => grammarStore.pathForGrammarFile(fileName),
       resolveInstalledLanguage: (languageId) => languageSupportRuntime.installedStructureSpec(languageId),
@@ -3442,11 +3441,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     backgroundIntervalMs: semanticIndexConfig.requestIntervalMs,
   });
   const semanticVectorCache = createVectorCache();
-  const nativeSemanticInference = createNativeSemanticInference(hostCredentialAuthority, {
+  const semanticInference = createSemanticInference(hostCredentialAuthority, {
     readGlobalSettings: () => hostCredentialAuthority.readGlobalInferenceSettings(),
   }, { ledger: createSemanticInferenceLedger({ dataDir: VARIN_DATA_DIR, hostId }) });
   const semanticRuntime = createWorkspaceSemanticRuntime({
-    nativeInference: nativeSemanticInference,
+    runtimeInference: semanticInference,
     dataDir: semanticIndexConfig.storageDirectory ?? VARIN_DATA_DIR,
     hostId,
     // HR3: one shared worker serves settings/inference for every resource root;
@@ -3488,7 +3487,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (error) => console.error('[HarnessKnowledge] Semantic runtime failed:', errorMessage(error)),
   });
   semanticRuntimeHolder.current = semanticRuntime;
-  const nativeRetrievalComposition = createNativeRetrievalComposition(extensionRuntime, {
+  const retrievalComposition = createRetrievalComposition(extensionRuntime, {
     structure: structureSource,
     prepareSemantic: async (scope, signal) => {
       const query = scope.query;
@@ -3499,26 +3498,26 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           || value.split('/').includes('..')) throw new Error('Invalid native semantic root');
         return value.split('/').filter(part => part && part !== '.').join('/');
       };
-      const grant = kernelClient.nativeRetrievalGrant(query);
+      const grant = kernelClient.retrievalGrant(query);
       const roots = (query.paths ?? grant.pathScopes).map(relative);
       const authorize = async (requestSignal: AbortSignal): Promise<void> => {
         requestSignal.throwIfAborted();
-        await nativeLiveSources.validate(query, requestSignal);
-        const current = kernelClient.nativeRetrievalGrant(query);
+        await liveSources.validate(query, requestSignal);
+        const current = kernelClient.retrievalGrant(query);
         const granted = current.pathScopes.map(relative);
         if (!roots.length || roots.some(root => !granted.some(parent => !parent || root === parent || root.startsWith(`${parent}/`)))) {
           throw new Error('Native semantic roots are outside the Run grant');
         }
       };
       await authorize(active);
-      return semanticRuntime.acquireNativeQuery({ workspaceId: query.workspaceId, threadId: query.threadId,
+      return semanticRuntime.acquireQuery({ workspaceId: query.workspaceId, threadId: query.threadId,
         runId: query.runId, invocation: query.invocation, roots, signal: active, authorize,
-        assertAuthorized: () => { kernelClient.nativeRetrievalGrant(query); } });
+        assertAuthorized: () => { kernelClient.retrievalGrant(query); } });
     },
   });
-  kernelClient.setNativeRetrievalOwner(createNativeRetrievalOwner({ documents: documentsAuthority, kernel: kernelClient,
-    validateSource: nativeLiveSources.validate,
-    preparePipeline: (query, signal) => nativeRetrievalComposition.prepare({ threadId: query.threadId, query,
+  kernelClient.setRetrievalOwner(createRetrievalOwner({ documents: documentsAuthority, kernel: kernelClient,
+    validateSource: liveSources.validate,
+    preparePipeline: (query, signal) => retrievalComposition.prepare({ threadId: query.threadId, query,
       workspaceId: query.liveRoot.canonicalRoot, ...(query.projectId ? { projectId: query.projectId } : {}) }, signal),
   }));
 
@@ -3728,7 +3727,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const discoveredShells = discoverShells();
   const shellPathResolver = createShellPathResolver({
     interpreter: (sessionId) => harnessServiceHost.getInterpreter(sessionId),
-    spawn: nativeProcesses.spawn,
+    spawn: kernelProcesses.spawn,
   });
   const harnessServiceHost = createHarnessServiceHost({
     agentPersonalization,
@@ -4085,7 +4084,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   );
   const runRuntime = createRunRuntime({
     documents: documentsAuthority,
-    spawn: nativeProcesses.spawn,
+    spawn: kernelProcesses.spawn,
     pathModule: path,
     env: process.env,
     isTrusted: workspaceRootGuard,
@@ -4530,8 +4529,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     isRequestOriginAllowed,
     rejectWebSocketUpgrade,
     terminalHeartbeatIntervalMs: TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
-    loadPtyProvider: async () => nativeProcesses.ptyProvider,
-    inspectNativeProcesses: (cwd) => nativeProcesses.list(cwd),
+    loadPtyProvider: async () => kernelProcesses.ptyProvider,
+    inspectNativeProcesses: (cwd) => kernelProcesses.list(cwd),
     staticRoutesRuntime,
     process,
     crypto,
@@ -4582,8 +4581,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     stop: async (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => {
       // Stop timer/watcher producers before their runtime and storage
       // dependencies begin shutting down.
-      nativeRunObservers.stop();
-      nativeCollaboration.stop();
+      runObservers.stop();
+      collaboration.stop();
       scheduledTasksRuntime.stop();
       await botService.dispose();
       followUpService.dispose();
@@ -4618,7 +4617,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await indexDirectories.dispose();
       observeKnowledgeDocumentMutation = () => undefined;
       await semanticRuntime.dispose();
-      await nativeSemanticInference.close();
+      await semanticInference.close();
       await symbolGraphRuntime.dispose();
       // Stop producers and drain their receipts while process grants are valid.
       // One refused exit must not prevent the other domains from shutting down.
@@ -4633,7 +4632,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const processShutdownErrors = processShutdown.flatMap((result) => result.status === 'rejected' ? [result.reason] : []);
       await languageToolProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       await documentProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
-      await nativeProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
+      await kernelProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       for (const error of processShutdownErrors) console.error('[VarinKernel] Native process shutdown incomplete:', errorMessage(error));
       await piRuntimeGateway.stop();
       mcpHarness.dispose();
@@ -4644,7 +4643,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await Promise.allSettled([...workspaceRecoveryEngines.values()].map((engine) => engine.dispose()));
       workspaceRecoveryEngines.clear();
       await localSemanticComponent.dispose();
-      await nativeCompute.dispose();
+      await kernelCompute.dispose();
       await kernelStorageAdapter.dispose().catch((error) => console.error('[VarinKernel] Failed to revoke storage grants:', errorMessage(error)));
       await kernelClient?.close();
       await knowledgeVectors?.close();

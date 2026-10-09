@@ -75,7 +75,7 @@ import {
   type KnowledgeStore,
   type OpenWorkspaceKnowledgeDeps,
 } from "./store-contract.js";
-import { createNativePlanStore } from "./native-plan-store.js";
+import { createPlanStore } from "./plan-store.js";
 import { createStorePersistence, trackStoreMutations } from "./persistence.js";
 import { resolveAssociations, type AssociationRefreshPort } from "./association-refresh.js";
 
@@ -153,7 +153,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
 
   const recallScope: KnowledgeScope = deps.scope ?? (workspaceId === "user" ? "user" : "workspace");
   const dim = embedding?.dim ?? PLACEHOLDER_DIM;
-  const nativeDb = new TriviumDB(dbPath, {
+  const runtimeDb = new TriviumDB(dbPath, {
     dim,
     // User state is acknowledged after native WAL fsync, not a whole-catalog
     // checkpoint. Derived property indexes are rebuilt from those payloads.
@@ -177,14 +177,14 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
     return enqueueWrite(() => {
       // Derived symbols retain their existing deferred persistence. These
       // synchronous callbacks cannot overlap a full-sync plan/memory mutation.
-      nativeDb.setSyncMode("normal");
-      try { return fn(); } finally { nativeDb.setSyncMode("full"); }
+      runtimeDb.setSyncMode("normal");
+      try { return fn(); } finally { runtimeDb.setSyncMode("full"); }
     });
   }
   const persistence = createStorePersistence({
     walCommits: true,
-    flush: () => nativeDb.flush(),
-    close: () => nativeDb.close(),
+    flush: () => runtimeDb.flush(),
+    close: () => runtimeDb.close(),
     enqueue: enqueueWrite,
     quietMs: GRAPH_FLUSH_QUIET_MS,
     maxDeferMs: GRAPH_FLUSH_MAX_DEFER_MS,
@@ -193,7 +193,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       else console.error("[KnowledgeStore] Deferred checkpoint failed");
     },
   });
-  const db = trackStoreMutations(nativeDb, persistence);
+  const db = trackStoreMutations(runtimeDb, persistence);
   try {
     const knowledgeInstanceId = randomUUID();
     let knowledgeEpoch = 0;
@@ -819,13 +819,13 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       async releaseAssociationRefresh(id) { associationJobs.delete(id); },
     };
 
-    const nativePlans = createNativePlanStore({
+    const conversationPlans = createPlanStore({
       lookup, enqueue: enqueueWrite, vector: placeholderVec,
       commit: operations => { db.commitTransaction(operations); persistence.commit(); },
-      afterCommit: change => persistence.afterCommit(() => deps.onNativePlanChanged?.(change)),
+      afterCommit: change => persistence.afterCommit(() => deps.onPlanChanged?.(change)),
     });
     const store: KnowledgeStore = {
-      ...nativePlans,
+      ...conversationPlans,
       dim,
       knowledgeRevision,
 
@@ -2323,7 +2323,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       },
 
       async compact(): Promise<void> {
-        return enqueueWrite(() => { nativeDb.compact(); persistence.commit(); });
+        return enqueueWrite(() => { runtimeDb.compact(); persistence.commit(); });
       },
       async close(): Promise<void> {
         return enqueueWrite(() => {

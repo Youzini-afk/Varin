@@ -18,7 +18,7 @@ pub(crate) fn graph_intent(op: &Operation) -> Result<Option<PolicyGraphIntent>> 
     if op.id != intent.action_id()
         || op.lifetime != Lifetime::Run
         || op.effect != Effect::None
-        || op.executor.as_deref() != Some("native.policy-read-graph.v1")
+        || op.executor.as_deref() != Some("policy-read-graph.v1")
     {
         return Err(RuntimeError::Invalid(
             "policy graph owner is malformed".into(),
@@ -225,7 +225,7 @@ impl Catalog {
             cancel_requested: false,
             lifetime: Lifetime::Run,
             handed_off: false,
-            executor: Some("native.policy-read-graph.v1".into()),
+            executor: Some("policy-read-graph.v1".into()),
             waiting_on: None,
             intent: serde_json::to_value(intent)?,
             result: Some(serde_json::to_value(PolicyGraphResult {

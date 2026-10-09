@@ -61,14 +61,14 @@ pub fn configured_compute_capacity() -> Result<NonZeroUsize, String> {
     CAPACITY.get_or_init(read_compute_capacity).clone()
 }
 fn read_compute_capacity() -> Result<NonZeroUsize, String> {
-    match std::env::var("VARIN_NATIVE_COMPUTE_CONCURRENCY") {
+    match std::env::var("VARIN_COMPUTE_CONCURRENCY") {
         Ok(value) => value
             .parse::<NonZeroUsize>()
-            .map_err(|_| "VARIN_NATIVE_COMPUTE_CONCURRENCY must be a positive integer".to_string()),
+            .map_err(|_| "VARIN_COMPUTE_CONCURRENCY must be a positive integer".to_string()),
         // Retain the existing two-foreground-worker deployment budget, reduced on single-core
         // hosts. This is configurable execution capacity, not a limit on accepted tasks.
         Err(std::env::VarError::NotPresent) => Ok(default_compute_capacity()),
-        Err(_) => Err("VARIN_NATIVE_COMPUTE_CONCURRENCY is not valid text".into()),
+        Err(_) => Err("VARIN_COMPUTE_CONCURRENCY is not valid text".into()),
     }
 }
 

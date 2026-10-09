@@ -13,7 +13,7 @@ interface State {
 const asJson = (state: State): JsonValue => state as unknown as JsonValue;
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 function read(id: string, path: string, length?: number): VarinAgentPolicyReadNode {
-  return { id, depends_on: [], call: { call_id: id, name: 'native_file_read', schema_version: '1', arguments: { path, ...(length === undefined ? {} : { length }) } } };
+  return { id, depends_on: [], call: { call_id: id, name: 'file_read', schema_version: '1', arguments: { path, ...(length === undefined ? {} : { length }) } } };
 }
 function restore(value: JsonValue): State {
   if (!record(value) || !['index', 'index_content', 'evidence', 'answer'].includes(String(value.phase))

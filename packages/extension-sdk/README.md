@@ -82,7 +82,7 @@ registered waits and cancellation. [The bounded evidence example](../../examples
 shows the executable contract and current action limits.
 
 `provideRetrievalPlan(context, { configurationId, structure })` registers an immutable
-`varin.retrieval.plan@1` declaration with matching `inspect` schemas. Select `structure: 'native'`
+`varin.retrieval.plan@1` declaration with matching `inspect` schemas. Select `structure: 'builtin'`
 for the existing native structure stage or `'disabled'` for keyword-only retrieval. Do not perform
 filesystem, model, index or other external work during declaration. The Host supplies stages and
 keeps a generation pin for each native query; ordinary extension replacement preserves existing

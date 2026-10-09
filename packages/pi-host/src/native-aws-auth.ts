@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export interface NativeCredentialDispatch { method: string; endpoint: string; payloadSha256: string }
+export interface CredentialDispatch { method: string; endpoint: string; payloadSha256: string }
 interface AwsCredentials { accessKeyId: string; secretAccessKey: string; sessionToken?: string }
 interface AwsClient {
   config: { credentials: () => Promise<AwsCredentials>; region: () => Promise<string>; sha256: unknown };
@@ -70,7 +70,7 @@ export class NativeAwsCredentialOwner {
     try { return await (await source.client).config.region(); }
     catch { return fail('aws-region-unavailable'); }
   }
-  async sign(source: Source, dispatch: NativeCredentialDispatch, headers: Record<string, string>, selectedRegion?: string): Promise<Record<string, string>> {
+  async sign(source: Source, dispatch: CredentialDispatch, headers: Record<string, string>, selectedRegion?: string): Promise<Record<string, string>> {
     try {
       if (typeof dispatch.payloadSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(dispatch.payloadSha256)) return fail('aws-request-payload-invalid');
       const client = await source.client;

@@ -73,7 +73,7 @@ Available evidence files:
 Choose the file relevant to the current user's question.
 ```
 
-Create both files with real evidence. Enable the ordinary `native_file_read` tool and use its
+Create both files with real evidence. Enable the ordinary `file_read` tool and use its
 existing authorized fixed branch/revision source. Ask about latency, then in a separate Run ask
 about recovery. A planner returning different `reads` produces different actual native read graphs;
 quality of that choice depends on the configured model. No real model call is made merely by

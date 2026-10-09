@@ -17,7 +17,7 @@ bindings. It never treats an arbitrary reference as an environment variable name
 broker can implement the same interface, including OAuth refresh coordination; OAuth is not implemented
 by the environment resolver. Authentication headers never enter request snapshots or debug output.
 
-`NativeHttpTransport` lazily creates one persistent reqwest TLS client and Tokio executor per transport instance. Model steps share that client and connection pool; concurrent requests have independent futures and cancellation. No global tenant or credential cache is used. A trusted
+`ReqwestTransport` lazily creates one persistent reqwest TLS client and Tokio executor per transport instance. Model steps share that client and connection pool; concurrent requests have independent futures and cancellation. No global tenant or credential cache is used. A trusted
 ClientBuilder factory supplies proxy/DNS/certificate policy. Redirects and automatic retries are disabled.
 Cancellation drops the active send/read future. Calling this synchronous adapter from an async runtime
 returns `worker_required`; use a blocking execution worker. The default has no generation deadline;
@@ -117,7 +117,7 @@ changes. A full credential broker must carry authoritative credential identity/v
 
 ## Native auth module
 
-`auth::NativeCredentialBroker` is a dispatch resolver over an injected `CredentialStore`. Its public
+`auth::CredentialBroker` is a dispatch resolver over an injected `CredentialStore`. Its public
 `CredentialScope` is nonsecret metadata: reference, authority, account and relink generation. Ordinary
 same-account token rotation does not change that generation. Each transaction checks the pinned scope
 before resolving or refreshing and again before returning headers. The backing store is the sole writer

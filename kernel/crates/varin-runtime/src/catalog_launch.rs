@@ -58,7 +58,7 @@ impl HostToolBinding {
     pub fn validate(&self) -> Result<()> {
         let mut names = std::collections::BTreeSet::new();
         if self.reference.is_empty() || self.resources.iter().any(|(name, key)| name.is_empty() || key.is_empty()) || self.tools.iter().any(|tool| tool.name.is_empty()
-            || tool.name.starts_with("native_") || tool.version.is_empty() || !tool.schema.is_object()
+            || tool.version.is_empty() || !tool.schema.is_object()
             || !names.insert(&tool.name)) {
             return Err(RuntimeError::Invalid("MCP binding requires unique frozen tool identities".into()));
         }

@@ -19,7 +19,7 @@ const exact = (value: Record<string, unknown>, keys: string[]) => Object.keys(va
 const asJson = (value: State): JsonValue => value as unknown as JsonValue;
 const sameRef = (a: VarinAgentPolicyEvidenceRef, b: VarinAgentPolicyEvidenceRef) => a.action_id === b.action_id && a.node_id === b.node_id && a.content_ref === b.content_ref;
 function read(id: string, path: string, length?: number): VarinAgentPolicyReadNode {
-  return { id, depends_on: [], call: { call_id: id, name: 'native_file_read', schema_version: '1', arguments: { path, ...(length === undefined ? {} : { length }) } } };
+  return { id, depends_on: [], call: { call_id: id, name: 'file_read', schema_version: '1', arguments: { path, ...(length === undefined ? {} : { length }) } } };
 }
 function restore(value: JsonValue): State {
   // Checkpoints are private to this pinned implementation, not model-produced plan objects.
@@ -35,7 +35,7 @@ function parsePlan(text: string, maxReads: number): string[] {
   const paths = plan.reads.map(item => {
     if (!record(item) || !exact(item, ['path']) || typeof item.path !== 'string' || !item.path.trim()
       || item.path !== item.path.trim() || item.path.startsWith('/') || item.path.includes('\\') || item.path.includes(':')
-      || /[\u0000-\u001f]/u.test(item.path) || item.path.split('/').some(part => !part || part === '.' || part === '..')) {
+      || Array.from(item.path).some(character => character.charCodeAt(0) < 0x20) || item.path.split('/').some(part => !part || part === '.' || part === '..')) {
       throw new Error('Plan reads must use project-relative file paths');
     }
     return item.path;

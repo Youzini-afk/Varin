@@ -109,7 +109,7 @@ Materialized reads share the execution-environment resource claim with process s
 bounded byte ranges, and reject detected concurrent file changes rather than claiming immutable
 snapshot consistency. The Host coordinator owns when an exact revision is materialized and bound.
 
-Materialized `native_file_write` and `native_file_edit` use the existing `file.apply` journal.
+Materialized `file_write` and `file_edit` use the existing `file.apply` journal.
 A complete file read or missing-path observation returns a `readVersion` scoped to the grant,
 registered root, path, and exact file state. Mutation compares that version before preparing bytes
 and supplies the observed state as `file.apply`'s conditional precondition. Partial reads do not
@@ -295,7 +295,7 @@ existing authenticated `settings.get` catalog path, validates `harness.models.ag
 explicit model picker in Context settings and never inherits the main model. Disabled, unconfigured,
 invalid settings, unavailable catalog/auth, and available selections remain distinct.
 
-`native-policy-models.ts` resolves registered IDs through `native-model-authority.ts` and freezes the
+`policy-models.ts` resolves registered IDs through `model-authority.ts` and freezes the
 configuration identity, purpose, supported operation and nonsecret binding ID. Rust derives the actual
 tool-free request binding and retains the selection with the launch. Policies receive only capability
 IDs and availability descriptors, never endpoints, provider selectors or credentials. Rebinding
@@ -319,7 +319,7 @@ Live identity pins the admitted canonical pathname on its Host, not a directory 
 snapshot. Native Run preparation observes cancellation and revokes failed launch grants; the public
 source preparation/submission API does not promise a general pre-admission AbortSignal contract.
 
-`native-live-source.ts` is an admission adapter, not a registry. Documents retains the durable
+`live-source.ts` is an admission adapter, not a registry. Documents retains the durable
 host/workspace/root mapping; Rust retains file/process authority. The Run's existing launch intent
 records live mode plus nonsecret host ID, canonical root and deterministic Rust root ID. Submit,
 continuation and restart revalidate the exact Documents mapping; each launch gets a fresh scoped
@@ -335,9 +335,9 @@ The initial live AGENTS.md is read through Documents and its actual revision is 
 existing context checkpoint. Later disk changes remain live for file tools but do not retroactively
 rewrite that instruction checkpoint. Ordinary instruction/memory refresh retains its existing owner.
 
-Live selections also expose `native_language_definition`, `native_language_references`, and
-`native_language_diagnostics`. Native tool contracts, grant admission and history remain in Rust;
-`native-language-owner.ts` binds saved text through the existing LanguageViewBinder and selected
+Live selections also expose `language_definition`, `language_references`, and
+`language_diagnostics`. Native tool contracts, grant admission and history remain in Rust;
+`language-owner.ts` binds saved text through the existing LanguageViewBinder and selected
 LanguageSupervisor. The private epoch-bound language bridge does not own another process, provider
 registry or configuration store. It starts no language service during source preparation. Shared
 startup and per-query cancellation remain with the existing supervisor; no file lease or Catalog
@@ -379,18 +379,18 @@ encodes the exact descriptor. Missing fields do not silently manufacture a legac
 
 
 Native live-language acceptance is recorded by suite in the
-[implementation plan](../../../../../docs/plan/native-agent-runtime-implementation.md#已核验增量live-root-原生语言工具):
+[implementation plan](../../../../../docs/plan/agent-runtime-implementation.md#已核验增量live-root-原生语言工具):
 Rust rendezvous/framing 5; native controlled-owner 20, source entry 1, real bundled TypeScript loop 1;
 portable owner 12 and bridge 3; existing Pi navigation 15 and diagnostics adapter 4; UI 18.
 These are focused checks, not an all-repository, fixed-dependency-closure or cross-platform pass.
 
 ## Native code retrieval
 
-`native_code_retrieval` is a live-root read tool. Its private query carries explicit native Run,
+`code_retrieval` is a live-root read tool. Its private query carries explicit native Run,
 Thread, grant and root identities, plus the real persisted invocation origin: ModelStep request and
 tool-call IDs, or policy action/node and tool-call IDs. The bridge UUID is transport-only and cannot
 identify an inference dispatch. It does not create a Pi session/worker or reuse a Pi Explore actor.
-`native-retrieval-owner.ts` reuses `createExploreQueryRun`, Documents, the existing structure facade,
+`retrieval-owner.ts` reuses `createExploreQueryRun`, Documents, the existing structure facade,
 and Rust compute. Keyword jobs use the actual Run's scoped client, never the Host-wide directory
 compute grant. `file.read.check` admits each candidate's canonical resource and regular-file status
 under that same grant before Documents reads it; the post-read check rejects changed identities.
@@ -443,7 +443,7 @@ snippets are contiguous spans, with hit-bearing ranges delivered before signatur
 snippet cap. Omitted unit bodies are not filled back in. The existing Explore byte budget bounds the
 Host pack; framing/reconstructed-body budgets fail or report partial without killing the shared writer.
 Each snippet has path, inclusive one-based line bounds and actual Documents revision for a later
-`native_file_read`. Its `readVersion` is a separate authority-bound mutation CAS token, not the
+`file_read`. Its `readVersion` is a separate authority-bound mutation CAS token, not the
 Documents content revision; verify a follow-up full read against the snippet's content digest/bytes.
 Live observations do not claim an atomic workspace snapshot.
 
@@ -480,17 +480,17 @@ UI-selector/Host-routing cases. Existing native consumers passed 7 selected case
 language concurrency (2), context/initial-context/reopen (3), durable history (1), and pinned history
 pagination (1). Rust catalog passed 31 cases, including 4 independent identity/recovery cases;
 execution passed 12. The unchanged content owner retained its earlier 7 passing cases. These are
-scoped suites, not whole-repository or visual UI acceptance. The [implementation plan](../../../../../docs/plan/native-agent-runtime-implementation.md)
+scoped suites, not whole-repository or visual UI acceptance. The [implementation plan](../../../../../docs/plan/agent-runtime-implementation.md)
 records the initial provider-ID collision and corrected candidate-publication fixture sequence;
 neither initial failure is counted as a passing run. No paid models or huge-frame/kill experiments
 were used. The model reranking and fixed-source limits above remain in force; semantic lease acceptance is recorded separately.
 
 ## Native fixed-source child owner
 
-`NativeThreadCollaboration` consumes the native Catalog's committed collaboration facts. Its maps
+`ThreadCollaboration` consumes the native Catalog's committed collaboration facts. Its maps
 only coalesce cancellable in-flight preparation and launch; they are not task storage. It registers
 for durable notifications before startup discovery, reopens exact pending source pins, prepares the
-child through the shared context owner, and uses `NativeRuntimeClient.rebindLaunch` plus the normal
+child through the shared context owner, and uses `AgentRuntimeClient.rebindLaunch` plus the normal
 RunSupervisor. It neither launches a Pi session nor registers native children in ThreadRegistry.
 
 Source preparation has an independent child lifetime. Parent final or a stalled child context
@@ -501,7 +501,7 @@ child source grants are revoked when their actual terminal outcome is known. Ker
 unfinished durable cleanup for recovery instead of pretending the resources were released.
 
 The authenticated `child/list`, `child/cancel`, `child/wait/cancel` and `tree/cancel` HTTP routes verify
-native Thread ownership. The optional `NativeThreadsAPI.collaboration` capability and child task
+native Thread ownership. The optional `ThreadsAPI.collaboration` capability and child task
 projection distinguish stopping the current Run, stopping a child, cancelling an observation and
 stopping the task with its children. The UI shows the child's actual state/report and no-file-change
 result; source/profile/model facts remain the Catalog's authority.

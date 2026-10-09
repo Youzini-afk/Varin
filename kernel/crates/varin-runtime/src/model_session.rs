@@ -1,7 +1,7 @@
 //! Explicit model bindings. Tool-enabled sessions replace the empty tool binding with an
 //! assembled, authorized executor; model configuration never invents tool permissions.
 use crate::execution::*;
-use crate::providers::{Connection,CredentialResolver,EnvironmentCredentialResolver,EnvironmentHeader,NativeHttpTransport};
+use crate::providers::{Connection,CredentialResolver,EnvironmentCredentialResolver,EnvironmentHeader,ReqwestTransport};
 use crate::providers::{anthropic,azure,bedrock,chat,codex,google,mistral,responses,auth::CredentialScope};
 use crate::supervisor::RunStart;
 use serde_json::{json,Value};
@@ -17,7 +17,7 @@ pub fn bind(configuration:ModelSessionConfiguration)->Result<RunStart,ExecutionE
         azure::FAMILY=>("api-key",""),anthropic::FAMILY=>("x-api-key",""),
         google::FAMILY=>("x-goog-api-key",""),
         google::VERTEX_FAMILY|codex::FAMILY|bedrock::FAMILY=>return Err(ExecutionError::new("credential_binding_required","this provider requires an explicitly bound credential owner")),
-        _=>return Err(ExecutionError::new("unsupported_provider","the selected native provider adapter is unavailable")),
+        _=>return Err(ExecutionError::new("unsupported_provider","the selected provider adapter is unavailable")),
     };
     let mut credentials=EnvironmentCredentialResolver{allow_anonymous:configuration.allow_anonymous,..Default::default()};
     let reference=if let Some(variable)=&configuration.credential_environment{
@@ -48,7 +48,7 @@ fn build(configuration:ModelSessionConfiguration,credentials:Arc<dyn CredentialR
 }
 pub fn build_provider(configuration:ModelSessionConfiguration,credentials:Arc<dyn CredentialResolver>,credential_ref:Option<String>,identity:String)->Result<BoundModel,ExecutionError>{
     if configuration.model.trim().is_empty()||configuration.max_output_tokens==Some(0){return Err(ExecutionError::new("invalid_model_configuration","model and positive output capacity are required"));}
-    let mut connection=Connection::new(configuration.endpoint.clone(),credentials,Arc::new(NativeHttpTransport::default()));
+    let mut connection=Connection::new(configuration.endpoint.clone(),credentials,Arc::new(ReqwestTransport::default()));
     connection.accepts_images=configuration.accepts_images;
     let provider:Arc<dyn ModelProvider>=match configuration.provider_family.as_str(){
         responses::FAMILY=>{let mut provider=responses::ResponsesProvider::new(connection);provider.max_output_tokens=configuration.max_output_tokens;provider.reasoning=configuration.reasoning_effort.map(|effort|json!({"effort":effort}));Arc::new(provider)},
@@ -72,7 +72,7 @@ pub fn build_provider(configuration:ModelSessionConfiguration,credentials:Arc<dy
             provider.reasoning=configuration.reasoning_effort.map(|effort|json!({"effort":effort,"summary":"auto"}));
             Arc::new(provider)
         },
-        _=>return Err(ExecutionError::new("unsupported_provider","the selected native provider adapter is unavailable")),
+        _=>return Err(ExecutionError::new("unsupported_provider","the selected provider adapter is unavailable")),
     };
     let binding=RequestBinding{connection_identity:identity,provider_family:configuration.provider_family,model:configuration.model,credential_ref,configuration_generation:configuration.configuration_generation,tool_schema_generation:0,tools:vec![],instruction_sources:vec![],memory_checkpoint:None,attachment_refs:vec![],environment_cursor:0,history_range:HistoryRange{branch_id:String::new(),ancestor_id:None,leaf_id:None}};
     Ok(BoundModel{binding,provider})

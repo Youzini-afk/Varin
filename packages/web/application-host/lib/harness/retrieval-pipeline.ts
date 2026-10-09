@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ExploreDeps } from './explore.js';
-import type { NativeSemanticInferenceReceipt } from '../knowledge/semantic/native-inference.js';
+import type { SemanticInferenceReceipt } from '../knowledge/semantic/runtime-inference.js';
 
 export type RetrievalStageKind = 'keyword' | 'structure' | 'semantic' | 'model';
 export type RetrievalStageStatus = 'ready' | 'empty' | 'partial' | 'unavailable' | 'unsupported' | 'failed' | 'cancelled' | 'stale' | 'disabled';
@@ -11,7 +11,7 @@ export interface PipelineStage {
   readonly status: 'ready' | 'disabled' | 'unavailable' | 'unsupported';
 }
 /** Nonsecret identity of the exact backend and published reader retained for this query. */
-export interface NativeRetrievalSemanticMetadata {
+export interface RetrievalSemanticMetadata {
   readonly bindingState: 'ready' | 'unconfigured' | 'disabled' | 'invalid' | 'unavailable';
   readonly providerId: string | null;
   readonly modelId: string | null;
@@ -28,7 +28,7 @@ export interface PipelinePlan {
   readonly id: string;
   readonly configurationGeneration: number;
   readonly stages: readonly PipelineStage[];
-  readonly semantic?: Readonly<NativeRetrievalSemanticMetadata>;
+  readonly semantic?: Readonly<RetrievalSemanticMetadata>;
   readonly selection?: Readonly<{ providerId: string; providerKey: string; artifactId: string; configurationId: string; selectionRevision: number }>;
 }
 export interface RetrievalSnippet { path: string; revision: string; startLine: number; endLine: number; content: string }
@@ -50,7 +50,7 @@ export interface BoundRetrievalPipeline {
   readonly plan: PipelinePlan;
   readonly assertAvailable?: () => void;
   readonly validateAvailable?: (signal?: AbortSignal) => Promise<void>;
-  readonly inferenceReceipts?: () => readonly NativeSemanticInferenceReceipt[];
+  readonly inferenceReceipts?: () => readonly SemanticInferenceReceipt[];
   readonly release?: () => void;
   readonly structure?: NonNullable<ExploreDeps['structure']>;
   readonly semantic?: NonNullable<ExploreDeps['semantic']>;
@@ -58,7 +58,7 @@ export interface BoundRetrievalPipeline {
 }
 function bind(configuration: RetrievalPipelineConfiguration, generation: number): BoundRetrievalPipeline {
   if (!configuration.configurationId.trim()) throw new Error('Retrieval configuration identity is required');
-  const stages: PipelineStage[] = [{ kind: 'keyword', providerId: 'varin.kernel.search', configurationId: 'native-search-v1', status: 'ready' }];
+  const stages: PipelineStage[] = [{ kind: 'keyword', providerId: 'varin.kernel.search', configurationId: 'search-v1', status: 'ready' }];
   const implementations: Pick<BoundRetrievalPipeline, 'structure' | 'semantic' | 'model'> = {};
   for (const kind of ['structure', 'semantic', 'model'] as const) {
     const selected = configuration[kind];

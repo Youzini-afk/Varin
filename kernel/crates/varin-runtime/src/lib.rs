@@ -1,4 +1,4 @@
-//! Native agent authority. Network, tool and extension work executes outside catalog transactions.
+//! Agent authority. Network, tool and extension work executes outside catalog transactions.
 //! This crate is not yet the production runtime; the cutover must replace, not duplicate, Pi ownership.
 pub mod catalog;
 pub mod composition;

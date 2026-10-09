@@ -1,4 +1,4 @@
-//! Atomic bridge from the native executor to its sole durable authority.
+//! Atomic bridge from the executor to its sole durable authority.
 use super::*;
 use crate::execution::*;
 use std::sync::Mutex;
@@ -1194,7 +1194,7 @@ impl Catalog {
 }
 
 impl Catalog {
-    /// Resource recovery queries only the native jobs whose facts are still unresolved.
+    /// Resource recovery queries only the jobs whose facts are still unresolved.
     pub fn pending_run_operations(&self, run_id:&str) -> Result<Vec<Operation>> {
         let mut statement=self.db.prepare("SELECT body FROM operations WHERE run_id=?1 AND (json_extract(body,'$.phase')!='terminal' OR json_extract(body,'$.outcome')='indeterminate') ORDER BY id")?;
         let rows=statement.query_map([run_id],|row|row.get::<_,String>(0))?;

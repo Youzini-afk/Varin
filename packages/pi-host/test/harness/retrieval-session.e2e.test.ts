@@ -22,7 +22,7 @@ import { createThreadWorktreeRuntime } from "../../../web/application-host/lib/h
 import { ThreadExecutionViewRegistry } from "../../../web/application-host/lib/harness/working-state/execution-view.js";
 import { createWorkingBranchLookups } from "../../../web/application-host/lib/harness/working-state/working-branch-lookups.js";
 import { projectZone2Threads } from "../../../web/application-host/lib/harness/zone2-threads.js";
-import { createNativeAuthorityTestRuntime } from "../../../web/application-host/lib/kernel/native-authority.test-helper.js";
+import { createAuthorityTestRuntime } from "../../../web/application-host/lib/kernel/authority.test-helper.js";
 import { createManagedRootAdmission } from "../../../web/application-host/lib/kernel/managed-root-admission.js";
 import { assertManagedWorktreeOwnership } from "../../../web/application-host/lib/harness/worktree-ownership.js";
 import { createKernelComputeService } from "../../../web/application-host/lib/kernel/compute-service.js";
@@ -65,7 +65,7 @@ describe("retrieval thread public slice", () => {
       isTrusted: async () => true,
     });
     const identity = await documents.resolveWorkspace({ path: workspace });
-    const native = await createNativeAuthorityTestRuntime({ documents, hostId: "retrieval-e2e-host", dataDir: join(root, "data") });
+    const native = await createAuthorityTestRuntime({ documents, hostId: "retrieval-e2e-host", dataDir: join(root, "data") });
     const { workingStates } = native;
     const compute = createKernelComputeService({ client: native.client, resolveIdentity: async (cwd) => {
       const { workspaceId } = await documents.resolveWorkspace({ path: cwd });

@@ -16,7 +16,7 @@ pub(crate) fn model_intent(op: &Operation) -> Result<Option<PolicyModelIntent>> 
     if op.id != intent.action_id()
         || op.lifetime != Lifetime::Run
         || op.effect != Effect::None
-        || op.executor.as_deref() != Some("native.policy-model.v1")
+        || op.executor.as_deref() != Some("policy-model.v1")
     {
         return Err(RuntimeError::Invalid("policy model owner malformed".into()));
     }
@@ -204,7 +204,7 @@ impl Catalog {
             cancel_requested: false,
             lifetime: Lifetime::Run,
             handed_off: false,
-            executor: Some("native.policy-model.v1".into()),
+            executor: Some("policy-model.v1".into()),
             waiting_on: None,
             intent: serde_json::to_value(intent)?,
             result: Some(serde_json::to_value(&result)?),

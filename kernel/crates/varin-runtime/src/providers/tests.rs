@@ -257,11 +257,11 @@ fn loopback_response(response: Vec<u8>) -> (String, std::thread::JoinHandle<()>)
     (endpoint, worker)
 }
 #[test]
-fn native_http_status_preserves_retry_and_request_id_without_echoing_body() {
+fn http_status_preserves_retry_and_request_id_without_echoing_body() {
     let body = "secret prompt must not enter failure";
     let response=format!("HTTP/1.1 429 Too Many Requests\r\nContent-Length: {}\r\nRetry-After: 2\r\nX-Request-ID: server-123\r\nConnection: close\r\n\r\n{body}",body.len());
     let (endpoint, server) = loopback_response(response.into_bytes());
-    let transport = NativeHttpTransport::new(|| reqwest::Client::builder().no_proxy());
+    let transport = ReqwestTransport::new(|| reqwest::Client::builder().no_proxy());
     let error = transport
         .stream(
             HttpRequest {
@@ -280,7 +280,7 @@ fn native_http_status_preserves_retry_and_request_id_without_echoing_body() {
     assert!(!error.message.contains("secret prompt"));
 }
 #[test]
-fn native_http_cancellation_interrupts_stalled_headers_and_body() {
+fn http_cancellation_interrupts_stalled_headers_and_body() {
     use std::io::{Read, Write};
     for send_headers in [false, true] {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -301,7 +301,7 @@ fn native_http_cancellation_interrupts_stalled_headers_and_body() {
         let worker_cancel = cancel.clone();
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
-            let transport = NativeHttpTransport::new(|| reqwest::Client::builder().no_proxy());
+            let transport = ReqwestTransport::new(|| reqwest::Client::builder().no_proxy());
             let result = transport.stream(
                 HttpRequest {
                     endpoint: &endpoint,
@@ -335,7 +335,7 @@ fn actual_http_sse_reaches_responses_adapter() {
     let p = responses::ResponsesProvider::new(Connection::new(
         endpoint,
         Arc::new(Credentials(AtomicUsize::new(0))),
-        Arc::new(NativeHttpTransport::new(|| {
+        Arc::new(ReqwestTransport::new(|| {
             reqwest::Client::builder().no_proxy()
         })),
     ));
@@ -346,7 +346,7 @@ fn actual_http_sse_reaches_responses_adapter() {
 }
 
 #[test]
-fn native_transport_reuses_builder_and_keeps_headers_request_local() {
+fn transport_reuses_builder_and_keeps_headers_request_local() {
     use std::io::{Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = format!("http://{}/model", listener.local_addr().unwrap());
@@ -363,7 +363,7 @@ fn native_transport_reuses_builder_and_keeps_headers_request_local() {
     });
     let builds = Arc::new(AtomicUsize::new(0));
     let counted = builds.clone();
-    let transport = NativeHttpTransport::new(move || {
+    let transport = ReqwestTransport::new(move || {
         counted.fetch_add(1, Ordering::SeqCst);
         reqwest::Client::builder().no_proxy()
     });
@@ -390,7 +390,7 @@ fn native_transport_reuses_builder_and_keeps_headers_request_local() {
     assert!(!requests[1].contains("fixture-A"));
 }
 #[test]
-fn shared_native_transport_has_independent_progress_and_cancellation() {
+fn shared_reqwest_transport_has_independent_progress_and_cancellation() {
     use std::io::{Read, Write};
     let slow = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let slow_endpoint = format!("http://{}/slow", slow.local_addr().unwrap());
@@ -403,7 +403,7 @@ fn shared_native_transport_has_independent_progress_and_cancellation() {
         started_tx.send(()).unwrap();
         let _ = release_rx.recv();
     });
-    let transport = Arc::new(NativeHttpTransport::new(|| {
+    let transport = Arc::new(ReqwestTransport::new(|| {
         reqwest::Client::builder().no_proxy()
     }));
     let cancel = CancellationToken::default();
@@ -727,7 +727,7 @@ fn google_accepts_actual_http_eof_only_after_finish_reason() {
     let p = google::GoogleProvider::new(Connection::new(
         endpoint,
         Arc::new(Credentials(AtomicUsize::new(0))),
-        Arc::new(NativeHttpTransport::new(|| {
+        Arc::new(ReqwestTransport::new(|| {
             reqwest::Client::builder().no_proxy()
         })),
     ))
@@ -1077,7 +1077,7 @@ fn explicit_model_image_capability_rejects_attachment_before_request_serializati
     assert!(provider.serialize(&request).is_ok());
 }
 
-// AWS eventstream fixture uses Python zlib CRC32, independently of the native decoder.
+// AWS eventstream fixture uses Python zlib CRC32, independently of the decoder.
 struct BedrockFixture {
     bytes: Vec<u8>,
     calls: AtomicUsize,
@@ -1215,7 +1215,7 @@ fn actual_binary_http_reaches_bedrock_adapter_through_clean_eof() {
     let provider = bedrock::BedrockProvider::new(Connection::new(
         endpoint,
         Arc::new(BedrockFixtureCredential),
-        Arc::new(NativeHttpTransport::new(|| {
+        Arc::new(ReqwestTransport::new(|| {
             reqwest::Client::builder().no_proxy()
         })),
     ));

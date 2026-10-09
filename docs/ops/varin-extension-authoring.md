@@ -641,8 +641,8 @@ remain part of the existing operation lifecycle, not an extension-owned task or 
 ## Native retrieval plans
 
 A brokered Host extension can provide `varin.retrieval.plan@1` with
-`provideRetrievalPlan(context, { configurationId: 'my-plan-v1', structure: 'native' })`.
-Use `structure: 'disabled'` for keyword-only retrieval. Optional `semantic: 'native'` selects the
+`provideRetrievalPlan(context, { configurationId: 'my-plan-v1', structure: 'builtin' })`.
+Use `structure: 'disabled'` for keyword-only retrieval. Optional `semantic: 'builtin'` selects the
 native semantic owner; omission or `semantic: 'disabled'` disables it. Declare the service with `multiple: true`
 in the manifest and activate on `service-request`. `inspect([])` exposes the shared schemas;
 `describe([])` accepts no arguments and returns only these declared fields. The declaration must be

@@ -1,5 +1,5 @@
 import type { ExploreFileSnapshot } from "../explore-file-reader.js";
-import { decodeNativeSearchHit, type WorkspaceContentSearchRequest, type WorkspaceContentSearchOptions, type WorkspaceContentSearchResult } from "../../search/content.js";
+import { decodeSearchHit, type WorkspaceContentSearchRequest, type WorkspaceContentSearchOptions, type WorkspaceContentSearchResult } from "../../search/content.js";
 import type { WorkingStatePin, WorkingStateRootStore } from "./types.js";
 import type { WorkingStateFileQuery, WorkingStateQueryOptions, WorkingStateQueryResult } from "./query-contract.js";
 
@@ -78,7 +78,7 @@ export function createWorkingBranchQuery(store:WorkingStateRootStore,pin:Working
         ...(request.ignoreCase===undefined?{}:{ignoreCase:request.ignoreCase}),...(request.maxResults===undefined?{}:{maxResults:request.maxResults}),
         ...(request.before===undefined?{}:{before:request.before}),...(request.after===undefined?{}:{after:request.after}),
       },{signal:opts.signal,collect:false,onRecords:async records=>{
-        const batch=records.map(r=>decodeNativeSearchHit(r,pin.workspaceId)).filter((r):r is NonNullable<typeof r>=>r!==null);
+        const batch=records.map(r=>decodeSearchHit(r,pin.workspaceId)).filter((r):r is NonNullable<typeof r>=>r!==null);
         count+=batch.length;if(opts.collect!==false)hits.push(...batch);
         if(batch.length&&opts.onBatch?.(batch)===false&&opts.onDrain)await opts.onDrain();
       }});

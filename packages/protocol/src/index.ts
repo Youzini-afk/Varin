@@ -22,7 +22,7 @@ export * from "./harness-web.js";
 export * from "./harness-history.js";
 export * from "./harness-tools.js";
 export * from "./harness-todo.js";
-export * from "./native-plan.js";
+export * from "./plan.js";
 export * from "./harness-threads.js";
 export * from "./utf8.js";
 export * from "./work-focus.js";
@@ -41,4 +41,4 @@ export * from "./session.js";
 export * from "./session-features.js";
 export * from "./types.js";
 
-export * from "./native-runtime.generated.js";
+export * from "./agent-runtime.generated.js";

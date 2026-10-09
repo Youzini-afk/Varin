@@ -1,5 +1,5 @@
 //! Selected declarative context transforms. The Host prepares a frozen declaration through its
-//! existing extension owner; native request compilation invokes this typed handle without RPC.
+//! existing extension owner; request compilation invokes this typed handle without RPC.
 //! No callback, filesystem, network or model execution belongs to this pure transform contract.
 use super::resolver::*;
 use super::{CompositionRegistry, ModelStepPins};

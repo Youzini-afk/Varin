@@ -81,6 +81,9 @@ bearer/pairing data, or file contents.
 
 ## Changes, verification, and Git
 
+Name modules, APIs, tools and internal records for their responsibility. Do not prefix the agent
+runtime with migration labels such as `native`, or retain old names as compatibility aliases.
+
 Inspect the owning implementation, consumers, and focused tests before changing behavior. Choose
 verification by what could actually regress: a local change needs focused evidence; a shared contract
 needs its real consumers; packaging and platform behavior need the relevant runtime or smoke check.

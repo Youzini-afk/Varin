@@ -168,15 +168,15 @@ export type KernelMethod =
   | "runtime.child.reconcile"
   | "runtime.child.wait.cancel";
 
-export type NativeRetrievalInvocation = { kind: 'model_step'; requestId: string; toolCallId: string } | { kind: 'policy_action'; actionId: string; nodeId: string; toolCallId: string };
+export type RetrievalInvocation = { kind: 'model_step'; requestId: string; toolCallId: string } | { kind: 'policy_action'; actionId: string; nodeId: string; toolCallId: string };
 
-export interface NativeRetrievalQuery {
-  invocation: NativeRetrievalInvocation;
+export interface RetrievalQuery {
+  invocation: RetrievalInvocation;
   runId: string;
   threadId: string;
   workspaceId: string;
   executionWorkspaceId: string;
-  liveRoot: NativeLiveRoot;
+  liveRoot: LiveRoot;
   grantId: string;
   projectId: string | null;
   question: string;
@@ -194,45 +194,45 @@ export interface KernelFileReadCheckResult {
   resourceKey: string;
 }
 
-export interface NativeLanguageQuery {
+export interface LanguageQuery {
   runId: string;
   threadId: string;
   workspaceId: string;
   executionWorkspaceId: string;
-  liveRoot: NativeLiveRoot;
+  liveRoot: LiveRoot;
   method: string;
   path: string;
   line?: number;
   character?: number;
 }
 
-export interface NativeHistoryPageParams {
+export interface HistoryPageParams {
   branchId: string;
   headId?: string;
   beforeId?: string;
   limit: number;
 }
 
-export interface NativeHistoryBodyParams {
+export interface HistoryBodyParams {
   itemId: string;
   chunkIndex: number;
 }
 
-export interface NativeHistoryReference {
+export interface HistoryReference {
   id: string;
   thread_id: string;
   parent: string | null;
-  source: NativeHistorySource;
+  source: HistorySource;
   content_ref: string;
 }
 
-export interface NativeHistoryPage {
+export interface HistoryPage {
   head: string | null;
-  items: NativeHistoryReference[];
+  items: HistoryReference[];
   previous: string | null;
 }
 
-export interface NativeHistoryBodyChunk {
+export interface HistoryBodyChunk {
   itemId: string;
   contentRef: string;
   chunkIndex: number;
@@ -241,154 +241,154 @@ export interface NativeHistoryBodyChunk {
   bytesBase64: string;
 }
 
-export interface NativeRunReconcileParams {
+export interface RunReconcileParams {
   runId: string;
   toolBinding: unknown;
 }
 
-export interface NativeRunReconcileResult {
+export interface RunReconcileResult {
   reconciled: string[];
   unresolved: string[];
 }
 
-export interface NativeSubmitLaunch {
+export interface SubmitLaunch {
   inheritSource?: boolean;
-  source: NativeLaunchSourceParams | null;
+  source: LaunchSourceParams | null;
   enabledTools: string[];
-  credentialScope?: NativeCredentialScope;
+  credentialScope?: CredentialScope;
 }
 
-export interface NativeLaunchFailedParams {
+export interface LaunchFailedParams {
   runId: string;
   code: string;
 }
 
-export interface NativeThreadParams {
+export interface ThreadParams {
   threadId: string;
 }
 
-export interface NativeThreadOperationsParams {
+export interface ThreadOperationsParams {
   threadId: string;
   branchId?: string;
 }
 
-export interface NativeThreadBranch {
+export interface ThreadBranch {
   branch_id: string;
   head: string | null;
   active_run_id: string | null;
-  latest_run: NativeRun | null;
+  latest_run: Run | null;
 }
 
-export interface NativeThreadSummary {
+export interface ThreadSummary {
   thread_id: string;
-  branches: NativeThreadBranch[];
+  branches: ThreadBranch[];
   observer_project_ids: Array<string | null>;
 }
 
-export type NativeRuntimeStreamEvent = {v: 1; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 1; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
-export type NativeSourceMode = 'fixed_branch' | 'materialized' | 'live_root';
+export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
-export interface NativeLiveRoot {
+export interface LiveRoot {
   hostId: string;
   canonicalRoot: string;
   rootId: string;
 }
 
-export interface NativeLaunchSourceParams {
+export interface LaunchSourceParams {
   environmentRunId?: string;
   workspaceId: string;
   executionWorkspaceId: string;
   branchId: string | null;
   revision: number | null;
-  mode: NativeSourceMode;
-  liveRoot?: NativeLiveRoot | null;
+  mode: SourceMode;
+  liveRoot?: LiveRoot | null;
 }
 
-export interface NativeLaunchSelectParams {
+export interface LaunchSelectParams {
   runId: string;
-  source: NativeLaunchSourceParams | null;
+  source: LaunchSourceParams | null;
   enabledTools: string[];
-  credentialScope?: NativeCredentialScope;
+  credentialScope?: CredentialScope;
 }
 
-export interface NativeLaunchSource {
+export interface LaunchSource {
   environment_run_id?: string | null;
   workspace_id: string;
   execution_workspace_id: string;
   branch_id: string | null;
   revision: number | null;
-  mode: NativeSourceMode;
-  live_root: NativeLiveRoot | null;
+  mode: SourceMode;
+  live_root: LiveRoot | null;
 }
 
-export interface NativeLaunchTool {
+export interface LaunchTool {
   name: string;
   version: string;
   schema: unknown;
 }
 
-export interface NativeLaunchPolicy {
+export interface LaunchPolicy {
   name: string;
   version: string;
 }
 
-export interface NativeAgentPolicyBinding {
+export interface AgentPolicyBinding {
   reference: string;
-  identity: NativeLaunchPolicy;
+  identity: LaunchPolicy;
 }
 
-export interface NativePolicyModelCapability {
+export interface PolicyModelCapability {
   capability_id: string;
   purpose: string;
-  status: NativePolicyModelStatus;
+  status: PolicyModelStatus;
   binding_id: string | null;
   configuration_identity: string | null;
   supported_operation: string;
   binding: unknown;
-  configuration: NativeModelSessionConfiguration | null;
-  credential_scope: NativeCredentialScope | null;
+  configuration: ModelSessionConfiguration | null;
+  credential_scope: CredentialScope | null;
 }
 
-export type NativePolicyModelStatus = 'available' | 'disabled' | 'unconfigured' | 'invalid' | 'unavailable';
+export type PolicyModelStatus = 'available' | 'disabled' | 'unconfigured' | 'invalid' | 'unavailable';
 
-export interface NativePolicyPrepareParams {
+export interface PolicyPrepareParams {
   runId: string;
-  identity: NativeLaunchPolicy;
+  identity: LaunchPolicy;
   policyModels?: unknown;
 }
 
-export interface NativeMcpBinding {
+export interface McpBinding {
   resources: Record<string, string>;
   reference: string;
   generation: number;
-  tools: NativeLaunchTool[];
+  tools: LaunchTool[];
 }
 
-export interface NativeMcpPrepareParams {
+export interface McpPrepareParams {
   runId: string;
-  binding: NativeMcpBinding;
+  binding: McpBinding;
 }
 
-export interface NativeLaunchSelection {
-  policy_models: NativePolicyModelCapability[];
-  mcp_binding: NativeMcpBinding | null;
-  credential_scope: NativeCredentialScope | null;
+export interface LaunchSelection {
+  policy_models: PolicyModelCapability[];
+  mcp_binding: McpBinding | null;
+  credential_scope: CredentialScope | null;
   connection_identity: string;
   provider_family: string;
   model: string;
   configuration_generation: number;
   tool_schema_generation: number;
-  tools: NativeLaunchTool[];
-  policy: NativeLaunchPolicy;
-  source: NativeLaunchSource | null;
+  tools: LaunchTool[];
+  policy: LaunchPolicy;
+  source: LaunchSource | null;
 }
 
-export interface NativeLaunchIntent {
+export interface LaunchIntent {
   preparation_failure: string | null;
   run_id: string;
   revision: number;
-  selection: NativeLaunchSelection;
+  selection: LaunchSelection;
   bound_epoch: number | null;
   requires_rebind: boolean;
 }
@@ -429,70 +429,70 @@ export interface KernelProcessStreamEvent {
   error: string | null;
 }
 
-export type NativeInputMode = "boundary" | "interrupt" | "next_run";
+export type InputMode = "boundary" | "interrupt" | "next_run";
 
-export type NativeInputState = "queued" | "delivered" | "cancelled";
+export type InputState = "queued" | "delivered" | "cancelled";
 
-export interface NativeInputEnqueueParams {
+export interface InputEnqueueParams {
   key: string;
   threadId: string;
   branchId: string;
-  mode: NativeInputMode;
+  mode: InputMode;
   input: unknown;
   configuration?: unknown;
 }
 
-export interface NativeInputEditParams {
+export interface InputEditParams {
   inputId: string;
   expectedRevision: number;
   content: unknown;
 }
 
-export interface NativeInputCancelParams {
+export interface InputCancelParams {
   inputId: string;
   expectedRevision: number;
 }
 
-export interface NativeInputHandleParams {
+export interface InputHandleParams {
   inputId: string;
 }
 
-export interface NativeInputReceipt {
+export interface InputReceipt {
   input_id: string;
   run_id: string;
-  mode: NativeInputMode;
+  mode: InputMode;
   cursor: number;
 }
 
-export interface NativeQueuedInput {
+export interface QueuedInput {
   id: string;
   thread_id: string;
   branch_id: string;
   run_id: string;
-  mode: NativeInputMode;
-  state: NativeInputState;
+  mode: InputMode;
+  state: InputState;
   revision: number;
   content: unknown;
   cursor: number;
 }
 
-export interface NativeExternalReceipt {
+export interface ExternalReceipt {
   executor: string;
   identity: string;
   epoch: string;
-  outcome: NativeOutcome;
-  effect: NativeEffect;
+  outcome: Outcome;
+  effect: Effect;
   result: unknown;
 }
 
-export interface NativeBranchForkParams {
+export interface BranchForkParams {
   sourceBranchId: string;
   branchId: string;
   headId: string | null;
-  planCapture?: NativePlanForkCaptureParams;
+  planCapture?: PlanForkCaptureParams;
 }
 
-export interface NativePlanForkCaptureParams {
+export interface PlanForkCaptureParams {
   sourceThreadId: string;
   sourceBranchId: string;
   targetBranchId: string;
@@ -501,26 +501,26 @@ export interface NativePlanForkCaptureParams {
   capturedRef: string | null;
 }
 
-export interface NativePlanContainsParams {
+export interface PlanContainsParams {
   branchId: string;
   headId: string | null;
   candidateHeadId: string | null;
   cursor?: string;
 }
 
-export interface NativePlanViewParams {
+export interface PlanViewParams {
   branchId: string;
   headId: string | null;
   current: boolean;
 }
 
-export interface NativeBranchForkResult {
+export interface BranchForkResult {
   threadId: string;
   branchId: string;
 }
 
-export interface NativeContextJobCreateParams {
-  personalization?: NativeContextPersonalization;
+export interface ContextJobCreateParams {
+  personalization?: ContextPersonalization;
   key: string;
   branchId: string;
   throughId: string;
@@ -529,25 +529,25 @@ export interface NativeContextJobCreateParams {
   instructionSources: string[];
   memoryCheckpoint: string | null;
   configuration: unknown;
-  credentialScope?: NativeCredentialScope;
+  credentialScope?: CredentialScope;
 }
 
-export interface NativeRunStartParams {
-  policyBinding?: NativeAgentPolicyBinding;
-  mcpBinding?: NativeMcpBinding;
+export interface RunStartParams {
+  policyBinding?: AgentPolicyBinding;
+  mcpBinding?: McpBinding;
   runId: string;
   toolBinding?: unknown;
-  credentialScope?: NativeCredentialScope;
+  credentialScope?: CredentialScope;
 }
 
-export interface NativeCredentialScope {
+export interface CredentialScope {
   reference: string;
   authority: string;
   account: string;
   generation: number;
 }
 
-export interface NativeModelSessionConfiguration {
+export interface ModelSessionConfiguration {
   providerId?: string;
   providerFamily: string;
   model: string;
@@ -565,85 +565,85 @@ export interface NativeModelSessionConfiguration {
   anthropicOauth?: boolean;
 }
 
-export interface NativeRunStartReceipt {
+export interface RunStartReceipt {
   runId: string;
   epoch: number;
 }
 
-export type NativeRunState = "accepted" | "preparing" | "runnable" | "generating" | "executing" | "waiting" | "completed" | "failed" | "cancelled";
+export type RunState = "accepted" | "preparing" | "runnable" | "generating" | "executing" | "waiting" | "completed" | "failed" | "cancelled";
 
-export type NativeOperationPhase = "accepted" | "preparing" | "queued" | "running" | "waiting" | "settling" | "terminal";
+export type OperationPhase = "accepted" | "preparing" | "queued" | "running" | "waiting" | "settling" | "terminal";
 
-export type NativeOutcome = "succeeded" | "failed" | "cancelled" | "indeterminate";
+export type Outcome = "succeeded" | "failed" | "cancelled" | "indeterminate";
 
-export type NativeEffect = "none" | "dispatched" | "partial" | "confirmed" | "unknown";
+export type Effect = "none" | "dispatched" | "partial" | "confirmed" | "unknown";
 
-export type NativeLifetime = "call" | "run" | "thread" | "environment";
+export type Lifetime = "call" | "run" | "thread" | "environment";
 
-export type NativeHistorySource = "user" | "assistant" | "tool" | "agent" | "environment" | "compaction";
+export type HistorySource = "user" | "assistant" | "tool" | "agent" | "environment" | "compaction";
 
-export type NativeModelStepState = "prepared" | "dispatched" | "completed" | "interrupted" | "failed" | "cancelled";
+export type ModelStepState = "prepared" | "dispatched" | "completed" | "interrupted" | "failed" | "cancelled";
 
-export type NativeDeliveryState = "selected" | "sent" | "committed";
+export type DeliveryState = "selected" | "sent" | "committed";
 
-export interface NativeThreadCreateParams {
+export interface ThreadCreateParams {
   threadId: string;
   branchId: string;
 }
 
-export interface NativeSystemSection {
+export interface SystemSection {
   name: string;
   content: string;
 }
 
-export interface NativeContextFragment {
+export interface ContextFragment {
   name: string;
   kind: string;
   content: string;
 }
 
-export interface NativeContextComposition {
+export interface ContextComposition {
   providerId: string;
   contentVersion: string;
   scopeId: string;
   selectionRevision: number;
-  sections: NativeContextFragment[];
+  sections: ContextFragment[];
 }
 
-export interface NativeMemorySnapshot {
+export interface MemorySnapshot {
   revision: number;
   memories: unknown[];
 }
 
-export interface NativeContextPersonalization {
-  memorySnapshot: NativeMemorySnapshot;
+export interface ContextPersonalization {
+  memorySnapshot: MemorySnapshot;
   configurationDigest: string;
   mode: string;
   threadRole: string;
-  contextComposition?: NativeContextComposition;
+  contextComposition?: ContextComposition;
   revision: number;
   sessionId: string;
   projectId: string | null;
-  originalSections: NativeSystemSection[];
+  originalSections: SystemSection[];
   instructionSources: string[];
 }
 
-export interface NativeContextRefreshParams {
+export interface ContextRefreshParams {
   branchId: string;
   expectedRevision: number;
-  context: NativeInitialContext;
+  context: InitialContext;
 }
 
-export interface NativeInitialContext {
-  personalization?: NativeContextPersonalization;
+export interface InitialContext {
+  personalization?: ContextPersonalization;
   effectiveSystemPrompt: string;
   instructionSources: string[];
   memoryCheckpoint: string | null;
 }
 
-export interface NativeInputSubmitParams {
-  initialContext?: NativeInitialContext;
-  launch?: NativeSubmitLaunch;
+export interface InputSubmitParams {
+  initialContext?: InitialContext;
+  launch?: SubmitLaunch;
   key: string;
   threadId: string;
   branchId: string;
@@ -652,56 +652,56 @@ export interface NativeInputSubmitParams {
   configuration: unknown;
 }
 
-export interface NativeRunParams {
+export interface RunParams {
   runId: string;
 }
 
-export interface NativePermissionOpenParams {
+export interface PermissionOpenParams {
   operationId: string;
   permissionId: string;
   call: unknown;
   scope: unknown;
 }
 
-export interface NativePermissionDecideParams {
+export interface PermissionDecideParams {
   operationId: string;
   permissionId: string;
   decision: string;
 }
 
-export interface NativeQuestionAnswerParams {
+export interface QuestionAnswerParams {
   operationId: string;
   answer: string;
 }
 
-export interface NativeOperationParams {
+export interface OperationParams {
   operationId: string;
 }
 
-export interface NativeHistoryParams {
+export interface HistoryParams {
   branchId: string;
 }
 
-export interface NativeEventsParams {
+export interface EventsParams {
   cursor: number;
   limit: number;
 }
 
-export interface NativeObserverReadParams {
+export interface ObserverReadParams {
   observerId: string;
   threadId: string;
   limit: number;
   throughCursor: number;
 }
 
-export interface NativeObserverDeliveryParams {
+export interface ObserverDeliveryParams {
   observerId: string;
   threadId: string;
   cursor: number;
-  state: NativeDeliveryState;
+  state: DeliveryState;
 }
 
-export interface NativeAdmissionInspectParams {
+export interface AdmissionInspectParams {
   runId: string;
   ownerGeneration: number;
   callId: string;
@@ -710,13 +710,13 @@ export interface NativeAdmissionInspectParams {
   nodeId?: string;
 }
 
-export interface NativeAdmissionSummary {
+export interface AdmissionSummary {
   localComputeCapacity: number;
   localComputeActive: number;
   queued: number;
 }
 
-export interface NativeAdmissionStatus {
+export interface AdmissionStatus {
   admissionId: string;
   familyId: string;
   class: 'unmetered' | 'local_compute';
@@ -727,19 +727,19 @@ export interface NativeAdmissionStatus {
   reason: string | null;
 }
 
-export interface NativeAdmissionInspection {
+export interface AdmissionInspection {
   admissionId: string;
   state: 'queued' | 'active' | 'settled' | 'not_active';
-  queue: NativeAdmissionStatus | null;
+  queue: AdmissionStatus | null;
 }
 
-export interface NativeStatus {
+export interface RuntimeStatus {
   epoch: number;
   eventCursor: number;
-  admission: NativeAdmissionSummary;
+  admission: AdmissionSummary;
 }
 
-export interface NativeReceipt {
+export interface InputSubmitReceipt {
   thread_id: string;
   branch_id: string;
   run_id: string;
@@ -747,29 +747,29 @@ export interface NativeReceipt {
   cursor: number;
 }
 
-export interface NativeRun {
+export interface Run {
   waiting_on: string | null;
   id: string;
   thread_id: string;
   branch_id: string;
-  state: NativeRunState;
+  state: RunState;
   revision: number;
   epoch: number;
   configuration: unknown;
   cancel_requested: boolean;
 }
 
-export interface NativeOperation {
-  external_receipt: NativeExternalReceipt | null;
+export interface Operation {
+  external_receipt: ExternalReceipt | null;
   id: string;
   run_id: string;
   epoch: number;
   revision: number;
-  phase: NativeOperationPhase;
-  outcome: NativeOutcome | null;
-  effect: NativeEffect;
+  phase: OperationPhase;
+  outcome: Outcome | null;
+  effect: Effect;
   cancel_requested: boolean;
-  lifetime: NativeLifetime;
+  lifetime: Lifetime;
   handed_off: boolean;
   executor: string | null;
   waiting_on: string | null;
@@ -777,23 +777,23 @@ export interface NativeOperation {
   result: unknown;
 }
 
-export interface NativeProviderOriginal {
+export interface ProviderOriginal {
   connection_identity: string;
   adapter: string;
   version: string;
   item: unknown;
 }
 
-export interface NativeHistoryItem {
+export interface HistoryItem {
   id: string;
   thread_id: string;
   parent: string | null;
-  source: NativeHistorySource;
+  source: HistorySource;
   content: unknown;
-  provider: NativeProviderOriginal | null;
+  provider: ProviderOriginal | null;
 }
 
-export interface NativeEvent {
+export interface RuntimeEvent {
   cursor: number;
   subject: string;
   revision: number;
@@ -1925,48 +1925,48 @@ export interface KernelComputeReadResult {
   message: string | null;
 }
 
-export interface NativeUnacceptedChildSource {
+export interface UnacceptedChildSource {
   operation_id: string;
   parent_thread_id: string;
-  source: NativeLaunchSource;
+  source: LaunchSource;
   pin_id: string;
 }
 
-export interface NativeChildPrepareParams {
+export interface ChildPrepareParams {
   operationId: string;
-  source: NativeLaunchSourceParams;
-  context: NativeInitialContext;
+  source: LaunchSourceParams;
+  context: InitialContext;
 }
 
-export interface NativeChildFailParams {
+export interface ChildFailParams {
   operationId: string;
   code: string;
 }
 
-export interface NativeChildWaitParams {
+export interface ChildWaitParams {
   waitId: string;
 }
 
-export interface NativeChildInput {
+export interface ChildInput {
   task: string;
   model: string;
   profile: string;
 }
 
-export interface NativeChildSourcePin {
+export interface ChildSourcePin {
   pin_id: string;
   root: string;
-  source: NativeLaunchSource;
+  source: LaunchSource;
 }
 
-export interface NativeChildReportReadParams {
+export interface ChildReportReadParams {
   operationId: string;
   itemId: string;
   offset?: number;
   maxBytes?: number;
 }
 
-export interface NativeChildTextPage {
+export interface ChildTextPage {
   operation_id: string;
   item_id: string;
   offset: number;
@@ -1975,8 +1975,8 @@ export interface NativeChildTextPage {
   text: string;
 }
 
-export interface NativeChildReport {
-  outcome: NativeOutcome;
+export interface ChildReport {
+  outcome: Outcome;
   sender_thread_id: string;
   run_id: string | null;
   history_ids: string[];
@@ -1984,7 +1984,7 @@ export interface NativeChildReport {
   code_result: string;
 }
 
-export interface NativeChildTask {
+export interface ChildTask {
   operation_id: string;
   parent_run_id: string;
   parent_thread_id: string;
@@ -1994,19 +1994,19 @@ export interface NativeChildTask {
   child_thread_id: string;
   child_branch_id: string;
   project_id: string | null;
-  input: NativeChildInput;
+  input: ChildInput;
   configuration: unknown;
-  launch: NativeLaunchSelection;
-  source_pin: NativeChildSourcePin;
+  launch: LaunchSelection;
+  source_pin: ChildSourcePin;
   state: string;
   revision: number;
   cursor: number;
-  receipt: NativeReceipt | null;
-  report: NativeChildReport | null;
+  receipt: InputSubmitReceipt | null;
+  report: ChildReport | null;
   resources_released: boolean;
 }
 
-export interface NativeChildWait {
+export interface ChildWait {
   id: string;
   run_id: string;
   subject: string;
@@ -2017,51 +2017,51 @@ export interface NativeChildWait {
 }
 
 export type KernelMethodParams = {
-  "runtime.branch.fork": NativeBranchForkParams;
-  "runtime.plan.view": NativePlanViewParams;
-  "runtime.plan.contains": NativePlanContainsParams;
-  "runtime.context_job.create": NativeContextJobCreateParams;
-  "runtime.context_job.inspect": NativeRunParams;
-  "runtime.context_job.list": NativeHistoryParams;
-  "runtime.context_job.publish": NativeRunParams;
-  "runtime.context.inspect": NativeHistoryParams;
-  "runtime.context.refresh": NativeContextRefreshParams;
-  "runtime.memory.reconcile": NativeRunParams;
-  "runtime.plan.reconcile": NativeRunParams;
-  "runtime.history.page": NativeHistoryPageParams;
-  "runtime.history.body": NativeHistoryBodyParams;
-  "runtime.thread.operations.active": NativeThreadOperationsParams;
-  "runtime.run.reconcile": NativeRunReconcileParams;
-  "runtime.launch.fail": NativeLaunchFailedParams;
-  "runtime.thread.inspect": NativeThreadParams;
+  "runtime.branch.fork": BranchForkParams;
+  "runtime.plan.view": PlanViewParams;
+  "runtime.plan.contains": PlanContainsParams;
+  "runtime.context_job.create": ContextJobCreateParams;
+  "runtime.context_job.inspect": RunParams;
+  "runtime.context_job.list": HistoryParams;
+  "runtime.context_job.publish": RunParams;
+  "runtime.context.inspect": HistoryParams;
+  "runtime.context.refresh": ContextRefreshParams;
+  "runtime.memory.reconcile": RunParams;
+  "runtime.plan.reconcile": RunParams;
+  "runtime.history.page": HistoryPageParams;
+  "runtime.history.body": HistoryBodyParams;
+  "runtime.thread.operations.active": ThreadOperationsParams;
+  "runtime.run.reconcile": RunReconcileParams;
+  "runtime.launch.fail": LaunchFailedParams;
+  "runtime.thread.inspect": ThreadParams;
   "runtime.thread.list": KernelEmptyParams;
-  "runtime.input.enqueue": NativeInputEnqueueParams;
-  "runtime.input.edit": NativeInputEditParams;
-  "runtime.input.cancel": NativeInputCancelParams;
-  "runtime.input.inspect": NativeInputHandleParams;
-  "runtime.input.list": NativeHistoryParams;
-  "runtime.launch.select": NativeLaunchSelectParams;
-  "runtime.launch.mcp.prepare": NativeMcpPrepareParams;
-  "runtime.launch.policy.prepare": NativePolicyPrepareParams;
-  "runtime.launch.inspect": NativeRunParams;
+  "runtime.input.enqueue": InputEnqueueParams;
+  "runtime.input.edit": InputEditParams;
+  "runtime.input.cancel": InputCancelParams;
+  "runtime.input.inspect": InputHandleParams;
+  "runtime.input.list": HistoryParams;
+  "runtime.launch.select": LaunchSelectParams;
+  "runtime.launch.mcp.prepare": McpPrepareParams;
+  "runtime.launch.policy.prepare": PolicyPrepareParams;
+  "runtime.launch.inspect": RunParams;
   "runtime.launch.list": KernelEmptyParams;
-  "runtime.run.start": NativeRunStartParams;
+  "runtime.run.start": RunStartParams;
   "runtime.status": KernelEmptyParams;
-  "runtime.admission.inspect": NativeAdmissionInspectParams;
-  "runtime.thread.create": NativeThreadCreateParams;
-  "runtime.input.submit": NativeInputSubmitParams;
-  "runtime.run.inspect": NativeRunParams;
-  "runtime.run.cancel": NativeRunParams;
-  "runtime.permission.open": NativePermissionOpenParams;
-  "runtime.permission.decide": NativePermissionDecideParams;
-  "runtime.permission.consume": NativePermissionOpenParams;
-  "runtime.question.answer": NativeQuestionAnswerParams;
-  "runtime.operation.inspect": NativeOperationParams;
-  "runtime.operation.cancel": NativeOperationParams;
-  "runtime.history.read": NativeHistoryParams;
-  "runtime.events.read": NativeEventsParams;
-  "runtime.observer.read": NativeObserverReadParams;
-  "runtime.observer.delivery": NativeObserverDeliveryParams;
+  "runtime.admission.inspect": AdmissionInspectParams;
+  "runtime.thread.create": ThreadCreateParams;
+  "runtime.input.submit": InputSubmitParams;
+  "runtime.run.inspect": RunParams;
+  "runtime.run.cancel": RunParams;
+  "runtime.permission.open": PermissionOpenParams;
+  "runtime.permission.decide": PermissionDecideParams;
+  "runtime.permission.consume": PermissionOpenParams;
+  "runtime.question.answer": QuestionAnswerParams;
+  "runtime.operation.inspect": OperationParams;
+  "runtime.operation.cancel": OperationParams;
+  "runtime.history.read": HistoryParams;
+  "runtime.events.read": EventsParams;
+  "runtime.observer.read": ObserverReadParams;
+  "runtime.observer.delivery": ObserverDeliveryParams;
   "process.subscribe": KernelProcessSubscribeParams;
   "process.subscription.ack": KernelProcessSubscriptionAckParams;
   "process.subscription.unsubscribe": KernelProcessSubscriptionParams;
@@ -2163,18 +2163,18 @@ export type KernelMethodParams = {
   "compute.release": KernelComputeHandleParams;
   "compute.grammar.register": KernelComputeGrammarParams;
   "runtime.child.sources.pending": KernelEmptyParams;
-  "runtime.child.sources.release": NativeOperationParams;
+  "runtime.child.sources.release": OperationParams;
   "runtime.child.list": KernelEmptyParams;
-  "runtime.child.inspect": NativeOperationParams;
-  "runtime.child.report.read": NativeChildReportReadParams;
-  "runtime.child.for_thread": NativeThreadParams;
-  "runtime.child.prepare": NativeChildPrepareParams;
-  "runtime.child.fail": NativeChildFailParams;
-  "runtime.child.cancel": NativeOperationParams;
-  "runtime.child.release": NativeOperationParams;
+  "runtime.child.inspect": OperationParams;
+  "runtime.child.report.read": ChildReportReadParams;
+  "runtime.child.for_thread": ThreadParams;
+  "runtime.child.prepare": ChildPrepareParams;
+  "runtime.child.fail": ChildFailParams;
+  "runtime.child.cancel": OperationParams;
+  "runtime.child.release": OperationParams;
   "runtime.process.wait.reconcile": KernelEmptyParams;
   "runtime.child.reconcile": KernelEmptyParams;
-  "runtime.child.wait.cancel": NativeChildWaitParams;
+  "runtime.child.wait.cancel": ChildWaitParams;
 };
 
 export type KernelRequest =
@@ -2183,7 +2183,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.branch.fork";
-      params: NativeBranchForkParams;
+      params: BranchForkParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2192,7 +2192,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.plan.view";
-      params: NativePlanViewParams;
+      params: PlanViewParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2201,7 +2201,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.plan.contains";
-      params: NativePlanContainsParams;
+      params: PlanContainsParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2210,7 +2210,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.context_job.create";
-      params: NativeContextJobCreateParams;
+      params: ContextJobCreateParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2219,7 +2219,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.context_job.inspect";
-      params: NativeRunParams;
+      params: RunParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2228,7 +2228,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.context_job.list";
-      params: NativeHistoryParams;
+      params: HistoryParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2237,7 +2237,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.context_job.publish";
-      params: NativeRunParams;
+      params: RunParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2246,7 +2246,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.context.inspect";
-      params: NativeHistoryParams;
+      params: HistoryParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2255,7 +2255,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.context.refresh";
-      params: NativeContextRefreshParams;
+      params: ContextRefreshParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2264,7 +2264,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.memory.reconcile";
-      params: NativeRunParams;
+      params: RunParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2273,7 +2273,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.plan.reconcile";
-      params: NativeRunParams;
+      params: RunParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2282,7 +2282,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.history.page";
-      params: NativeHistoryPageParams;
+      params: HistoryPageParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2291,7 +2291,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.history.body";
-      params: NativeHistoryBodyParams;
+      params: HistoryBodyParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2300,7 +2300,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.thread.operations.active";
-      params: NativeThreadOperationsParams;
+      params: ThreadOperationsParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2309,7 +2309,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.run.reconcile";
-      params: NativeRunReconcileParams;
+      params: RunReconcileParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2318,7 +2318,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.launch.fail";
-      params: NativeLaunchFailedParams;
+      params: LaunchFailedParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2327,7 +2327,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.thread.inspect";
-      params: NativeThreadParams;
+      params: ThreadParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2345,7 +2345,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.input.enqueue";
-      params: NativeInputEnqueueParams;
+      params: InputEnqueueParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2354,7 +2354,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.input.edit";
-      params: NativeInputEditParams;
+      params: InputEditParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2363,7 +2363,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.input.cancel";
-      params: NativeInputCancelParams;
+      params: InputCancelParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2372,7 +2372,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.input.inspect";
-      params: NativeInputHandleParams;
+      params: InputHandleParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2381,7 +2381,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.input.list";
-      params: NativeHistoryParams;
+      params: HistoryParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2390,7 +2390,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.launch.select";
-      params: NativeLaunchSelectParams;
+      params: LaunchSelectParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2399,7 +2399,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.launch.mcp.prepare";
-      params: NativeMcpPrepareParams;
+      params: McpPrepareParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2408,7 +2408,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.launch.policy.prepare";
-      params: NativePolicyPrepareParams;
+      params: PolicyPrepareParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2417,7 +2417,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.launch.inspect";
-      params: NativeRunParams;
+      params: RunParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2435,7 +2435,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.run.start";
-      params: NativeRunStartParams;
+      params: RunStartParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2453,7 +2453,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.admission.inspect";
-      params: NativeAdmissionInspectParams;
+      params: AdmissionInspectParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2462,7 +2462,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.thread.create";
-      params: NativeThreadCreateParams;
+      params: ThreadCreateParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2471,7 +2471,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.input.submit";
-      params: NativeInputSubmitParams;
+      params: InputSubmitParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2480,7 +2480,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.run.inspect";
-      params: NativeRunParams;
+      params: RunParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2489,7 +2489,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.run.cancel";
-      params: NativeRunParams;
+      params: RunParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2498,7 +2498,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.permission.open";
-      params: NativePermissionOpenParams;
+      params: PermissionOpenParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2507,7 +2507,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.permission.decide";
-      params: NativePermissionDecideParams;
+      params: PermissionDecideParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2516,7 +2516,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.permission.consume";
-      params: NativePermissionOpenParams;
+      params: PermissionOpenParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2525,7 +2525,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.question.answer";
-      params: NativeQuestionAnswerParams;
+      params: QuestionAnswerParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2534,7 +2534,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.operation.inspect";
-      params: NativeOperationParams;
+      params: OperationParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2543,7 +2543,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.operation.cancel";
-      params: NativeOperationParams;
+      params: OperationParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2552,7 +2552,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.history.read";
-      params: NativeHistoryParams;
+      params: HistoryParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2561,7 +2561,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.events.read";
-      params: NativeEventsParams;
+      params: EventsParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2570,7 +2570,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.observer.read";
-      params: NativeObserverReadParams;
+      params: ObserverReadParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2579,7 +2579,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.observer.delivery";
-      params: NativeObserverDeliveryParams;
+      params: ObserverDeliveryParams;
       epoch?: string;
       grantId?: string;
     }
@@ -3497,7 +3497,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.child.sources.release";
-      params: NativeOperationParams;
+      params: OperationParams;
       epoch?: string;
       grantId?: string;
     }
@@ -3515,7 +3515,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.child.inspect";
-      params: NativeOperationParams;
+      params: OperationParams;
       epoch?: string;
       grantId?: string;
     }
@@ -3524,7 +3524,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.child.report.read";
-      params: NativeChildReportReadParams;
+      params: ChildReportReadParams;
       epoch?: string;
       grantId?: string;
     }
@@ -3533,7 +3533,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.child.for_thread";
-      params: NativeThreadParams;
+      params: ThreadParams;
       epoch?: string;
       grantId?: string;
     }
@@ -3542,7 +3542,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.child.prepare";
-      params: NativeChildPrepareParams;
+      params: ChildPrepareParams;
       epoch?: string;
       grantId?: string;
     }
@@ -3551,7 +3551,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.child.fail";
-      params: NativeChildFailParams;
+      params: ChildFailParams;
       epoch?: string;
       grantId?: string;
     }
@@ -3560,7 +3560,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.child.cancel";
-      params: NativeOperationParams;
+      params: OperationParams;
       epoch?: string;
       grantId?: string;
     }
@@ -3569,7 +3569,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.child.release";
-      params: NativeOperationParams;
+      params: OperationParams;
       epoch?: string;
       grantId?: string;
     }
@@ -3596,7 +3596,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.child.wait.cancel";
-      params: NativeChildWaitParams;
+      params: ChildWaitParams;
       epoch?: string;
       grantId?: string;
     }

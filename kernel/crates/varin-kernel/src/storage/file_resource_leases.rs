@@ -20,10 +20,10 @@ fn overlaps(left: &CanonicalFileLeaseResource, right: &CanonicalFileLeaseResourc
 
 impl Storage {
     /// Same canonical file identity as actual leases, independent of alias roots and Run IDs.
-    pub(crate) fn native_file_resource_key(&self, root_id: &str, path: &str, grant: &Grant) -> Result<String, KernelError> {
+    pub(crate) fn file_resource_key(&self, root_id: &str, path: &str, grant: &Grant) -> Result<String, KernelError> {
         let resolved = self.canonical_lease_resources(root_id, &[FileLeaseResource { path: path.into(), subtree: false }], grant)?;
         let absolute = resolved[0].absolute.to_str().ok_or_else(|| KernelError::Authorization("file resource path is not UTF-8".into()))?;
-        Ok(serde_json::to_string(&["native-file", absolute])?)
+        Ok(serde_json::to_string(&["file", absolute])?)
     }
     fn canonical_lease_resources(
         &self,

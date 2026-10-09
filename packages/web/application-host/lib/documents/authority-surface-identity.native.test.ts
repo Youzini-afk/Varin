@@ -20,13 +20,13 @@ import {
   createInMemoryRecoveryDurablePort,
 } from "../recovery/recovery-durable-port.test-helper.js";
 
-import { createNativeAuthorityTestRuntime } from "../kernel/native-authority.test-helper.js";
+import { createAuthorityTestRuntime } from "../kernel/authority.test-helper.js";
 import type { RecoveryDurableOperationPort } from "../recovery/journal-engine.js";
 
 const utf16LeHello = Buffer.from([0xff, 0xfe, 0x68, 0x00, 0x69, 0x00]);
 
 const bindDurableCatalog = async (harness: DocumentAuthorityHarness) => {
-  const native = await createNativeAuthorityTestRuntime({ documents: harness.authority, hostId: harness.authority.hostId, dataDir: harness.dataDir });
+  const native = await createAuthorityTestRuntime({ documents: harness.authority, hostId: harness.authority.hostId, dataDir: harness.dataDir });
   const cleanup = harness.cleanup;
   harness.cleanup = async () => { try { await native.dispose(); } finally { await cleanup(); } };
   const context = await native.engine.withWorkspaceStorage(harness.identity.workspaceId, { mode: "exclusive", purpose: "surface-identity-acceptance", create: true }, current => current);
@@ -628,7 +628,7 @@ describe("surface identity and durable compensation", () => {
   it("keeps dispatched surface uncertainty while compensating another applied disk path", async () => {
     harness = await createDocumentAuthorityHarness();
     const activeHarness = harness;
-    const { objectRoot, identity, fileStore, durableRecoveryStore, context: nativeContext } =
+    const { objectRoot, identity, fileStore, durableRecoveryStore, context: threadContext } =
       await bindDurableCatalog(activeHarness);
     await fs.promises.writeFile(
       path.join(activeHarness.workspaceRoot, "disk.txt"),
@@ -653,7 +653,7 @@ describe("surface identity and durable compensation", () => {
         path.join(activeHarness.workspaceRoot, "disk.txt"),
         "after\n",
       );
-      const context: DurableFileOperationContext = nativeContext;
+      const context: DurableFileOperationContext = threadContext;
       const data = await beginAgentMutationOperationAsync(context, {
         operationId: "op-dispatched-surface",
         sessionId: "session-dispatched",

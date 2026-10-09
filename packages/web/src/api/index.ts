@@ -1,4 +1,4 @@
-import { createNativeThreadsHttpAPI } from '@varin/application-client';
+import { createThreadsHttpAPI } from '@varin/application-client';
 import type { RuntimeAPIs } from '@varin/application-client';
 import {
   createRuntimeUrlResolver,
@@ -52,7 +52,7 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
   return {
     runtime: { platform: 'web', isDesktop: false, label: 'web' },
     piRuntime: createWebPiRuntimeAPI(),
-    nativeThreads: createNativeThreadsHttpAPI(),
+    threads: createThreadsHttpAPI(),
     terminal: createWebTerminalAPI(),
     git: createWebGitAPI(),
     workspace: createWebWorkspaceAPI(),

@@ -74,8 +74,8 @@ contains history count/head references and settlement metadata, not full histori
 The native core remains the authority for legal action admission and durable checkpoints.
 
 `VARIN_RETRIEVAL_PLAN_CONTRACT` describes the declarative `varin.retrieval.plan@1` boundary.
-`describe([])` returns an immutable `configurationId`, `structure: 'native' | 'disabled'`, and optional
-`semantic: 'native' | 'disabled'` (omission disables semantic recall). The parser rejects unknown
+`describe([])` returns an immutable `configurationId`, `structure: 'builtin' | 'disabled'`, and optional
+`semantic: 'builtin' | 'disabled'` (omission disables semantic recall). The parser rejects unknown
 fields, including model selectors. The selected native Host owns keyword/structure implementations,
 the semantic backend/published-reader lease, and all Run-granted reads; the extension gets no query,
 source text, root, filesystem or model capability through this contract.

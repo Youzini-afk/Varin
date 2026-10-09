@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { expect, it, vi } from 'vitest';
 import type { SessionSnapshot, SessionStats } from '@varin/protocol';
 import { createDocumentAuthority } from '../documents/authority.js';
-import { createNativeAuthorityTestRuntime } from '../kernel/native-authority.test-helper.js';
+import { createAuthorityTestRuntime } from '../kernel/authority.test-helper.js';
 import { createManagedRootAdmission } from '../kernel/managed-root-admission.js';
 import { canonicalizePathIdentity, normalizePathIdentity } from '../workspace/path-safety.js';
 import { assertManagedWorktreeOwnership } from './worktree-ownership.js';
@@ -33,7 +33,7 @@ it('continues the original session after Git/native archive, reclaim and restore
   const documents = createDocumentAuthority({ hostId: 'host', dataDir: join(root, 'documents'), isAllowedRoot: async () => true });
   const { workspaceId } = await documents.resolveWorkspace({ path: repo });
   const registry = createThreadRegistry({ hostId: 'host', dataDir: join(root, 'threads') });
-  const native = await createNativeAuthorityTestRuntime({ documents, hostId: 'host', dataDir: join(root, 'data') });
+  const native = await createAuthorityTestRuntime({ documents, hostId: 'host', dataDir: join(root, 'data') });
   const { workingStates } = native;
   const managed = createManagedRootAdmission({
     listWorktrees: async (id) => (await registry.listThreads(id, { kind: 'session', id: 'parent' }, true)).flatMap(thread => thread.worktree ? [thread.worktree] : []),

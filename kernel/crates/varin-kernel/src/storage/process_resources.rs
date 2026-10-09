@@ -305,7 +305,7 @@ impl Storage {
         if let Err(error)=self.processes.spawn(id,json!({"processId":id,"kernelEpoch":grant.kernel_epoch,
             "receiptPath":receipt_path,"jobName":job_name,"cwd":cwd,"command":command,"args":params_value["args"],
             "windowsRawArguments":params_value["windowsRawArguments"],
-            "env":params_value["env"],"mode":mode,"cols":cols,"rows":rows,"nativeRunId":params_value["__nativeRunId"]})){
+            "env":params_value["env"],"mode":mode,"cols":cols,"rows":rows,"runId":params_value["__runId"]})){
             let mut failed=record;
             failed["status"]=json!("failed");failed["writerActive"]=json!(false);failed["reason"]=json!(error.to_string());
             self.persist_process_record(id,&failed)?;
@@ -317,7 +317,7 @@ impl Storage {
     /// Exact read-only delegation for a Catalog-validated process of the same Run.
     /// The current grant was authorized by the Storage actor; the original grant is never
     /// revived or substituted as the caller. No persisted observer or control authority exists.
-    pub(crate) fn observe_native_process(&mut self, method: &str, params_value: &Value,
+    pub(crate) fn observe_run_process(&mut self, method: &str, params_value: &Value,
         grant: &Grant, root_id: Option<&str>, authorize_only: bool) -> Result<Value, KernelError> {
         if !matches!(method,"process.inspect"|"process.read") {
             return Err(KernelError::Authorization("process delegation is observation-only".into()));

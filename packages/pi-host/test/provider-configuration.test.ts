@@ -32,7 +32,7 @@ function config(
 
 describe("ProviderConfigurationManager", () => {
   it("retains native typed models with shared IDs and publishes a project-free classifier catalog", async () => {
-    const root = await mkdtemp(join(tmpdir(), "varin-native-model-types-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-model-types-"));
     const agentDir = join(root, "agent"); const cwd = join(root, "workspace");
     await mkdir(agentDir); await mkdir(join(cwd, ".pi"), { recursive: true });
     await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: { mixed: {

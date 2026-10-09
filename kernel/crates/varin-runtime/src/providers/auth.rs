@@ -176,12 +176,12 @@ impl Drop for WorkerRuntime {
 }
 /// Refresh single-flight is provided by the authoritative store's per-reference transaction,
 /// not a process-global credential cache. A cancelled waiter never cancels a started refresh.
-pub struct NativeCredentialBroker {
+pub struct CredentialBroker {
     store: Arc<dyn CredentialStore>,
     bindings: BTreeMap<String, CredentialBinding>,
     runtime: OnceLock<Result<WorkerRuntime, CredentialError>>,
 }
-impl NativeCredentialBroker {
+impl CredentialBroker {
     pub fn new(
         store: Arc<dyn CredentialStore>,
         bindings: Vec<CredentialBinding>,
@@ -306,7 +306,7 @@ impl NativeCredentialBroker {
         runtime.block_on(async{tokio::select!{biased;_ = cancel.cancelled()=>Err(CredentialError::Cancelled),result=task=>result.map_err(|_|CredentialError::WorkerUnavailable)?}})
     }
 }
-impl CredentialResolver for NativeCredentialBroker {
+impl CredentialResolver for CredentialBroker {
     fn headers(
         &self,
         reference: Option<&str>,

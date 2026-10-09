@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, vi } from "vitest";
 import { createDocumentAuthority } from "../../documents/authority.js";
-import { createNativeAuthorityTestRuntime } from "../../kernel/native-authority.test-helper.js";
+import { createAuthorityTestRuntime } from "../../kernel/authority.test-helper.js";
 import { createThreadRegistry } from "../thread-registry.js";
 import { createThreadRuntime, type ThreadSessionAdapter } from "../thread-runtime.js";
 import { createThreadUpdateService } from "../thread-services.js";
@@ -14,7 +14,7 @@ import type { HarnessServiceContext } from "../router.js";
 import type { RecoveryState, WorkspaceWorkingStateRootAccess } from "./types.js";
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "varin-native-baseline-update-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-baseline-update-"));
   const workspace = join(root, "workspace");
   const managedRoot = join(root, "managed");
   const directory = join(managedRoot, "child");
@@ -27,7 +27,7 @@ async function fixture() {
   const documents = createDocumentAuthority({ hostId: "baseline-host", dataDir: join(root, "documents"), isAllowedRoot: async () => true });
   const { workspaceId } = await documents.resolveWorkspace({ path: workspace });
   const registry = createThreadRegistry({ hostId: "baseline-host", dataDir: join(root, "threads") });
-  const native = await createNativeAuthorityTestRuntime({ documents, hostId: "baseline-host", dataDir: join(root, "data") });
+  const native = await createAuthorityTestRuntime({ documents, hostId: "baseline-host", dataDir: join(root, "data") });
   const common = { scopeId: workspaceId, brief: "Implement", kind: "implementation" as const, createdBy: "agent" as const,
     concurrency: 2, autoRun: true, worktree: "isolated" as const, tools: ["read", "write", "update"], permissions: {} };
   const parent = await registry.createThread({ ...common, parent: { kind: "session", id: "root-session" } });

@@ -1,4 +1,4 @@
-//! Worker-friendly native agent execution. Providers, policies and tools run outside Catalog locks.
+//! Worker-friendly agent execution. Providers, policies and tools run outside Catalog locks.
 //!
 //! A worker owns one engine invocation. Its cloneable cancellation control has no dependency on
 //! persistence or the data stream. Adapters must observe that control during blocking I/O. This
@@ -605,7 +605,7 @@ pub trait Persistence: Send + Sync {
     fn confirms_no_effect(&self, _context: &ToolExecutionContext, _epoch: u64, _completion: &ToolCompletion)
         -> Result<bool, ExecutionError> { Ok(false) }
 
-    /// Native Catalog overrides this with its actual parent/child lineage and execution fence.
+    /// Catalog overrides this with its actual parent/child lineage and execution fence.
     fn task_family(&self, run: &str, _epoch: u64) -> Result<String, ExecutionError> { Ok(run.into()) }
 
     fn policy_model_job(&self, _run: &str, _epoch: u64) -> Result<Option<PolicyModelState>, ExecutionError> { Ok(None) }

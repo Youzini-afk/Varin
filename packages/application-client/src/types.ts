@@ -2498,7 +2498,7 @@ export interface WorkspaceTestAPI {
 }
 
 export interface RuntimeAPIs {
-  nativeThreads?: import("./native-threads.js").NativeThreadsAPI;
+  threads?: import("./threads.js").ThreadsAPI;
   runtime: RuntimeDescriptor;
   piRuntime?: PiRuntimeManagementAPI;
   terminal: TerminalAPI;

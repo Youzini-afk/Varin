@@ -132,7 +132,7 @@ fn same_reference_refresh_is_single_flight_and_headers_follow_commit() {
         release: Some(Mutex::new(release_rx)),
     });
     let broker = Arc::new(
-        NativeCredentialBroker::new(store.clone(), vec![binding("one", refresh.clone())]).unwrap(),
+        CredentialBroker::new(store.clone(), vec![binding("one", refresh.clone())]).unwrap(),
     );
     let first = broker.clone();
     let one = std::thread::spawn(move || first.headers(Some("one"), &CancellationToken::default()));
@@ -165,7 +165,7 @@ fn cancelled_waiter_does_not_discard_rotated_credentials_or_block_other_referenc
     });
     let fast = Arc::new(Refresh::immediate());
     let broker = Arc::new(
-        NativeCredentialBroker::new(
+        CredentialBroker::new(
             store.clone(),
             vec![binding("slow", slow.clone()), binding("fast", fast)],
         )
@@ -220,7 +220,7 @@ fn scope_mismatch_and_store_failure_never_release_headers() {
     store.records["one"].lock().unwrap().scope.account = "different-account".into();
     let refresh = Arc::new(Refresh::immediate());
     let broker =
-        NativeCredentialBroker::new(store.clone(), vec![binding("one", refresh.clone())]).unwrap();
+        CredentialBroker::new(store.clone(), vec![binding("one", refresh.clone())]).unwrap();
     assert_eq!(
         broker
             .headers(Some("one"), &CancellationToken::default())
@@ -294,7 +294,7 @@ fn injected_factory_uses_authoritative_broker_without_environment_fallback() {
     store.records["one"].lock().unwrap().material =
         CredentialMaterial::ApiKey(Secret::new("broker-only-fixture").unwrap());
     let broker = Arc::new(
-        NativeCredentialBroker::new(store, vec![CredentialBinding::bearer(scope("one"))]).unwrap(),
+        CredentialBroker::new(store, vec![CredentialBinding::bearer(scope("one"))]).unwrap(),
     );
     let config:ModelSessionConfiguration=serde_json::from_value(serde_json::json!({"providerFamily":"openai-responses","model":"fixture-model","endpoint":endpoint,"credentialEnvironment":"VARIN_NONEXISTENT_IGNORED_BOOTSTRAP_REF","allowAnonymous":false,"configurationGeneration":1,"maxOutputTokens":100})).unwrap();
     let start =
