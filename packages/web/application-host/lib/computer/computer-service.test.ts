@@ -183,14 +183,17 @@ describe("computer service (BC4)", () => {
       expect((await call(a, 'control', () => a.act({ desktopId: id, action: { kind: 'click', app: 'notepad', observationId: observed.id, elementIndex: 1 }, automationEpoch: control.automationEpoch }))).accepted).toBe(true);
       await expect(call(b, 'control', () => b.act({ desktopId: id, action: { kind: 'key', app: 'notepad', key: 'enter' } }))).rejects.toMatchObject({ harnessCode: 'forbidden' });
       expect((await a.automation.stop('main')).status).toBe('enabled');
-      expect((await call(b, 'control', () => b.act({ desktopId: id, action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(true);
+      const resumedControl = await call(b, 'observe', () => b.control(id));
+      await call(b, 'observe', () => b.observe({ desktopId: id, app: 'notepad' }));
+      expect((await call(b, 'control', () => b.act({ desktopId: id, automationEpoch: resumedControl.automationEpoch,
+        action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(true);
     } finally {
       await Promise.allSettled([a.automation.release('main'), b.automation.release('main')]);
       await Promise.all([a.dispose(), b.dispose(), target.dispose()]);
       server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
     }
   });
-  it('keeps observations isolated per execution, fences old app epochs, and prevents resumed calls after user stop', async () => {
+  it('keeps observations isolated per execution, fences old app epochs, and allows fresh work after user cancellation', async () => {
     const actors = new Map<string, ComputerActor>(['main', 'lookup'].map(id => [id, { sessionId: id, runId: `${id}:run`, threadId: id, scopeId: 'scope', rootSessionId: 'main', rootRunId: 'main:run', label: id, readOnly: id === 'lookup' }]));
     const driver = makeDriver(async op => op.tool === 'get_app_state' ? okResponse({ snapshot: appSnapshot() }) : okResponse());
     const { service } = makeService(driver, { resolveActor: async id => actors.get(id) ?? null, notifyActor: async () => {} });
@@ -210,6 +213,7 @@ describe("computer service (BC4)", () => {
         action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(false);
       await call('main', 'observe', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
       expect((await call('main', 'control', () => service.act({ desktopId: 'local-console', action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(true);
+      await c.finishRun('main:run');
       actors.set('main', { ...actors.get('main')!, runId: 'next', rootRunId: 'next' });
       expect((await call('main', 'control', () => service.act({ desktopId: 'local-console', automationEpoch: control.automationEpoch,
         action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(false);
