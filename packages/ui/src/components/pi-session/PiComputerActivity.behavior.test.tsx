@@ -46,6 +46,10 @@ it('keeps newer activity over a delayed snapshot, opens the existing desktop tab
   expect(mocks.read).toHaveBeenCalledTimes(1);
   mocks.read.mockResolvedValue({ state, activities: [{ ...entry, activity: { ...entry.activity, status: 'idle' } }] });
   await emit({ type: 'stream-ready' });
-  expect(container.textContent).toContain('chat.computerActivity.view');
+  expect(container.querySelector('button')).toBeNull();
   expect(mocks.read).toHaveBeenCalledTimes(2);
+  mocks.read.mockResolvedValue({ state, activities: [entry] });
+  await emit({ type: 'stream-ready' });
+  expect(container.textContent).toContain('Editor');
+  expect(container.textContent).toContain('chat.computerActivity.working');
 });

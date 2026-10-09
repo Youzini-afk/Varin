@@ -5216,7 +5216,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const view = options.executionViews?.get(sessionId);
     if (!view) return { status: "materialized", path: "" };
     if (view.mode === "materialized") {
-      const current = await options.registry.getThreadForSession(view.workspaceId, sessionId);
+      const current = await options.registry.getThreadById(view.workspaceId, view.threadId);
       return { status: "materialized", path: current?.worktree?.path ?? "" };
     }
     if (!options.workingStates) {
@@ -5227,7 +5227,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (switchRole === "already") {
       const latest = options.executionViews?.get(sessionId);
       if (latest?.mode === "materialized") {
-        const current = await options.registry.getThreadForSession(latest.workspaceId, sessionId);
+        const current = await options.registry.getThreadById(latest.workspaceId, latest.threadId);
         return { status: "materialized", path: current?.worktree?.path ?? "" };
       }
       return { status: "failed", message: "Working-branch materialization did not complete" };
@@ -5251,11 +5251,12 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       const latest = options.executionViews?.get(sessionId);
       if (!latest || latest.mode === "materialized") {
         const current = latest
-          ? await options.registry.getThreadForSession(latest.workspaceId, sessionId)
+          ? await options.registry.getThreadById(latest.workspaceId, latest.threadId)
           : null;
         return { status: "materialized", path: current?.worktree?.path ?? "" };
       }
-      const thread = await options.registry.getThreadForSession(latest.workspaceId, sessionId);
+      // Startup materializes LSP inputs before markRunRunning binds the session.
+      const thread = await options.registry.getThreadById(latest.workspaceId, latest.threadId);
       let worktree = thread?.worktree;
       if (!thread || !worktree?.path || !thread.workBranchId) {
         return { status: "failed", message: "Virtual run has no scratch directory to materialize" };

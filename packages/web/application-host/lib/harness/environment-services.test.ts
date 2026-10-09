@@ -79,7 +79,7 @@ describe("execution environment binding", () => {
       const host = {
         threadRegistry: registry,
         managedRemoteTargets: { targetFor: async (_scope: string, id: string) => ({ machineId: id }) },
-        computerService: { list: async () => ({ machines: [], desktops: [{ id: "desk-1" }], defaultDesktopId: "desk-1" }) },
+        computerService: { list: async () => ({ machines: [], desktops: [{ id: "desk-1" }], defaultDesktopId: "desk-1" }), prewarm: vi.fn(async () => {}) },
       };
       const set = createEnvironmentSetService(host as never);
       const setResult = await set.handle({ workTarget: "machine-9", desktopId: "desk-1" }, ctx("session-1"));
@@ -176,7 +176,7 @@ describe("execution environment binding", () => {
       const host = {
         threadRegistry: registry,
         managedRemoteTargets: { targetFor: async (_s: string, id: string) => ({ machineId: id }) },
-        computerService: { list: async () => ({ machines: [], desktops: [{ id: "desk-1" }] }) },
+        computerService: { list: async () => ({ machines: [], desktops: [{ id: "desk-1" }] }), prewarm: vi.fn(async () => {}) },
       };
       const set = createEnvironmentSetService(host as never);
       await set.handle({ workTarget: "machine-a", desktopId: "desk-1" }, ctx("session-1"));
@@ -201,6 +201,7 @@ describe("execution environment binding", () => {
         threadRegistry: registry,
         computerService: {
           list: async () => ({ machines: [], desktops: [{ id: "desk-9" }] }),
+          prewarm: vi.fn(async () => {}),
           observe,
         },
       };

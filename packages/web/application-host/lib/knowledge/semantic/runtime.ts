@@ -902,7 +902,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       }
       status = statusForEmbedder(scope, embedder);
       if (scanFailures.has(scopeId)) {
-        return { status: { ...status, status: "stale" }, hits: [], gaps: [] };
+        return { status: { ...status, status: scanProgress.get(scopeId)?.phase === "failed" ? "failed" : "stale" }, hits: [], gaps: [] };
       }
       if (status.coverage === "empty" && !status.publishedDocuments
         && !searchOptions?.threadQuery && !searchOptions?.overlays?.some(overlay => overlay.content !== null)) {
@@ -913,7 +913,8 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           ? [{ path: overlay.path, reason: overlay.gap }] : []);
         const incomplete = Boolean(activeScan && !activeScan.resolved) || gaps.length > 0
           || status.lifecycle === 'building' || status.lifecycle === 'rebuilding';
-        return { status: { ...status, status: incomplete ? "incomplete" : status.status }, hits: [], gaps };
+        const failed = scanProgress.get(scopeId)?.phase === "failed";
+        return { status: { ...status, status: incomplete ? "incomplete" : failed ? "failed" : status.status }, hits: [], gaps };
       }
       signal?.throwIfAborted();
       await waitWithSignal(embedder.prepare(), signal);

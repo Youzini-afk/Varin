@@ -2564,7 +2564,10 @@ describe("session e2e — real LSP diagnostics", () => {
         },
       ]);
       const session = await setupSession({
-        root: harness.workspaceRoot,
+        // Session settings/history live outside the source workspace, as in
+        // production. Creating them must not invalidate prepared diagnostics.
+        root: harness.root,
+        sessionRoot: harness.workspaceRoot,
         faux,
         workspaceId: harness.identity.workspaceId,
         serviceHostOptions: { diagnosticsProvider },

@@ -778,6 +778,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     if (isObject(result)) {
       if (result.outcome === "unknown") return "unknown";
       if (result.cancelled === true) return "cancelled";
+      if (result.accepted === false && isObject(result.receipt) && result.receipt.effect === 'none') return "rejected";
       if (result.ok === false || result.accepted === false) return "error";
       if (Array.isArray(result.results) && result.results.some((entry) => isObject(entry) && entry.state === "failed")) return "error";
     }
