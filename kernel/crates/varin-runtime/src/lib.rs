@@ -19,6 +19,7 @@ pub mod content;
 
 pub mod context_job;
 pub mod context_capacity;
+mod context_material;
 
 pub mod resource_admission;
 

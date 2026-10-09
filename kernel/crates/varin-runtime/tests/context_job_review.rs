@@ -243,7 +243,7 @@ fn exercise(mode: Mode) {
         tools: Arc::new(NoTools),
         policy: Arc::new(DefaultAgentPolicy),
         progress: ProgressSink::default(),
-    });
+    },1);
     let next_start = start.clone();
     let handle = supervisor.start(&job.receipt.run_id, start).unwrap();
     rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();

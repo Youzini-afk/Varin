@@ -2,7 +2,7 @@
 use super::*;
 use crate::context_job::SummarySource;
 pub use crate::context_job::{ContextJob, ContextJobRequest};
-use crate::execution::{Content, ConversationItem};
+use crate::execution::{Content, ConversationItem, Provenance};
 
 /// Small searchable ownership facts. Prompt and memory bodies live in the immutable recipe.
 #[derive(Debug, Clone, PartialEq)]
@@ -13,11 +13,26 @@ pub(crate) struct ContextJobAdmission {
     expected_revision: u64,
     owner_run_id: Option<String>,
     recipe: Value,
+    parts: u64,
 }
 impl ContextJobAdmission {
-    pub(super) fn publish(&self, tx: &Transaction<'_>, run_id: &str) -> Result<()> {
-        tx.execute("INSERT INTO context_jobs(run_id,job_key,branch_id,through_id,expected_revision,owner_run_id,recipe) VALUES(?1,?2,?3,?4,?5,?6,?7)",
-            params![run_id,self.key,self.branch_id,self.through_id,sql_number(self.expected_revision)?,self.owner_run_id,encode(&self.recipe)?])?;
+    pub(super) fn publish(
+        &self,
+        tx: &Transaction<'_>,
+        run_id: &str,
+        parts: &[Value],
+    ) -> Result<()> {
+        tx.execute("INSERT INTO context_jobs(run_id,job_key,branch_id,through_id,expected_revision,owner_run_id,recipe,parts) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![run_id,self.key,self.branch_id,self.through_id,sql_number(self.expected_revision)?,self.owner_run_id,encode(&self.recipe)?,sql_number(self.parts)?])?;
+        let mut insert =
+            tx.prepare("INSERT INTO context_job_parts(run_id,part_index,body) VALUES(?1,?2,?3)")?;
+        for (index, reference) in parts.iter().enumerate() {
+            insert.execute(params![
+                run_id,
+                sql_number(index as u64)?,
+                encode(reference)?
+            ])?;
+        }
         Ok(())
     }
 }
@@ -27,11 +42,12 @@ struct ContextJobRecipe {
     source: SummarySource,
 }
 pub(super) fn initialize_new(db: &Connection) -> Result<()> {
-    db.execute_batch("CREATE TABLE context_jobs(run_id TEXT PRIMARY KEY REFERENCES runs(id),job_key TEXT NOT NULL UNIQUE,branch_id TEXT NOT NULL REFERENCES branches(id),through_id TEXT NOT NULL REFERENCES history(id),expected_revision INTEGER NOT NULL,owner_run_id TEXT REFERENCES runs(id),recipe TEXT NOT NULL); CREATE INDEX context_jobs_branch ON context_jobs(branch_id);")?;
+    db.execute_batch("CREATE TABLE context_jobs(run_id TEXT PRIMARY KEY REFERENCES runs(id),job_key TEXT NOT NULL UNIQUE,branch_id TEXT NOT NULL REFERENCES branches(id),through_id TEXT NOT NULL REFERENCES history(id),expected_revision INTEGER NOT NULL,owner_run_id TEXT REFERENCES runs(id),recipe TEXT NOT NULL,parts INTEGER NOT NULL); CREATE INDEX context_jobs_branch ON context_jobs(branch_id); CREATE TABLE context_job_parts(run_id TEXT NOT NULL REFERENCES runs(id),part_index INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(run_id,part_index));")?;
     Ok(())
 }
 pub(super) fn check_format(db: &Connection) -> Result<()> {
-    db.prepare("SELECT run_id,job_key,branch_id,through_id,expected_revision,owner_run_id,recipe FROM context_jobs")?;
+    db.prepare("SELECT run_id,job_key,branch_id,through_id,expected_revision,owner_run_id,recipe,parts FROM context_jobs")?;
+    db.prepare("SELECT run_id,part_index,body FROM context_job_parts")?;
     Ok(())
 }
 
@@ -108,6 +124,7 @@ impl Catalog {
             launch,
             configuration,
             admission,
+            parts,
             _publication,
         } = prepared;
 
@@ -181,7 +198,7 @@ impl Catalog {
             false,
             None,
             None,
-            Some(&admission),
+            Some((&admission, &parts)),
         )?;
         Ok(ContextJob { request, receipt })
     }
@@ -217,6 +234,38 @@ impl Catalog {
     }
     pub fn context_job_parent(&self, run_id: &str) -> Result<Option<String>> {
         context_job_parent(&self.db, run_id)
+    }
+    pub fn context_job_parts(&self, run_id: &str) -> Result<Option<u64>> {
+        Ok(self
+            .db
+            .query_row(
+                "SELECT parts FROM context_jobs WHERE run_id=?1",
+                [run_id],
+                |row| read_number(row, 0),
+            )
+            .optional()?)
+    }
+    pub(super) fn context_job_input(
+        &self,
+        run_id: &str,
+    ) -> Result<(Value, Option<(String, Value)>)> {
+        let completed: u64 = self.db.query_row(
+            "SELECT count(*) FROM model_steps WHERE run_id=?1 AND state='completed'",
+            [run_id],
+            |row| read_number(row, 0),
+        )?;
+        let reference: String = self.db.query_row(
+            "SELECT body FROM context_job_parts WHERE run_id=?1 AND part_index=?2",
+            params![run_id, sql_number(completed)?],
+            |row| row.get(0),
+        )?;
+        let previous:Option<(String,String)>=self.db.query_row("SELECT s.id,o.body FROM model_steps s JOIN model_outputs o ON o.request_id=s.id WHERE s.run_id=?1 AND s.state='completed' ORDER BY s.rowid DESC LIMIT 1",[run_id],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
+        Ok((
+            serde_json::from_str(&reference)?,
+            previous
+                .map(|(id, value)| Ok::<_, RuntimeError>((id, serde_json::from_str(&value)?)))
+                .transpose()?,
+        ))
     }
     pub fn register_context_job_wait(
         &mut self,
@@ -335,11 +384,11 @@ impl Catalog {
         Ok(Some(run))
     }
     fn context_job_metadata(&self, run_id: &str) -> Result<Option<ContextJobAdmission>> {
-        let row:Option<(String,String,String,u64,Option<String>,String)> = self.db.query_row(
-            "SELECT job_key,branch_id,through_id,expected_revision,owner_run_id,recipe FROM context_jobs WHERE run_id=?1",[run_id],
-            |row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,read_number(row,3)?,row.get(4)?,row.get(5)?))).optional()?;
+        let row:Option<(String,String,String,u64,Option<String>,String,u64)> = self.db.query_row(
+            "SELECT job_key,branch_id,through_id,expected_revision,owner_run_id,recipe,parts FROM context_jobs WHERE run_id=?1",[run_id],
+            |row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,read_number(row,3)?,row.get(4)?,row.get(5)?,read_number(row,6)?))).optional()?;
         row.map(
-            |(key, branch_id, through_id, expected_revision, owner_run_id, recipe)| {
+            |(key, branch_id, through_id, expected_revision, owner_run_id, recipe, parts)| {
                 Ok(ContextJobAdmission {
                     key,
                     branch_id,
@@ -347,6 +396,7 @@ impl Catalog {
                     expected_revision,
                     owner_run_id,
                     recipe: serde_json::from_str(&recipe)?,
+                    parts,
                 })
             },
         )
@@ -387,13 +437,13 @@ impl Catalog {
                 "context summary Run has not completed successfully".into(),
             ));
         }
-        let mut statement = self.db.prepare("SELECT o.body FROM model_steps s JOIN model_outputs o ON o.request_id=s.id WHERE s.run_id=?1")?;
+        let mut statement = self.db.prepare("SELECT o.body FROM model_steps s JOIN model_outputs o ON o.request_id=s.id WHERE s.run_id=?1 ORDER BY s.rowid")?;
         let outputs = statement
             .query_map([run_id], |row| row.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        if outputs.len() != 1 {
+        if outputs.is_empty() || outputs.len() as u64 != job.metadata.parts {
             return Err(RuntimeError::Conflict(
-                "context job requires exactly one completed generation".into(),
+                "context job has not completed every frozen source part".into(),
             ));
         }
         Ok(ContextJobPublication {
@@ -405,7 +455,10 @@ impl Catalog {
                 .path()
                 .ok_or_else(|| RuntimeError::Invalid("Catalog has no database".into()))?
                 .into(),
-            output: serde_json::from_str(&outputs[0])?,
+            outputs: outputs
+                .into_iter()
+                .map(|value| serde_json::from_str(&value).map_err(Into::into))
+                .collect::<Result<Vec<_>>>()?,
             publication: self.content.begin_publication(),
         })
     }
@@ -528,9 +581,8 @@ impl ContextJobRead {
             receipt: self.receipt,
         })
     }
-    pub(super) fn summary(self) -> Result<(ContextJobRequest, SummarySource)> {
-        let recipe = self.recipe()?;
-        Ok((recipe.request, recipe.source))
+    pub(super) fn request(self) -> Result<ContextJobRequest> {
+        Ok(self.recipe()?.request)
     }
 }
 
@@ -550,6 +602,7 @@ pub struct PreparedContextJob {
     launch: launches::LaunchSelection,
     configuration: Value,
     admission: ContextJobAdmission,
+    parts: Vec<Value>,
     _publication: crate::content::ContentPublication,
 }
 impl ContextJobPreparation {
@@ -573,7 +626,7 @@ impl ContextJobPreparation {
             &self.database,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
-        if let Some(reference) = &self.duplicate {
+        let parts = if let Some(reference) = &self.duplicate {
             let original: ContextJobRecipe = serde_json::from_value(self.content.load(reference)?)?;
             if original.request != self.request {
                 return Err(RuntimeError::Conflict(
@@ -581,6 +634,14 @@ impl ContextJobPreparation {
                 ));
             }
             self.source = original.source;
+            let mut statement=database.prepare("SELECT p.body FROM context_jobs j JOIN context_job_parts p ON p.run_id=j.run_id WHERE j.job_key=?1 ORDER BY p.part_index")?;
+            let references = statement
+                .query_map([&self.request.key], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            references
+                .into_iter()
+                .map(|value| serde_json::from_str(&value).map_err(Into::into))
+                .collect::<Result<Vec<_>>>()?
         } else {
             let active_checkpoint: Option<context::ContextCheckpoint> = self
                 .source
@@ -638,7 +699,28 @@ impl ContextJobPreparation {
             let history = hydrate_source(&self.content, source)?;
             crate::execution::validate_history_pairs(&history)
                 .map_err(|error| RuntimeError::Conflict(error.to_string()))?;
-        }
+            let prior = active_checkpoint
+                .filter(|_| self.source.through_id.is_some())
+                .map(|checkpoint| ConversationItem {
+                    id: format!("context-job:{}:prior-summary", self.request.key),
+                    provenance: Provenance::ExternalData {
+                        source: format!("conversation-summary:{}", checkpoint.id),
+                    },
+                    content: Content::Text {
+                        text: checkpoint.proposal.summary,
+                    },
+                    opaque: None,
+                });
+            crate::context_material::partition(
+                &self.request.key,
+                &self.configuration,
+                prior,
+                history,
+            )?
+            .into_iter()
+            .map(|part| self.content.save(&serde_json::to_value(part)?))
+            .collect::<Result<Vec<_>>>()?
+        };
         let recipe = self.content.save(&serde_json::to_value(ContextJobRecipe {
             request: self.request.clone(),
             source: self.source,
@@ -650,12 +732,14 @@ impl ContextJobPreparation {
             expected_revision: self.request.expected_revision,
             owner_run_id: self.request.owner_run_id.clone(),
             recipe,
+            parts: parts.len() as u64,
         };
         Ok(PreparedContextJob {
             request: self.request,
             launch: self.launch,
             configuration: self.configuration,
             admission,
+            parts,
             _publication: self.publication,
         })
     }
@@ -665,7 +749,7 @@ pub struct ContextJobPublication {
     job: ContextJobRead,
     run_revision: u64,
     content: crate::content::ContentStore,
-    output: Value,
+    outputs: Vec<Value>,
     database: std::path::PathBuf,
     publication: crate::content::ContentPublication,
 }
@@ -684,40 +768,9 @@ impl ContextJobPublication {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         require_ancestor(&database, &job.request.branch_id, &job.request.through_id)?;
-        let output = self.content.load(&self.output)?;
-        if output.get("status").and_then(Value::as_str) != Some("committed") {
-            return Err(RuntimeError::Conflict(
-                "summary output was not committed".into(),
-            ));
-        }
-        let record: crate::execution::ExecutionRecord =
-            serde_json::from_value(output["record"].clone())?;
-        let crate::execution::ExecutionRecord::ModelFinished {
-            outcome: crate::execution::ModelOutcome::Completed,
-            finish_reason: Some(crate::execution::FinishReason::Stop),
-            items,
-            ..
-        } = record
-        else {
-            return Err(RuntimeError::Conflict(
-                "summary generation did not finish completely".into(),
-            ));
-        };
-        let mut text = Vec::new();
-        for item in items {
-            match item.content {
-                Content::Text { text: value } => text.push(value),
-                Content::ReasoningSummary { .. } | Content::ProviderOnly => (),
-                _ => {
-                    return Err(RuntimeError::Invalid(
-                        "summary contains an action or attachment".into(),
-                    ))
-                }
-            }
-        }
-        let summary = text.join("\n");
-        if summary.trim().is_empty() {
-            return Err(RuntimeError::Invalid("summary is empty".into()));
+        let mut summary = String::new();
+        for reference in self.outputs {
+            summary = crate::context_material::summary_text(&self.content, &reference)?;
         }
         let request = &job.request;
         let checkpoint = context::ContextCheckpoint {

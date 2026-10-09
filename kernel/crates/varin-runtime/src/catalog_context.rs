@@ -232,9 +232,11 @@ impl Catalog {
             database:self.db.path().ok_or_else(||RuntimeError::Invalid("Catalog has no database".into()))?.into(),
             _publication:self.content.begin_publication() }) };
         if self.is_context_job(run_id)? {
+            let(part,previous)=self.context_job_input(run_id)?;
             return Ok(Some(capture(ContextReadKind::Summary {
                 content: self.content.clone(),
                 job:self.capture_context_job(run_id)?,
+                part,previous,
             })?));
         }
         let active:Option<(String,Option<String>,String)>=self.db.query_row("SELECT c.id,c.through_id,c.body FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",[&run.branch_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
@@ -326,13 +328,13 @@ enum ContextReadKind {
     Summary {
         content: crate::content::ContentStore,
         job:super::context_jobs::ContextJobRead,
+        part:Value,
+        previous:Option<(String,Value)>,
     },
 }
 impl ContextRead {
     pub fn load(self) -> Result<ContextProjection> {
         let Self {kind,database,_publication} = self;
-        let database = Connection::open_with_flags(database,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
         let (content, checkpoint_id, reference, suffix, compositions, branch_id, memory, trusted_receipts) = match kind {
             ContextReadKind::Checkpoint {
                 compositions, branch_id, memory, trusted_receipts,
@@ -341,49 +343,37 @@ impl ContextRead {
                 reference,
                 head, through_id,
             } => {
+                let database = Connection::open_with_flags(database,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
                 let suffix = super::context_jobs::source_metadata_until(&database, head.as_deref(), through_id.as_deref())?;
                 (content, checkpoint_id, reference, suffix, compositions, branch_id, memory, trusted_receipts)
             },
             ContextReadKind::Summary {
                 content,
                 job,
+                part,previous,
             } => {
-                let (request,source)=job.summary()?;
-                let metadata = super::context_jobs::source_metadata_until(&database, Some(&request.through_id), source.through_id.as_deref())?;
-                let originals = super::context_jobs::hydrate_source(&content, metadata)?;
+                let request=job.request()?;
                 let mut history = vec![ConversationItem {
                     id: format!("context-job:{}:system", request.key),
                     provenance: Provenance::SystemInstruction {
-                        source: "context_compaction:v1".into(),
+                        source: "context_compaction:v2".into(),
                     },
                     content: Content::Text {
                         text: crate::context_job::SUMMARIZER_SYSTEM.into(),
                     },
                     opaque: None,
                 }];
-                if let Some(reference) = source.checkpoint.filter(|_| source.through_id.is_some()) {
-                    let checkpoint: ContextCheckpoint = serde_json::from_value(content.load(&reference)?)?;
+                if let Some((request_id,reference)) = previous {
+                    let summary=crate::context_material::summary_text(&content,&reference)?;
                     history.push(ConversationItem {
-                        id:format!("context-job:{}:prior-summary",request.key),
-                        provenance:Provenance::ExternalData {source:format!("conversation-summary:{}",checkpoint.id)},
-                        content:Content::Text {text:checkpoint.proposal.summary}, opaque:None,
+                        id:format!("context-job:{}:summary-so-far:{request_id}",request.key),
+                        provenance:Provenance::ExternalData {source:format!("model-output:{request_id}")},
+                        content:Content::Text {text:summary}, opaque:None,
                     });
                 }
-                for mut item in originals {
-                    // Quote the semantic source with its real role and identity; never replay a
-                    // historical tool call or promote earlier instructions into job authority.
-                    item.opaque = None;
-                    history.push(ConversationItem {
-                        id: format!("context-job:{}:source:{}", request.key, item.id),
-                        provenance: Provenance::ExternalData {
-                            source: format!("history:{}", item.id),
-                        },
-                        content: Content::Text {
-                            text: serde_json::to_string(&item)?,
-                        },
-                        opaque: None,
-                    });
-                }
+                let material:Vec<ConversationItem>=serde_json::from_value(content.load(&part)?)?;
+                history.extend(material);
                 history.push(ConversationItem {
                     id: format!("context-job:{}:request", request.key),
                     provenance: Provenance::UserInstruction {
@@ -397,7 +387,7 @@ impl ContextRead {
                 return Ok(ContextProjection {
                     checkpoint_id: format!("context-job:{}", request.key),
                     history,
-                    instruction_sources: vec!["context_compaction:v1".into()],
+                    instruction_sources: vec!["context_compaction:v2".into()],
                     memory_checkpoint: None,
                 });
             }
