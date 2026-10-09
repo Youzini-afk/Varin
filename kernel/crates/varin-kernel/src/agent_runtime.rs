@@ -359,7 +359,7 @@ pub(crate) fn spawn(
                         let params = value.get_mut("params").map(Value::take).unwrap_or_else(|| json!({}));
                         // Typed body contracts are consumed once on their independent worker.
                         // Generated validation would otherwise clone all input/attachment content here.
-                        if !matches!(method,"runtime.thread.create"|"runtime.input.submit"|"runtime.input.enqueue"|"runtime.input.edit"|"runtime.child.prepare"|"runtime.tools.ready") {
+                        if !matches!(method,"runtime.thread.create"|"runtime.input.submit"|"runtime.input.enqueue"|"runtime.input.edit"|"runtime.child.prepare"|"runtime.tools.ready"|"runtime.launch.mcp.prepare"|"runtime.launch.policy.prepare") {
                             validate_method_params(method, &params)?;
                         }
                         if let Some(failure) = &initialization_failure {
@@ -491,21 +491,66 @@ pub(crate) fn spawn(
                                 }
                             }
                             if cancelled.load(Ordering::Acquire) {return Err(KernelError::Cancelled);}
-                            let result = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                                .prepare_policy_launch_with_models(&p.run_id, identity, models).map_err(domain)?;
-                            Ok(serde_json::to_value(result)?)
+                            let owner = runtime.catalog();
+                            let preparation = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                                .prepare_policy_change(&p.run_id, crate::process_wait::default_policy_identity(), identity, models).map_err(domain)?;
+                            let prepared = preparation.load().map_err(domain)?;
+                            let read = {
+                                let mut catalog = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+                                if cancelled.load(Ordering::Acquire) {return Err(KernelError::Cancelled);}
+                                catalog.admit_launch_change(prepared).map_err(domain)?
+                            };
+                            Ok(serde_json::to_value(read.load().map_err(domain)?)?)
                             })();
                             let response = match result {Ok(value)=>response_ok(&response_id,value),Err(error)=>response_error(&response_id,&error)};
                             done(&response_id); let _ = response_sender.send(response);
                             });
                             deferred = true; return Ok(Value::Null);
                         }
-                        if method == "runtime.launch.mcp.prepare" {
-                            let p: McpPrepareParams = serde_json::from_value(params)?;
-                            let binding = mcp_binding(p.binding)?;
-                            let result = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                                .prepare_mcp_launch(&p.run_id, binding).map_err(domain)?;
-                            return Ok(serde_json::to_value(result)?);
+                        if matches!(method, "runtime.launch.mcp.prepare" | "runtime.launch.inspect" | "runtime.launch.list" | "runtime.launch.fail") {
+                            let runtime = runtime.clone(); let method = method.to_owned();
+                            let response_id = id.clone(); let response_sender = responses.clone(); let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            thread::spawn(move || {
+                                let result = (|| -> Result<Value, KernelError> {
+                                    if cancelled.load(Ordering::Acquire) {return Err(KernelError::Cancelled);}
+                                    let owner = runtime.catalog();
+                                    if method == "runtime.launch.list" {
+                                        let reads = owner.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?
+                                            .capture_pending_launches().map_err(domain)?;
+                                        let launches = reads.into_iter().map(|read|read.load()).collect::<std::result::Result<Vec<_>,_>>().map_err(domain)?;
+                                        return Ok(serde_json::to_value(launches)?);
+                                    }
+                                    if method == "runtime.launch.inspect" {
+                                        let p: RunParams = serde_json::from_value(params)?;
+                                        let read = owner.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?.capture_launch(&p.run_id).map_err(domain)?;
+                                        return Ok(serde_json::to_value(read.map(|read|read.load()).transpose().map_err(domain)?)?);
+                                    }
+                                    let read = if method == "runtime.launch.mcp.prepare" {
+                                        let p: McpPrepareParams = serde_json::from_value(params)?;
+                                        let binding = mcp_binding(p.binding)?;
+                                        let preparation = owner.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?
+                                            .prepare_mcp_change(&p.run_id,binding).map_err(domain)?;
+                                        let prepared = preparation.load().map_err(domain)?;
+                                        let mut catalog = owner.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?;
+                                        if cancelled.load(Ordering::Acquire) {return Err(KernelError::Cancelled);}
+                                        catalog.admit_launch_change(prepared).map_err(domain)?
+                                    } else {
+                                        let p: LaunchFailedParams = serde_json::from_value(params)?;
+                                        if runtime.status().map_err(|e|KernelError::Operation(e.to_string()))?.iter().any(|worker|worker.run_id==p.run_id && !worker.finished) {
+                                            return Err(KernelError::Operation("Run already has a live worker".into()));
+                                        }
+                                        let mut catalog = owner.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?;
+                                        if cancelled.load(Ordering::Acquire) {return Err(KernelError::Cancelled);}
+                                        catalog.fail_launch_metadata(&p.run_id,&p.code).map_err(domain)?;
+                                        catalog.capture_launch(&p.run_id).map_err(domain)?.ok_or_else(||KernelError::Storage("launch missing after failure".into()))?
+                                    };
+                                    Ok(serde_json::to_value(read.load().map_err(domain)?)?)
+                                })();
+                                let response = match result {Ok(value)=>response_ok(&response_id,value),Err(error)=>response_error(&response_id,&error)};
+                                done(&response_id); let _ = response_sender.send(response);
+                            });
+                            deferred = true; return Ok(Value::Null);
                         }
                         if matches!(method, "runtime.run.start" | "runtime.launch.select") {
                             let selected: Option<LaunchSelectParams> =
@@ -724,7 +769,7 @@ pub(crate) fn spawn(
                                         "reconciliation binding belongs to another Run".into(),
                                     ));
                                 }
-                                let launch = catalog.launch_intent(&run.id).map_err(domain)?
+                                let launch = catalog.launch_metadata(&run.id).map_err(domain)?
                                     .ok_or_else(|| KernelError::Authorization("reconciliation requires a durable source selection".into()))?;
                                 if launch.selection.source.as_ref() != Some(&binding.source_selection()?) {
                                     return Err(KernelError::Authorization("reconciliation cannot change the durable source selection".into()));
@@ -755,29 +800,6 @@ pub(crate) fn spawn(
                             )?;
                             deferred = true;
                             return Ok(Value::Null);
-                        }
-                        if method == "runtime.launch.fail" {
-                            let p: LaunchFailedParams = serde_json::from_value(params)?;
-                            if runtime
-                                .status()
-                                .map_err(|e| KernelError::Operation(e.to_string()))?
-                                .iter()
-                                .any(|worker| worker.run_id == p.run_id && !worker.finished)
-                            {
-                                return Err(KernelError::Operation(
-                                    "Run already has a live worker".into(),
-                                ));
-                            }
-                            return Ok(serde_json::to_value(
-                                runtime
-                                    .catalog()
-                                    .lock()
-                                    .map_err(|_| {
-                                        KernelError::Storage("catalog owner failed".into())
-                                    })?
-                                    .fail_launch(&p.run_id, &p.code)
-                                    .map_err(domain)?,
-                            )?);
                         }
                         if matches!(method, "runtime.permission.open" | "runtime.permission.consume") {
                             let p: PermissionOpenParams = serde_json::from_value(params)?;
@@ -941,17 +963,6 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
     if method == "runtime.thread.list" {
         return Ok(serde_json::to_value(
             catalog.list_threads().map_err(domain)?,
-        )?);
-    }
-    if method == "runtime.launch.inspect" {
-        let p: RunParams = serde_json::from_value(params)?;
-        return Ok(serde_json::to_value(
-            catalog.launch_intent(&p.run_id).map_err(domain)?,
-        )?);
-    }
-    if method == "runtime.launch.list" {
-        return Ok(serde_json::to_value(
-            catalog.pending_launches().map_err(domain)?,
         )?);
     }
 

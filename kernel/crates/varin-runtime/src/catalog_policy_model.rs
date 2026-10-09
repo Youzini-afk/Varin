@@ -148,7 +148,8 @@ impl Catalog {
         let _publication = self.content.begin_publication();
         let deliveries = super::memory::PreparedMemoryDeliveries::prepare(snapshot)?;
         let reference = self.content.save(&serde_json::to_value(snapshot)?)?;
-        self.admit_policy_model_reference(run_id, epoch, intent, snapshot, reference, deliveries)?.load()
+        let capability_ref = self.content.save(&serde_json::to_value(intent.capability())?)?;
+        self.admit_policy_model_reference(run_id, epoch, intent, snapshot, reference, capability_ref, deliveries)?.load()
     }
     pub(crate) fn admit_policy_model_reference(
         &mut self,
@@ -157,6 +158,7 @@ impl Catalog {
         intent: &PolicyModelIntent,
         snapshot: &RequestSnapshot,
         reference: Value,
+        capability_ref: Value,
         deliveries: super::memory::PreparedMemoryDeliveries,
     ) -> Result<PolicyModelRead> {
         let PolicyModelIntent::PolicyModelJobV1 {
@@ -223,9 +225,9 @@ impl Catalog {
         {
             return Err(RuntimeError::Invalid("planning origin mismatch".into()));
         }
-        if let Some(launch) = self.launch_intent(run_id)? {
+        if let Some(launch) = self.launch_metadata(run_id)? {
             if launch.selection.policy != *identity
-                || !launch.selection.policy_models.contains(capability)
+                || !launch.selection.policy_models.iter().any(|selected| selected.capability_id == capability.capability_id && selected.body == capability_ref)
             {
                 return Err(RuntimeError::Conflict(
                     "planning capability differs from pinned launch".into(),

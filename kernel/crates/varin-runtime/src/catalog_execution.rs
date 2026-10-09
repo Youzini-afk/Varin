@@ -38,8 +38,9 @@ impl Persistence for Mutex<Catalog> {
         };
         let deliveries = super::memory::PreparedMemoryDeliveries::prepare(snapshot).map_err(policy_error)?;
         let reference = content.save(&serde_json::to_value(snapshot).map_err(|error| policy_error(error.into()))?).map_err(policy_error)?;
+        let capability_ref = content.save(&serde_json::to_value(intent.capability()).map_err(|error| policy_error(error.into()))?).map_err(policy_error)?;
         let read = self.lock().map_err(catalog_lock_error)?
-            .admit_policy_model_reference(run, epoch, intent, snapshot, reference, deliveries).map_err(policy_error)?;
+            .admit_policy_model_reference(run, epoch, intent, snapshot, reference, capability_ref, deliveries).map_err(policy_error)?;
         read.load().map_err(policy_error)
     }
     fn dispatch_policy_model(&self, run: &str, epoch: u64, action: &str) -> std::result::Result<(), ExecutionError> {
@@ -62,7 +63,11 @@ impl Persistence for Mutex<Catalog> {
     }
     fn policy_boundary(&self, run:&str, epoch:u64)->std::result::Result<PolicyBoundary,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.policy_boundary(run,epoch).map_err(policy_error)}
     fn policy_graph(&self, run:&str, epoch:u64)->std::result::Result<Option<PolicyGraphState>,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.policy_graph(run,epoch).map_err(policy_error)}
-    fn admit_policy_graph(&self,run:&str,epoch:u64,intent:&PolicyGraphIntent)->std::result::Result<PolicyGraphState,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.admit_policy_graph(run,epoch,intent).map_err(policy_error)}
+    fn admit_policy_graph(&self,run:&str,epoch:u64,intent:&PolicyGraphIntent)->std::result::Result<PolicyGraphState,ExecutionError>{
+        let preparation = self.lock().map_err(catalog_lock_error)?.prepare_policy_graph_schemas();
+        let schemas = preparation.load(intent).map_err(policy_error)?;
+        self.lock().map_err(catalog_lock_error)?.admit_policy_graph_prepared(run,epoch,schemas).map_err(policy_error)
+    }
     fn settle_policy_node(&self,run:&str,epoch:u64,action:&str,node:&str,completion:&ToolCompletion)->std::result::Result<PolicyNodeReceipt,ExecutionError>{
         let (content, _publication) = {
             let catalog = self.lock().map_err(catalog_lock_error)?;
@@ -85,7 +90,7 @@ impl Persistence for Mutex<Catalog> {
         let (content,owned)={let catalog=self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?;fence(&catalog.run(run).map_err(policy_error)?,epoch).map_err(policy_error)?;(catalog.content.clone(),catalog.owned_policy_reference(run,reference).map_err(policy_error)?)};
         content.load_chunk(&owned,index).map_err(policy_error)
     }
-    fn tool_source(&self,run:&str)->std::result::Result<Option<super::launches::SourceSelection>,ExecutionError>{Ok(self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.launch_intent(run).map_err(policy_error)?.and_then(|launch|launch.selection.source))}
+    fn tool_source(&self,run:&str)->std::result::Result<Option<super::launches::SourceSelection>,ExecutionError>{Ok(self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.launch_metadata(run).map_err(policy_error)?.and_then(|launch|launch.selection.source))}
 
     fn resource_admission(&self) -> std::sync::Arc<crate::resource_admission::ResourceAdmission> {
         self.lock().unwrap_or_else(|p| p.into_inner()).resource_admission.clone()
@@ -247,6 +252,7 @@ struct ExecutionBodyPreparation {
 struct PreparedExecutionBodies {
     _publication: crate::content::ContentPublication,
     request: Option<Value>,
+    tools_ref: Option<Value>,
     frozen_history_range: Option<HistoryRange>,
     memory_deliveries: Option<super::memory::PreparedMemoryDeliveries>,
     history: std::collections::HashMap<String, Value>,
@@ -257,6 +263,10 @@ impl ExecutionBodyPreparation {
     fn write(self, record: &ExecutionRecord) -> Result<PreparedExecutionBodies> {
         let request = match record {
             ExecutionRecord::RequestPrepared { snapshot } => Some(self.content.save(&serde_json::to_value(snapshot)?)?),
+            _ => None,
+        };
+        let tools_ref = match record {
+            ExecutionRecord::RequestPrepared { snapshot } => Some(self.content.save(&serde_json::to_value(&snapshot.view.binding.tools)?)?),
             _ => None,
         };
         let snapshot: Option<RequestSnapshot> = self.frozen_request.as_ref()
@@ -283,7 +293,7 @@ impl ExecutionBodyPreparation {
             (Some(self.content.save_originals(&provider_originals(items))?),
              Some(self.content.save(&json!({"status":"committed","record":record}))?))
         } else { (None, None) };
-        Ok(PreparedExecutionBodies { _publication: self.publication, request, frozen_history_range, memory_deliveries, history, originals, output })
+        Ok(PreparedExecutionBodies { _publication: self.publication, request, tools_ref, frozen_history_range, memory_deliveries, history, originals, output })
     }
 }
 impl Catalog {
@@ -322,7 +332,7 @@ impl Catalog {
         &mut self, run_id: &str, epoch: u64, record: &ExecutionRecord, prepared: PreparedExecutionBodies,
     ) -> Result<()> {
         let PreparedExecutionBodies {
-            _publication, request: prepared_request, frozen_history_range, memory_deliveries, history: prepared_history,
+            _publication, request: prepared_request, tools_ref, frozen_history_range, memory_deliveries, history: prepared_history,
             originals: prepared_originals, output: prepared_output,
         } = prepared;
         // A receipt retry confirms the original completion. Keep exact request/owner fencing,
@@ -444,9 +454,9 @@ impl Catalog {
                 put(&tx, "runs", run_id, &run)?;
             }
             ExecutionRecord::RequestPrepared { snapshot } => {
-                if let Some(launch) = optional_record::<super::launches::LaunchIntent>(&tx,"run_launches",run_id)? {
+                if let Some(launch) = optional_record::<super::launch_content::LaunchMetadata>(&tx,"run_launches",run_id)? {
                     if launch.selection.tool_schema_generation != snapshot.view.binding.tool_schema_generation
-                        || launch.selection.tools != snapshot.view.binding.tools {
+                        || Some(&launch.selection.tools_ref) != tools_ref.as_ref() {
                         return Err(RuntimeError::Conflict("request differs from the activated tool composition".into()));
                     }
                 }

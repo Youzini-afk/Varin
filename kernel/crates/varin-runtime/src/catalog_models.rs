@@ -263,7 +263,7 @@ impl Catalog {
         run.configuration = serde_json::to_value(&stored.configuration)?;
         run.revision += 1;
         put(&tx, "runs", &run.id, &run)?;
-        let mut launch: launches::LaunchIntent = record(&tx, "run_launches", &run.id)?;
+        let mut launch: launch_content::LaunchMetadata = record(&tx, "run_launches", &run.id)?;
         launch.selection.connection_identity = binding.connection_identity.clone();
         launch.selection.provider_family = binding.provider_family.clone();
         launch.selection.model = binding.model.clone();

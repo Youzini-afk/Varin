@@ -229,6 +229,7 @@ impl RunTools {
                     .capture_tool_update(run, catalog.epoch())
                     .map_err(failed)?
             };
+            let preparation = preparation.load_base().map_err(failed)?;
             let mut schemas = preparation.base().to_vec();
             if let Some(binding) = &binding {
                 schemas.extend(binding.binding.tools.iter().cloned());

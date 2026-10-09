@@ -224,12 +224,11 @@ impl ToolExecutor for CollaborationTools {
                     if cancel.is_cancelled() {
                         return Err(error("collaboration cancelled"));
                     }
-                    let mut db = self.catalog.lock().map_err(error)?;
-                    let mut launch = db
-                        .launch_intent(&c.run_id)
+                    let read = self.catalog.lock().map_err(error)?
+                        .capture_launch(&c.run_id)
                         .map_err(error)?
-                        .ok_or_else(|| error("parent launch missing"))?
-                        .selection;
+                        .ok_or_else(|| error("parent launch missing"))?;
+                    let mut launch = read.load().map_err(error)?.selection;
                     launch.tools.retain(|tool| {
                         matches!(
                             tool.name.as_str(),
@@ -240,7 +239,11 @@ impl ToolExecutor for CollaborationTools {
                         name: "default".into(),
                         version: "1".into(),
                     };
-                    db.accept_child(c, input, pin, launch).map_err(error)
+                    let preparation = self.catalog.lock().map_err(error)?
+                        .prepare_child_launch(&c.run_id, launch).map_err(error)?;
+                    let prepared = preparation.load().map_err(error)?;
+                    if cancel.is_cancelled() { return Err(error("collaboration cancelled")); }
+                    self.catalog.lock().map_err(error)?.accept_prepared_child(c, input, pin, prepared).map_err(error)
                 })();
                 if admission.is_err() {
                     let _ = self.resources.collaboration_pin(

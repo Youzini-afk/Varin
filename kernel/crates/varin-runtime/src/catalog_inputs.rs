@@ -280,7 +280,7 @@ impl Catalog {
             if let Some(previous) = predecessor.as_ref().filter(|previous| {
                 previous.configuration == next.configuration || desired.is_some()
             }) {
-                if let Some(mut launch) = optional_record::<super::launches::LaunchIntent>(
+                if let Some(mut launch) = optional_record::<super::launch_content::LaunchMetadata>(
                     &tx,
                     "run_launches",
                     &previous.id,

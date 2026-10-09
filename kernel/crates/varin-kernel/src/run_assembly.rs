@@ -88,7 +88,7 @@ impl RunAssembly {
             .catalog()
             .lock()
             .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-            .launch_intent(&p.run_id)
+            .launch_metadata(&p.run_id)
             .map_err(domain)?
             .map(|launch| launch.selection.tool_schema_generation);
         let plan_eligible = {
@@ -252,12 +252,17 @@ impl RunAssembly {
             );
             selection.credential_scope = selected_credential_scope;
             check_cancelled()?;
-            let intent = runtime
+            let preparation = runtime.catalog().lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .prepare_launch_selection(selection);
+            let prepared = preparation.load().map_err(domain)?;
+            let read = runtime
                 .catalog()
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                .select_launch(&p.run_id, selection)
+                .admit_launch(&p.run_id, prepared, false)
                 .map_err(domain)?;
+            let intent = read.load().map_err(domain)?;
             return Ok(PreparedLaunch::Selection(serde_json::to_value(intent)?));
         }
         let mut launch_source = None;
@@ -313,14 +318,13 @@ impl RunAssembly {
         let directory = self.tools.prepare_scope(&p.run_id,declarations,mcp_live)
             .map_err(|error| KernelError::Protocol(error.to_string()))?;
         start.binding.tools = directory.schemas().to_vec();
-        let policy_models = runtime
+        let policy_read = runtime
             .catalog()
             .lock()
             .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-            .launch_intent(&p.run_id)
-            .map_err(domain)?
-            .map(|launch| launch.selection.policy_models)
-            .unwrap_or_default();
+            .capture_launch(&p.run_id)
+            .map_err(domain)?;
+        let policy_models = policy_read.map(|read| read.load_policy_models()).transpose().map_err(domain)?.unwrap_or_default();
         if is_context_job && !policy_models.is_empty() {
             return Err(KernelError::Protocol(
                 "context jobs cannot acquire planning capabilities".into(),
@@ -372,11 +376,15 @@ impl RunAssembly {
             selection.credential_scope = selected_credential_scope;
             selection.policy_models = policy_models;
             check_cancelled()?;
+            let preparation = runtime.catalog().lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .prepare_launch_selection(selection);
+            let prepared = preparation.load().map_err(domain)?;
             runtime
                 .catalog()
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                .bind_launch(&p.run_id, selection)
+                .admit_launch(&p.run_id, prepared, true)
                 .map_err(domain)?;
         }
         check_cancelled()?;

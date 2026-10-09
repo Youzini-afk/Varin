@@ -94,7 +94,7 @@ impl ProcessWaitTools {
         db.require_process_observation(&c.run_id, id)
             .map_err(error)?;
         let launch = db
-            .launch_intent(&c.run_id)
+            .launch_metadata(&c.run_id)
             .map_err(error)?
             .ok_or_else(|| error("process observation requires saved launch"))?;
         if launch.selection.source.as_ref()

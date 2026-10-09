@@ -1434,6 +1434,30 @@ fn launch_selection_survives_restart_before_materialization_and_binding() {
 }
 
 #[test]
+fn missing_launch_tool_content_does_not_break_source_or_cancellation_control() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let selection: launches::LaunchSelection = serde_json::from_value(json!({
+        "connection_identity":"selected", "provider_family":"fixture", "model":"model",
+        "configuration_generation":1, "tool_schema_generation":1,
+        "tools":[{"name":"read", "version":"1", "schema":{"type":"object", "description":"large tool material".repeat(65536)}}],
+        "policy":{"name":"default", "version":"1"},
+        "source":{"mode":"fixed_branch", "live_root":null, "workspace_id":"workspace", "execution_workspace_id":"workspace", "branch_id":"fixed", "revision":1}
+    })).unwrap();
+    db.select_launch(&receipt.run_id, selection.clone()).unwrap();
+    db.collect_content_objects().unwrap();
+    assert_eq!(db.launch_intent(&receipt.run_id).unwrap().unwrap().selection, selection);
+    let metadata = db.launch_metadata(&receipt.run_id).unwrap().unwrap();
+    let path = crate::content::object_path(&f.0.join("content"), metadata.selection.tools_ref["content_object"].as_str().unwrap()).unwrap();
+    std::fs::remove_file(path).unwrap();
+    assert!(db.capture_launch(&receipt.run_id).unwrap().unwrap().load().is_err());
+    assert_eq!(db.launch_metadata(&receipt.run_id).unwrap().unwrap().selection.source, selection.source);
+    assert!(db.request_cancel_run(&receipt.run_id).unwrap().cancel_requested);
+    assert!(db.events_after(0, 64).unwrap().iter().any(|event| event.kind == "run.cancel_requested"));
+}
+
+#[test]
 fn successor_environment_selection_reuses_only_its_original_thread_source() {
     use super::launches::{LaunchSelection, SourceSelection};
     let f = Fixture::new();
@@ -1647,7 +1671,7 @@ fn tool_activation_retains_its_exact_composition_through_collection_and_reopen()
     snapshot.view.binding=initial.binding.clone();snapshot.view.binding.history_range=range;
     let schema=ToolSchema{name:"query".into(),version:"new".into(),schema:json!({"type":"object"})};
     let mcp=launches::HostToolBinding{reference:"exact-owner".into(),generation:42,tools:vec![schema.clone()],resources:Default::default()};
-    let preparation=db.capture_tool_update(&receipt.run_id,db.epoch()).unwrap();
+    let preparation=db.capture_tool_update(&receipt.run_id,db.epoch()).unwrap().load_base().unwrap();
     let mut next_tools=preparation.base().to_vec();next_tools.push(schema);
     let prepared=preparation.load(next_tools.clone(),Some(mcp.clone())).unwrap();
     independent_prepare(&mut db,&receipt,snapshot.clone());
@@ -1667,9 +1691,9 @@ fn tool_activation_retains_its_exact_composition_through_collection_and_reopen()
     let (input,recovery)=db.prepare_recovered_execution(&receipt.run_id,next_binding,policy,Value::Null).unwrap();
     assert!(recovery.is_some());
     assert!(input.history.iter().any(|item|matches!(&item.content,Content::Text{text} if text=="old request output")));
-    let stale=db.capture_tool_update(&receipt.run_id,db.epoch()).unwrap().load(input.binding.tools.clone(),None);
+    let stale=db.capture_tool_update(&receipt.run_id,db.epoch()).unwrap().load_base().unwrap().load(input.binding.tools.clone(),None);
     assert!(stale.is_err(),"MCP schemas cannot be moved into base authority");
-    let preparation=db.capture_tool_update(&receipt.run_id,db.epoch()).unwrap();
+    let preparation=db.capture_tool_update(&receipt.run_id,db.epoch()).unwrap().load_base().unwrap();
     let base=preparation.base().to_vec();
     let prepared=preparation.load(base,None).unwrap();
     drop(db);let mut db=f.open();

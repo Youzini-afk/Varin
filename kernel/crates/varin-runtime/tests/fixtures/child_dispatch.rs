@@ -55,7 +55,7 @@ impl Fixture {
             "workspace_id":"workspace-A","execution_workspace_id":"workspace-A","branch_id":"fixed-parent","revision":revision})).unwrap();
         let launch: LaunchSelection = serde_json::from_value(json!({"connection_identity":"frozen-connection",
             "provider_family":"fixture","model":"fixture-model","configuration_generation":2,"tool_schema_generation":1,
-            "tools":[read.clone(),dispatch],"policy":{"name":"fixture","version":"1"},"source":source,
+            "tools":[read.clone(),dispatch,{"name":WAIT_TOOL,"version":"1","schema":{"type":"object"}}],"policy":{"name":"fixture","version":"1"},"source":source,
             "credential_scope":{"reference":"credential-ref","authority":"credential-owner","account":"account-A","generation":3}})).unwrap();
         let receipt = db.submit_with_launch(&SubmitInput { key: "parent-input".into(), thread_id: "thread:parent".into(),
             branch_id: "branch:parent".into(), expected_head: None, input: json!("Delegate a read"),
@@ -211,11 +211,7 @@ impl Fixture {
             ancestor_id: None,
             leaf_id: self.db.head(&branch).unwrap(),
         };
-        let schema = ToolSchema {
-            name: WAIT_TOOL.into(),
-            version: "1".into(),
-            schema: json!({"type":"object"}),
-        };
+        let tools = self.db.launch_intent(&self.context.run_id).unwrap().unwrap().selection.tools;
         let snapshot = RequestSnapshot {
             view: RequestView {
                 request_id: request_id.clone(),
@@ -231,7 +227,7 @@ impl Fixture {
                     credential_ref: Some("credential-ref".into()),
                     configuration_generation: 2,
                     tool_schema_generation: 1,
-                    tools: vec![schema],
+                    tools,
                     instruction_sources: vec![],
                     memory_checkpoint: None,
                     attachment_refs: vec![],

@@ -27,7 +27,7 @@ impl Catalog {
         { return Err(RuntimeError::Conflict("permission action is no longer admitted".into())); }
         let active: Option<String> = tx.query_row("SELECT active_run FROM branches WHERE id=?1", [&run.branch_id], |r| r.get(0))?;
         if active.as_deref() != Some(&run.id) { return Err(RuntimeError::Conflict("permission branch owner changed".into())); }
-        let launch: launches::LaunchIntent = record(&tx,"run_launches",&run.id)?;
+        let launch: launch_content::LaunchMetadata = record(&tx,"run_launches",&run.id)?;
         let wait_id = format!("permission:{permission_id}");
         let cursor = tx.query_row("SELECT coalesce(max(cursor),0) FROM events",[],|r|read_number(r,0))?;
         let wait = Wait { id:wait_id.clone(), run_id:run.id.clone(), subject:op.id.clone(), kind:"permission.decided".into(), after_cursor:cursor, trigger_cursor:None, cancelled:false };
@@ -92,7 +92,7 @@ fn permission_record(op:&Operation,id:&str)->Result<Value>{
     Ok(value)
 }
 fn validate_live_permission(tx:&Transaction<'_>,op:&Operation,run:&Run,permission:&Value)->Result<()> {
-    let launch:launches::LaunchIntent=record(tx,"run_launches",&run.id)?;
+    let launch:launch_content::LaunchMetadata=record(tx,"run_launches",&run.id)?;
     let active: Option<String> = tx.query_row("SELECT active_run FROM branches WHERE id=?1", [&run.branch_id], |r| r.get(0))?;
     let wait:Wait=record(tx,"waits",op.waiting_on.as_deref().ok_or_else(||RuntimeError::Conflict("permission not waiting".into()))?)?;
     if active.as_deref() != Some(&run.id) || op.phase!=OperationPhase::Waiting || op.effect!=Effect::None || op.cancel_requested || run.cancel_requested || run.state.terminal()

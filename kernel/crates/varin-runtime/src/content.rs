@@ -256,6 +256,10 @@ impl ContentStore {
         if contexts {roots.push_str(" UNION ALL SELECT body FROM context_checkpoints UNION ALL SELECT body FROM memory_states");}
         roots.push_str(" UNION ALL SELECT recipe FROM context_jobs UNION ALL SELECT body FROM context_job_parts");
         roots.push_str(" UNION ALL SELECT json_extract(data,'$.composition') FROM events WHERE kind='run.tools_activated'");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.selection.tools_ref') FROM run_launches
+            UNION ALL SELECT json_extract(body,'$.selection.base_tools_ref') FROM run_launches
+            UNION ALL SELECT json_extract(body,'$.selection.mcp_binding_ref') FROM run_launches WHERE json_extract(body,'$.selection.mcp_binding_ref') IS NOT NULL
+            UNION ALL SELECT json_extract(p.value,'$.body') FROM run_launches l,json_each(l.body,'$.selection.policy_models') p");
         let mut references=Vec::new();
         let mut stmt=db.prepare(&roots)?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;

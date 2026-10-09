@@ -36,7 +36,7 @@ pub struct PreparedSubmission {
     pub(super) epoch: u64,
     pub(super) intent: Value,
     pub(super) history: Value,
-    pub(super) launch: Option<launches::LaunchSelection>,
+    pub(super) launch: Option<launch_content::LaunchSelectionMetadata>,
     pub(super) inherit_source: bool,
     pub(super) initial: Option<(context::CheckpointMetadata, Value)>,
     pub(super) origin: SubmissionOrigin,
@@ -237,6 +237,7 @@ impl PreparedSubmission {
         // the initial prompt are separately frozen by the atomic admission, never by a retry.
         let intent = content.save(&json!({"command":&command,"launch":&launch,"inherit_source":inherit_source,
             "child_context":matches!(origin,SubmissionOrigin::Child {..}).then(||initial.as_ref().map(|(_,reference)|reference))}))?;
+        let launch = launch.map(|selection| launch_content::LaunchSelectionMetadata::stage(&content, selection)).transpose()?;
         Ok(Self {
             identity: SubmissionIdentity {
                 key: command.key,

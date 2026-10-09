@@ -12,6 +12,13 @@ writing Pi session files or the Host harness's existing execution records.
   installation cannot publish a partial internal format.
 - Input admission, branch ownership, operations, model request snapshots, waits/resumptions and
   delivery identities survive reopening. Events commit with the corresponding facts.
+- Launch records retain model/source/policy ownership and immutable content references. Tool schemas,
+  MCP descriptions and planning capabilities are prepared and hydrated outside Catalog. Queue/source
+  inheritance copies retained references; model switches and permission checks touch only metadata.
+  Tool/request admission compares the prepared content identity and generation at commit. Full launch
+  inspection/list serialization runs on workers, and content collection retains every launch reference.
+  Policy preparation binds the actual admitted baseline supplied by its assembly owner; the runtime
+  does not hard-code a kernel policy wrapper's name.
 - `execution` drives a bound model provider and tool executor on a worker. Tool results have stable
   request/call/operation identities, real effect receipts and provider-specific original items.
   The default policy is replaceable; it does not own or mutate the catalog itself.
