@@ -692,8 +692,9 @@ pub trait Persistence: Send + Sync {
     fn policy_chunk(&self, _run: &str, _epoch: u64, _reference: &PolicyEvidenceRef, _index: usize) -> Result<crate::content::ContentChunk, ExecutionError> { Err(ExecutionError::new("policy_graph_unavailable", "durable graph authority required")) }
     fn tool_source(&self, _run: &str) -> Result<Option<crate::catalog::launches::SourceSelection>, ExecutionError> { Ok(None) }
 
-    /// All engines sharing one durable authority must share its admission owner.
-    fn resource_admission(&self) -> Option<Arc<crate::resource_admission::ResourceAdmission>> { None }
+    /// The durable authority owns and reuses one coordinator across every Run and policy call.
+    /// Returning a newly allocated owner would split conflict ordering and execution capacity.
+    fn resource_admission(&self) -> Arc<crate::resource_admission::ResourceAdmission>;
 
     fn compile_context(
         &self,
@@ -1522,7 +1523,7 @@ impl<
             .collect();
         let mut planned = Vec::new();
         let mut operation_tokens = Vec::new();
-        let admission = self.persistence.resource_admission().unwrap_or_default();
+        let admission = self.persistence.resource_admission();
         let mut identity = None;
         // Only local, nonblocking planning runs on this thread. Establish the entire batch's
         // order before starting owner lookups; the shared admission owner also orders other Runs.

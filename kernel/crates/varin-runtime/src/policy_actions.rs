@@ -323,21 +323,17 @@ impl<
                                         Ok(()) => {
                                             let ready = prepare_dispatch(&token, || {
                                                 _admission_control = self.tools.watch_admission(&context, &node.call, &admitted.contract, &token)?;
-                                                if let Some(admission) =
-                                                    self.persistence.resource_admission()
-                                                {
-                                                    let identity = crate::execution_capacity::AdmissionIdentity {
-                                                        run_id: input.run_id.clone(), owner_generation: input.owner_generation,
-                                                        origin: context.origin.clone(),
-                                                        family_id: self.persistence.task_family(&input.run_id, input.owner_generation)?,
-                                                    };
-                                                    lease = admission.acquire_scheduled(
-                                                        &context.operation_id, &admitted.contract.resources, &identity,
-                                                        self.tools.execution_class(&node.call, &admitted.contract), &token,
-                                                    )?;
-                                                    return Ok(lease.is_some());
-                                                }
-                                                Ok(true)
+                                                let admission = self.persistence.resource_admission();
+                                                let identity = crate::execution_capacity::AdmissionIdentity {
+                                                    run_id: input.run_id.clone(), owner_generation: input.owner_generation,
+                                                    origin: context.origin.clone(),
+                                                    family_id: self.persistence.task_family(&input.run_id, input.owner_generation)?,
+                                                };
+                                                lease = admission.acquire_scheduled(
+                                                    &context.operation_id, &admitted.contract.resources, &identity,
+                                                    self.tools.execution_class(&node.call, &admitted.contract), &token,
+                                                )?;
+                                                Ok(lease.is_some())
                                             })?;
                                             if !ready {
                                                 ToolCompletion::NotDispatched {

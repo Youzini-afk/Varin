@@ -431,7 +431,7 @@ fn trusted_contract_and_dispatch_grant_cannot_be_claimed_by_policy() {
 #[test]
 fn unrelated_b_runs_while_a_waits_shared_resource_and_c_waits_dependency() {
     let f = Fixture::new();
-    let admission = f.db.resource_admission().unwrap();
+    let admission = f.db.resource_admission();
     let blocker = admission
         .acquire(
             "other-run-writer",
@@ -481,7 +481,7 @@ fn unrelated_b_runs_while_a_waits_shared_resource_and_c_waits_dependency() {
 #[test]
 fn queued_cancellation_releases_wait_and_never_dispatches_blocked_nodes() {
     let f = Fixture::new();
-    let admission = f.db.resource_admission().unwrap();
+    let admission = f.db.resource_admission();
     let blocker = admission
         .acquire(
             "other-run-writer",
@@ -525,7 +525,7 @@ fn queued_cancellation_releases_wait_and_never_dispatches_blocked_nodes() {
 #[test]
 fn grant_revoked_while_queued_is_rechecked_at_dispatch() {
     let f = Fixture::new();
-    let admission = f.db.resource_admission().unwrap();
+    let admission = f.db.resource_admission();
     let blocker = admission
         .acquire(
             "other-writer",
@@ -937,7 +937,7 @@ fn cancelling_an_active_read_drains_executor_and_releases_resource() {
     let result = finished.recv_timeout(Duration::from_secs(3));
     worker.join().unwrap();
     assert_eq!(result.unwrap().unwrap().state, RunState::Cancelled);
-    let admission = f.db.resource_admission().unwrap();
+    let admission = f.db.resource_admission();
     let (tx, rx) = mpsc::channel();
     let probe = CancellationToken::default();
     let probe_child = probe.clone();
@@ -1029,7 +1029,7 @@ struct InterleavingPersistence {
 impl Persistence for InterleavingPersistence {
     fn resource_admission(
         &self,
-    ) -> Option<Arc<varin_runtime::resource_admission::ResourceAdmission>> {
+    ) -> Arc<varin_runtime::resource_admission::ResourceAdmission> {
         self.db.resource_admission()
     }
     fn compile_context(

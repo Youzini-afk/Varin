@@ -596,6 +596,9 @@ impl BoundaryPersistence {
     }
 }
 impl Persistence for BoundaryPersistence {
+    fn resource_admission(&self) -> Arc<varin_runtime::resource_admission::ResourceAdmission> {
+        self.db.resource_admission()
+    }
     fn compile_context(
         &self,
         r: &str,

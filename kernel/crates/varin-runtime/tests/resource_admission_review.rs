@@ -153,7 +153,7 @@ fn restart_dead_synchronous_writer_must_not_retain_resource() {
     drop(db);
     let db = Mutex::new(Catalog::open(&root).unwrap());
     assert!(
-        can_acquire(db.resource_admission().unwrap()),
+        can_acquire(db.resource_admission()),
         "dead synchronous executor retained file occupancy after restart"
     );
     drop(db);
@@ -178,7 +178,7 @@ fn terminal_receipt_with_unknown_effect_should_release_executor_occupancy() {
     drop(db);
     let db = Mutex::new(Catalog::open(&root).unwrap());
     assert!(
-        can_acquire(db.resource_admission().unwrap()),
+        can_acquire(db.resource_admission()),
         "trusted terminal receipt retains lock merely because business effect unknown"
     );
     drop(db);
@@ -545,7 +545,7 @@ fn live_job_survives_run_cancel_and_restart_until_explicit_stop() {
     db.request_cancel_operation("model-1:tool:job").unwrap();
     drop(db);
     let db = Mutex::new(Catalog::open(&root).unwrap());
-    assert!(!can_acquire(db.resource_admission().unwrap()));
+    assert!(!can_acquire(db.resource_admission()));
     let receipt = ExternalReceipt {
         identity: "model-1:tool:job".into(),
         executor: "process-executor".into(),
@@ -558,12 +558,12 @@ fn live_job_survives_run_cancel_and_restart_until_explicit_stop() {
         .unwrap()
         .record_external_receipt_with_stop("model-1:tool:job", receipt.clone(), false)
         .unwrap();
-    assert!(!can_acquire(db.resource_admission().unwrap()));
+    assert!(!can_acquire(db.resource_admission()));
     db.lock()
         .unwrap()
         .record_external_receipt_with_stop("model-1:tool:job", receipt, true)
         .unwrap();
-    assert!(can_acquire(db.resource_admission().unwrap()));
+    assert!(can_acquire(db.resource_admission()));
     drop(db);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -603,7 +603,7 @@ fn early_stop_before_job_accepted_never_reacquires_occupancy() {
     .unwrap();
     drop(db);
     let db = Mutex::new(Catalog::open(&root).unwrap());
-    assert!(can_acquire(db.resource_admission().unwrap()));
+    assert!(can_acquire(db.resource_admission()));
     drop(db);
     std::fs::remove_dir_all(root).unwrap();
 }
