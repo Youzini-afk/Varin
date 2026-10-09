@@ -145,6 +145,7 @@ pub(crate) struct NativeThreadCreateParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeInputSubmitParams {
+    pub(crate) initial_context: Option<NativeInitialContext>,
     pub(crate) launch: Option<NativeSubmitLaunch>,
     pub(crate) key: String,
     pub(crate) thread_id: String,
@@ -152,6 +153,13 @@ pub(crate) struct NativeInputSubmitParams {
     pub(crate) expected_head: RequiredNullable<String>,
     pub(crate) input: Value,
     pub(crate) configuration: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeQuestionAnswerParams {
+    pub(crate) operation_id: String,
+    pub(crate) answer: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1147,6 +1155,14 @@ pub(crate) struct NativeLaunchSourceParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeInitialContext {
+    pub(crate) effective_system_prompt: String,
+    pub(crate) instruction_sources: Vec<String>,
+    pub(crate) memory_checkpoint: RequiredNullable<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeSubmitLaunch {
     pub(crate) inherit_source: Option<bool>,
     pub(crate) source: RequiredNullable<NativeLaunchSourceParams>,
@@ -1470,6 +1486,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.run.cancel" => serde_json::from_value::<NativeRunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.question.answer" => {
+            serde_json::from_value::<NativeQuestionAnswerParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.operation.inspect" => {
             serde_json::from_value::<NativeOperationParams>(params.clone())
                 .map(|_| ())

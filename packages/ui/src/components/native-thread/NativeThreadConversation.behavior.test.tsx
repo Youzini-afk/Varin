@@ -45,7 +45,7 @@ function fixture(active = false) {
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
   const api: NativeThreadsAPI = { listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
-    prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, events: async () => [],
+    answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
   };
   return { api, view, submit, enqueue, editInput, cancelInput, cancelRun, emit: (event: Parameters<NativeThreadsAPI['observe']>[1] extends (value: infer T) => void ? T : never) => listener?.(event) };
@@ -343,4 +343,50 @@ it('does not silently discard a prepared workspace when a live run appears befor
   await act(async () => { button('Remove prepared workspace').click(); });
   await submitForm(container.querySelector('form')!);
   expect(f.enqueue).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ text: 'run on prepared workspace' }));
+});
+
+it('requires an explicit answer send, keeps the draft on failure and disables a stale question', async () => {
+  const f = fixture(true);
+  const operation: NativeThreadSnapshot['operations'][number] = { id: 'question-op', run_id: 'ui-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'native_ask_user', waiting_on: 'question:question-op', intent: { call: { arguments: { question: 'Which approach?', options: ['Option A', 'Option B'] } } }, result: null, external_receipt: null };
+  f.view.activeRun!.state = 'waiting'; f.view.activeRun!.waiting_on = operation.waiting_on;
+  f.view.operations = [operation];
+  const answer = vi.fn<NativeThreadsAPI['answerQuestion']>().mockRejectedValueOnce(new Error('uncertain answer acceptance')).mockImplementation(async () => {
+    f.view.operations[0] = { ...operation, phase: 'terminal', outcome: 'succeeded', result: { answer: 'Option B with detail' } };
+    f.view.activeRun!.waiting_on = 'question:another-operation';
+    return f.view.operations[0]!;
+  });
+  f.api.answerQuestion = answer;
+  await act(async () => { root.render(<NativeThreadConversation api={f.api} identity={identity} />); });
+  expect(answer).not.toHaveBeenCalled();
+  await act(async () => { button('Option B').click(); });
+  expect(answer).not.toHaveBeenCalled();
+  await edit('[aria-label="Your answer"]', 'Option B with detail');
+  await submitForm(container.querySelector<HTMLFormElement>('form[aria-label="Answer agent question"]')!);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Your answer"]')!.value).toBe('Option B with detail');
+  expect(container.textContent).toContain('uncertain answer acceptance');
+  await submitForm(container.querySelector<HTMLFormElement>('form[aria-label="Answer agent question"]')!);
+  expect(answer.mock.calls[0]![0]).toEqual({ ...identity, operationId: operation.id, answer: 'Option B with detail' });
+  expect(answer.mock.calls[1]![0]).toEqual(answer.mock.calls[0]![0]);
+  expect(button('Send answer').disabled).toBe(true);
+  expect(button('Option A').disabled).toBe(true);
+  await submitForm(container.querySelector<HTMLFormElement>('form[aria-label="Answer agent question"]')!);
+  expect(answer).toHaveBeenCalledTimes(2);
+});
+
+it('keeps a sibling branch question non-actionable while viewing an earlier conversation fork', async () => {
+  const f = fixture();
+  const fork = { ...identity, branchId: 'earlier-fork-branch' };
+  f.view.identity = fork;
+  f.view.thread.branches.push({ branch_id: fork.branchId, head: 'earlier-user', active_run_id: null, latest_run: null });
+  f.view.operations = [{ id: 'source-question-op', run_id: 'source-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'native_ask_user', waiting_on: 'question:source-question-op', intent: { call: { arguments: { question: 'Original branch clarification', options: ['Proceed'] } } }, result: null, external_receipt: null }];
+  const answer = vi.fn<NativeThreadsAPI['answerQuestion']>();
+  const cancel = vi.fn<NativeThreadsAPI['cancelOperation']>();
+  f.api.answerQuestion = answer; f.api.cancelOperation = cancel;
+  await act(async () => { root.render(<NativeThreadConversation api={f.api} identity={fork} />); });
+  expect(button('Proceed').disabled).toBe(true);
+  expect(button('Send answer').disabled).toBe(true);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Your answer"]')!.disabled).toBe(true);
+  expect(button('Cancel operation')).toBeUndefined();
+  await submitForm(container.querySelector<HTMLFormElement>('form[aria-label="Answer agent question"]')!);
+  expect(answer).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled();
 });

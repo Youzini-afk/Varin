@@ -1,3 +1,4 @@
+import { NativeThreadQuestion } from './NativeThreadQuestion';
 import { NativeThreadSourcePicker } from './NativeThreadSourcePicker';
 import type { ImageAttachment } from '@varin/protocol';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
@@ -142,9 +143,10 @@ export function NativeThreadConversation({ api, identity, onBranchCreated, initi
       </article>)}
       {!historyView && progress && <article className="mx-auto max-w-3xl" aria-label="Streaming assistant response"><MarkdownRenderer messageId={`${identity.threadId}:progress`} isStreaming content={progress} /></article>}
       {snapshot?.operations.map(operation => <div key={operation.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
+        {operation.executor === 'native_ask_user' && <NativeThreadQuestion operation={operation} enabled={!pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on} onAnswer={answer => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}
         <div>Background operation · {operation.phase} · {operation.outcome ?? 'In progress'} · effect: {operation.effect}</div>
         {operation.external_receipt && <div className="text-xs text-muted-foreground">{operation.external_receipt.executor} · {operation.external_receipt.outcome}</div>}
-        {operation.phase !== 'terminal' && <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelOperation(operation.id))}>Cancel operation</Button>}
+        {operation.phase !== 'terminal' && (operation.executor !== 'native_ask_user' || run?.waiting_on === operation.waiting_on) && <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelOperation(operation.id))}>Cancel operation</Button>}
       </div>)}
       {snapshot?.inputs.filter(input => input.state === 'queued').map(input => <div key={input.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
         <form onSubmit={event => { event.preventDefault(); const edited = new FormData(event.currentTarget).get('text');
@@ -161,7 +163,7 @@ export function NativeThreadConversation({ api, identity, onBranchCreated, initi
       active={active || pending} launch={snapshot?.launch ?? null} prepared={preparedSource} onPrepared={setPreparedSource} onPreparingChange={setPreparingSource} />
     {snapshot && <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">
       <summary className="cursor-pointer">Context summaries · checkpoint {snapshot.context.checkpoint?.revision ?? 0} · {snapshot.context.jobs.length} jobs</summary>
-      {snapshot.context.checkpoint && <div className="my-2" aria-label="Active context summary">
+      {snapshot.context.checkpoint?.proposal.through_id && <div className="my-2" aria-label="Active context summary">
         <MarkdownRenderer messageId={snapshot.context.checkpoint.id} content={snapshot.context.checkpoint.proposal.summary} />
       </div>}
       {snapshot.context.jobs.map(({ job, run: jobRun }) => {

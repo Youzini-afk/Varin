@@ -192,16 +192,30 @@ impl Catalog {
         self.submit_with_launch(command, None)
     }
     pub fn submit_with_launch(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>) -> Result<Receipt> {
-        self.submit_admission(command, launch, false, false)
+        self.submit_admission(command, launch, false, false, None)
     }
     /// Inherit the last committed source within admission, while retaining the new model/credential selection.
     pub fn submit_with_inherited_source(&mut self, command: &SubmitInput, launch: launches::LaunchSelection) -> Result<Receipt> {
-        if launch.source.is_some() || !launch.tools.is_empty() {
+        if launch.source.is_some() || launch.tools.iter().any(|tool| tool.name != questions::QUESTION_TOOL) {
             return Err(RuntimeError::Invalid("source inheritance cannot also override source or tools".into()));
         }
-        self.submit_admission(command, Some(launch), false, true)
+        self.submit_admission(command, Some(launch), false, true, None)
     }
-    fn submit_admission(&mut self, command: &SubmitInput, mut launch: Option<launches::LaunchSelection>, create_thread: bool, inherit_source: bool) -> Result<Receipt> {
+    /// Trusted first-input context is committed with input and launch, never before admission.
+    /// Existing checkpoints (including uncertain retries) remain the frozen authority.
+    pub fn submit_with_initial_context(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>, inherit_source: bool, initial: Option<context::ContextProposal>) -> Result<Receipt> {
+        if inherit_source && launch.as_ref().is_none_or(|selection| selection.source.is_some() || selection.tools.iter().any(|tool| tool.name != questions::QUESTION_TOOL)) {
+            return Err(RuntimeError::Invalid("source inheritance requires an unoverridden model launch".into()));
+        }
+        let staged = if let Some(proposal) = initial {
+            if proposal.branch_id != command.branch_id || proposal.through_id.is_some() || proposal.expected_revision != 0 || !proposal.summary.is_empty() {
+                return Err(RuntimeError::Invalid("initial context must be a first-input system snapshot".into()));
+            }
+            if self.active_context(&command.branch_id)?.is_none() { Some(self.stage_context(proposal)?) } else { None }
+        } else { None };
+        self.submit_admission(command, launch, false, inherit_source, staged)
+    }
+    fn submit_admission(&mut self, command: &SubmitInput, mut launch: Option<launches::LaunchSelection>, create_thread: bool, inherit_source: bool, initial_context: Option<(context::ContextCheckpoint, Value)>) -> Result<Receipt> {
         if let Some(selection)=launch.as_ref(){selection.validate()?;}
         execution_persistence::user_input_items("admission",&command.input)?;
         let history_content = self.content.save_history(&command.input, &None)?;
@@ -237,6 +251,9 @@ impl Catalog {
             return Err(RuntimeError::Conflict(
                 "branch head or execution owner changed".into(),
             ));
+        }
+        if let Some((checkpoint, reference)) = initial_context {
+            context::publish_prepared(&tx, &checkpoint, &reference)?;
         }
         if inherit_source {
             let previous: Option<(String, String)> = tx.query_row(
@@ -340,6 +357,7 @@ impl Catalog {
             return Err(RuntimeError::Conflict("run revision/state changed".into()));
         }
         if next.terminal() {
+            if matches!(next, RunState::Cancelled | RunState::Failed) { questions::cancel_run_questions(&tx, id)?; }
             if matches!(next,RunState::Completed|RunState::Failed)&&inputs::has_boundary_inputs(&tx,id)?{return Err(RuntimeError::InputPending);}
 
             let mut stmt = tx.prepare("SELECT body FROM operations WHERE run_id=?1")?;
@@ -388,6 +406,7 @@ impl Catalog {
             return Ok(run);
         }
         run.cancel_requested = true;
+        if run.state == RunState::Waiting { questions::cancel_run_questions(&tx, id)?; }
         run.revision += 1;
         put(&tx, "runs", id, &run)?;
         event(&tx, id, run.revision, "run.cancel_requested", Value::Null)?;
@@ -519,11 +538,26 @@ impl Catalog {
             crate::execution::validate_history_pairs(&history)
                 .map_err(|error| RuntimeError::Invalid(error.to_string()))?;
         }
+        let fork_context = self.active_context(source)?.map(|checkpoint| {
+            let proposal = context::ContextProposal {
+                key: format!("fork-context:{new_branch}"), branch_id: new_branch.into(),
+                through_id: None, expected_revision: 0, summary: String::new(),
+                effective_system_prompt: checkpoint.proposal.effective_system_prompt,
+                instruction_sources: checkpoint.proposal.instruction_sources,
+                memory_checkpoint: checkpoint.proposal.memory_checkpoint,
+            };
+            let checkpoint = context::ContextCheckpoint { id: proposal.key.clone(), revision: 1, proposal };
+            let reference = self.content.save(&serde_json::to_value(&checkpoint)?)?;
+            Ok::<_, RuntimeError>((checkpoint, reference))
+        }).transpose()?;
         let tx = self.db.transaction()?;
         tx.execute(
             "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,?3)",
             params![new_branch, thread, head],
         )?;
+        if let Some((checkpoint, reference)) = fork_context {
+            context::publish_prepared(&tx, &checkpoint, &reference)?;
+        }
         event(
             &tx,
             new_branch,
@@ -1186,3 +1220,6 @@ pub mod history_views;
 
 #[path="catalog_context_jobs.rs"]
 pub mod context_jobs;
+
+#[path = "catalog_questions.rs"]
+pub mod questions;

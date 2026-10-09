@@ -60,3 +60,11 @@ loads them as command templates.
 Verification owners: `agent-personalization.native.test.ts` exercises real Rust persistence,
 scope isolation and stale edits; Pi `session-e2e.test.ts` exercises actual outgoing requests
 with a faux provider; UI `AgentSettings.behavior.test.tsx` covers editing and scope selection.
+
+
+Native conversations now read this same catalog through `kernel/native-thread-context.ts` at first
+input admission. Rust atomically stores the resulting system snapshot alongside the native input;
+project scope comes from Host-admitted workspace membership and session scope is the native thread ID.
+The snapshot survives subsequent Runs, explicit compaction and conversation forks. This initial
+native slice does not yet deliver live memory changes or refresh snapshots at compaction; the Pi
+mutation/receipt behavior described above remains Pi-specific. No native memory catalog is added.

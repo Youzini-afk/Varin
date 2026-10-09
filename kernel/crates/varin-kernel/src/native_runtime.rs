@@ -376,6 +376,7 @@ pub(crate) fn spawn(
                                 start =
                                     varin_runtime::context_job::configure_compaction_start(start);
                             }
+                            if !is_context_job { start = crate::native_questions::configure(start, runtime.catalog()); }
                             if let Some(selected) = selected {
                                 let kinds: std::collections::BTreeSet<
                                     crate::native_tools::NativeToolKind,
@@ -388,6 +389,7 @@ pub(crate) fn spawn(
                                     crate::native_tools::NativeToolExecutor::selected_schemas(
                                         &kinds,
                                     );
+                                start.binding.tools.push(crate::native_questions::schema());
                                 start.binding.tool_schema_generation =
                                     start.binding.configuration_generation;
                                 let source = selected
@@ -487,6 +489,9 @@ pub(crate) fn spawn(
                                 start.binding.tool_schema_generation =
                                     start.binding.configuration_generation;
                                 start.tools = Arc::new(tools);
+                                // The source executor replaced the initial built-ins; keep the existing policy wrapper.
+                                start.tools = crate::native_questions::wrap_tools(start.tools, runtime.catalog());
+                                start.binding.tools.push(crate::native_questions::schema());
                             }
                             {
                                 let mut selection =
@@ -617,8 +622,20 @@ pub(crate) fn spawn(
                                     .map_err(domain)?,
                             )?);
                         }
+                        if method == "runtime.question.answer" {
+                            let p: NativeQuestionAnswerParams = serde_json::from_value(params)?;
+                            runtime.quiesce_question(&p.operation_id).map_err(|e| KernelError::Operation(e.to_string()))?;
+                            let result = runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?
+                                .answer_question(&p.operation_id, &p.answer).map_err(domain)?;
+                            return Ok(serde_json::to_value(result)?);
+                        }
                         if method == "runtime.run.cancel" {
                             let p: NativeRunParams = serde_json::from_value(params)?;
+                            let waiting = runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?
+                                .run(&p.run_id).map_err(domain)?.waiting_on;
+                            if let Some(operation_id) = waiting.as_deref().and_then(|id| id.strip_prefix("question:")) {
+                                runtime.quiesce_question(operation_id).map_err(|e| KernelError::Operation(e.to_string()))?;
+                            }
                             return Ok(serde_json::to_value(
                                 runtime
                                     .cancel(&p.run_id)
@@ -627,6 +644,13 @@ pub(crate) fn spawn(
                         }
                         if method == "runtime.operation.cancel" {
                             let p: NativeOperationParams = serde_json::from_value(params)?;
+                            if runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?
+                                .operation(&p.operation_id).map_err(domain)?.executor.as_deref() == Some("native_ask_user") {
+                                runtime.quiesce_question(&p.operation_id).map_err(|e| KernelError::Operation(e.to_string()))?;
+                                let operation = runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?
+                                    .cancel_question(&p.operation_id).map_err(domain)?;
+                                return Ok(serde_json::to_value(operation)?);
+                            }
                             let operation = runtime
                                 .cancel_operation(&p.operation_id)
                                 .map_err(|e| KernelError::Operation(e.to_string()))?;
@@ -905,21 +929,22 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                         } else {
                             0
                         },
-                        tools: crate::native_tools::NativeToolExecutor::selected_schemas(&kinds),
-                        policy: varin_runtime::execution::AgentPolicy::identity(
-                            &varin_runtime::execution::DefaultAgentPolicy,
-                        ),
+                        tools: crate::native_questions::schemas(crate::native_tools::NativeToolExecutor::selected_schemas(&kinds)),
+                        policy: crate::native_questions::default_policy_identity(),
                         source,
                     })
                 })
                 .transpose()?;
             let command = SubmitInput { key:p.key, thread_id:p.thread_id, branch_id:p.branch_id,
                 expected_head:p.expected_head.0, input:p.input, configuration:p.configuration };
-            let receipt = if inherit_source {
-                catalog.submit_with_inherited_source(&command, launch.ok_or_else(|| KernelError::Protocol("source inheritance requires a model launch".into()))?)
-            } else {
-                catalog.submit_with_launch(&command, launch)
-            }.map_err(domain)?;
+            let initial = p.initial_context.map(|context| varin_runtime::catalog::context::ContextProposal {
+                key: format!("initial-context:{}", command.branch_id), branch_id: command.branch_id.clone(),
+                through_id: None, expected_revision: 0, summary: String::new(),
+                effective_system_prompt: context.effective_system_prompt,
+                instruction_sources: context.instruction_sources,
+                memory_checkpoint: context.memory_checkpoint.0,
+            });
+            let receipt = catalog.submit_with_initial_context(&command, launch, inherit_source, initial).map_err(domain)?;
             Ok(serde_json::to_value(receipt)?)
         }
         "runtime.run.inspect" | "runtime.run.cancel" => {

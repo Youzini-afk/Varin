@@ -87,6 +87,7 @@ export interface NativeThreadsAPI {
   cancelRun(runId: string): Promise<NativeRun>;
   operation(operationId: string): Promise<NativeOperation>;
   cancelOperation(operationId: string): Promise<NativeOperation>;
+  answerQuestion(input: NativeThreadIdentity & { operationId: string; answer: string }): Promise<NativeOperation>;
   resume(runId: string): Promise<void>;
   events(cursor: number): Promise<NativeEvent[]>;
   /** Reconnect from the last durable cursor; progress is presentation-only. */

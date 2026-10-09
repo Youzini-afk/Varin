@@ -24,6 +24,7 @@ const identity = (body: Record<string, unknown>): NativeThreadIdentity => {
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
 export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAdapter, requireAuth: RequestHandler): void {
   const fields: Record<string, readonly string[]> = {
+    'question/answer': ['runtime', 'threadId', 'branchId', 'operationId', 'answer'],
     'source/prepare': ['runtime', 'threadId', 'branchId', 'key', 'path', 'mode'],
     'context/compact': ['runtime', 'threadId', 'branchId', 'key', 'throughId', 'expectedRevision', 'model'],
     'context/publish': ['runtime', 'threadId', 'branchId', 'runId'], 'context/cancel': ['runtime', 'threadId', 'branchId', 'runId'], 'context/resume': ['runtime', 'threadId', 'branchId', 'runId'],
@@ -48,6 +49,7 @@ export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAd
       }
     });
   };
+  post('question/answer', body => adapter.answerQuestion({ ...identity(body), operationId: text(body.operationId), answer: text(body.answer) }));
   post('models', () => adapter.listModels());
   post('list', async () => (await adapter.runtime.threads()).filter(thread => thread.thread_id.startsWith('nativeThread:')));
   post('create', body => adapter.create(text(body.key)));
@@ -110,7 +112,7 @@ export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAd
   post('run/cancel', async body => { await adapter.requireRun(text(body.runId)); return adapter.runtime.cancelRun(text(body.runId)); });
   post('run/resume', async body => { await adapter.resume(text(body.runId)); return {}; });
   post('operation', body => adapter.requireOperation(text(body.operationId)));
-  post('operation/cancel', async body => { await adapter.requireOperation(text(body.operationId)); return adapter.runtime.cancelOperation(text(body.operationId)); });
+  post('operation/cancel', body => adapter.cancelOperation(text(body.operationId)));
   post('events', body => adapter.runtime.events(revision(body.cursor), 256));
   app.get('/api/native-threads/observe', requireAuth, (request, response) => {
     let cursor: number;
