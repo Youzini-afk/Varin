@@ -16,6 +16,7 @@ private runtime protocol and product surfaces still move together.
 - 调整只读工具的调度，减少长检索对同批其他工具的阻塞；请求取消贯穿后台准备和文件盘点。
 - LSP 按工作区预热，隔离代码视图各自准备。修复 Worker 启动时目录准备依赖尚未登记的会话，导致子任务启动失败的问题。
 - 文件监听按实际内容修订核对语言视图，避免延迟事件清除已经更新的诊断；语言扩展激活失败保留明确的失败状态。
+- 修复首次语义索引构建失败被显示为空结果的问题。
 - Windows 文件工具识别 MSYS 盘符路径和临时目录路径；批量编辑对照原文匹配并检测重叠，编辑失败只显示一次错误。
 - Todo 使用明确的进度状态并简化输入；文档多页读取、隐藏文件检索及 Shell 输出标记处理得到修正。
 - 修复已结束子任务的待输入状态及过期接续任务控件，减少已结束队友和重复消息对上下文的干扰。
@@ -49,6 +50,7 @@ Varin 0.9.25 improves concurrent tools, child-task startup, Windows Computer Use
 - Adjust read-tool scheduling so long retrieval calls do not unnecessarily hold up other tools in the batch. Propagate cancellation through preparation and file inventory.
 - Prewarm workspace language services and prepare isolated code views separately. Fix Worker startup materialization looking up a session before its running-state binding exists.
 - Compare watched disk content with the current language binding so delayed events do not clear fresh diagnostics. Preserve explicit language-extension activation failures.
+- Report an initial semantic-index build failure instead of an empty result.
 - Recognize MSYS drive and temporary paths in Windows file tools. Match batch edits against original content, reject overlaps and display edit failures once.
 - Clarify Todo progress states and simplify plan input. Repair multi-page document input, hidden-file search and Shell output framing.
 - Refresh finished-task attention and expired continuation controls; reduce repeated settled-teammate and message material.
