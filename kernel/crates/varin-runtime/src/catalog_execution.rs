@@ -25,17 +25,52 @@ impl Persistence for Mutex<Catalog> {
             .task_family(run, epoch).map_err(policy_error)
     }
 
-    fn policy_model_job(&self,run:&str, epoch:u64)->std::result::Result<Option<PolicyModelState>,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.policy_model_job(run,epoch).map_err(policy_error)}
-    fn admit_policy_model(&self,run:&str,epoch:u64,intent:&PolicyModelIntent,snapshot:&RequestSnapshot)->std::result::Result<PolicyModelState,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.admit_policy_model(run,epoch,intent,snapshot).map_err(policy_error)}
-    fn dispatch_policy_model(&self,run:&str,epoch:u64,action:&str)->std::result::Result<(),ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.dispatch_policy_model(run,epoch,action).map_err(policy_error)}
-    fn record_policy_model(&self,run:&str,epoch:u64,action:&str,output:&PolicyModelOutput,receipt:Option<&PolicyModelReceipt>)->std::result::Result<(),ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.record_policy_model(run,epoch,action,output,receipt).map_err(policy_error)}
+    fn policy_model_job(&self, run: &str, epoch: u64) -> std::result::Result<Option<PolicyModelState>, ExecutionError> {
+        let read = self.lock().map_err(catalog_lock_error)?
+            .prepare_policy_model_read(run, epoch).map_err(policy_error)?;
+        read.map(super::policy_model::PolicyModelRead::load).transpose().map_err(policy_error)
+    }
+    fn admit_policy_model(&self, run: &str, epoch: u64, intent: &PolicyModelIntent, snapshot: &RequestSnapshot) -> std::result::Result<PolicyModelState, ExecutionError> {
+        let (content, _publication) = {
+            let catalog = self.lock().map_err(catalog_lock_error)?;
+            fence(&catalog.run(run).map_err(policy_error)?, epoch).map_err(policy_error)?;
+            (catalog.content.clone(), catalog.content.begin_publication())
+        };
+        let reference = content.save(&serde_json::to_value(snapshot).map_err(|error| policy_error(error.into()))?).map_err(policy_error)?;
+        let read = self.lock().map_err(catalog_lock_error)?
+            .admit_policy_model_reference(run, epoch, intent, snapshot, reference).map_err(policy_error)?;
+        read.load().map_err(policy_error)
+    }
+    fn dispatch_policy_model(&self, run: &str, epoch: u64, action: &str) -> std::result::Result<(), ExecutionError> {
+        let (content, _publication, reference) = policy_model_body(self, run, epoch, action)?;
+        let snapshot = serde_json::from_value(content.load(&reference).map_err(policy_error)?)
+            .map_err(|error| policy_error(error.into()))?;
+        self.lock().map_err(catalog_lock_error)?
+            .dispatch_policy_model_prepared(run, epoch, action, &reference, &snapshot).map_err(policy_error)
+    }
+    fn record_policy_model(&self, run: &str, epoch: u64, action: &str, output: &PolicyModelOutput, receipt: Option<&PolicyModelReceipt>) -> std::result::Result<(), ExecutionError> {
+        let (content, _publication, reference) = policy_model_body(self, run, epoch, action)?;
+        let snapshot = serde_json::from_value(content.load(&reference).map_err(policy_error)?)
+            .map_err(|error| policy_error(error.into()))?;
+        let output_refs = super::policy_model::PolicyModelOutputReferences::write(&content, output, receipt).map_err(policy_error)?;
+        self.lock().map_err(catalog_lock_error)?
+            .record_policy_model_prepared(run, epoch, action, output, receipt, &reference, &snapshot, output_refs).map_err(policy_error)
+    }
     fn policy_boundary(&self, run:&str, epoch:u64)->std::result::Result<PolicyBoundary,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.policy_boundary(run,epoch).map_err(policy_error)}
     fn policy_graph(&self, run:&str, epoch:u64)->std::result::Result<Option<PolicyGraphState>,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.policy_graph(run,epoch).map_err(policy_error)}
     fn admit_policy_graph(&self,run:&str,epoch:u64,intent:&PolicyGraphIntent)->std::result::Result<PolicyGraphState,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.admit_policy_graph(run,epoch,intent).map_err(policy_error)}
     fn settle_policy_node(&self,run:&str,epoch:u64,action:&str,node:&str,completion:&ToolCompletion)->std::result::Result<PolicyNodeReceipt,ExecutionError>{
-        // Content publication and GC share the existing Catalog owner. Do not unlock between
-        // saving a new immutable body and committing its root: GC could collect that body.
-        self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.settle_policy_node(run,epoch,action,node,completion).map_err(policy_error)
+        let (content, _publication) = {
+            let catalog = self.lock().map_err(catalog_lock_error)?;
+            fence(&catalog.run(run).map_err(policy_error)?, epoch).map_err(policy_error)?;
+            (catalog.content.clone(), catalog.content.begin_publication())
+        };
+        let output = match completion {
+            ToolCompletion::Result { effect: Effect::None, content: body, .. } => Some(content.save(body).map_err(policy_error)?),
+            _ => None,
+        };
+        self.lock().map_err(catalog_lock_error)?
+            .settle_policy_node_reference(run, epoch, action, node, completion, output).map_err(policy_error)
     }
     fn policy_evidence(&self,run:&str,epoch:u64,reference:&PolicyEvidenceRef)->std::result::Result<ConversationItem,ExecutionError>{
         let (content,owned,model)={let catalog=self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?;fence(&catalog.run(run).map_err(policy_error)?,epoch).map_err(policy_error)?;(catalog.content.clone(),catalog.owned_policy_reference(run,reference).map_err(policy_error)?,catalog.is_policy_model_reference(reference).map_err(policy_error)?)};
@@ -82,10 +117,10 @@ impl Persistence for Mutex<Catalog> {
         // Hashing, body serialization and durable object I/O belong to the executing worker.
         // The publication lease keeps these objects alive until their metadata commits.
         let prepared = preparation.and_then(|preparation| preparation.write(record));
-        let mut catalog = self
-            .lock()
-            .map_err(|_| ExecutionError::new("catalog_poisoned", "catalog owner failed"))?;
-        match prepared.and_then(|prepared| catalog.commit_prepared_execution(run_id, epoch, record, prepared)) {
+        let result = prepared.and_then(|prepared| self.lock()
+            .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?
+            .commit_prepared_execution(run_id, epoch, record, prepared));
+        match result {
             Ok(()) => Ok(()),
             Err(RuntimeError::InputPending) => Err(ExecutionError::new(
                 "input_pending",
@@ -93,8 +128,18 @@ impl Persistence for Mutex<Catalog> {
             )),
             Err(error) => {
                 if matches!(record, ExecutionRecord::ModelFinished { .. }) {
-                    if let Err(retain) = catalog.retain_rejected_model_output(run_id, epoch, record)
-                    {
+                    let retain = (|| {
+                        let (content, _publication) = {
+                            let catalog = self.lock().map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?;
+                            (catalog.content.clone(), catalog.content.begin_publication())
+                        };
+                        let ExecutionRecord::ModelFinished { items, .. } = record else { unreachable!() };
+                        let originals = content.save_originals(&provider_originals(items))?;
+                        let output = content.save(&json!({"status":"rejected","record":record}))?;
+                        self.lock().map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?
+                            .retain_rejected_model_output(run_id, epoch, record, originals, output)
+                    })();
+                    if let Err(retain) = retain {
                         return Err(ExecutionError::new(
                             "catalog_commit",
                             format!("{error}; generated output could not be retained: {retain}"),
@@ -107,6 +152,15 @@ impl Persistence for Mutex<Catalog> {
     }
 }
 fn policy_error(error:RuntimeError)->ExecutionError{ExecutionError::new(if matches!(error,RuntimeError::InputPending){"input_pending"}else{"policy_graph"},error.to_string())}
+fn catalog_lock_error<T>(_: std::sync::PoisonError<T>) -> ExecutionError {
+    ExecutionError::new("catalog_poisoned", "catalog owner failed")
+}
+fn policy_model_body(catalog: &Mutex<Catalog>, run: &str, epoch: u64, action: &str)
+    -> std::result::Result<(crate::content::ContentStore, crate::content::ContentPublication, Value), ExecutionError> {
+    let catalog = catalog.lock().map_err(catalog_lock_error)?;
+    let reference = catalog.policy_model_request_reference(run, epoch, action).map_err(policy_error)?;
+    Ok((catalog.content.clone(), catalog.content.begin_publication(), reference))
+}
 fn append_item(tx: &Transaction<'_>, run: &Run, item: &ConversationItem, body_reference: &Value) -> Result<()> {
     let (head, active): (Option<String>, Option<String>) = tx.query_row(
         "SELECT head,active_run FROM branches WHERE id=?1",
@@ -1027,18 +1081,17 @@ impl Catalog {
         run_id: &str,
         epoch: u64,
         record: &ExecutionRecord,
+        originals: Vec<ProviderOriginal>,
+        output: Value,
     ) -> Result<()> {
         let ExecutionRecord::ModelFinished {
             request_id,
-            items,
             usage,
             ..
         } = record
         else {
             return Ok(());
         };
-        let originals = self.content.save_originals(&provider_originals(items))?;
-        let output = self.content.save(&json!({"status":"rejected","record":record}))?;
         let tx = self.db.transaction()?;
         let Some(mut step) = optional_record::<ModelStep>(&tx, "model_steps", request_id)? else {
             return Ok(());

@@ -295,6 +295,22 @@ impl Catalog {
         node: &str,
         completion: &ToolCompletion,
     ) -> Result<PolicyNodeReceipt> {
+        let _publication = self.content.begin_publication();
+        let output = match completion {
+            ToolCompletion::Result { effect: Effect::None, content, .. } => Some(self.content.save(content)?),
+            _ => None,
+        };
+        self.settle_policy_node_reference(run_id, epoch, action, node, completion, output)
+    }
+    pub(crate) fn settle_policy_node_reference(
+        &mut self,
+        run_id: &str,
+        epoch: u64,
+        action: &str,
+        node: &str,
+        completion: &ToolCompletion,
+        output: Option<Value>,
+    ) -> Result<PolicyNodeReceipt> {
         let run = self.run(run_id)?;
         fence(&run, epoch)?;
         let mut op: Operation = record(&self.db, "operations", action)?;
@@ -339,7 +355,7 @@ impl Catalog {
             ToolCompletion::Result {
                 outcome,
                 effect: Effect::None,
-                content,
+                ..
             } => {
                 if admitted
                     .node
@@ -351,7 +367,7 @@ impl Catalog {
                         "failed dependency cannot execute".into(),
                     ));
                 }
-                let reference = self.content.save(content)?;
+                let reference = output.ok_or_else(|| RuntimeError::Invalid("policy output reference missing".into()))?;
                 (
                     *outcome,
                     Some(PolicyEvidenceRef {
