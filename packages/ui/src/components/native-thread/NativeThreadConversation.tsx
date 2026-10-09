@@ -143,12 +143,21 @@ export function NativeThreadConversation({ api, identity, onBranchCreated, initi
         </details>}
       </article>)}
       {!historyView && progress && <article className="mx-auto max-w-3xl" aria-label="Streaming assistant response"><MarkdownRenderer messageId={`${identity.threadId}:progress`} isStreaming content={progress} /></article>}
+      {snapshot?.children?.map(child => <div key={child.operation_id} className="mx-auto max-w-3xl rounded border p-3 text-sm" aria-label="Native child task">
+        <div>Read-only child · {child.state}</div>
+        <div className="text-xs text-muted-foreground">{child.child_thread_id}</div>
+        <p>{child.input.task}</p>
+        {child.report && <><div className="text-xs text-muted-foreground">Report · {child.report.outcome} · no file changes</div><MarkdownRenderer messageId={`child:${child.operation_id}`} content={child.report.detail ?? "Report stored in child history."} /></>}
+        {child.report?.history_ids.map(itemId => <ChildReportPage key={itemId} api={api} identity={identity} operationId={child.operation_id} itemId={itemId} />)}
+        {!child.report && api.collaboration && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelChild(identity, child.operation_id))}>Cancel child task</Button>}
+      </div>)}
+      {snapshot?.children?.some(child => !child.report) && api.collaboration && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelTree(identity))}>Stop task and children</Button>}
       {snapshot?.operations.map(operation => <div key={operation.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
         <NativeThreadPermission operation={operation} enabled={!pending && operation.run_id === run?.id && !run?.cancel_requested} onDecide={(permissionId, decision) => act(() => api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }))} />
         {operation.executor === 'native_ask_user' && <NativeThreadQuestion operation={operation} enabled={!pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on} onAnswer={answer => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}
         <div>Background operation · {operation.phase} · {operation.outcome ?? 'In progress'} · effect: {operation.effect}</div>
         {operation.external_receipt && <div className="text-xs text-muted-foreground">{operation.external_receipt.executor} · {operation.external_receipt.outcome}</div>}
-        {operation.phase !== 'terminal' && (operation.executor !== 'native_ask_user' || run?.waiting_on === operation.waiting_on) && <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelOperation(operation.id))}>Cancel operation</Button>}
+        {operation.phase !== 'terminal' && (operation.executor !== 'native_ask_user' || run?.waiting_on === operation.waiting_on) && <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelOperation(operation.id))}>{operation.executor === 'native_dispatch' ? 'Cancel child task' : operation.executor === 'native_wait_child' ? 'Cancel observation wait' : 'Cancel operation'}</Button>}
       </div>)}
       {snapshot?.inputs.filter(input => input.state === 'queued').map(input => <div key={input.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
         <form onSubmit={event => { event.preventDefault(); const edited = new FormData(event.currentTarget).get('text');
@@ -227,4 +236,13 @@ export function NativeThreadConversation({ api, identity, onBranchCreated, initi
       </div>
     </form>
   </section>;
+}
+
+function ChildReportPage({api, identity, operationId, itemId}: {api: NativeThreadsAPI; identity: NativeThreadIdentity; operationId: string; itemId: string}) {
+  const [page, setPage] = React.useState<Awaited<ReturnType<NonNullable<NativeThreadsAPI['collaboration']>['readReport']>> | null>(null);
+  const [error, setError] = React.useState('');
+  const read = (offset: number) => { void api.collaboration?.readReport(identity, operationId, itemId, offset).then(setPage).catch(e => setError(String(e))); };
+  return <div><div className="text-xs">Other-agent report data · {itemId}</div>{error && <p>{error}</p>}{page && <><MarkdownRenderer messageId={`${itemId}:${page.offset}`} content={page.text} /><p>Bytes {page.offset}–{page.offset + new TextEncoder().encode(page.text).length} of {page.total_bytes}</p></>}
+    {!page ? <Button variant="ghost" size="sm" onClick={() => read(0)}>Read report</Button> : page.next_offset !== null && <Button variant="ghost" size="sm" onClick={() => read(page.next_offset!)}>Read next page</Button>}
+  </div>;
 }

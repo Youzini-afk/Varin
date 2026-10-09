@@ -152,7 +152,7 @@ async function fixture(options: { main?: Reply; planner?: Reply; planningAuth?: 
     if (!documents) throw new Error('No workspace is admitted');
     await documents.inspectWorkspace(source.workspaceId); await documents.inspectWorkspace(source.executionWorkspaceId);
   }, (_runId, error) => { launchErrors.push(error); }, prepareSource,
-    options.initialContext ? async () => options.initialContext! : undefined);
+    options.initialContext ? Object.assign(async () => options.initialContext!, { main: async () => options.initialContext! }) : undefined);
   const app = express(); registerCommonRequestMiddleware(app, { express });
   registerNativeThreadRoutes(app, adapter, (request, response, next) => {
     if (request.headers['x-fixture-auth'] !== 'planning-client') { response.status(401).json({ error: 'authentication required' }); return; }

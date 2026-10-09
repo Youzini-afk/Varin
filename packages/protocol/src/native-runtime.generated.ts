@@ -368,6 +368,8 @@ export interface NativeContextComposition {
 }
 
 export interface NativeContextPersonalization {
+  mode: string;
+  threadRole: string;
   contextComposition?: NativeContextComposition;
   revision: number;
   sessionId: string;
@@ -420,6 +422,97 @@ export interface NativePermissionDecideParams {
 export interface NativeQuestionAnswerParams {
   operationId: string;
   answer: string;
+}
+
+export interface NativeUnacceptedChildSource {
+  operation_id: string;
+  parent_thread_id: string;
+  source: NativeLaunchSource;
+  pin_id: string;
+}
+
+export interface NativeChildPrepareParams {
+  operationId: string;
+  source: NativeLaunchSourceParams;
+  context: NativeInitialContext;
+}
+
+export interface NativeChildFailParams {
+  operationId: string;
+  code: string;
+}
+
+export interface NativeChildWaitParams {
+  waitId: string;
+}
+
+export interface NativeChildInput {
+  task: string;
+  model: string;
+  profile: string;
+}
+
+export interface NativeChildSourcePin {
+  pin_id: string;
+  root: string;
+  source: NativeLaunchSource;
+}
+
+export interface NativeChildReportReadParams {
+  operationId: string;
+  itemId: string;
+  offset?: number;
+  maxBytes?: number;
+}
+
+export interface NativeChildTextPage {
+  operation_id: string;
+  item_id: string;
+  offset: number;
+  next_offset: number | null;
+  total_bytes: number;
+  text: string;
+}
+
+export interface NativeChildReport {
+  outcome: NativeOutcome;
+  sender_thread_id: string;
+  run_id: string | null;
+  history_ids: string[];
+  detail: string | null;
+  code_result: string;
+}
+
+export interface NativeChildTask {
+  operation_id: string;
+  parent_run_id: string;
+  parent_thread_id: string;
+  parent_branch_id: string;
+  origin: unknown;
+  call_id: string;
+  child_thread_id: string;
+  child_branch_id: string;
+  project_id: string | null;
+  input: NativeChildInput;
+  configuration: unknown;
+  launch: NativeLaunchSelection;
+  source_pin: NativeChildSourcePin;
+  state: string;
+  revision: number;
+  cursor: number;
+  receipt: NativeReceipt | null;
+  report: NativeChildReport | null;
+  resources_released: boolean;
+}
+
+export interface NativeChildWait {
+  id: string;
+  run_id: string;
+  subject: string;
+  kind: string;
+  after_cursor: number;
+  trigger_cursor: number | null;
+  cancelled: boolean;
 }
 
 export interface NativeOperationParams {

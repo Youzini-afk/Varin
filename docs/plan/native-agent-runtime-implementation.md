@@ -443,3 +443,41 @@ Host credential/settings、Composition 与原生历史，唯一模拟外部对�
 
 这些结果不包含全仓测试、全部恢复矩阵、真实付费供应商、跨平台构建或大语料性能/质量验收。
 原 Pi broker 入口的完整持久结算迁移、模型 rerank、固定/远端来源及完整两份设计的其他里程碑仍另行推进。
+
+## 2026-10-09 并行增量：固定来源只读子任务（分支范围验证，待全局集成）
+
+A worktree 新增原生 `native_dispatch`、状态与 durable Wait/报告路径，沿已有 Catalog、RunSupervisor、
+WorkingState pin/branch 与 source launch 接线，不调用 Pi ThreadRegistry。受理固定真实父 Run/origin、
+项目快照、显式 parent model/read_only profile；异步准备调用同一 context owner，子 Thread 不继承父
+session notes。只读子任务的正常文本报告与 `no_changes` 代码结果分别保留。取消观察、取消子任务、
+父 Run 结束和停止整任务使用各自边界。源授权 pin→Catalog 受理窗口保留原 Operation 归属及恢复清理事实。
+
+本轮报告只持久引用原 child history；状态/list 不复制正文。`native_child_report` 与认证 HTTP
+读取采用 UTF-8 字节页、显式 next_offset 与 64 KiB 输出上限；Wait 含有界的最新文本预览，明确
+标记 other-agent data、可能不完整及续读方法。UI 按需替换页，不自动聚合无限正文。
+
+独立 reviewer 在 v3 验证真实 Host/Rust/loopback 20 项和 Catalog 11 项全部通过；真实
+Storage pin 返回与 Catalog 受理之间的两个精确撤权边界、P0 受影响既有消费者 62 项在 v2 通过。
+v3 相对 v2 的唯一业务源码改动是 collaboration schema 只读预检，未重写工具/受理/Wait 接线。
+覆盖固定来源与工具子集、独立 session/project、父终态与 child 寿命分离、迟到准备取消与 pin 清理、
+来源信任撤销、模型请求已发后的 crash 不重派、报告丢通知重开、先报告后 Wait、取消观察再 Wait、
+fork 前后可见报告去重、100 KB Unicode 报告续页及越权拒绝。缺 unique/FK 或旧报告格式的 Catalog
+只读拒绝，测试核对原数据库 bytes 未变。补充反例曾揭示 v2 接受 partial UNIQUE、NOCASE
+child/PK 索引及 cascade FK；v3 核对完整非 partial 的精确 BINARY key、PK origin、FK actions/match，
+四个真实重开反例全部重验通过。精确 pin→Catalog 窗口用真实 Storage/wrapper 受控断点，
+不是在该窗口实际杀进程；对应 orphan 恢复/补偿另有低层与 Host 反例，不扩大这条证据的含义。
+
+作者完成 0.9.24 Cargo check/build、协议生成一致性、protocol/client 构建、Host 生产类型与本树
+bundle、UI 类型检查。专属 v3 二进制 SHA256 为
+`680ec58a4b731adb5d4ec52cae229622016c41c701885409a996c00b0dfab169`，构建生产输入前后稳定；
+分支独立审查汇总保留源码/测试 manifest、命令及失败修订证据。Host 生产/UI 最终类型与新增
+20 项的测试类型检查通过；新测试两处可选 API 非空断言修订后，16 项及测试类型重新验证通过。
+新增 TS 测试 targeted ESLint 零诊断；Rust 测试有一个 unused import warning 按冻结裁定保留，
+不宣称全仓 lint 清零。首轮窄路径源 grant 越权受理反例
+曾失败，补 whole-root/read capability 校验后在 v2 重验通过；初版重开 fixture 用正常 close 导致
+真实取消，改为该 fixture 独占进程 crash 后验证，未把初轮失败计入通过。
+
+本轮未运行全仓测试、完整恢复矩阵、完整 native MCP authority review、视觉 UI 验收、跨平台构建、
+超大帧/共享 writer kill 或付费模型。代码仍待根与独立 memory/context 线集成，子 profile 本轮精确
+file-only；集成时仅接共同 context 边界同步，不隐式添加 memory/MCP/dispatch 能力。首轮不包括
+递归/任意兄弟协作、写入/代码合并、live 首次隔离捕获、远端环境或完整协作域交付。

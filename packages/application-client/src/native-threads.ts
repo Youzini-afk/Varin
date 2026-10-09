@@ -1,4 +1,4 @@
-import type { NativeLiveRoot, NativeContextPersonalization, NativeEvent, NativeHistoryItem, NativeInputMode, NativeInputReceipt, NativeQueuedInput, NativeReceipt, NativeRun, NativeOperation, NativeRuntimeStreamEvent, NativeThreadSummary, NativeLaunchIntent, ImageAttachment } from '@varin/protocol';
+import type { NativeChildTextPage, NativeChildTask, NativeChildWait, NativeLiveRoot, NativeContextPersonalization, NativeEvent, NativeHistoryItem, NativeInputMode, NativeInputReceipt, NativeQueuedInput, NativeReceipt, NativeRun, NativeOperation, NativeRuntimeStreamEvent, NativeThreadSummary, NativeLaunchIntent, ImageAttachment } from '@varin/protocol';
 
 /** Explicit authority selection. A nativeThread never opens a Pi session. */
 export interface NativeThreadIdentity { runtime: 'nativeThread'; threadId: string; branchId: string }
@@ -57,6 +57,13 @@ export interface NativeThreadCompact extends NativeThreadIdentity {
   expectedRevision: number;
   model: NativeThreadModel;
 }
+export interface NativeThreadCollaborationAPI {
+  readReport(identity: NativeThreadIdentity, operationId: string, itemId: string, offset?: number, maxBytes?: number): Promise<NativeChildTextPage>;
+  children(identity: NativeThreadIdentity): Promise<NativeChildTask[]>;
+  cancelChild(identity: NativeThreadIdentity, operationId: string): Promise<NativeChildTask>;
+  cancelWait(identity: NativeThreadIdentity, waitId: string): Promise<NativeChildWait>;
+  cancelTree(identity: NativeThreadIdentity): Promise<void>;
+}
 export interface NativeThreadSnapshot {
   identity: NativeThreadIdentity;
   thread: NativeThreadSummary;
@@ -67,8 +74,10 @@ export interface NativeThreadSnapshot {
   operations: NativeOperation[];
   launch: NativeLaunchIntent | null;
   context: NativeThreadContextState;
+  children?: NativeChildTask[];
 }
 export interface NativeThreadsAPI {
+  collaboration?: NativeThreadCollaborationAPI;
   listModels(): Promise<Array<NativeThreadModel & { name?: string; acceptsImages?: boolean }>>;
   list(): Promise<NativeThreadSummary[]>;
   create(key: string): Promise<NativeThreadIdentity>;
