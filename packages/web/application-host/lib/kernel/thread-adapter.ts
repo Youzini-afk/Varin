@@ -240,7 +240,7 @@ export class ThreadAdapter {
     const run = await this.runtime.run(runId);
     const launch = await this.runtime.launch(runId);
     if (!launch?.selection.credential_scope) throw new Error('Context job has no durable credential binding');
-    const { context_job: _recipe, ...configuration } = run.configuration as ModelSessionConfiguration & { context_job: unknown };
+    const { context_job: _recipe, context_job_source: _source, ...configuration } = run.configuration as ModelSessionConfiguration & { context_job: unknown; context_job_source: unknown };
     const owner = await this.models.rebindModel(configuration as ModelSessionConfiguration, launch.selection.credential_scope);
     await this.runtime.startRunWithCredentialOwner(runId, owner);
   }

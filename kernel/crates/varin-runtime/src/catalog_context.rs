@@ -128,14 +128,18 @@ impl Catalog {
         ).optional()?.ok_or_else(|| RuntimeError::NotFound(run_id.into()))
     }
     pub fn active_context(&self, branch_id: &str) -> Result<Option<ContextCheckpoint>> {
-        let reference:Option<String>=self.db.query_row("SELECT c.body FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",[branch_id],|r|r.get(0)).optional()?;
-        reference
-            .map(|reference| {
-                Ok::<ContextCheckpoint, RuntimeError>(serde_json::from_value(
-                    self.content.load(&serde_json::from_str(&reference)?)?,
-                )?)
-            })
-            .transpose()
+        self.capture_active_checkpoint(branch_id)?.map(CheckpointRead::load).transpose()
+    }
+    pub fn capture_active_checkpoint(&self, branch_id: &str) -> Result<Option<CheckpointRead>> {
+        self.capture_checkpoint("SELECT c.id,c.revision,c.body FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",branch_id)
+    }
+    pub fn capture_admitted_checkpoint(&self, run_id: &str) -> Result<Option<CheckpointRead>> {
+        self.capture_checkpoint("SELECT c.id,c.revision,c.body FROM runs r JOIN context_checkpoints c ON c.id=r.context_checkpoint_id WHERE r.id=?1",run_id)
+    }
+    fn capture_checkpoint(&self, sql: &str, id: &str) -> Result<Option<CheckpointRead>> {
+        let metadata: Option<(String,u64,String)> = self.db.query_row(sql,[id],|row| Ok((row.get(0)?,read_number(row,1)?,row.get(2)?))).optional()?;
+        metadata.map(|(id, revision, reference)| Ok(CheckpointRead {id,revision,reference:serde_json::from_str(&reference)?,
+            content:self.content.clone(),_publication:self.content.begin_publication()})).transpose()
     }
     /// A candidate fixes an ancestor, not a moving leaf. Appended tail input remains untouched.
     pub fn publish_context(&mut self, proposal: ContextProposal) -> Result<ContextCheckpoint> {
@@ -224,32 +228,25 @@ impl Catalog {
                 "context branch changed during preparation".into(),
             ));
         }
+        let capture = |kind| -> Result<ContextRead> { Ok(ContextRead { kind,
+            database:self.db.path().ok_or_else(||RuntimeError::Invalid("Catalog has no database".into()))?.into(),
+            _publication:self.content.begin_publication() }) };
         if let Some(request) = run.configuration.get("context_job") {
             let request: crate::context_job::ContextJobRequest =
                 serde_json::from_value(request.clone())?;
-            let source = self.context_source_metadata(&request.branch_id, &request.through_id)?;
-            return Ok(Some(ContextRead(ContextReadKind::Summary {
+            let source: crate::context_job::SummarySource = serde_json::from_value(run.configuration.get("context_job_source")
+                .ok_or_else(|| RuntimeError::Invalid("context job has no frozen summary source".into()))?.clone())?;
+            return Ok(Some(capture(ContextReadKind::Summary {
                 content: self.content.clone(),
                 request,
                 source,
-            })));
+            })?));
         }
         let active:Option<(String,Option<String>,String)>=self.db.query_row("SELECT c.id,c.through_id,c.body FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",[&run.branch_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
         let Some((checkpoint_id, through_id, reference)) = active else {
             return Ok(None);
         };
-        let mut cursor = self.head(&run.branch_id)?;
-        let mut suffix = Vec::new();
-        while cursor.as_deref() != through_id.as_deref() {
-            let key = cursor.ok_or_else(|| {
-                RuntimeError::Conflict("active context boundary is not an ancestor".into())
-            })?;
-            let metadata: HistoryItem = record(&self.db, "history", &key)?;
-            cursor = metadata.parent.clone();
-            suffix.push(metadata);
-        }
-        suffix.reverse();
-        Ok(Some(ContextRead(ContextReadKind::Checkpoint {
+        Ok(Some(capture(ContextReadKind::Checkpoint {
             compositions: self.context_compositions.clone(),
             branch_id: run.branch_id.clone(),
             memory: self.memory_state(&run.branch_id)?,
@@ -257,8 +254,8 @@ impl Catalog {
             content: self.content.clone(),
             checkpoint_id,
             reference: serde_json::from_str(&reference)?,
-            suffix,
-        })))
+            head:expected_head.map(str::to_owned), through_id,
+        })?))
     }
 }
 /// The immutable, already-referenced bodies are loaded after releasing the Catalog owner.
@@ -303,7 +300,22 @@ pub(super) fn publish_prepared(
     Ok(())
 }
 
-pub struct ContextRead(ContextReadKind);
+pub struct CheckpointRead {
+    pub id: String,
+    pub revision: u64,
+    reference: Value,
+    content: crate::content::ContentStore,
+    _publication: crate::content::ContentPublication,
+}
+impl CheckpointRead {
+    pub fn load(self) -> Result<ContextCheckpoint> { Ok(serde_json::from_value(self.content.load(&self.reference)?)?) }
+}
+
+pub struct ContextRead {
+    kind: ContextReadKind,
+    database: std::path::PathBuf,
+    _publication: crate::content::ContentPublication,
+}
 
 enum ContextReadKind {
     Checkpoint {
@@ -314,30 +326,37 @@ enum ContextReadKind {
         content: crate::content::ContentStore,
         checkpoint_id: String,
         reference: Value,
-        suffix: Vec<HistoryItem>,
+        head: Option<String>, through_id: Option<String>,
     },
     Summary {
         content: crate::content::ContentStore,
         request: crate::context_job::ContextJobRequest,
-        source: Vec<HistoryItem>,
+        source: crate::context_job::SummarySource,
     },
 }
 impl ContextRead {
     pub fn load(self) -> Result<ContextProjection> {
-        let (content, checkpoint_id, reference, suffix, compositions, branch_id, memory, trusted_receipts) = match self.0 {
+        let Self {kind,database,_publication} = self;
+        let database = Connection::open_with_flags(database,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+        let (content, checkpoint_id, reference, suffix, compositions, branch_id, memory, trusted_receipts) = match kind {
             ContextReadKind::Checkpoint {
                 compositions, branch_id, memory, trusted_receipts,
                 content,
                 checkpoint_id,
                 reference,
-                suffix,
-            } => (content, checkpoint_id, reference, suffix, compositions, branch_id, memory, trusted_receipts),
+                head, through_id,
+            } => {
+                let suffix = super::context_jobs::source_metadata_until(&database, head.as_deref(), through_id.as_deref())?;
+                (content, checkpoint_id, reference, suffix, compositions, branch_id, memory, trusted_receipts)
+            },
             ContextReadKind::Summary {
                 content,
                 request,
                 source,
             } => {
-                let originals = super::context_jobs::hydrate_source(&content, source)?;
+                let metadata = super::context_jobs::source_metadata_until(&database, Some(&request.through_id), source.through_id.as_deref())?;
+                let originals = super::context_jobs::hydrate_source(&content, metadata)?;
                 let mut history = vec![ConversationItem {
                     id: format!("context-job:{}:system", request.key),
                     provenance: Provenance::SystemInstruction {
@@ -348,6 +367,14 @@ impl ContextRead {
                     },
                     opaque: None,
                 }];
+                if let Some(reference) = source.checkpoint.filter(|_| source.through_id.is_some()) {
+                    let checkpoint: ContextCheckpoint = serde_json::from_value(content.load(&reference)?)?;
+                    history.push(ConversationItem {
+                        id:format!("context-job:{}:prior-summary",request.key),
+                        provenance:Provenance::ExternalData {source:format!("conversation-summary:{}",checkpoint.id)},
+                        content:Content::Text {text:checkpoint.proposal.summary}, opaque:None,
+                    });
+                }
                 for mut item in originals {
                     // Quote the semantic source with its real role and identity; never replay a
                     // historical tool call or promote earlier instructions into job authority.

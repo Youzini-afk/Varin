@@ -120,11 +120,17 @@ pub(crate) fn spawn(
 ) -> JoinHandle<()> {
     let finished: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(finished);
     let (content_tasks, content_jobs) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
-    thread::spawn(move || {
-        for job in content_jobs {
+    let content_jobs = Arc::new(Mutex::new(content_jobs));
+    // The protocol admits this many ordinary requests. Independent content reads get their
+    // own execution slot; the receiver lock is released before any file I/O or decoding.
+    for _ in 0..KERNEL_REQUEST_WINDOW {
+        let jobs = content_jobs.clone();
+        thread::spawn(move || loop {
+            let job = { jobs.lock().unwrap_or_else(|error|error.into_inner()).recv() };
+            let Ok(job) = job else {break;};
             job();
-        }
-    });
+        });
+    }
 
     thread::spawn(move || {
         let mut identity: Option<(PathBuf, String)> = None;
@@ -467,6 +473,7 @@ pub(crate) fn spawn(
                                         )
                                     })?
                                     .remove("context_job");
+                                configuration.as_object_mut().unwrap().remove("context_job_source");
                             }
                             let configuration = serde_json::from_value(configuration)?;
                             let mut selected_credential_scope = None;
@@ -715,6 +722,39 @@ pub(crate) fn spawn(
                                 }
                             });
                             return Ok(receipt);
+                        }
+                        if method == "runtime.context.refresh" || method == "runtime.context.inspect" {
+                            let catalog = runtime.catalog();
+                            let refresh = if method == "runtime.context.refresh" {
+                                let p: ContextRefreshParams = serde_json::from_value(params.clone())?;
+                                let basis = personalization_basis(p.context.personalization.ok_or_else(||KernelError::Protocol("personalization basis is required".into()))?)?;
+                                Some(catalog.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?
+                                    .prepare_personalization_refresh(&p.branch_id,
+                                        u64::try_from(p.expected_revision).map_err(|_|KernelError::Protocol("context revision must be nonnegative".into()))?,
+                                        p.context.effective_system_prompt,p.context.instruction_sources,p.context.memory_checkpoint.0,basis).map_err(domain)?)
+                            } else {None};
+                            let read = if refresh.is_none() {
+                                let p: HistoryParams = serde_json::from_value(params)?;
+                                let owner = catalog.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?;
+                                owner.head(&p.branch_id).map_err(domain)?;
+                                owner.capture_active_checkpoint(&p.branch_id).map_err(domain)?
+                            } else {None};
+                            let response_id = id.clone(); let response_sender = responses.clone(); let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            thread::spawn(move || {
+                                let result = (||->Result<Value,KernelError>{
+                                    if cancelled.load(Ordering::Acquire) {return Err(KernelError::Cancelled);}
+                                    if let Some(refresh) = refresh {
+                                        let prepared = refresh.load().map_err(domain)?;
+                                        if cancelled.load(Ordering::Acquire) {return Err(KernelError::Cancelled);}
+                                        let checkpoint = catalog.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?.publish_personalization_refresh(prepared).map_err(domain)?;
+                                        Ok(serde_json::to_value(checkpoint)?)
+                                    } else {Ok(serde_json::to_value(read.map(|read|read.load()).transpose().map_err(domain)?)?)}
+                                })();
+                                let response = match result {Ok(value)=>response_ok(&response_id,value),Err(error)=>response_error(&response_id,&error)};
+                                done(&response_id); let _ = response_sender.send(response);
+                            });
+                            deferred = true; return Ok(Value::Null);
                         }
                         if method == "runtime.context_job.create" || method == "runtime.context_job.publish" {
                             let catalog = runtime.catalog();
@@ -1008,23 +1048,6 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         let p: HistoryParams = serde_json::from_value(params)?;
         return Ok(serde_json::to_value(
             catalog.context_jobs(&p.branch_id).map_err(domain)?,
-        )?);
-    }
-    if method == "runtime.context.refresh" {
-        let p: ContextRefreshParams = serde_json::from_value(params)?;
-        let basis = p.context.personalization.ok_or_else(|| KernelError::Protocol("personalization basis is required".into()))?;
-        return Ok(serde_json::to_value(catalog.refresh_personalization(
-            &p.branch_id,
-            u64::try_from(p.expected_revision).map_err(|_| KernelError::Protocol("context revision must be nonnegative".into()))?,
-            p.context.effective_system_prompt, p.context.instruction_sources, p.context.memory_checkpoint.0,
-            personalization_basis(basis)?,
-        ).map_err(domain)?)?);
-    }
-    if method == "runtime.context.inspect" {
-        let p: HistoryParams = serde_json::from_value(params)?;
-        catalog.head(&p.branch_id).map_err(domain)?;
-        return Ok(serde_json::to_value(
-            catalog.active_context(&p.branch_id).map_err(domain)?,
         )?);
     }
     if method == "runtime.context_job.inspect" || method == "runtime.context_job.publish" {
