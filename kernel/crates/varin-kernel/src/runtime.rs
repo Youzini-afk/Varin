@@ -11,12 +11,28 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use uuid::Uuid;
+use crate::storage::materialization::{Admission as MaterializationAdmission, Control as MaterializationControl,
+    Controlled as MaterializationControlled, Task as MaterializationTask};
+
+enum MaterializationReply {
+    Direct(Value),
+    Reconcile(Value),
+    RootRegistration(String),
+}
+
+struct PendingRootRegistration {
+    response: Value,
+    remaining: usize,
+}
 
 enum WorkerRequest {
     Wire(Value, Arc<AtomicBool>),
     Resource(crate::tools::ResourceCall),
     ReplayProcessTerminals(Vec<String>),
     CaptureDone { request: Value, task: crate::storage::capture_resources::CaptureTask, result: Result<crate::storage::capture_resources::CapturedBatch, KernelError> },
+    MaterializationControl { operation_id: String, job_id: String, grant_id: String,
+        control: MaterializationControl, reply: mpsc::Sender<Result<MaterializationControlled, KernelError>> },
+    MaterializationDone { operation_id: String, job_id: String, reply: MaterializationReply, result: Result<Value, KernelError> },
     Stop,
 }
 
@@ -93,13 +109,15 @@ struct Kernel {
     storage_root: Option<PathBuf>,
     storage: Option<Storage>,
     handshaken: bool,
-    capture_workers: Vec<(Arc<AtomicBool>, thread::JoinHandle<()>)>,
+    file_workers: Vec<(Arc<AtomicBool>, thread::JoinHandle<()>)>,
+    pending_root_registrations: HashMap<String, PendingRootRegistration>,
+    active_materializations: usize,
 }
 
 impl Drop for Kernel {
     fn drop(&mut self) {
-        for (cancel, _) in &self.capture_workers { cancel.store(true, Ordering::Release); }
-        for (_, worker) in self.capture_workers.drain(..) { let _ = worker.join(); }
+        for (cancel, _) in &self.file_workers { cancel.store(true, Ordering::Release); }
+        for (_, worker) in self.file_workers.drain(..) { let _ = worker.join(); }
     }
 }
 
@@ -113,7 +131,9 @@ impl Kernel {
             storage_root: None,
             storage: None,
             handshaken: false,
-            capture_workers: Vec::new(),
+            file_workers: Vec::new(),
+            pending_root_registrations: HashMap::new(),
+            active_materializations: 0,
         }
     }
 
@@ -286,6 +306,7 @@ impl Kernel {
             )));
         }
         if method == "kernel.shutdown" {
+            for (cancel, _) in &self.file_workers { cancel.store(true, Ordering::Release); }
             if let Some(storage) = self.storage.as_mut() {
                 storage.shutdown_computations()?;
                 storage.shutdown_processes()?;
@@ -352,15 +373,67 @@ impl Kernel {
             let lease_id = task.lease_id().to_string();
             let request = request.clone();
             let completed = completions.clone();
-            self.capture_workers.retain(|(_, worker)| !worker.is_finished());
+            self.file_workers.retain(|(_, worker)| !worker.is_finished());
             let spawned = thread::Builder::new().name("file-capture".into()).spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task.run()))
                     .unwrap_or_else(|_| Err(KernelError::Storage("capture worker panicked".into())));
                 let _ = completed.send(WorkerRequest::CaptureDone { request, task, result });
             });
             match spawned {
-                Ok(worker) => self.capture_workers.push((cancellation, worker)),
-                Err(error) => { storage.finish_capture_lease(&lease_id); return Err(error.into()); }
+                Ok(worker) => self.file_workers.push((cancellation, worker)),
+                Err(error) => { storage.finish_retained_file_lease(&lease_id); return Err(error.into()); }
+            }
+            return Ok(None);
+        }
+        if method == "file.materialize" {
+            match storage.prepare_materialization(&authorized_params, &authorized_grant, cancellation.clone())? {
+                MaterializationAdmission::Complete(result) => return Ok(Some(response_ok(id, result))),
+                MaterializationAdmission::Work(task) => {
+                    self.spawn_materialization(task, MaterializationReply::Direct(request.clone()),
+                        authorized_grant.grant_id, cancellation, completions)?;
+                    return Ok(None);
+                }
+            }
+        }
+        if method == "file.operation.reconcile" {
+            let pending = storage.pending_materializations(authorized_params["rootId"].as_str().unwrap_or(""),
+                authorized_params["workspaceId"].as_str().unwrap_or(""), authorized_params["operationId"].as_str())?;
+            if let Some(intent) = pending.first() {
+                match storage.prepare_materialization(intent, &authorized_grant, cancellation.clone())? {
+                    MaterializationAdmission::Work(task) => {
+                        self.spawn_materialization(task, MaterializationReply::Reconcile(request.clone()),
+                            authorized_grant.grant_id, cancellation, completions)?;
+                        return Ok(None);
+                    }
+                    MaterializationAdmission::Complete(_) => {},
+                }
+            }
+        }
+        if method == "file.root.register" {
+            storage.set_cancellation(cancellation.clone());
+            let registered = storage.dispatch(method, &authorized_params, grant_id, &authorized_grant);
+            storage.clear_cancellation();
+            let result = registered?;
+            let intents = storage.pending_materializations(result["rootId"].as_str().unwrap_or(""),
+                authorized_params["workspaceId"].as_str().unwrap_or(""), None)?;
+            let mut tasks = Vec::new();
+            for intent in intents {
+                // Busy or unadmitted journals remain explicit pending work.
+                if let Ok(MaterializationAdmission::Work(task)) = storage.prepare_materialization(
+                    &intent, &authorized_grant, cancellation.clone()) { tasks.push(task); }
+            }
+            if tasks.is_empty() { return Ok(Some(response_ok(id, result))); }
+            self.pending_root_registrations.insert(id.to_string(), PendingRootRegistration {
+                response: response_ok(id, result), remaining: tasks.len(),
+            });
+            for task in tasks {
+                if let Err(_) = self.spawn_materialization(task, MaterializationReply::RootRegistration(id.to_string()),
+                    authorized_grant.grant_id.clone(), cancellation.clone(), completions) {
+                    self.pending_root_registrations.get_mut(id).expect("root registration").remaining -= 1;
+                }
+            }
+            if self.pending_root_registrations[id].remaining == 0 {
+                return Ok(Some(self.pending_root_registrations.remove(id).expect("root registration").response));
             }
             return Ok(None);
         }
@@ -368,6 +441,34 @@ impl Kernel {
         let result = storage.dispatch(method, &authorized_params, grant_id, &authorized_grant);
         storage.clear_cancellation();
         Ok(Some(response_ok(id, result?)))
+    }
+
+    fn spawn_materialization(&mut self, task: MaterializationTask, reply: MaterializationReply,
+        grant_id: String, cancellation: Arc<AtomicBool>, completions: &mpsc::Sender<WorkerRequest>) -> Result<(), KernelError> {
+        let operation_id = task.operation_id.clone();
+        let job_id = task.job_id.clone();
+        let completed = completions.clone();
+        self.file_workers.retain(|(_, worker)| !worker.is_finished());
+        let spawned = thread::Builder::new().name("file-materialization".into()).spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task.run(|control| {
+                let (reply, receive) = mpsc::channel();
+                completed.send(WorkerRequest::MaterializationControl {
+                    operation_id: task.operation_id.clone(), job_id: task.job_id.clone(),
+                    grant_id: grant_id.clone(), control, reply,
+                }).map_err(|_| KernelError::Storage("materialization owner stopped".into()))?;
+                receive.recv().map_err(|_| KernelError::Storage("materialization owner stopped".into()))?
+            }))).unwrap_or_else(|_| Err(KernelError::Storage("materialization worker panicked".into())));
+            let _ = completed.send(WorkerRequest::MaterializationDone {
+                operation_id: task.operation_id, job_id: task.job_id, reply, result,
+            });
+        });
+        match spawned {
+            Ok(worker) => { self.file_workers.push((cancellation, worker)); self.active_materializations += 1; Ok(()) }
+            Err(error) => {
+                if let Some(storage) = self.storage.as_mut() { storage.finish_materialization(&operation_id, &job_id); }
+                Err(error.into())
+            }
+        }
     }
 }
 
@@ -479,10 +580,54 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let capture_completions = request_tx.clone();
     let worker = thread::spawn(move || {
         let mut kernel = Kernel::new();
+        let mut stopping = false;
         for message in request_rx {
+            if stopping && kernel.active_materializations == 0 { break; }
             let (request, cancellation) = match message {
                 WorkerRequest::Wire(request, cancellation) => (request, cancellation),
-                WorkerRequest::Stop => break,
+                WorkerRequest::Stop => {
+                    stopping = true;
+                    for (cancel, _) in &kernel.file_workers { cancel.store(true, Ordering::Release); }
+                    if kernel.active_materializations == 0 { break; }
+                    continue;
+                }
+                WorkerRequest::MaterializationControl { operation_id, job_id, grant_id, control, reply } => {
+                    let denied = worker_revoked_grants.lock().map(|revoked| revoked.contains(&grant_id)).unwrap_or(true);
+                    let result = kernel.storage.as_mut().ok_or_else(|| KernelError::Storage("kernel stopped".into()))
+                        .and_then(|storage| storage.control_materialization(&operation_id, &job_id, control, denied));
+                    let _ = reply.send(result);
+                    continue;
+                }
+                WorkerRequest::MaterializationDone { operation_id, job_id, reply, result } => {
+                    if let Some(storage) = kernel.storage.as_mut() { storage.finish_materialization(&operation_id, &job_id); }
+                    kernel.active_materializations -= 1;
+                    let response = match reply {
+                        MaterializationReply::Direct(request) | MaterializationReply::Reconcile(request) => {
+                            let id = request["id"].as_str().unwrap_or("");
+                            worker_cancellations.lock().ok().map(|mut active| active.remove(id));
+                            let result = if request["method"] == "file.operation.reconcile" {
+                                result.map(|result| json!({"status":"reconciled","operationId":operation_id,"kind":"file.materialize","result":result}))
+                            } else { result };
+                            Some(match result { Ok(result) => response_ok(id, result), Err(error) => response_error(id, &error) })
+                        }
+                        MaterializationReply::RootRegistration(id) => {
+                            let pending = kernel.pending_root_registrations.get_mut(&id).expect("root registration");
+                            pending.remaining -= 1;
+                            if result.is_ok() {
+                                let result = &mut pending.response["result"];
+                                result["reconciledOperations"] = json!(result["reconciledOperations"].as_u64().unwrap_or(0) + 1);
+                                result["pendingOperations"] = json!(result["pendingOperations"].as_u64().unwrap_or(0).saturating_sub(1));
+                            }
+                            if pending.remaining == 0 {
+                                worker_cancellations.lock().ok().map(|mut active| active.remove(&id));
+                                Some(kernel.pending_root_registrations.remove(&id).expect("root registration").response)
+                            } else { None }
+                        }
+                    };
+                    if let Some(response) = response { if worker_response_tx.send(response).is_err() { break; } }
+                    if stopping && kernel.active_materializations == 0 { break; }
+                    continue;
+                }
                 WorkerRequest::CaptureDone { request, task, result } => {
                     let id = request["id"].as_str().unwrap_or("");
                     let published = (|| {
@@ -494,7 +639,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                         if denied { return Err(KernelError::Authorization("grant is revoked".into())); }
                         storage.publish_capture_batch(&task, result?, &grant)
                     })();
-                    if let Some(storage) = kernel.storage.as_mut() { storage.finish_capture_lease(task.lease_id()); }
+                    if let Some(storage) = kernel.storage.as_mut() { storage.finish_retained_file_lease(task.lease_id()); }
                     worker_cancellations.lock().ok().map(|mut active| active.remove(id));
                     let response = match published { Ok(value) => response_ok(id, value), Err(error) => response_error(id, &error) };
                     if worker_response_tx.send(response).is_err() { break; }
@@ -510,7 +655,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 WorkerRequest::Resource(call) => {
                     let denied = worker_revoked_grants.lock().map(|revoked| revoked.contains(&call.binding.grant_id)).unwrap_or(true);
-                    let result = if denied {
+                    let result = if stopping {
+                        Err(crate::tools::ResourceFailure { error:KernelError::Operation("kernel is stopping".into()), dispatched:false })
+                    } else if denied {
                         Err(crate::tools::ResourceFailure { error:KernelError::Authorization("grant is revoked".into()), dispatched:false })
                     } else if let (Some(storage), Some(host_id), Some(host_generation)) =
                         (kernel.storage.as_mut(), kernel.host_id.as_deref(), kernel.host_generation.as_deref()) {
@@ -544,7 +691,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .ok()
                     .is_some_and(|revoked| revoked.contains(grant_id))
             });
-            let handled = if revoked {
+            let handled = if stopping {
+                Err(KernelError::Operation("kernel is stopping".into()))
+            } else if revoked {
                 Err(KernelError::Authorization("grant is revoked".to_string()))
             } else {
                 kernel.handle(&request, cancellation, &capture_completions)
@@ -552,7 +701,8 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             let response = match handled {
                 Ok(Some(response)) => response,
                 Ok(None) => {
-                    if method.as_deref() == Some("file.captureBatch") { continue; }
+                    if method.as_deref().is_some_and(|method| matches!(method,
+                        "file.captureBatch" | "file.materialize" | "file.root.register" | "file.operation.reconcile")) { continue; }
                     worker_cancellations
                         .lock()
                         .ok()
@@ -612,7 +762,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            let stopping = method.as_deref() == Some("kernel.shutdown");
+            let shutdown = method.as_deref() == Some("kernel.shutdown");
             // Retire execution ownership before its response becomes observable, so a client
             // using its returned credit cannot race a stale in-flight entry at admission.
             worker_cancellations.lock().ok().map(|mut active| active.remove(&id));
@@ -620,8 +770,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 worker_writer_failed.store(true, Ordering::Release);
                 break;
             }
-            if stopping {
-                break;
+            if shutdown {
+                stopping = true;
+                if kernel.active_materializations == 0 { break; }
             }
         }
     });

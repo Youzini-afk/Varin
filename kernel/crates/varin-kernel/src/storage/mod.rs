@@ -32,6 +32,7 @@ mod branches;
 mod core;
 mod compute_resources;
 pub(crate) mod capture_resources;
+pub(crate) mod materialization;
 mod dispatch;
 mod file_resource_leases;
 mod file_resources;
@@ -181,7 +182,8 @@ pub(crate) struct Storage {
     verified_objects: BTreeSet<String>,
     file_roots: HashMap<String, FileRoot>,
     file_leases: HashMap<String, FileLease>,
-    capture_leases: HashMap<String, capture_resources::CaptureLease>,
+    retained_file_leases: HashMap<String, file_resource_leases::RetainedFileLease>,
+    materializations: HashMap<String, materialization::ActiveMaterialization>,
     processes: crate::process::ProcessManager,
     computations: crate::compute::ComputeManager,
 }

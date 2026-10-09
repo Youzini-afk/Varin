@@ -5,10 +5,6 @@ use super::file_resources::{file_mode, parse_file_params, resolve_admitted_resou
 use super::*;
 use crate::protocol_generated::KernelFileCaptureBatchParams;
 
-pub(super) struct CaptureLease {
-    pub release_requested: bool,
-}
-
 pub(crate) struct CaptureTask {
     params: KernelFileCaptureBatchParams,
     root: FileRoot,
@@ -231,9 +227,9 @@ impl Storage {
             })
             .collect::<Result<Vec<_>, KernelError>>()?;
         self.assert_file_lease(grant, &params.root_id, &paths, Some(&params.lease_id))?;
-        self.capture_leases.insert(
+        self.retained_file_leases.insert(
             params.lease_id.clone(),
-            CaptureLease {
+            super::file_resource_leases::RetainedFileLease {
                 release_requested: false,
             },
         );
@@ -244,15 +240,6 @@ impl Storage {
             storage_root: self.root.clone(),
             cancellation,
         })
-    }
-    pub(crate) fn finish_capture_lease(&mut self, lease_id: &str) {
-        if self
-            .capture_leases
-            .remove(lease_id)
-            .is_some_and(|lease| lease.release_requested)
-        {
-            self.file_leases.remove(lease_id);
-        }
     }
     pub(crate) fn publish_capture_batch(
         &mut self,
