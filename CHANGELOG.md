@@ -5,7 +5,7 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
-## 0.9.26 - 2026-10-09
+## 0.9.25 - 2026-10-09
 
 ### 更新摘要
 
@@ -42,7 +42,7 @@ private runtime protocol and product surfaces still move together.
 
 ### Release highlights
 
-Varin 0.9.26 improves concurrent tools, child-task startup, Windows Computer Use, conversation updates and native MCP settings.
+Varin 0.9.25 improves concurrent tools, child-task startup, Windows Computer Use, conversation updates and native MCP settings.
 
 #### Tools and child tasks
 
@@ -71,7 +71,7 @@ Varin 0.9.26 improves concurrent tools, child-task startup, Windows Computer Use
 - Refine the elevated composer and diffuse focus halo, remove generation glow sweeps and improve conversation navigation and Agent/IDE transitions.
 - Update Pi, Electron, PDF, Canvas and related runtime dependencies.
 
-[完整提交记录 / Full changelog](https://github.com/Youzini-afk/Varin/compare/v0.9.24...v0.9.26)
+[完整提交记录 / Full changelog](https://github.com/Youzini-afk/Varin/compare/v0.9.24...v0.9.25)
 
 ## 0.9.24 - 2026-10-06
 
