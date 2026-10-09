@@ -265,3 +265,54 @@ Collaboration preflight verifies complete nonpartial unique keys, their BINARY c
 ascending key columns, the actual primary-key index origin, and exact FK mappings/actions/match.
 A partial or differently collated index cannot stand in for the admitted identity constraints.
 These checks precede mutable catalog open and never migrate an unsupported catalog.
+
+## Native process observation waits
+
+`native_wait_process({processId})` observes a `native_process_spawn` Operation of the same
+real Run. It registers the existing Catalog Wait and its JobAccepted tool receipt together,
+then parks only after the model/tool exchange closes. Terminal facts that precede registration
+are found retrospectively. Process state/output remain owned by Storage and the original
+process worker; recovery never executes the command again. A recovery-only indeterminate process
+does not trigger the Wait: only the original executor's durable receipt can deliver a lifecycle
+fact, and an indeterminate receipt is never presented as proof that its tree stopped. History contains only a bounded
+lifecycle projection and an existing `native_process_read` reference, not command arguments or
+log contents. Delivery identity deduplicates the same process fact on the visible history chain.
+
+The existing Host continuation coordinator consumes process-wait facts alongside child facts;
+there is no timer/model polling loop. It rebinds the same Run through its saved model, source,
+and context preparation contracts. Cancelling the observation cancels its Wait, not the process.
+Cancelling the actual spawn Operation retains the existing explicit process-stop path.
+
+After legal rebind, native inspect/read can observe that exact same-Run process only after
+Catalog verifies its original spawn Operation and immutable source selection. Storage rechecks
+both the original creating grant (including explicit revocation) and the current authorized
+Run/Thread/workspace/source-scope grant on every observation. This is an internal read-only
+path, not an observer grant, owner replacement, or maintenance/kill/stdin/write delegation.
+Current Host source trust is re-admitted before continuation rebind. The existing Host deployment
+root/trust guard has no event bridge that immediately revokes already issued native grants when
+its deployment configuration changes during a live launch; this unit does not broaden that
+existing lifetime or claim to implement such a bridge. Explicit grant revocation is checked on
+every delegated observation. Cross-Run observation, even within the same Thread, is excluded.
+
+### Independent process-wait acceptance (2026-10-09)
+
+The independent lane passed runtime 7, actual Host/kernel 5, and one unchanged source-picker
+process consumer. Host test types, focused handwritten TypeScript lint and protocol checks passed.
+The accepted source, dedicated kernel and actual generated dependencies were stable before/after.
+The 0.9.24 debug kernel SHA256 is
+`3c663931ba1e94241e0d80f9cbc7aa07b208a74e8e50d24660e1847844ca348d`.
+
+Review closed three defects: synthetic recovery Terminal/Indeterminate is not an executor terminal
+receipt; observation cancellation and Wait state must persist atomically and recover committed intent;
+portable-pty signal is a string and is preserved rather than silently projected to null.
+Tests cover early/duplicate terminal, lost continuation, observation cancellation without process kill,
+Run cancellation, exact same-Run/source rebound observation, original/current grant revocation,
+foreign Run/source and kill/stdin rejection. Rebuilding only the Host continuation service can resume
+the still-live original process; closing the kernel intentionally stops it, and reopening delivers its
+actual Failed/Killed and incomplete output without respawning. These are distinct contracts.
+
+The initial fixture incorrectly expected process survival across kernel shutdown and attempted cleanup
+through a closed client; those failed logs remain. The corrected tests reflect existing lifecycle rules,
+not a new persistence guarantee. Runtime trust/root changes still follow the existing source-grant
+lifetime; this lane does not implement an immediate trust-change revocation listener. Fairness-main
+integration requires ProcessWaitTools capability/admission-hook forwarding and separate verification.

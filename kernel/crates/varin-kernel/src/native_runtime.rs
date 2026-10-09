@@ -273,6 +273,9 @@ pub(crate) fn spawn(
                         if matches!(method, "runtime.child.reconcile" | "runtime.child.wait.cancel") {
                             runtime.quiesce_child_waits().map_err(|e| KernelError::Operation(e.to_string()))?;
                         }
+                        if method == "runtime.process.wait.reconcile" {
+                            runtime.quiesce_process_waits().map_err(|e| KernelError::Operation(e.to_string()))?;
+                        }
                         if method == "runtime.child.cancel" {
                             let p: NativeOperationParams = serde_json::from_value(params.clone())?;
                             let child = runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?.child_task(&p.operation_id).map_err(domain)?;
@@ -332,7 +335,7 @@ pub(crate) fn spawn(
                         }
                         if method == "runtime.launch.policy.prepare" {
                             let p: NativePolicyPrepareParams = serde_json::from_value(params)?;
-                            let identity = crate::native_collaboration::policy_identity(crate::native_questions::policy_identity(varin_runtime::execution::PolicyIdentity { name: p.identity.name, version: p.identity.version }));
+                            let identity = crate::native_process_wait::policy_identity(crate::native_collaboration::policy_identity(crate::native_questions::policy_identity(varin_runtime::execution::PolicyIdentity { name: p.identity.name, version: p.identity.version })));
                             let mut models: Vec<varin_runtime::execution::policy_model::PolicyModelCapability> =
                                 p.policy_models.map(serde_json::from_value).transpose()?.unwrap_or_default();
                             // The Host selects registered models; only the kernel constructs their
@@ -444,6 +447,7 @@ pub(crate) fn spawn(
                             if !is_context_job && !is_child {
                                 start = crate::native_questions::configure(start, runtime.catalog());
                                 start = crate::native_collaboration::configure(start, runtime.catalog());
+                                start = crate::native_process_wait::configure(start, runtime.catalog());
                             }
                             if let Some(selected) = selected {
                                 let kinds: std::collections::BTreeSet<
@@ -460,6 +464,7 @@ pub(crate) fn spawn(
                                 if !is_child {
                                     start.binding.tools.push(crate::native_questions::schema());
                                     start.binding.tools = crate::native_collaboration::schemas(start.binding.tools, selected.source.0.as_ref().is_some_and(|source| source.mode == varin_runtime::SourceMode::FixedBranch));
+                                    start.binding.tools = crate::native_process_wait::schemas(start.binding.tools);
                                     start.binding.tools.push(crate::native_memory::schema(true));
                                 }
                                 start.binding.tool_schema_generation =
@@ -551,7 +556,9 @@ pub(crate) fn spawn(
                                     start.tools = crate::native_questions::wrap_tools(start.tools, runtime.catalog());
                                     start.binding.tools.push(crate::native_questions::schema());
                                     start.binding.tools = crate::native_collaboration::schemas(start.binding.tools, collaboration_binding.source_mode == varin_runtime::SourceMode::FixedBranch);
-                                    start.tools = crate::native_collaboration::wrap_tools(start.tools, runtime.catalog(), Some(collaboration_binding), resources.clone());
+                                    start.tools = crate::native_collaboration::wrap_tools(start.tools, runtime.catalog(), Some(collaboration_binding.clone()), resources.clone());
+                                    start.tools = crate::native_process_wait::wrap_tools(start.tools, runtime.catalog(), collaboration_binding, resources.clone());
+                                    start.binding.tools = crate::native_process_wait::schemas(start.binding.tools);
                                 }
                             }
                             if launch_source.is_none() && !is_context_job && !is_child {
@@ -788,6 +795,7 @@ pub(crate) fn spawn(
                             let waiting = runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?
                                 .run(&p.run_id).map_err(domain)?.waiting_on;
                             if waiting.as_deref().is_some_and(|id|id.starts_with("child-wait:")) {runtime.quiesce_child_waits().map_err(|e|KernelError::Operation(e.to_string()))?;}
+                            if waiting.as_deref().is_some_and(|id|id.starts_with("process-wait:")) {runtime.quiesce_process_waits().map_err(|e|KernelError::Operation(e.to_string()))?;}
                             if let Some(operation_id) = waiting.as_deref().and_then(|id| id.strip_prefix("question:")) {
                                 runtime.quiesce_question(operation_id).map_err(|e| KernelError::Operation(e.to_string()))?;
                             }
@@ -799,6 +807,11 @@ pub(crate) fn spawn(
                         }
                         if method == "runtime.operation.cancel" {
                             let p: NativeOperationParams = serde_json::from_value(params)?;
+                            if runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?
+                                .operation(&p.operation_id).map_err(domain)?.executor.as_deref() == Some("native_wait_process") {
+                                runtime.quiesce_process_waits().map_err(|e|KernelError::Operation(e.to_string()))?;
+                                return Ok(serde_json::to_value(runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?.cancel_process_wait(&p.operation_id).map_err(domain)?)?);
+                            }
                             if runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?
                                 .operation(&p.operation_id).map_err(domain)?.executor.as_deref() == Some("native_ask_user") {
                                 runtime.quiesce_question(&p.operation_id).map_err(|e| KernelError::Operation(e.to_string()))?;
@@ -1043,6 +1056,7 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                 instruction_sources:p.context.instruction_sources,memory_checkpoint:p.context.memory_checkpoint.0};
             Ok(serde_json::to_value(catalog.prepare_child(&p.operation_id,source,proposal,basis).map_err(domain)?)?)
         }
+        "runtime.process.wait.reconcile" => Ok(serde_json::to_value(catalog.deliver_process_waits().map_err(domain)?)?),
         "runtime.child.reconcile" => Ok(serde_json::to_value(catalog.deliver_child_waits().map_err(domain)?)?),
         "runtime.child.wait.cancel" => {let p:NativeChildWaitParams=serde_json::from_value(params)?;Ok(serde_json::to_value(catalog.cancel_child_wait(&p.wait_id).map_err(domain)?)?)},
         "runtime.status" => Ok(json!({"epoch":catalog.epoch(),"eventCursor":catalog.event_cursor().map_err(domain)?})),
@@ -1153,10 +1167,11 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                             let mut tools = crate::native_collaboration::schemas(
                                 crate::native_questions::schemas(crate::native_tools::NativeToolExecutor::selected_schemas(&kinds)),
                                 source.as_ref().is_some_and(|source| source.mode == varin_runtime::SourceMode::FixedBranch));
+                            tools = crate::native_process_wait::schemas(tools);
                             tools.push(crate::native_memory::schema(true));
                             tools
                         },
-                        policy: crate::native_collaboration::default_policy_identity(),
+                        policy: crate::native_process_wait::default_policy_identity(),
                         source,
                     })
                 })
