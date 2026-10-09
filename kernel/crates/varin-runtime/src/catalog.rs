@@ -128,6 +128,7 @@ pub struct Catalog {
     context_compositions: std::sync::Arc<crate::composition::context::ContextCompositions>,
     _owner: File,
     epoch: u64,
+    plan_cursor_key: [u8; 32],
 }
 impl Catalog {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
@@ -175,6 +176,7 @@ impl Catalog {
             context_compositions: std::sync::Arc::new(crate::composition::context::ContextCompositions::default()),
             _owner: owner,
             epoch,
+            plan_cursor_key: { let mut key = [0; 32]; key[..16].copy_from_slice(Uuid::new_v4().as_bytes()); key[16..].copy_from_slice(Uuid::new_v4().as_bytes()); key },
         };
         this.recover()?;
         {
@@ -230,7 +232,7 @@ impl Catalog {
     }
     /// Inherit the last committed source within admission, while retaining the new model/credential selection.
     pub fn submit_with_inherited_source(&mut self, command: &SubmitInput, launch: launches::LaunchSelection) -> Result<Receipt> {
-        if launch.source.is_some() || launch.tools.iter().any(|tool| !matches!(tool.name.as_str(), questions::QUESTION_TOOL | collaboration::STATUS_TOOL | collaboration::WAIT_TOOL | collaboration::REPORT_TOOL | "native_memory")) {
+        if launch.source.is_some() || launch.tools.iter().any(|tool| !matches!(tool.name.as_str(), questions::QUESTION_TOOL | collaboration::STATUS_TOOL | collaboration::WAIT_TOOL | collaboration::REPORT_TOOL | "native_memory" | "native_todo")) {
             return Err(RuntimeError::Invalid("source inheritance cannot also override source or tools".into()));
         }
         self.submit_admission(command, Some(launch), false, true, None, None)
@@ -241,7 +243,7 @@ impl Catalog {
         self.submit_with_context_snapshot(command, launch, inherit_source, initial, None)
     }
     pub fn submit_with_context_snapshot(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>, inherit_source: bool, initial: Option<context::ContextProposal>, personalization: Option<personalization::PersonalizationBasis>) -> Result<Receipt> {
-        if inherit_source && launch.as_ref().is_none_or(|selection| selection.source.is_some() || selection.tools.iter().any(|tool| !matches!(tool.name.as_str(), questions::QUESTION_TOOL | collaboration::STATUS_TOOL | collaboration::WAIT_TOOL | collaboration::REPORT_TOOL | "native_memory"))) {
+        if inherit_source && launch.as_ref().is_none_or(|selection| selection.source.is_some() || selection.tools.iter().any(|tool| !matches!(tool.name.as_str(), questions::QUESTION_TOOL | collaboration::STATUS_TOOL | collaboration::WAIT_TOOL | collaboration::REPORT_TOOL | "native_memory" | "native_todo"))) {
             return Err(RuntimeError::Invalid("source inheritance requires an unoverridden model launch".into()));
         }
         if personalization.as_ref().is_some_and(|basis| basis.session_id != command.thread_id) {
@@ -539,13 +541,31 @@ impl Catalog {
         new_branch: &str,
         head: Option<&str>,
     ) -> Result<()> {
+        self.fork_branch_with_plan(source, new_branch, head, None)
+    }
+    pub fn fork_branch_with_plan(
+        &mut self,
+        source: &str,
+        new_branch: &str,
+        head: Option<&str>,
+        plan_capture: Option<plan::PlanForkCapture>,
+    ) -> Result<()> {
         // Creation identity is immutable even when either branch later advances.
         let creation: Option<String> = self.db.query_row(
             "SELECT data FROM events WHERE subject=?1 AND kind='branch.created' ORDER BY cursor LIMIT 1",
             [new_branch],
             |row| row.get(0),
         ).optional()?;
-        let identity = json!({"source":source,"head":head});
+        let mut identity = json!({"source":source,"head":head});
+        if let Some(capture) = &plan_capture {
+            let source_view = self.plan_view(source, head)?;
+            if capture.source_thread_id != source_view.thread_id || capture.source_branch_id != source
+                || capture.target_branch_id != new_branch || capture.head_id.as_deref() != head
+                || capture.inherited_ref != source_view.inherited_ref {
+                return Err(RuntimeError::Conflict("plan capture does not identify the source fork".into()));
+            }
+            identity["planCapture"] = serde_json::to_value(capture)?;
+        }
         if let Some(creation) = creation {
             if serde_json::from_str::<Value>(&creation)? == identity {
                 return Ok(());
@@ -1350,3 +1370,6 @@ mod scheduling;
 
 #[path = "catalog_process_wait.rs"]
 pub mod process_wait;
+
+#[path = "catalog_plan.rs"]
+pub mod plan;

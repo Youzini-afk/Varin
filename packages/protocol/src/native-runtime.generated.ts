@@ -270,6 +270,29 @@ export interface NativeBranchForkParams {
   sourceBranchId: string;
   branchId: string;
   headId: string | null;
+  planCapture?: NativePlanForkCaptureParams;
+}
+
+export interface NativePlanForkCaptureParams {
+  sourceThreadId: string;
+  sourceBranchId: string;
+  targetBranchId: string;
+  headId: string | null;
+  inheritedRef: string | null;
+  capturedRef: string | null;
+}
+
+export interface NativePlanContainsParams {
+  branchId: string;
+  headId: string | null;
+  candidateHeadId: string | null;
+  cursor?: string;
+}
+
+export interface NativePlanViewParams {
+  branchId: string;
+  headId: string | null;
+  current: boolean;
 }
 
 export interface NativeBranchForkResult {

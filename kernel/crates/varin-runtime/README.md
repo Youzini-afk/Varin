@@ -381,3 +381,68 @@ through a closed client; those failed logs remain. The corrected tests reflect e
 not a new persistence guarantee. Runtime trust/root changes still follow the existing source-grant
 lifetime; this lane does not implement an immediate trust-change revocation listener. Fairness-main
 integration requires ProcessWaitTools capability/admission-hook forwarding and separate verification.
+
+## Native plan identity
+
+`catalog_plan` projects fixed Thread/branch/head identity and an immutable fork basis; it stores no
+plan text or mutable plan pointer. New plan-aware forks record the KnowledgeStore capture on
+`branch.created`, after checking its source Thread, branch, head and inherited reference.
+The Host performs KnowledgeStore capture outside the Catalog lock. Historical cuts, including
+null pre-history, remain explicit. Root/legacy branch identity comes from Catalog creation facts;
+an unrelated abandoned capture cannot change it. KnowledgeStore owns atomic version/CAS/receipt
+publication and verifies the recorded fork basis before resolving plan content.
+
+Plan visibility follows at most 256 immutable parent metadata rows per control request, using
+HMAC-authenticated cursors tied to the Catalog-open epoch, Thread, branch, selected head and
+candidate. No complete history list crosses the plan bridge. Host cancellation ends between
+bounded pages; reopening restarts only pure reads. Existing conversation fork replay/pairing
+validation is unchanged and is not claimed to be a new bounded plan-page operation.
+
+`native_todo` exposes `read` and whole-plan `update` with exact `expectedRef` CAS. The private
+bridge derives the fixed request head and original Operation identity from Catalog; model
+arguments contain no owner/scope fields. Only admitted ordinary main Threads receive the schema,
+and dispatch rechecks their persisted role and child relationship. Source-inheritance filters
+recognize this built-in without granting source capabilities. An authoritative CAS-conflict
+receipt settles `Failed/None`; an unknown dispatch is not relabeled as no effect. Recovery queries
+the original Knowledge receipt and never repeats a plan mutation.
+
+### Native plan slice verification (2026-10-09)
+
+Independent owner tests passed 22 cases using real TriviumDB and private IPC. Independent Host
+integration passed 22 cases against the diagnostic kernel, including HTTP identity/CAS,
+fixed and nested forks, bounded membership cursors, native model/tool consumption, structured
+conflict settlement and lost-reply reconciliation after a later user edit and owner/kernel reopen.
+UI/client focused tests passed 18 cases. Cargo check/build, protocol/client builds, the Host raw
+bundle, Host test typecheck and full UI typecheck completed. Fixtures were corrected to use actual
+persisted context admission; this does not substitute for a production scope grant.
+
+The exact durable no-effect receipt test and 12 existing execution behavior tests also passed.
+Integration with the newer process-wait mainline remains a separate pending gate at this snapshot. This is not packaged-surface, power-loss, or full-design
+acceptance. Project/Bot/Pi plans and legacy Pi timestamp CAS are unchanged.
+
+### Combined plan/process/capacity acceptance (2026-10-09)
+
+The plan lane is now integrated with durable process observation and family admission. The combined
+0.9.24 debug kernel SHA256 is
+`b86064f0695382a1560469644d27db666c091376e528856c863c427ad36a379f`.
+Actual Host/kernel tests passed 27 cases (plan 22 plus existing process wait 5). The exact durable
+no-effect evidence test and three held-permit kernel cases passed. Those three exercise the real
+PlanTools -> MemoryTools -> ProcessWaitTools -> CollaborationTools -> Questions -> NativeToolExecutor
+chain for queued search, cancellation and post-permit Storage revocation. Plan classification is
+unmetered; real plan execution is verified by the Host tests. Immediate queued revocation wakeups
+remain outside this fixture's scope.
+
+Protocol/client and Host production builds, focused combined consumer types, changed-filter/test
+lint, protocol generation consistency and whitespace checks passed. The independent lane's owner
+22, UI 18, full UI types and final Host test types remain separate evidence. Source and dedicated
+binary hashes were stable throughout the combined behavior checks; the final addition is this
+acceptance text only. No packaged UI, unexpected-crash or full-design acceptance is claimed.
+
+Initial combined Host compilation caught an incomplete conflict resolution, corrected by a fresh
+three-way reconstruction and independently checked byte-for-byte before successful rebuilding.
+An initially overbroad Cargo invocation also compiled the unchanged policy_model_jobs_review test
+fixture, which lacks context_preparation in nine ExecutionEngine initializers. The intended --lib
+checks then passed without modifying or claiming that unrelated target passed. Focused whole-file
+lint on the independent lane retains the pre-existing index.ts prefer-const error, reproduced on
+its base revision; changed plan files and merged filters add no lint errors. These initial failures
+and the successful scoped reruns are retained separately.

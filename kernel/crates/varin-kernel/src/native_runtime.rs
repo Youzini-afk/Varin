@@ -102,6 +102,7 @@ pub(crate) fn spawn(
     mcp_bridge: crate::native_mcp::McpBridge,
     language_bridge: crate::native_language::LanguageBridge,
     memory_bridge: crate::native_memory_bridge::MemoryBridge,
+    plan_bridge: crate::native_plan_bridge::PlanBridge,
     retrieval_bridge: crate::native_retrieval::RetrievalBridge,
     policy_bridge: crate::native_policy::PolicyBridge,
     responses: mpsc::SyncSender<Value>,
@@ -387,6 +388,8 @@ pub(crate) fn spawn(
                                 })?;
                                 catalog.run(&p.run_id).map_err(domain)?
                             };
+                            let plan_eligible = { let owner = runtime.catalog(); let catalog = owner.lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?;
+                                crate::native_plan::eligible(&catalog, &run.id).map_err(|error| KernelError::Authorization(error.to_string()))? };
                             let is_context_job = run.configuration.get("context_job").is_some();
                             let is_child = runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?
                                 .require_child_launch(&run.id).map_err(domain)?.is_some();
@@ -469,6 +472,7 @@ pub(crate) fn spawn(
                                     start.binding.tools = crate::native_collaboration::schemas(start.binding.tools, selected.source.0.as_ref().is_some_and(|source| source.mode == varin_runtime::SourceMode::FixedBranch));
                                     start.binding.tools = crate::native_process_wait::schemas(start.binding.tools);
                                     start.binding.tools.push(crate::native_memory::schema(true));
+                                    if plan_eligible { start.binding.tools.push(crate::native_plan::schema()); }
                                 }
                                 start.binding.tool_schema_generation =
                                     start.binding.configuration_generation;
@@ -571,6 +575,7 @@ pub(crate) fn spawn(
                             if !is_context_job && !is_child {
                                 start = crate::native_memory::configure(start, runtime.catalog(), memory_bridge.clone(), true);
                             }
+                            if plan_eligible { start = crate::native_plan::configure(start, runtime.catalog(), plan_bridge.clone()); }
                             let mcp_binding = p.mcp_binding.map(native_mcp_binding).transpose()?;
                             if let Some(binding) = &mcp_binding {
                                 binding.validate().map_err(domain)?;
@@ -690,6 +695,12 @@ pub(crate) fn spawn(
                                 let response=match result {Ok(value)=>response_ok(&response_id,value),Err(error)=>response_error(&response_id,&error)};
                                 done(&response_id);let _=response_sender.send(response);
                             })).map_err(|_|KernelError::Storage("native content reader unavailable".into()))?;
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
+                        if method == "runtime.plan.reconcile" {
+                            let p: NativeRunParams = serde_json::from_value(params)?;
+                            crate::native_plan::reconcile(runtime.clone(), plan_bridge.clone(), p.run_id, id.clone(), responses.clone(), finished.clone())?;
                             deferred = true;
                             return Ok(Value::Null);
                         }
@@ -886,10 +897,31 @@ fn native_mcp_binding(binding: NativeMcpBinding) -> Result<crate::native_mcp::Mc
     })
 }
 fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value, KernelError> {
+    if method == "runtime.plan.contains" {
+        if ["headId", "candidateHeadId"].iter().any(|field| params.get(*field).is_none()) {
+            return Err(KernelError::Protocol("plan visibility requires explicit selected and candidate heads, including null".into()));
+        }
+        let p: NativePlanContainsParams = serde_json::from_value(params)?;
+        return catalog.plan_contains(&p.branch_id, p.head_id.0.as_deref(), p.candidate_head_id.0.as_deref(), p.cursor.as_deref()).map_err(domain);
+    }
+    if method == "runtime.plan.view" {
+        if params.get("headId").is_none() { return Err(KernelError::Protocol("plan view requires an explicit headId, including null".into())); }
+        let p: NativePlanViewParams = serde_json::from_value(params)?;
+        let head = if p.current { catalog.head(&p.branch_id).map_err(domain)? } else { p.head_id.0 };
+        return Ok(serde_json::to_value(catalog.plan_view(&p.branch_id, head.as_deref()).map_err(domain)?)?);
+    }
     if method == "runtime.branch.fork" {
+        if let Some(capture) = params.get("planCapture") {
+            if !capture.is_object() || ["headId", "inheritedRef", "capturedRef"].iter().any(|field| capture.get(*field).is_none()) {
+                return Err(KernelError::Protocol("planCapture requires the complete immutable capture, including explicit null references".into()));
+            }
+        }
         let p: NativeBranchForkParams = serde_json::from_value(params)?;
+        let capture = p.plan_capture.map(|value| varin_runtime::catalog::plan::PlanForkCapture {
+            source_thread_id:value.source_thread_id, source_branch_id:value.source_branch_id, target_branch_id:value.target_branch_id,
+            head_id:value.head_id.0, inherited_ref:value.inherited_ref.0, captured_ref:value.captured_ref.0 });
         catalog
-            .fork_branch(&p.source_branch_id, &p.branch_id, p.head_id.0.as_deref())
+            .fork_branch_with_plan(&p.source_branch_id, &p.branch_id, p.head_id.0.as_deref(), capture)
             .map_err(domain)?;
         let thread_id = catalog.branch_thread_id(&p.branch_id).map_err(domain)?;
         return Ok(json!({"threadId":thread_id,"branchId":p.branch_id}));
@@ -1100,6 +1132,11 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                     "input idempotency key cannot be empty".into(),
                 ));
             }
+            let initial_personalization = p.initial_context.as_ref().and_then(|context| context.personalization.clone())
+                .map(native_personalization_basis).transpose()?;
+            let plan_basis = match &initial_personalization { Some(basis) => Some(basis.clone()),
+                None => catalog.active_context(&p.branch_id).map_err(domain)?.and_then(|context|context.personalization) };
+            let plan_eligible = plan_basis.as_ref().is_some_and(|basis|basis.mode == "agent" && basis.thread_role == "main" && basis.session_id == p.thread_id);
             let inherit_source = p.launch.as_ref().and_then(|launch| launch.inherit_source).unwrap_or(false);
             let launch = p
                 .launch
@@ -1186,6 +1223,7 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                                 source.as_ref().is_some_and(|source| source.mode == varin_runtime::SourceMode::FixedBranch));
                             tools = crate::native_process_wait::schemas(tools);
                             tools.push(crate::native_memory::schema(true));
+                            if plan_eligible { tools.push(crate::native_plan::schema()); }
                             tools
                         },
                         policy: crate::native_process_wait::default_policy_identity(),
@@ -1195,8 +1233,7 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                 .transpose()?;
             let command = SubmitInput { key:p.key, thread_id:p.thread_id, branch_id:p.branch_id,
                 expected_head:p.expected_head.0, input:p.input, configuration:p.configuration };
-            let personalization = p.initial_context.as_ref().and_then(|context| context.personalization.clone())
-                .map(native_personalization_basis).transpose()?;
+            let personalization = initial_personalization;
             let initial = p.initial_context.map(|context| varin_runtime::catalog::context::ContextProposal {
                 key: format!("initial-context:{}", command.branch_id), branch_id: command.branch_id.clone(),
                 through_id: None, expected_revision: 0, summary: String::new(),

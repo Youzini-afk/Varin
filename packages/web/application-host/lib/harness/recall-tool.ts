@@ -93,7 +93,8 @@ export const RECALL_PROMPT_SNIPPET =
 /**
  * Open the user-level knowledge store at
  * {dataDir}/knowledge/{hostId}/user.tdb.
- * Only allows knowledge nodes (no events, sessions, or blocks).
+ * Knowledge nodes and explicitly scoped native plans share this physical owner.
+ * Legacy session events/blocks remain prohibited; native plans are excluded from recall.
  */
 export async function openUserKnowledgeStore(
   deps: {
@@ -101,6 +102,7 @@ export async function openUserKnowledgeStore(
     hostId: string;
     embedding: import("../knowledge/store.js").EmbeddingProvider | null;
     onKnowledgeChanged?: (ids: readonly number[]) => void;
+    onNativePlanChanged?: (change: import("@varin/protocol").NativePlanChanged) => void;
   },
 ): Promise<KnowledgeStore> {
   // Reuse openWorkspaceKnowledge with a special workspaceId "user"
@@ -111,6 +113,7 @@ export async function openUserKnowledgeStore(
     workspaceId: "user",
     embedding: deps.embedding,
     ...(deps.onKnowledgeChanged ? { onKnowledgeChanged: deps.onKnowledgeChanged } : {}),
+    ...(deps.onNativePlanChanged ? { onNativePlanChanged: deps.onNativePlanChanged } : {}),
   });
 
   // Wrap to reject non-knowledge writes

@@ -1,3 +1,4 @@
+import { NativeThreadPlan } from './NativeThreadPlan';
 import { NativeThreadMemory } from './NativeThreadMemory';
 import { NativeThreadPermission } from './NativeThreadPermission';
 import { NativeThreadQuestion } from './NativeThreadQuestion';
@@ -128,6 +129,7 @@ export function NativeThreadConversation({ api, identity, onBranchCreated, initi
         {historyView && <Button variant="outline" size="sm" onClick={returnToLatest}>{historyView.head !== snapshot?.historyPage.head ? 'Show latest messages' : 'Return to latest view'}</Button>}
         {historyView && <span className="text-xs text-muted-foreground">Viewing saved history</span>}
       </div>
+      {api.plan && <NativeThreadPlan api={api.plan} identity={identity} contextRevision={snapshot?.context.checkpoint?.revision} />}
       {visibleHistory.map(item => <article key={item.id} className="mx-auto max-w-3xl">
         <div className="mb-1 text-xs text-muted-foreground">{item.source}</div>
         <MarkdownRenderer messageId={item.id} content={nativeHistoryText(item.content)} />
