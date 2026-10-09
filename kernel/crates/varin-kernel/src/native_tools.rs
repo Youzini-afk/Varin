@@ -184,6 +184,7 @@ enum ResourceOperation {
         mutation: NativeTextMutation,
         executor: String,
     },
+    ProcessObservation { process_id: String, read: Option<(u64, Option<u64>)> },
     ProcessInspect(ProcessInspectArgs),
     ProcessRead(ProcessReadArgs),
     ProcessSpawn(ProcessSpawnArgs),
@@ -278,6 +279,11 @@ impl ResourceOperation {
         context: &ToolExecutionContext,
     ) -> (&'static str, Value) {
         match self {
+            Self::ProcessObservation { process_id, read } => {
+                let mut params=json!({"workspaceId":binding.workspace_id,"processId":process_id});
+                if let Some((cursor,limit))=read { params["cursor"]=json!(cursor); if let Some(limit)=limit { params["maxBytes"]=json!(limit); } }
+                (if read.is_some() { "process.read" } else { "process.inspect" },params)
+            }
             Self::CollaborationPin { release, pin_id } => {
                 let source = binding.file_source.as_ref().expect("fixed collaboration binding");
                 if *release { ("branch.unpin", json!({"operationId":format!("native-child-unpin:{}",context.operation_id),"branchId":source.branch_id,"pinId":pin_id})) }
@@ -414,6 +420,17 @@ impl NativeResourceClient {
         -> Result<varin_runtime::execution_capacity::AdmissionControlGuard, ExecutionError> + Send + Sync + 'static) -> Self {
         self.admission_control = Some(Arc::new(watch));
         self
+    }
+    /// Caller has checked the real Catalog process Operation and immutable launch source.
+    pub(crate) fn observe_process(&self, binding: &NativeToolBinding, context: &ToolExecutionContext,
+        process_id: &str, read: Option<(u64, Option<u64>)>, authorize_only: bool,
+        cancel: &CancellationToken) -> Result<Value, ExecutionError> {
+        self.call(binding, context, ResourceOperation::ProcessObservation { process_id:process_id.into(),read },
+            authorize_only,cancel).map_err(|failure|ExecutionError::new(error_code(&failure.error),failure.error.to_string()))
+    }
+    pub(crate) fn authorize_process_observation(&self, binding: &NativeToolBinding, context: &ToolExecutionContext,
+        process_id: &str, cancel: &CancellationToken) -> Result<(), ExecutionError> {
+        self.observe_process(binding,context,process_id,None,true,cancel).map(|_|())
     }
     pub(crate) fn collaboration_pin(&self, binding: &NativeToolBinding, context: &ToolExecutionContext,
         release: bool, authorize_only: bool, cancel: &CancellationToken) -> Result<Value, ExecutionError> {
@@ -642,6 +659,7 @@ impl NativeToolExecutor {
                 let source = self.binding.file_source.as_ref().expect("validated source");
                 (key(json!(["fixed-file", self.binding.workspace_id, source.branch_id, source.revision, args.path])), Access::Read)
             }
+            ResourceOperation::ProcessObservation { .. } => unreachable!("observation is admitted by the Catalog wrapper"),
             ResourceOperation::ProcessInspect(args) => (key(json!(["process-output", self.binding.execution_workspace_id, args.process_id])), Access::Read),
             ResourceOperation::ProcessRead(args) => (key(json!(["process-output", self.binding.execution_workspace_id, args.process_id])), Access::Read),
             // Arbitrary programs have unknown write sets. Record shared writer activity, never
@@ -654,6 +672,13 @@ impl NativeToolExecutor {
             lifetime: if job { Lifetime::Thread } else { Lifetime::Run },
             resources: vec![ResourceClaim { key: resource, access }],
         }
+    }
+    pub(crate) fn process_observation_contract(&self, context:&ToolExecutionContext, call:&ToolCall) -> Result<ToolContract,ExecutionError> {
+        let operation=self.operation(Some(context),call)?;
+        if !matches!(operation,ResourceOperation::ProcessInspect(_)|ResourceOperation::ProcessRead(_)) {
+            return Err(ExecutionError::new("process_observation","not a read-only process observation"));
+        }
+        Ok(self.contract(call,&operation))
     }
     fn physical_file(&self, operation: &ResourceOperation) -> bool {
         matches!(operation, ResourceOperation::FileMutation(_))
@@ -1014,6 +1039,9 @@ pub(crate) fn serve_resource(
                 if !request.authorize_only { result["source"] = request.binding.physical_source(); }
                 result
             });
+        }
+        if matches!(&request.operation, ResourceOperation::ProcessObservation { .. }) {
+            return storage.observe_native_process(method, &authorized, &grant, request.binding.root_id.as_deref(), request.authorize_only);
         }
         if request.authorize_only {
             return Ok(Value::Null);

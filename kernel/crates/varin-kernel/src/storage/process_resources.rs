@@ -314,6 +314,47 @@ impl Storage {
         self.refresh_process_record(id)?
             .ok_or_else(|| KernelError::Storage("process intent disappeared".into()))
     }
+    /// Exact read-only delegation for a Catalog-validated process of the same Run.
+    /// The current grant was authorized by the Storage actor; the original grant is never
+    /// revived or substituted as the caller. No persisted observer or control authority exists.
+    pub(crate) fn observe_native_process(&mut self, method: &str, params_value: &Value,
+        grant: &Grant, root_id: Option<&str>, authorize_only: bool) -> Result<Value, KernelError> {
+        if !matches!(method,"process.inspect"|"process.read") {
+            return Err(KernelError::Authorization("process delegation is observation-only".into()));
+        }
+        let id=string(params_value,"processId")?;
+        let workspace=string(params_value,"workspaceId")?;
+        let actor:String=self.conn.query_row("SELECT grant_id FROM process_records WHERE process_id=?1",[id],|row|row.get(0))?;
+        let original=self.load_grant(&actor)?;
+        if original.revoked || grant.revoked || original.run_id.is_none() || original.thread_id.is_none()
+            || original.run_id != grant.run_id || original.thread_id != grant.thread_id
+            || original.owning_workspace.as_deref() != Some(workspace)
+            || original.owning_workspace != grant.owning_workspace || original.execution_workspace != grant.execution_workspace
+            || original.storage_identity != grant.storage_identity || original.host_id != grant.host_id
+            || original.path_scopes != grant.path_scopes || !original.capabilities.contains("process") {
+            return Err(KernelError::Authorization("original process authority was revoked or does not match this Run/source".into()));
+        }
+        let root=self.registered_file_root(root_id.ok_or_else(||KernelError::Authorization("process observation requires its physical source root".into()))?,grant)?;
+        let cwd:String=self.conn.query_row("SELECT cwd FROM process_records WHERE process_id=?1",[id],|row|row.get(0))?;
+        if root.owning_workspace_id!=workspace || !contains(&root.canonical_root,Path::new(&cwd)) {
+            return Err(KernelError::Authorization("process observation physical source changed".into()));
+        }
+        if authorize_only { return Ok(Value::Null); }
+        let record=self.refresh_process_record(id)?.ok_or_else(||KernelError::Operation("process disappeared".into()))?;
+        if method == "process.inspect" { return Ok(record); }
+        self.read_process_output(id,params_value,record)
+    }
+    fn read_process_output(&mut self,id:&str,params_value:&Value,record:Value)->Result<Value,KernelError> {
+        if record["outputAvailable"].as_bool()!=Some(true) {
+            return Err(KernelError::Storage(record["outputError"].as_str().unwrap_or("process output is unavailable").into()));
+        }
+        let cursor=unsigned(params_value,"cursor",0)?;
+        let limit=unsigned(params_value,"maxBytes",CHUNK_BYTES as u64)?;
+        if limit==0 || limit>CHUNK_BYTES as u64 { return Err(KernelError::Operation("invalid process read chunk size".into())); }
+        let mut result=self.processes.read(id,cursor,limit as usize)?;
+        result["process"]=record;
+        Ok(result)
+    }
     pub(super) fn dispatch_process(
         &mut self,
         method: &str,
@@ -406,18 +447,7 @@ impl Storage {
             ));
         }
         match method {
-            "process.read" => {
-                let cursor = unsigned(params_value, "cursor", 0)?;
-                let limit = unsigned(params_value, "maxBytes", CHUNK_BYTES as u64)?;
-                if limit == 0 || limit > CHUNK_BYTES as u64 {
-                    return Err(KernelError::Operation(
-                        "invalid process read chunk size".into(),
-                    ));
-                }
-                let mut result = self.processes.read(id, cursor, limit as usize)?;
-                result["process"] = record;
-                Ok(result)
-            }
+            "process.read" => self.read_process_output(id,params_value,record),
             "process.write" => self.processes.write(
                 id,
                 unsigned(params_value, "sequence", 0)? as i64,

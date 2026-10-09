@@ -1347,3 +1347,6 @@ pub mod collaboration;
 
 #[path = "catalog_scheduling.rs"]
 mod scheduling;
+
+#[path = "catalog_process_wait.rs"]
+pub mod process_wait;

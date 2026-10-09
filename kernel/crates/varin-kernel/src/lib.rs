@@ -9,6 +9,7 @@ mod native_runtime;
 mod native_tools;
 mod native_questions;
 mod native_collaboration;
+mod native_process_wait;
 mod native_mcp;
 mod native_language;
 mod native_memory;

@@ -363,6 +363,17 @@ impl RunSupervisor {
         }
         Ok(())
     }
+    pub fn quiesce_process_waits(&self) -> Result<()> {
+        let ids: Vec<String> = self.workers.lock().map_err(error)?.keys().cloned().collect();
+        for id in ids {
+            let run = self.catalog.lock().map_err(error)?.run(&id).map_err(error)?;
+            if run.state != RunState::Waiting || !run.waiting_on.as_deref().is_some_and(|id| id.starts_with("process-wait:")) { continue; }
+            if let Some(mut worker) = self.workers.lock().map_err(error)?.remove(&id) {
+                if let Some(join) = worker.join.take() { join.join().map_err(|_| error("process wait teardown failed"))?; }
+            }
+        }
+        Ok(())
+    }
     pub fn cancel_operation(&self, operation_id: &str) -> Result<crate::Operation> {
         self.cancel_operation_control(operation_id);
         self.catalog
