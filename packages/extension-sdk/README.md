@@ -73,3 +73,10 @@ managed Surface does not inject the optional service. It does not invent managed
 callback, or DOM access. `@varin/extension-sdk/testing` also exports
 `runEditorExtensionConformance` and a real mock document controller covering incremental failures and
 mount abort/disposal.
+
+`provideAgentPolicy` implements `varin.agent.policy@1` at committed execution boundaries. Its
+immutable declared configuration and versioned private JSON state are distinct from core history;
+the Host pins exact package/configuration identity for the Run. Return a permitted action rather
+than calling models or tools in the decision handler. Core validates exchanges, permissions,
+registered waits and cancellation. [The bounded evidence example](../../examples/extensions/evidence-policy/README.md)
+shows the executable contract and current action limits.

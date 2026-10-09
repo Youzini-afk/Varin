@@ -1,6 +1,8 @@
 import { createNativeThreadSourcePreparer } from './lib/kernel/native-thread-sources.js';
 import { createNativeThreadContext } from './lib/kernel/native-thread-context.js';
 import { createNativeContextComposition } from './lib/kernel/native-context-composition.js';
+import { createNativeAgentPolicy } from './lib/kernel/native-agent-policy.js';
+import { NativeRunObservers } from './lib/kernel/native-run-observers.js';
 import { McpAuthority, mcpHostAgentDir, mcpHostProjectTrusted, readMcpHostPermissionPolicy } from '@varin/pi-host/mcp-authority';
 import { createNativeMcpLease } from './lib/kernel/native-mcp-owner.js';
 import { createMcpHarnessServices } from './lib/harness/mcp-service.js';
@@ -2866,7 +2868,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     providerToken: async (_scope, provider) => (await hostCredentialAuthority.getAuth(provider))?.auth.apiKey,
     credentialScope: async (_scope, provider) => hostCredentialAuthority.currentScope(provider),
   });
-  const nativeRuntime = new NativeRuntimeClient(kernelClient, async (input, signal) => {
+  const prepareNativePolicy = createNativeAgentPolicy(extensionRuntime);
+  const nativeRuntime: NativeRuntimeClient = new NativeRuntimeClient(kernelClient, async (input, signal) => {
     // A read-only fixed branch has no executable filesystem view. Global MCP capabilities run
     // in the neutral Host scope; they must not borrow the mutable project directory.
     const workspace = input.source && input.executionCwd
@@ -2895,6 +2898,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         return readMcpHostPermissionPolicy(mcpAgentDir, configCwd, trusted);
       },
     });
+  }, async (input, signal) => {
+    const run = await nativeRuntime.run(input.runId, signal);
+    if (run.thread_id !== input.threadId) throw new Error('Native policy scope changed');
+    const checkpoint = await nativeRuntime.context(run.branch_id, signal);
+    const projectId = checkpoint?.personalization?.projectId;
+    return prepareNativePolicy({ sessionId: input.threadId, ...(projectId ? { projectId } : {}) }, signal);
+  });
+  const nativeRunObservers = new NativeRunObservers(nativeRuntime, extensionRuntime, (threadId, _error) => {
+    console.error('[NativeObserver] Activity projection requires attention:', threadId ?? 'selection');
   });
   const nativeThreads = new NativeThreadAdapter(nativeRuntime,
     createNativeModelAuthority(hostCredentialAuthority), async source => {
@@ -4500,6 +4512,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     stop: async (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => {
       // Stop timer/watcher producers before their runtime and storage
       // dependencies begin shutting down.
+      nativeRunObservers.stop();
       scheduledTasksRuntime.stop();
       await botService.dispose();
       followUpService.dispose();

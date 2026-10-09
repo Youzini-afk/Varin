@@ -66,3 +66,12 @@ helper and `inspect` metadata share the contract; the packaged default and insta
 use the ordinary lifecycle. This does not yet provide general Decision/Observer author contracts or
 arbitrary retrieval/tool composition. See `examples/extensions/project-context` for the actual author
 and project-selection path.
+
+Brokered process shutdown has a configurable `brokerShutdownGraceMs` (default 5000 ms).
+This is a cleanup grace addressing an observed indefinitely hanging disposer, not a model/tool
+execution deadline. Normal replacement first drains valid old-generation exchange pins; only
+entry into final process disposal starts the grace. At expiry the Host kills that broker and waits
+for its actual exit. The existing owner diagnostics record `broker_cleanup_unconfirmed`: process
+exit does not mean the extension's cleanup or any external effect was completed or undone.
+Independent owners still finish shutdown even if another owner reports a failure. Trusted-native
+extensions retain their distinct in-process cleanup/restart contract.

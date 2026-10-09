@@ -144,7 +144,15 @@ pub(crate) struct NativeMcpPrepareParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativePolicyPrepareParams {
+    pub(crate) run_id: String,
+    pub(crate) identity: NativeLaunchPolicy,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeRunStartParams {
+    pub(crate) policy_binding: Option<NativeAgentPolicyBinding>,
     pub(crate) mcp_binding: Option<NativeMcpBinding>,
     pub(crate) run_id: String,
     pub(crate) tool_binding: Option<Value>,
@@ -206,6 +214,24 @@ pub(crate) struct NativeOperationParams {
 pub(crate) struct NativeEventsParams {
     pub(crate) cursor: i64,
     pub(crate) limit: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeObserverReadParams {
+    pub(crate) observer_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) limit: i64,
+    pub(crate) through_cursor: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeObserverDeliveryParams {
+    pub(crate) observer_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) cursor: i64,
+    pub(crate) state: varin_runtime::DeliveryState,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1206,6 +1232,20 @@ pub(crate) struct NativeMcpBinding {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeLaunchPolicy {
+    pub(crate) name: String,
+    pub(crate) version: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeAgentPolicyBinding {
+    pub(crate) reference: String,
+    pub(crate) identity: NativeLaunchPolicy,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeSubmitLaunch {
     pub(crate) inherit_source: Option<bool>,
     pub(crate) source: RequiredNullable<NativeLaunchSourceParams>,
@@ -1557,6 +1597,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "runtime.launch.policy.prepare" => {
+            serde_json::from_value::<NativePolicyPrepareParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.launch.inspect" => serde_json::from_value::<NativeRunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -1619,6 +1664,16 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.events.read" => serde_json::from_value::<NativeEventsParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.observer.read" => {
+            serde_json::from_value::<NativeObserverReadParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.observer.delivery" => {
+            serde_json::from_value::<NativeObserverDeliveryParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "process.subscribe" => {
             serde_json::from_value::<KernelProcessSubscribeParams>(params.clone())
                 .map(|_| ())

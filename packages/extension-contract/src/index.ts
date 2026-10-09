@@ -11,3 +11,7 @@ export * from "./editor.js";
 export * from "./recovery.js";
 
 export * from "./context-fragments.js";
+
+export * from "./agent-policy.js";
+
+export * from "./run-activity.js";

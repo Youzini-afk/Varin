@@ -56,10 +56,12 @@ interface BrokerCancelMessage { kind: "cancel"; id: string; }
 
 type BrokerMessage = BrokerRequestMessage | BrokerResponseMessage | BrokerEventMessage | BrokerCancelMessage;
 
+export interface BrokeredHostStopResult { processExited: true; cleanup: "confirmed" | "unconfirmed" }
+
 export interface BrokeredHostTransport {
   forceTerminate(): void;
   request(method: string, params?: unknown, signal?: AbortSignal): Promise<unknown>;
-  terminate(): Promise<void>;
+  terminate(): Promise<BrokeredHostStopResult | void>;
 }
 
 export interface BrokeredHostTransportOptions {
@@ -101,6 +103,8 @@ interface BrokerActivationResult {
 
 export interface BrokeredHostSupervisorOptions {
   brokerScript: string;
+  /** Grace for a broker disposer after live exchange pins have drained; not an execution budget. */
+  brokerShutdownGraceMs?: number;
   capabilities: HostCapabilityRegistry;
   catalog: ApplicationExtensionCatalog;
   onStateChange?: () => void;
@@ -159,6 +163,10 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
   readonly #onCrash: (error: Error) => void;
   readonly #pending = new Map<string, { reject(error: Error): void; resolve(value: unknown): void }>();
   readonly #ready: Promise<void>;
+  readonly #exited: Promise<void>;
+  readonly #shutdownGraceMs: number;
+  #termination: Promise<BrokeredHostStopResult> | undefined;
+  #cleanupConfirmed = false;
   readonly #requestFromChild: (method: string, params: unknown, signal: AbortSignal) => Promise<JsonValue>;
   #intentional = false;
   #crashed = false;
@@ -166,10 +174,13 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
 
   constructor(options: {
     brokerScript: string;
+    shutdownGraceMs?: number;
     forkProcess?: typeof fork;
     onCrash(error: Error): void;
     requestFromChild(method: string, params: unknown, signal: AbortSignal): Promise<JsonValue>;
   }) {
+    this.#shutdownGraceMs = options.shutdownGraceMs ?? 5_000;
+    if (!Number.isSafeInteger(this.#shutdownGraceMs) || this.#shutdownGraceMs <= 0) throw new Error("Broker shutdown grace must be a positive integer");
     this.#onCrash = options.onCrash;
     this.#requestFromChild = options.requestFromChild;
     this.#child = (options.forkProcess ?? fork)(options.brokerScript, [], {
@@ -177,6 +188,8 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
       serialization: "json",
       stdio: ["ignore", "ignore", "ignore", "ipc"],
     });
+    let resolveExited!: () => void;
+    this.#exited = new Promise<void>(resolve => { resolveExited = resolve; });
     let rejectReadyRequest: (error: Error) => void = () => undefined;
     this.#ready = new Promise((resolveReady, rejectReady) => {
       rejectReadyRequest = rejectReady;
@@ -192,6 +205,7 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
     });
     this.#child.on("message", (value) => { void this.#onMessage(value as BrokerMessage); });
     this.#child.once("exit", (code, signal) => {
+      resolveExited();
       const error = new Error(`Brokered Host process exited (${code ?? signal ?? "unknown"})`);
       rejectReadyRequest(error);
       for (const pending of this.#pending.values()) pending.reject(error);
@@ -201,6 +215,7 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
       if (!this.#intentional && !this.#crashed) { this.#crashed = true; this.#onCrash(error); }
     });
     this.#child.once("error", (error) => {
+      if (!this.#child.pid) resolveExited();
       for (const pending of this.#pending.values()) pending.reject(error);
       this.#pending.clear();
     });
@@ -243,18 +258,34 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
     });
   }
 
-  async terminate(): Promise<void> {
-    if (this.#intentional) return;
+  terminate(): Promise<BrokeredHostStopResult> {
+    if (this.#termination) return this.#termination;
+    if (this.#intentional) return this.#exited.then(() => ({ processExited: true, cleanup: this.#cleanupConfirmed ? "confirmed" : "unconfirmed" }));
     this.#intentional = true;
-    if (this.#child.connected) await this.request("deactivate").catch((error) => { this.#intentional = false; throw error; });
-    if (this.#child.connected) this.#child.disconnect();
+    this.#termination = (async () => {
+      let forced = false;
+      // A broker can stall in its disposer even with zero service calls. Bound only this final
+      // process-cleanup phase, after normal replacement has respected every live exchange pin.
+      const timer = setTimeout(() => { forced = true; this.forceTerminate(); }, this.#shutdownGraceMs);
+      try {
+        if (this.#child.connected) { await this.request("deactivate"); this.#cleanupConfirmed = true; }
+        if (this.#child.connected) this.#child.disconnect();
+        await this.#exited;
+      } catch (error) {
+        this.forceTerminate();
+        await this.#exited;
+        if (!forced) throw error;
+      } finally { clearTimeout(timer); }
+      return { processExited: true, cleanup: this.#cleanupConfirmed ? "confirmed" : "unconfirmed" };
+    })();
+    return this.#termination;
   }
 
   forceTerminate(): void {
     this.#intentional = true;
     for (const controller of this.#childRequests.values()) controller.abort("Brokered Host process force-terminated");
     this.#childRequests.clear();
-    this.#child.kill();
+    this.#child.kill("SIGKILL");
   }
 
   async #onMessage(message: BrokerMessage): Promise<void> {
@@ -331,10 +362,20 @@ export class BrokeredHostSupervisor {
     grants: VarinExtensionCapabilityGrant[];
     desiredRevision: number;
     slot: "candidate" | "selected";
+    broker: BrokeredHostTransport;
+    native: boolean;
   }>();
   readonly #epochs = new Map<string, number>();
   #stopping = false;
   #shutdown: Promise<void> | undefined;
+
+  /** Exact executing artifact, for consumers persisting implementation-private checkpoints. */
+  getActiveArtifactIdentity(owner: HostServiceOwnerIdentity): string | undefined {
+    const instance = this.#active.get(owner.extensionId);
+    return instance && instance.owner.entrypointId === owner.entrypointId
+      && instance.owner.generation === owner.generation && instance.owner.extensionVersion === owner.extensionVersion
+      ? instance.artifactIntegrity : undefined;
+  }
 
   constructor(options: BrokeredHostSupervisorOptions) {
     this.#brokerScript = options.brokerScript;
@@ -347,6 +388,7 @@ export class BrokeredHostSupervisor {
     this.#storage = options.storage;
     this.#transportFactory = options.transportFactory ?? ((transportOptions) => new ChildBrokeredHostTransport({
       brokerScript: this.#brokerScript,
+      ...(options.brokerShutdownGraceMs === undefined ? {} : { shutdownGraceMs: options.brokerShutdownGraceMs }),
       onCrash: transportOptions.onCrash,
       requestFromChild: (method, params, signal) => this.#handleChildRequest(transportOptions.owner, transportOptions.grants, method, params, signal),
     }));
@@ -454,16 +496,18 @@ export class BrokeredHostSupervisor {
   shutdown(): Promise<void> {
     if (this.#shutdown) return this.#shutdown;
     this.#stopping = true;
-    for (const instance of this.#active.values()) this.#services.revokeOwner(instance.owner);
+    this.#stopRevokedCalls();
     for (const [id, controller] of this.#preparations) {
       this.#invalidate(id);
       controller.abort(new Error("Host supervisor is shutting down"));
     }
     this.#shutdown = (async () => {
-      await Promise.all([...this.#operations.values()]);
+      const operations = await Promise.allSettled([...this.#operations.values()]);
       const snapshot = await this.#catalog.snapshot();
-      await Promise.all([...new Set([...this.#active.keys(), ...this.#staged.keys()])]
+      const owners = await Promise.allSettled([...new Set([...this.#active.keys(), ...this.#staged.keys()])]
         .map((id) => this.#deactivateWithDependents(id, snapshot)));
+      const failures = [...operations, ...owners].filter((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failures.length) throw new AggregateError(failures.map(result => result.reason), "Some extension owners failed during shutdown");
     })();
     return this.#shutdown;
   }
@@ -788,6 +832,13 @@ export class BrokeredHostSupervisor {
         return;
       }
     }
+    // Publication is already complete even when the owner's replacement operation is still
+    // draining an older Run pin. The ready generation must not queue behind that retirement.
+    const ready = this.#active.get(entry.manifest.id);
+    if (ready && ready.epoch === epoch && !ready.preparation.signal.aborted
+      && this.#ownerGrants.has(ownerStorageKey(ready.owner)) && ready.artifactIntegrity === entry.integrity
+      && ready.desiredRevision === entry.desired.revision
+      && ready.grantIdentity === grantIdentity(entry.capabilityGrants, entry.selectedVersion)) return;
     const identity = `${entry.integrity}:${entry.desired.revision}:${epoch}:${grantIdentity(entry.capabilityGrants, entry.selectedVersion)}`;
     const pending = this.#selectedPreparations.get(entry.manifest.id);
     if (pending?.identity === identity) return pending.promise;
@@ -950,7 +1001,7 @@ export class BrokeredHostSupervisor {
             void this.#handleCrash(entry.manifest.id, owner, error, snapshot.hostId, entry.desired.revision);
           },
         });
-      this.#ownerGrants.set(ownerStorageKey(owner), { owner, grants, desiredRevision: entry.desired.revision, slot: selection.slot });
+      this.#ownerGrants.set(ownerStorageKey(owner), { owner, grants, desiredRevision: entry.desired.revision, slot: selection.slot, broker, native: selection.manifest.entrypoints?.host?.mode === "native" });
       const cancelPreparation = () => broker.forceTerminate();
       controller.signal.addEventListener("abort", cancelPreparation, { once: true });
       if (controller.signal.aborted) cancelPreparation();
@@ -1077,6 +1128,20 @@ export class BrokeredHostSupervisor {
     };
   }
 
+  /** Explicit disable/shutdown must not wait on an uncooperative callback before stopping its
+   * execution process. This does not assert that any external effect was undone. Replacement
+   * never calls this path: its old generation remains available to valid exchange pins. */
+  #stopRevokedCalls(extensionId?: string): void {
+    for (const tracked of this.#ownerGrants.values()) {
+      if (extensionId && tracked.owner.extensionId !== extensionId) continue;
+      this.#services.revokeOwner(tracked.owner);
+      if (!tracked.native && this.#services.hasPendingOwnerCalls(tracked.owner)) {
+        for (const grant of tracked.grants) grant.granted = false;
+        tracked.broker.forceTerminate();
+      }
+    }
+  }
+
   async #deactivateWithDependents(
     extensionId: string,
     snapshot: VarinExtensionCatalogSnapshot,
@@ -1086,9 +1151,8 @@ export class BrokeredHostSupervisor {
     if (visited.has(extensionId)) return;
     visited.add(extensionId);
     // Close exchange admission before waiting for the owner queue: replacement finalization
-    // may itself be awaiting an old pin. In-flight calls still retain normal drain ownership.
-    const active = this.#active.get(extensionId);
-    if (active) this.#services.revokeOwner(active.owner);
+    // may itself be awaiting an old pin. Explicit revocation also stops retained callbacks.
+    this.#stopRevokedCalls(extensionId);
     this.#invalidate(extensionId);
     const manifest = this.#active.get(extensionId)?.manifest
       ?? snapshot.extensions.find((entry) => entry.manifest.id === extensionId)?.manifest;
@@ -1120,8 +1184,9 @@ export class BrokeredHostSupervisor {
     this.#active.delete(extensionId);
     this.#services.removeOwner(instance.owner);
     const entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
+    let cleanupConfirmed = true;
     try {
-      await this.#disposeInstance(instance, true);
+      cleanupConfirmed = await this.#disposeInstance(instance, true);
     } catch (error) {
       if (instance.manifest.entrypoints?.host?.mode !== "native") throw error;
       this.#nativeRestartRequired.add(extensionId);
@@ -1140,10 +1205,11 @@ export class BrokeredHostSupervisor {
       entry.desired.revision,
       instance.owner.generation + 1,
       "inactive",
+      ...(cleanupConfirmed ? [] : ["broker_cleanup_unconfirmed", "Broker process exited; extension cleanup was not confirmed"]),
     ));
   }
 
-  async #disposeInstance(instance: BrokeredHostInstance, terminate: boolean): Promise<void> {
+  async #disposeInstance(instance: BrokeredHostInstance, terminate: boolean): Promise<boolean> {
     if (this.#preparations.get(instance.owner.extensionId) === instance.preparation) {
       this.#preparations.delete(instance.owner.extensionId);
       this.#preparationTargets.delete(instance.owner.extensionId);
@@ -1151,12 +1217,22 @@ export class BrokeredHostSupervisor {
     this.#setStoragePhase(instance, "disposed");
     this.#storageSessions.delete(ownerStorageKey(instance.owner));
     try {
-      // Disposers still execute extension code. Keep the captured grant view tracked until
-      // termination settles so a concurrent explicit review reaches the draining callback.
-      if (terminate) {
-        try { await instance.broker.terminate(); }
-        catch (error) { instance.broker.forceTerminate(); throw error; }
-      } else await instance.broker.terminate().catch(() => instance.broker.forceTerminate());
+      // Normal cleanup retains its reviewed capability view until it finishes. A forced process
+      // exit is a separate fact from successful disposer completion.
+      let result: BrokeredHostStopResult | void = undefined;
+      let cleanupFailed = false;
+      try { result = await instance.broker.terminate(); }
+      catch (error) {
+        instance.broker.forceTerminate();
+        if (terminate) throw error;
+        cleanupFailed = true;
+      }
+      const confirmed = !cleanupFailed && result?.cleanup !== "unconfirmed";
+      if (result?.cleanup === "unconfirmed") {
+        await this.#catalog.recordHostCleanupUnconfirmed(instance.owner.extensionId, instance.owner.generation);
+        this.#onStateChange();
+      }
+      return confirmed;
     } finally {
       // Trusted-native callbacks may retain their context even after cleanup failed. Never
       // leave those captured grants usable after the owner is no longer tracked.

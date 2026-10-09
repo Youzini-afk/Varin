@@ -55,6 +55,7 @@ import { WorkbenchProfileStore } from "./workbench-profile-store.js";
 
 export interface ApplicationExtensionRuntimeOptions {
   brokerScript: string;
+  brokerShutdownGraceMs?: number;
   capabilities?: HostCapabilityRegistry;
   catalog?: ApplicationExtensionCatalog;
   dataDir: string;
@@ -107,6 +108,7 @@ export class ApplicationExtensionRuntime {
     if (this.workbench.hostId !== hostId) throw new Error("Workbench profile store belongs to another application host");
     this.supervisor = new BrokeredHostSupervisor({
       brokerScript: options.brokerScript,
+      ...(options.brokerShutdownGraceMs === undefined ? {} : { brokerShutdownGraceMs: options.brokerShutdownGraceMs }),
       capabilities: this.capabilities,
       catalog: this.catalog,
       onStateChange: () => this.#publish(),
@@ -550,10 +552,12 @@ export class ApplicationExtensionRuntime {
     // Close supervisor admission and cancel unpublished workers before waiting for callers.
     const shutdown = this.supervisor.shutdown();
     this.#stop = (async () => {
-      await Promise.all([shutdown, ...this.#mutations]);
+      const results = await Promise.allSettled([shutdown, ...this.#mutations]);
       this.#serviceUnsubscribe();
       this.#publish();
       this.#listeners.clear();
+      const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failures.length) throw new AggregateError(failures.map(result => result.reason), "Extension Host shutdown reported failures");
     })();
     return this.#stop;
   }

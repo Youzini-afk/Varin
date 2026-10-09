@@ -629,7 +629,8 @@ pub struct PolicyDecision {
     pub state: Value,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PolicyEvent {
     InputDelivered {
         input_ids: Vec<String>,
@@ -660,6 +661,7 @@ pub trait AgentPolicy: Send + Sync {
         view: &PolicyView<'_>,
         event: &PolicyEvent,
         state: &Value,
+        cancel: &CancellationToken,
     ) -> Result<PolicyDecision, ExecutionError>;
 }
 
@@ -677,7 +679,9 @@ impl AgentPolicy for DefaultAgentPolicy {
         _view: &PolicyView<'_>,
         event: &PolicyEvent,
         state: &Value,
+        cancel: &CancellationToken,
     ) -> Result<PolicyDecision, ExecutionError> {
+        if cancel.is_cancelled() { return Err(ExecutionError::new("policy_cancelled", "policy cancelled")); }
         let action = match event {
             PolicyEvent::Started | PolicyEvent::InputDelivered{..} => PolicyAction::RequestModel,
             PolicyEvent::ModelCompleted { tool_calls, .. } if *tool_calls > 0 => PolicyAction::ExecuteTools,
@@ -853,11 +857,12 @@ impl<
             };
             let decision = match recovered_decision.take().map(Ok).unwrap_or_else(|| {
                 guarded("policy_panicked", || {
-                    self.policy.decide(&view, &event, &policy_state)
+                    self.policy.decide(&view, &event, &policy_state, &cancel)
                 })
             }) {
                 Ok(decision) => decision,
                 Err(error) => {
+                    if cancel.is_cancelled() { continue 'agent; }
                     if let Some((snapshot, calls)) = pending.take() {
                         self.close_unexecuted_batch(
                             &input,
@@ -872,6 +877,7 @@ impl<
                     finish!('agent, RunState::Failed, None, Some(error));
                 }
             };
+            if cancel.is_cancelled() { continue 'agent; }
             // A policy can neither fabricate a closed exchange nor bypass the tool admission path.
             let legal = match &decision.action {
                 PolicyAction::ExecuteTools => pending.is_some(),

@@ -1,3 +1,4 @@
+import { waitWithSignal } from '../cancellation.js';
 /** Private Host/kernel rendezvous. Secret replies bypass public RPC, event buses and histories. */
 import { ExistingHostCredentialOwner, NativeCredentialOwnerError, type NativeCredentialScope, type NativeCredentialDispatch } from './native-credential-owner.js';
 export interface PrivateCredentialResponse {
@@ -18,10 +19,11 @@ export class NativeCredentialBridge {
   constructor(private readonly currentEpoch: () => string | null,
     private readonly send: (response: PrivateCredentialResponse) => Promise<void>,
     private readonly transportFailed: () => void) {}
-  async register(runId: string, owner: ExistingHostCredentialOwner): Promise<NativeCredentialScope> {
+  async register(runId: string, owner: ExistingHostCredentialOwner, signal?: AbortSignal): Promise<NativeCredentialScope> {
     const epoch = this.currentEpoch();
     if (!epoch || !runId || this.#owners.has(runId)) throw new NativeCredentialOwnerError('credential-owner-registration-invalid');
-    const scope = await owner.scope();
+    const scope = await waitWithSignal(owner.scope(), signal);
+    signal?.throwIfAborted();
     if (this.currentEpoch() !== epoch || this.#owners.has(runId)) throw new NativeCredentialOwnerError('credential-owner-registration-stale');
     this.#owners.set(runId, { owner, scope, epoch, abort: new AbortController(), active: new Set() });
     return { ...scope };

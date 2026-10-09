@@ -102,6 +102,7 @@ impl AgentPolicy for SummaryPolicy {
         _: &PolicyView<'_>,
         event: &PolicyEvent,
         state: &Value,
+        _cancel: &CancellationToken,
     ) -> Result<PolicyDecision, ExecutionError> {
         let action = match event {
             PolicyEvent::Started => PolicyAction::RequestModel,

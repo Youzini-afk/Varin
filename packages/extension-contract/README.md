@@ -66,3 +66,9 @@ not validated. Use `checkVarinContributionCompatibility` and `isVarinContributio
 to determine whether a contribution is executable on the current runtime.
 
 See the complete [authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/ops/varin-extension-authoring.md).
+
+`VARIN_AGENT_POLICY_CONTRACT` describes the `varin.agent.policy@1` Decision boundary, including
+inspectable input/output schemas. `parseVarinAgentPolicyInput` and `parseVarinAgentPolicyDecision`
+validate detached run/event facts, finite actions and private JSON state. The view deliberately
+contains history count/head references and settlement metadata, not full histories or tool bodies.
+The native core remains the authority for legal action admission and durable checkpoints.

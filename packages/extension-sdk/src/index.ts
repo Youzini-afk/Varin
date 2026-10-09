@@ -705,3 +705,7 @@ export const defineTestProvider = (
 });
 
 export * from "./context-fragments.js";
+
+export * from "./agent-policy.js";
+
+export * from "./run-activity.js";

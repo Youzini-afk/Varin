@@ -130,18 +130,16 @@ struct QuestionPolicy {
 impl AgentPolicy for QuestionPolicy {
     fn identity(&self) -> PolicyIdentity {
         let inner = self.inner.identity();
-        PolicyIdentity {
-            name: format!("{}+questions", inner.name),
-            version: format!("{}+1", inner.version),
-        }
+        policy_identity(inner)
     }
     fn decide(
         &self,
         view: &PolicyView<'_>,
         event: &PolicyEvent,
         state: &Value,
+        cancel: &CancellationToken,
     ) -> Result<PolicyDecision, ExecutionError> {
-        let decision = self.inner.decide(view, event, state)?;
+        let decision = self.inner.decide(view, event, state, cancel)?;
         // Clarification never masks a failed/indeterminate execution decision.
         if matches!(decision.action, PolicyAction::Fail { .. }) {
             return Ok(decision);
@@ -179,4 +177,9 @@ pub fn wrap_tools(
     catalog: Arc<Mutex<Catalog>>,
 ) -> Arc<dyn ToolExecutor> {
     Arc::new(Questions { inner, catalog })
+}
+
+/// Effective launch/checkpoint identity includes the core clarification behavior.
+pub(crate) fn policy_identity(inner: PolicyIdentity) -> PolicyIdentity {
+    PolicyIdentity { name: format!("{}+questions", inner.name), version: format!("{}+1", inner.version) }
 }

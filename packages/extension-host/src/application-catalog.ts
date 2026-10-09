@@ -171,6 +171,23 @@ export class ApplicationExtensionCatalog {
     return this.#publicSnapshot(identity.hostId, read);
   }
 
+  /** Append a cleanup outcome to the existing actual-owner diagnostics without replacing a newer generation. */
+  async recordHostCleanupUnconfirmed(extensionId: string, ownerGeneration: number): Promise<void> {
+    const snapshot = await this.snapshot();
+    const entry = snapshot.extensions.find(item => item.manifest.id === extensionId);
+    if (!entry) return;
+    const current = [...this.#actual.values()].find(value => value.extensionId === extensionId && value.state.realmKind === "host");
+    const state: VarinExtensionActualState = current?.state ?? {
+      desiredRevision: entry.desired.revision, diagnostics: [], entrypointId: "host", generation: ownerGeneration,
+      hostId: snapshot.hostId, realmId: "application-host", realmKind: "host", status: "inactive", updatedAt: new Date().toISOString(),
+    };
+    const updated = { ...state, diagnostics: [...state.diagnostics, {
+      code: "broker_cleanup_unconfirmed", message: `Broker generation ${ownerGeneration} exited; extension cleanup was not confirmed`,
+      severity: "error" as const, timestamp: new Date().toISOString(),
+    }] };
+    this.#actual.set(actualKey(extensionId, updated), { extensionId, state: updated });
+  }
+
   async reportActualState(extensionId: string, state: VarinExtensionActualState): Promise<void> {
     const snapshot = await this.snapshot();
     if (state.hostId !== snapshot.hostId) throw new ExtensionCatalogStaleStateError("Actual state belongs to another application host");

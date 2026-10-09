@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,10 +13,11 @@ const gateCapability = 'dev.review.gate';
 const candidateCapability = 'dev.review.candidate';
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; };
 
-async function fixture(mode: 'brokered' | 'native', pauseDisposal = false) {
+async function fixture(mode: 'brokered' | 'native', pauseDisposal = false, brokerShutdownGraceMs?: number) {
   const root = await mkdtemp(join(tmpdir(), 'varin-grant-review-'));
-  const runtime = await ApplicationExtensionRuntime.create({ dataDir: join(root, 'data'), varinVersion: '1.2.3', brokerScript: fileURLToPath(new URL('../broker/broker-child.mjs', import.meta.url)) });
+  const runtime = await ApplicationExtensionRuntime.create({ dataDir: join(root, 'data'), varinVersion: '1.2.3', ...(brokerShutdownGraceMs === undefined ? {} : { brokerShutdownGraceMs }), brokerScript: fileURLToPath(new URL('../broker/broker-child.mjs', import.meta.url)) });
   const entered = deferred(); const release = deferred();
+  const disposalEnteredPath = join(root, 'disposal-entered'); const disposalReleasePath = join(root, 'disposal-release');
   let privilegedCalls = 0;
   runtime.capabilities.register(protectedCapability, () => { privilegedCalls++; return 'allowed'; });
   runtime.capabilities.register(candidateCapability, () => 'allowed');
@@ -27,11 +28,12 @@ async function fixture(mode: 'brokered' | 'native', pauseDisposal = false) {
     await writeFile(join(path, 'host.cjs'), `module.exports = { async activate(context) {
       ${pauseActivation ? `await context.capabilities.call('${gateCapability}', 'wait', null);` : ''}
       await context.capabilities.call('${pauseActivation ? candidateCapability : protectedCapability}', 'read', null);
-      ${pauseDisposal ? `context.effect(async () => { await context.capabilities.call('${gateCapability}', 'wait', null); await context.capabilities.call('${protectedCapability}', 'read', null); });` : ''}
+      ${pauseDisposal ? `context.effect(async () => { const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(disposalEnteredPath)}, 'entered'); while (!fs.existsSync(${JSON.stringify(disposalReleasePath)})) await new Promise(resolve => setTimeout(resolve, 5)); await context.capabilities.call('${protectedCapability}', 'read', null); });` : ''}
       context.services.provide({ id: '${serviceId}', version: 1 }, {
         async wait() { await context.capabilities.call('${gateCapability}', 'wait', null); return context.capabilities.call('${protectedCapability}', 'read', null); },
         read() { return context.capabilities.call('${protectedCapability}', 'read', null); },
-        version() { return '${version}'; }
+        version() { return '${version}'; },
+        pid() { return process.pid; }
       });
     } };`);
     return { kind: 'local' as const, display: id, specifier: path };
@@ -42,9 +44,12 @@ async function fixture(mode: 'brokered' | 'native', pauseDisposal = false) {
   await runtime.setEnabled(id, true, (await runtime.catalog.snapshot()).revision);
   await runtime.activateExtension(id);
   const invoke = (method: string, providerId?: string) => runtime.invokeService({ serviceId, version: 1, method, args: [], ...(providerId ? {providerId} : {}) });
-  return { runtime, source, entered, release, invoke, privilegedCalls: () => privilegedCalls,
+  return { runtime, source, entered, release, invoke,
+    disposalEntered: async () => { while (!(await access(disposalEnteredPath).then(() => true, () => false))) await new Promise(r => setTimeout(r, 5)); },
+    releaseDisposal: () => writeFile(disposalReleasePath, 'release'),
+    privilegedCalls: () => privilegedCalls,
     revoke: async () => runtime.reviewCapabilities({ extensionId: id, expectedRevision: (await runtime.catalog.snapshot()).revision, decisions: [{ capability: protectedCapability, realm: 'host', granted: false }] }),
-    cleanup: async () => { release.resolve(); await runtime.stop(); await rm(root, { recursive: true, force: true }); } };
+    cleanup: async (allowStopFailure = false) => { release.resolve(); await writeFile(disposalReleasePath, 'release'); try { await runtime.stop(); } catch (error) { if (!allowStopFailure) throw error; } finally { await rm(root, { recursive: true, force: true }); } } };
 }
 
 for (const mode of ['brokered', 'native'] as const) {
@@ -149,11 +154,11 @@ for (const mode of ['brokered', 'native'] as const) {
     const h = await fixture(mode, true);
     try {
       const disabling = h.runtime.setEnabled(id, false, (await h.runtime.catalog.snapshot()).revision);
-      await h.entered.promise;
+      await h.disposalEntered();
       const revoking = h.revoke();
       while ((await h.runtime.catalog.snapshot()).extensions.find(e => e.manifest.id === id)!.capabilityGrants.find(g => g.capability === protectedCapability)!.granted) await new Promise(r => setTimeout(r, 5));
       await new Promise(r => setTimeout(r, 30));
-      h.release.resolve(); await Promise.allSettled([disabling, revoking]);
+      await h.releaseDisposal(); await Promise.allSettled([disabling, revoking]);
       assert.equal(h.privilegedCalls(), 1, 'retiring disposer entered privileged handler after revocation');
     } finally { await h.cleanup(); }
   });
@@ -175,3 +180,55 @@ test(`forced native owner cannot regain captured privileges on ${refresh} catalo
 });
 
 }
+
+
+test('new published generation prepares while the previous exchange remains pinned', { timeout: 15_000 }, async () => {
+  const h = await fixture('brokered'); let releasePin: (() => void) | undefined;
+  try {
+    const staged = await h.runtime.installOrStage({ source: await h.source('2.0.0'), expectedRevision: (await h.runtime.catalog.snapshot()).revision });
+    const candidate = staged.extensions.find(e => e.manifest.id === id)!.candidate!;
+    const requested = await h.runtime.requestCandidateApplication({ extensionId: id, candidateIntegrity: candidate.integrity, expectedRevision: staged.revision });
+    const pin = (await h.runtime.prepareService({ serviceId, version: 1, method: 'version', args: [] })).pin(); releasePin = () => pin.release();
+    const selecting = h.runtime.selectCandidate({ extensionId: id, candidateIntegrity: candidate.integrity, expectedRevision: requested.revision });
+    while (!h.runtime.services.getSnapshot().providers.some(p => p.extensionVersion === '2.0.0' && p.status === 'active')) await new Promise(r => setTimeout(r, 5));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const bound = await Promise.race([h.runtime.prepareService({ serviceId, version: 1, method: 'version', args: [] }), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('new generation blocked by old pin')), 1500); })]);
+      assert.equal(await bound.invoke('version', []), '2.0.0');
+      assert.equal(await pin.invoke('version', []), '1.0.0');
+    } finally { clearTimeout(timer); pin.release(); await selecting; }
+  } finally { releasePin?.(); await h.cleanup(); }
+});
+
+test('shutdown terminates a broker callback that ignores cooperative cancellation', { timeout: 15_000 }, async () => {
+  const h = await fixture('brokered');
+  try {
+    const pending = h.invoke('wait').then(value => ({ value, error: '' }), error => ({ value: null, error: String(error) }));
+    await h.entered.promise;
+    const stopping = h.runtime.stop(); let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([stopping, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('shutdown blocked by hung broker callback')), 1500); })]);
+      assert.match((await pending).error, /exited|disconnect|terminated/);
+    } finally { clearTimeout(timer); h.release.resolve(); await stopping; }
+  } finally { await h.cleanup(); }
+});
+
+test('shutdown does not wait forever for a broker disposer with no service call in flight', { timeout: 15_000 }, async () => {
+  const h = await fixture('brokered', true, 100);
+  try {
+    const pid = await h.invoke('pid') as number;
+    const stopping = h.runtime.stop().then(() => null, error => error as Error); let settled = false;
+    void stopping.then(() => { settled = true; });
+    await h.disposalEntered();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([stopping, new Promise<void>(resolve => { timer = setTimeout(resolve, 1500); })]);
+      assert.equal(settled, true, 'shutdown remains blocked solely by an uncooperative worker disposer');
+      assert.equal(await stopping, null, 'process shutdown succeeds while separately reporting unconfirmed cleanup');
+      const catalog = await h.runtime.catalog.snapshot();
+      const actual = catalog.extensions.find(e => e.manifest.id === id)!.actual;
+      assert.ok(actual.some(state => state.diagnostics.some(diagnostic => diagnostic.code === 'broker_cleanup_unconfirmed')), 'forced shutdown must report unconfirmed cleanup');
+      assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, 'shutdown must observe actual broker process exit');
+    } finally { clearTimeout(timer); await h.releaseDisposal(); await stopping; }
+  } finally { await h.cleanup(true); }
+});

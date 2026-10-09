@@ -111,6 +111,16 @@ export interface NativeLaunchPolicy {
   version: string;
 }
 
+export interface NativeAgentPolicyBinding {
+  reference: string;
+  identity: NativeLaunchPolicy;
+}
+
+export interface NativePolicyPrepareParams {
+  runId: string;
+  identity: NativeLaunchPolicy;
+}
+
 export interface NativeMcpBinding {
   resources: Record<string, string>;
   reference: string;
@@ -225,6 +235,7 @@ export interface NativeContextJobCreateParams {
 }
 
 export interface NativeRunStartParams {
+  policyBinding?: NativeAgentPolicyBinding;
   mcpBinding?: NativeMcpBinding;
   runId: string;
   toolBinding?: unknown;
@@ -369,8 +380,23 @@ export interface NativeEventsParams {
   limit: number;
 }
 
+export interface NativeObserverReadParams {
+  observerId: string;
+  threadId: string;
+  limit: number;
+  throughCursor: number;
+}
+
+export interface NativeObserverDeliveryParams {
+  observerId: string;
+  threadId: string;
+  cursor: number;
+  state: NativeDeliveryState;
+}
+
 export interface NativeStatus {
   epoch: number;
+  eventCursor: number;
 }
 
 export interface NativeReceipt {
