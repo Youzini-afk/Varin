@@ -1,7 +1,7 @@
 //! Immutable content primitives shared with the system kernel. Conversation objects have a
 //! separate lifetime: the replaceable kernel catalog must never collect native user assets.
 use crate::catalog::RuntimeError;
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -236,10 +236,18 @@ impl ContentStore {
              UNION ALL SELECT body FROM model_outputs
              UNION ALL SELECT body FROM input_history_content".to_string();
         if contexts {roots.push_str(" UNION ALL SELECT body FROM context_checkpoints");}
+        let mut references=Vec::new();
         let mut stmt=db.prepare(&roots)?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-        for row in rows {
-            let reference: Reference = serde_json::from_str(&row?)?;
+        for row in rows { references.push(serde_json::from_str::<Reference>(&row?)?); }
+        let mut operations=db.prepare("SELECT body FROM operations WHERE json_extract(body,'$.intent.kind')='policy_read_graph_v1'")?;
+        for row in operations.query_map([],|r|r.get::<_,String>(0))? {
+            let op:crate::types::Operation=serde_json::from_str(&row?)?;
+            let intent=crate::catalog::policy::graph_intent(&op)?.ok_or_else(||RuntimeError::Invalid("graph intent missing".into()))?;
+            let result=crate::catalog::policy::graph_result(&op,&intent)?;
+            for receipt in result.receipts.values() { if let Some(output)=&receipt.output {references.push(Reference{content_object:output.content_ref.clone()});} }
+        }
+        for reference in references {
             let manifest: Manifest =
                 serde_json::from_slice(&self.read_bytes(&reference.content_object)?)?;
             if manifest.version != 1 {
@@ -299,140 +307,12 @@ impl ContentStore {
     }
 }
 
-/// One atomic conversion of the current native catalog representation. Original histories and
-/// provider values are preserved. Interrupted conversions leave only unreferenced immutable objects.
-pub(crate) fn initialize(db: &mut Connection, content: &ContentStore) -> Result<()> {
-    let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_content_format')", [], |r| r.get(0))?;
-    let catalog_version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    let format = if exists {
-        Some(db.query_row::<i64, _, _>(
-            "SELECT version FROM runtime_content_format WHERE id=1",
-            [],
-            |r| r.get(0),
-        )?)
-    } else {
-        None
-    };
-    match (catalog_version, format) {
-        (3, Some(2)) => {
-            // A missing root domain cannot be interpreted as an empty catalog.
-            db.prepare("SELECT input_id,body FROM input_history_content")?;
-            return Ok(());
-        }
-        (2, Some(1)) | (0 | 1, None) => (),
-        _ => {
-            return Err(RuntimeError::Invalid(
-                "native content format identity is unsupported or incomplete; data was preserved"
-                    .into(),
-            ))
-        }
-    }
-    // Parse and durably stage every body before beginning the conversion transaction. Preserve
-    // unknown metadata fields; the only replaced fields are the documented large-body slots.
-    let mut converted_steps = Vec::new();
-    {
-        let mut stmt = db.prepare("SELECT id,body FROM model_steps")?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-        for row in rows {
-            let (id, raw) = row?;
-            let mut step: Value = serde_json::from_str(&raw)?;
-            let request = step
-                .get_mut("request")
-                .ok_or_else(|| RuntimeError::Invalid("model step request missing".into()))?;
-            if format.is_none() {
-                *request = content.save(request)?;
-            } else {
-                content.load(request)?;
-            }
-            let originals = step
-                .get_mut("original")
-                .and_then(Value::as_array_mut)
-                .ok_or_else(|| RuntimeError::Invalid("model step originals missing".into()))?;
-            for original in originals {
-                let item = original
-                    .get_mut("item")
-                    .ok_or_else(|| RuntimeError::Invalid("provider original missing".into()))?;
-                *item = content.save(item)?;
-            }
-            converted_steps.push((id, serde_json::to_string(&step)?));
-        }
-    }
-    let mut converted_history = Vec::new();
-    {
-        let mut stmt = db.prepare("SELECT id,body FROM history")?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-        for row in rows {
-            let (id, raw) = row?;
-            let mut item: Value = serde_json::from_str(&raw)?;
-            let body = item
-                .get("content")
-                .ok_or_else(|| RuntimeError::Invalid("history content missing".into()))?;
-            let provider = item
-                .get("provider")
-                .ok_or_else(|| RuntimeError::Invalid("history provider field missing".into()))?;
-            let reference =
-                content.save(&serde_json::json!({"content":body,"provider":provider}))?;
-            item["content"] = reference;
-            item["provider"] = Value::Null;
-            converted_history.push((id, serde_json::to_string(&item)?));
-        }
-    }
-    let mut converted_outputs = Vec::new();
-    {
-        let mut stmt = db.prepare("SELECT request_id,body FROM model_outputs")?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-        for row in rows {
-            let (id, raw) = row?;
-            let value: Value = serde_json::from_str(&raw)?;
-            converted_outputs.push((id, serde_json::to_string(&content.save(&value)?)?));
-        }
-    }
-    let mut queued = Vec::new();
-    {
-        let mut stmt = db.prepare("SELECT id,body FROM input_queue")?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-        for row in rows {
-            let (id, raw) = row?;
-            let input: Value = serde_json::from_str(&raw)?;
-            let body = input
-                .get("content")
-                .ok_or_else(|| RuntimeError::Invalid("queued input content missing".into()))?;
-            queued.push((
-                id,
-                serde_json::to_string(&content.save_history(body, &None)?)?,
-            ));
-        }
-    }
-    let tx = db.transaction()?;
-    for (id, body) in converted_steps {
-        tx.execute(
-            "UPDATE model_steps SET body=?2 WHERE id=?1",
-            params![id, body],
-        )?;
-    }
-    for (id, body) in converted_history {
-        tx.execute("UPDATE history SET body=?2 WHERE id=?1", params![id, body])?;
-    }
-    for (id, body) in converted_outputs {
-        tx.execute(
-            "UPDATE model_outputs SET body=?2 WHERE request_id=?1",
-            params![id, body],
-        )?;
-    }
-    tx.execute_batch("CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY REFERENCES input_queue(id),body TEXT NOT NULL);")?;
-    for (id, body) in queued {
-        tx.execute(
-            "INSERT INTO input_history_content(input_id,body) VALUES(?1,?2)",
-            params![id, body],
-        )?;
-    }
-    if !exists {
-        tx.execute_batch("CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,2);")?;
-    } else {
-        tx.execute("UPDATE runtime_content_format SET version=2 WHERE id=1", [])?;
-    }
-    tx.execute_batch("PRAGMA user_version=3;")?;
-    tx.commit()?;
+/// Internal representations are not migrated. Unknown formats and all original files remain intact.
+pub(crate) fn initialize(db: &mut Connection, _content: &ContentStore) -> Result<()> {
+    let version:i64=db.pragma_query_value(None,"user_version",|r|r.get(0))?;
+    let format:i64=db.query_row("SELECT version FROM runtime_content_format WHERE id=1",[],|r|r.get(0))?;
+    if version!=3||format!=2 {return Err(RuntimeError::Invalid("unsupported native content format; data was preserved".into()));}
+    db.prepare("SELECT input_id,body FROM input_history_content")?;
     Ok(())
 }
 

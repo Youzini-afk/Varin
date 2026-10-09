@@ -4,6 +4,25 @@ use crate::execution::*;
 use std::sync::Mutex;
 
 impl Persistence for Mutex<Catalog> {
+    fn policy_boundary(&self, run:&str, epoch:u64)->std::result::Result<PolicyBoundary,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.policy_boundary(run,epoch).map_err(policy_error)}
+    fn policy_graph(&self, run:&str, epoch:u64)->std::result::Result<Option<PolicyGraphState>,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.policy_graph(run,epoch).map_err(policy_error)}
+    fn admit_policy_graph(&self,run:&str,epoch:u64,intent:&PolicyGraphIntent)->std::result::Result<PolicyGraphState,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.admit_policy_graph(run,epoch,intent).map_err(policy_error)}
+    fn settle_policy_node(&self,run:&str,epoch:u64,action:&str,node:&str,completion:&ToolCompletion)->std::result::Result<PolicyNodeReceipt,ExecutionError>{
+        // Content publication and GC share the existing Catalog owner. Do not unlock between
+        // saving a new immutable body and committing its root: GC could collect that body.
+        self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.settle_policy_node(run,epoch,action,node,completion).map_err(policy_error)
+    }
+    fn policy_evidence(&self,run:&str,epoch:u64,reference:&PolicyEvidenceRef)->std::result::Result<ConversationItem,ExecutionError>{
+        let (content,owned)={let catalog=self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?;fence(&catalog.run(run).map_err(policy_error)?,epoch).map_err(policy_error)?;(catalog.content.clone(),catalog.owned_policy_reference(run,reference).map_err(policy_error)?)};
+        let value=content.load(&owned).map_err(policy_error)?;
+        Ok(policy_evidence_item(reference,value))
+    }
+    fn policy_chunk(&self,run:&str,epoch:u64,reference:&PolicyEvidenceRef,index:usize)->std::result::Result<crate::content::ContentChunk,ExecutionError>{
+        let (content,owned)={let catalog=self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?;fence(&catalog.run(run).map_err(policy_error)?,epoch).map_err(policy_error)?;(catalog.content.clone(),catalog.owned_policy_reference(run,reference).map_err(policy_error)?)};
+        content.load_chunk(&owned,index).map_err(policy_error)
+    }
+    fn tool_source(&self,run:&str)->std::result::Result<Option<super::launches::SourceSelection>,ExecutionError>{Ok(self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.launch_intent(run).map_err(policy_error)?.and_then(|launch|launch.selection.source))}
+
     fn resource_admission(&self) -> Option<std::sync::Arc<crate::resource_admission::ResourceAdmission>> {
         Some(self.lock().unwrap_or_else(|p| p.into_inner()).resource_admission.clone())
     }
@@ -55,6 +74,7 @@ impl Persistence for Mutex<Catalog> {
         }
     }
 }
+fn policy_error(error:RuntimeError)->ExecutionError{ExecutionError::new(if matches!(error,RuntimeError::InputPending){"input_pending"}else{"policy_graph"},error.to_string())}
 fn append_item(tx: &Transaction<'_>, run: &Run, item: &ConversationItem, body_reference: &Value) -> Result<()> {
     let (head, active): (Option<String>, Option<String>) = tx.query_row(
         "SELECT head,active_run FROM branches WHERE id=?1",
@@ -242,6 +262,8 @@ impl Catalog {
                 put(&tx, "runs", run_id, &run)?;
             }
             ExecutionRecord::RequestPrepared { snapshot } => {
+                let graph_pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind')='policy_read_graph_v1' AND json_extract(body,'$.phase')!='terminal')",[run_id],|r|r.get(0))?;
+                if graph_pending {return Err(RuntimeError::Conflict("policy graph is unsettled".into()));}
                 if super::inputs::has_boundary_inputs(&tx,run_id)?{return Err(RuntimeError::InputPending);}
 
                 if run.cancel_requested
@@ -605,6 +627,9 @@ impl Catalog {
                 state,
                 action,
             } => {
+                let saved:Option<String>=tx.query_row("SELECT identity FROM policy_checkpoints WHERE run_id=?1",[run_id],|r|r.get(0)).optional()?;
+                if saved.map(|raw|serde_json::from_str::<PolicyIdentity>(&raw)).transpose()?.is_some_and(|saved|saved!=*identity) { return Err(RuntimeError::Conflict("policy identity changed".into())); }
+                if matches!(action, PolicyAction::ReadGraph { .. }) { return Err(RuntimeError::Invalid("graph checkpoint requires atomic graph admission".into())); }
                 if let PolicyAction::Wait { wait_id } = action {
                     let wait: Wait = super::record(&tx, "waits", wait_id)?;
                     if wait.run_id != run_id || wait.cancelled {
@@ -972,6 +997,7 @@ impl Catalog {
     ) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let mut op: Operation = super::record(&tx, "operations", operation_id)?;
+        if super::policy::graph_intent(&op)?.is_some() {return Err(RuntimeError::Invalid("policy graph cannot accept external executor receipts".into()));}
         if receipt.identity != op.id
             || op.executor.as_deref() != Some(receipt.executor.as_str())
             || receipt.epoch.is_empty()

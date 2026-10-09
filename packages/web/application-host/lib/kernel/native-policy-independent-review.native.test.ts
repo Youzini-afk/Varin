@@ -107,6 +107,8 @@ function complete(response: ServerResponse, id: string, text: string) {
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id, type: 'message', content: [{ type: 'output_text', text }] }] } })}\n\n`);
 }
 async function installExample(f: Awaited<ReturnType<typeof fixture>>) {
+  await fs.writeFile(path.join(f.workspace, 'evidence-index.json'), JSON.stringify({ nextFile: 'evidence.txt' }));
+  await fs.writeFile(path.join(f.workspace, 'evidence.txt'), 'Example evidence');
   const example = path.join(f.root, 'evidence-policy'); await fs.mkdir(example);
   for (const file of ['package.json', 'varin.extension.json']) await fs.copyFile(path.join(repository, 'examples/extensions/evidence-policy', file), path.join(example, file));
   await build({ entryPoints: [path.join(repository, 'examples/extensions/evidence-policy/host.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: path.join(example, 'host.cjs'), alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
@@ -131,7 +133,7 @@ it('real installed policy settles native read exchange and completes with pinned
   expect(JSON.stringify(input)).toContain('SENSITIVE_EVIDENCE_BODY');
   expect((await f.runtime.launch(first.run_id))!.selection.policy.name).toContain('bounded-evidence+questions');
   await expect.poll(()=>f.kernel.nativePolicyBinding(first.run_id)).toBeUndefined();
-  expect(f.launchErrors).toEqual([]); expect(JSON.stringify(f.decisions)).not.toMatch(/PRIVATE_USER_BODY|SENSITIVE_EVIDENCE_BODY|fake-native-http-provider-key|http:\/\//); expect(f.decisions).toHaveLength(4);
+  expect(f.launchErrors).toEqual([]); expect(JSON.stringify(f.decisions)).not.toMatch(/PRIVATE_USER_BODY|SENSITIVE_EVIDENCE_BODY|fake-native-http-provider-key|http:\/\//); expect(f.decisions).toHaveLength(7);
 });
 it('no selected policy uses default; explicit missing fails without inference', async()=>{
   const f=await fixture((_body,response)=>complete(response,'default','done'));
@@ -166,7 +168,7 @@ it('cancel hung decision releases Run and unrelated selected run still completes
   await expect.poll(()=>f.decisions.length).toBe(1);
   await f.runtime.cancelRun(first.run_id); await expect.poll(async()=>(await f.runtime.run(first.run_id)).state).toBe('cancelled');
   await installExample(f); await route(f,'example.evidence-policy:host:varin.agent.policy@1',{projectId:'selected-project'});
-  const b=await f.api.create('other'); const other=await f.api.submit({...b,key:'other',expectedHead:null,text:'done',model});
+  const b=await f.api.create('other'); const source=await f.api.prepareSource({...b,key:'source',path:f.workspace,mode:'fixed_branch'}); const other=await f.api.submit({...b,key:'other',expectedHead:null,text:'done',model,source:source.source});
   await expect.poll(async()=>(await f.runtime.run(other.run_id)).state).toBe('completed');
 });
 it('illegal policy complete cannot skip registered tool exchange or run tool effects',async()=>{
@@ -197,7 +199,7 @@ it('actual artifact replacement pins old implementation; later lease differs des
 });
 it('retry launch while model in flight cannot detach policy lease of active Run',async()=>{
  let held!:ServerResponse;const f=await fixture((_body,response)=>{held=response});await installExample(f);await route(f,'example.evidence-policy:host:varin.agent.policy@1',{projectId:'selected-project'});
- const a=await f.api.create('retry');const first=await f.api.submit({...a,key:'retry',expectedHead:null,text:'retry',model});await expect.poll(()=>f.requests.length).toBe(1);
+ const a=await f.api.create('retry');const source=await f.api.prepareSource({...a,key:'source',path:f.workspace,mode:'fixed_branch'});const first=await f.api.submit({...a,key:'retry',expectedHead:null,text:'retry',model,source:source.source});await expect.poll(()=>f.requests.length).toBe(1);
  await f.runtime.rebindLaunch(first.run_id,{credentialOwner:f.owner}).catch(()=>undefined);
  expect(f.kernel.nativePolicyBinding(first.run_id)).toBeDefined();complete(held,'retry-complete','done');
  await expect.poll(async()=>(await f.runtime.run(first.run_id)).state).toBe('completed');expect(f.requests).toHaveLength(1);
@@ -205,7 +207,7 @@ it('retry launch while model in flight cannot detach policy lease of active Run'
 it('restart accepts exact policy identity and rejects changed artifact or config with unchanged author version before inference',async()=>{
  const f=await fixture((_body,response)=>{response.writeHead(200,{'content-type':'text/event-stream'});response.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[{id:'ask',type:'function_call',call_id:'ask-call',name:'native_ask_user',arguments:JSON.stringify({question:'Choose',options:['A','B']})}]}})}\n\n`)});
  await installExample(f);await route(f,'example.evidence-policy:host:varin.agent.policy@1',{projectId:'selected-project'});
- const a=await f.api.create('restart');const first=await f.api.submit({...a,key:'restart',expectedHead:null,text:'ask',model});await expect.poll(async()=>(await f.runtime.run(first.run_id)).state).toBe('waiting');const saved=(await f.runtime.launch(first.run_id))!.selection.policy;
+ const a=await f.api.create('restart');const source=await f.api.prepareSource({...a,key:'source',path:f.workspace,mode:'fixed_branch'});const first=await f.api.submit({...a,key:'restart',expectedHead:null,text:'ask',model,source:source.source});await expect.poll(async()=>(await f.runtime.run(first.run_id)).state).toBe('waiting');const saved=(await f.runtime.launch(first.run_id))!.selection.policy;
  await f.close();await f.extensions.stop();
  const second=await fixture((_body,response)=>complete(response,'unexpected','unexpected'),f.root,f.endpoint);
  const same=await second.runtime.preparePolicy(first.run_id);expect(same).toBeDefined();expect((await second.runtime.launch(first.run_id))!.selection.policy).toEqual(saved);second.kernel.unregisterNativePolicyOwner(first.run_id);

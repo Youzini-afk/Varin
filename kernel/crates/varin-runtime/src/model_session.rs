@@ -70,7 +70,7 @@ fn build(configuration:ModelSessionConfiguration,credentials:Arc<dyn CredentialR
 }
 struct NoTools;
 impl ToolExecutor for NoTools {
-    fn prepare(&self,_:&ToolCall,_:&RequestSnapshot)->Result<ToolContract,ExecutionError>{Err(ExecutionError::new("tool_unavailable","this binding has no tools"))}
+    fn prepare(&self,_:&ToolCall,_:&FrozenToolContext)->Result<ToolContract,ExecutionError>{Err(ExecutionError::new("tool_unavailable","this binding has no tools"))}
     fn authorize(&self,_:&ToolExecutionContext,_:&ToolCall,_:&ToolContract,_:&CancellationToken)->Result<(),ExecutionError>{Err(ExecutionError::new("tool_unavailable","this binding has no tools"))}
     fn execute(&self,_:&ToolExecutionContext,_:&ToolCall,_:&ToolContract,_:&CancellationToken)->ToolCompletion{ToolCompletion::NotDispatched{reason:"no tool binding exists".into()}}
 }

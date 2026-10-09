@@ -68,7 +68,7 @@ impl McpBridge {
         let result = (|| {
             self.send(json!({"v":1,"kind":"mcp-tool-request","id":id,"kernelEpoch":epoch,"phase":phase,
                 "binding":{"reference":binding.reference,"generation":binding.generation},
-                "call":{"runId":context.run_id,"requestId":context.request_id,"operationId":context.operation_id,
+                "call":{"runId":context.run_id,"requestId":match &context.origin { ToolOrigin::ModelStep { request_id } => request_id, _ => return Err(failed("mcp_policy_action_forbidden")) },"operationId":context.operation_id,
                     "callId":call.call_id,"name":call.name,"schemaVersion":call.schema_version,"arguments":call.arguments}}))
                 .map_err(|_| failed("mcp_not_dispatched"))?;
             let mut cancellation_sent = false;
@@ -136,9 +136,12 @@ impl McpTools {
     }
 }
 impl ToolExecutor for McpTools {
-    fn prepare(&self, call: &ToolCall, request: &RequestSnapshot) -> Result<ToolContract, ExecutionError> {
+    fn supports_policy_read(&self, context: &FrozenToolContext, call: &ToolCall, contract: &ToolContract) -> bool {
+        !self.tools.contains_key(&call.name) && self.inner.supports_policy_read(context, call, contract)
+    }
+    fn prepare(&self, call: &ToolCall, request: &FrozenToolContext) -> Result<ToolContract, ExecutionError> {
         let Some(schema) = self.tools.get(&call.name) else { return self.inner.prepare(call, request); };
-        if request.view.run_id != self.run_id || !request.view.binding.tools.contains(schema) { return Err(failed("mcp_frozen_schema_changed")); }
+        if request.run_id != self.run_id || !request.tools.contains(schema) { return Err(failed("mcp_frozen_schema_changed")); }
         self.contract(call)
     }
     fn authorize(&self, context: &ToolExecutionContext, call: &ToolCall, contract: &ToolContract, cancel: &CancellationToken) -> Result<(), ExecutionError> {

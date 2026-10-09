@@ -26,6 +26,20 @@ impl Catalog {
                 .prepare_execution(run_id, binding, policy, initial_policy_state)
                 .map(|input| (input, None));
         }
+        // Policy reads can be the first work in a Run. Restore their sole Operation before
+        // looking for a ModelStep; the engine consumes the committed receipts directly.
+        if let Some(graph)=self.policy_graph(run_id,self.epoch)? {
+            if graph.intent.checkpoint().0!=&policy {return Err(RuntimeError::Conflict("policy recovery version changed".into()));}
+            if run.state==RunState::Waiting {
+                let key=run.waiting_on.as_deref().ok_or_else(||RuntimeError::Conflict("missing recovery wait".into()))?;
+                let mut wait:Wait=record(&self.db,"waits",key)?;
+                if !matches!(wait.kind.as_str(),"recovery.reconciled"|"execution.reconciled") {return Err(RuntimeError::Conflict("Run waits on another condition".into()));}
+                let tx=self.db.transaction()?;
+                wait.cancelled=true;put(&tx,"waits",key,&wait)?;
+                let mut resumed=run.clone();resumed.state=RunState::Runnable;resumed.waiting_on=None;resumed.revision+=1;put(&tx,"runs",run_id,&resumed)?;tx.commit()?;
+            }
+            return self.prepare_execution(run_id,binding,policy,initial_policy_state).map(|input|(input,None));
+        }
         let latest: Option<String> = self
             .db
             .query_row(

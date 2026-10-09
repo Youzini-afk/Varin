@@ -59,15 +59,12 @@ without large body writes inside their transactions. Queue metadata still includ
 input for its current public API; cancellation preserves its content reference. Command-idempotency
 and tool-receipt records remain their existing inline domains in this slice.
 
-Opening previous native content formats performs one atomic conversion, retaining existing request
-references and preserving history, opaque originals and unknown history metadata. Durable objects
-precede the conversion transaction; interruption leaves either the old representation or committed
-references, never empty history. Catalog version 3 and content format 2 select one current reader
-and prevent older binaries from treating references as inline payloads. Missing or corrupt referenced
+Unsupported native catalog/content formats fail without converting or rebuilding stored assets.
+Catalog version 3 and content format 2 select the current reader. Missing or corrupt referenced
 objects fail explicitly. `Catalog::collect_content_objects` marks requests, provider originals,
-history, all model outputs (including rejected output), and queued-history references, verifies live
-objects before sweeping, and preserves unknown files. It never deletes history or invokes the
-replaceable system-kernel GC.
+history, all model outputs (including rejected output), queued-history references, context
+checkpoints, and strictly typed policy-graph node output references. It verifies every live object
+before sweeping and preserves unknown files; it never deletes history or invokes system-kernel GC.
 
 Provider serialization still visits and sends full legal requests; chunk reuse is not remote
 incremental-context support or a measured speedup claim.
@@ -85,6 +82,30 @@ continuation state in the same transaction.
 
 Transient provider progress uses a bounded, nonblocking sink. Durable tool results and model output
 remain available independently of whether a viewer consumed progress.
+
+## Policy-originated read graphs
+
+A pinned AgentPolicy may return `ReadGraph` before any model request. Nodes have unique identities,
+frozen schemas/source contexts and explicit acyclic prerequisites. Only trusted executor opt-in for
+read-only Result capabilities is eligible; untrusted read-only annotations confer no permission.
+`ToolOrigin` distinguishes actual ModelSteps from policy action/node origins. There are no fabricated
+requests, tool exchanges or user messages.
+
+Core derives the action identity from the durable Run decision boundary. One Run-owned Operation
+stores the strictly tagged `PolicyReadGraphV1` intent and committed node receipts. Admission and the
+versioned private policy checkpoint commit atomically; changed intent at the same identity conflicts.
+Independent nodes share existing ResourceAdmission and can overlap. Each receipt commits before any
+dependent can start. Failed prerequisites produce explicit nonexecution receipts. Grants are checked
+again after resource waits; ordinary model-originated reads retain their cheaper batch path.
+
+Restart preserves settled receipts and retries only interrupted pure reads using their retained
+schema/source. Recovery works before the first ModelStep and restores later decision checkpoints.
+The policy receives owned references and can request bounded `ReadResult` chunks. Selected evidence
+enters `RequestModelWithEvidence` as labeled ExternalData, without synthetic provider call/result
+pairing. Output references are checked against Run, action and node; no arbitrary object-hash reader
+is granted. Chunk and selected-evidence hydration happen outside the Catalog mutex. New graph output
+body writes and reference publication retain the Catalog lock, which also excludes content GC;
+large-result publication cost remains an explicit optimization boundary, not a claimed speedup.
 
 ## Explicit context compaction
 

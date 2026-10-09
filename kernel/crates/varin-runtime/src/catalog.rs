@@ -119,7 +119,7 @@ impl Catalog {
         let mut db = Connection::open(root.as_ref().join("conversation.sqlite"))?;
         db.pragma_update(None, "foreign_keys", true)?;
         let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version != 0 && version != 1 && version != 2 && version != 3 {
+        if version != 0 && version != 3 {
             return Err(RuntimeError::Format(version));
         }
         let existing: i64 = db.query_row(
@@ -134,6 +134,7 @@ impl Catalog {
         db.pragma_update(None, "synchronous", "FULL")?;
         if version == 0 {
             db.execute_batch(SCHEMA)?;
+            db.execute_batch("CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY REFERENCES input_queue(id),body TEXT NOT NULL); CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,2); PRAGMA user_version=3;")?;
         }
         db.execute_batch("CREATE TABLE IF NOT EXISTS resource_occupancy (operation_id TEXT PRIMARY KEY REFERENCES operations(id), claims TEXT NOT NULL)")?;
         let resource_admission = std::sync::Arc::new(crate::resource_admission::ResourceAdmission::default());
@@ -596,6 +597,7 @@ impl Catalog {
         lifetime: Lifetime,
         intent: Value,
     ) -> Result<Operation> {
+        if intent.get("kind").and_then(Value::as_str).is_some_and(|kind|kind.starts_with("policy_read_graph")) {return Err(RuntimeError::Invalid("policy graph requires atomic typed admission".into()));}
         let tx = self.db.transaction()?;
         let run: Run = record(&tx, "runs", run_id)?;
         fence(&run, epoch)?;
@@ -694,6 +696,7 @@ impl Catalog {
     ) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let mut op: Operation = record(&tx, "operations", key)?;
+        if policy::graph_intent(&op)?.is_some() {return Err(RuntimeError::Invalid("policy graph settles through node receipts only".into()));}
         if op.epoch != epoch {
             return Err(RuntimeError::Conflict("stale operation executor".into()));
         }
@@ -789,6 +792,8 @@ impl Catalog {
     ) -> Result<ModelStep> {
         let request_ref = self.content.save(&request)?;
         let tx = self.db.transaction()?;
+        let graph_pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind')='policy_read_graph_v1' AND json_extract(body,'$.phase')!='terminal')",[run_id],|r|r.get(0))?;
+        if graph_pending {return Err(RuntimeError::Conflict("policy graph is unsettled".into()));}
         let run: Run = record(&tx, "runs", run_id)?;
         fence(&run, epoch)?;
         if run.cancel_requested {
@@ -1154,6 +1159,13 @@ impl Catalog {
         }
         let operations: Vec<Operation> = read_all(&tx, "operations")?;
         for mut op in operations {
+            if let Some(intent)=policy::graph_intent(&op)? {
+                policy::graph_result(&op,&intent)?;
+                // No external effect exists: retry only missing pure reads, retaining settled receipts.
+                op.epoch=self.epoch;
+                put(&tx,"operations",&op.id,&op)?;
+                continue;
+            }
             // A Result contract owns a local dispatch window, whose executor died with the
             // previous Catalog process. This proves occupancy ended, not that its effect is known.
             // Job owners can outlive that process and require independent stop evidence.
@@ -1276,3 +1288,6 @@ pub mod personalization;
 
 #[path = "catalog_permissions.rs"]
 pub mod permissions;
+
+#[path="catalog_policy.rs"]
+pub(crate) mod policy;

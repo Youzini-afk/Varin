@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::sync::{mpsc, Arc};
 use varin_runtime::execution::{
-    Access, CancellationToken, CompletionKind, ExecutionError, RequestSnapshot, ResourceClaim,
+    Access, CancellationToken, CompletionKind, ExecutionError, FrozenToolContext, ToolOrigin, ResourceClaim,
     ToolCall, ToolCompletion, ToolContract, ToolExecutionContext, ToolExecutor, ToolSchema,
 };
 use varin_runtime::{Effect, Lifetime, Outcome};
@@ -583,12 +583,27 @@ impl NativeToolExecutor {
 
 }
 impl ToolExecutor for NativeToolExecutor {
+    fn supports_policy_read(&self, context: &FrozenToolContext, call: &ToolCall, contract: &ToolContract) -> bool {
+        // Eligibility is this trusted adapter's promise, never extension/MCP metadata.
+        let Some(source) = &context.source else { return false; };
+        let Some(bound) = &self.binding.file_source else { return false; };
+        context.run_id == self.binding.run_id
+            && self.binding.source_mode == NativeSourceMode::FixedBranch
+            && !source.materialized
+            && source.workspace_id == self.binding.workspace_id
+            && source.execution_workspace_id == self.binding.execution_workspace_id
+            && source.environment_run_id == self.binding.environment_run_id
+            && source.branch_id.as_deref() == Some(bound.branch_id.as_str())
+            && source.revision == u64::try_from(bound.revision).ok()
+            && matches!(self.operation(None, call), Ok(ResourceOperation::FileRead(_) | ResourceOperation::FileQuery(_)))
+            && contract.read_only && contract.completion == CompletionKind::Result
+    }
     fn prepare(
         &self,
         call: &ToolCall,
-        request: &RequestSnapshot,
+        request: &FrozenToolContext,
     ) -> Result<ToolContract, ExecutionError> {
-        if request.view.run_id != self.binding.run_id {
+        if request.run_id != self.binding.run_id {
             return Err(ExecutionError::new(
                 "unauthorized",
                 "request Run does not match tool binding",
@@ -601,8 +616,6 @@ impl ToolExecutor for NativeToolExecutor {
             .find(|schema| schema.name == call.name)
             .expect("selected tool");
         if !request
-            .view
-            .binding
             .tools
             .iter()
             .any(|schema| schema == &expected)
@@ -613,8 +626,11 @@ impl ToolExecutor for NativeToolExecutor {
             ));
         }
         self.planned_contract(&ToolExecutionContext {
-            run_id: self.binding.run_id.clone(), request_id: request.view.request_id.clone(),
-            operation_id: format!("{}:tool:{}", request.view.request_id, call.call_id),
+            run_id: self.binding.run_id.clone(), origin: request.origin.clone(),
+            operation_id: match &request.origin {
+                ToolOrigin::ModelStep { request_id } => format!("{request_id}:tool:{}", call.call_id),
+                ToolOrigin::PolicyAction { action_id, node_id } => format!("{action_id}:node:{node_id}"),
+            },
         }, call, &operation, &CancellationToken::default())
     }
     fn authorize(
