@@ -4,6 +4,26 @@ use crate::execution::*;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
+pub struct PolicyGraphSchemaPreparation {
+    content: crate::content::ContentStore,
+    publication: crate::content::ContentPublication,
+}
+pub struct PreparedPolicyGraphSchemas {
+    intent: PolicyGraphIntent,
+    reference: Option<Value>,
+    _publication: crate::content::ContentPublication,
+}
+impl PolicyGraphSchemaPreparation {
+    pub fn load(self, intent: &PolicyGraphIntent) -> Result<PreparedPolicyGraphSchemas> {
+        let tools = intent.nodes().first().map(|node| node.context.tools.as_ref());
+        if intent.nodes().iter().any(|node| Some(node.context.tools.as_ref()) != tools) {
+            return Err(RuntimeError::Conflict("graph nodes differ in their selected tools".into()));
+        }
+        let reference = tools.map(|tools| self.content.save(&serde_json::to_value(tools)?)).transpose()?;
+        Ok(PreparedPolicyGraphSchemas { intent: intent.clone(), reference, _publication: self.publication })
+    }
+}
+
 pub(crate) fn graph_intent(op: &Operation) -> Result<Option<PolicyGraphIntent>> {
     let kind = op.intent.get("kind").and_then(Value::as_str).unwrap_or("");
     if !kind.starts_with("policy_read_graph") {
@@ -108,7 +128,7 @@ impl Catalog {
             previous,
         ))?));
         let source = self
-            .launch_intent(run_id)?
+            .launch_metadata(run_id)?
             .and_then(|launch| launch.selection.source);
         Ok(PolicyBoundary { id, source })
     }
@@ -169,6 +189,15 @@ impl Catalog {
         epoch: u64,
         intent: &PolicyGraphIntent,
     ) -> Result<PolicyGraphState> {
+        let schemas = self.prepare_policy_graph_schemas().load(intent)?;
+        self.admit_policy_graph_prepared(run_id, epoch, schemas)
+    }
+    pub fn prepare_policy_graph_schemas(&self) -> PolicyGraphSchemaPreparation {
+        PolicyGraphSchemaPreparation { content: self.content.clone(), publication: self.content.begin_publication() }
+    }
+    pub fn admit_policy_graph_prepared(&mut self, run_id: &str, epoch: u64,
+        schemas: PreparedPolicyGraphSchemas) -> Result<PolicyGraphState> {
+        let intent = &schemas.intent;
         let PolicyGraphIntent::PolicyReadGraphV1 {
             action_id,
             boundary,
@@ -200,11 +229,11 @@ impl Catalog {
         {
             return Err(RuntimeError::Conflict("policy boundary changed".into()));
         }
-        if let Some(launch) = self.launch_intent(run_id)? {
+        if let Some(launch) = self.launch_metadata(run_id)? {
             if launch.selection.policy != *identity
+                || schemas.reference.as_ref().is_some_and(|reference| reference != &launch.selection.tools_ref)
                 || nodes.iter().any(|n| {
-                    n.context.tools.as_ref() != &launch.selection.tools
-                        || n.context.tool_schema_generation
+                    n.context.tool_schema_generation
                             != launch.selection.tool_schema_generation
                         || n.context.source != launch.selection.source
                 })

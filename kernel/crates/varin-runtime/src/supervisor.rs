@@ -422,9 +422,9 @@ impl RunSupervisor {
                                     .waiting_on
                                     .as_deref()
                                     .is_none_or(|id| id == format!("preparation:{}", identity))
-                                && catalog.launch_intent(&identity)?.is_some();
+                                && catalog.launch_metadata(&identity)?.is_some();
                             if preparation {
-                                catalog.fail_launch(&identity, "preparation_failed")?;
+                                catalog.fail_launch_metadata(&identity, "preparation_failed")?;
                                 Ok(())
                             } else {
                                 catalog.pause_failed_execution(

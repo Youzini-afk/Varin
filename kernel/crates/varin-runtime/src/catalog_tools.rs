@@ -1,6 +1,7 @@
 //! Ready tool compositions publish only at a closed request boundary. Configuration remains
 //! with its owner; the activation fact retains the exact credential-free executable selection.
-use super::launches::{HostToolBinding, LaunchIntent};
+use super::launch_content::LaunchMetadata;
+use super::launches::HostToolBinding;
 use super::*;
 use crate::execution::ToolSchema;
 
@@ -16,6 +17,7 @@ pub struct ToolUpdatePreparation {
     epoch: u64,
     previous_generation: u64,
     base: Vec<ToolSchema>,
+    base_ref: Value,
     content: crate::content::ContentStore,
     publication: crate::content::ContentPublication,
 }
@@ -23,25 +25,34 @@ pub struct PreparedToolUpdate {
     run_id: String,
     epoch: u64,
     previous_generation: u64,
-    base: Vec<ToolSchema>,
+    base_ref: Value,
+    tools_ref: Value,
+    mcp_ref: Option<Value>,
     composition: ToolComposition,
     reference: Value,
     _publication: crate::content::ContentPublication,
 }
-fn base_tools(launch: &LaunchIntent) -> Vec<ToolSchema> {
-    launch
-        .selection
-        .tools
-        .iter()
-        .filter(|tool| {
-            !launch
-                .selection
-                .mcp_binding
-                .as_ref()
-                .is_some_and(|mcp| mcp.tools.iter().any(|selected| selected.name == tool.name))
+pub struct ToolUpdateCapture {
+    run_id: String,
+    epoch: u64,
+    previous_generation: u64,
+    base_ref: Value,
+    content: crate::content::ContentStore,
+    publication: crate::content::ContentPublication,
+}
+impl ToolUpdateCapture {
+    pub fn load_base(self) -> Result<ToolUpdatePreparation> {
+        let base = serde_json::from_value(self.content.load(&self.base_ref)?)?;
+        Ok(ToolUpdatePreparation {
+            run_id: self.run_id,
+            epoch: self.epoch,
+            previous_generation: self.previous_generation,
+            base,
+            base_ref: self.base_ref,
+            content: self.content,
+            publication: self.publication,
         })
-        .cloned()
-        .collect()
+    }
 }
 impl ToolUpdatePreparation {
     pub fn base(&self) -> &[ToolSchema] {
@@ -84,11 +95,21 @@ impl ToolUpdatePreparation {
             mcp_binding,
         };
         let reference = self.content.save(&serde_json::to_value(&composition)?)?;
+        let tools_ref = self
+            .content
+            .save(&serde_json::to_value(&composition.tools)?)?;
+        let mcp_ref = composition
+            .mcp_binding
+            .as_ref()
+            .map(|binding| self.content.save(&serde_json::to_value(binding)?))
+            .transpose()?;
         Ok(PreparedToolUpdate {
             run_id: self.run_id,
             epoch: self.epoch,
             previous_generation: self.previous_generation,
-            base: self.base,
+            base_ref: self.base_ref,
+            tools_ref,
+            mcp_ref,
             composition,
             reference,
             _publication: self.publication,
@@ -113,14 +134,14 @@ impl Catalog {
         }
         Ok(())
     }
-    pub fn capture_tool_update(&self, run_id: &str, epoch: u64) -> Result<ToolUpdatePreparation> {
+    pub fn capture_tool_update(&self, run_id: &str, epoch: u64) -> Result<ToolUpdateCapture> {
         self.validate_tool_update_scope(run_id, epoch)?;
-        let launch: LaunchIntent = record(&self.db, "run_launches", run_id)?;
-        Ok(ToolUpdatePreparation {
+        let launch: LaunchMetadata = record(&self.db, "run_launches", run_id)?;
+        Ok(ToolUpdateCapture {
             run_id: run_id.into(),
             epoch,
             previous_generation: launch.selection.tool_schema_generation,
-            base: base_tools(&launch),
+            base_ref: launch.selection.base_tools_ref,
             content: self.content.clone(),
             publication: self.content.begin_publication(),
         })
@@ -132,10 +153,10 @@ impl Catalog {
         if run.cancel_requested {
             return Ok(false);
         }
-        let mut launch: LaunchIntent = record(&tx, "run_launches", &run.id)?;
+        let mut launch: LaunchMetadata = record(&tx, "run_launches", &run.id)?;
         if launch.bound_epoch != Some(prepared.epoch)
             || launch.selection.tool_schema_generation != prepared.previous_generation
-            || base_tools(&launch) != prepared.base
+            || launch.selection.base_tools_ref != prepared.base_ref
         {
             return Err(RuntimeError::Conflict(
                 "tool update belongs to another active composition".into(),
@@ -156,8 +177,8 @@ impl Catalog {
             ));
         }
         launch.selection.tool_schema_generation = prepared.composition.generation;
-        launch.selection.tools = prepared.composition.tools.clone();
-        launch.selection.mcp_binding = prepared.composition.mcp_binding.clone();
+        launch.selection.tools_ref = prepared.tools_ref.clone();
+        launch.selection.mcp_binding_ref = prepared.mcp_ref.clone();
         launch.revision += 1;
         run.revision += 1;
         put(&tx, "run_launches", &run.id, &launch)?;

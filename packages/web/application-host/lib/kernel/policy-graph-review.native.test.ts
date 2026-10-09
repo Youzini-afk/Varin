@@ -4,6 +4,7 @@ import { createContextComposition } from './context-composition.js';
 import { createRequire } from 'node:module';
 import { createThreadContext } from './thread-context.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
+import { createMemoryOwner } from './memory-owner.js';
 import { createThreadSourcePreparer } from './thread-sources.js';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from './storage-adapter.js';
@@ -72,6 +73,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   await extensions.start(); cleanups.push(() => extensions.stop());
   const composition = createContextComposition(extensions);
   const prepareContext = createThreadContext({ composition, personalization, workingStates, projectForWorkspace: async () => 'selected-project' });
+  kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
   const decisions: unknown[]=[]; let pins=0;
   const originalPrepare=extensions.prepareService.bind(extensions);
   extensions.prepareService=async(...args)=>{const binding=await originalPrepare(...args); if(args[0] && typeof args[0]==='object' && 'serviceId' in args[0] && args[0].serviceId==='varin.agent.policy') return {...binding,pin:()=>{const pin=binding.pin();pins++;let released=false;return {...pin,invoke:(method,args,signal)=>{if(method==='decide') decisions.push(structuredClone(args[0]));return pin.invoke(method,args,signal)},release:()=>{if(!released){released=true;pins--;}pin.release()}}}};return binding};
@@ -156,7 +158,9 @@ it('installed evidence policy reads content-dependent immutable graphs before th
   // The selected file changes after capture. Both graph reads must use the pinned source.
   await fs.writeFile(path.join(f.workspace, followOn), 'MUTATED_LIVE_EVIDENCE');
   const run = await f.api.submit({ ...identity, key: 'run', expectedHead: null, text: 'Read selected evidence', model, source: source.source });
-  await expect.poll(async () => (await f.runtime.run(run.run_id)).state).toBe('completed');
+  await expect.poll(async () => (await f.runtime.run(run.run_id)).state).toBe('completed').catch(async error => {
+    throw new Error(`${String(error)} ${JSON.stringify({run:await f.runtime.run(run.run_id),errors:f.launchErrors.map(String),events:(await f.runtime.events(0,256)).slice(-6)})}`);
+  });
   expect(f.requests).toHaveLength(1);
   expect(decisionsAtInference[0]!.filter(kind => kind === 'read_graph_completed')).toHaveLength(2);
   expect(decisionsAtInference[0]).toContain('result_chunk');

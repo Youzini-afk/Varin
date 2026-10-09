@@ -145,7 +145,7 @@ impl Catalog {
                 .context_job_metadata(&receipt.run_id)?
                 .ok_or_else(|| RuntimeError::Invalid("context job metadata is missing".into()))?;
             let intent = self
-                .launch_intent(&receipt.run_id)?
+                .launch_metadata(&receipt.run_id)?
                 .ok_or_else(|| RuntimeError::Invalid("context job launch is missing".into()))?;
             let previous_configuration = self.run(&receipt.run_id)?.configuration;
             if previous != admission
@@ -163,7 +163,7 @@ impl Catalog {
         if let Some(parent) = &request.owner_run_id {
             let parent = self.run(parent)?;
             fence(&parent, self.epoch)?;
-            let selected = self.launch_intent(&parent.id)?.ok_or_else(|| {
+            let selected = self.launch_metadata(&parent.id)?.ok_or_else(|| {
                 RuntimeError::Invalid("automatic compaction needs the selected model owner".into())
             })?;
             if parent.cancel_requested
@@ -348,7 +348,7 @@ impl Catalog {
         run.state = RunState::Runnable;
         run.revision += 1;
         put(&tx, "runs", &parent, &run)?;
-        let mut launch: launches::LaunchIntent = record(&tx, "run_launches", &parent)?;
+        let mut launch: launch_content::LaunchMetadata = record(&tx, "run_launches", &parent)?;
         launch.requires_rebind = true;
         launch.bound_epoch = None;
         launch.revision += 1;
@@ -584,7 +584,7 @@ pub struct ContextJobPreparation {
 }
 pub struct PreparedContextJob {
     request: ContextJobRequest,
-    launch: launches::LaunchSelection,
+    launch: launch_content::LaunchSelectionMetadata,
     configuration: Value,
     admission: ContextJobAdmission,
     parts: Vec<Value>,
@@ -719,17 +719,19 @@ impl ContextJobPreparation {
             recipe,
             parts: parts.len() as u64,
         };
-        Ok(PreparedContextJob {
-            submission: submissions::PreparedSubmission::stage(submissions::SubmissionBody {
+        let submission = submissions::PreparedSubmission::stage(submissions::SubmissionBody {
                 command:SubmitInput {key:format!("context-job:{}",self.request.key),
                     thread_id:format!("context-job-thread:{}",self.request.key),
                     branch_id:format!("context-job-branch:{}",self.request.key),expected_head:None,
                     input:Value::String(crate::context_job::SUMMARY_REQUEST.into()),configuration:self.configuration.clone()},
                 launch:Some(self.launch.clone()),inherit_source:false,initial:None,personalization:None,
                 origin:submissions::SubmissionOrigin::Summary,epoch:self.epoch,content:self.content,publication:self.publication,
-            })?,
+            })?;
+        let launch = submission.launch.clone().ok_or_else(||RuntimeError::Invalid("context job launch is missing".into()))?;
+        Ok(PreparedContextJob {
+            submission,
             request: self.request,
-            launch: self.launch,
+            launch,
             configuration: self.configuration,
             admission,
             parts,

@@ -435,7 +435,7 @@ impl Catalog {
             run.waiting_on = None;
             run.revision += 1;
             put(&tx, "runs", &run.id, &run)?;
-            let mut launch: launches::LaunchIntent = record(&tx, "run_launches", &run.id)?;
+            let mut launch: launch_content::LaunchMetadata = record(&tx, "run_launches", &run.id)?;
             launch.requires_rebind = true;
             launch.bound_epoch = None;
             launch.revision += 1;
@@ -462,7 +462,7 @@ impl Catalog {
             if run.state == RunState::Runnable
                 && !run.cancel_requested
                 && self
-                    .launch_intent(&run.id)?
+                    .launch_metadata(&run.id)?
                     .is_some_and(|launch| launch.requires_rebind)
                 && !resumed.contains(&run.id)
             {

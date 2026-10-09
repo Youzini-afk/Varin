@@ -29,7 +29,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 8;
+pub(crate) const FORMAT: i64 = 9;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -340,7 +340,7 @@ impl Catalog {
                 [&command.branch_id], |row| Ok((row.get(0)?,row.get(1)?)),
             ).optional()?;
             if let (Some(selection), Some((previous_run, body))) = (launch.as_mut(), previous) {
-                let previous: launches::LaunchIntent = serde_json::from_str(&body)?;
+                let previous: launch_content::LaunchMetadata = serde_json::from_str(&body)?;
                 selection.source = previous.selection.source;
                 if let Some(source) = selection.source.as_mut() {
                     if source.mode == crate::SourceMode::Materialized
@@ -348,21 +348,11 @@ impl Catalog {
                     {
                         source.environment_run_id = Some(previous_run);
                     }
-                    let mcp_names: std::collections::BTreeSet<String> = previous
-                        .selection
-                        .mcp_binding
-                        .as_ref()
-                        .map(|binding| binding.tools.iter().map(|tool| tool.name.clone()).collect())
-                        .unwrap_or_default();
-                    selection.tools = previous
-                        .selection
-                        .tools
-                        .into_iter()
-                        .filter(|tool| !mcp_names.contains(&tool.name))
-                        .collect();
+                    selection.tools_ref = previous.selection.base_tools_ref.clone();
+                    selection.base_tools_ref = previous.selection.base_tools_ref;
                     selection.tool_schema_generation = selection.configuration_generation;
                 }
-                selection.validate()?;
+                if let Some(source) = &selection.source { source.validate()?; }
             }
         }
         let input_id = child_operation
@@ -410,7 +400,7 @@ impl Catalog {
             if let Some(source) = selection.source.as_ref() {
                 if let Some(origin_id) = source.environment_run_id.as_ref() {
                     let origin_run: Run = record(&tx, "runs", origin_id)?;
-                    let origin: launches::LaunchIntent = record(&tx, "run_launches", origin_id)?;
+                    let origin: launch_content::LaunchMetadata = record(&tx, "run_launches", origin_id)?;
                     let mut same_source = source.clone();
                     same_source.environment_run_id = None;
                     if origin_run.thread_id != run.thread_id
@@ -424,7 +414,7 @@ impl Catalog {
                     }
                 }
             }
-            let intent = launches::LaunchIntent {
+            let intent = launch_content::LaunchMetadata {
                 run_id: run_id.clone(),
                 revision: 1,
                 selection,
@@ -1296,6 +1286,9 @@ pub mod submissions;
 
 #[path="catalog_launch.rs"]
 pub mod launches;
+
+#[path="catalog_launch_content.rs"]
+pub mod launch_content;
 
 #[path="catalog_tools.rs"]
 pub mod tools;

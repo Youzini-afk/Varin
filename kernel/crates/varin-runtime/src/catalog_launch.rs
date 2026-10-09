@@ -2,6 +2,7 @@
 use super::*;
 use crate::execution::{PolicyIdentity, RequestBinding, ToolSchema};
 use crate::execution::policy_model::{PolicyModelCapability, PolicyModelStatus};
+use super::launch_content::{LaunchMetadata, LaunchRead, PreparedLaunchChange, PreparedLaunchSelection};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -105,9 +106,14 @@ impl LaunchSelection {
     }
     pub(super) fn validate(&self) -> Result<()> {
         validate_policy_models(&self.policy_models)?;
+        let mut tools = std::collections::BTreeMap::new();
+        if self.tools.iter().any(|tool| tool.name.is_empty() || tool.version.is_empty()
+            || tools.insert(tool.name.as_str(), tool).is_some()) {
+            return Err(RuntimeError::Invalid("launch tool identities must be unique and versioned".into()));
+        }
         if let Some(binding) = &self.mcp_binding {
             binding.validate()?;
-            if binding.tools.iter().any(|tool| !self.tools.contains(tool)) {
+            if binding.tools.iter().any(|tool| tools.get(tool.name.as_str()).copied() != Some(tool)) {
                 return Err(RuntimeError::Invalid("MCP launch schemas do not match retained owner".into()));
             }
         }
@@ -121,20 +127,12 @@ impl LaunchSelection {
                 "launch requires pinned provider and policy identities".into(),
             ));
         }
-        let mut names = std::collections::BTreeSet::new();
-        if self.tools.iter().any(|tool| {
-            tool.name.is_empty() || tool.version.is_empty() || !names.insert(&tool.name)
-        }) {
-            return Err(RuntimeError::Invalid(
-                "launch tool identities must be unique and versioned".into(),
-            ));
-        }
         if let Some(source) = &self.source { source.validate()?; }
         Ok(())
     }
 }
 
-fn validate_policy_models(models: &[PolicyModelCapability]) -> Result<()> {
+pub(super) fn validate_policy_models(models: &[PolicyModelCapability]) -> Result<()> {
     let mut ids = std::collections::BTreeSet::new();
     let mut credential_bindings = std::collections::BTreeSet::new();
     for model in models {
@@ -197,7 +195,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
         rows.collect::<std::result::Result<_, _>>()?
     };
     if table_type.as_deref() != Some("table") || foreign_keys != vec![("runs".into(), "id".into(), "id".into(), "NO ACTION".into(), "NO ACTION".into())]
-        || version != Some(2) || columns != vec![("id".into(),"TEXT".into(),0,1),("body".into(),"TEXT".into(),1,0)] {
+        || version != Some(3) || columns != vec![("id".into(),"TEXT".into(),0,1),("body".into(),"TEXT".into(),1,0)] {
         return Err(RuntimeError::Invalid("unsupported or malformed launch domain; user data was preserved".into()));
     }
     Ok(())
@@ -218,70 +216,50 @@ pub(super) fn initialize(tx: &Transaction<'_>) -> Result<()> {
         )
         .optional()?;
     match version {
-        None if existing.is_none() => tx.execute_batch("CREATE TABLE run_launches(id TEXT PRIMARY KEY REFERENCES runs(id),body TEXT NOT NULL); INSERT INTO runtime_domains(name,version) VALUES('run_launches',2);")?,
-        Some(2) if existing.as_deref() == Some("table") => check_format(tx)?,
+        None if existing.is_none() => tx.execute_batch("CREATE TABLE run_launches(id TEXT PRIMARY KEY REFERENCES runs(id),body TEXT NOT NULL); INSERT INTO runtime_domains(name,version) VALUES('run_launches',3);")?,
+        Some(3) if existing.as_deref() == Some("table") => check_format(tx)?,
         _ => return Err(RuntimeError::Invalid("unrecognized launch domain; data preserved".into())),
     }
     Ok(())
 }
 impl Catalog {
-    /// Select one exact policy before execution. Private state is never migrated to a different identity.
-    pub fn prepare_policy_launch(&mut self, run_id: &str, identity: PolicyIdentity) -> Result<LaunchIntent> {
-        self.prepare_policy_launch_with_models(run_id, identity, Vec::new())
-    }
-    pub fn prepare_policy_launch_with_models(&mut self, run_id: &str, identity: PolicyIdentity,
-        models: Vec<PolicyModelCapability>) -> Result<LaunchIntent> {
-        if identity.name.is_empty() || identity.version.is_empty() { return Err(RuntimeError::Invalid("policy identity is empty".into())); }
-        validate_policy_models(&models)?;
+    /// The preparation binds the exact admitted policy baseline; private state is not migrated.
+    pub fn admit_launch_change(&mut self, prepared: PreparedLaunchChange) -> Result<LaunchRead> {
+        if prepared.epoch != self.epoch { return Err(RuntimeError::Conflict("launch preparation belongs to a previous owner".into())); }
         let tx = self.db.transaction()?;
+        let run_id = &prepared.expected.run_id;
         let run: Run = record(&tx, "runs", run_id)?;
         fence(&run, self.epoch)?;
-        let mut launch: LaunchIntent = record(&tx, "run_launches", run_id)?;
-        if launch.selection.policy == identity && launch.selection.policy_models == models { return Ok(launch); }
+        let mut launch: LaunchMetadata = record(&tx, "run_launches", run_id)?;
+        launch.requires_rebind = launch.bound_epoch != Some(self.epoch);
+        if launch.selection == prepared.selection {
+            drop(tx); return Ok(self.launch_read(launch));
+        }
+        if launch != prepared.expected { return Err(RuntimeError::Conflict("launch changed during preparation".into())); }
         let steps: i64 = tx.query_row("SELECT count(*) FROM model_steps WHERE run_id=?1", [run_id], |row| row.get(0))?;
         let checkpoints: i64 = tx.query_row("SELECT count(*) FROM policy_checkpoints WHERE run_id=?1", [run_id], |row| row.get(0))?;
-        if run.cancel_requested || run.state.terminal() || launch.bound_epoch.is_some() || steps != 0 || checkpoints != 0
-            || launch.selection.policy.name != "default+questions+collaboration" || launch.selection.policy.version != "1+1+1"
-            || !launch.selection.policy_models.is_empty() || launch.selection.policy == identity {
-            return Err(RuntimeError::Conflict("policy preparation cannot replace a selected or used launch".into()));
+        if run.cancel_requested || run.state.terminal() || launch.bound_epoch.is_some() || steps != 0
+            || (prepared.kind == "run.policy_prepared" && (
+                checkpoints != 0
+                || !launch.selection.policy_models.is_empty() || launch.selection.policy == prepared.selection.policy)) {
+            return Err(RuntimeError::Conflict("preparation cannot replace a selected or used launch".into()));
         }
-        launch.selection.policy = identity;
-        launch.selection.policy_models = models;
-        launch.selection.validate()?;
+        launch.selection = prepared.selection;
         launch.revision += 1;
         put(&tx, "run_launches", run_id, &launch)?;
-        event(&tx, run_id, launch.revision, "run.policy_prepared", serde_json::to_value(&launch)?)?;
+        event(&tx, run_id, launch.revision, prepared.kind, serde_json::to_value(&launch)?)?;
         tx.commit()?;
-        Ok(launch)
+        Ok(self.launch_read(launch))
     }
 
     /// Preparation can append one concrete MCP generation only before the launch is bound or used.
     /// It cannot revise a source, model, base capability, or an already frozen tool description.
     pub fn prepare_mcp_launch(&mut self, run_id: &str, binding: HostToolBinding) -> Result<LaunchIntent> {
-        binding.validate()?;
-        let tx = self.db.transaction()?;
-        let run: Run = record(&tx, "runs", run_id)?;
-        fence(&run, self.epoch)?;
-        let mut launch: LaunchIntent = record(&tx, "run_launches", run_id)?;
-        if let Some(previous) = &launch.selection.mcp_binding {
-            if previous == &binding { return Ok(launch); }
-            return Err(RuntimeError::Conflict("MCP owner generation changed".into()));
-        }
-        let steps: i64 = tx.query_row("SELECT count(*) FROM model_steps WHERE run_id=?1", [run_id], |row| row.get(0))?;
-        if run.cancel_requested || run.state.terminal() || launch.bound_epoch.is_some() || steps != 0 {
-            return Err(RuntimeError::Conflict("MCP preparation cannot change a used launch".into()));
-        }
-        launch.selection.tools.extend(binding.tools.iter().cloned());
-        launch.selection.tools.sort_by(|left, right| left.name.cmp(&right.name));
-        launch.selection.mcp_binding = Some(binding);
-        launch.selection.validate()?;
-        launch.revision += 1;
-        put(&tx, "run_launches", run_id, &launch)?;
-        event(&tx, run_id, launch.revision, "run.mcp_prepared", serde_json::to_value(&launch)?)?;
-        tx.commit()?;
-        Ok(launch)
+        let prepared = self.prepare_mcp_change(run_id, binding)?.load()?;
+        self.admit_launch_change(prepared)?.load()
     }
 
+    /// Standalone Catalog convenience; concurrent owners use prepare_launch_selection/admit_launch.
     /// Store the selected plan before starting a worker. Retries can only rebind the same plan.
     /// Durable intent is not proof of authorization or worker liveness.
     pub fn bind_launch(
@@ -289,7 +267,8 @@ impl Catalog {
         run_id: &str,
         selection: LaunchSelection,
     ) -> Result<LaunchIntent> {
-        self.save_launch(run_id, selection, true)
+        let prepared = self.prepare_launch_selection(selection).load()?;
+        self.admit_launch(run_id, prepared, true)?.load()
     }
     /// Durable selection precedes expensive preparation. It conveys no live execution permit.
     pub fn select_launch(
@@ -297,15 +276,17 @@ impl Catalog {
         run_id: &str,
         selection: LaunchSelection,
     ) -> Result<LaunchIntent> {
-        self.save_launch(run_id, selection, false)
+        let prepared = self.prepare_launch_selection(selection).load()?;
+        self.admit_launch(run_id, prepared, false)?.load()
     }
-    fn save_launch(
+    pub fn admit_launch(
         &mut self,
         run_id: &str,
-        selection: LaunchSelection,
+        prepared: PreparedLaunchSelection,
         bound: bool,
-    ) -> Result<LaunchIntent> {
-        selection.validate()?;
+    ) -> Result<LaunchRead> {
+        if prepared.epoch != self.epoch { return Err(RuntimeError::Conflict("launch belongs to a previous owner".into())); }
+        let selection = prepared.selection;
         let tx = self.db.transaction()?;
         let mut run: Run = record(&tx, "runs", run_id)?;
         fence(&run, self.epoch)?;
@@ -317,7 +298,7 @@ impl Catalog {
         if let Some(source) = selection.source.as_ref() {
             if let Some(origin_id) = source.environment_run_id.as_ref() {
                 let origin_run: Run = record(&tx, "runs", origin_id)?;
-                let origin: LaunchIntent = record(&tx, "run_launches", origin_id)?;
+                let origin: LaunchMetadata = record(&tx, "run_launches", origin_id)?;
                 let mut same_source = source.clone();
                 same_source.environment_run_id = None;
                 if origin_run.thread_id != run.thread_id
@@ -330,7 +311,7 @@ impl Catalog {
                 }
             }
         }
-        let previous: Option<LaunchIntent> = optional_record(&tx, "run_launches", run_id)?;
+        let previous: Option<LaunchMetadata> = optional_record(&tx, "run_launches", run_id)?;
         let intent = match previous {
             Some(mut intent) => {
                 if intent.selection != selection {
@@ -343,7 +324,7 @@ impl Catalog {
                         && intent.preparation_failure.is_none())
                 {
                     intent.requires_rebind = intent.bound_epoch != Some(self.epoch);
-                    return Ok(intent);
+                    drop(tx); return Ok(self.launch_read(intent));
                 }
                 intent.revision += 1;
                 intent.preparation_failure = None;
@@ -353,7 +334,7 @@ impl Catalog {
                 intent
             }
             None => {
-                let intent = LaunchIntent {
+                let intent = LaunchMetadata {
                     preparation_failure: None,
                     run_id: run_id.into(),
                     revision: 1,
@@ -394,9 +375,13 @@ impl Catalog {
             serde_json::to_value(&intent)?,
         )?;
         tx.commit()?;
-        Ok(intent)
+        Ok(self.launch_read(intent))
     }
     pub fn fail_launch(&mut self, run_id: &str, code: &str) -> Result<LaunchIntent> {
+        let metadata = self.fail_launch_metadata(run_id, code)?;
+        self.launch_read(metadata).load()
+    }
+    pub fn fail_launch_metadata(&mut self, run_id: &str, code: &str) -> Result<LaunchMetadata> {
         if !matches!(
             code,
             "preparation_failed"
@@ -421,7 +406,7 @@ impl Catalog {
                 "Run has already entered execution".into(),
             ));
         }
-        let mut intent: LaunchIntent = record(&tx, "run_launches", run_id)?;
+        let mut intent: LaunchMetadata = record(&tx, "run_launches", run_id)?;
         let wait_id = format!("preparation:{}", run_id);
         if run.state == RunState::Waiting && run.waiting_on.as_deref() != Some(&wait_id) {
             return Err(RuntimeError::Conflict(
@@ -462,23 +447,10 @@ impl Catalog {
         Ok(intent)
     }
     pub fn launch_intent(&self, run_id: &str) -> Result<Option<LaunchIntent>> {
-        let mut intent: Option<LaunchIntent> = optional_record(&self.db, "run_launches", run_id)?;
-        if let Some(intent) = &mut intent {
-            intent.requires_rebind = intent.bound_epoch != Some(self.epoch);
-        }
-        Ok(intent)
+        self.capture_launch(run_id)?.map(LaunchRead::load).transpose()
     }
     /// Includes queued launches; recovery never silently executes a saved grant or model request.
     pub fn pending_launches(&self) -> Result<Vec<LaunchIntent>> {
-        let intents: Vec<LaunchIntent> = read_all(&self.db, "run_launches")?;
-        let mut pending = Vec::new();
-        for mut intent in intents {
-            let run: Run = record(&self.db, "runs", &intent.run_id)?;
-            if !run.state.terminal() {
-                intent.requires_rebind = intent.bound_epoch != Some(self.epoch);
-                pending.push(intent);
-            }
-        }
-        Ok(pending)
+        self.capture_pending_launches()?.into_iter().map(LaunchRead::load).collect()
     }
 }

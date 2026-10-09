@@ -152,8 +152,14 @@ impl Catalog {
         context: &ToolExecutionContext,
         input: DispatchInput,
         pin: ChildSourcePin,
-        mut child_launch: launches::LaunchSelection,
+        child_launch: launches::LaunchSelection,
     ) -> Result<ChildTask> {
+        let prepared = self.prepare_child_launch(&context.run_id, child_launch)?.load()?;
+        self.accept_prepared_child(context, input, pin, prepared)
+    }
+    pub fn accept_prepared_child(&mut self, context: &ToolExecutionContext, input: DispatchInput,
+        pin: ChildSourcePin, prepared: launch_content::PreparedChildLaunch) -> Result<ChildTask> {
+        let mut child_launch = prepared.selection;
         input.validate()?;
         pin.source.validate()?;
         if pin.source.mode != SourceMode::FixedBranch
@@ -212,7 +218,7 @@ impl Catalog {
                 "dispatch is not an admitted parent tool call".into(),
             ));
         }
-        let parent: launches::LaunchIntent = record(&tx, "run_launches", &run.id)?;
+        let parent: launch_content::LaunchMetadata = record(&tx, "run_launches", &run.id)?;
         if parent.selection.source.as_ref() != Some(&pin.source)
             || parent.selection.connection_identity != child_launch.connection_identity
             || parent.selection.credential_scope != child_launch.credential_scope
@@ -231,10 +237,7 @@ impl Catalog {
                     "file_read" | "file_list" | "file_search"
                 )
             })
-            || child_launch
-                .tools
-                .iter()
-                .any(|tool| !parent.selection.tools.contains(tool))
+            || parent.selection.tools_ref != prepared.parent_tools_ref
         {
             return Err(RuntimeError::Conflict(
                 "child exceeds parent source/model/read authority".into(),
@@ -1166,7 +1169,7 @@ impl Catalog {
             run.waiting_on = None;
             run.revision += 1;
             put(&tx, "runs", &run.id, &run)?;
-            let mut launch: launches::LaunchIntent = record(&tx, "run_launches", &run.id)?;
+            let mut launch: launch_content::LaunchMetadata = record(&tx, "run_launches", &run.id)?;
             launch.requires_rebind = true;
             launch.bound_epoch = None;
             launch.revision += 1;
@@ -1191,7 +1194,7 @@ impl Catalog {
             if run.state == RunState::Runnable
                 && !run.cancel_requested
                 && self
-                    .launch_intent(&run.id)?
+                    .launch_metadata(&run.id)?
                     .is_some_and(|launch| launch.requires_rebind)
                 && !resumed.contains(&run.id)
             {
@@ -1226,7 +1229,7 @@ impl Catalog {
             }
             let run = self.run(&op.run_id)?;
             let Some(source) = self
-                .launch_intent(&run.id)?
+                .launch_metadata(&run.id)?
                 .and_then(|launch| launch.selection.source)
             else {
                 continue;

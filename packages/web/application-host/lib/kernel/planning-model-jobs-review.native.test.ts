@@ -598,6 +598,9 @@ async function terminalFromEvents(f: Fixture, runId: string, state = 'completed'
     const run = await new Promise<Awaited<ReturnType<typeof f.runtime.run>>>((resolve, reject) => {
       const check = async () => {
         const current = await f.runtime.run(runId);
+        if (current.waiting_on?.startsWith('preparation:')) {
+          throw new Error(JSON.stringify({run:current,errors:f.launchErrors.map(String),events:(await f.runtime.events(0,256)).slice(-6)}));
+        }
         if (['completed', 'failed', 'cancelled'].includes(current.state)) resolve(current);
       };
       unsubscribe = f.runtime.onEvent(event => { if (event.stream === 'durable') void check().catch(reject); });
