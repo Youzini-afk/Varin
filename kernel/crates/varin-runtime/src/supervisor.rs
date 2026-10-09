@@ -664,6 +664,12 @@ impl RunSupervisor {
                 run = catalog
                     .transition_run(run_id, run.epoch, run.revision, RunState::Cancelled)
                     .map_err(error)?;
+            } else if !run.state.terminal() {
+                // Pure preparation has no outstanding effect to await. Fence its late worker
+                // now; dispatched requests and unclosed tool exchanges still require receipts.
+                if let Some(settled) = catalog.cancel_preparing_execution(run_id, run.epoch).map_err(error)? {
+                    run = settled;
+                }
             }
             Ok(run)
         })();

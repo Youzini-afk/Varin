@@ -351,6 +351,10 @@ pub struct ModelFailure {
 }
 
 pub trait ModelProvider: Send + Sync {
+    /// Called only at a closed conversation exchange, before compiling the next request.
+    /// The returned provider is retained by that ModelStep; subsequent selection cannot mutate it.
+    fn select_for_request(&self, _run_id: &str, _owner_generation: u64, _cancel: &CancellationToken)
+        -> Result<Option<SelectedModel>, ExecutionError> { Ok(None) }
     fn policy_model_capabilities(&self) -> Vec<PolicyModelCapability> { Vec::new() }
     fn policy_model_capability(&self, _id: &str) -> Option<BoundPolicyModel> { None }
 
@@ -364,6 +368,12 @@ pub trait ModelProvider: Send + Sync {
         cancel: &CancellationToken,
         emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
     ) -> Result<FinishReason, ModelFailure>;
+}
+
+#[derive(Clone)]
+pub struct SelectedModel {
+    pub binding: RequestBinding,
+    pub provider: Arc<dyn ModelProvider>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -960,7 +970,7 @@ impl<
     }
     pub fn run_recovered(
         &self,
-        input: ExecutionInput,
+        mut input: ExecutionInput,
         cancel: CancellationToken,
         recovery: Option<crate::catalog::recovery::ExecutionRecovery>,
     ) -> Result<ExecutionReport, ExecutionError> {
@@ -1000,6 +1010,7 @@ impl<
             recovered_results.clear();
         }
         let mut pending_tools = pending.as_ref().map(|(snapshot, _)| self.tools.freeze(&snapshot.view.binding.tools)).transpose()?.flatten();
+        let mut pending_model: Option<Arc<dyn ModelProvider>> = None;
         let resumed_graph = self.persistence.policy_graph(&input.run_id,input.owner_generation)?;
         if pending.is_some() && resumed_graph.as_ref().is_some_and(|graph|!graph.terminal) { return Err(ExecutionError::new("unclosed_model_exchange","policy graph conflicts with model exchange")); }
         if let Some(graph)=resumed_graph {
@@ -1188,6 +1199,18 @@ impl<
                 }
                 action @ (PolicyAction::RequestModel | PolicyAction::RequestModelWithEvidence { .. }) => {
                     let evidence=match action {PolicyAction::RequestModelWithEvidence{evidence}=>evidence,_=>Vec::new()};
+                    let selected_model = match guarded("model_selection_panicked",||self.provider.select_for_request(&input.run_id,input.owner_generation,&cancel)) {
+                        Ok(selected)=>selected,
+                        Err(_) if cancel.is_cancelled()=>{policy_state = previous_policy_state;continue 'agent;},
+                        Err(error)=>finish!('agent,RunState::Failed,None,Some(error)),
+                    };
+                    if let Some(selected) = &selected_model {
+                        input.binding.connection_identity = selected.binding.connection_identity.clone();
+                        input.binding.provider_family = selected.binding.provider_family.clone();
+                        input.binding.model = selected.binding.model.clone();
+                        input.binding.credential_ref = selected.binding.credential_ref.clone();
+                        input.binding.configuration_generation = selected.binding.configuration_generation;
+                    }
                     if self.context_preparation.prepare(&input.run_id, input.owner_generation, &cancel).is_err() {
                         policy_state = previous_policy_state;
                         if cancel.is_cancelled() { continue 'agent; }
@@ -1212,7 +1235,7 @@ impl<
                     }
                     binding.history_range.leaf_id = history_cursor.clone();
                     let request_tools = self.tools.freeze(&binding.tools)?;
-                    let mut request_history=compile_history(&history,&input.binding.provider_family,&input.binding.connection_identity);
+                    let mut request_history=compile_history(&history,&binding.provider_family,&binding.connection_identity);
                     let mut selected=BTreeSet::new();
                     for reference in evidence {
                         if !selected.insert((reference.action_id.clone(),reference.node_id.clone())) { finish!('agent,RunState::Failed,None,Some(ExecutionError::new("duplicate_evidence","evidence references must be unique"))); }
@@ -1231,7 +1254,10 @@ impl<
                     };
                     let model_cancel = cancel.child(&format!("model:{}", view.request_id));
                     let serialized = match guarded("provider_serialize_panicked", || {
-                        self.provider.serialize(&view)
+                        match &selected_model {
+                            Some(selected)=>selected.provider.serialize(&view),
+                            None=>self.provider.serialize(&view),
+                        }
                     }) {
                         Ok(serialized) => serialized,
                         Err(error) => finish!('agent, RunState::Failed, None, Some(error)),
@@ -1320,7 +1346,7 @@ impl<
                         Err(error) => return Err(error),
                     }
                     let (items, deltas, usage, mut result) =
-                        self.generate(&input.run_id, &snapshot, &model_cancel);
+                        self.generate(&input.run_id, &snapshot, &model_cancel, selected_model.as_ref().map(|selected|selected.provider.as_ref()));
                     let cancelled = cancel.is_cancelled();
                     let interrupted = model_cancel.is_cancelled() && !cancelled;
                     let mut calls = Vec::new();
@@ -1398,6 +1424,7 @@ impl<
                     if !calls.is_empty() {
                         pending = Some((snapshot, calls));
                         pending_tools = request_tools;
+                        pending_model = selected_model.map(|selected|selected.provider);
                     }
                 }
                 PolicyAction::ExecuteTools => {
@@ -1445,6 +1472,7 @@ impl<
                         },
                     )?;
                     event = PolicyEvent::ToolsCompleted { results };
+                    pending_model.take();
                 }
             }
         }
@@ -1506,6 +1534,7 @@ impl<
         run_id: &str,
         snapshot: &RequestSnapshot,
         cancel: &CancellationToken,
+        selected: Option<&dyn ModelProvider>,
     ) -> (
         Vec<ProviderItem>,
         Vec<ProviderEvent>,
@@ -1516,7 +1545,7 @@ impl<
         let mut deltas = Vec::new();
         let mut usage = UsageReceipt::default();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.provider.generate(snapshot, cancel, &mut |event| {
+            let mut emit = |event| {
                 if cancel.is_cancelled() && !matches!(event, ProviderEvent::Usage { .. }) {
                     return Err(ExecutionError::new(
                         "cancelled",
@@ -1532,7 +1561,11 @@ impl<
                 }
                 self.progress.emit(run_id, ExecutionEvent::Provider(event));
                 Ok(())
-            })
+            };
+            match selected {
+                Some(provider)=>provider.generate(snapshot,cancel,&mut emit),
+                None=>self.provider.generate(snapshot,cancel,&mut emit),
+            }
         }))
         .unwrap_or_else(|_| {
             Err(ModelFailure {

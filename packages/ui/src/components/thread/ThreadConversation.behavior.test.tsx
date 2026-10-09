@@ -25,7 +25,7 @@ const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:ui-fixtur
 function initialSnapshot(active = false): ThreadSnapshot {
   const run = { id: 'ui-run', thread_id: identity.threadId, branch_id: identity.branchId, state: 'generating' as const, revision: 1, epoch: 1, configuration: { providerId: 'fixture-provider', model: 'fixture-model' }, cancel_requested: false, waiting_on: null };
   return { identity, eventCursor: 0, thread: { thread_id: identity.threadId, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: null, active_run_id: active ? run.id : null, latest_run: active ? run : null }] }, activeRun: active ? run : null,
-    history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], launch: null, context: { checkpoint: null, jobs: [] } };
+    history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], launch: null, modelSelection: {desired:null,active:null}, context: { checkpoint: null, jobs: [] } };
 }
 function fixture(active = false) {
   const view = initialSnapshot(active);
@@ -45,7 +45,7 @@ function fixture(active = false) {
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
   const api: ThreadsAPI = { listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
-    decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, events: async () => [],
+    selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
   };
   return { api, view, submit, enqueue, editInput, cancelInput, cancelRun, emit: (event: Parameters<ThreadsAPI['observe']>[1] extends (value: infer T) => void ? T : never) => listener?.(event) };
@@ -72,6 +72,34 @@ const edit = async (selector: string, value: string, event = 'input') => {
 };
 const submitForm = async (form: HTMLFormElement) => { await act(async () => { form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); }); };
 const button = (text: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === text)!;
+
+it('selects a desired model during an active run and keeps its display until activation',async()=>{
+  const f = fixture(true);
+  f.api.listModels = async()=>[{providerId:'fixture-provider',modelId:'fixture-model'},{providerId:'replacement-provider',modelId:'replacement-model'}];
+  const selectModel = vi.fn<ThreadsAPI['selectModel']>(async input=>{
+    const selection = {id:input.key,run_id:input.runId,revision:1,binding_id:`model:${input.key}`,status:'ready' as const,failure:null,credential_scope:null,
+      configuration:{providerId:input.model.providerId,providerFamily:'openai-responses',model:input.model.modelId,thinkingLevel:input.model.thinkingLevel,
+        endpoint:'http://localhost/responses',allowAnonymous:true,credentialEnvironment:null,configurationGeneration:2,maxOutputTokens:32}};
+    f.view.modelSelection.desired = selection;
+    return selection;
+  });
+  f.api.selectModel = selectModel;
+  await act(async()=>root.render(<ThreadConversation api={f.api} identity={identity}/>));
+  const selector = container.querySelector<HTMLSelectElement>('[aria-label="Registered model"]')!;
+  expect(selector.disabled).toBe(false);
+  await edit('[aria-label="Registered model"]',JSON.stringify(['replacement-provider','replacement-model']),'change');
+  expect(selectModel).toHaveBeenCalledOnce();
+  expect(selectModel.mock.calls[0]![0]).toMatchObject({...identity,runId:'ui-run',model:{providerId:'replacement-provider',modelId:'replacement-model'}});
+  expect(selector.value).toBe(JSON.stringify(['replacement-provider','replacement-model']));
+  expect(container.textContent).toContain('Applies to the next model request');
+  expect(f.view.activeRun?.configuration).toMatchObject({model:'fixture-model'});
+  f.view.activeRun!.configuration = f.view.modelSelection.desired!.configuration;
+  f.view.modelSelection.desired!.status = 'active';
+  f.view.modelSelection.active = f.view.modelSelection.desired;
+  await act(async()=>f.emit({cursor:1,subject:'ui-run',revision:2,kind:'run.model_activated',data:{}}));
+  expect(selector.value).toBe(JSON.stringify(['replacement-provider','replacement-model']));
+  expect(container.textContent).not.toContain('Applies to the next model request');
+});
 
 it('renders the composer and retries an uncertain send with the same request identity and text', async () => {
   const f = fixture();

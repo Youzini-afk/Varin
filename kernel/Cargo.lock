@@ -2018,6 +2018,7 @@ dependencies = [
  "sha2 0.11.0",
  "streaming-iterator",
  "thiserror 2.0.21",
+ "tokio",
  "tree-sitter",
  "uuid",
  "varin-runtime",

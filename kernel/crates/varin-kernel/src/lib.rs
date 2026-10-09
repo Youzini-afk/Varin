@@ -7,6 +7,7 @@ mod error;
 mod model;
 mod agent_runtime;
 mod run_assembly;
+mod run_models;
 mod tools;
 mod questions;
 mod collaboration;

@@ -61,9 +61,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const acceptsImages = active ? (run?.configuration as { acceptsImages?: boolean } | undefined)?.acceptsImages
     : models.find(model => model.providerId === providerId && model.modelId === modelId)?.acceptsImages;
   React.useEffect(() => {
-    const config = run?.configuration as { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel } | undefined;
+    const config = (snapshot?.modelSelection.desired?.configuration ?? run?.configuration) as { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel } | undefined;
     if (config?.providerId && config.model && (active || !providerId)) { setProviderId(config.providerId); setModelId(config.model); setThinkingLevel(config.thinkingLevel ?? 'off'); }
-  }, [run?.configuration, active, providerId]);
+  }, [run?.configuration, snapshot?.modelSelection.desired, active, providerId]);
   const act = async (work: () => Promise<unknown>) => {
     const generation = identityGeneration.current;
     const current = () => generation === identityGeneration.current && host === getRuntimeEndpointGeneration();
@@ -90,6 +90,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       if (generation === fileReadGeneration.current) setImages(current => [...current, ...added]);
     } catch (value) { if (generation === fileReadGeneration.current) setError(value instanceof Error ? value.message : 'Could not read images'); }
     finally { if (generation === fileReadGeneration.current) setReadingFiles(false); }
+  };
+  const selectModel = (provider: string, model: string, thinking: ThreadThinkingLevel) => {
+    if (active && run) {
+      void act(()=>api.selectModel({...identity,runId:run.id,key:crypto.randomUUID(),model:{providerId:provider,modelId:model,thinkingLevel:thinking}}));
+    } else {setProviderId(provider);setModelId(model);setThinkingLevel(thinking);}
   };
   const returnToLatest = () => { historyGeneration.current += 1; setHistoryView(null); setHistoryLoading(false); };
   const loadEarlier = async () => {
@@ -223,17 +228,19 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {sourceCannotBeApplied && <p role="status" className="text-sm text-muted-foreground">The prepared workspace needs a new run. Keep the current workspace to queue this message, or wait for this run to finish.</p>}
       {snapshot?.launch?.preparation_failure && <p role="alert" className="text-sm text-destructive">Preparation needs attention: {snapshot.launch.preparation_failure}</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      <select aria-label="Registered model" disabled={active} className="w-full rounded border bg-background px-2 py-1 text-sm"
+      {snapshot?.modelSelection.desired?.status === 'failed' && <p role="alert" className="text-sm text-destructive">Model preparation failed: {snapshot.modelSelection.desired.failure}</p>}
+      {snapshot?.modelSelection.desired && snapshot.modelSelection.desired.id !== snapshot.modelSelection.active?.id && snapshot.modelSelection.desired.status !== 'failed' && <p role="status" className="text-sm text-muted-foreground">Applies to the next model request</p>}
+      <select aria-label="Registered model" disabled={pending} className="w-full rounded border bg-background px-2 py-1 text-sm"
         value={JSON.stringify([providerId, modelId])} onChange={event => {
-          const [provider, model] = JSON.parse(event.target.value) as [string, string]; setProviderId(provider); setModelId(model);
+          const [provider, model] = JSON.parse(event.target.value) as [string, string];
           const available = models.find(candidate => candidate.providerId === provider && candidate.modelId === model)?.thinkingLevels ?? ['off'];
-          if (!available.includes(thinkingLevel)) setThinkingLevel(available[0] ?? 'off');
+          selectModel(provider,model,available.includes(thinkingLevel) ? thinkingLevel : available[0] ?? 'off');
         }}>
         <option value={JSON.stringify(['', ''])}>Choose a registered model</option>
         {models.map(model => <option key={JSON.stringify([model.providerId, model.modelId])} value={JSON.stringify([model.providerId, model.modelId])}>{model.providerId} · {model.name ?? model.modelId}</option>)}
       </select>
-      {(models.find(model => model.providerId === providerId && model.modelId === modelId)?.thinkingLevels?.length ?? 0) > 1 && <select aria-label="Thinking level" disabled={active}
-        className="rounded border bg-background px-2 py-1 text-sm" value={thinkingLevel} onChange={event => setThinkingLevel(event.target.value as ThreadThinkingLevel)}>
+      {(models.find(model => model.providerId === providerId && model.modelId === modelId)?.thinkingLevels?.length ?? 0) > 1 && <select aria-label="Thinking level" disabled={pending}
+        className="rounded border bg-background px-2 py-1 text-sm" value={thinkingLevel} onChange={event => selectModel(providerId,modelId,event.target.value as ThreadThinkingLevel)}>
         {models.find(model => model.providerId === providerId && model.modelId === modelId)?.thinkingLevels?.map(level => <option key={level} value={level}>{level}</option>)}
       </select>}
       {active && <select aria-label="Input delivery" className="rounded border bg-background text-sm" value={inputMode} onChange={event => setInputMode(event.target.value as typeof inputMode)}>

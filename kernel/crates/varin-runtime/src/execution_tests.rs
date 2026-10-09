@@ -435,7 +435,7 @@ fn cold_run_assembly_is_independent_and_cancellation_prevents_model_dispatch() {
     waiter.join().unwrap();
     assert!(independent_result.is_ok(),"cold assembly blocked an independent Run");
     assert_eq!(independent_result.unwrap().unwrap().state,RunState::Completed);
-    assert!(cancelled.unwrap().cancel_requested);
+    assert_eq!(cancelled.unwrap().state,RunState::Cancelled);
     assert!(observed);
     assert_eq!(report.state,RunState::Cancelled);
     assert_eq!(first_provider.calls.load(Ordering::SeqCst),0);

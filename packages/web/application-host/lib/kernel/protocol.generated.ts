@@ -43,6 +43,8 @@ export type KernelMethod =
   | "runtime.input.inspect"
   | "runtime.input.list"
   | "runtime.run.start"
+  | "runtime.model.select"
+  | "runtime.model.inspect"
   | "runtime.status"
   | "runtime.admission.inspect"
   | "runtime.thread.create"
@@ -532,6 +534,29 @@ export interface ContextJobCreateParams {
   memoryCheckpoint: string | null;
   configuration: unknown;
   credentialScope?: CredentialScope;
+}
+
+export interface ModelSelectParams {
+  runId: string;
+  key: string;
+  configuration: unknown;
+  credentialScope?: CredentialScope;
+}
+
+export interface RunModelSelection {
+  id: string;
+  run_id: string;
+  revision: number;
+  binding_id: string;
+  configuration: ModelSessionConfiguration;
+  credential_scope: CredentialScope | null;
+  status: 'preparing' | 'ready' | 'active' | 'failed' | 'superseded';
+  failure: string | null;
+}
+
+export interface RunModelSelections {
+  desired: RunModelSelection | null;
+  active: RunModelSelection | null;
 }
 
 export interface RunStartParams {
@@ -2057,6 +2082,8 @@ export type KernelMethodParams = {
   "runtime.launch.inspect": RunParams;
   "runtime.launch.list": KernelEmptyParams;
   "runtime.run.start": RunStartParams;
+  "runtime.model.select": ModelSelectParams;
+  "runtime.model.inspect": RunParams;
   "runtime.status": KernelEmptyParams;
   "runtime.admission.inspect": AdmissionInspectParams;
   "runtime.thread.create": ThreadCreateParams;
@@ -2446,6 +2473,24 @@ export type KernelRequest =
       id: string;
       method: "runtime.run.start";
       params: RunStartParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.model.select";
+      params: ModelSelectParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.model.inspect";
+      params: RunParams;
       epoch?: string;
       grantId?: string;
     }

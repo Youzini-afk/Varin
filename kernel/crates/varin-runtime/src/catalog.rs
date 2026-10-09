@@ -29,6 +29,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
+pub(crate) const FORMAT: i64 = 4;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -97,7 +98,7 @@ fn fence(run: &Run, epoch: u64) -> Result<()> {
 /// any write-capable SQLite handle: dropping a read/write connection can checkpoint its WAL.
 fn inspect_catalog_format(db: &Connection) -> Result<i64> {
     let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    if version != 0 && version != 3 {
+    if version != 0 && version != FORMAT {
         return Err(RuntimeError::Format(version));
     }
     let existing: i64 = db.query_row(
@@ -108,7 +109,8 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
     if version == 0 && existing != 0 {
         return Err(RuntimeError::Format(0));
     }
-    if version == 3 {
+    if version == FORMAT {
+        db.prepare("SELECT id,run_id,revision,status,active,body FROM model_selections")?;
         launches::check_format(db)?;
         collaboration::check_format(db)?;
         context::check_format(db)?;
@@ -154,7 +156,7 @@ impl Catalog {
         db.pragma_update(None, "synchronous", "FULL")?;
         if version == 0 {
             db.execute_batch(SCHEMA)?;
-            db.execute_batch("CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY REFERENCES input_queue(id),body TEXT NOT NULL); CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,3); PRAGMA user_version=3;")?;
+            db.execute_batch("CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY REFERENCES input_queue(id),body TEXT NOT NULL); CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,3); PRAGMA user_version=4;")?;
         }
         db.execute_batch("CREATE TABLE IF NOT EXISTS resource_occupancy (operation_id TEXT PRIMARY KEY REFERENCES operations(id), claims TEXT NOT NULL)")?;
         let resource_admission = std::sync::Arc::new(crate::resource_admission::ResourceAdmission::default());
@@ -1305,6 +1307,8 @@ CREATE TABLE operations(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs
 CREATE INDEX operations_run ON operations(run_id);
 CREATE TABLE model_steps(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),state TEXT NOT NULL,body TEXT NOT NULL);
 CREATE INDEX model_steps_run ON model_steps(run_id,state);
+CREATE TABLE model_selections(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),revision INTEGER NOT NULL,status TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 0,body TEXT NOT NULL,UNIQUE(run_id,revision));
+CREATE UNIQUE INDEX model_selections_active ON model_selections(run_id) WHERE active=1;
 CREATE UNIQUE INDEX model_steps_active ON model_steps(run_id) WHERE state IN ('prepared','dispatched');
 CREATE TABLE model_outputs(request_id TEXT PRIMARY KEY REFERENCES model_steps(id),body TEXT NOT NULL);
 CREATE TABLE tool_calls(request_id TEXT NOT NULL REFERENCES model_steps(id),call_id TEXT NOT NULL,body TEXT NOT NULL,receipt TEXT,committed INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(request_id,call_id));
@@ -1373,3 +1377,6 @@ pub mod process_wait;
 
 #[path = "catalog_plan.rs"]
 pub mod plan;
+
+#[path = "catalog_models.rs"]
+pub mod models;

@@ -21,6 +21,7 @@ pub(crate) struct RunAssembly {
     pub memory: crate::memory_bridge::MemoryBridge,
     pub plan: crate::plan_bridge::PlanBridge,
     pub policy: crate::policy::PolicyBridge,
+    pub models: Arc<crate::run_models::RunModels>,
     pub responses: crate::transport::Sender,
     pub epoch: String,
 }
@@ -28,10 +29,32 @@ pub(crate) enum PreparedLaunch {
     Selection(Value),
     Start(RunStart),
 }
+pub(crate) struct RunPreparation {
+    pub params: RunStartParams,
+    tools: Option<crate::tools::ToolBinding>,
+}
+impl RunPreparation {
+    pub fn new(mut params: RunStartParams, run: &varin_runtime::Run) -> Result<Self, KernelError> {
+        let tools = params
+            .tool_binding
+            .take()
+            .map(serde_json::from_value::<crate::tools::ToolBinding>)
+            .transpose()?;
+        if tools
+            .as_ref()
+            .is_some_and(|binding| binding.run_id != run.id || binding.thread_id != run.thread_id)
+        {
+            return Err(KernelError::Authorization(
+                "tool binding does not belong to the admitted Run".into(),
+            ));
+        }
+        Ok(Self { params, tools })
+    }
+}
 impl RunAssembly {
     pub fn prepare(
         &self,
-        p: RunStartParams,
+        preparation: RunPreparation,
         selected: Option<LaunchSelectParams>,
         cancelled: impl Fn() -> bool,
     ) -> Result<PreparedLaunch, KernelError> {
@@ -43,6 +66,8 @@ impl RunAssembly {
             }
         };
         check_cancelled()?;
+        let p = preparation.params;
+        let tool_binding = preparation.tools;
         let runtime = &self.runtime;
         let resources = &self.resources;
         let credential_bridge = &self.credentials;
@@ -59,6 +84,13 @@ impl RunAssembly {
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
             catalog.run(&p.run_id).map_err(domain)?
         };
+        let saved_schema_generation = runtime
+            .catalog()
+            .lock()
+            .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+            .launch_intent(&p.run_id)
+            .map_err(domain)?
+            .map(|launch| launch.selection.tool_schema_generation);
         let plan_eligible = {
             let owner = runtime.catalog();
             let catalog = owner
@@ -82,7 +114,7 @@ impl RunAssembly {
         }
         if is_context_job
             && (selected.is_some()
-                || p.tool_binding.is_some()
+                || tool_binding.is_some()
                 || p.mcp_binding.is_some()
                 || p.policy_binding.is_some())
         {
@@ -116,11 +148,24 @@ impl RunAssembly {
                 })?,
             };
             selected_credential_scope = Some(scope.clone());
-            let resolver = credential_bridge
-                .resolver(&p.run_id, scope.clone())
-                .map_err(|_| {
-                    KernelError::Authorization("private Host credential owner unavailable".into())
-                })?;
+            let active_model = runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .model_selections(&p.run_id)
+                .map_err(domain)?
+                .active;
+            let resolver = match active_model {
+                Some(active) => credential_bridge.resolver_for_binding(
+                    &p.run_id,
+                    &active.binding_id,
+                    scope.clone(),
+                ),
+                None => credential_bridge.resolver(&p.run_id, scope.clone()),
+            }
+            .map_err(|_| {
+                KernelError::Authorization("private Host credential owner unavailable".into())
+            })?;
             model_session::bind_with_credentials(configuration, resolver, scope)
         } else {
             model_session::bind(configuration)
@@ -178,7 +223,8 @@ impl RunAssembly {
                 .binding
                 .tools
                 .sort_by(|left, right| left.name.cmp(&right.name));
-            start.binding.tool_schema_generation = start.binding.configuration_generation;
+            start.binding.tool_schema_generation =
+                saved_schema_generation.unwrap_or(start.binding.configuration_generation);
             let source = selected
                 .source
                 .0
@@ -228,13 +274,7 @@ impl RunAssembly {
         let mut launch_source = None;
         let mut declarations = Vec::new();
         let mut collaboration_source = None;
-        if let Some(binding) = p.tool_binding {
-            let binding: crate::tools::ToolBinding = serde_json::from_value(binding)?;
-            if binding.run_id != p.run_id || binding.thread_id != run.thread_id {
-                return Err(KernelError::Authorization(
-                    "tool binding does not belong to the admitted Run".into(),
-                ));
-            }
+        if let Some(binding) = tool_binding {
             launch_source = Some(binding.source_selection()?);
             let retrieval_project_id = runtime
                 .catalog()
@@ -247,7 +287,8 @@ impl RunAssembly {
                 .map_err(|e| KernelError::Authorization(e.to_string()))?
                 .with_language(language_bridge.clone())
                 .with_retrieval(retrieval_bridge.clone(), retrieval_project_id);
-            start.binding.tool_schema_generation = start.binding.configuration_generation;
+            start.binding.tool_schema_generation =
+                saved_schema_generation.unwrap_or(start.binding.configuration_generation);
             declarations.extend(tools.declarations(!is_child));
             collaboration_source = Some(collaboration_binding);
         }
@@ -357,6 +398,9 @@ impl RunAssembly {
                 .map_err(domain)?;
         }
         check_cancelled()?;
+        if !is_context_job {
+            start.provider = self.models.wrap(start.provider);
+        }
         let (progress, updates) = varin_runtime::execution::ProgressSink::channel(64);
         start.progress = progress;
         let responses = self.responses.clone();
@@ -376,6 +420,7 @@ impl RunAssembly {
         let epoch = self.epoch.clone();
         let run_id = handle.run_id.clone();
         let catalog = self.runtime.catalog();
+        let models = self.models.clone();
         thread::spawn(move || {
             let _ = handle.wait();
             let terminal = catalog
@@ -384,6 +429,7 @@ impl RunAssembly {
                 .and_then(|catalog| catalog.run(&run_id).ok())
                 .is_some_and(|run| run.state.terminal());
             if terminal {
+                models.release(&run_id);
                 let _ = responses.send(
                     json!({"v":1,"kind":"agent-policy-release","kernelEpoch":epoch,"runId":run_id}),
                 );

@@ -32,6 +32,7 @@ const modelSelection = (value: unknown): ThreadModel => {
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
 export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler): void {
   const fields: Record<string, readonly string[]> = {
+    'model/select': ['runtime','threadId','branchId','runId','key','model'],
     'permission/decide': ['runtime', 'threadId', 'branchId', 'operationId', 'permissionId', 'decision'],
     'question/answer': ['runtime', 'threadId', 'branchId', 'operationId', 'answer'],
     'source/prepare': ['runtime', 'threadId', 'branchId', 'key', 'path', 'mode'],
@@ -84,6 +85,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('child/wait/cancel', body => adapter.cancelChildWait(identity(body), text(body.waitId)));
   post('tree/cancel', async body => { await adapter.cancelTree(identity(body)); return {}; });
   post('models', () => adapter.listModels());
+  post('model/select',body=>adapter.selectModel({...identity(body),runId:text(body.runId),key:text(body.key),model:modelSelection(body.model)}));
   post('list', async () => (await adapter.runtime.threads()).filter(thread => thread.thread_id.startsWith('thread:')));
   post('create', body => adapter.create(text(body.key)));
   post('fork', (body, signal) => adapter.fork({ ...identity(body), key: text(body.key), headId: body.headId === null ? null : text(body.headId) }, signal));

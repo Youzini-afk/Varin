@@ -1361,6 +1361,47 @@ fn independent_prepare(db: &mut Catalog, receipt: &Receipt, snapshot: crate::exe
 }
 
 #[test]
+fn model_activation_after_a_closed_exchange_survives_reopen_without_rewriting_its_snapshot() {
+    use crate::execution::*;
+    let f = Fixture::new(); let mut db = f.open();
+    db.create_thread("thread","main").unwrap();
+    let configuration:ModelSessionConfiguration = serde_json::from_value(json!({"providerFamily":"openai-responses","model":"old","endpoint":"http://localhost/responses","credentialEnvironment":null,"allowAnonymous":true,"configurationGeneration":1,"maxOutputTokens":32})).unwrap();
+    let old = crate::model_session::bind(configuration.clone()).unwrap();
+    let receipt = db.submit(&SubmitInput {configuration:serde_json::to_value(&configuration).unwrap(),..command()}).unwrap();
+    let policy = old.policy.identity();
+    db.bind_launch(&receipt.run_id,launches::LaunchSelection::from_binding(&old.binding,policy.clone(),None)).unwrap();
+    let mut snapshot = request_snapshot(&receipt);
+    let range = snapshot.view.binding.history_range.clone();
+    snapshot.view.binding = old.binding.clone(); snapshot.view.binding.history_range = range;
+    independent_prepare(&mut db,&receipt,snapshot.clone());
+    let next = ModelSessionConfiguration {model:"new".into(),configuration_generation:2,..configuration};
+    let bound = crate::model_session::bind(next.clone()).unwrap();
+    let selection = db.select_model(&receipt.run_id,"next-choice",next,None).unwrap();
+    db.prepare_model_selection(&selection,db.epoch(),None).unwrap();
+    let queued = db.enqueue_input(&inputs::EnqueueInput {key:"next-run-choice".into(),thread_id:"thread".into(),branch_id:"main".into(),mode:InputMode::NextRun,input:json!({"text":"follow up"}),configuration:None}).unwrap();
+    assert_eq!(db.run(&queued.run_id).unwrap().configuration["model"],"new");
+    assert_eq!(db.launch_intent(&queued.run_id).unwrap().unwrap().selection.model,"new");
+    assert!(db.activate_model_selection(&selection,db.epoch(),&bound.binding).is_err(),"an active request cannot be switched");
+    db.commit_execution(&receipt.run_id,db.epoch(),&ExecutionRecord::ModelFinished {
+        request_id:"model-1".into(),outcome:ModelOutcome::Completed,finish_reason:Some(FinishReason::Stop),
+        items:vec![ProviderItem {id:"old-output".into(),content:Content::Text {text:"completed old output".into()},opaque:None}],
+        interrupted_deltas:vec![],usage:UsageReceipt::default(),failure:None,
+    }).unwrap();
+    assert!(db.prepare_recovered_execution(&receipt.run_id,bound.binding.clone(),policy.clone(),Value::Null).is_err(),"a changed binding requires a committed activation");
+    assert!(db.activate_model_selection(&selection,db.epoch(),&bound.binding).unwrap());
+    let step = db.model_step("model-1").unwrap();
+    assert_eq!(step.request["view"]["binding"]["model"],"old");
+    let launch = db.launch_intent(&receipt.run_id).unwrap().unwrap().selection;
+    drop(db); let mut db = f.open();
+    db.bind_launch(&receipt.run_id,launch).unwrap();
+    let (input,recovery) = db.prepare_recovered_execution(&receipt.run_id,bound.binding,policy,Value::Null).unwrap();
+    assert_eq!(input.binding.model,"new");
+    assert!(recovery.is_some());
+    assert_eq!(db.model_selections(&receipt.run_id).unwrap().active.unwrap().id,"next-choice");
+    assert!(input.history.iter().any(|item|matches!(&item.content,Content::Text{text} if text=="completed old output")));
+}
+
+#[test]
 fn independent_model_finished_retry_is_exactly_idempotent_and_conflicting_retry_preserves_history() {
     let f = Fixture::new(); let mut db = f.open(); let receipt = submit(&mut db); let epoch = db.epoch();
     independent_prepare(&mut db, &receipt, request_snapshot(&receipt));
