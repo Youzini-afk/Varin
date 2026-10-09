@@ -52,6 +52,15 @@ fn file_params_value(params_value: &Value) -> Value {
     params
 }
 
+fn file_operation_identity(params_value: &Value) -> Result<(Value, String), KernelError> {
+    let mut identity = file_params_value(params_value);
+    if let Some(object) = identity.as_object_mut() {
+        object.remove("leaseId");
+    }
+    let hash = hash_json(&identity)?;
+    Ok((identity, hash))
+}
+
 pub(super) fn parse_file_params<T: DeserializeOwned>(
     params_value: &Value,
 ) -> Result<T, KernelError> {
@@ -850,17 +859,12 @@ impl Storage {
         Ok(())
     }
 
-    pub(super) fn begin_file_operation(
-        &mut self,
+    fn file_operation_record(
+        &self,
         operation_id: &str,
         kind: &str,
-        params_value: &Value,
-    ) -> Result<(String, Option<Value>, bool), KernelError> {
-        let mut identity_params = file_params_value(params_value);
-        if let Some(object) = identity_params.as_object_mut() {
-            object.remove("leaseId");
-        }
-        let params_hash = hash_json(&identity_params)?;
+        params_hash: &str,
+    ) -> Result<Option<(String, Option<String>)>, KernelError> {
         let existing: Option<(String, String, String, Option<String>)> = self.conn.query_row(
             "SELECT kind, params_hash, state, result_json FROM operations WHERE operation_id = ?1",
             params![operation_id],
@@ -872,6 +876,44 @@ impl Storage {
                     "operationId {operation_id} was reused with different parameters"
                 )));
             }
+            return Ok(Some((state, result)));
+        }
+        Ok(None)
+    }
+
+    /// Read an immutable receipt without starting work or requiring its derived
+    /// source to remain alive. The current caller still owns the workspace and
+    /// supplies the exact intent; execution leases are not historical authority.
+    pub(super) fn committed_file_operation(
+        &self,
+        operation_id: &str,
+        kind: &str,
+        params_value: &Value,
+        workspace_id: &str,
+    ) -> Result<Option<Value>, KernelError> {
+        let (_, params_hash) = file_operation_identity(params_value)?;
+        let Some((state, result)) = self.file_operation_record(operation_id, kind, &params_hash)? else {
+            return Ok(None);
+        };
+        if state != "committed" { return Ok(None); }
+        let owned: bool = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM operation_owners WHERE operation_id=?1 AND workspace_id=?2)",
+            params![operation_id, workspace_id], |row| row.get(0))?;
+        if !owned {
+            return Err(KernelError::Authorization("file operation is not owned by the workspace".into()));
+        }
+        let result = result.ok_or_else(|| KernelError::Storage("committed file operation has no result".into()))?;
+        Ok(Some(serde_json::from_str(&result)?))
+    }
+
+    pub(super) fn begin_file_operation(
+        &mut self,
+        operation_id: &str,
+        kind: &str,
+        params_value: &Value,
+    ) -> Result<(String, Option<Value>, bool), KernelError> {
+        let (identity_params, params_hash) = file_operation_identity(params_value)?;
+        if let Some((state, result)) = self.file_operation_record(operation_id, kind, &params_hash)? {
             if state == "committed" {
                 let result = result.ok_or_else(|| {
                     KernelError::Storage("committed file operation has no result".to_string())

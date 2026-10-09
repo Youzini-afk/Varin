@@ -695,6 +695,21 @@ impl Storage {
                 "materialization requires an operation identity and target below its root".into(),
             ));
         }
+        if !grant.path_scopes.iter().any(String::is_empty) {
+            return Err(KernelError::Authorization(
+                "materialize requires an unbounded source-view grant".into(),
+            ));
+        }
+        let root = self.registered_file_root(&params.root_id, grant)?;
+        let target = self.resolve_file_resource(&params.root_id, &params.path, grant, false)?;
+        if let Some(receipt) = self.committed_file_operation(
+            &params.operation_id,
+            "file.materialize",
+            value,
+            &params.workspace_id,
+        )? {
+            return Ok(Admission::Complete(receipt));
+        }
         if self.materializations.contains_key(&params.operation_id) {
             return Err(KernelError::Operation(
                 "materialization operation is already active".into(),
@@ -716,14 +731,7 @@ impl Storage {
                 ));
             }
         }
-        if !grant.path_scopes.iter().any(String::is_empty) {
-            return Err(KernelError::Authorization(
-                "materialize requires an unbounded source-view grant".into(),
-            ));
-        }
         self.load_node(&params.source_root)?;
-        let root = self.registered_file_root(&params.root_id, grant)?;
-        let target = self.resolve_file_resource(&params.root_id, &params.path, grant, false)?;
         let stage = self.resolve_file_resource(
             &params.root_id,
             &materialize_side_path(&target.path, &params.operation_id, "staging"),
