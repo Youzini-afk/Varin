@@ -1,3 +1,5 @@
+import { createPersonalizationContextResolver } from './lib/memory/personalization-context.js';
+import { createNativeMemoryOwner } from './lib/kernel/native-memory-owner.js';
 import { createSemanticInferenceLedger } from './lib/knowledge/semantic/inference-ledger.js';
 import { createNativeSemanticInference } from './lib/knowledge/semantic/native-inference.js';
 import { createNativeRetrievalOwner } from './lib/kernel/native-retrieval-owner.js';
@@ -1982,9 +1984,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (error) => console.error('[VarinMemory]', errorMessage(error)),
   });
   let refreshNativePersonalization: (() => Promise<void>) | undefined;
+  let nativePersonalizationRuntime: NativeRuntimeClient | undefined = undefined;
   const agentPersonalization = createAgentPersonalization({
     client: kernelClient,
-    context: async (sessionId) => {
+    context: createPersonalizationContextResolver({ native: () => nativePersonalizationRuntime, legacy: async (sessionId) => {
       const binding = await threadRegistry.getSessionBinding(sessionId);
       const thread = binding?.owner === 'spawned-child' ? await threadRegistry.getThreadById(binding.owningScopeId, binding.threadId) : null;
       if (binding?.owner === 'spawned-child' && !thread) throw new Error('The session thread configuration is unavailable');
@@ -1997,7 +2000,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
       const project = projects.find(entry => cwd && projectContainsPath(entry, cwd));
       return { bot: false, threadRole, ...(project ? { projectId: project.id } : {}) };
-    },
+    } }),
     onChanged: () => {
       broadcastGlobalUiEvent?.({ type: 'varin:agent-personalization-changed', properties: {} });
       void refreshNativePersonalization?.().catch(() => console.error('[NativeThread] Personalization refresh requires attention'));
@@ -2921,6 +2924,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const nativeRunObservers = new NativeRunObservers(nativeRuntime, extensionRuntime, (threadId, _error) => {
     console.error('[NativeObserver] Activity projection requires attention:', threadId ?? 'selection');
   });
+  nativePersonalizationRuntime = nativeRuntime;
+  const nativeContext = createNativeThreadContext({ personalization: agentPersonalization,
+      liveSource: { documents: documentsAuthority, validate: nativeLiveSources.validate },
+      composition: createNativeContextComposition(extensionRuntime),
+      workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter),
+      projectForWorkspace: async workspaceId => {
+        const { root } = await documentsAuthority.inspectWorkspace(workspaceId);
+        const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
+        return projects.find(project => projectContainsPath(project, root))?.id;
+      },
+    });
+  kernelClient.setNativeMemoryOwner(createNativeMemoryOwner({ personalization: agentPersonalization, prepareContext: nativeContext }));
   const nativeThreads = new NativeThreadAdapter(nativeRuntime,
     nativeModelAuthority, async (source, identity) => {
       if (source.mode === 'live_root') return nativeLiveSources.admit(source, identity.threadId);
@@ -2931,16 +2946,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // Durable launch remains inspectable/resumable. Never log credentials or provider responses.
       console.error('[NativeThread] Launch preparation requires attention:', runId);
     }, createNativeThreadSourcePreparer({ documents: documentsAuthority, liveSources: nativeLiveSources, workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter) }),
-    createNativeThreadContext({ personalization: agentPersonalization,
-      liveSource: { documents: documentsAuthority, validate: nativeLiveSources.validate },
-      composition: createNativeContextComposition(extensionRuntime),
-      workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter),
-      projectForWorkspace: async workspaceId => {
-        const { root } = await documentsAuthority.inspectWorkspace(workspaceId);
-        const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
-        return projects.find(project => projectContainsPath(project, root))?.id;
-      },
-    }));
+    nativeContext);
   refreshNativePersonalization = () => nativeThreads.refreshPersonalization();
   void refreshNativePersonalization().catch(() => console.error('[NativeThread] Personalization refresh requires attention'));
   void nativeThreads.recover().catch(() => console.error('[NativeThread] Saved launch discovery requires attention'));

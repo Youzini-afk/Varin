@@ -278,6 +278,7 @@ export interface NativeBranchForkResult {
 }
 
 export interface NativeContextJobCreateParams {
+  personalization?: NativeContextPersonalization;
   key: string;
   branchId: string;
   throughId: string;
@@ -367,7 +368,16 @@ export interface NativeContextComposition {
   sections: NativeContextFragment[];
 }
 
+export interface NativeMemorySnapshot {
+  revision: number;
+  memories: unknown[];
+}
+
 export interface NativeContextPersonalization {
+  memorySnapshot: NativeMemorySnapshot;
+  configurationDigest: string;
+  mode: string;
+  threadRole: string;
   contextComposition?: NativeContextComposition;
   revision: number;
   sessionId: string;

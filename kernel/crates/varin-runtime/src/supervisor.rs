@@ -16,6 +16,7 @@ fn error(error: impl ToString) -> ExecutionError {
 }
 #[derive(Clone)]
 pub struct RunStart {
+    pub context_preparation: Arc<dyn ContextPreparation>,
     pub binding: RequestBinding,
     pub policy_state: Value,
     pub provider: Arc<dyn ModelProvider>,
@@ -176,6 +177,7 @@ impl RunSupervisor {
         let epoch = input.owner_generation;
         let engine = ExecutionEngine {
             persistence: self.catalog.clone(),
+            context_preparation: pending.start.context_preparation,
             provider: pending.start.provider,
             tools: pending.start.tools,
             policy: pending.start.policy,

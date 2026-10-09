@@ -1,3 +1,4 @@
+import { createNativeMemoryOwner } from './native-memory-owner.js';
 import { createNativeThreadContext } from './native-thread-context.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
 import { createNativeThreadSourcePreparer } from './native-thread-sources.js';
@@ -63,6 +64,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const refreshTasks: Promise<void>[] = [];
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }), onChanged: () => { const task = refresh(); void task.catch(() => undefined); refreshTasks.push(task); } });
   const prepareContext = createNativeThreadContext({ personalization, workingStates, projectForWorkspace: async () => 'selected-project' });
+  kernel.setNativeMemoryOwner(createNativeMemoryOwner({ personalization, prepareContext }));
   let closed = false;
   const close = async () => { if (closed) return; closed = true; await storage.dispose(); await documents.dispose(); await kernel.close(); };
   cleanups.push(close);
@@ -94,7 +96,7 @@ function complete(response: ServerResponse, id: string, text: string) {
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id, type: 'message', content: [{ type: 'output_text', text }] }] } })}\n\n`);
 }
-it('live profile/note edits apply at the next request boundary, preserve the in-flight request and cannot be reverted by stale compaction', async () => {
+it('live profiles advance at the request boundary while note tails preserve the frozen memory prefix and compaction revisions', async () => {
   let held!: ServerResponse; let count = 0;
   const f = await fixture((body, response) => {
     count++;
@@ -121,17 +123,21 @@ it('live profile/note edits apply at the next request boundary, preserve the in-
   held.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'live-read-item', type: 'function_call', call_id: 'live-read-call', name: 'native_file_read', arguments: JSON.stringify({ path: 'source.txt' }) }] } })}\n\n`);
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state).toBe('completed');
   const refreshedWire = system(f.requests[1]!.body);
-  expect(refreshedWire).toContain('PROFILE NEW'); expect(refreshedWire).toContain('NOTE NEW');
+  expect(refreshedWire).toContain('PROFILE NEW'); expect(refreshedWire).not.toContain('NOTE NEW');
+  expect(JSON.stringify((f.requests[1]!.body.input as Array<{ role?: string }>).filter(item => item.role !== 'system'))).toContain('NOTE NEW');
   expect(refreshedWire).toContain('PINNED AGENT SOURCE'); expect(refreshedWire).not.toContain('LATER DISK SOURCE');
-  expect(refreshedWire).not.toContain('PROFILE OLD'); expect(refreshedWire).not.toContain('NOTE OLD');
+  expect(refreshedWire).not.toContain('PROFILE OLD'); expect(refreshedWire).toContain('NOTE OLD');
   const before = await f.api.snapshot(identity);
   const stale = await f.api.compact({ ...identity, key: 'stale-live-summary', throughId: before.historyPage.head!, expectedRevision: before.context.checkpoint!.revision, model });
   await expect.poll(async () => (await f.api.snapshot(identity)).context.jobs.find(job => job.job.receipt.run_id === stale.receipt.run_id)?.run.state).toBe('completed');
   await f.personalization.saveNote({ id: note.result.id, scope: { kind: 'global' }, content: 'NOTE LATEST' });
   await f.flushRefreshes();
-  await expect(f.api.publishContext(identity, stale.receipt.run_id)).rejects.toMatchObject({ status: 409 });
+  const admitted = await f.api.publishContext(identity, stale.receipt.run_id);
+  expect(admitted.proposal.effective_system_prompt).toContain('NOTE NEW');
+  expect(admitted.proposal.effective_system_prompt).not.toContain('NOTE LATEST');
   const current = (await f.api.snapshot(identity)).context.checkpoint!;
-  expect(current.proposal.effective_system_prompt).toContain('NOTE LATEST');
+  expect(current.proposal.effective_system_prompt).toContain('NOTE NEW');
+  expect(current.proposal.effective_system_prompt).not.toContain('NOTE LATEST');
   const fresh = await f.api.compact({ ...identity, key: 'fresh-live-summary', throughId: before.historyPage.head!, expectedRevision: current.revision, model });
   await expect.poll(async () => (await f.api.snapshot(identity)).context.jobs.find(job => job.job.receipt.run_id === fresh.receipt.run_id)?.run.state).toBe('completed');
   const published = await f.api.publishContext(identity, fresh.receipt.run_id);
@@ -143,11 +149,12 @@ it('live profile/note edits apply at the next request boundary, preserve the in-
   expect(reset.proposal.through_id).toBe(published.proposal.through_id);
   expect(reset.proposal.effective_system_prompt).toContain('PINNED AGENT SOURCE');
   expect(reset.proposal.effective_system_prompt).not.toContain('PROFILE NEW');
-  expect(reset.proposal.effective_system_prompt).not.toContain('NOTE LATEST');
+  expect(reset.proposal.effective_system_prompt).toContain('NOTE LATEST');
+  expect(reset.proposal.memory_checkpoint).toBe(published.proposal.memory_checkpoint);
   const next = await f.api.submit({ ...identity, key: 'after-live-reset', expectedHead: before.historyPage.head, text: 'continue after reset', model });
   await expect.poll(async () => (await f.api.run(next.run_id)).state).toBe('completed');
   const last = f.requests.at(-1)!.body;
-  expect(system(last)).not.toContain('PROFILE NEW'); expect(system(last)).not.toContain('NOTE LATEST');
+  expect(system(last)).not.toContain('PROFILE NEW'); expect(system(last)).toContain('NOTE LATEST');
   expect(JSON.stringify(last)).toContain('LIVE CONTINUATION SUMMARY');
   expect((await f.api.snapshot(identity)).history.slice(0, before.history.length)).toEqual(before.history);
   expect(f.launchErrors).toEqual([]);

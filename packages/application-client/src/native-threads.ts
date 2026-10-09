@@ -36,7 +36,7 @@ export interface NativeThreadHistoryPage {
 }
 /** Durable context records projected by the Host; original conversation history stays intact. */
 export interface NativeContextJob {
-  request: { key: string; branch_id: string; through_id: string; expected_revision: number;
+  request: { personalization?: NativeContextPersonalization; key: string; branch_id: string; through_id: string; expected_revision: number;
     effective_system_prompt: string; instruction_sources: string[]; memory_checkpoint: string | null };
   receipt: NativeReceipt;
 }

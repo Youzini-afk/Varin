@@ -129,11 +129,15 @@ export class NativeThreadAdapter {
     const [checkpoint, jobs] = await Promise.all([this.runtime.context(input.branchId), this.runtime.contextJobs(input.branchId)]);
     // An uncertain create retry keeps its original prompt/memory recipe even after publication.
     const previous = jobs.find(job => job.request.key === key);
-    const recipe = previous?.request ?? checkpoint?.proposal;
+    const candidate = !previous && checkpoint && this.prepareContext?.compact ? await this.prepareContext.compact(checkpoint) : undefined;
+    const recipe = previous?.request ?? (candidate ? { effective_system_prompt: candidate.effectiveSystemPrompt,
+      instruction_sources: candidate.instructionSources, memory_checkpoint: candidate.memoryCheckpoint } : checkpoint?.proposal);
+    const personalization = previous?.request.personalization ?? candidate?.personalization ?? checkpoint?.personalization;
     const model = await this.models.resolveModel(input.model);
     const job = await this.runtime.createContextJob({ key, branchId: input.branchId, throughId: input.throughId,
       expectedRevision: input.expectedRevision, effectiveSystemPrompt: recipe?.effective_system_prompt ?? '',
       instructionSources: recipe?.instruction_sources ?? [], memoryCheckpoint: recipe?.memory_checkpoint ?? null,
+      ...(personalization ? { personalization } : {}),
       configuration: model.configuration, credentialScope: await model.credentialOwner.scope() });
     const run = await this.runtime.run(job.receipt.run_id);
     if (['accepted', 'preparing', 'runnable'].includes(run.state)) {
@@ -156,6 +160,9 @@ export class NativeThreadAdapter {
 
   async publishContext(identity: NativeThreadIdentity, runId: string) {
     await this.requireContextJob(identity, runId);
+    // Explicit configuration changes are checked against the candidate even when their
+    // notification refresh has not run yet. Ordinary notes do not advance this CAS.
+    await this.refreshContext(identity);
     return this.runtime.publishContextJob(runId);
   }
 
@@ -205,7 +212,7 @@ export class NativeThreadAdapter {
           };
         }
       }
-      initialContext = await this.prepareContext(input, source);
+      initialContext = await this.prepareContext.main(input, source);
     }
     // The same Rust transaction accepts input, initial context and source/credential/tool selection.
     const receipt = await this.runtime.submit({ key: input.key, threadId: input.threadId, branchId: input.branchId,

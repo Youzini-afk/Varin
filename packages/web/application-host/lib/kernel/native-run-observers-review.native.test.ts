@@ -21,7 +21,7 @@ const poll = (fn: () => unknown) => expect.poll(fn, { timeout: 10_000 });
 const serviceId = 'varin.run.activity';
 const key = (id = 'example.run-activity') => `${id}:host:${serviceId}@1`;
 const subscription = (thread = 'thread', id = 'example.run-activity', project: string | null = null) => JSON.stringify([`${serviceId}@1`, key(id), thread, project]);
-const context = (projectId: string) => ({effectiveSystemPrompt:'private prompt',instructionSources:[],memoryCheckpoint:null,personalization:{revision:1,sessionId:'thread',projectId,originalSections:[],instructionSources:[]}});
+const context = (projectId: string) => ({effectiveSystemPrompt:'private prompt',instructionSources:[],memoryCheckpoint:null,personalization:{mode:'agent',threadRole:'main',memorySnapshot:{revision:0,memories:[]},configurationDigest:'review-profile-v1',revision:1,sessionId:'thread',projectId,originalSections:[],instructionSources:[]}});
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-observer-review-'));
   let child!: ChildProcessWithoutNullStreams;
@@ -245,7 +245,7 @@ it('queued NextRun pins scope at enqueue rather than promotion or later branch c
   const head = (await f.runtime.thread('thread')).branches[0]!.head;
   const activeA = await f.runtime.submit({key:'first-context',threadId:'thread',branchId:'thread-branch',expectedHead:head,input:{text:'first A context'},configuration:{},initialContext:context('project-a')});
   const queuedA = await f.runtime.enqueue({key:'queued-a',threadId:'thread',branchId:'thread-branch',mode:'next_run',input:{text:'queued A'}});
-  await f.runtime.refreshContext({branchId:'thread-branch',expectedRevision:1,context:{...context('project-a'),personalization:{...context('project-a').personalization,revision:2},effectiveSystemPrompt:'refreshed execution prompt'}});
+  await f.runtime.refreshContext({branchId:'thread-branch',expectedRevision:1,context:{...context('project-a'),personalization:{...context('project-a').personalization,configurationDigest:'review-profile-v2',revision:2},effectiveSystemPrompt:'refreshed execution prompt'}});
   await f.runtime.cancelRun(activeA.run_id); await f.runtime.cancelRun(queuedA.run_id);
   const subjects = async (project: string | null) => new Set((await f.runtime.observerEvents(subscription('thread','example.run-activity',project),'thread',64)).map(fact => fact.subject));
   expect(await subjects(null)).toEqual(new Set([first.run_id,queuedNull.run_id]));

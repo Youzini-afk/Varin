@@ -443,3 +443,64 @@ Host credential/settings、Composition 与原生历史，唯一模拟外部对�
 
 这些结果不包含全仓测试、全部恢复矩阵、真实付费供应商、跨平台构建或大语料性能/质量验收。
 原 Pi broker 入口的完整持久结算迁移、模型 rerank、固定/远端来源及完整两份设计的其他里程碑仍另行推进。
+
+## 2026-10-09 普通 notes 原生闭环（独立 B 线首出口）
+
+实现沿既有 `agent.personalization` typed record 唯一 writer。`native_memory` 的 read/search
+保持只读；save/delete 在执行前持久化真实 Run/request/call 对应的 intent，以相同 origin 查询原
+`storage.record.put` 的原子 receipt。丢回执的核对不会再次修改 notes，UI 与工具写入共用 CAS。
+已有合法 `memories/prompts/nextId` 文档继续读取；新增可省略的 latest-revision/last-mutation 元数据，
+不迁移、不重置。历史 receipt 复用原 operation 事实，不在每次文档中复制 receipt 列表。
+
+可信受理 scope 显式包含 mode/threadRole/projectId，sessionId 必须为本 Thread。通用 preparer
+不默认为 main，主入口薄适配显式受理 main。Bot 普通 notes 隔离；child 初始上下文使用自己的 scope
+与固定来源，工具能力由显式 profile 单独授权。实际 Host UI resolver 查持久 Thread/checkpoint，
+错误不回退为 Pi main；原生会话入口复用既有 notes 编辑器、CRUD 和 stale revision 提示。
+
+普通 note 编辑不改变系统 memory snapshot。独立 `ContextPreparation` 在普通模型和 policy model job
+冻结新请求前同步同源 facts；已冻结/派发请求不重编。每个 RequestSnapshot 保存完整尾部正文和稳定
+fact identity，selected/sent/committed 分开记录，跨请求保留到成功压缩覆盖。工具 JSON 仅在匹配
+真实 native-memory Operation、origin、调用和原 receipt 时去重，不信任外部同名 JSON。
+
+显式压缩成功才原子发布 summary、memory snapshot 与 effective system；新 note/原会话尾部保留，
+失败、取消、profile CAS 或分支变化保留旧资产。删除最后一条 note 可清空对应新 snapshot。
+Context domain 3 在可写 SQLite/WAL/epoch 前只读预检；旧、缺失、畸形内部格式不静默重建。
+
+独立审查先后发现并修复了三个真实边界缺陷：`operation.get` 将真正不存在的 operation 与无归属实体
+混为授权错误、阻断首次写入；context 预检误接受部分 UNIQUE 索引；ContextPreparation 的取消错误
+裸传播导致 Run 进入 waiting。现在 missing 可读 null，foreign/orphan 拒绝，授权与读取在唯一 Storage
+worker 同步完成；本域 TEXT PK/UNIQUE 核非 partial、准确 key、BINARY/ASC 与 FK 动作，坏资产只读拒绝。
+ASC 是格式合同，不表示 DESC 削弱 uniqueness。取消走正常 Cancelled 结算；其他准备失败同事务写
+Failed 与安全的 `context.preparation_failed` 原因，原始 Host 错误不进入公开事件，未受理的新模型
+请求/ModelJob 不被伪造成已执行。晚回执再核 token/Run/epoch，不能恢复 Run 或替换 checkpoint。
+
+2026-10-09 最终 v3 独立 Linux x64 验收使用 debug profile、正式 build identity `0.9.24`，内核 SHA-256：
+`0ecabc887c4674b0317feabf6f675c4b1f4d2295d62778534417a603cddc5ddb`。
+
+- 原生七文件 **92/92**：memory delivery 16、owner/schema 7、planning 31、retrieval 5、observers 31、
+  initial-context 1、live-personalization 1。使用真实 Kernel IPC、Catalog、Host owner、HTTP 路由和模型请求；
+  仅外部模型为 loopback deterministic provider。原始回执丢失后重开不重写、精确 CAS、工具读写 effect、
+  compaction/profile/尾部竞态、Bot 与可信 child scope、fork/GC/原请求保全、三阶段 delivery 均覆盖。
+- Host context callback 人为挂起未释放期间，status 与取消到 Cancelled 的实测样本为 **5.32 ms**，
+  严格断言小于 1000 ms，零模型派发；晚回执不复活，新 Run 可继续。普通/planning 的 reject/throw
+  四项证明安全失败原因与 Failed 在关闭重开后仍存在，checkpoint 不变且未伪造模型 operation。
+- 本域 partial UNIQUE、复合 NOCASE、DESC 和 PK NOCASE 四类不兼容 schema 在任何 epoch 推进前拒绝；
+  DB bytes、epoch 与原 history 保持，合法新库正常重开。storage missing/foreign/orphan 与并发同 ID
+  所有权反例均通过。
+- Rust **19/19**：memory delivery 3、context job 4、execution 12。UI **5/5**：复用真实 notes 编辑器与
+  routes、可信 project/currentThread、stale draft CAS、删除、切身份清 draft、Bot 隐藏。
+- 生产/测试/UI TypeScript、协议生成检查、生产 Host bundle、依赖隔离与文档检查通过。
+  变更生产文件全量 targeted lint 仍有唯一原 HEAD 的 `refreshNativePersonalization` prefer-const；
+  本次新增诊断已修，不写为全 lint 通过。新增/相关无旧诊断的测试文件 lint 通过；
+  observer 测试原有 6 条 no-explicit-any、planning 原有 1 条 prefer-const 单独保留，
+  最终静态组合命令因这些既有 lint 返回非零，不能写成整个组合命令通过。
+
+v3 build、native 和 Rust 验收绑定同一完整源码 manifest
+`b216a594197d0cc8067418b1337f2814e6cc852268ae124683d920b4e11a2176`；最后仅补本文验收记录。
+构建及运行命令、source 前后身份、独立 binary 和生成目录 hash 由本批 evidence receipts 保存。
+初轮失败未记作通过：除上述生产缺陷外，review fixture 的不合法 recordType、read-graph node/call ID
+不一致、将内部 context job 走普通 Run HTTP 入口、手造无效 basis、旧 1 秒 polling 均已独立纠正；
+原行为断言保留，polling 改读真实 durable events，未扩大原用例 deadline。
+
+本节不包括全仓测试、完整 MCP 套件、极端并发或性能基准、真实付费供应商和跨平台发布。
+自动 budget 压缩、完整 context 设计、全部恢复矩阵、A/B 最终综合验收和 Pi 退出仍另行交付。

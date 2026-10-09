@@ -1,3 +1,4 @@
+import { NativeThreadMemory } from './NativeThreadMemory';
 import { NativeThreadPermission } from './NativeThreadPermission';
 import { NativeThreadQuestion } from './NativeThreadQuestion';
 import { NativeThreadSourcePicker } from './NativeThreadSourcePicker';
@@ -161,6 +162,7 @@ export function NativeThreadConversation({ api, identity, onBranchCreated, initi
         <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelInput(input.id, input.revision))}>Cancel queued input</Button>
       </div>)}
     </div>
+    {snapshot?.context.checkpoint?.personalization && <NativeThreadMemory key={identity.threadId} identity={identity} basis={snapshot.context.checkpoint.personalization} />}
     <NativeThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={initialWorkspacePath}
       active={active || pending} launch={snapshot?.launch ?? null} prepared={preparedSource} onPrepared={setPreparedSource} onPreparingChange={setPreparingSource} />
     {snapshot && <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">

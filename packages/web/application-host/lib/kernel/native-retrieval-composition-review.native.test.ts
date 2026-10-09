@@ -1,3 +1,7 @@
+import { createAgentPersonalization } from '../memory/agent-personalization.js';
+import { createNativeThreadContext } from './native-thread-context.js';
+import { createNativeMemoryOwner } from './native-memory-owner.js';
+import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from './storage-adapter.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -162,16 +166,20 @@ it('retrieval routing uses the accepted Run project even when the visible projec
     expectedRevision: (await extensions.routing.read()).document.revision,
     rule: { allowFallback: false, providerKey: providerKey!, scope: { projectId: projectId! }, serviceId: 'varin.retrieval.plan', version: 1 },
   });
+  const personalization = createAgentPersonalization({ client: f.kernel, context: async () => ({ bot: false, threadRole: 'main', projectId: 'accepted-project' }) });
+  const storage = new KernelStorageAdapter({ client: f.kernel, hostId: 'process-consumer', storageRoot: f.documents.root,
+    resolveWorkspaceRoot: async id => (await f.documents.authority.inspectWorkspace(id)).root });
+  cleanups.push(() => storage.dispose());
+  const prepareContext = createNativeThreadContext({ personalization, workingStates: createKernelWorkspaceWorkingStateAccess(storage), projectForWorkspace: async () => 'accepted-project' });
+  f.kernel.setNativeMemoryOwner(createNativeMemoryOwner({ personalization, prepareContext }));
   const observedProjects: Array<string | null> = [];
   let visibleProject = 'accepted-project';
   f.kernel.setNativeRetrievalOwner(createNativeRetrievalOwner({ documents: f.documents.authority, kernel: f.kernel, validateSource: f.liveSources.validate,
     preparePipeline: async (query, signal) => { observedProjects.push(query.projectId); return composition.prepare({ threadId: query.threadId,
       ...(query.projectId ? { projectId: query.projectId } : {}), workspaceId: query.liveRoot.canonicalRoot }, signal); } }));
-  const run = await f.admit('frozen-project', ['code_retrieval'], [''], ['storage.read', 'storage.write'], {
-    effectiveSystemPrompt: 'Project identity fixture', instructionSources: ['review:project-source'], memoryCheckpoint: null,
-    personalization: { revision: 0, sessionId: 'frozen-project-thread', projectId: visibleProject,
-      originalSections: [{ name: 'preamble', content: 'Project identity fixture' }], instructionSources: ['review:project-source'] },
-  });
+  const initialContext = await prepareContext({ runtime: 'nativeThread', threadId: 'frozen-project-thread', branchId: 'frozen-project-branch' }, null,
+    { mode: 'agent', threadRole: 'main', projectId: visibleProject });
+  const run = await f.admit('frozen-project', ['code_retrieval'], [''], ['storage.read', 'storage.write'], initialContext);
   await run.start(); await expect.poll(() => requests, { timeout: 10_000 }).toBe(1);
   visibleProject = 'visible-project';
   responseTool(heldResponse, 'native_code_retrieval', { question: 'retrievalNeedle' });

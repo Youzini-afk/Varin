@@ -382,6 +382,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let admission_epoch = Arc::new(Mutex::new(None::<String>));
     let credential_bridge = crate::credential_bridge::CredentialBridge::new(response_tx.clone());
     let mcp_bridge = crate::native_mcp::McpBridge::new(response_tx.clone());
+    let memory_bridge = crate::native_memory_bridge::MemoryBridge::new(response_tx.clone());
     let language_bridge = crate::native_language::LanguageBridge::new(response_tx.clone());
     let retrieval_bridge = crate::native_retrieval::RetrievalBridge::new(response_tx.clone());
     let policy_bridge = crate::native_policy::PolicyBridge::new(response_tx.clone());
@@ -433,7 +434,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|_| KernelError::Storage("resource authority stopped before receipt replay".into()))
     }, process_controls.clone());
     let native_control = crate::native_runtime::NativeControl::default();
-    let native_worker = crate::native_runtime::spawn(native_rx, native_tx.clone(), native_control.clone(), resources, credential_bridge.clone(), mcp_bridge.clone(), language_bridge.clone(), retrieval_bridge.clone(), policy_bridge.clone(), response_tx.clone(), move |id| {
+    let native_worker = crate::native_runtime::spawn(native_rx, native_tx.clone(), native_control.clone(), resources, credential_bridge.clone(), mcp_bridge.clone(), language_bridge.clone(), memory_bridge.clone(), retrieval_bridge.clone(), policy_bridge.clone(), response_tx.clone(), move |id| {
         if let Ok(mut active) = native_cancellations.lock() { active.remove(id); }
     });
     let worker_native_tx = native_tx.clone();
@@ -443,6 +444,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let worker_credentials = credential_bridge.clone();
     let worker_mcp = mcp_bridge.clone();
     let worker_language = language_bridge.clone();
+    let worker_memory = memory_bridge.clone();
     let worker_retrieval = retrieval_bridge.clone();
     let worker_policy = policy_bridge.clone();
     let worker_response_tx = response_tx.clone();
@@ -544,6 +546,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let _ = worker_credentials.initialize(epoch);
                     worker_mcp.initialize(epoch);
                     worker_language.initialize(epoch);
+                    worker_memory.initialize(epoch);
                     worker_retrieval.initialize(epoch);
                     worker_policy.initialize(epoch);
                     if let Some(storage) = kernel.storage.as_mut() { storage.set_process_terminal_sender(process_terminals.clone()); storage.set_process_controls(process_controls.clone()); storage.set_process_subscriptions(storage_subscriptions.clone()); }
@@ -645,6 +648,10 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         if request.get("kind").and_then(Value::as_str) == Some("retrieval-response") {
             retrieval_bridge.receive(request);
+            continue;
+        }
+        if request.get("kind").and_then(Value::as_str) == Some("memory-response") {
+            memory_bridge.receive(request);
             continue;
         }
         if request.get("kind").and_then(Value::as_str) == Some("language-response") {
@@ -762,6 +769,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     credential_bridge.close();
     mcp_bridge.close();
     language_bridge.close();
+    memory_bridge.close();
     retrieval_bridge.close();
     policy_bridge.close();
     subscriptions.shutdown();

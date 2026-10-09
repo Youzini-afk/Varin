@@ -244,6 +244,7 @@ impl Catalog {
             "INSERT INTO operations(id,run_id,body) VALUES(?1,?2,?3)",
             params![action_id, run_id, encode(&op)?],
         )?;
+        super::memory::record_deliveries(&tx, snapshot, &run.thread_id, DeliveryState::Selected)?;
         event(
             &tx,
             action_id,
@@ -271,6 +272,7 @@ impl Catalog {
                 "planning dispatch no longer allowed".into(),
             ));
         }
+        let snapshot: RequestSnapshot = serde_json::from_value(self.content.load(&result.request_ref)?)?;
         result.dispatch = PolicyModelDispatch::Dispatched;
         op.result = Some(serde_json::to_value(result)?);
         op.phase = OperationPhase::Running;
@@ -280,6 +282,7 @@ impl Catalog {
             return Err(RuntimeError::InputPending);
         }
         put(&tx, "operations", action, &op)?;
+        super::memory::record_deliveries(&tx, &snapshot, &run.thread_id, DeliveryState::Sent)?;
         event(
             &tx,
             action,
@@ -298,7 +301,8 @@ impl Catalog {
         output: &PolicyModelOutput,
         receipt: Option<&PolicyModelReceipt>,
     ) -> Result<()> {
-        fence(&self.run(run_id)?, epoch)?;
+        let run = self.run(run_id)?;
+        fence(&run, epoch)?;
         let mut op: Operation = record(&self.db, "operations", action)?;
         if model_intent(&op)?.is_none() || op.run_id != run_id || op.epoch != epoch {
             return Err(RuntimeError::Conflict("planning owner changed".into()));
@@ -307,6 +311,7 @@ impl Catalog {
         if result.receipt.is_some() {
             return Err(RuntimeError::Conflict("planning already settled".into()));
         }
+        let snapshot: RequestSnapshot = serde_json::from_value(self.content.load(&result.request_ref)?)?;
         result.original_ref = Some(self.content.save(&serde_json::to_value(output)?)?);
         if let Some(receipt) = receipt {
             if receipt.usage != output.usage
@@ -364,6 +369,7 @@ impl Catalog {
         op.revision += 1;
         let tx = self.db.transaction()?;
         put(&tx, "operations", action, &op)?;
+        if receipt.is_some_and(|receipt| receipt.usable) { super::memory::record_deliveries(&tx, &snapshot, &run.thread_id, DeliveryState::Committed)?; }
         event(
             &tx,
             action,

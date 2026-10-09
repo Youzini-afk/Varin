@@ -224,6 +224,7 @@ fn engine(
     progress: ProgressSink,
 ) -> ExecutionEngine<Mutex<Catalog>, Provider, Tools, DefaultAgentPolicy> {
     ExecutionEngine {
+        context_preparation: Arc::new(NoopContextPreparation),
         persistence: db,
         provider: Arc::new(Provider {
             calls: AtomicUsize::new(0),
@@ -352,6 +353,7 @@ fn supervisor_control_reaches_provider_while_catalog_is_locked() {
         .start(
             &run_id,
             crate::supervisor::RunStart {
+                context_preparation: Arc::new(NoopContextPreparation),
                 binding: input.binding,
                 policy_state: Value::Null,
                 provider: Arc::new(WaitingProvider {
@@ -435,6 +437,7 @@ fn worker_commit_conflict_cannot_leave_a_workerless_run_generating() {
         .start(
             &run_id,
             crate::supervisor::RunStart {
+                context_preparation: Arc::new(NoopContextPreparation),
                 binding: input.binding,
                 policy_state: Value::Null,
                 provider: Arc::new(ConcurrentInput {
@@ -607,6 +610,7 @@ fn independent_fast_tool_finishes_while_another_tool_is_still_running() {
     let (release_tx, release_rx) = std::sync::mpsc::channel();
     let (fast_tx, fast_rx) = std::sync::mpsc::channel();
     let engine = ExecutionEngine {
+        context_preparation: Arc::new(NoopContextPreparation),
         persistence: db,
         provider: Arc::new(BatchProvider(AtomicUsize::new(0))),
         tools: Arc::new(IndependentTools {
@@ -757,6 +761,7 @@ fn cancelling_one_queued_operation_does_not_fail_its_run_or_execute_it() {
         .start(
             &input.run_id,
             crate::supervisor::RunStart {
+                context_preparation: Arc::new(NoopContextPreparation),
                 binding: input.binding,
                 policy_state: Value::Null,
                 provider: Arc::new(TwoWrites(AtomicUsize::new(0))),
@@ -900,6 +905,7 @@ fn input_arriving_between_completion_decision_and_commit_is_not_lost() {
         .start(
             &run_id,
             crate::supervisor::RunStart {
+                context_preparation: Arc::new(NoopContextPreparation),
                 binding: input.binding,
                 policy_state: Value::Null,
                 provider: provider.clone(),
@@ -1010,6 +1016,7 @@ fn interrupt_during_request_serialization_prevents_stale_generation() {
         .start(
             &run_id,
             crate::supervisor::RunStart {
+                context_preparation: Arc::new(NoopContextPreparation),
                 binding: input.binding,
                 policy_state: Value::Null,
                 provider: provider.clone(),
@@ -1283,6 +1290,7 @@ fn active_context_compiles_summary_and_tail_without_destroying_original_history(
     drop(catalog);
     let (progress, _receiver) = ProgressSink::channel(1);
     let engine = ExecutionEngine {
+        context_preparation: Arc::new(NoopContextPreparation),
         persistence: db.clone(),
         provider: Arc::new(ContextProvider),
         tools: Arc::new(Tools::default()),

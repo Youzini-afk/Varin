@@ -62,14 +62,69 @@ scope isolation and stale edits; Pi `session-e2e.test.ts` exercises actual outgo
 with a faux provider; UI `AgentSettings.behavior.test.tsx` covers editing and scope selection.
 
 
-Native conversations now read this same catalog through `kernel/native-thread-context.ts` at first
-input admission. Rust atomically stores the resulting system snapshot alongside the native input;
-project scope comes from Host-admitted workspace membership and session scope is the native thread ID.
-The checkpoint carries the typed original-section and scope basis through subsequent Runs, explicit
-compaction and conversation forks. Committed note/profile edits trigger Host refresh through this
-same catalog; later admission and resume also await refresh. Native refresh CAS replaces only the
-system snapshot and its provenance, preserving any summary and original tail, and never rewrites
-prepared/dispatched ModelStep requests. Removing notes and resetting profiles re-render from the
-original sections. Failed refreshes are retried at later admission rather than treated as delivered.
-The Pi tail-message mutation/receipt and cache-prefix behavior above remains Pi-specific. Native
-memory tools are not implied, and no native memory catalog is added.
+Native conversations use this same catalog through `kernel/native-thread-context.ts`. A trusted
+Host admission supplies mode, role and nullable project; the current-thread scope is the actual
+native Thread ID. The generic preparer requires that scope explicitly. Its `main` adapter alone
+resolves a main conversation's project from the admitted workspace. Child contexts do not inherit
+parent session notes or a parent's assembled system prompt. Bot contexts exclude ordinary notes
+and prompt profiles.
+
+`native_memory` exposes read/search and revision-checked save/delete. Native calls carry their real
+Run, request/call-derived operation and admitted scopes through the private epoch-fenced memory
+bridge. The existing personalization typed record remains the only note writer. The current document
+adds only per-note latest revision metadata and its last mutation receipt. Historical receipts reuse
+the existing atomic `storage.record.put` operation result: a lost return is reconciled using the
+same stable origin and exact intent, never by repeating the mutation. `runtime.memory.reconcile`
+queries those original receipts on an independent worker and settles the original native operation.
+Missing or unknown outcomes stay unresolved. Existing valid notes need no migration or format reset.
+UI stale edits and native mutations share the same record CAS. Scope moves retain both deletion of
+the old scope and addition in the new scope.
+
+The native conversation exposes the existing notes editor with its admitted global, project and
+current-Thread scopes. It reuses the ordinary notes routes, editor and CAS rather than another store.
+The Host resolves native session scopes from the persisted Thread and context checkpoints; a
+native namespace only selects that lookup and does not grant a role. Missing, inconsistent or
+unavailable native ownership fails closed. The legacy Pi resolver is retained only for Pi identities.
+Bot contexts have no ordinary-notes entry, and the Host independently rejects their session writes.
+
+An immutable context checkpoint now separates the frozen memory snapshot from current explicit
+prompt configuration. Ordinary note edits are immediately readable but do not rewrite the system
+memory prefix. Explicit profile changes re-render from the original sections plus the old memory
+snapshot at a safe boundary. A dedicated `ContextPreparation` runs outside Catalog locks before a
+new ordinary or policy-planning request freezes; an already prepared request is never rewritten.
+Cancellation exits that boundary through the normal durable Cancelled terminal path without waiting
+for the Host callback. Other preparation failures atomically fail the Run with a
+`context.preparation_failed` fact containing a stable code and safe message, not the raw Host error.
+No new model request/step or planning operation is fabricated for a pre-admission failure.
+
+The native Catalog stores a read-only, scoped memory projection, not a CRUD copy. Newer per-note
+facts are selected once per frozen request with stable identities and real EnvironmentFact provenance.
+Their complete bodies remain in immutable RequestSnapshots. They are not additional raw-history
+messages. Subsequent requests retain these facts until a successful compaction snapshot covers them;
+recording delivery must not make an old snapshot forget a newer note. Native tool receipts suppress
+the corresponding fact only after matching the real confirmed native-memory Operation, original
+request/call, origin and exact receipt body. Arbitrary tool/MCP JSON is not receipt authority.
+
+Selected, sent and successfully completed delivery records reuse real Catalog fact-event cursors.
+Failed or cancelled requests never mark a fact committed. Planning requests use their real auxiliary
+request/operation identity, quote the context as data and keep their own delivery records. A fork
+copies the scoped projection's known-note identities but does not copy another branch's delivery ACKs.
+
+Explicit compaction freezes a candidate memory snapshot and prompt configuration with its ancestor
+range. Successful publication atomically replaces summary, snapshot and effective system. Newer
+notes and original conversation tail survive. Failed/cancelled candidates leave the old checkpoint;
+profile CAS rejects stale candidates, and deleting the last note clears its memory sections in the
+next successful snapshot. This is explicit compaction, not automatic budget compression.
+
+Context domain 3 is checked through read-only SQLite before any writable open/recovery. Unsupported
+or malformed native context formats preserve their assets. Declared TEXT primary keys and revision
+uniqueness require complete non-partial BINARY/ASC indexes; foreign-key targets/actions are checked.
+ASC is the canonical format requirement, not a claim that DESC weakens uniqueness. No migration or silent reconstruction is
+provided. Per-note tombstones and original typed-record operation receipts are retained while old
+conversation checkpoints or unresolved effects may reference them. No automatic receipt/tombstone
+GC is claimed; the memory owner does not release those operation records prematurely.
+
+Native implementation verification is owned by the independent memory delivery review suites;
+implementation/build status and acceptance evidence are recorded in the implementation plan after
+source and binary freeze. These contracts do not imply that the complete native context design or
+Pi cutover is finished.

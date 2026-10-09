@@ -23,6 +23,7 @@ pub(crate) struct NativeBranchForkParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeContextJobCreateParams {
+    pub(crate) personalization: Option<NativeContextPersonalization>,
     pub(crate) key: String,
     pub(crate) branch_id: String,
     pub(crate) through_id: String,
@@ -1203,6 +1204,21 @@ pub(crate) struct KernelComputeGrammarParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeContextPersonalization {
+    pub(crate) memory_snapshot: NativeMemorySnapshot,
+    pub(crate) configuration_digest: String,
+    pub(crate) mode: String,
+    pub(crate) thread_role: String,
+    pub(crate) context_composition: Option<NativeContextComposition>,
+    pub(crate) revision: i64,
+    pub(crate) session_id: String,
+    pub(crate) project_id: RequiredNullable<String>,
+    pub(crate) original_sections: Vec<NativeSystemSection>,
+    pub(crate) instruction_sources: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeCredentialScope {
     pub(crate) reference: String,
     pub(crate) authority: String,
@@ -1414,13 +1430,26 @@ pub(crate) struct KernelComputeFile {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeContextPersonalization {
-    pub(crate) context_composition: Option<NativeContextComposition>,
+pub(crate) struct NativeMemorySnapshot {
     pub(crate) revision: i64,
-    pub(crate) session_id: String,
-    pub(crate) project_id: RequiredNullable<String>,
-    pub(crate) original_sections: Vec<NativeSystemSection>,
-    pub(crate) instruction_sources: Vec<String>,
+    pub(crate) memories: Vec<Value>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeContextComposition {
+    pub(crate) provider_id: String,
+    pub(crate) content_version: String,
+    pub(crate) scope_id: String,
+    pub(crate) selection_revision: i64,
+    pub(crate) sections: Vec<NativeContextFragment>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeSystemSection {
+    pub(crate) name: String,
+    pub(crate) content: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1483,18 +1512,9 @@ pub(crate) struct KernelReviewFinding {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeContextComposition {
-    pub(crate) provider_id: String,
-    pub(crate) content_version: String,
-    pub(crate) scope_id: String,
-    pub(crate) selection_revision: i64,
-    pub(crate) sections: Vec<NativeContextFragment>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeSystemSection {
+pub(crate) struct NativeContextFragment {
     pub(crate) name: String,
+    pub(crate) kind: String,
     pub(crate) content: String,
 }
 
@@ -1526,14 +1546,6 @@ pub(crate) struct KernelVerificationInputIdentity {
     pub(crate) reason: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeContextFragment {
-    pub(crate) name: String,
-    pub(crate) kind: String,
-    pub(crate) content: String,
-}
-
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
         "runtime.branch.fork" => serde_json::from_value::<NativeBranchForkParams>(params.clone())
@@ -1561,6 +1573,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "runtime.memory.reconcile" => serde_json::from_value::<NativeRunParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.history.page" => serde_json::from_value::<NativeHistoryPageParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

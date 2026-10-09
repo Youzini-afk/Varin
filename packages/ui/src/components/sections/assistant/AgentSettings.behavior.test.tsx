@@ -5,6 +5,8 @@ import { beforeEach, afterEach, test, expect, vi } from 'vitest';
 import type { AgentPersonalizationCatalog, AgentSystemPromptSnapshot } from '@varin/protocol';
 import { AgentPromptPage } from './AgentPromptPage';
 import { AgentMemoryPage } from './AgentMemoryPage';
+import { NativeThreadMemory } from '../../native-thread/NativeThreadMemory';
+import type { NativeContextPersonalization } from '@varin/protocol';
 
 const fixture = vi.hoisted(() => ({ catalog: {} as AgentPersonalizationCatalog, snapshot: {} as AgentSystemPromptSnapshot,
   update: vi.fn(async (..._args: unknown[]) => true), load: vi.fn(), project: { id: 'project-a', path: '/repo', label: 'Project A' } }));
@@ -81,4 +83,50 @@ test('previews the conversation memory checkpoint while newly saved notes remain
   await act(async () => root.render(<AgentPromptPage />));
   expect(container.querySelector('pre')?.textContent).toContain('Checkpoint note');
   expect(container.querySelector('pre')?.textContent).not.toContain('Newly saved note');
+});
+
+const nativeIdentity = { runtime: 'nativeThread' as const, threadId: 'nativeThread:child', branchId: 'nativeBranch:child' };
+const nativeBasis: NativeContextPersonalization = {
+  mode: 'agent', threadRole: 'worker', sessionId: nativeIdentity.threadId, projectId: 'admitted-project', revision: 0,
+  configurationDigest: 'review-profile', memorySnapshot: { revision: 0, memories: [] }, originalSections: [], instructionSources: [],
+};
+const chooseNativeScope = (value: string) => act(async () => {
+  const select = container.querySelector('select')!;
+  Object.defineProperty(select, 'value', { configurable: true, value });
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+});
+
+test('native notes reuse the editor with admitted scopes and preserve the opened CAS revision', async () => {
+  fixture.catalog.memories.push(
+    { id: 3, scope: { kind: 'session', id: nativeIdentity.threadId }, content: 'Child private note', updatedAt: '' },
+    { id: 4, scope: { kind: 'project', id: 'admitted-project' }, content: 'Admitted project note', updatedAt: '' },
+  );
+  const render = () => act(async () => root.render(<NativeThreadMemory identity={nativeIdentity} basis={nativeBasis} />));
+  await render();
+  expect([...container.querySelectorAll('option')].map(option => option.value)).toEqual(['global', 'project:admitted-project', 'session:nativeThread:child']);
+  expect(container.textContent).toContain('Child private note');
+  expect(container.textContent).not.toContain('Project note');
+  await click('assistant.edit'); await type('Native draft');
+  fixture.catalog = { ...fixture.catalog, revision: 9 };
+  await render(); await click('assistant.save');
+  expect(fixture.update).toHaveBeenLastCalledWith('memory', { id: 3, scope: { kind: 'session', id: nativeIdentity.threadId }, content: 'Native draft', revision: 4 });
+  await chooseNativeScope('project:admitted-project');
+  expect(container.textContent).toContain('Admitted project note');
+  await click('assistant.delete');
+  expect(fixture.update).toHaveBeenLastCalledWith('memory/4', { revision: 9 }, 'DELETE');
+});
+
+test('native identity changes discard drafts and Bot or mismatched bases expose no notes editor', async () => {
+  await act(async () => root.render(<NativeThreadMemory identity={nativeIdentity} basis={nativeBasis} />));
+  await click('assistant.add'); await type('Old child private draft');
+  const next = { ...nativeIdentity, threadId: 'nativeThread:next', branchId: 'nativeBranch:next' };
+  await act(async () => root.render(<NativeThreadMemory identity={next} basis={{ ...nativeBasis, sessionId: next.threadId, projectId: null }} />));
+  expect(container.querySelector('textarea')).toBeNull();
+  expect([...container.querySelectorAll('option')].map(option => option.value)).toEqual(['global', 'session:nativeThread:next']);
+  await click('assistant.add'); await type('Next private note'); await click('assistant.save');
+  expect(fixture.update).toHaveBeenLastCalledWith('memory', { scope: { kind: 'session', id: next.threadId }, content: 'Next private note', revision: 4 });
+  await act(async () => root.render(<NativeThreadMemory identity={next} basis={{ ...nativeBasis, mode: 'bot', sessionId: next.threadId }} />));
+  expect(container.textContent).toBe('');
+  await act(async () => root.render(<NativeThreadMemory identity={next} basis={nativeBasis} />));
+  expect(container.textContent).toBe('');
 });
