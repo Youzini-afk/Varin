@@ -29,7 +29,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 7;
+pub(crate) const FORMAT: i64 = 8;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -110,6 +110,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
         return Err(RuntimeError::Format(0));
     }
     if version == FORMAT {
+        inputs::check_format(db)?;
         db.prepare("SELECT id,run_id,revision,status,active,body FROM model_selections")?;
         context_jobs::check_format(db)?;
         launches::check_format(db)?;
@@ -162,6 +163,9 @@ pub struct Catalog {
 }
 impl Catalog {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_resource_admission(root, std::sync::Arc::new(crate::resource_admission::ResourceAdmission::default()))
+    }
+    pub fn open_with_resource_admission(root:impl AsRef<Path>,resource_admission:std::sync::Arc<crate::resource_admission::ResourceAdmission>)->Result<Self> {
         std::fs::create_dir_all(root.as_ref())?;
         let owner = OpenOptions::new()
             .create(true)
@@ -182,7 +186,6 @@ impl Catalog {
         db.pragma_update(None, "foreign_keys", true)?;
         db.pragma_update(None, "journal_mode", "WAL")?;
         db.pragma_update(None, "synchronous", "FULL")?;
-        let resource_admission = std::sync::Arc::new(crate::resource_admission::ResourceAdmission::default());
         let content = crate::content::ContentStore::open(root.as_ref().join("content"))?;
         let epoch = initialize_metadata(&mut db, version, &content)?;
         let mut this = Self {
@@ -240,60 +243,44 @@ impl Catalog {
             .optional()?
             .ok_or_else(|| RuntimeError::NotFound(branch.into()))?)
     }
-    pub fn submit(&mut self, command: &SubmitInput) -> Result<Receipt> {
-        self.submit_with_launch(command, None)
-    }
-    pub fn submit_with_launch(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>) -> Result<Receipt> {
-        self.submit_admission(command, launch, false, false, None, None, None)
-    }
-    /// Inherit the last committed source within admission, while retaining the new model/credential selection.
-    pub fn submit_with_inherited_source(&mut self, command: &SubmitInput, launch: launches::LaunchSelection) -> Result<Receipt> {
-        if launch.source.is_some() || launch.tools.iter().any(|tool| !matches!(tool.name.as_str(), questions::QUESTION_TOOL | collaboration::STATUS_TOOL | collaboration::WAIT_TOOL | collaboration::REPORT_TOOL | "memory" | "todo")) {
-            return Err(RuntimeError::Invalid("source inheritance cannot also override source or tools".into()));
+    fn submit_admission(
+        &mut self,
+        prepared: submissions::PreparedSubmission,
+        context_job: Option<(&context_jobs::ContextJobAdmission, &[Value])>,
+    ) -> Result<Receipt> {
+        let submissions::PreparedSubmission {
+            identity: command,
+            epoch,
+            intent: input,
+            history: history_content,
+            mut launch,
+            inherit_source,
+            initial: initial_context,
+            origin,
+            _publication,
+        } = prepared;
+        if epoch != self.epoch {
+            return Err(RuntimeError::Conflict(
+                "input preparation belongs to a previous owner".into(),
+            ));
         }
-        self.submit_admission(command, Some(launch), false, true, None, None, None)
-    }
-    /// Trusted first-input context is committed with input and launch, never before admission.
-    /// Existing checkpoints (including uncertain retries) remain the frozen authority.
-    pub fn submit_with_initial_context(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>, inherit_source: bool, initial: Option<context::ContextProposal>) -> Result<Receipt> {
-        self.submit_with_context_snapshot(command, launch, inherit_source, initial, None)
-    }
-    pub fn submit_with_context_snapshot(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>, inherit_source: bool, initial: Option<context::ContextProposal>, personalization: Option<personalization::PersonalizationBasis>) -> Result<Receipt> {
-        if inherit_source && launch.as_ref().is_none_or(|selection| selection.source.is_some() || selection.tools.iter().any(|tool| !matches!(tool.name.as_str(), questions::QUESTION_TOOL | collaboration::STATUS_TOOL | collaboration::WAIT_TOOL | collaboration::REPORT_TOOL | "memory" | "todo"))) {
-            return Err(RuntimeError::Invalid("source inheritance requires an unoverridden model launch".into()));
-        }
-        if personalization.as_ref().is_some_and(|basis| basis.session_id != command.thread_id) {
-            return Err(RuntimeError::Invalid("personalization scope must identify the admitted thread".into()));
-        }
-        let staged = if let Some(proposal) = initial {
-            if proposal.branch_id != command.branch_id || proposal.through_id.is_some() || proposal.expected_revision != 0 || !proposal.summary.is_empty() {
-                return Err(RuntimeError::Invalid("initial context must be a first-input system snapshot".into()));
+        let child_operation = match &origin {
+            submissions::SubmissionOrigin::Child { operation_id, .. } => {
+                Some(operation_id.as_str())
             }
-            if self.capture_active_checkpoint(&command.branch_id)?.is_none() { Some(self.stage_context_with_personalization(proposal, personalization)?) } else { None }
-        } else { None };
-        self.submit_admission(command, launch, false, inherit_source, staged, None, None)
-    }
-    fn submit_admission(&mut self, command: &SubmitInput, mut launch: Option<launches::LaunchSelection>, create_thread: bool, inherit_source: bool, initial_context: Option<(context::ContextCheckpoint, Value)>, child_operation: Option<&str>, context_job: Option<(&context_jobs::ContextJobAdmission,&[Value])>) -> Result<Receipt> {
-        if let Some(selection)=launch.as_ref(){selection.validate()?;}
-        execution_persistence::user_input_items("admission",&command.input)?;
-        let history_content = if let Some(operation_id) = child_operation {
-            let child = self.child_task(operation_id)?;
-            self.content.save_history(&serde_json::to_value(crate::execution::ConversationItem {
-                id: format!("child-input:{operation_id}"), provenance: crate::execution::Provenance::AgentMessage { thread_id: child.parent_thread_id },
-                content: crate::execution::Content::Text { text: child.input.task }, opaque: None,
-            })?, &None)?
-        } else { self.content.save_history(&command.input, &None)? };
-        let input = if inherit_source { encode(&json!({"command":command,"launch":launch,"inherit_source":true}))? } else if let Some(selection)=launch.as_ref(){encode(&json!({"command":command,"launch":selection}))?}else{encode(command)?};
+            _ => None,
+        };
+        let create_thread = matches!(origin, submissions::SubmissionOrigin::Summary);
         let tx = self.db.transaction()?;
         let duplicate: Option<(String, String)> = tx
             .query_row(
-                "SELECT input,receipt FROM commands WHERE id=?1",
+                "SELECT intent,receipt FROM commands WHERE id=?1",
                 [&command.key],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
         if let Some((old, receipt)) = duplicate {
-            if old != input {
+            if serde_json::from_str::<Value>(&old)? != input {
                 return Err(RuntimeError::Conflict(
                     "idempotency key has different input".into(),
                 ));
@@ -301,11 +288,38 @@ impl Catalog {
             return Ok(serde_json::from_str(&receipt)?);
         }
         context_jobs::require_regular_branch(&tx, &command.branch_id)?;
-        if let Some(operation_id) = child_operation { collaboration::validate_submission(&tx, operation_id, command)?; }
+        if let Some(operation_id) = child_operation {
+            collaboration::validate_submission(&tx, operation_id, &command)?;
+        }
+        if let submissions::SubmissionOrigin::User { checkpoint }
+        | submissions::SubmissionOrigin::Child { checkpoint, .. } = &origin
+        {
+            let active: Option<String> = tx
+                .query_row(
+                    "SELECT checkpoint_id FROM active_contexts WHERE branch_id=?1",
+                    [&command.branch_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if active != *checkpoint {
+                return Err(RuntimeError::Conflict(
+                    "input context changed during preparation".into(),
+                ));
+            }
+        }
         if create_thread {
             tx.execute("INSERT INTO threads(id) VALUES(?1)", [&command.thread_id])?;
-            tx.execute("INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,NULL)", params![command.branch_id, command.thread_id])?;
-            event(&tx, &command.thread_id, 1, "thread.created", json!({"branch_id":command.branch_id}))?;
+            tx.execute(
+                "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,NULL)",
+                params![command.branch_id, command.thread_id],
+            )?;
+            event(
+                &tx,
+                &command.thread_id,
+                1,
+                "thread.created",
+                json!({"branch_id":command.branch_id}),
+            )?;
         }
         let (thread, head, active): (String, Option<String>, Option<String>) = tx.query_row(
             "SELECT thread_id,head,active_run FROM branches WHERE id=?1",
@@ -318,7 +332,7 @@ impl Catalog {
             ));
         }
         if let Some((checkpoint, reference)) = initial_context {
-            context::publish_prepared(&tx, &checkpoint, &reference)?;
+            context::publish_metadata(&tx, &checkpoint, &reference)?;
         }
         if inherit_source {
             let previous: Option<(String, String)> = tx.query_row(
@@ -329,24 +343,41 @@ impl Catalog {
                 let previous: launches::LaunchIntent = serde_json::from_str(&body)?;
                 selection.source = previous.selection.source;
                 if let Some(source) = selection.source.as_mut() {
-                    if source.mode == crate::SourceMode::Materialized && source.environment_run_id.is_none() {
+                    if source.mode == crate::SourceMode::Materialized
+                        && source.environment_run_id.is_none()
+                    {
                         source.environment_run_id = Some(previous_run);
                     }
-                    let mcp_names: std::collections::BTreeSet<String> = previous.selection.mcp_binding.as_ref()
-                        .map(|binding| binding.tools.iter().map(|tool| tool.name.clone()).collect()).unwrap_or_default();
-                    selection.tools = previous.selection.tools.into_iter().filter(|tool| !mcp_names.contains(&tool.name)).collect();
+                    let mcp_names: std::collections::BTreeSet<String> = previous
+                        .selection
+                        .mcp_binding
+                        .as_ref()
+                        .map(|binding| binding.tools.iter().map(|tool| tool.name.clone()).collect())
+                        .unwrap_or_default();
+                    selection.tools = previous
+                        .selection
+                        .tools
+                        .into_iter()
+                        .filter(|tool| !mcp_names.contains(&tool.name))
+                        .collect();
                     selection.tool_schema_generation = selection.configuration_generation;
                 }
                 selection.validate()?;
             }
         }
-        let input_id = child_operation.map(|id| format!("child-input:{id}")).unwrap_or_else(id);
+        let input_id = child_operation
+            .map(|id| format!("child-input:{id}"))
+            .unwrap_or_else(id);
         let run_id = id();
         let history = HistoryItem {
             id: input_id.clone(),
             thread_id: thread.clone(),
             parent: head,
-            source: if child_operation.is_some() { HistorySource::Agent } else { HistorySource::User },
+            source: if child_operation.is_some() {
+                HistorySource::Agent
+            } else {
+                HistorySource::User
+            },
             content: history_content,
             provider: None,
         };
@@ -375,18 +406,37 @@ impl Catalog {
             "UPDATE branches SET head=?2,active_run=?3 WHERE id=?1",
             params![command.branch_id, input_id, run_id],
         )?;
-        if let Some(selection)=launch {
-            if let Some(source)=selection.source.as_ref() {
-                if let Some(origin_id)=source.environment_run_id.as_ref() {
-                    let origin_run:Run=record(&tx,"runs",origin_id)?;
-                    let origin:launches::LaunchIntent=record(&tx,"run_launches",origin_id)?;
-                    let mut same_source=source.clone();same_source.environment_run_id=None;
-                    if origin_run.thread_id!=run.thread_id || source.mode != crate::SourceMode::Materialized || origin.selection.source.as_ref()!=Some(&same_source) {return Err(RuntimeError::Conflict("environment continuation must preserve the original thread source".into()));}
+        if let Some(selection) = launch {
+            if let Some(source) = selection.source.as_ref() {
+                if let Some(origin_id) = source.environment_run_id.as_ref() {
+                    let origin_run: Run = record(&tx, "runs", origin_id)?;
+                    let origin: launches::LaunchIntent = record(&tx, "run_launches", origin_id)?;
+                    let mut same_source = source.clone();
+                    same_source.environment_run_id = None;
+                    if origin_run.thread_id != run.thread_id
+                        || source.mode != crate::SourceMode::Materialized
+                        || origin.selection.source.as_ref() != Some(&same_source)
+                    {
+                        return Err(RuntimeError::Conflict(
+                            "environment continuation must preserve the original thread source"
+                                .into(),
+                        ));
+                    }
                 }
             }
-            let intent=launches::LaunchIntent{run_id:run_id.clone(),revision:1,selection,bound_epoch:None,requires_rebind:true,preparation_failure:None};
-            tx.execute("INSERT INTO run_launches(id,body) VALUES(?1,?2)",params![run_id,encode(&intent)?])?;
-            event(&tx,&run_id,1,"run.launch_selected",Value::Null)?;
+            let intent = launches::LaunchIntent {
+                run_id: run_id.clone(),
+                revision: 1,
+                selection,
+                bound_epoch: None,
+                requires_rebind: true,
+                preparation_failure: None,
+            };
+            tx.execute(
+                "INSERT INTO run_launches(id,body) VALUES(?1,?2)",
+                params![run_id, encode(&intent)?],
+            )?;
+            event(&tx, &run_id, 1, "run.launch_selected", Value::Null)?;
         }
         let cursor = event(
             &tx,
@@ -403,11 +453,15 @@ impl Catalog {
             cursor,
         };
         tx.execute(
-            "INSERT INTO commands(id,input,receipt) VALUES(?1,?2,?3)",
-            params![command.key, input, encode(&receipt)?],
+            "INSERT INTO commands(id,intent,receipt) VALUES(?1,?2,?3)",
+            params![command.key, encode(&input)?, encode(&receipt)?],
         )?;
-        if let Some(operation_id) = child_operation { collaboration::publish_submission(&tx, operation_id, &receipt)?; }
-        if let Some((job,parts)) = context_job { job.publish(&tx, &receipt.run_id,parts)?; }
+        if let Some(operation_id) = child_operation {
+            collaboration::publish_submission(&tx, operation_id, &receipt)?;
+        }
+        if let Some((job, parts)) = context_job {
+            job.publish(&tx, &receipt.run_id, parts)?;
+        }
         tx.commit()?;
         Ok(receipt)
     }
@@ -1316,7 +1370,7 @@ CREATE INDEX branches_thread ON branches(thread_id);
 CREATE TABLE history(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES threads(id),parent TEXT REFERENCES history(id),body TEXT NOT NULL);
 CREATE TABLE runs(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),body TEXT NOT NULL,context_checkpoint_id TEXT REFERENCES context_checkpoints(id));
 CREATE INDEX runs_branch ON runs(branch_id);
-CREATE TABLE commands(id TEXT PRIMARY KEY,input TEXT NOT NULL,receipt TEXT NOT NULL);
+CREATE TABLE commands(id TEXT PRIMARY KEY,intent TEXT NOT NULL,receipt TEXT NOT NULL);
 CREATE TABLE operations(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),body TEXT NOT NULL);
 CREATE INDEX operations_run ON operations(run_id);
 CREATE TABLE model_steps(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),state TEXT NOT NULL,body TEXT NOT NULL);
@@ -1342,6 +1396,9 @@ mod execution_persistence;
 
 #[path="catalog_inputs.rs"]
 pub mod inputs;
+
+#[path="catalog_submission.rs"]
+pub mod submissions;
 
 #[path="catalog_launch.rs"]
 pub mod launches;

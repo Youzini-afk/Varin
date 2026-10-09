@@ -4,7 +4,7 @@ import net, { type Server, type Socket } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { Worker } from "node:worker_threads";
-import { KERNEL_CONTROL_METHODS, KERNEL_CONTROL_RESPONSE_METHODS, KERNEL_MAX_FRAME_BYTES, KERNEL_PROTOCOL_VERSION } from "./protocol.generated.js";
+import { KERNEL_CONTROL_METHODS, KERNEL_CONTROL_RESPONSE_METHODS, KERNEL_INPUT_ORDER_PARAMS, KERNEL_MAX_FRAME_BYTES, KERNEL_PROTOCOL_VERSION } from "./protocol.generated.js";
 
 export const CONTROL_METHODS: ReadonlySet<string> = new Set(KERNEL_CONTROL_METHODS);
 export const CONTROL_RESPONSE_METHODS: ReadonlySet<string> = new Set(KERNEL_CONTROL_RESPONSE_METHODS);
@@ -16,9 +16,13 @@ interface Outgoing {
   resolve(): void; reject(error: Error): void;
 }
 interface Incoming { identity: Envelope; length?: number; received: number; sequence: number; stopping: boolean; abortSequence?: number }
-const identity = (value: Envelope): Envelope => Object.fromEntries(
-  ["v", "kind", "id", "method", "epoch", "grantId", "kernelEpoch"].filter(key => value[key] !== undefined).map(key => [key, value[key]]),
-);
+const identity = (value: Envelope): Envelope => {
+  const result: Envelope = Object.fromEntries(["v", "kind", "id", "method", "epoch", "grantId", "kernelEpoch"].filter(key => value[key] !== undefined).map(key => [key, value[key]]));
+  const field = KERNEL_INPUT_ORDER_PARAMS[value.method as keyof typeof KERNEL_INPUT_ORDER_PARAMS];
+  const target = field && value.params && typeof value.params === 'object' ? (value.params as Envelope)[field] : undefined;
+  if (value.kind === 'request' && typeof target === 'string') result.inputOrderKey = `input:${field}:${target}`;
+  return result;
+};
 export function controlFrame(value: unknown): Buffer {
   const body = Buffer.from(JSON.stringify(value), "utf8");
   if (body.length > KERNEL_MAX_FRAME_BYTES) throw new Error("Kernel control frame exceeds the protocol frame bound");
@@ -32,7 +36,14 @@ export function controlFrame(value: unknown): Buffer {
 const BODY_WORKER = String.raw`
 import { parentPort } from "node:worker_threads";
 const streams = new Map();
-const identity = value => Object.fromEntries(["v","kind","id","method","epoch","grantId","kernelEpoch"].filter(key => value[key] !== undefined).map(key => [key,value[key]]));
+const inputOrderParams = ${JSON.stringify(KERNEL_INPUT_ORDER_PARAMS)};
+const identity = value => {
+  const result = Object.fromEntries(["v","kind","id","method","epoch","grantId","kernelEpoch"].filter(key => value[key] !== undefined).map(key => [key,value[key]]));
+  const field = inputOrderParams[value.method];
+  const target = field && value.params && typeof value.params === 'object' ? value.params[field] : undefined;
+  if (value.kind === 'request' && typeof target === 'string') result.inputOrderKey = 'input:' + field + ':' + target;
+  return result;
+};
 parentPort.on("message", message => {
   const { type, id } = message;
   try {

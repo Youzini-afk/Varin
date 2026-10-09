@@ -436,14 +436,97 @@ pub(super) fn initialize_new(db: &Connection) -> Result<()> {
 impl Catalog {
     /// Context is assembled by the single Host context owner from the child identity and admitted
     /// project/role. The existing input writer commits its Run, context, launch and relation together.
-    pub fn prepare_child(
-        &mut self,
+    pub fn capture_child_preparation(
+        &self,
         operation_id: &str,
         source: launches::SourceSelection,
         proposal: context::ContextProposal,
         basis: personalization::PersonalizationBasis,
-    ) -> Result<ChildTask> {
+    ) -> Result<ChildPreparation> {
         let child = self.child_task(operation_id)?;
+        let admitted = child
+            .receipt
+            .as_ref()
+            .map(|receipt| self.capture_admitted_checkpoint(&receipt.run_id))
+            .transpose()?
+            .flatten();
+        let checkpoint = self
+            .capture_active_checkpoint(&child.child_branch_id)?
+            .map(|checkpoint| checkpoint.id);
+        Ok(ChildPreparation {
+            child,
+            source,
+            proposal,
+            basis,
+            admitted,
+            checkpoint,
+            epoch: self.epoch,
+            content: self.content.clone(),
+            publication: self.content.begin_publication(),
+        })
+    }
+    pub fn admit_child(&mut self, prepared: PreparedChild) -> Result<ChildTask> {
+        let PreparedChild {
+            operation_id,
+            submission,
+            receipt,
+        } = prepared;
+        if let Some(submission) = submission {
+            self.submit_admission(submission, None)?;
+        } else if self.child_task(&operation_id)?.receipt != receipt {
+            return Err(RuntimeError::Conflict(
+                "child admission changed during preparation".into(),
+            ));
+        }
+        self.child_task(&operation_id)
+    }
+    pub fn require_child_launch(&self, run_id: &str) -> Result<Option<ChildTask>> {
+        let run = self.run(run_id)?;
+        let Some(child) = self.child_task_for_thread(&run.thread_id)? else {
+            return Ok(None);
+        };
+        let op = self.operation(&child.operation_id)?;
+        if child.receipt.as_ref().map(|r| r.run_id.as_str()) != Some(run_id)
+            || child.state != "ready"
+            || op.cancel_requested
+            || child.report.is_some()
+        {
+            return Err(RuntimeError::Conflict(
+                "child is not eligible to launch".into(),
+            ));
+        }
+        Ok(Some(child))
+    }
+}
+pub struct ChildPreparation {
+    child: ChildTask,
+    source: launches::SourceSelection,
+    proposal: context::ContextProposal,
+    basis: personalization::PersonalizationBasis,
+    admitted: Option<context::CheckpointRead>,
+    checkpoint: Option<String>,
+    epoch: u64,
+    content: crate::content::ContentStore,
+    publication: crate::content::ContentPublication,
+}
+pub struct PreparedChild {
+    operation_id: String,
+    submission: Option<submissions::PreparedSubmission>,
+    receipt: Option<Receipt>,
+}
+impl ChildPreparation {
+    pub fn load(self) -> Result<PreparedChild> {
+        let Self {
+            child,
+            source,
+            proposal,
+            basis,
+            admitted,
+            checkpoint,
+            epoch,
+            content,
+            publication,
+        } = self;
         let scope = serde_json::to_value(&basis)?;
         if basis.session_id != child.child_thread_id
             || basis.project_id != child.project_id
@@ -467,55 +550,56 @@ impl Catalog {
                 "prepared source does not match child baseline identity".into(),
             ));
         }
-        if let Some(receipt) = &child.receipt {
-            let reference:String=self.db.query_row("SELECT c.body FROM runs r JOIN context_checkpoints c ON c.id=r.context_checkpoint_id WHERE r.id=?1",[&receipt.run_id],|r|r.get(0))?;
-            let admitted: context::ContextCheckpoint =
-                serde_json::from_value(self.content.load(&serde_json::from_str(&reference)?)?)?;
+        if child.receipt.is_some() {
+            let admitted = admitted
+                .ok_or_else(|| {
+                    RuntimeError::Invalid("child admission has no context checkpoint".into())
+                })?
+                .load()?;
             if admitted.proposal != proposal || admitted.personalization.as_ref() != Some(&basis) {
                 return Err(RuntimeError::Conflict(
                     "child preparation retry changed its admitted context".into(),
                 ));
             }
-            return Ok(child);
+            return Ok(PreparedChild {
+                operation_id: child.operation_id,
+                receipt: child.receipt,
+                submission: None,
+            });
         }
-        let staged = self.stage_context_with_personalization(proposal, Some(basis))?;
         let mut launch = child.launch.clone();
         launch.source = Some(source);
-        self.submit_admission(
-            &SubmitInput {
-                key: format!("child:{}", child.operation_id),
+        let operation_id = child.operation_id;
+        let submission = submissions::PreparedSubmission::stage(submissions::SubmissionBody {
+            command: SubmitInput {
+                key: format!("child:{operation_id}"),
                 thread_id: child.child_thread_id,
                 branch_id: child.child_branch_id,
                 expected_head: None,
                 input: Value::String(child.input.task),
                 configuration: child.configuration,
             },
-            Some(launch),
-            false,
-            false,
-            Some(staged),
-            Some(operation_id),
-            None,
-        )?;
-        self.child_task(operation_id)
+            launch: Some(launch),
+            inherit_source: false,
+            initial: Some(proposal),
+            personalization: Some(basis),
+            origin: submissions::SubmissionOrigin::Child {
+                operation_id: operation_id.clone(),
+                checkpoint,
+                parent_thread_id: child.parent_thread_id,
+            },
+            epoch,
+            content,
+            publication,
+        })?;
+        Ok(PreparedChild {
+            operation_id,
+            submission: Some(submission),
+            receipt: None,
+        })
     }
-    pub fn require_child_launch(&self, run_id: &str) -> Result<Option<ChildTask>> {
-        let run = self.run(run_id)?;
-        let Some(child) = self.child_task_for_thread(&run.thread_id)? else {
-            return Ok(None);
-        };
-        let op = self.operation(&child.operation_id)?;
-        if child.receipt.as_ref().map(|r| r.run_id.as_str()) != Some(run_id)
-            || child.state != "ready"
-            || op.cancel_requested
-            || child.report.is_some()
-        {
-            return Err(RuntimeError::Conflict(
-                "child is not eligible to launch".into(),
-            ));
-        }
-        Ok(Some(child))
-    }
+}
+impl Catalog {
     pub fn fail_child_preparation(
         &mut self,
         operation_id: &str,
@@ -725,7 +809,7 @@ impl Catalog {
 pub(super) fn validate_submission(
     tx: &Transaction<'_>,
     operation_id: &str,
-    command: &SubmitInput,
+    command: &submissions::SubmissionIdentity,
 ) -> Result<()> {
     let child: ChildTask = record(tx, "child_tasks", operation_id)?;
     let op: Operation = record(tx, "operations", operation_id)?;

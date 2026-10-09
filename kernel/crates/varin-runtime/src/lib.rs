@@ -21,6 +21,12 @@ pub mod context_job;
 pub mod context_capacity;
 mod context_material;
 
+#[cfg(test)]
+extern crate self as varin_runtime;
+#[cfg(test)]
+#[path="../tests/fixtures/input_admission.rs"]
+mod test_submission;
+
 pub mod resource_admission;
 
 pub mod execution_capacity;

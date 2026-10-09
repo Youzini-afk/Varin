@@ -1,5 +1,8 @@
 //! Independent deterministic admission counterexamples. Gates represent executor completion,
 //! not elapsed-time guesses or artificially large file payloads.
+#[path="fixtures/input_admission.rs"]
+mod input_admission;
+use input_admission::InputAdmission;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};

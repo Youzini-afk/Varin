@@ -102,12 +102,26 @@ impl Persistence for Mutex<Catalog> {
         epoch: u64,
         expected_head: Option<&str>,
     ) -> std::result::Result<Vec<ConversationItem>, ExecutionError> {
-        self.lock()
-            .map_err(|_| ExecutionError::new("catalog_poisoned", "catalog owner failed"))?
-            .consume_inputs(run_id, epoch, expected_head)
-            .map_err(|e| ExecutionError::new("catalog_input", e.to_string()))
+        loop {
+            let preparation = self
+                .lock()
+                .map_err(|_| ExecutionError::new("catalog_poisoned", "catalog owner failed"))?
+                .prepare_input_delivery(run_id, epoch, expected_head)
+                .map_err(|e| ExecutionError::new("catalog_input", e.to_string()))?;
+            let prepared = preparation
+                .load()
+                .map_err(|e| ExecutionError::new("catalog_input_content", e.to_string()))?;
+            let result = self
+                .lock()
+                .map_err(|_| ExecutionError::new("catalog_poisoned", "catalog owner failed"))?
+                .admit_input_delivery(prepared)
+                .map_err(|e| ExecutionError::new("catalog_input", e.to_string()))?;
+            if let Some(items) = result {
+                return Ok(items);
+            }
+            // Only an actual edit/cancel of a captured input asks for another body read.
+        }
     }
-
     fn commit(
         &self,
         run_id: &str,

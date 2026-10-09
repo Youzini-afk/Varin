@@ -1,3 +1,4 @@
+use crate::test_submission::InputAdmission;
 use super::*;
 use crate::{Catalog, SubmitInput};
 use serde_json::json;
