@@ -52,6 +52,10 @@ pub struct WithPolicyModels {
     pub models: BTreeMap<String, BoundPolicyModel>,
 }
 impl ModelProvider for WithPolicyModels {
+    fn select_for_request(&self, run_id: &str, owner_generation: u64, cancel: &CancellationToken)
+        -> Result<Option<SelectedModel>, ExecutionError> {
+        self.primary.select_for_request(run_id,owner_generation,cancel)
+    }
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         self.primary.serialize(view)
     }

@@ -1002,9 +1002,9 @@ export class KernelClient {
   }
 
   /** Native authority management. Never expose this Host-owned channel to tool grants. */
-  async agentRuntimeRequest<T, M extends Extract<KernelMethod, `runtime.${string}`>>(method: M, params: KernelMethodParams[M], signal?: AbortSignal): Promise<T> {
+  async agentRuntimeRequest<T, M extends Extract<KernelMethod, `runtime.${string}`>>(method: M, params: KernelMethodParams[M], signal?: AbortSignal, options: { settleCancellation?: boolean } = {}): Promise<T> {
     if (!this.handshakeResult) await this.start();
-    return this.requestRaw<T, M>(method, params, { signal, allowBootstrap: true });
+    return this.requestRaw<T, M>(method, params, { signal, allowBootstrap: true, ...options });
   }
 
   async health(options: { deep?: boolean; signal?: AbortSignal | undefined } = {}): Promise<KernelHealthResult> {

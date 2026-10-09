@@ -136,6 +136,7 @@ impl ExecutionPreparation {
 }
 
 struct ModelRecoveryPreparation {
+    active_model: Option<super::models::RunModelSelection>,
     step: ModelStep,
     output: Value,
     calls: Vec<ToolCall>,
@@ -210,14 +211,25 @@ impl RecoveryPreparation {
                 let snapshot: RequestSnapshot =
                     serde_json::from_value(self.execution.content.load(&model.step.request)?)?;
                 let binding = &self.execution.binding;
-                if snapshot.view.binding.connection_identity != binding.connection_identity
+                let model_changed = snapshot.view.binding.connection_identity != binding.connection_identity
                     || snapshot.view.binding.provider_family != binding.provider_family
                     || snapshot.view.binding.model != binding.model
-                    || snapshot.view.binding.tools != binding.tools
                     || snapshot.view.binding.configuration_generation
-                        != binding.configuration_generation
+                        != binding.configuration_generation;
+                let activated_model = model.active_model.as_ref().map(|active| {
+                    Ok::<_,RuntimeError>(serde_json::to_value(&active.configuration)? == self.execution.run.configuration
+                        && active.configuration.provider_family == binding.provider_family
+                        && active.configuration.model == binding.model
+                        && active.configuration.configuration_generation == binding.configuration_generation
+                        && binding.connection_identity == if let Some(scope) = &active.credential_scope {
+                            crate::model_session::connection_identity_with_scope(&active.configuration,scope)
+                        } else {crate::model_session::connection_identity(&active.configuration)}
+                            .map_err(|error|RuntimeError::Invalid(error.to_string()))?)
+                }).transpose()?.unwrap_or(false);
+                if snapshot.view.binding.tools != binding.tools
                     || snapshot.view.binding.tool_schema_generation
                         != binding.tool_schema_generation
+                    || (model_changed && (model.committed != model.calls.len() || !activated_model))
                 {
                     return Err(RuntimeError::Conflict(
                         "completed exchange belongs to another frozen launch binding".into(),
@@ -717,6 +729,10 @@ impl Catalog {
             }
         }
         Ok(ModelRecoveryPreparation {
+            active_model: {
+                let id: Option<String> = database.query_row("SELECT id FROM model_selections WHERE run_id=?1 AND active=1",[run_id],|row|row.get(0)).optional()?;
+                id.map(|id|record(database,"model_selections",&id)).transpose()?
+            },
             step,
             output,
             calls,

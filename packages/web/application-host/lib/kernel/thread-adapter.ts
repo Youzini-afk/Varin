@@ -300,9 +300,10 @@ export class ThreadAdapter {
     const branch = thread.branches.find(candidate => candidate.branch_id === input.branchId)!;
     const previous = branch.active_run_id ? await this.runtime.run(branch.active_run_id) : branch.latest_run;
     if (!previous) throw new Error('An initial model selection is required');
-    this.assertImagesSupported(input.images, previous.configuration);
+    const selected = await this.runtime.modelSelections(previous.id);
+    this.assertImagesSupported(input.images, selected.desired?.configuration ?? previous.configuration);
     const receipt = await this.runtime.enqueue({ key: input.key, threadId: input.threadId, branchId: input.branchId,
-      mode: input.mode, input: threadInput(input.text, input.images), configuration: previous.configuration });
+      mode: input.mode, input: threadInput(input.text, input.images) });
     // Context is synchronized by the Run's request preparation. An accepted input receipt
     // must not wait for extension/MCP startup, source materialization or credential rebinding.
     this.launchAdmitted(receipt.run_id, async () => {
@@ -317,6 +318,14 @@ export class ThreadAdapter {
       }
     });
     return receipt;
+  }
+
+  async selectModel(input: ThreadIdentity & { runId: string; key: string; model: ThreadModel }) {
+    await this.requireIdentity(input);
+    const run = await this.requireRun(input.runId);
+    if (run.thread_id !== input.threadId || run.branch_id !== input.branchId) throw new Error('Run belongs to another branch');
+    const model = await this.models.resolveModel(input.model);
+    return this.runtime.selectModel(run.id,input.key,model.configuration,model.credentialOwner);
   }
 
   assertImagesSupported(images: readonly ImageAttachment[] | undefined, configuration: unknown): void {
@@ -389,9 +398,11 @@ export class ThreadAdapter {
     for (const operation of visible) if (operation) operations.set(operation.id, operation);
     const latest = branch.latest_run;
     const activeRun = branch.active_run_id ? await this.runtime.run(branch.active_run_id) : null;
-    const launch = latest ? await this.runtime.launch(latest.id) : null;
+    const shownRun = activeRun ?? latest;
+    const launch = shownRun ? await this.runtime.launch(shownRun.id) : null;
+    const modelSelection = shownRun ? await this.runtime.modelSelections(shownRun.id) : {desired:null,active:null};
     return { identity, eventCursor, thread, activeRun, history, historyPage: { head: page.head, previous: page.previous }, inputs,
-      operations: [...operations.values()], launch, context, children: await this.children(identity) };
+      operations: [...operations.values()], launch, modelSelection, context, children: await this.children(identity) };
   }
 
   private async recordLaunchFailure(runId: string, error: unknown): Promise<void> {
@@ -429,6 +440,12 @@ export class ThreadAdapter {
     const launch = await this.runtime.launch(runId);
     if (!launch?.selection.credential_scope) throw new Error('Run has no durable credential binding; resubmit its original input key');
     const owner = await this.models.rebindModel(run.configuration as ModelSessionConfiguration, launch.selection.credential_scope);
+    const selected = await this.runtime.modelSelections(run.id);
+    const desired = selected.desired;
+    if (desired?.credential_scope && desired.id !== selected.active?.id && desired.status !== 'failed') {
+      const credentialOwner = await this.models.rebindModel(desired.configuration,desired.credential_scope);
+      await this.runtime.selectModel(run.id,desired.id,desired.configuration,credentialOwner);
+    }
     await this.runtime.rebindLaunch(runId, { credentialOwner: owner });
   }
 

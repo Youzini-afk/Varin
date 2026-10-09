@@ -135,6 +135,7 @@ pub(crate) fn spawn(
     thread::spawn(move || {
         let mut identity: Option<(PathBuf, String)> = None;
         let mut runtime: Option<Arc<RunSupervisor>> = None;
+        let mut run_models: Option<Arc<crate::run_models::RunModels>> = None;
         let mut opening = false;
         let mut initialization_failure: Option<String> = None;
         let mut waiting = std::collections::VecDeque::new();
@@ -260,6 +261,7 @@ pub(crate) fn spawn(
                         resources: resources.clone(),
                     });
                     runtime = Some(owner.clone());
+                    run_models = Some(crate::run_models::RunModels::new(owner.catalog(),credential_bridge.clone()));
                     let pending = {
                         let catalog = owner.catalog();
                         let catalog = catalog.lock().map_err(|_| {
@@ -401,6 +403,23 @@ pub(crate) fn spawn(
                                 .map_err(|e| KernelError::Operation(e.to_string()))?;
                             return Ok(serde_json::to_value(input)?);
                         }
+                        if method == "runtime.model.inspect" {
+                            let p: RunParams = serde_json::from_value(params)?;
+                            return Ok(serde_json::to_value(run_models.as_ref().expect("initialized runtime models").inspect(&p.run_id)?)?);
+                        }
+                        if method == "runtime.model.select" {
+                            let p: ModelSelectParams = serde_json::from_value(params)?;
+                            let configuration = serde_json::from_value(p.configuration)?;
+                            let scope = p.credential_scope.map(|scope|Ok::<_,KernelError>(varin_runtime::providers::auth::CredentialScope {
+                                reference:scope.reference,authority:scope.authority,account:scope.account,
+                                generation:scope.generation.try_into().map_err(|_|KernelError::Protocol("credential generation must be nonnegative".into()))?,
+                            })).transpose()?;
+                            let selection = runtime.catalog().lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?
+                                .select_model(&p.run_id,&p.key,configuration,scope).map_err(domain)?;
+                            run_models.as_ref().expect("initialized runtime models").prepare(selection.clone())
+                                .map_err(|error|KernelError::Operation(error.to_string()))?;
+                            return Ok(serde_json::to_value(selection)?);
+                        }
                         if method == "runtime.launch.policy.prepare" {
                             let p: PolicyPrepareParams = serde_json::from_value(params)?;
                             let runtime = runtime.clone();
@@ -458,17 +477,20 @@ pub(crate) fn spawn(
                             } else {
                                 serde_json::from_value(params)?
                             };
+                            let run = runtime.catalog().lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?.run(&p.run_id).map_err(domain)?;
+                            let preparation = crate::run_assembly::RunPreparation::new(p,&run)?;
                             let assembly = crate::run_assembly::RunAssembly {
                                 runtime: runtime.clone(), resources: resources.clone(), credentials: credential_bridge.clone(),
                                 mcp: mcp_bridge.clone(), language: language_bridge.clone(), retrieval: retrieval_bridge.clone(),
                                 memory: memory_bridge.clone(), plan: plan_bridge.clone(), policy: policy_bridge.clone(),
+                                models: run_models.as_ref().expect("initialized runtime models").clone(),
                                 responses: responses.clone(), epoch: epoch.clone(),
                             };
                             if selected.is_some() {
                                 let response_id = id.clone(); let response_sender = responses.clone(); let done = finished.clone();
                                 let cancelled = cancellation.clone();
                                 thread::spawn(move || {
-                                    let result = assembly.prepare(p,selected,||cancelled.load(Ordering::Acquire))
+                                    let result = assembly.prepare(preparation,selected,||cancelled.load(Ordering::Acquire))
                                         .and_then(|prepared| match prepared {
                                             crate::run_assembly::PreparedLaunch::Selection(intent)=>Ok(intent),
                                             crate::run_assembly::PreparedLaunch::Start(_)=>Err(KernelError::Protocol("selection unexpectedly prepared execution".into())),
@@ -479,8 +501,8 @@ pub(crate) fn spawn(
                                 deferred = true; return Ok(Value::Null);
                             }
                             let prepare = assembly.clone();
-                            let handle = runtime.prepare_start(&p.run_id.clone(),move|cancel| {
-                                prepare.prepare(p,None,||cancel.is_cancelled())
+                            let handle = runtime.prepare_start(&run.id,move|cancel| {
+                                prepare.prepare(preparation,None,||cancel.is_cancelled())
                                     .map_err(|error|varin_runtime::execution::ExecutionError::new("preparation_failed",error.to_string()))
                                     .and_then(|prepared|match prepared {
                                         crate::run_assembly::PreparedLaunch::Start(start)=>Ok(start),
@@ -702,8 +724,9 @@ pub(crate) fn spawn(
                             if let Some(operation_id) = waiting.as_deref().and_then(|id| id.strip_prefix("question:")) {
                                 runtime.quiesce_question(operation_id).map_err(|e| KernelError::Operation(e.to_string()))?;
                             }
-                            return Ok(run_cancellation_receipt(&runtime.cancel(&p.run_id)
-                                .map_err(|e| KernelError::Operation(e.to_string()))?));
+                            let run = runtime.cancel(&p.run_id).map_err(|e| KernelError::Operation(e.to_string()))?;
+                            if run.state.terminal() {run_models.as_ref().expect("initialized runtime models").release(&run.id);}
+                            return Ok(run_cancellation_receipt(&run));
                         }
                         if method == "runtime.operation.cancel" {
                             let p: OperationParams = serde_json::from_value(params)?;

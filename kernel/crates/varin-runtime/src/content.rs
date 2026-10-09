@@ -337,7 +337,7 @@ impl ContentStore {
 pub(crate) fn initialize(db: &mut Connection, _content: &ContentStore) -> Result<()> {
     let version:i64=db.pragma_query_value(None,"user_version",|r|r.get(0))?;
     let format:i64=db.query_row("SELECT version FROM runtime_content_format WHERE id=1",[],|r|r.get(0))?;
-    if version!=3||format!=3 {return Err(RuntimeError::Invalid("unsupported content format; data was preserved".into()));}
+    if version!=crate::catalog::FORMAT||format!=3 {return Err(RuntimeError::Invalid("unsupported content format; data was preserved".into()));}
     db.prepare("SELECT input_id,body FROM input_history_content")?;
     Ok(())
 }

@@ -186,6 +186,60 @@ it('run.cancel interrupts an active local HTTP stream and leaves control usable'
   expect((await f.runtimeClient.status()).epoch).toBeGreaterThan(0);
 }, 30_000);
 
+it.each([false,true])('model choice preserves the dispatched exchange and never falls back after preparation failure (invalid=%s)',async invalid=>{
+  const f = await fixture();
+  const revision = await publishSource(f.host,'model-choice-source','frozen tool result');
+  let finishOld!:()=>void;
+  const authorizations: Array<string | undefined> = [];
+  const old = await localProvider((_body,response,request)=>{
+    authorizations.push(request.headers.authorization);
+    finishOld = ()=>{
+      response.writeHead(200,{'content-type':'text/event-stream'});
+      response.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[
+        {id:'reasoning-old',type:'reasoning',summary:[],encrypted_content:'old-opaque-only'},
+        {id:'read-old',type:'function_call',call_id:'read-frozen',name:'file_read',arguments:JSON.stringify({path:'source.txt'})},
+      ]}})}\n\n`);
+    };
+  });
+  const replacement = await localProvider((_body,response,request)=>{
+    authorizations.push(request.headers.authorization);
+    completeLocalResponse(response,'model-choice-answer','new model continued the original tool exchange');
+  });
+  const owner = (endpoint:string,account:string)=>new ExistingHostCredentialOwner({providerId:'fixture',providerFamily:'openai-responses',endpoint,
+    currentScope:async()=>({reference:`ref-${account}`,authority:'fixture',account,generation:1}),
+    runtime:{getAuth:async()=>({auth:{apiKey:`fake-${account}`}})},
+  });
+  await f.runtimeClient.createThread('model-choice-thread','model-choice-branch');
+  const run = await f.runtimeClient.submit({key:'model-choice-input',threadId:'model-choice-thread',branchId:'model-choice-branch',expectedHead:null,input:{text:'read then answer'},configuration:{...old.configuration,allowAnonymous:false}});
+  await f.runtimeClient.startFromSource({runId:run.run_id,workspaceId:'source-workspace',executionWorkspaceId:'source-workspace',branchId:'model-choice-source',revision,mode:'fixed_branch',tools:['file_read']},{credentialOwner:owner(old.configuration.endpoint,'old')});
+  await expect.poll(()=>old.requests.length).toBe(1);
+  const configuration = {...replacement.configuration,credentialEnvironment:null,allowAnonymous:false,model:'replacement',configurationGeneration:2,...(invalid?{modelOptions:{protocol:{unknown_option:true}}}:{})};
+  const choice = await f.runtimeClient.selectModel(run.run_id,'model-choice',configuration,owner(replacement.configuration.endpoint,'new'));
+  expect(choice.status).toBe('preparing');
+  await expect.poll(async()=>(await f.runtimeClient.modelSelections(run.run_id)).desired?.status).toBe(invalid?'failed':'ready');
+  expect((await f.runtimeClient.run(run.run_id)).configuration).toMatchObject({model:'local-test-model',configurationGeneration:1});
+  expect(replacement.requests).toHaveLength(0);
+  finishOld();
+  await expect.poll(async()=>(await f.runtimeClient.run(run.run_id)).state,{timeout:8_000}).toBe(invalid?'failed':'completed');
+  expect(old.requests).toHaveLength(1);
+  const history = JSON.stringify(await f.runtimeClient.history('model-choice-branch'));
+  expect(history).toContain('frozen tool result');
+  if (invalid) {
+    expect(replacement.requests).toHaveLength(0);
+    expect((await f.runtimeClient.modelSelections(run.run_id)).active).toBeNull();
+    expect(authorizations).toEqual(['Bearer fake-old']);
+  } else {
+    expect(replacement.requests).toHaveLength(1);
+    const request = replacement.requests[0]!;
+    expect(request.model).toBe('replacement');
+    expect(JSON.stringify(request.input)).toContain('frozen tool result');
+    expect(JSON.stringify(request.input)).not.toContain('old-opaque-only');
+    expect(authorizations).toEqual(['Bearer fake-old','Bearer fake-new']);
+    expect((await f.runtimeClient.modelSelections(run.run_id)).active?.id).toBe(choice.id);
+    expect((await f.runtimeClient.run(run.run_id)).configuration).toMatchObject({model:'replacement',configurationGeneration:2});
+  }
+},30_000);
+
 it('tool loop reads a grant-scoped fixed file revision and returns its receipt to the provider', async () => {
   const f = await fixture();
   let turn = 0;

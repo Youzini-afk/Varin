@@ -29,8 +29,11 @@ writing Pi session files or the Host harness's existing execution records.
   adapter preserves signed blocks and tool pairing without executing a Pi agent loop. Production model
   bindings share the immutable default outbound connection pool and I/O executor.
 - Host model admission retains actual context capacity, thinking mappings and configured sampling
-  parameters. Unknown capacity remains unknown. Desired/active model changes within a Run and automatic
-  capacity-triggered compaction are not yet connected to the product path.
+  parameters. Unknown capacity remains unknown. Desired model choices prepare independently and activate
+  at the next closed ModelStep boundary; each request retains its actual provider, tool bindings and
+  credential owner. Failed choices cannot fall back to a previously active model. Accepted queued Runs
+  retain their configuration; later queue admissions inherit the selected target. Automatic capacity
+  compaction remains in progress.
 - Context compilation walks anchored immutable history on a read worker. Repeated summary jobs freeze
   the previously published checkpoint and summarize its continuation instead of repeatedly loading the
   entire ancestor. A manual earlier boundary can select the original history. Personalization refresh

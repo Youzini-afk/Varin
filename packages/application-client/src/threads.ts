@@ -1,5 +1,7 @@
 import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildWait, LiveRoot, ContextPersonalization, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, ImageAttachment } from '@varin/protocol';
 
+import type { RunModelSelection, RunModelSelections } from '@varin/protocol';
+
 /** Explicit authority selection. A thread never opens a Pi session. */
 export interface ThreadIdentity { runtime: 'agent'; threadId: string; branchId: string }
 export type ThreadThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -77,6 +79,7 @@ export interface ThreadSnapshot {
   inputs: QueuedInput[];
   operations: Operation[];
   launch: LaunchIntent | null;
+  modelSelection: RunModelSelections;
   context: ThreadContextState;
   children?: ChildTask[];
 }
@@ -93,6 +96,7 @@ export interface ThreadsAPI {
   plan?: ThreadPlanAPI;
   collaboration?: ThreadCollaborationAPI;
   listModels(): Promise<ThreadModelInfo[]>;
+  selectModel(input: ThreadIdentity & { runId: string; key: string; model: ThreadModel }): Promise<RunModelSelection>;
   list(): Promise<ThreadSummary[]>;
   create(key: string): Promise<ThreadIdentity>;
   prepareSource(input: ThreadPrepareSource): Promise<ThreadPreparedSource>;

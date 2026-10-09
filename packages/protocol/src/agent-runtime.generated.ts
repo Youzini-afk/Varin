@@ -318,6 +318,29 @@ export interface ContextJobCreateParams {
   credentialScope?: CredentialScope;
 }
 
+export interface ModelSelectParams {
+  runId: string;
+  key: string;
+  configuration: unknown;
+  credentialScope?: CredentialScope;
+}
+
+export interface RunModelSelection {
+  id: string;
+  run_id: string;
+  revision: number;
+  binding_id: string;
+  configuration: ModelSessionConfiguration;
+  credential_scope: CredentialScope | null;
+  status: 'preparing' | 'ready' | 'active' | 'failed' | 'superseded';
+  failure: string | null;
+}
+
+export interface RunModelSelections {
+  desired: RunModelSelection | null;
+  active: RunModelSelection | null;
+}
+
 export interface RunStartParams {
   policyBinding?: AgentPolicyBinding;
   mcpBinding?: McpBinding;

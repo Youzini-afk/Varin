@@ -223,6 +223,15 @@ pub(crate) struct RunStartParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelSelectParams {
+    pub(crate) run_id: String,
+    pub(crate) key: String,
+    pub(crate) configuration: Value,
+    pub(crate) credential_scope: Option<CredentialScope>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AdmissionInspectParams {
     pub(crate) run_id: String,
     pub(crate) owner_generation: i64,
@@ -1751,6 +1760,12 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.run.start" => serde_json::from_value::<RunStartParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.model.select" => serde_json::from_value::<ModelSelectParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.model.inspect" => serde_json::from_value::<RunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.status" => serde_json::from_value::<KernelEmptyParams>(params.clone())

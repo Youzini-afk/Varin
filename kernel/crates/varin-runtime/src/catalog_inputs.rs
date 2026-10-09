@@ -166,13 +166,28 @@ impl Catalog {
         };
         let immediate=owner.is_none();
         let run_id=if command.mode==InputMode::NextRun||immediate {
-            let configuration=command.configuration.clone().or_else(||owner.as_ref().map(|run|run.configuration.clone()))
+            let desired: Option<super::models::RunModelSelection> = if command.configuration.is_none() {
+                predecessor.as_ref().map(|previous|tx.query_row("SELECT body FROM model_selections WHERE run_id=?1 ORDER BY revision DESC LIMIT 1",[&previous.id],|row|row.get::<_,String>(0)).optional())
+                    .transpose()?.flatten().map(|body|serde_json::from_str(&body)).transpose()?
+            } else {None};
+            let inherited_configuration = desired.as_ref().map(|choice|serde_json::to_value(&choice.configuration)).transpose()?;
+            let configuration=command.configuration.clone().or(inherited_configuration).or_else(||predecessor.as_ref().map(|run|run.configuration.clone()))
                 .ok_or_else(||RuntimeError::Invalid("an idle branch requires an explicit launch configuration".into()))?;
             let next=Run{id:id(),thread_id:thread,branch_id:command.branch_id.clone(),state:RunState::Accepted,revision:1,epoch:self.epoch,configuration,cancel_requested:false,waiting_on:None};
             // Queued Runs own their admission scope now, not when eventually promoted.
             tx.execute("INSERT INTO runs(id,branch_id,body,context_checkpoint_id) VALUES(?1,?2,?3,(SELECT checkpoint_id FROM active_contexts WHERE branch_id=?2))",params![next.id,next.branch_id,encode(&next)?])?;
-            if let Some(previous)=predecessor.as_ref().filter(|previous|previous.configuration==next.configuration) {
+            if let Some(previous)=predecessor.as_ref().filter(|previous|previous.configuration==next.configuration || desired.is_some()) {
                 if let Some(mut launch)=optional_record::<super::launches::LaunchIntent>(&tx,"run_launches",&previous.id)? {
+                    if let Some(desired) = &desired {
+                        let binding = &mut launch.selection;
+                        binding.connection_identity = if let Some(scope) = &desired.credential_scope {
+                            crate::model_session::connection_identity_with_scope(&desired.configuration,scope)
+                        } else {crate::model_session::connection_identity(&desired.configuration)}.map_err(|error|RuntimeError::Invalid(error.to_string()))?;
+                        binding.model = desired.configuration.model.clone();
+                        binding.provider_family = desired.configuration.provider_family.clone();
+                        binding.configuration_generation = desired.configuration.configuration_generation;
+                        binding.credential_scope = desired.credential_scope.clone();
+                    }
                     if let Some(source)=launch.selection.source.as_mut().filter(|source|source.mode == crate::SourceMode::Materialized) {
                         if source.environment_run_id.is_none(){source.environment_run_id=Some(previous.id.clone());}
                     }

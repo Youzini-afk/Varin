@@ -9,6 +9,7 @@ import type { ContextJob, ContextCheckpoint } from '@varin/application-client';
 import { startRunFromSource, type SourceLaunch } from './source-launch.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import type { KernelClient } from './kernel-client.js';
+import type { RunModelSelection, RunModelSelections, ModelSessionConfiguration } from './protocol.generated.js';
 import type {
   AdmissionInspectParams, AdmissionInspection, ChildTextPage, UnacceptedChildSource, ChildTask, ChildPrepareParams, ChildWait, ContextRefreshParams, ContextJobCreateParams, HistoryPage, HistoryPageParams, HistoryReference, HistoryBodyChunk, RunReconcileResult, ThreadSummary, LaunchIntent, LaunchSelectParams, InputSubmitParams, InputSubmitReceipt, Run, Operation,
   HistoryItem, RuntimeEvent, RuntimeStatus, RunStartReceipt, InputEnqueueParams, InputReceipt, QueuedInput, RunCancellationReceipt, OperationCancellationReceipt,
@@ -322,7 +323,8 @@ export class AgentRuntimeClient {
   /** Private Host path: only nonsecret pinned scope crosses admission; credentials resolve later. */
   async startRunWithCredentialOwner(runId: string, owner: ExistingHostCredentialOwner, signal?: AbortSignal, toolBinding?: unknown): Promise<RunStartReceipt> {
     return this.withRunPreparation(runId, signal, async signal => {
-      const credentialScope = await this.kernel.registerCredentialOwner(runId, owner, signal);
+      const selected = await this.modelSelections(runId,signal);
+      const credentialScope = await this.kernel.registerCredentialOwner(runId, owner, signal,selected.active?.binding_id);
       try {
         const policyBinding = await this.preparePolicy(runId, signal, credentialScope);
         const mcpBinding = this.kernel.mcpBinding(runId);
@@ -341,6 +343,18 @@ export class AgentRuntimeClient {
     this.kernel.unregisterCredentialOwner(runId);
     // A parked Run resumes with every frozen planning credential owner freshly rebound.
     this.kernel.unregisterPolicyOwner(runId);
+  }
+  modelSelections(runId: string, signal?: AbortSignal): Promise<RunModelSelections> {
+    return this.kernel.agentRuntimeRequest('runtime.model.inspect',{runId},signal);
+  }
+  async selectModel(runId: string,key: string,configuration: ModelSessionConfiguration,owner: ExistingHostCredentialOwner,signal?: AbortSignal): Promise<RunModelSelection> {
+    const bindingId = `model:${key}`;
+    const credentialScope = await this.kernel.registerCredentialOwner(runId,owner,signal,bindingId);
+    try {
+      return await this.kernel.agentRuntimeRequest('runtime.model.select',{runId,key,configuration,credentialScope},signal,{settleCancellation:true});
+    } catch(error) {
+      this.kernel.unregisterCredentialOwner(runId,bindingId); throw error;
+    }
   }
   async run(runId: string, signal?: AbortSignal): Promise<Run> {
     const run = await this.kernel.agentRuntimeRequest<Run, 'runtime.run.inspect'>('runtime.run.inspect', { runId }, signal);
