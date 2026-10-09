@@ -36,25 +36,29 @@ impl Persistence for Mutex<Catalog> {
             fence(&catalog.run(run).map_err(policy_error)?, epoch).map_err(policy_error)?;
             (catalog.content.clone(), catalog.content.begin_publication())
         };
+        let deliveries = super::memory::PreparedMemoryDeliveries::prepare(snapshot).map_err(policy_error)?;
         let reference = content.save(&serde_json::to_value(snapshot).map_err(|error| policy_error(error.into()))?).map_err(policy_error)?;
         let read = self.lock().map_err(catalog_lock_error)?
-            .admit_policy_model_reference(run, epoch, intent, snapshot, reference).map_err(policy_error)?;
+            .admit_policy_model_reference(run, epoch, intent, snapshot, reference, deliveries).map_err(policy_error)?;
         read.load().map_err(policy_error)
     }
     fn dispatch_policy_model(&self, run: &str, epoch: u64, action: &str) -> std::result::Result<(), ExecutionError> {
         let (content, _publication, reference) = policy_model_body(self, run, epoch, action)?;
         let snapshot = serde_json::from_value(content.load(&reference).map_err(policy_error)?)
             .map_err(|error| policy_error(error.into()))?;
+        let deliveries = super::memory::PreparedMemoryDeliveries::prepare(&snapshot).map_err(policy_error)?;
         self.lock().map_err(catalog_lock_error)?
-            .dispatch_policy_model_prepared(run, epoch, action, &reference, &snapshot).map_err(policy_error)
+            .dispatch_policy_model_prepared(run, epoch, action, &reference, &snapshot, deliveries).map_err(policy_error)
     }
     fn record_policy_model(&self, run: &str, epoch: u64, action: &str, output: &PolicyModelOutput, receipt: Option<&PolicyModelReceipt>) -> std::result::Result<(), ExecutionError> {
         let (content, _publication, reference) = policy_model_body(self, run, epoch, action)?;
         let snapshot = serde_json::from_value(content.load(&reference).map_err(policy_error)?)
             .map_err(|error| policy_error(error.into()))?;
+        let deliveries = receipt.filter(|receipt| receipt.usable)
+            .map(|_| super::memory::PreparedMemoryDeliveries::prepare(&snapshot)).transpose().map_err(policy_error)?;
         let output_refs = super::policy_model::PolicyModelOutputReferences::write(&content, output, receipt).map_err(policy_error)?;
         self.lock().map_err(catalog_lock_error)?
-            .record_policy_model_prepared(run, epoch, action, output, receipt, &reference, &snapshot, output_refs).map_err(policy_error)
+            .record_policy_model_prepared(run, epoch, action, output, receipt, &reference, deliveries, output_refs).map_err(policy_error)
     }
     fn policy_boundary(&self, run:&str, epoch:u64)->std::result::Result<PolicyBoundary,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.policy_boundary(run,epoch).map_err(policy_error)}
     fn policy_graph(&self, run:&str, epoch:u64)->std::result::Result<Option<PolicyGraphState>,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.policy_graph(run,epoch).map_err(policy_error)}
@@ -229,7 +233,8 @@ struct ExecutionBodyPreparation {
 struct PreparedExecutionBodies {
     _publication: crate::content::ContentPublication,
     request: Option<Value>,
-    snapshot: Option<RequestSnapshot>,
+    frozen_history_range: Option<HistoryRange>,
+    memory_deliveries: Option<super::memory::PreparedMemoryDeliveries>,
     history: std::collections::HashMap<String, Value>,
     originals: Option<Vec<ProviderOriginal>>,
     output: Option<Value>,
@@ -240,9 +245,18 @@ impl ExecutionBodyPreparation {
             ExecutionRecord::RequestPrepared { snapshot } => Some(self.content.save(&serde_json::to_value(snapshot)?)?),
             _ => None,
         };
-        let snapshot = self.frozen_request.as_ref()
+        let snapshot: Option<RequestSnapshot> = self.frozen_request.as_ref()
             .map(|reference| self.content.load(reference).and_then(|value| Ok(serde_json::from_value(value)?)))
             .transpose()?;
+        let frozen_history_range = snapshot.as_ref().map(|snapshot| snapshot.view.binding.history_range.clone());
+        let memory_deliveries = match record {
+            ExecutionRecord::RequestPrepared { snapshot } => Some(super::memory::PreparedMemoryDeliveries::prepare(snapshot)?),
+            ExecutionRecord::ModelDispatched { .. }
+            | ExecutionRecord::ModelFinished { outcome: ModelOutcome::Completed, .. } =>
+                Some(super::memory::PreparedMemoryDeliveries::prepare(snapshot.as_ref()
+                    .ok_or_else(|| RuntimeError::Invalid("memory delivery request missing".into()))?)?),
+            _ => None,
+        };
         let mut history = std::collections::HashMap::new();
         for item in history_items(record) {
             let provider = item.opaque.as_ref().map(|o| ProviderOriginal {
@@ -255,7 +269,7 @@ impl ExecutionBodyPreparation {
             (Some(self.content.save_originals(&provider_originals(items))?),
              Some(self.content.save(&json!({"status":"committed","record":record}))?))
         } else { (None, None) };
-        Ok(PreparedExecutionBodies { _publication: self.publication, request, snapshot, history, originals, output })
+        Ok(PreparedExecutionBodies { _publication: self.publication, request, frozen_history_range, memory_deliveries, history, originals, output })
     }
 }
 impl Catalog {
@@ -294,7 +308,7 @@ impl Catalog {
         &mut self, run_id: &str, epoch: u64, record: &ExecutionRecord, prepared: PreparedExecutionBodies,
     ) -> Result<()> {
         let PreparedExecutionBodies {
-            _publication, request: prepared_request, snapshot: frozen_snapshot, history: prepared_history,
+            _publication, request: prepared_request, frozen_history_range, memory_deliveries, history: prepared_history,
             originals: prepared_originals, output: prepared_output,
         } = prepared;
         // A receipt retry confirms the original completion. Keep exact request/owner fencing,
@@ -342,9 +356,12 @@ impl Catalog {
             }
         }
         match record {
-            ExecutionRecord::RequestPrepared { snapshot } => super::memory::record_deliveries(&tx, snapshot, &run.thread_id, DeliveryState::Selected)?,
-            ExecutionRecord::ModelDispatched { .. } => super::memory::record_deliveries(&tx, frozen_snapshot.as_ref().ok_or_else(|| RuntimeError::Invalid("memory delivery request missing".into()))?, &run.thread_id, DeliveryState::Sent)?,
-            ExecutionRecord::ModelFinished { outcome: ModelOutcome::Completed, .. } => super::memory::record_deliveries(&tx, frozen_snapshot.as_ref().ok_or_else(|| RuntimeError::Invalid("memory delivery request missing".into()))?, &run.thread_id, DeliveryState::Committed)?,
+            ExecutionRecord::RequestPrepared { snapshot } => super::memory::record_deliveries(&tx,
+                memory_deliveries.ok_or_else(|| RuntimeError::Invalid("prepared memory delivery missing".into()))?, &run, &snapshot.view.request_id, DeliveryState::Selected)?,
+            ExecutionRecord::ModelDispatched { request_id } => super::memory::record_deliveries(&tx,
+                memory_deliveries.ok_or_else(|| RuntimeError::Invalid("prepared memory delivery missing".into()))?, &run, request_id, DeliveryState::Sent)?,
+            ExecutionRecord::ModelFinished { request_id, outcome: ModelOutcome::Completed, .. } => super::memory::record_deliveries(&tx,
+                memory_deliveries.ok_or_else(|| RuntimeError::Invalid("prepared memory delivery missing".into()))?, &run, request_id, DeliveryState::Committed)?,
             _ => (),
         }
         match record {
@@ -491,8 +508,8 @@ impl Catalog {
                         "model completion owner changed".into(),
                     ));
                 }
-                let snapshot = frozen_snapshot.as_ref().ok_or_else(|| {
-                    RuntimeError::Invalid("frozen request content missing".into())
+                let history_range = frozen_history_range.as_ref().ok_or_else(|| {
+                    RuntimeError::Invalid("frozen request history range missing".into())
                 })?;
                 let head: Option<String> = tx.query_row(
                     "SELECT head FROM branches WHERE id=?1",
@@ -500,7 +517,7 @@ impl Catalog {
                     |r| r.get(0),
                 )?;
                 if *outcome == ModelOutcome::Completed
-                    && head != snapshot.view.binding.history_range.leaf_id
+                    && head != history_range.leaf_id
                 {
                     return Err(RuntimeError::Conflict(
                         "model output history head changed".into(),
