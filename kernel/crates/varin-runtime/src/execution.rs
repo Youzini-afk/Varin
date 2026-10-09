@@ -931,12 +931,17 @@ pub struct ExecutionReport {
 
 /// Trusted context owner synchronization before a new request is frozen. This runs on
 /// the Run worker, outside Catalog transactions; prepared snapshots never pass through it.
+pub enum ContextRequestPreparation {
+    Ready,
+    Recompile,
+    Waiting { wait_id:String },
+}
 pub trait ContextPreparation: Send + Sync {
     fn prepare(&self, run_id: &str, owner_generation: u64, cancel: &CancellationToken) -> Result<(), ExecutionError>;
     /// Inspect the complete serialized candidate before admission. A successful checkpoint
     /// publication asks the engine to compile the same legal boundary again.
     fn prepare_request(&self, _owner_generation: u64, _view: &RequestView, _serialized: &Value,
-        _cancel: &CancellationToken) -> Result<bool, ExecutionError> { Ok(false) }
+        _cancel: &CancellationToken) -> Result<ContextRequestPreparation, ExecutionError> { Ok(ContextRequestPreparation::Ready) }
 }
 pub struct NoopContextPreparation;
 impl ContextPreparation for NoopContextPreparation {
@@ -1263,8 +1268,12 @@ impl<
                         Err(error) => finish!('agent, RunState::Failed, None, Some(error)),
                     };
                     match self.context_preparation.prepare_request(input.owner_generation, &view, &serialized, &cancel) {
-                        Ok(true) => { steps -= 1; policy_state = previous_policy_state; continue 'agent; }
-                        Ok(false) => (),
+                        Ok(ContextRequestPreparation::Recompile) => { steps -= 1; policy_state = previous_policy_state; continue 'agent; }
+                        Ok(ContextRequestPreparation::Ready) => (),
+                        Ok(ContextRequestPreparation::Waiting{wait_id}) => {
+                            steps -= 1;
+                            finish!('agent,RunState::Waiting,Some(wait_id),None);
+                        }
                         Err(error) => {
                             if cancel.is_cancelled() { steps -= 1; policy_state = previous_policy_state; continue 'agent; }
                             finish!('agent, RunState::Failed, None, Some(error));

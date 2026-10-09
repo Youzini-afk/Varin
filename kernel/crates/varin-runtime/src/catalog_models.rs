@@ -73,7 +73,8 @@ impl Catalog {
         let tx = self.db.transaction()?;
         let mut run: Run = record(&tx, "runs", run_id)?;
         fence(&run, self.epoch)?;
-        if run.cancel_requested || run.configuration.get("context_job").is_some() {
+        let context_job:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM context_jobs WHERE run_id=?1)",[run_id],|row|row.get(0))?;
+        if run.cancel_requested || context_job {
             return Err(RuntimeError::Conflict(
                 "Run is closing or has a fixed context-job model".into(),
             ));

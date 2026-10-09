@@ -18,6 +18,7 @@ pub mod model_session;
 pub mod content;
 
 pub mod context_job;
+pub mod context_capacity;
 
 pub mod resource_admission;
 

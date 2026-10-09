@@ -495,6 +495,7 @@ impl Catalog {
             false,
             Some(staged),
             Some(operation_id),
+            None,
         )?;
         self.child_task(operation_id)
     }

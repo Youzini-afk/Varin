@@ -9,6 +9,8 @@ use serde_json::Value;
 #[serde(deny_unknown_fields)]
 pub struct ContextJobRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub personalization: Option<crate::catalog::personalization::PersonalizationBasis>,
     pub key: String,
     pub branch_id: String,

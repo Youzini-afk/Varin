@@ -234,7 +234,7 @@ fn combined(ending: Ending) {
         enabled_tools: BTreeSet::from([ToolKind::FileSearch]),
     };
     let (output, messages) = mpsc::sync_channel(8);
-    let bridge = MemoryBridge::new(output);
+    let bridge = OwnerChannel::new("memory",output);
     bridge.initialize(EPOCH);
     // Real private bridge rendezvous; the external memory domain reply is deliberately a fixture.
     let responder = {

@@ -306,6 +306,7 @@ export interface BranchForkResult {
 }
 
 export interface ContextJobCreateParams {
+  ownerRunId?: string;
   personalization?: ContextPersonalization;
   key: string;
   branchId: string;

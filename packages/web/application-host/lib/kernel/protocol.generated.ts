@@ -19,6 +19,7 @@ export type KernelMethod =
   | "runtime.context_job.inspect"
   | "runtime.context_job.list"
   | "runtime.context_job.publish"
+  | "runtime.context_job.resume"
   | "runtime.context.inspect"
   | "runtime.context.refresh"
   | "runtime.memory.reconcile"
@@ -524,6 +525,7 @@ export interface BranchForkResult {
 }
 
 export interface ContextJobCreateParams {
+  ownerRunId?: string;
   personalization?: ContextPersonalization;
   key: string;
   branchId: string;
@@ -2060,6 +2062,7 @@ export type KernelMethodParams = {
   "runtime.context_job.inspect": RunParams;
   "runtime.context_job.list": HistoryParams;
   "runtime.context_job.publish": RunParams;
+  "runtime.context_job.resume": RunParams;
   "runtime.context.inspect": HistoryParams;
   "runtime.context.refresh": ContextRefreshParams;
   "runtime.memory.reconcile": RunParams;
@@ -2274,6 +2277,15 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.context_job.publish";
+      params: RunParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.context_job.resume";
       params: RunParams;
       epoch?: string;
       grantId?: string;

@@ -231,15 +231,10 @@ impl Catalog {
         let capture = |kind| -> Result<ContextRead> { Ok(ContextRead { kind,
             database:self.db.path().ok_or_else(||RuntimeError::Invalid("Catalog has no database".into()))?.into(),
             _publication:self.content.begin_publication() }) };
-        if let Some(request) = run.configuration.get("context_job") {
-            let request: crate::context_job::ContextJobRequest =
-                serde_json::from_value(request.clone())?;
-            let source: crate::context_job::SummarySource = serde_json::from_value(run.configuration.get("context_job_source")
-                .ok_or_else(|| RuntimeError::Invalid("context job has no frozen summary source".into()))?.clone())?;
+        if self.is_context_job(run_id)? {
             return Ok(Some(capture(ContextReadKind::Summary {
                 content: self.content.clone(),
-                request,
-                source,
+                job:self.capture_context_job(run_id)?,
             })?));
         }
         let active:Option<(String,Option<String>,String)>=self.db.query_row("SELECT c.id,c.through_id,c.body FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",[&run.branch_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
@@ -330,8 +325,7 @@ enum ContextReadKind {
     },
     Summary {
         content: crate::content::ContentStore,
-        request: crate::context_job::ContextJobRequest,
-        source: crate::context_job::SummarySource,
+        job:super::context_jobs::ContextJobRead,
     },
 }
 impl ContextRead {
@@ -352,9 +346,9 @@ impl ContextRead {
             },
             ContextReadKind::Summary {
                 content,
-                request,
-                source,
+                job,
             } => {
+                let (request,source)=job.summary()?;
                 let metadata = super::context_jobs::source_metadata_until(&database, Some(&request.through_id), source.through_id.as_deref())?;
                 let originals = super::context_jobs::hydrate_source(&content, metadata)?;
                 let mut history = vec![ConversationItem {

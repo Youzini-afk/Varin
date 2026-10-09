@@ -68,21 +68,24 @@ export class ThreadAdapter {
     if (results.some(result => result.status === 'rejected')) throw new Error('Personalization refresh requires attention');
   }
 
-  private readonly questionResumptions = new Map<string, Promise<void>>();
-  private async continueQuestion(runId: string): Promise<void> {
-    const existing = this.questionResumptions.get(runId);
+  private readonly resumptions = new Map<string, Promise<void>>();
+  private async continueParked(runId: string): Promise<void> {
+    const existing = this.resumptions.get(runId);
     if (existing) return existing;
     const work = (async () => {
       const run = await this.runtime.run(runId);
       if (run.state === 'runnable') {
-        // The answer transaction follows parked-worker quiescence. Replace only that finished
-        // worker's live bridge entry; resume still verifies the persisted principal/generation.
+        // Wait delivery follows parked-worker quiescence. Resume verifies the persisted owner.
         this.runtime.releaseRunCredentialOwner(runId);
         await this.resume(runId);
       }
     })();
-    this.questionResumptions.set(runId, work);
-    try { await work; } finally { if (this.questionResumptions.get(runId) === work) this.questionResumptions.delete(runId); }
+    this.resumptions.set(runId, work);
+    try { await work; } finally { if (this.resumptions.get(runId) === work) this.resumptions.delete(runId); }
+  }
+  async continueContext(runId:string):Promise<void> {
+    try {await this.continueParked(runId);}
+    catch(error) {await this.recordLaunchFailure(runId,error);throw error;}
   }
   async decidePermission(input: ThreadIdentity & { operationId: string; permissionId: string; decision: 'allow_once' | 'deny' }) {
     await this.requireIdentity(input);
@@ -97,7 +100,7 @@ export class ThreadAdapter {
     const run = await this.requireRun(operation.run_id);
     if (run.branch_id !== input.branchId || run.thread_id !== input.threadId) throw new Error('Question belongs to another branch');
     const result = await this.runtime.answerQuestion(input.operationId, input.answer);
-    await this.continueQuestion(result.run_id);
+    await this.continueParked(result.run_id);
     return result;
   }
   async cancelOperation(operationId: string) {
@@ -110,7 +113,7 @@ export class ThreadAdapter {
       await this.runtime.cancelChildWait(current.waiting_on); return this.runtime.operation(operationId);
     }
     const result = await this.runtime.cancelOperation(operationId);
-    if (result.executor === 'ask_user') await this.continueQuestion(result.run_id);
+    if (result.executor === 'ask_user') await this.continueParked(result.run_id);
     return result;
   }
   async readChildReport(identity: ThreadIdentity, operationId: string, itemId: string, offset = 0, maxBytes = 65536) {
@@ -240,8 +243,7 @@ export class ThreadAdapter {
     const run = await this.runtime.run(runId);
     const launch = await this.runtime.launch(runId);
     if (!launch?.selection.credential_scope) throw new Error('Context job has no durable credential binding');
-    const { context_job: _recipe, context_job_source: _source, ...configuration } = run.configuration as ModelSessionConfiguration & { context_job: unknown; context_job_source: unknown };
-    const owner = await this.models.rebindModel(configuration as ModelSessionConfiguration, launch.selection.credential_scope);
+    const owner = await this.models.rebindModel(run.configuration as ModelSessionConfiguration, launch.selection.credential_scope);
     await this.runtime.startRunWithCredentialOwner(runId, owner);
   }
 
@@ -418,12 +420,13 @@ export class ThreadAdapter {
     const pending = await this.runtime.pendingLaunches();
     await Promise.all(pending.map(async launch => {
       const run = await this.runtime.run(launch.run_id);
-      if (['completed', 'failed', 'cancelled'].includes(run.state) || (run.state === 'waiting' && (run.waiting_on?.startsWith('question:') || run.waiting_on?.startsWith('child-wait:') || run.waiting_on?.startsWith('process-wait:')))) return;
+      if (['completed', 'failed', 'cancelled'].includes(run.state) || (run.state === 'waiting' && (run.waiting_on?.startsWith('question:') || run.waiting_on?.startsWith('child-wait:') || run.waiting_on?.startsWith('process-wait:') || run.waiting_on?.startsWith('context-wait:')))) return;
       if (await this.runtime.childForThread(run.thread_id)) return;
       try {
         if (run.thread_id.startsWith('thread:')) await this.resume(run.id);
         else if (run.thread_id.startsWith('context-job-thread:')) {
           const job = await this.runtime.contextJob(run.id);
+          if(job.request.owner_run_id) return;
           const sources = await this.runtime.threads();
           if (!sources.some(thread => thread.thread_id.startsWith('thread:') && thread.branches.some(branch => branch.branch_id === job.request.branch_id))) return;
           await this.resumeContextRun(run.id);

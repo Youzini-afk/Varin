@@ -2,6 +2,7 @@ import { PlanBridge, type PrivatePlanResponse } from './plan-bridge.js';
 import type { PlanOwner } from './plan-owner.js';
 import { MemoryBridge, type PrivateMemoryResponse } from './memory-bridge.js';
 import type { MemoryToolOwner } from './memory-owner.js';
+import { ContextBridge, type ContextOwner, type PrivateContextResponse } from './context-bridge.js';
 import { RetrievalBridge, type PrivateRetrievalResponse } from './retrieval-bridge.js';
 import type { RetrievalOwner } from './retrieval-owner.js';
 import { LanguageBridge, type PrivateLanguageResponse } from './language-bridge.js';
@@ -553,6 +554,7 @@ export class KernelClient {
   private readonly mcpBridge: McpBridge;
   private readonly languageBridge: LanguageBridge;
   private readonly memoryBridge: MemoryBridge;
+  private readonly contextBridge: ContextBridge;
   private readonly planBridge: PlanBridge;
   private readonly retrievalBridge: RetrievalBridge;
   private readonly issuedGrants = new Map<string, KernelGrantHandle>();
@@ -587,6 +589,8 @@ export class KernelClient {
       () => this.failAll(new KernelClientError({ code: "retrieval-channel-failed", message: "Private retrieval channel failed", retryable: false }), true));
     this.memoryBridge = new MemoryBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "memory-channel-failed", message: "Private memory channel failed", retryable: false }), true));
+    this.contextBridge = new ContextBridge(() => this.epoch, response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: "context-channel-failed", message: "Private context channel failed", retryable: false }), true));
     this.planBridge = new PlanBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "plan-channel-failed", message: "Private plan channel failed", retryable: false }), true));
     this.languageBridge = new LanguageBridge(() => this.epoch, response => this.write(response),
@@ -631,6 +635,7 @@ export class KernelClient {
     return this.requestRaw<{ resourceKey: string }>("file.read.check", params, { signal, grant });
   }
   setMemoryOwner(owner: MemoryToolOwner): void { this.memoryBridge.setOwner(owner); }
+  setContextOwner(owner: ContextOwner): void { this.contextBridge.setOwner(owner); }
   setPlanOwner(owner: PlanOwner): void { this.planBridge.setOwner(owner); }
   setLanguageOwner(owner: LanguageToolOwner): void { this.languageBridge.setOwner(owner); }
   mcpBinding(runId: string): McpBinding | undefined { return this.mcpBridge.binding(runId); }
@@ -849,7 +854,7 @@ export class KernelClient {
       return;
     }
     const response = value as KernelResponse | KernelProcessStreamEvent | AgentRuntimeStreamEvent;
-      if (this.credentialBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.mcpBridge.consume(response) || this.policyBridge.consume(response)) return;
+      if (this.credentialBridge.consume(response) || this.contextBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.mcpBridge.consume(response) || this.policyBridge.consume(response)) return;
       if (response.kind === "runtime-event") {
         if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch
           || !["durable", "progress"].includes(response.stream)
@@ -921,6 +926,7 @@ export class KernelClient {
     this.mcpBridge.close();
     this.languageBridge.close();
     this.memoryBridge.close();
+    this.contextBridge.close();
     this.planBridge.close();
     this.retrievalBridge.close();
     this.issuedGrants.clear();
@@ -944,7 +950,7 @@ export class KernelClient {
     if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
-  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateMcpResponse | PrivatePolicyResponse | PrivateMemoryResponse | PrivatePlanResponse | PrivateLanguageResponse | PrivateRetrievalResponse): Promise<void> {
+  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateMcpResponse | PrivatePolicyResponse | PrivateMemoryResponse | PrivateContextResponse | PrivatePlanResponse | PrivateLanguageResponse | PrivateRetrievalResponse): Promise<void> {
     const transport = this.transport;
     if (!transport) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel transport is unavailable", retryable: true });
     const control = request.kind === "cancel" || request.kind === "credential-response"
@@ -1552,6 +1558,7 @@ export class KernelClient {
     this.mcpBridge.close();
     this.languageBridge.close();
     this.memoryBridge.close();
+    this.contextBridge.close();
     this.planBridge.close();
     this.retrievalBridge.close();
     this.issuedGrants.clear();
