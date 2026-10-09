@@ -54,7 +54,7 @@ export async function startNativeRunFromSource(
       || source.live_root?.hostId !== selection.liveRoot?.hostId || source.live_root?.canonicalRoot !== selection.liveRoot?.canonicalRoot || source.live_root?.rootId !== selection.liveRoot?.rootId
       || (source.environment_run_id ?? undefined) !== selection.environmentRunId) throw new Error('Native rebind cannot change its durable source selection');
     const selectedNames = tools.map(tool => `native_${tool}`).sort();
-    if (JSON.stringify(selectedNames) !== JSON.stringify(saved.selection.tools.filter(tool => tool.name !== 'native_ask_user' && !saved.selection.mcp_binding?.tools.some(mcp => mcp.name === tool.name)).map(tool => tool.name).sort())) throw new Error('Native rebind cannot change its durable tools');
+    if (JSON.stringify(selectedNames) !== JSON.stringify(saved.selection.tools.filter(tool => !['native_ask_user', 'native_dispatch', 'native_child_status', 'native_wait_child', 'native_child_report'].includes(tool.name) && !saved.selection.mcp_binding?.tools.some(mcp => mcp.name === tool.name)).map(tool => tool.name).sort())) throw new Error('Native rebind cannot change its durable tools');
   }
   const credentialScope = options.credentialOwner ? await options.credentialOwner.scope() : undefined;
   if (!saved) await runtime.selectLaunch({ runId: run.id,
@@ -73,6 +73,7 @@ export async function startNativeRunFromSource(
     capabilities: ['storage.read', 'storage.write', ...(tools.some(tool => tool.startsWith('process_')) ? ['process'] : [])],
     pathScopes: [''],
   }, signal);
+  runtime.retainSourceGrant(run.id, grant.grantId);
   const actor = kernel.scoped(grant);
   try {
     let rootId: string | undefined;
@@ -130,7 +131,7 @@ export async function startNativeRunFromSource(
       : await runtime.startRun(run.id, signal, toolBinding);
   } catch (error) {
     // Revocation is a control request, not a claim that an already accepted effect stopped.
-    await kernel.revokeGrant(grant.grantId).catch(() => undefined);
+    await runtime.releaseSourceGrant(run.id, grant.grantId).catch(() => undefined);
     throw error;
   }
 }

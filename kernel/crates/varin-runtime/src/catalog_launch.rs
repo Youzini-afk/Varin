@@ -243,7 +243,7 @@ impl Catalog {
         let steps: i64 = tx.query_row("SELECT count(*) FROM model_steps WHERE run_id=?1", [run_id], |row| row.get(0))?;
         let checkpoints: i64 = tx.query_row("SELECT count(*) FROM policy_checkpoints WHERE run_id=?1", [run_id], |row| row.get(0))?;
         if run.cancel_requested || run.state.terminal() || launch.bound_epoch.is_some() || steps != 0 || checkpoints != 0
-            || launch.selection.policy.name != "default+questions" || launch.selection.policy.version != "1+1"
+            || launch.selection.policy.name != "default+questions+collaboration" || launch.selection.policy.version != "1+1+1"
             || !launch.selection.policy_models.is_empty() || launch.selection.policy == identity {
             return Err(RuntimeError::Conflict("policy preparation cannot replace a selected or used launch".into()));
         }

@@ -169,7 +169,7 @@ it('retrieval routing uses the accepted Run project even when the visible projec
       ...(query.projectId ? { projectId: query.projectId } : {}), workspaceId: query.liveRoot.canonicalRoot }, signal); } }));
   const run = await f.admit('frozen-project', ['code_retrieval'], [''], ['storage.read', 'storage.write'], {
     effectiveSystemPrompt: 'Project identity fixture', instructionSources: ['review:project-source'], memoryCheckpoint: null,
-    personalization: { revision: 0, sessionId: 'frozen-project-thread', projectId: visibleProject,
+    personalization: { mode: 'agent', threadRole: 'main', revision: 0, sessionId: 'frozen-project-thread', projectId: visibleProject,
       originalSections: [{ name: 'preamble', content: 'Project identity fixture' }], instructionSources: ['review:project-source'] },
   });
   await run.start(); await expect.poll(() => requests, { timeout: 10_000 }).toBe(1);

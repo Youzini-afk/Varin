@@ -21,7 +21,7 @@ const poll = (fn: () => unknown) => expect.poll(fn, { timeout: 10_000 });
 const serviceId = 'varin.run.activity';
 const key = (id = 'example.run-activity') => `${id}:host:${serviceId}@1`;
 const subscription = (thread = 'thread', id = 'example.run-activity', project: string | null = null) => JSON.stringify([`${serviceId}@1`, key(id), thread, project]);
-const context = (projectId: string) => ({effectiveSystemPrompt:'private prompt',instructionSources:[],memoryCheckpoint:null,personalization:{revision:1,sessionId:'thread',projectId,originalSections:[],instructionSources:[]}});
+const context = (projectId: string) => ({effectiveSystemPrompt:'private prompt',instructionSources:[],memoryCheckpoint:null,personalization:{mode:'agent',threadRole:'main',revision:1,sessionId:'thread',projectId,originalSections:[],instructionSources:[]}});
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-observer-review-'));
   let child!: ChildProcessWithoutNullStreams;

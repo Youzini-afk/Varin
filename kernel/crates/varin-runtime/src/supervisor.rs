@@ -348,6 +348,19 @@ impl RunSupervisor {
         if let Some(mut worker) = worker { if let Some(join) = worker.join.take() { join.join().map_err(|_| error("question worker teardown failed"))?; } }
         Ok(())
     }
+    /// A persisted child Wait has relinquished the history writer. Join only final teardown,
+    /// never a running model/tool, before its durable report makes that same Run runnable.
+    pub fn quiesce_child_waits(&self) -> Result<()> {
+        let ids: Vec<String> = self.workers.lock().map_err(error)?.keys().cloned().collect();
+        for id in ids {
+            let run = self.catalog.lock().map_err(error)?.run(&id).map_err(error)?;
+            if run.state != RunState::Waiting || !run.waiting_on.as_deref().is_some_and(|id| id.starts_with("child-wait:")) { continue; }
+            if let Some(mut worker) = self.workers.lock().map_err(error)?.remove(&id) {
+                if let Some(join) = worker.join.take() { join.join().map_err(|_| error("child wait teardown failed"))?; }
+            }
+        }
+        Ok(())
+    }
     pub fn cancel_operation(&self, operation_id: &str) -> Result<crate::Operation> {
         self.cancel_operation_control(operation_id);
         self.catalog

@@ -20,6 +20,18 @@ export type KernelMethod =
   | "runtime.history.body"
   | "runtime.thread.operations.active"
   | "runtime.run.reconcile"
+  | "runtime.child.sources.pending"
+  | "runtime.child.sources.release"
+  | "runtime.child.list"
+  | "runtime.child.inspect"
+  | "runtime.child.report.read"
+  | "runtime.child.for_thread"
+  | "runtime.child.prepare"
+  | "runtime.child.fail"
+  | "runtime.child.cancel"
+  | "runtime.child.release"
+  | "runtime.child.reconcile"
+  | "runtime.child.wait.cancel"
   | "runtime.launch.fail"
   | "runtime.thread.inspect"
   | "runtime.thread.list"
@@ -564,6 +576,8 @@ export interface NativeContextComposition {
 }
 
 export interface NativeContextPersonalization {
+  mode: string;
+  threadRole: string;
   contextComposition?: NativeContextComposition;
   revision: number;
   sessionId: string;
@@ -616,6 +630,97 @@ export interface NativePermissionDecideParams {
 export interface NativeQuestionAnswerParams {
   operationId: string;
   answer: string;
+}
+
+export interface NativeUnacceptedChildSource {
+  operation_id: string;
+  parent_thread_id: string;
+  source: NativeLaunchSource;
+  pin_id: string;
+}
+
+export interface NativeChildPrepareParams {
+  operationId: string;
+  source: NativeLaunchSourceParams;
+  context: NativeInitialContext;
+}
+
+export interface NativeChildFailParams {
+  operationId: string;
+  code: string;
+}
+
+export interface NativeChildWaitParams {
+  waitId: string;
+}
+
+export interface NativeChildInput {
+  task: string;
+  model: string;
+  profile: string;
+}
+
+export interface NativeChildSourcePin {
+  pin_id: string;
+  root: string;
+  source: NativeLaunchSource;
+}
+
+export interface NativeChildReportReadParams {
+  operationId: string;
+  itemId: string;
+  offset?: number;
+  maxBytes?: number;
+}
+
+export interface NativeChildTextPage {
+  operation_id: string;
+  item_id: string;
+  offset: number;
+  next_offset: number | null;
+  total_bytes: number;
+  text: string;
+}
+
+export interface NativeChildReport {
+  outcome: NativeOutcome;
+  sender_thread_id: string;
+  run_id: string | null;
+  history_ids: string[];
+  detail: string | null;
+  code_result: string;
+}
+
+export interface NativeChildTask {
+  operation_id: string;
+  parent_run_id: string;
+  parent_thread_id: string;
+  parent_branch_id: string;
+  origin: unknown;
+  call_id: string;
+  child_thread_id: string;
+  child_branch_id: string;
+  project_id: string | null;
+  input: NativeChildInput;
+  configuration: unknown;
+  launch: NativeLaunchSelection;
+  source_pin: NativeChildSourcePin;
+  state: string;
+  revision: number;
+  cursor: number;
+  receipt: NativeReceipt | null;
+  report: NativeChildReport | null;
+  resources_released: boolean;
+}
+
+export interface NativeChildWait {
+  id: string;
+  run_id: string;
+  subject: string;
+  kind: string;
+  after_cursor: number;
+  trigger_cursor: number | null;
+  cancelled: boolean;
 }
 
 export interface NativeOperationParams {
@@ -1837,6 +1942,18 @@ export interface KernelComputeReadResult {
 }
 
 export type KernelMethodParams = {
+  "runtime.child.sources.pending": KernelEmptyParams;
+  "runtime.child.sources.release": NativeOperationParams;
+  "runtime.child.list": KernelEmptyParams;
+  "runtime.child.inspect": NativeOperationParams;
+  "runtime.child.report.read": NativeChildReportReadParams;
+  "runtime.child.for_thread": NativeThreadParams;
+  "runtime.child.prepare": NativeChildPrepareParams;
+  "runtime.child.fail": NativeChildFailParams;
+  "runtime.child.cancel": NativeOperationParams;
+  "runtime.child.release": NativeOperationParams;
+  "runtime.child.reconcile": KernelEmptyParams;
+  "runtime.child.wait.cancel": NativeChildWaitParams;
   "runtime.branch.fork": NativeBranchForkParams;
   "runtime.context_job.create": NativeContextJobCreateParams;
   "runtime.context_job.inspect": NativeRunParams;
@@ -1980,6 +2097,114 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.child.sources.pending";
+      params: KernelEmptyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.child.sources.release";
+      params: NativeOperationParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.child.list";
+      params: KernelEmptyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.child.inspect";
+      params: NativeOperationParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.child.report.read";
+      params: NativeChildReportReadParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.child.for_thread";
+      params: NativeThreadParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.child.prepare";
+      params: NativeChildPrepareParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.child.fail";
+      params: NativeChildFailParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.child.cancel";
+      params: NativeOperationParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.child.release";
+      params: NativeOperationParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.child.reconcile";
+      params: KernelEmptyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.child.wait.cancel";
+      params: NativeChildWaitParams;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";

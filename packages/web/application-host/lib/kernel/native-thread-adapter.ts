@@ -92,9 +92,46 @@ export class NativeThreadAdapter {
   }
   async cancelOperation(operationId: string) {
     await this.requireOperation(operationId);
+    const current = await this.runtime.operation(operationId);
+    if (current.executor === 'native_dispatch') {
+      await this.runtime.cancelChild(operationId); return this.runtime.operation(operationId);
+    }
+    if (current.executor === 'native_wait_child' && current.waiting_on) {
+      await this.runtime.cancelChildWait(current.waiting_on); return this.runtime.operation(operationId);
+    }
     const result = await this.runtime.cancelOperation(operationId);
     if (result.executor === 'native_ask_user') await this.continueQuestion(result.run_id);
     return result;
+  }
+  async readChildReport(identity: NativeThreadIdentity, operationId: string, itemId: string, offset = 0, maxBytes = 65536) {
+    await this.requireIdentity(identity);
+    const child = await this.runtime.child(operationId);
+    if (child.parent_thread_id !== identity.threadId) throw new Error('Child belongs to another Thread');
+    return this.runtime.readChildReport(operationId, itemId, offset, maxBytes);
+  }
+  async children(identity: NativeThreadIdentity) {
+    await this.requireIdentity(identity);
+    return (await this.runtime.children()).filter(child => child.parent_thread_id === identity.threadId);
+  }
+  async cancelChild(identity: NativeThreadIdentity, operationId: string) {
+    await this.requireIdentity(identity);
+    const child = await this.runtime.child(operationId);
+    if (child.parent_thread_id !== identity.threadId) throw new Error('Child belongs to another parent Thread');
+    return this.runtime.cancelChild(operationId);
+  }
+  async cancelChildWait(identity: NativeThreadIdentity, waitId: string) {
+    await this.requireIdentity(identity);
+    if (!waitId.startsWith('child-wait:')) throw new Error('Not a child observation wait');
+    const operation = await this.runtime.operation(waitId.slice('child-wait:'.length));
+    const run = await this.requireRun(operation.run_id);
+    if (run.thread_id !== identity.threadId) throw new Error('Wait belongs to another parent Thread');
+    return this.runtime.cancelChildWait(waitId);
+  }
+  async cancelTree(identity: NativeThreadIdentity): Promise<void> {
+    const thread = await this.requireIdentity(identity);
+    const children = await this.children(identity);
+    await Promise.all(children.filter(child => !child.report).map(child => this.runtime.cancelChild(child.operation_id)));
+    await Promise.all(thread.branches.filter(branch => branch.active_run_id).map(branch => this.runtime.cancelRun(branch.active_run_id!)));
   }
   async listModels() {
     if (!this.models.listModels) throw new Error('Model catalog is unavailable');
@@ -205,7 +242,7 @@ export class NativeThreadAdapter {
           };
         }
       }
-      initialContext = await this.prepareContext(input, source);
+      initialContext = await this.prepareContext.main(input, source);
     }
     // The same Rust transaction accepts input, initial context and source/credential/tool selection.
     const receipt = await this.runtime.submit({ key: input.key, threadId: input.threadId, branchId: input.branchId,
@@ -312,7 +349,7 @@ export class NativeThreadAdapter {
     const latest = branch.latest_run;
     const activeRun = branch.active_run_id ? await this.runtime.run(branch.active_run_id) : null;
     const launch = latest ? await this.runtime.launch(latest.id) : null;
-    return { identity, thread, activeRun, history, historyPage: { head: page.head, previous: page.previous }, inputs, operations: [...operations.values()], launch, context };
+    return { identity, thread, activeRun, history, historyPage: { head: page.head, previous: page.previous }, inputs, operations: [...operations.values()], launch, context, children: await this.children(identity) };
   }
 
   private async recordLaunchFailure(runId: string, error: unknown): Promise<void> {
@@ -328,7 +365,8 @@ export class NativeThreadAdapter {
     const pending = await this.runtime.pendingLaunches();
     await Promise.all(pending.map(async launch => {
       const run = await this.runtime.run(launch.run_id);
-      if (['completed', 'failed', 'cancelled'].includes(run.state) || (run.state === 'waiting' && run.waiting_on?.startsWith('question:'))) return;
+      if (['completed', 'failed', 'cancelled'].includes(run.state) || (run.state === 'waiting' && (run.waiting_on?.startsWith('question:') || run.waiting_on?.startsWith('child-wait:')))) return;
+      if (await this.runtime.childForThread(run.thread_id)) return;
       try {
         if (run.thread_id.startsWith('nativeThread:')) await this.resume(run.id);
         else if (run.thread_id.startsWith('context-job-thread:')) {

@@ -12,6 +12,8 @@ pub struct SystemSection {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PersonalizationBasis {
+    pub mode: String,
+    pub thread_role: String,
     pub revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_composition: Option<crate::composition::context::ContextComposition>,
@@ -22,11 +24,16 @@ pub struct PersonalizationBasis {
 }
 impl PersonalizationBasis {
     pub(super) fn same_scope_and_source(&self, other: &Self) -> bool {
-        self.session_id == other.session_id && self.project_id == other.project_id
+        self.mode == other.mode && self.thread_role == other.thread_role
+            && self.session_id == other.session_id && self.project_id == other.project_id
             && self.original_sections == other.original_sections
             && self.instruction_sources == other.instruction_sources
     }
     pub(super) fn validate(&self) -> Result<()> {
+        if !matches!(self.mode.as_str(), "agent" | "bot")
+            || !matches!(self.thread_role.as_str(), "main" | "worker" | "read-only") {
+            return Err(RuntimeError::Invalid("personalization admission role is invalid".into()));
+        }
         if let Some(composition) = &self.context_composition {
             composition.validate().map_err(RuntimeError::Invalid)?;
             if composition.scope_id != self.session_id {
