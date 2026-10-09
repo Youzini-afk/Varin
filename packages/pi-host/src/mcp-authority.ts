@@ -15,6 +15,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import type { McpOwnerConfig, McpOwnerConnectionSnapshot, McpOwnerEntry } from '@varin/protocol';
 import { ConfigTextFileEditor, resolveConfigDocumentPath } from './config-text-file-editor.js';
+import { ConfigWatchManager } from './config-watch-manager.js';
 
 export interface McpAuthorityScope {
   agentDir: string;
@@ -90,6 +91,7 @@ export interface McpAuthorityLease {
   /** Rebind a persisted concrete target only when the exact expected declaration is still present. */
   prepareTool(server: string, tool: string, schemaVersion: string, signal: AbortSignal): Promise<McpAuthorityTool>;
   assertCallable(name: string, schemaVersion: string): void;
+  revocationSignal(name: string, schemaVersion: string): AbortSignal;
   validateArguments(name: string, schemaVersion: string, arguments_: unknown): void;
   callTool(name: string, arguments_: Record<string, unknown>, options: { schemaVersion: string; signal: AbortSignal; beforeDispatch?: () => void | Promise<void> }): ReturnType<McpServerConnection['callTool']>;
   release(): void;
@@ -99,6 +101,7 @@ export class McpAuthorityError extends Error {
   constructor(readonly code: string, readonly dispatched = false) { super(code); this.name = 'McpAuthorityError'; }
 }
 type ConfigPatch = { enabled?: boolean; exposure?: 'direct' | 'codemode' | 'deferred' | 'hidden' };
+interface SourceWatch { keys: Set<string>; ready: Promise<string> }
 type McpTool = McpServerConnection['tools'][number];
 interface ScopeRecord {
   handle: string;
@@ -133,6 +136,7 @@ interface ConnectionRecord {
   providerGrant: string | undefined;
   tokenObservation?: string;
   validators: Map<string, ValidateFunction>;
+  declarations?: string;
 }
 function fail(code: string): never { throw new McpAuthorityError(code); }
 function stable(value: unknown): string {
@@ -157,6 +161,13 @@ function publicEntry(entry: McpServerEntry): McpOwnerEntry {
   return { name: entry.name, source: entry.source, ...(entry.scope ? { scope: entry.scope } : {}),
     ...(entry.override ? { override: entry.override } : {}), config: { ...common, ...transport } };
 }
+function normalizeScope(input: McpAuthorityScope): McpAuthorityScope {
+  if (!input.agentDir || !input.configCwd || !input.executionCwd || !input.environmentId || !input.sessionId) fail('mcp-scope-invalid');
+  return { ...input, agentDir: resolve(input.agentDir), configCwd: resolve(input.configCwd), executionCwd: resolve(input.executionCwd) };
+}
+function scopeKey(scope: McpAuthorityScope): string {
+  return stable([scope.agentDir, scope.configCwd, scope.executionCwd, scope.environmentId, scope.executionScope, scope.projectTrusted]);
+}
 function compile(tool: McpTool): ValidateFunction {
   const schema = structuredClone(tool.inputSchema);
   if (schema.$async === true) fail('mcp-schema-unsupported');
@@ -175,15 +186,71 @@ export class McpAuthority {
   readonly #selected = new Map<string, ConnectionRecord>();
   readonly #credentials = new Map<string, McpOAuthCredentialStore>();
   readonly #observations = new Map<string, { status: McpAuthorityServerReadiness['status']; toolCount: number }>();
+  readonly #subscribers = new Map<string, { scope: McpAuthorityScope; listeners: Set<() => void>; files: string[] }>();
+  readonly #fileWatches = new Map<string, SourceWatch>();
+  readonly #configWatches = new ConfigWatchManager(subscription => {
+    if (subscription.target.kind !== 'document') return;
+    for (const key of this.#fileWatches.get(subscription.target.path)?.keys ?? []) this.#changed(key);
+  });
   #generation = 0;
   #closed = false;
   constructor(options: McpAuthorityOptions = {}) { this.#options = options; }
 
+  /** Subscribers share watches for the actual configuration sources; no per-request probes. */
+  async subscribe(input: McpAuthorityScope, listener: () => void): Promise<() => void> {
+    if (this.#closed) fail('mcp-owner-closed');
+    const scope = normalizeScope(input); const key = scopeKey(scope);
+    let group = this.#subscribers.get(key);
+    if (!group) {
+      const files = [join(scope.agentDir, 'mcp.json'), join(scope.agentDir, 'mcp-auth.json'),
+        ...(scope.projectTrusted ? [join(scope.configCwd, '.pi/mcp.json')] : [])];
+      group = { scope, listeners: new Set(), files };
+      this.#subscribers.set(key, group);
+      for (const file of files) {
+        let entry = this.#fileWatches.get(file);
+        if (!entry) {
+          const owned: SourceWatch = { keys: new Set(),
+            ready: this.#configWatches.watch({ kind: 'document', path: file, scope: 'global' }, [file]).then(subscription => {
+              if (this.#closed || this.#fileWatches.get(file) !== owned) this.#configWatches.unwatch(subscription.watchId);
+              return subscription.watchId;
+            }) };
+          entry = owned;
+          this.#fileWatches.set(file, entry);
+        }
+        entry.keys.add(key);
+      }
+    }
+    group.listeners.add(listener);
+    let released = false;
+    const release = () => {
+      if (released) return; released = true;
+      group!.listeners.delete(listener);
+      if (group!.listeners.size || this.#subscribers.get(key) !== group) return;
+      this.#subscribers.delete(key);
+      for (const file of group!.files) {
+        const watch = this.#fileWatches.get(file); watch?.keys.delete(key);
+        if (watch && !watch.keys.size) {
+          this.#fileWatches.delete(file);
+          void watch.ready.then(id => { this.#configWatches.unwatch(id); }, () => undefined);
+        }
+      }
+    };
+    try { await Promise.all(group.files.map(file => this.#fileWatches.get(file)!.ready)); }
+    catch (error) { release(); throw error; }
+    if (this.#closed) { release(); fail('mcp-owner-closed'); }
+    return release;
+  }
+  #changed(key: string): void {
+    queueMicrotask(() => {
+      if (this.#closed) return;
+      for (const listener of this.#subscribers.get(key)?.listeners ?? []) { try { listener(); } catch { /* Observers cannot interrupt the authority. */ } }
+    });
+  }
+
   open(input: McpAuthorityScope): { scope: string; config: McpOwnerConfig } {
     if (this.#closed) fail('mcp-owner-closed');
-    if (!input.agentDir || !input.configCwd || !input.executionCwd || !input.environmentId || !input.sessionId) fail('mcp-scope-invalid');
-    const scope = { ...input, agentDir: resolve(input.agentDir), configCwd: resolve(input.configCwd), executionCwd: resolve(input.executionCwd) };
-    const key = stable([scope.agentDir, scope.configCwd, scope.executionCwd, scope.environmentId, scope.executionScope, scope.projectTrusted]);
+    const scope = normalizeScope(input);
+    const key = scopeKey(scope);
     const configRevision = this.#configRevision(scope);
     const config = loadMcpConfig({ agentDir: scope.agentDir, cwd: scope.configCwd, projectTrusted: scope.projectTrusted });
     if (configRevision !== this.#configRevision(scope)) fail('mcp-config-changed');
@@ -225,6 +292,7 @@ export class McpAuthority {
       if (handles.some(connection => connection.connection.state !== 'connected')) fail('mcp-connection-unavailable');
       const pinned = new Map<string, { connection: ConnectionRecord; tool: McpTool; descriptor: McpAuthorityTool; validate: ValidateFunction }>();
       const project = (connection: ConnectionRecord): McpAuthorityTool[] => {
+        connection.declarations = stable(connection.connection.tools);
         const declarations = [...connection.connection.tools].sort((a, b) => a.name.localeCompare(b.name));
         const plain = declarations.map(tool => createMcpToolName(connection.entry.name, tool.name));
         const claimed = new Set<string>();
@@ -295,7 +363,9 @@ export class McpAuthority {
           if (!target || target.schemaVersion !== schemaVersion) fail('mcp-schema-generation-mismatch');
           assert(target.name, schemaVersion); return target;
         },
-        assertCallable: (name, schemaVersion) => { assert(name, schemaVersion); }, validateArguments,
+        assertCallable: (name, schemaVersion) => { assert(name, schemaVersion); },
+        revocationSignal: (name, schemaVersion) => assert(name,schemaVersion).connection.shutdown.signal,
+        validateArguments,
         callTool: async (name, args, options) => {
           validateArguments(name, options.schemaVersion, args);
           const target = assert(name, options.schemaVersion);
@@ -353,7 +423,14 @@ export class McpAuthority {
             return token;
           },
           log: new runtime.McpServerLog(join(scope.scope.agentDir, 'mcp.log')),
-          onTools: () => undefined,
+          onTools: () => {
+            // Initial discovery belongs to the preparation already awaiting this connection.
+            // Only changes to declarations actually leased by a consumer invalidate that scope.
+            const selected = this.#pool.get(key);
+            if (!selected?.declarations || selected.revoked || selected.connection !== connection) return;
+            const next = stable(connection.tools);
+            if (next !== selected.declarations) { selected.declarations = next; this.#changed(scope.key); }
+          },
         });
         record = { handle: randomUUID(), generation: ++this.#generation, key, configIdentity: this.#configurationIdentity(scope, entry), scopeKey: scope.key, scope: scope.scope,
           entry, connection, references: 0, retired: false, revoked: false, shutdown: new AbortController(),
@@ -506,6 +583,7 @@ export class McpAuthority {
       if (patch.enabled === false) this.#revoke(record);
       else if (scope.connections.get(name) === record) record.entry = next;
     }
+    this.#changed(scope.key);
   }
 
   releaseConnection(scopeHandle: string, handle: string): void {
@@ -518,7 +596,8 @@ export class McpAuthority {
   }
   disposeSession(sessionId: string): void { for (const scope of this.#scopes.values()) if (scope.scope.sessionId === sessionId) this.closeScope(scope.handle); }
   async close(): Promise<void> {
-    this.#closed = true; for (const scope of [...this.#scopes.values()]) this.closeScope(scope.handle);
+    this.#closed = true; this.#configWatches.close(); this.#fileWatches.clear(); this.#subscribers.clear();
+    for (const scope of [...this.#scopes.values()]) this.closeScope(scope.handle);
     const records = [...this.#pool.values()]; for (const record of records) this.#revoke(record);
     await Promise.all(records.map(record => record.connection.close())); this.#pool.clear(); this.#selected.clear();
   }
@@ -607,7 +686,11 @@ export class McpAuthority {
       if (!definition || this.#toolVersion(record, definition) !== schemaVersion || getMcpToolExposure(record.entry.config, tool) === 'hidden') fail('mcp-schema-generation-mismatch');
     }
   }
-  #revoke(record: ConnectionRecord, reason = 'mcp-owner-revoked'): void { record.revoked = true; record.revocationReason = reason; record.shutdown.abort(); void record.connection.close().catch(() => undefined); this.#collect(record); }
+  #revoke(record: ConnectionRecord, reason = 'mcp-owner-revoked'): void {
+    if (record.revoked) return;
+    record.revoked = true; record.revocationReason = reason; record.shutdown.abort();
+    void record.connection.close().catch(() => undefined); this.#collect(record); this.#changed(record.scopeKey);
+  }
   #releaseConnection(scope: ScopeRecord, record: ConnectionRecord): void {
     if (scope.connections.get(record.entry.name) !== record) return;
     scope.connections.delete(record.entry.name); record.references--; this.#collect(record);

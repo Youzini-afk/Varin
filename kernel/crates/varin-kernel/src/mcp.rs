@@ -160,11 +160,11 @@ impl McpBridge {
         }
         result
     }
-    pub(crate) fn declarations(
+    pub(crate) fn prepare_generation(
         &self,
         run_id: String,
         binding: McpBinding,
-    ) -> Result<Vec<varin_runtime::composition::tools::ToolDeclaration>, ExecutionError> {
+    ) -> Result<Arc<McpGeneration>, ExecutionError> {
         binding
             .validate()
             .map_err(|_| failed("mcp_binding_invalid"))?;
@@ -178,31 +178,23 @@ impl McpBridge {
         let holder = uuid::Uuid::new_v4().to_string();
         self.send(json!({"v":1,"kind":"mcp-binding-retain","kernelEpoch":epoch,
             "runId":run_id,"reference":binding.reference,"generation":binding.generation,"holderId":holder}))?;
-        let generation = Arc::new(McpGeneration {
+        Ok(Arc::new(McpGeneration {
             run_id,
             binding,
             bridge: self.clone(),
             epoch,
             holder,
-        });
-        Ok(generation
-            .binding
-            .tools
-            .iter()
-            .map(
-                |schema| varin_runtime::composition::tools::ToolDeclaration {
-                    schema: schema.clone(),
-                    content_version: format!(
-                        "{}:{}:{}",
-                        generation.binding.reference, generation.binding.generation, schema.version
-                    ),
-                    implementation: Arc::new(McpTools {
-                        generation: generation.clone(),
-                        schema: schema.clone(),
-                    }),
-                },
-            )
-            .collect())
+        }))
+    }
+    pub(crate) fn deactivate(&self, run_id: &str) -> Result<(), ExecutionError> {
+        let epoch = self
+            .state
+            .lock()
+            .map_err(|_| failed("mcp_channel_failed"))?
+            .epoch
+            .clone()
+            .ok_or_else(|| failed("mcp_channel_unavailable"))?;
+        self.send(json!({"v":1,"kind":"mcp-binding-deactivate","kernelEpoch":epoch,"runId":run_id}))
     }
 }
 #[derive(Deserialize)]
@@ -232,12 +224,42 @@ fn unknown() -> ToolCompletion {
         content: json!({"error":"mcp_effect_unknown"}),
     }
 }
-struct McpGeneration {
+pub(crate) struct McpGeneration {
     run_id: String,
     binding: McpBinding,
     bridge: McpBridge,
     epoch: String,
     holder: String,
+}
+impl McpGeneration {
+    pub(crate) fn binding(&self) -> &McpBinding {
+        &self.binding
+    }
+    pub(crate) fn declarations(
+        self: &Arc<Self>,
+    ) -> Vec<varin_runtime::composition::tools::ToolDeclaration> {
+        self.binding
+            .tools
+            .iter()
+            .map(
+                |schema| varin_runtime::composition::tools::ToolDeclaration {
+                    schema: schema.clone(),
+                    content_version: format!(
+                        "{}:{}:{}",
+                        self.binding.reference, self.binding.generation, schema.version
+                    ),
+                    implementation: Arc::new(McpTools {
+                        generation: self.clone(),
+                        schema: schema.clone(),
+                    }),
+                },
+            )
+            .collect()
+    }
+    pub(crate) fn activate(&self) -> Result<(), ExecutionError> {
+        self.bridge.send(json!({"v":1,"kind":"mcp-binding-activate","kernelEpoch":self.epoch,
+            "runId":self.run_id,"reference":self.binding.reference,"generation":self.binding.generation,"holderId":self.holder}))
+    }
 }
 impl Drop for McpGeneration {
     fn drop(&mut self) {

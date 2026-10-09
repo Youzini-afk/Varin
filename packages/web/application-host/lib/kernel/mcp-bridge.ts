@@ -55,7 +55,8 @@ export class McpBridge {
   readonly #owners = new Map<string, Map<string, OwnerEntry>>();
   readonly #selected = new Map<string, string>();
   constructor(private readonly currentEpoch: () => string | null,
-    private readonly send: (response: PrivateMcpResponse) => Promise<void>, private readonly transportFailed: () => void) {}
+    private readonly send: (response: PrivateMcpResponse) => Promise<void>, private readonly transportFailed: () => void,
+    private readonly released: (runId: string) => void = () => {}) {}
   register(runId: string, lease: McpLease, selected = true): McpBinding {
     const epoch = this.currentEpoch();
     const binding = structuredClone(lease.binding);
@@ -102,6 +103,11 @@ export class McpBridge {
     entry.closing = true;
     entry.lease.release();
   }
+  discard(runId: string, binding: { reference: string; generation: number }): void {
+    const key = this.#key(binding);
+    const entry = this.#owners.get(runId)?.get(key);
+    if (entry) this.#collect(runId, key, entry);
+  }
   binding(runId: string): McpBinding | undefined {
     const key = this.#selected.get(runId);
     const owner = key ? this.#owners.get(runId)?.get(key) : undefined;
@@ -109,6 +115,7 @@ export class McpBridge {
   }
   unregister(runId: string): void {
     const entries = this.#owners.get(runId);
+    this.released(runId);
     if (!entries) return;
     this.#owners.delete(runId);
     this.#selected.delete(runId);
@@ -120,11 +127,21 @@ export class McpBridge {
   }
   close(): void { for (const runId of this.#owners.keys()) this.unregister(runId); }
   consume(value: unknown): boolean {
-    if (!record(value) || !['mcp-tool-request', 'mcp-tool-cancel', 'mcp-owner-release', 'mcp-binding-retain', 'mcp-binding-release', 'mcp-binding-activate'].includes(String(value.kind))) return false;
+    if (!record(value) || !['mcp-tool-request', 'mcp-tool-cancel', 'mcp-owner-release', 'mcp-binding-retain', 'mcp-binding-release', 'mcp-binding-activate', 'mcp-binding-deactivate'].includes(String(value.kind))) return false;
     // Consume malformed/private traffic rather than letting it reach public protocol consumers.
     if (value.kind === 'mcp-owner-release') {
       if (value.v === 1 && value.kernelEpoch === this.currentEpoch() && text(value.runId)
         && exact(value, ['v', 'kind', 'kernelEpoch', 'runId'])) this.unregister(value.runId);
+      return true;
+    }
+    if (value.kind === 'mcp-binding-deactivate') {
+      if (value.v === 1 && value.kernelEpoch === this.currentEpoch() && text(value.runId)
+        && exact(value, ['v', 'kind', 'kernelEpoch', 'runId'])) {
+        const key = this.#selected.get(value.runId);
+        this.#selected.delete(value.runId);
+        const entry = key ? this.#owners.get(value.runId)?.get(key) : undefined;
+        if (entry) { entry.selected = false; this.#collect(value.runId, key!, entry); }
+      }
       return true;
     }
     if (['mcp-binding-retain', 'mcp-binding-release', 'mcp-binding-activate'].includes(String(value.kind))) {

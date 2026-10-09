@@ -1634,6 +1634,49 @@ fn independent_model_finished_retry_is_exactly_idempotent_and_conflicting_retry_
 }
 
 #[test]
+fn tool_activation_retains_its_exact_composition_through_collection_and_reopen() {
+    use crate::execution::*;
+    let f=Fixture::new();let mut db=f.open();
+    db.create_thread("thread","main").unwrap();
+    let configuration:ModelSessionConfiguration=serde_json::from_value(json!({"providerFamily":"openai-responses","model":"same","endpoint":"http://localhost/responses","credentialEnvironment":null,"allowAnonymous":true,"configurationGeneration":1,"maxOutputTokens":32})).unwrap();
+    let initial=crate::model_session::bind(configuration.clone()).unwrap();
+    let receipt=db.submit(&SubmitInput{configuration:serde_json::to_value(configuration).unwrap(),..command()}).unwrap();
+    let policy=initial.policy.identity();
+    db.bind_launch(&receipt.run_id,launches::LaunchSelection::from_binding(&initial.binding,policy.clone(),None)).unwrap();
+    let mut snapshot=request_snapshot(&receipt);let range=snapshot.view.binding.history_range.clone();
+    snapshot.view.binding=initial.binding.clone();snapshot.view.binding.history_range=range;
+    let schema=ToolSchema{name:"query".into(),version:"new".into(),schema:json!({"type":"object"})};
+    let mcp=launches::HostToolBinding{reference:"exact-owner".into(),generation:42,tools:vec![schema.clone()],resources:Default::default()};
+    let preparation=db.capture_tool_update(&receipt.run_id,db.epoch()).unwrap();
+    let mut next_tools=preparation.base().to_vec();next_tools.push(schema);
+    let prepared=preparation.load(next_tools.clone(),Some(mcp.clone())).unwrap();
+    independent_prepare(&mut db,&receipt,snapshot.clone());
+    assert!(db.activate_tool_update(&prepared).is_err(),"a dispatched request still owns its directory");
+    db.commit_execution(&receipt.run_id,db.epoch(),&independent_finish("model-1","old request output")).unwrap();
+    let mut next_binding=initial.binding.clone();
+    next_binding.tools=next_tools;next_binding.tool_schema_generation=prepared.composition().generation;
+    assert!(db.prepare_recovered_execution(&receipt.run_id,next_binding.clone(),policy.clone(),Value::Null).is_err(),"schemas alone are not an activation fact");
+    assert!(db.activate_tool_update(&prepared).unwrap());
+    drop(prepared);
+    db.collect_content_objects().unwrap();
+    let launch=db.launch_intent(&receipt.run_id).unwrap().unwrap().selection;
+    assert_eq!(launch.mcp_binding,Some(mcp));
+    assert_eq!(db.model_step("model-1").unwrap().request["view"]["binding"]["tools"],serde_json::to_value(&snapshot.view.binding.tools).unwrap());
+    drop(db);let mut db=f.open();
+    db.bind_launch(&receipt.run_id,launch).unwrap();
+    let (input,recovery)=db.prepare_recovered_execution(&receipt.run_id,next_binding,policy,Value::Null).unwrap();
+    assert!(recovery.is_some());
+    assert!(input.history.iter().any(|item|matches!(&item.content,Content::Text{text} if text=="old request output")));
+    let stale=db.capture_tool_update(&receipt.run_id,db.epoch()).unwrap().load(input.binding.tools.clone(),None);
+    assert!(stale.is_err(),"MCP schemas cannot be moved into base authority");
+    let preparation=db.capture_tool_update(&receipt.run_id,db.epoch()).unwrap();
+    let base=preparation.base().to_vec();
+    let prepared=preparation.load(base,None).unwrap();
+    drop(db);let mut db=f.open();
+    assert!(db.activate_tool_update(&prepared).is_err(),"an old owner cannot publish its ready candidate after reopen");
+}
+
+#[test]
 fn independent_reused_provider_id_across_model_steps_preserves_each_original_and_branch_chain() {
     let f = Fixture::new(); let mut db = f.open(); let receipt = submit(&mut db); let epoch = db.epoch();
     independent_prepare(&mut db, &receipt, request_snapshot(&receipt));

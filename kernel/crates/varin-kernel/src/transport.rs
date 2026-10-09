@@ -173,7 +173,7 @@ impl Sender {
             "process-event" if value["stream"] != "data" => Lane::Control,
             "runtime-event" if value["stream"] == "durable" => Lane::Control,
             "credential-request" => Lane::Control,
-            "mcp-binding-retain" | "mcp-binding-activate" => Lane::Control,
+            "mcp-binding-retain" | "mcp-binding-activate" | "mcp-binding-deactivate" => Lane::Control,
             kind if kind.ends_with("-cancel") || kind.ends_with("-release") => Lane::Control,
             _ => Lane::Data,
         }

@@ -156,6 +156,7 @@ pub(crate) fn spawn(
         let mut identity: Option<(PathBuf, String)> = None;
         let mut runtime: Option<Arc<RunSupervisor>> = None;
         let mut run_models: Option<Arc<crate::run_models::RunModels>> = None;
+        let mut run_tools: Option<Arc<crate::run_tools::RunTools>> = None;
         let mut opening = false;
         let mut initialization_failure: Option<String> = None;
         let mut waiting = std::collections::VecDeque::new();
@@ -283,6 +284,7 @@ pub(crate) fn spawn(
                     });
                     runtime = Some(owner.clone());
                     run_models = Some(crate::run_models::RunModels::new(owner.catalog(),credential_bridge.clone()));
+                    run_tools = Some(crate::run_tools::RunTools::new(owner.catalog(),mcp_bridge.clone()));
                     let pending = {
                         let catalog = owner.catalog();
                         let catalog = catalog.lock().map_err(|_| {
@@ -357,7 +359,7 @@ pub(crate) fn spawn(
                         let params = value.get_mut("params").map(Value::take).unwrap_or_else(|| json!({}));
                         // Typed body contracts are consumed once on their independent worker.
                         // Generated validation would otherwise clone all input/attachment content here.
-                        if !matches!(method,"runtime.thread.create"|"runtime.input.submit"|"runtime.input.enqueue"|"runtime.input.edit"|"runtime.child.prepare") {
+                        if !matches!(method,"runtime.thread.create"|"runtime.input.submit"|"runtime.input.enqueue"|"runtime.input.edit"|"runtime.child.prepare"|"runtime.tools.ready") {
                             validate_method_params(method, &params)?;
                         }
                         if let Some(failure) = &initialization_failure {
@@ -429,6 +431,29 @@ pub(crate) fn spawn(
                         if method == "runtime.model.inspect" {
                             let p: RunParams = serde_json::from_value(params)?;
                             return Ok(serde_json::to_value(run_models.as_ref().expect("initialized runtime models").inspect(&p.run_id)?)?);
+                        }
+                        if method == "runtime.tools.select" {
+                            let p: ToolSelectParams=serde_json::from_value(params)?;
+                            run_tools.as_ref().expect("initialized runtime tools").desire(&p.run_id,&p.selection_id)
+                                .map_err(|error|KernelError::Operation(error.to_string()))?;
+                            return Ok(json!({}));
+                        }
+                        if method == "runtime.tools.ready" {
+                            let tools=run_tools.as_ref().expect("initialized runtime tools").clone();
+                            let response_id=id.clone();let response_sender=responses.clone();let done=finished.clone();let cancelled=cancellation.clone();
+                            thread::spawn(move||{
+                                let result=(||->Result<Value,KernelError>{
+                                    if cancelled.load(Ordering::Acquire) {return Err(KernelError::Cancelled);}
+                                    let p:ToolReadyParams=serde_json::from_value(params)?;
+                                    let binding=p.binding.map(mcp_binding).transpose()?;
+                                    let ready=tools.ready(&p.run_id,&p.selection_id,binding,||cancelled.load(Ordering::Acquire))
+                                        .map_err(|error|KernelError::Operation(error.to_string()))?;
+                                    Ok(json!({"ready":ready}))
+                                })();
+                                let response=match result{Ok(value)=>response_ok(&response_id,value),Err(error)=>response_error(&response_id,&error)};
+                                done(&response_id);let _=response_sender.send(response);
+                            });
+                            deferred=true;return Ok(Value::Null);
                         }
                         if method == "runtime.model.select" {
                             let p: ModelSelectParams = serde_json::from_value(params)?;
@@ -504,9 +529,10 @@ pub(crate) fn spawn(
                             let preparation = crate::run_assembly::RunPreparation::new(p,&run)?;
                             let assembly = crate::run_assembly::RunAssembly {
                                 runtime: runtime.clone(), resources: resources.clone(), credentials: credential_bridge.clone(),
-                                mcp: mcp_bridge.clone(), language: language_bridge.clone(), retrieval: retrieval_bridge.clone(),
+                                language: language_bridge.clone(), retrieval: retrieval_bridge.clone(),
                                 memory: memory_bridge.clone(), context: context_bridge.clone(), plan: plan_bridge.clone(), policy: policy_bridge.clone(),
                                 models: run_models.as_ref().expect("initialized runtime models").clone(),
+                                tools: run_tools.as_ref().expect("initialized runtime tools").clone(),
                                 responses: responses.clone(), epoch: epoch.clone(),
                             };
                             if selected.is_some() {
@@ -787,7 +813,7 @@ pub(crate) fn spawn(
                                 runtime.quiesce_question(operation_id).map_err(|e| KernelError::Operation(e.to_string()))?;
                             }
                             let run = runtime.cancel(&p.run_id).map_err(|e| KernelError::Operation(e.to_string()))?;
-                            if run.state.terminal() {run_models.as_ref().expect("initialized runtime models").release(&run.id);}
+                            if run.state.terminal() {run_models.as_ref().expect("initialized runtime models").release(&run.id);run_tools.as_ref().expect("initialized runtime tools").release(&run.id);}
                             return Ok(run_cancellation_receipt(&run));
                         }
                         if method == "runtime.operation.cancel" {

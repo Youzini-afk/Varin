@@ -15,7 +15,6 @@ pub(crate) struct RunAssembly {
     pub runtime: Arc<RunSupervisor>,
     pub resources: crate::tools::KernelResourceClient,
     pub credentials: crate::credential_bridge::CredentialBridge,
-    pub mcp: crate::mcp::McpBridge,
     pub language: crate::language::LanguageBridge,
     pub retrieval: crate::retrieval::RetrievalBridge,
     pub memory: crate::host_query::OwnerChannel,
@@ -23,6 +22,7 @@ pub(crate) struct RunAssembly {
     pub plan: crate::plan_bridge::PlanBridge,
     pub policy: crate::policy::PolicyBridge,
     pub models: Arc<crate::run_models::RunModels>,
+    pub tools: Arc<crate::run_tools::RunTools>,
     pub responses: crate::transport::Sender,
     pub epoch: String,
 }
@@ -72,7 +72,6 @@ impl RunAssembly {
         let runtime = &self.runtime;
         let resources = &self.resources;
         let credential_bridge = &self.credentials;
-        let mcp_bridge = &self.mcp;
         let language_bridge = &self.language;
         let retrieval_bridge = &self.retrieval;
         let memory_bridge = &self.memory;
@@ -309,18 +308,10 @@ impl RunAssembly {
             ));
         }
         let mcp_binding = p.mcp_binding.map(mcp_binding).transpose()?;
-        if let Some(binding) = &mcp_binding {
-            binding.validate().map_err(domain)?;
-            declarations.extend(
-                mcp_bridge
-                    .declarations(p.run_id.clone(), binding.clone())
-                    .map_err(|error| KernelError::Authorization(error.to_string()))?,
-            );
-        }
-        let directory = varin_runtime::composition::tools::ToolDirectory::assemble(declarations)
+        if let Some(generation)=saved_schema_generation {start.binding.tool_schema_generation=generation;}
+        let directory = self.tools.prepare_scope(&p.run_id,declarations,mcp_binding.clone())
             .map_err(|error| KernelError::Protocol(error.to_string()))?;
         start.binding.tools = directory.schemas().to_vec();
-        start.tools = Arc::new(directory);
         let policy_models = runtime
             .catalog()
             .lock()
@@ -388,6 +379,10 @@ impl RunAssembly {
                 .map_err(domain)?;
         }
         check_cancelled()?;
+        start.tools=if !is_context_job && !is_child {
+            self.tools.install(&p.run_id,start.binding.tool_schema_generation,directory)
+                .map_err(|error|KernelError::Operation(error.to_string()))?
+        } else {directory.into_static()};
         if !is_context_job {
             start.provider = self.models.wrap(start.provider);
             start.context_preparation = Arc::new(crate::context::CapacityPreparation::new(start.context_preparation,runtime.catalog(),self.context.clone()));
@@ -412,6 +407,7 @@ impl RunAssembly {
         let run_id = handle.run_id.clone();
         let catalog = self.runtime.catalog();
         let models = self.models.clone();
+        let tools = self.tools.clone();
         thread::spawn(move || {
             let _ = handle.wait();
             let terminal = catalog
@@ -421,6 +417,7 @@ impl RunAssembly {
                 .is_some_and(|run| run.state.terminal());
             if terminal {
                 models.release(&run_id);
+                tools.release(&run_id);
                 let _ = responses.send(
                     json!({"v":1,"kind":"agent-policy-release","kernelEpoch":epoch,"runId":run_id}),
                 );

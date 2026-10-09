@@ -1297,6 +1297,9 @@ pub mod submissions;
 #[path="catalog_launch.rs"]
 pub mod launches;
 
+#[path="catalog_tools.rs"]
+pub mod tools;
+
 #[path="catalog_recovery.rs"]
 pub mod recovery;
 

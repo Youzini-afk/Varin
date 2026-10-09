@@ -1,4 +1,5 @@
 import { createMcpLease } from './mcp-owner.js';
+import { createMemoryOwner } from './memory-owner.js';
 import type { McpAuthorityLease } from '@varin/pi-host/mcp-authority';
 import type { PermissionPolicy } from '@varin/protocol';
 import { createThreadContext } from './thread-context.js';
@@ -64,6 +65,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const prepare = createThreadSourcePreparer({ documents, workingStates });
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }) });
   const prepareContext = createThreadContext({ personalization, workingStates, projectForWorkspace: async () => 'selected-project' });
+  kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
   let closed = false;
   const close = async () => { if (closed) return; closed = true; await storage.dispose(); await documents.dispose(); await kernel.close(); };
   cleanups.push(close);
@@ -71,6 +73,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const effects: Array<Record<string, unknown>> = [];
   let currentPolicy: PermissionPolicy = { mode: 'normal', rules: [] };
   let callable = true;
+  const revocation = new AbortController();
   const runtime = new AgentRuntimeClient(kernel, async () => {
     let released = false;
     const lease: McpAuthorityLease = {
@@ -81,6 +84,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
       async discover() { throw new Error('unexpected fixture discovery'); },
       async prepareTool() { throw new Error('unexpected deferred fixture tool'); },
       assertCallable() { if (released || !callable) throw new Error('fixture_owner_changed'); },
+      revocationSignal: () => revocation.signal,
       validateArguments(_name, _version, args) { if (!args || typeof args !== 'object' || typeof (args as { text?: unknown }).text !== 'string' || Object.keys(args).some(key => key !== 'text')) throw new Error('fixture_schema_invalid'); },
       async callTool(_name, args, options) { options.signal.throwIfAborted(); await options.beforeDispatch?.(); effects.push(structuredClone(args)); return { content: [{ type: 'text', text: 'fixture accepted' }] }; },
       release() { released = true; },
@@ -103,7 +107,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const hostUrl = await listen(createServer(app));
   configureRuntimeUrlResolver({ apiBaseUrl: hostUrl, realtimeBaseUrl: hostUrl });
   setRuntimeExtraHeaders({ 'x-fixture-auth': 'fixture-client' });
-  return { effects, setPolicy: (value: PermissionPolicy) => { currentPolicy = value; }, revokeOwner: () => { callable = false; }, endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
+  return { effects, setPolicy: (value: PermissionPolicy) => { currentPolicy = value; }, revokeOwner: () => { callable = false; revocation.abort(); }, endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
 }
 
 const model = { providerId: 'fixture-provider', modelId: 'fixture-model' };
@@ -163,7 +167,10 @@ it('changed policy, revoked owner and cancelled or reopened permissions never di
       await f.close(); const reopened = await fixture(reply, f.root, f.endpoint);
       await expect(reopened.api.decidePermission(decision)).rejects.toMatchObject({ status: 400 });
       expect(reopened.effects).toEqual([]);
-    } else if (reason === 'cancel') await expect(f.api.decidePermission(decision)).rejects.toMatchObject({ status: 400 });
+    } else if (reason === 'cancel' || reason === 'owner') {
+      if (reason === 'owner') await expect.poll(async () => (await f.api.run(state.receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');
+      await expect(f.api.decidePermission(decision)).rejects.toMatchObject({ status: 400 });
+    }
     else {
       await f.api.decidePermission(decision);
       await expect.poll(async () => (await f.api.run(state.receipt.run_id)).state).toBe('completed');
