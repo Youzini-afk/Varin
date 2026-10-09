@@ -41,6 +41,12 @@ R3 extends that domain with `file.scan`, `file.measure`, and `file.materialize`.
 capture uses Host-admitted roots and same-grant content owners; immutable roots materialize through verified
 staging/backup/promotion with restart reconciliation. Linux/macOS attempt real clone backends and unsupported
 filesystems fall back to byte copy; Windows currently reports copy only and leaves physical allocation unknown.
+Materialization and its recovery observations run on independent workers. Storage retains the immutable
+source through the started journal and holds the actual physical target/staging/backup leases until each
+worker stops. Tree traversal, copying, hashing and verification do not occupy the shared resource owner;
+authorization, cancellation at promotion, directory moves and factual receipt commits stay with Storage.
+Root registration and explicit reconciliation use the same worker path. Interrupted directories are
+preserved when their state cannot be proved, and cleanup never recursively deletes later user content.
 Managed directory reclaim/delete also runs through the kernel. Git remains a semantic adapter for inventory,
 index/filter behavior, and linked-worktree metadata; it does not become another workspace-body writer.
 There is no arbitrary SQL or arbitrary filesystem-write method on the wire.

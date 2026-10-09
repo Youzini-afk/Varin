@@ -187,8 +187,8 @@ impl Storage {
                 self.conn.execute_batch("COMMIT")?;
                 self.file_leases.retain(|id, lease| {
                     if lease.grant_id != grant_id { return true; }
-                    if let Some(capture) = self.capture_leases.get_mut(id) {
-                        capture.release_requested = true; return true;
+                    if let Some(retained) = self.retained_file_leases.get_mut(id) {
+                        retained.release_requested = true; return true;
                     }
                     false
                 });

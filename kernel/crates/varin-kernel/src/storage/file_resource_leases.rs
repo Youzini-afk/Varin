@@ -18,14 +18,28 @@ fn overlaps(left: &CanonicalFileLeaseResource, right: &CanonicalFileLeaseResourc
         || (right.subtree && left.absolute.starts_with(&right.absolute))
 }
 
+pub(super) struct RetainedFileLease {
+    pub release_requested: bool,
+}
+
 impl Storage {
+    pub(crate) fn finish_retained_file_lease(&mut self, lease_id: &str) {
+        if self
+            .retained_file_leases
+            .remove(lease_id)
+            .is_some_and(|lease| lease.release_requested)
+        {
+            self.file_leases.remove(lease_id);
+        }
+    }
+
     /// Same canonical file identity as actual leases, independent of alias roots and Run IDs.
     pub(crate) fn file_resource_key(&self, root_id: &str, path: &str, grant: &Grant) -> Result<String, KernelError> {
         let resolved = self.canonical_lease_resources(root_id, &[FileLeaseResource { path: path.into(), subtree: false }], grant)?;
         let absolute = resolved[0].absolute.to_str().ok_or_else(|| KernelError::Authorization("file resource path is not UTF-8".into()))?;
         Ok(serde_json::to_string(&["file", absolute])?)
     }
-    fn canonical_lease_resources(
+    pub(super) fn canonical_lease_resources(
         &self,
         root_id: &str,
         resources: &[FileLeaseResource],
@@ -71,8 +85,8 @@ impl Storage {
     ) -> Result<(), KernelError> {
         let requested = self.canonical_lease_resources(root_id, paths, grant)?;
         if let Some(lease_id) = lease_id {
-            if self.capture_leases.contains_key(lease_id) {
-                return Err(KernelError::Operation("file lease is retained by an active capture".into()));
+            if self.retained_file_leases.contains_key(lease_id) {
+                return Err(KernelError::Operation("file lease is retained by an active file worker".into()));
             }
             let lease = self.file_leases.get(lease_id).ok_or_else(|| {
                 KernelError::Operation("file resource lease is no longer active".to_string())
@@ -225,8 +239,8 @@ impl Storage {
                 "file lease belongs to another resource owner".to_string(),
             ));
         }
-        if let Some(capture) = self.capture_leases.get_mut(&params.lease_id) {
-            capture.release_requested = true;
+        if let Some(retained) = self.retained_file_leases.get_mut(&params.lease_id) {
+            retained.release_requested = true;
             return Ok(json!({"leaseId": params.lease_id, "released": true, "deferred": true}));
         }
         self.file_leases.remove(&params.lease_id);
