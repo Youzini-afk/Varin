@@ -1338,3 +1338,6 @@ pub(crate) mod policy_model;
 
 #[path = "catalog_collaboration.rs"]
 pub mod collaboration;
+
+#[path = "catalog_scheduling.rs"]
+mod scheduling;

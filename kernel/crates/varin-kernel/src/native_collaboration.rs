@@ -81,6 +81,16 @@ struct CollaborationTools {
     resources: NativeResourceClient,
 }
 impl ToolExecutor for CollaborationTools {
+    fn watch_admission(&self, context: &ToolExecutionContext, call: &ToolCall, contract: &ToolContract, cancel: &CancellationToken)
+        -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError> {
+        if is_tool(&call.name) { Ok(None) } else { self.inner.watch_admission(context, call, contract, cancel) }
+    }
+
+    fn execution_class(&self, call: &ToolCall, contract: &ToolContract) -> varin_runtime::execution_capacity::ExecutionClass {
+        if is_tool(&call.name) { varin_runtime::execution_capacity::ExecutionClass::Unmetered }
+        else { self.inner.execution_class(call, contract) }
+    }
+
     fn supports_policy_read(
         &self,
         c: &FrozenToolContext,

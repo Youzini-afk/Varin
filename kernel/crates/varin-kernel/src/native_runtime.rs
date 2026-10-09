@@ -197,8 +197,11 @@ pub(crate) fn spawn(
                         let params = value.get("params").cloned().unwrap_or_else(|| json!({}));
                         validate_method_params(method, &params)?;
                         if runtime.is_none() {
-                            let owner =
-                                Arc::new(RunSupervisor::new(Catalog::open(root).map_err(domain)?));
+                            let capacity = varin_runtime::execution_capacity::configured_compute_capacity()
+                                .map_err(KernelError::Protocol)?;
+                            let catalog = Catalog::open(root).map_err(domain)?;
+                            catalog.resource_admission().set_compute_capacity(capacity);
+                            let owner = Arc::new(RunSupervisor::new(catalog));
                             let (notify, notifications) = mpsc::sync_channel(1);
                             owner
                                 .catalog()
@@ -1028,7 +1031,21 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         }
         "runtime.child.reconcile" => Ok(serde_json::to_value(catalog.deliver_child_waits().map_err(domain)?)?),
         "runtime.child.wait.cancel" => {let p:NativeChildWaitParams=serde_json::from_value(params)?;Ok(serde_json::to_value(catalog.cancel_child_wait(&p.wait_id).map_err(domain)?)?)},
-        "runtime.status" => Ok(json!({"epoch":catalog.epoch(),"eventCursor":catalog.event_cursor().map_err(domain)?})),
+        "runtime.status" => Ok(json!({"epoch":catalog.epoch(),"eventCursor":catalog.event_cursor().map_err(domain)?,"admission":catalog.resource_admission().summary()})),
+        "runtime.admission.inspect" => {
+            let p: NativeAdmissionInspectParams = serde_json::from_value(params)?;
+            let epoch = u64::try_from(p.owner_generation).map_err(|_| KernelError::Protocol("ownerGeneration must be nonnegative".into()))?;
+            let origin = match (p.request_id, p.action_id, p.node_id) {
+                (Some(request_id), None, None) => varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                (None, Some(action_id), Some(node_id)) => varin_runtime::execution::ToolOrigin::PolicyAction { action_id, node_id },
+                _ => return Err(KernelError::Protocol("specify a model request or a policy action and node".into())),
+            };
+            let result = catalog.inspect_admission(&p.run_id, epoch, &origin, &p.call_id).map_err(domain)?;
+            if serde_json::to_vec(&result)?.len() > crate::protocol::MAX_FRAME_BYTES / 2 {
+                return Err(KernelError::Protocol("admission identity exceeds the protocol response budget".into()));
+            }
+            Ok(result)
+        }
         "runtime.thread.create" => {
             let p: NativeThreadCreateParams = serde_json::from_value(params)?;
             if p.thread_id.trim().is_empty() || p.branch_id.trim().is_empty() {

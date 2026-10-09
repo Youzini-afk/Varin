@@ -407,6 +407,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let resource_cancellations = cancellations.clone();
     let resource_revoked = revoked_grants.clone();
     let resource_epoch = admission_epoch.clone();
+    let queue_admission_epoch = admission_epoch.clone();
+    let admission_revoked = revoked_grants.clone();
+    let admission_cancellations = cancellations.clone();
     let process_controls = crate::process::ProcessControlRegistry::default();
     let resources = crate::native_tools::NativeResourceClient::new(move |call| {
         let epoch = resource_epoch.lock().map_err(|_| KernelError::Storage("admission identity lock poisoned".into()))?
@@ -431,7 +434,29 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         if ids.is_empty() { return Ok(()); }
         replay_requests.send(WorkerRequest::ReplayProcessTerminals(ids))
             .map_err(|_| KernelError::Storage("resource authority stopped before receipt replay".into()))
-    }, process_controls.clone());
+    }, process_controls.clone()).with_admission_control(move |binding, cancel| {
+        use varin_runtime::{execution::ExecutionError, execution_capacity::AdmissionControlGuard};
+        let failed = || ExecutionError::new("admission_control", "native capability control is unavailable");
+        let epoch = queue_admission_epoch.lock().map_err(|_| failed())?.clone()
+            .ok_or_else(|| ExecutionError::new("admission_control", "kernel handshake required"))?;
+        // Registration and the revoke fence share the existing owner lock order. A revoke cannot
+        // fall between checking the grant and publishing this queue-lifetime cancellation token.
+        let revoked = admission_revoked.lock().map_err(|_| failed())?;
+        if revoked.contains(&binding.grant_id) {
+            cancel.cancel();
+            return Ok(AdmissionControlGuard::new(|| {}));
+        }
+        let key = format!("native-admission:{}", Uuid::new_v4());
+        admission_cancellations.lock().map_err(|_| failed())?.insert(key.clone(), ActiveRequest {
+            token: cancel.shared_flag(), epoch: Some(epoch), grant_id: Some(binding.grant_id.clone()),
+            native: Some(cancel.clone()), wire_lane: None,
+        });
+        drop(revoked);
+        let active = admission_cancellations.clone();
+        Ok(AdmissionControlGuard::new(move || {
+            if let Ok(mut active) = active.lock() { active.remove(&key); }
+        }))
+    });
     let native_control = crate::native_runtime::NativeControl::default();
     let native_worker = crate::native_runtime::spawn(native_rx, native_tx.clone(), native_control.clone(), resources, credential_bridge.clone(), mcp_bridge.clone(), language_bridge.clone(), retrieval_bridge.clone(), policy_bridge.clone(), response_tx.clone(), move |id| {
         if let Ok(mut active) = native_cancellations.lock() { active.remove(id); }

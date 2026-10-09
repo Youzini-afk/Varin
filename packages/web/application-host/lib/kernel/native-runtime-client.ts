@@ -9,7 +9,7 @@ import { startNativeRunFromSource, type NativeSourceLaunch } from './native-sour
 import type { ExistingHostCredentialOwner } from './native-credential-owner.js';
 import type { KernelClient } from './kernel-client.js';
 import type {
-  NativeChildTextPage, NativeUnacceptedChildSource, NativeChildTask, NativeChildPrepareParams, NativeChildWait, NativeContextRefreshParams, NativeContextJobCreateParams, NativeHistoryPage, NativeHistoryPageParams, NativeHistoryReference, NativeHistoryBodyChunk, NativeRunReconcileResult, NativeThreadSummary, NativeLaunchIntent, NativeLaunchSelectParams, NativeInputSubmitParams, NativeReceipt, NativeRun, NativeOperation,
+  NativeAdmissionInspectParams, NativeAdmissionInspection, NativeChildTextPage, NativeUnacceptedChildSource, NativeChildTask, NativeChildPrepareParams, NativeChildWait, NativeContextRefreshParams, NativeContextJobCreateParams, NativeHistoryPage, NativeHistoryPageParams, NativeHistoryReference, NativeHistoryBodyChunk, NativeRunReconcileResult, NativeThreadSummary, NativeLaunchIntent, NativeLaunchSelectParams, NativeInputSubmitParams, NativeReceipt, NativeRun, NativeOperation,
   NativeHistoryItem, NativeEvent, NativeStatus, NativeRunStartReceipt, NativeInputEnqueueParams, NativeInputReceipt, NativeQueuedInput,
 } from './protocol.generated.js';
 
@@ -76,6 +76,10 @@ export class NativeRuntimeClient {
   cancelChildWait(waitId: string, signal?: AbortSignal): Promise<NativeChildWait> { return this.kernel.nativeRuntimeRequest('runtime.child.wait.cancel', { waitId }, signal); }
   status(signal?: AbortSignal): Promise<NativeStatus> {
     return this.kernel.nativeRuntimeRequest('runtime.status', {}, signal);
+  }
+  /** Use the Run epoch and actual ModelStep/tool-call or policy-action/node identity. */
+  admission(input: NativeAdmissionInspectParams, signal?: AbortSignal): Promise<NativeAdmissionInspection> {
+    return this.kernel.nativeRuntimeRequest('runtime.admission.inspect', input, signal);
   }
   thread(threadId: string, signal?: AbortSignal): Promise<NativeThreadSummary> {
     return this.kernel.nativeRuntimeRequest('runtime.thread.inspect', { threadId }, signal);

@@ -388,12 +388,15 @@ pub(crate) struct ResourceCall {
     pub cancellation: CancellationToken,
     pub reply: mpsc::Sender<Result<Value, ResourceFailure>>,
 }
+type AdmissionControl = dyn Fn(&NativeToolBinding, &CancellationToken)
+    -> Result<varin_runtime::execution_capacity::AdmissionControlGuard, ExecutionError> + Send + Sync;
 /// The Kernel actor injects this sender. Sending does not create another resource authority.
 #[derive(Clone)]
 pub(crate) struct NativeResourceClient {
     send: Arc<dyn Fn(ResourceCall) -> Result<(), KernelError> + Send + Sync>,
     replay: Arc<dyn Fn(Vec<String>) -> Result<(), KernelError> + Send + Sync>,
     controls: crate::process::ProcessControlRegistry,
+    admission_control: Option<Arc<AdmissionControl>>,
 }
 impl NativeResourceClient {
     pub(crate) fn new(
@@ -404,8 +407,13 @@ impl NativeResourceClient {
         Self {
             send: Arc::new(send),
             replay: Arc::new(replay),
-            controls,
+            controls, admission_control: None,
         }
+    }
+    pub(crate) fn with_admission_control(mut self, watch: impl Fn(&NativeToolBinding, &CancellationToken)
+        -> Result<varin_runtime::execution_capacity::AdmissionControlGuard, ExecutionError> + Send + Sync + 'static) -> Self {
+        self.admission_control = Some(Arc::new(watch));
+        self
     }
     pub(crate) fn collaboration_pin(&self, binding: &NativeToolBinding, context: &ToolExecutionContext,
         release: bool, authorize_only: bool, cancel: &CancellationToken) -> Result<Value, ExecutionError> {
@@ -664,6 +672,20 @@ impl NativeToolExecutor {
 
 }
 impl ToolExecutor for NativeToolExecutor {
+    fn watch_admission(&self, _: &ToolExecutionContext, _: &ToolCall, _: &ToolContract, cancel: &CancellationToken)
+        -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError> {
+        self.resources.admission_control.as_ref().map(|watch| watch(&self.binding, cancel)).transpose()
+    }
+    fn execution_class(&self, call: &ToolCall, _: &ToolContract) -> varin_runtime::execution_capacity::ExecutionClass {
+        use varin_runtime::execution_capacity::ExecutionClass;
+        match NativeToolKind::from_name(&call.name).filter(|kind| self.binding.enabled_tools.contains(kind)) {
+            Some(NativeToolKind::FileSearch) => ExecutionClass::LocalCompute,
+            // Directory lists, plain reads and control stay independent. Host composite retrieval
+            // and language waits have their own stages/owners and do not take a local CPU permit.
+            _ => ExecutionClass::Unmetered,
+        }
+    }
+
     fn supports_policy_read(&self, context: &FrozenToolContext, call: &ToolCall, contract: &ToolContract) -> bool {
         // Eligibility is this trusted adapter's promise, never extension/MCP metadata.
         let Some(source) = &context.source else { return false; };

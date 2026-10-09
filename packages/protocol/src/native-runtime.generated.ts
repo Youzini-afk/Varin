@@ -542,9 +542,42 @@ export interface NativeObserverDeliveryParams {
   state: NativeDeliveryState;
 }
 
+export interface NativeAdmissionInspectParams {
+  runId: string;
+  ownerGeneration: number;
+  callId: string;
+  requestId?: string;
+  actionId?: string;
+  nodeId?: string;
+}
+
+export interface NativeAdmissionSummary {
+  localComputeCapacity: number;
+  localComputeActive: number;
+  queued: number;
+}
+
+export interface NativeAdmissionStatus {
+  admissionId: string;
+  familyId: string;
+  class: 'unmetered' | 'local_compute';
+  runId: string | null;
+  ownerGeneration: number | null;
+  origin: unknown;
+  state: 'queued' | 'active';
+  reason: string | null;
+}
+
+export interface NativeAdmissionInspection {
+  admissionId: string;
+  state: 'queued' | 'active' | 'settled' | 'not_active';
+  queue: NativeAdmissionStatus | null;
+}
+
 export interface NativeStatus {
   epoch: number;
   eventCursor: number;
+  admission: NativeAdmissionSummary;
 }
 
 export interface NativeReceipt {
