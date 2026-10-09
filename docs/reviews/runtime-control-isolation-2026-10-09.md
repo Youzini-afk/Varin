@@ -82,10 +82,3 @@ node node_modules/vitest/vitest.mjs run --config packages/web/vitest.kernel.conf
 ```
 
 没有调用付费模型、操作真实桌面、启动应用或进行全仓测试。上述结果不能代替完整产品、远端、所有平台和总设计性能验收。
-
-### 临时夹具清理
-
-自动执行审查拒绝删除以下两个本轮自建 TEMP 夹具，返回 `blocked by policy`，没有更具体原因；已停止重试。它们不是用户工作区或产品数据：
-
-- `C:/Users/Youzi/AppData/Local/Temp/varin-materialization-hack-eh235ymd`
-- `C:/Users/Youzi/AppData/Local/Temp/varin-materialization-hack-qd8j0ya4`
