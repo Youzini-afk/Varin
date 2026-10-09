@@ -18,6 +18,7 @@ pub struct HostCredentialRequest {
     pub request_id: String,
     pub epoch: String,
     pub run_id: String,
+    pub binding_id: Option<String>,
     pub scope: CredentialScope,
     pub dispatch: Option<CredentialDispatch>,
 }
@@ -66,6 +67,20 @@ impl HostCredentialChannel {
         run_id: impl Into<String>,
         scope: CredentialScope,
     ) -> Result<Arc<dyn CredentialResolver>, ModelFailure> {
+        self.resolver_for_binding(run_id, None, scope)
+    }
+    pub fn resolver_for_binding(
+        self: &Arc<Self>,
+        run_id: impl Into<String>,
+        binding_id: Option<String>,
+        scope: CredentialScope,
+    ) -> Result<Arc<dyn CredentialResolver>, ModelFailure> {
+        if binding_id.as_ref().is_some_and(|id| id.is_empty()) {
+            return Err(failure(
+                "credential_binding_required",
+                "credential binding identity is empty",
+            ));
+        }
         scope
             .validate()
             .map_err(|_| failure("invalid_credential_scope", "credential scope is incomplete"))?;
@@ -85,6 +100,7 @@ impl HostCredentialChannel {
         Ok(Arc::new(HostCredentialResolver {
             channel: self.clone(),
             run_id,
+            binding_id,
             scope,
         }))
     }
@@ -172,6 +188,7 @@ impl HostCredentialChannel {
     fn resolve(
         &self,
         run_id: &str,
+        binding_id: Option<&str>,
         scope: &CredentialScope,
         dispatch: Option<CredentialDispatch>,
         cancel: &CancellationToken,
@@ -250,6 +267,7 @@ impl HostCredentialChannel {
             request_id: request_id.clone(),
             epoch: self.epoch.clone(),
             run_id: run_id.into(),
+            binding_id: binding_id.map(str::to_owned),
             scope: scope.clone(),
             dispatch,
         })
@@ -270,6 +288,7 @@ impl Drop for HostCredentialChannel {
 struct HostCredentialResolver {
     channel: Arc<HostCredentialChannel>,
     run_id: String,
+    binding_id: Option<String>,
     scope: CredentialScope,
 }
 impl CredentialResolver for HostCredentialResolver {
@@ -284,14 +303,32 @@ impl CredentialResolver for HostCredentialResolver {
                 "credential reference does not match the registered owner",
             ));
         }
-        self.channel.resolve(&self.run_id, &self.scope, None, cancel)
+        self.channel.resolve(
+            &self.run_id,
+            self.binding_id.as_deref(),
+            &self.scope,
+            None,
+            cancel,
+        )
     }
-    fn request_headers(&self, reference: Option<&str>, dispatch: &CredentialDispatch,
-        cancel: &CancellationToken) -> Result<HeaderMap, ModelFailure> {
+    fn request_headers(
+        &self,
+        reference: Option<&str>,
+        dispatch: &CredentialDispatch,
+        cancel: &CancellationToken,
+    ) -> Result<HeaderMap, ModelFailure> {
         if reference != Some(self.scope.reference.as_str()) {
-            return Err(failure("unknown_credential_ref", "credential reference does not match the registered owner"));
+            return Err(failure(
+                "unknown_credential_ref",
+                "credential reference does not match the registered owner",
+            ));
         }
-        self.channel.resolve(&self.run_id, &self.scope, Some(dispatch.clone()), cancel)
+        self.channel.resolve(
+            &self.run_id,
+            self.binding_id.as_deref(),
+            &self.scope,
+            Some(dispatch.clone()),
+            cancel,
+        )
     }
-
 }

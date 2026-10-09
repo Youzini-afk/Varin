@@ -37,7 +37,16 @@ pub fn connection_identity_with_scope(configuration:&ModelSessionConfiguration,s
     scope.validate().map_err(|error|ExecutionError::new("credential_scope",error.to_string()))?;
     hash_identity(configuration,json!({"authority":scope.authority,"account":scope.account,"reference":scope.reference,"generation":scope.generation}))
 }
+pub struct BoundModel { pub binding: RequestBinding, pub provider: Arc<dyn ModelProvider> }
+pub fn bind_provider_with_credentials(configuration:ModelSessionConfiguration,credentials:Arc<dyn CredentialResolver>,scope:CredentialScope)->Result<BoundModel,ExecutionError>{
+    let identity=connection_identity_with_scope(&configuration,&scope)?;
+    build_provider(configuration,credentials,Some(scope.reference),identity)
+}
 fn build(configuration:ModelSessionConfiguration,credentials:Arc<dyn CredentialResolver>,credential_ref:Option<String>,identity:String)->Result<RunStart,ExecutionError>{
+    let BoundModel{binding,provider}=build_provider(configuration,credentials,credential_ref,identity)?;
+    Ok(RunStart{binding,policy_state:Value::Null,provider,tools:Arc::new(NoTools),policy:Arc::new(DefaultAgentPolicy),progress:ProgressSink::default()})
+}
+pub fn build_provider(configuration:ModelSessionConfiguration,credentials:Arc<dyn CredentialResolver>,credential_ref:Option<String>,identity:String)->Result<BoundModel,ExecutionError>{
     if configuration.model.trim().is_empty()||configuration.max_output_tokens==Some(0){return Err(ExecutionError::new("invalid_model_configuration","model and positive output capacity are required"));}
     let mut connection=Connection::new(configuration.endpoint.clone(),credentials,Arc::new(NativeHttpTransport::default()));
     connection.accepts_images=configuration.accepts_images;
@@ -66,7 +75,7 @@ fn build(configuration:ModelSessionConfiguration,credentials:Arc<dyn CredentialR
         _=>return Err(ExecutionError::new("unsupported_provider","the selected native provider adapter is unavailable")),
     };
     let binding=RequestBinding{connection_identity:identity,provider_family:configuration.provider_family,model:configuration.model,credential_ref,configuration_generation:configuration.configuration_generation,tool_schema_generation:0,tools:vec![],instruction_sources:vec![],memory_checkpoint:None,attachment_refs:vec![],environment_cursor:0,history_range:HistoryRange{branch_id:String::new(),ancestor_id:None,leaf_id:None}};
-    Ok(RunStart{binding,policy_state:Value::Null,provider,tools:Arc::new(NoTools),policy:Arc::new(DefaultAgentPolicy),progress:ProgressSink::default()})
+    Ok(BoundModel{binding,provider})
 }
 struct NoTools;
 impl ToolExecutor for NoTools {

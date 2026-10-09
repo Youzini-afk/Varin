@@ -311,8 +311,20 @@ pub(crate) fn spawn(
                         if method == "runtime.launch.policy.prepare" {
                             let p: NativePolicyPrepareParams = serde_json::from_value(params)?;
                             let identity = crate::native_questions::policy_identity(varin_runtime::execution::PolicyIdentity { name: p.identity.name, version: p.identity.version });
+                            let mut models: Vec<varin_runtime::execution::policy_model::PolicyModelCapability> =
+                                p.policy_models.map(serde_json::from_value).transpose()?.unwrap_or_default();
+                            // The Host selects registered models; only the kernel constructs their
+                            // executable binding. Preparation performs no credential/network I/O.
+                            for capability in &mut models {
+                                if capability.binding.is_some() {
+                                    return Err(KernelError::Protocol("policy model binding is constructed by the native owner".into()));
+                                }
+                                if capability.status == varin_runtime::execution::policy_model::PolicyModelStatus::Available {
+                                    capability.binding = Some(bind_policy_model(&p.run_id, capability, &credential_bridge)?.binding);
+                                }
+                            }
                             let result = runtime.catalog().lock().map_err(|_| KernelError::Storage("native catalog owner failed".into()))?
-                                .prepare_policy_launch(&p.run_id, identity).map_err(domain)?;
+                                .prepare_policy_launch_with_models(&p.run_id, identity, models).map_err(domain)?;
                             return Ok(serde_json::to_value(result)?);
                         }
                         if method == "runtime.launch.mcp.prepare" {
@@ -526,6 +538,32 @@ pub(crate) fn spawn(
                                 start.tools = mcp_bridge.wrap(p.run_id.clone(), binding.clone(), start.tools)
                                     .map_err(|error| KernelError::Authorization(error.to_string()))?;
                             }
+                            let policy_models = runtime.catalog().lock()
+                                .map_err(|_| KernelError::Storage("native catalog owner failed".into()))?
+                                .launch_intent(&p.run_id).map_err(domain)?
+                                .map(|launch| launch.selection.policy_models).unwrap_or_default();
+                            if is_context_job && !policy_models.is_empty() {
+                                return Err(KernelError::Protocol("context jobs cannot acquire planning capabilities".into()));
+                            }
+                            if !policy_models.is_empty() {
+                                use varin_runtime::execution::policy_model::{BoundPolicyModel, PolicyModelStatus, WithPolicyModels};
+                                let mut models = std::collections::BTreeMap::new();
+                                for capability in &policy_models {
+                                    if capability.status != PolicyModelStatus::Available { continue; }
+                                    let bound = bind_policy_model(&p.run_id, capability, &credential_bridge)?;
+                                    if capability.binding.as_ref() != Some(&bound.binding) {
+                                        return Err(KernelError::Authorization("planning model differs from its admitted binding".into()));
+                                    }
+                                    if models.insert(capability.capability_id.clone(), BoundPolicyModel {
+                                        capability: capability.clone(), provider: bound.provider,
+                                    }).is_some() {
+                                        return Err(KernelError::Protocol("duplicate planning capability identity".into()));
+                                    }
+                                }
+                                start.provider = Arc::new(WithPolicyModels {
+                                    primary: start.provider, capabilities: policy_models.clone(), models,
+                                });
+                            }
                             {
                                 let mut selection =
                                     varin_runtime::catalog::launches::LaunchSelection::from_binding(
@@ -535,6 +573,7 @@ pub(crate) fn spawn(
                                     );
                                 selection.mcp_binding = mcp_binding;
                                 selection.credential_scope = selected_credential_scope;
+                                selection.policy_models = policy_models;
                                 runtime
                                     .catalog()
                                     .lock()
@@ -848,6 +887,7 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         }
         .map_err(|error| KernelError::Protocol(error.to_string()))?;
         let launch = varin_runtime::catalog::launches::LaunchSelection {
+            policy_models: Vec::new(),
             mcp_binding: None,
             credential_scope: scope,
             connection_identity: identity,
@@ -1006,6 +1046,7 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                         ));
                     }
                     Ok::<_, KernelError>(varin_runtime::catalog::launches::LaunchSelection {
+                        policy_models: Vec::new(),
                         mcp_binding: None,
                         credential_scope: scope,
                         connection_identity: identity,
@@ -1181,6 +1222,32 @@ fn apply_process_terminal(
         )
         .map_err(domain)?;
     Ok(())
+}
+
+fn bind_policy_model(
+    run_id: &str,
+    capability: &varin_runtime::execution::policy_model::PolicyModelCapability,
+    credentials: &crate::credential_bridge::CredentialBridge,
+) -> Result<model_session::BoundModel, KernelError> {
+    use varin_runtime::execution::policy_model::PolicyModelStatus;
+    if capability.status != PolicyModelStatus::Available
+        || capability.capability_id.trim().is_empty()
+        || capability.purpose != "planning"
+        || capability.supported_operation != "tool_free_text"
+        || capability.configuration_identity.as_deref().is_none_or(|value| value.trim().is_empty())
+    {
+        return Err(KernelError::Protocol("invalid available planning capability".into()));
+    }
+    let binding_id = capability.binding_id.as_deref().filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| KernelError::Protocol("planning capability requires its own credential binding".into()))?;
+    let configuration = capability.configuration.clone()
+        .ok_or_else(|| KernelError::Protocol("planning capability requires a frozen model configuration".into()))?;
+    let scope = capability.credential_scope.clone()
+        .ok_or_else(|| KernelError::Authorization("planning capability requires its selected Host credential owner".into()))?;
+    let resolver = credentials.resolver_for_binding(run_id, binding_id, scope.clone())
+        .map_err(|_| KernelError::Authorization("planning credential owner unavailable".into()))?;
+    model_session::bind_provider_with_credentials(configuration, resolver, scope)
+        .map_err(|error| KernelError::Operation(error.to_string()))
 }
 
 fn validate_configuration(configuration: &Value) -> Result<(), KernelError> {

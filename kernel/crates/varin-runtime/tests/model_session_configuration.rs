@@ -26,7 +26,7 @@ fn model_only_binding_has_no_tool_grant_and_credentials_remain_dispatch_only() {
     let view = RequestView {
         request_id: "request".into(),
         run_id: "run".into(),
-        step: 1,
+        origin: varin_runtime::execution::RequestOrigin::Conversation { step: 1, history_range: start.binding.history_range.clone() },
         binding: start.binding,
         history: vec![],
     };
@@ -50,7 +50,7 @@ fn absent_credentials_require_explicit_anonymous_configuration() {
     let view = RequestView {
         request_id: "request".into(),
         run_id: "run".into(),
-        step: 1,
+        origin: varin_runtime::execution::RequestOrigin::Conversation { step: 1, history_range: start.binding.history_range.clone() },
         binding: start.binding,
         history: vec![],
     };
@@ -138,7 +138,7 @@ fn factory_chat_and_azure_reach_the_selected_protocol_and_credential_header() {
         let view = RequestView {
             request_id: "request".into(),
             run_id: "run".into(),
-            step: 1,
+            origin: varin_runtime::execution::RequestOrigin::Conversation { step: 1, history_range: start.binding.history_range.clone() },
             binding: start.binding,
             history: vec![],
         };

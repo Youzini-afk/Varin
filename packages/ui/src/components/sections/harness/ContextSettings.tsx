@@ -17,6 +17,9 @@ export function ContextSettings({ harness, update }: HarnessSettingsPageProps) {
     ? null : t('settings.page.harness.context.recovery.retries.invalid');
   const setRecovery = (patch: Partial<typeof recovery>) => update({ context: { compactionRecovery: patch } });
   return <>
+    <SettingsSection settingsItem="harness.models.agentPlanning">
+      <HarnessModelField harness={harness} update={update} slot="agentPlanning" />
+    </SettingsSection>
     <SettingsSection settingsItem="harness.context">
       <SettingsCheckboxRow checked={harness.context.backgroundPreparation}
         onChange={(backgroundPreparation) => update({ context: { backgroundPreparation } })}

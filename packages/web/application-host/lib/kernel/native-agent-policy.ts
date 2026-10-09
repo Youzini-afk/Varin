@@ -11,6 +11,7 @@ import { parseVarinAgentPolicyIdentity, parseVarinAgentPolicyInput, parseVarinAg
 export interface NativeAgentPolicyBinding { reference: string; identity: VarinAgentPolicyIdentity }
 export interface NativeAgentPolicyLease {
   binding: NativeAgentPolicyBinding;
+  requestedModelRoles?: readonly 'agentPlanning'[];
   decide(input: VarinAgentPolicyInput, signal: AbortSignal): Promise<VarinAgentPolicyDecision>;
   release(): void;
 }
@@ -30,15 +31,18 @@ export function createNativeAgentPolicy(runtime: ApplicationExtensionRuntime): N
       if (!provider || !artifact) throw new Error('Policy executing artifact identity is unavailable');
       const description = await waitWithSignal(pin.invoke('describe', [], signal), signal);
       signal?.throwIfAborted();
-      if (!record(description) || Object.keys(description).some(key => !['identity', 'configuration'].includes(key)) || !('configuration' in description)) throw new Error('Invalid policy description');
+      if (!record(description) || Object.keys(description).some(key => !['identity', 'configuration', 'capabilities'].includes(key)) || !('configuration' in description)) throw new Error('Invalid policy description');
+      if (description.capabilities !== undefined && (!Array.isArray(description.capabilities)
+        || description.capabilities.some(role => role !== 'agentPlanning') || new Set(description.capabilities).size !== description.capabilities.length)) throw new Error('Invalid policy capabilities');
+      const requestedModelRoles = (description.capabilities ?? []) as 'agentPlanning'[];
       const identity = parseVarinAgentPolicyIdentity(description.identity);
       const current = await waitWithSignal(runtime.prepareService({ serviceId: VARIN_AGENT_POLICY_SERVICE_ID,
         version: VARIN_AGENT_POLICY_VERSION, method: 'describe', args: [], routing: scope }), signal);
       if (current.providerId !== selected.providerId || runtime.supervisor.getActiveArtifactIdentity(provider) !== artifact) throw new Error('Policy selection changed during preparation');
       pin.assertAvailable();
       const version = createHash('sha256').update(JSON.stringify({ artifact,
-        configuration: description.configuration, version: identity.version })).digest('hex');
-      return { binding: { reference: selected.providerId, identity: { name: `${selected.providerKey}:${identity.name}`, version } },
+        configuration: description.configuration, version: identity.version, ...(requestedModelRoles.length ? { capabilities: requestedModelRoles } : {}) })).digest('hex');
+      return { requestedModelRoles, binding: { reference: selected.providerId, identity: { name: `${selected.providerKey}:${identity.name}`, version } },
         decide: async (input, signal) => parseVarinAgentPolicyDecision(await pin.invoke('decide', [input as unknown as JsonValue], signal)),
         release: () => pin.release() };
     } catch (error) { pin.release(); throw error; }

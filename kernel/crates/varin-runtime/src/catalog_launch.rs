@@ -1,6 +1,7 @@
 //! Durable launch intent. Live grants and credential material never enter this domain.
 use super::*;
 use crate::execution::{PolicyIdentity, RequestBinding, ToolSchema};
+use crate::execution::policy_model::{PolicyModelCapability, PolicyModelStatus};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -38,6 +39,8 @@ impl HostToolBinding {
 #[serde(deny_unknown_fields)]
 pub struct LaunchSelection {
     #[serde(default)]
+    pub policy_models: Vec<PolicyModelCapability>,
+    #[serde(default)]
     pub mcp_binding: Option<HostToolBinding>,
     #[serde(default)]
     pub credential_scope: Option<crate::providers::auth::CredentialScope>,
@@ -57,6 +60,7 @@ impl LaunchSelection {
         source: Option<SourceSelection>,
     ) -> Self {
         Self {
+            policy_models: Vec::new(),
             mcp_binding: None,
             credential_scope: None,
             connection_identity: binding.connection_identity.clone(),
@@ -70,6 +74,7 @@ impl LaunchSelection {
         }
     }
     pub(super) fn validate(&self) -> Result<()> {
+        validate_policy_models(&self.policy_models)?;
         if let Some(binding) = &self.mcp_binding {
             binding.validate()?;
             if binding.tools.iter().any(|tool| !self.tools.contains(tool)) {
@@ -105,6 +110,43 @@ impl LaunchSelection {
         }
         Ok(())
     }
+}
+
+fn validate_policy_models(models: &[PolicyModelCapability]) -> Result<()> {
+    let mut ids = std::collections::BTreeSet::new();
+    let mut credential_bindings = std::collections::BTreeSet::new();
+    for model in models {
+        if model.capability_id.trim().is_empty() || !ids.insert(&model.capability_id)
+            || model.purpose != "planning" || model.supported_operation != "tool_free_text" {
+            return Err(RuntimeError::Invalid("planning capabilities require distinct explicit identities".into()));
+        }
+        if model.status != PolicyModelStatus::Available {
+            if model.binding_id.is_some() || model.configuration_identity.is_some() || model.binding.is_some()
+                || model.configuration.is_some() || model.credential_scope.is_some() {
+                return Err(RuntimeError::Invalid("unavailable planning capability cannot retain executable authority".into()));
+            }
+            continue;
+        }
+        let (Some(binding_id), Some(configuration_identity), Some(binding), Some(configuration), Some(scope)) = (
+            &model.binding_id, &model.configuration_identity, &model.binding, &model.configuration, &model.credential_scope,
+        ) else { return Err(RuntimeError::Invalid("available planning capability is incomplete".into())); };
+        if binding_id.trim().is_empty() || !credential_bindings.insert(binding_id) || configuration_identity.trim().is_empty() {
+            return Err(RuntimeError::Invalid("planning capabilities require distinct credential bindings".into()));
+        }
+        let connection = crate::model_session::connection_identity_with_scope(configuration, scope)
+            .map_err(|error| RuntimeError::Invalid(error.to_string()))?;
+        if binding.connection_identity != connection || binding.provider_family != configuration.provider_family
+            || binding.model != configuration.model || binding.configuration_generation != configuration.configuration_generation
+            || binding.credential_ref.as_deref() != Some(scope.reference.as_str())
+            || !binding.tools.is_empty() || binding.tool_schema_generation != 0
+            || !binding.instruction_sources.is_empty() || binding.memory_checkpoint.is_some()
+            || !binding.attachment_refs.is_empty() || binding.environment_cursor != 0
+            || !binding.history_range.branch_id.is_empty() || binding.history_range.ancestor_id.is_some()
+            || binding.history_range.leaf_id.is_some() {
+            return Err(RuntimeError::Invalid("planning model binding differs from its frozen tool-free selection".into()));
+        }
+    }
+    Ok(())
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LaunchIntent {
@@ -148,19 +190,26 @@ pub(super) fn initialize(db: &mut Connection) -> Result<()> {
 impl Catalog {
     /// Select one exact policy before execution. Private state is never migrated to a different identity.
     pub fn prepare_policy_launch(&mut self, run_id: &str, identity: PolicyIdentity) -> Result<LaunchIntent> {
+        self.prepare_policy_launch_with_models(run_id, identity, Vec::new())
+    }
+    pub fn prepare_policy_launch_with_models(&mut self, run_id: &str, identity: PolicyIdentity,
+        models: Vec<PolicyModelCapability>) -> Result<LaunchIntent> {
         if identity.name.is_empty() || identity.version.is_empty() { return Err(RuntimeError::Invalid("policy identity is empty".into())); }
+        validate_policy_models(&models)?;
         let tx = self.db.transaction()?;
         let run: Run = record(&tx, "runs", run_id)?;
         fence(&run, self.epoch)?;
         let mut launch: LaunchIntent = record(&tx, "run_launches", run_id)?;
-        if launch.selection.policy == identity { return Ok(launch); }
+        if launch.selection.policy == identity && launch.selection.policy_models == models { return Ok(launch); }
         let steps: i64 = tx.query_row("SELECT count(*) FROM model_steps WHERE run_id=?1", [run_id], |row| row.get(0))?;
         let checkpoints: i64 = tx.query_row("SELECT count(*) FROM policy_checkpoints WHERE run_id=?1", [run_id], |row| row.get(0))?;
         if run.cancel_requested || run.state.terminal() || launch.bound_epoch.is_some() || steps != 0 || checkpoints != 0
-            || launch.selection.policy.name != "default+questions" || launch.selection.policy.version != "1+1" {
+            || launch.selection.policy.name != "default+questions" || launch.selection.policy.version != "1+1"
+            || !launch.selection.policy_models.is_empty() || launch.selection.policy == identity {
             return Err(RuntimeError::Conflict("policy preparation cannot replace a selected or used launch".into()));
         }
         launch.selection.policy = identity;
+        launch.selection.policy_models = models;
         launch.selection.validate()?;
         launch.revision += 1;
         put(&tx, "run_launches", run_id, &launch)?;

@@ -305,6 +305,7 @@ export interface HarnessSettings {
 }
 
 export type HarnessModelRole =
+  | "agentPlanning"
   | "explore"
   | "retrievalAgent"
   | "worker"

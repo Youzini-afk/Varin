@@ -60,10 +60,10 @@ input for its current public API; cancellation preserves its content reference. 
 and tool-receipt records remain their existing inline domains in this slice.
 
 Unsupported native catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 3 and content format 2 select the current reader. Missing or corrupt referenced
+Catalog version 3 and content format 3 select the typed-request-origin reader; older request bodies are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. `Catalog::collect_content_objects` marks requests, provider originals,
 history, all model outputs (including rejected output), queued-history references, context
-checkpoints, and strictly typed policy-graph node output references. It verifies every live object
+checkpoints, and strictly typed policy-graph node and planning-model request/output references. It verifies every live object
 before sweeping and preserves unknown files; it never deletes history or invokes system-kernel GC.
 
 Provider serialization still visits and sends full legal requests; chunk reuse is not remote
@@ -106,6 +106,35 @@ pairing. Output references are checked against Run, action and node; no arbitrar
 is granted. Chunk and selected-evidence hydration happen outside the Catalog mutex. New graph output
 body writes and reference publication retain the Catalog lock, which also excludes content GC;
 large-result publication cost remains an explicit optimization boundary, not a claimed speedup.
+
+## Policy-originated planning models
+
+`RequestModelJob` selects an admitted planning capability by ID and supplies pinned policy
+instructions plus owned evidence references. It creates one Run-owned `PolicyModelJobV1` Operation,
+never a synthetic conversation, compaction Run, ModelStep, or read-only tool. The existing
+ModelProvider adapters, credential owners, content store and UsageReceipt remain authoritative.
+Provider construction is shared with ordinary chat; no implicit main-model fallback exists.
+
+Admission freezes the current committed context as quoted source data, the exact model/config/account
+binding, instructions, evidence, serialized request and private policy checkpoint atomically. Typed
+request origin distinguishes conversation requests from policy model work. Graph and model actions
+share a decision boundary and latest-action recovery selection. Provider I/O runs on the existing
+Run worker, outside the Catalog/control lock, so a stalled planner does not occupy other Runs.
+
+The Operation records prepared versus durable dispatch intent and owns original output, opaque items,
+usage and a terminal receipt. A never-dispatched prepared request may resume only with the exact
+binding and request. Once dispatch intent is durable, a crash or cancellation without completion
+produces an interrupted/indeterminate receipt, never automatic paid replay or assumed zero usage.
+Completed-item, usage and terminal boundaries persist observed output; token deltas are transient
+until such a boundary. A crash can lose uncommitted deltas. This avoids per-token durable writes;
+large completed-item publication remains a content/Catalog optimization boundary.
+
+Tool calls returned by the tool-free provider are retained but never executed and make the plan
+unusable. A successful textual plan is exposed through a Run/action-owned reference and bounded
+`ReadResult` chunks. Main-model injection labels it as untrusted model-derived evidence. Provider
+opaque originals are retained separately and never enter that evidence path. Body creation and
+reference publication use the same Catalog exclusion as content GC. Both operation cancellation and
+model-generation interruption address the same registered cancellation child.
 
 ## Explicit context compaction
 

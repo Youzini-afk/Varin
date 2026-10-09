@@ -95,6 +95,10 @@ impl CancellationToken {
         }
         child
     }
+    pub(crate) fn alias_child(&self, identity: &str, child: &Self) {
+        self.0.children.lock().unwrap_or_else(|p|p.into_inner()).insert(identity.into(), Arc::downgrade(&child.0));
+        if self.is_cancelled() { child.cancel(); }
+    }
     pub fn cancel_children_with_prefix(&self, prefix: &str) -> bool {
         let children: Vec<_> = self
             .0
@@ -228,9 +232,17 @@ pub struct RequestBinding {
 pub struct RequestView {
     pub request_id: String,
     pub run_id: String,
-    pub step: u64,
+    pub origin: RequestOrigin,
     pub binding: RequestBinding,
     pub history: Vec<ConversationItem>,
+}
+
+/// Explicit request identity: auxiliary work never masquerades as a conversation ModelStep.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RequestOrigin {
+    Conversation { step: u64, history_range: HistoryRange },
+    PolicyModelJob { action_id: String, purpose: String, boundary_id: String },
 }
 
 /// The provider receives an immutable reference to the exact durably prepared request.
@@ -326,6 +338,9 @@ pub struct ModelFailure {
 }
 
 pub trait ModelProvider: Send + Sync {
+    fn policy_model_capabilities(&self) -> Vec<PolicyModelCapability> { Vec::new() }
+    fn policy_model_capability(&self, _id: &str) -> Option<BoundPolicyModel> { None }
+
     /// Serialize and validate the semantic view. Reject unsupported attachment kinds explicitly.
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError>;
     /// Implementations must cooperate with cancellation, including while awaiting the network.
@@ -450,6 +465,9 @@ pub struct FrozenToolContext {
 #[path = "policy_actions.rs"]
 pub mod policy_actions;
 pub use policy_actions::*;
+#[path = "policy_model.rs"]
+pub mod policy_model;
+pub use policy_model::*;
 
 pub trait ToolExecutor: Send + Sync {
     /// Trusted implementation opt-in, never inferred from untrusted MCP annotations.
@@ -554,6 +572,11 @@ pub struct ContextProjection {
 }
 
 pub trait Persistence: Send + Sync {
+    fn policy_model_job(&self, _run: &str, _epoch: u64) -> Result<Option<PolicyModelState>, ExecutionError> { Ok(None) }
+    fn admit_policy_model(&self, _run: &str, _epoch: u64, _intent: &PolicyModelIntent, _snapshot: &RequestSnapshot) -> Result<PolicyModelState, ExecutionError> { Err(ExecutionError::new("policy_model_unavailable", "durable model job authority required")) }
+    fn dispatch_policy_model(&self, _run: &str, _epoch: u64, _action: &str) -> Result<(), ExecutionError> { Err(ExecutionError::new("policy_model_unavailable", "durable model job authority required")) }
+    fn record_policy_model(&self, _run: &str, _epoch: u64, _action: &str, _output: &PolicyModelOutput, _receipt: Option<&PolicyModelReceipt>) -> Result<(), ExecutionError> { Err(ExecutionError::new("policy_model_unavailable", "durable model job authority required")) }
+
     fn policy_boundary(&self, _run: &str, _epoch: u64) -> Result<PolicyBoundary, ExecutionError> { Err(ExecutionError::new("policy_graph_unavailable", "durable policy action authority required")) }
     fn policy_graph(&self, _run: &str, _epoch: u64) -> Result<Option<PolicyGraphState>, ExecutionError> { Ok(None) }
     fn admit_policy_graph(&self, _run: &str, _epoch: u64, _intent: &PolicyGraphIntent) -> Result<PolicyGraphState, ExecutionError> { Err(ExecutionError::new("policy_graph_unavailable", "durable graph authority required")) }
@@ -643,6 +666,7 @@ pub struct PolicyIdentity {
 pub enum PolicyAction {
     RequestModel,
     RequestModelWithEvidence { evidence: Vec<PolicyEvidenceRef> },
+    RequestModelJob { capability_id: String, instructions: Vec<String>, evidence: Vec<PolicyEvidenceRef> },
     ReadGraph { nodes: Vec<PolicyReadNode> },
     ReadResult { reference: PolicyEvidenceRef, index: usize },
     ExecuteTools,
@@ -670,6 +694,7 @@ pub enum PolicyEvent {
     },
     Started,
     ReadGraphCompleted { action_id: String, receipts: Vec<PolicyNodeReceipt> },
+    ModelJobCompleted { action_id: String, receipt: PolicyModelReceipt },
     ResultChunk { reference: PolicyEvidenceRef, index: usize, total_chunks: usize, total_bytes: u64, bytes: Vec<u8> },
     ModelCompleted {
         reason: FinishReason,
@@ -685,6 +710,7 @@ pub struct PolicyView<'a> {
     pub state: RunState,
     pub history: &'a [ConversationItem],
     pub pending_tool_calls: usize,
+    pub model_capabilities: Vec<PolicyModelAvailability>,
 }
 
 /// Policy computes a quick decision. Slow planning belongs in an explicit model/tool operation.
@@ -725,7 +751,7 @@ impl AgentPolicy for DefaultAgentPolicy {
             PolicyEvent::ToolsCompleted { results } if results.iter().any(|result|
                 matches!(result.completion, ToolCompletion::Result { outcome: Outcome::Indeterminate, .. })) =>
                 PolicyAction::Fail { reason: "tool effect is indeterminate; reconcile the original operation before continuing".into() },
-            PolicyEvent::ToolsCompleted { .. } | PolicyEvent::ReadGraphCompleted { .. } | PolicyEvent::ResultChunk { .. } => PolicyAction::RequestModel,
+            PolicyEvent::ToolsCompleted { .. } | PolicyEvent::ModelJobCompleted { .. } | PolicyEvent::ReadGraphCompleted { .. } | PolicyEvent::ResultChunk { .. } => PolicyAction::RequestModel,
         };
         Ok(PolicyDecision {
             action,
@@ -826,6 +852,11 @@ impl<
             recovered_decision=graph.decision.clone();
             event=self.execute_read_graph(&input,graph,&cancel)?;
         }
+        if let Some(job) = self.persistence.policy_model_job(&input.run_id,input.owner_generation)? {
+            if pending.is_some() { return Err(ExecutionError::new("unclosed_model_exchange","model job conflicts with model exchange")); }
+            recovered_decision = job.decision.clone();
+            event = self.execute_model_job(&input, job, &cancel)?;
+        }
         let mut steps = input.completed_model_steps;
         let mut interrupted_generation = false;
         macro_rules! finish {
@@ -895,6 +926,7 @@ impl<
                 state,
                 history: &history,
                 pending_tool_calls: pending.as_ref().map_or(0, |(_, calls)| calls.len()),
+                model_capabilities: self.provider.policy_model_capabilities().iter().map(PolicyModelAvailability::from).collect(),
             };
             let decision = match recovered_decision.take().map(Ok).unwrap_or_else(|| {
                 guarded("policy_panicked", || {
@@ -922,7 +954,7 @@ impl<
             // A policy can neither fabricate a closed exchange nor bypass the tool admission path.
             let legal = match &decision.action {
                 PolicyAction::ExecuteTools => pending.is_some(),
-                PolicyAction::RequestModel | PolicyAction::RequestModelWithEvidence { .. } | PolicyAction::ReadGraph { .. } | PolicyAction::ReadResult { .. } | PolicyAction::Complete | PolicyAction::Wait { .. } => {
+                PolicyAction::RequestModel | PolicyAction::RequestModelJob { .. } | PolicyAction::RequestModelWithEvidence { .. } | PolicyAction::ReadGraph { .. } | PolicyAction::ReadResult { .. } | PolicyAction::Complete | PolicyAction::Wait { .. } => {
                     pending.is_none()
                 }
                 PolicyAction::Fail { .. } => pending.is_none(),
@@ -946,7 +978,7 @@ impl<
                 finish!('agent, RunState::Failed, None,
                     Some(ExecutionError::new("illegal_policy_action", "unclosed tool exchange or no tools to execute")));
             }
-            if !matches!(decision.action,PolicyAction::ReadGraph{..}) { self.commit(
+            if !matches!(decision.action,PolicyAction::ReadGraph{..}|PolicyAction::RequestModelJob{..}) { self.commit(
                 &input,
                 ExecutionRecord::PolicyCheckpoint {
                     identity: self.policy.identity(),
@@ -965,6 +997,14 @@ impl<
                             Some(ExecutionError::new("invalid_wait", "a wait needs a registered identity")));
                     }
                     finish!('agent, RunState::Waiting, Some(wait_id), None);
+                }
+                PolicyAction::RequestModelJob { capability_id, instructions, evidence } => {
+                    let job = match self.admit_model_job(&input, &history, history_cursor.as_deref(), capability_id, instructions, evidence, policy_state.clone()) {
+                        Ok(job) => job,
+                        Err(error) if error.code == "input_pending" => { policy_state = previous_policy_state; continue 'agent; },
+                        Err(error) => { policy_state = previous_policy_state; finish!('agent,RunState::Failed,None,Some(error)); }
+                    };
+                    event = self.execute_model_job(&input, job, &cancel)?;
                 }
                 PolicyAction::ReadGraph { nodes } => {
                     let graph=match self.admit_read_graph(&input,nodes,policy_state.clone()) {Ok(graph)=>graph,Err(error) if error.code=="input_pending"=>{policy_state=previous_policy_state;continue 'agent},Err(error)=>{policy_state=previous_policy_state;finish!('agent,RunState::Failed,None,Some(error))}};
@@ -1006,7 +1046,7 @@ impl<
                             input.run_id, input.owner_generation, steps
                         ),
                         run_id: input.run_id.clone(),
-                        step: steps,
+                        origin: RequestOrigin::Conversation { step: steps, history_range: binding.history_range.clone() },
                         binding,
                         history: request_history,
                     };

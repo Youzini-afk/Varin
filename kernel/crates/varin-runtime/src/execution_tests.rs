@@ -1060,7 +1060,7 @@ fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts(
             view: RequestView {
                 request_id: "saved-first".into(),
                 run_id: run_id.clone(),
-                step: 1,
+                origin: RequestOrigin::Conversation { step: 1, history_range: original_input.binding.history_range.clone() },
                 binding: original_input.binding.clone(),
                 history: original_input.history.clone(),
             },

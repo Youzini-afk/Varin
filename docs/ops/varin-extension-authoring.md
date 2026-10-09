@@ -618,6 +618,26 @@ the request as external data. See the [installed evidence-policy example](../../
 for the build/install route, complete content-dependent sequence, API fields and recovery boundary.
 Installation alone does not switch the product's default runtime to the native path.
 
+For auxiliary planning, declare `capabilities: ['agentPlanning']` in the implementation passed to
+`provideAgentPolicy`. Omit it for policies that do not need another model. The existing global
+Harness model slot owns selection and enablement; it never defaults to the main model. The immutable
+view exposes `model_capabilities` with `capability_id`, `purpose: 'planning'`,
+`supported_operation: 'tool_free_text'`, and a status of `available`, `disabled`, `unconfigured`,
+`invalid` or `unavailable`. Provider configuration and credentials remain private to the Host/core.
+
+Return `request_model_job` with the admitted `capability_id`, nonempty `instructions` strings and
+owned `evidence` references. Core freezes task context and runs an independent tool-free operation;
+`decide()` must not perform direct model/network work. `model_job_completed` delivers an `action_id`
+and typed `receipt` with `dispatch`, `outcome`, scoped `output`, `usage`, `finish_reason`, `failure`
+and `usable`. Read a successful committed result using the same scoped `read_result` chunks, then
+validate the model-derived data against the policy's declared format before choosing another action.
+Neither model output nor a parsed plan grants permissions. Auxiliary tool calls are never executed.
+See the [installed planning-policy example](../../examples/extensions/planning-policy/README.md) for
+explicit model configuration, normal installation/routing, budgets and the complete content-dependent
+planning → evidence graph → main-answer path. Cancellation, pinned generations and epoch fencing
+remain part of the existing operation lifecycle, not an extension-owned task or credential store.
+
+
 ## Install and development workflow
 
 Open **Settings → Varin Extensions → Install or update** and choose npm, Git, or local folder. The

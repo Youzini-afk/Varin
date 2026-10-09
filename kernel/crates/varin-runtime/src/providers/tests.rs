@@ -47,7 +47,7 @@ fn view(family: &str) -> RequestView {
     RequestView {
         request_id: "request".into(),
         run_id: "run".into(),
-        step: 1,
+        origin: RequestOrigin::Conversation { step: 1, history_range: HistoryRange { branch_id: "branch".into(), ancestor_id: None, leaf_id: None } },
         binding: RequestBinding {
             connection_identity: "fixture-connection".into(),
             provider_family: family.into(),
@@ -1225,4 +1225,32 @@ fn actual_binary_http_reaches_bedrock_adapter_through_clean_eof() {
     assert!(events.iter().any(
         |event| matches!(event,ProviderEvent::Usage{receipt} if receipt.output_tokens==Some(4))
     ));
+}
+
+#[test]
+fn planning_call_original_is_retained_without_weakening_main_schema_authority() {
+    let raw = json!({"id":"unoffered-item","type":"function_call","call_id":"unoffered-call","name":"unoffered","arguments":"{\"sentinel\":\"original\"}","provider_private":{"keep":true}});
+    for planning in [false, true] {
+        let provider = responses::ResponsesProvider::new(connection(vec![
+            json!({"type":"response.output_item.done","item":raw}),
+            json!({"type":"response.completed","response":{"output":[raw]}}),
+        ], 5));
+        let mut view = view(responses::FAMILY);
+        view.binding.tools.clear();
+        if planning { view.origin = RequestOrigin::PolicyModelJob { action_id:"planning-action".into(),purpose:"planning".into(),boundary_id:"boundary".into() }; }
+        let serialized = provider.serialize(&view).unwrap();
+        let snapshot = RequestSnapshot { view, serialized };
+        let mut events = Vec::new();
+        let result = provider.generate(&snapshot, &CancellationToken::default(), &mut |event| { events.push(event); Ok(()) });
+        if planning {
+            assert_eq!(result.unwrap(), FinishReason::ToolCalls);
+            let items:Vec<_> = events.into_iter().filter_map(|event|match event {ProviderEvent::ItemCompleted{item}=>Some(item),_=>None}).collect();
+            assert_eq!(items.len(),1);
+            assert_eq!(items[0].opaque.as_ref().unwrap().value,raw);
+            assert!(matches!(&items[0].content,Content::ToolCall{call} if call.schema_version.is_empty() && call.name=="unoffered"));
+        } else {
+            assert_eq!(result.unwrap_err().code,"unknown_tool_schema");
+            assert!(!events.iter().any(|e|matches!(e,ProviderEvent::ItemCompleted{item} if matches!(item.content,Content::ToolCall{..}))));
+        }
+    }
 }

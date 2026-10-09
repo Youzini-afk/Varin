@@ -601,12 +601,12 @@ export class KernelClient {
 
 
   /** Host-only owner registration. This is not exposed through tool grants or renderer APIs. */
-  async registerNativeCredentialOwner(runId: string, owner: ExistingHostCredentialOwner, signal?: AbortSignal): Promise<NativeCredentialScope> {
+  async registerNativeCredentialOwner(runId: string, owner: ExistingHostCredentialOwner, signal?: AbortSignal, bindingId?: string): Promise<NativeCredentialScope> {
     if (!this.handshakeResult) await this.start();
     signal?.throwIfAborted();
-    return this.credentialBridge.register(runId, owner, signal);
+    return this.credentialBridge.register(runId, owner, signal, bindingId);
   }
-  unregisterNativeCredentialOwner(runId: string): void { this.credentialBridge.unregister(runId); }
+  unregisterNativeCredentialOwner(runId: string, bindingId?: string): void { this.credentialBridge.unregister(runId, bindingId); }
   async registerNativeMcpOwner(runId: string, lease: NativeMcpLease): Promise<NativeMcpBinding> {
     if (!this.handshakeResult) await this.start();
     return this.mcpBridge.register(runId, lease);

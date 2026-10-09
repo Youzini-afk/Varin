@@ -24,3 +24,11 @@ same controller. It does not create a second tab or file-content store.
 
 The coordinated public version for this workbench SDK is 0.2.0. Do not npm tag or publish until that
 release is explicitly approved.
+
+## Native Agent policy examples
+
+- [Evidence policy](evidence-policy/README.md): inspect committed file evidence and choose a read.
+- [Planning policy](planning-policy/README.md): explicitly configure a tool-free planning model,
+  inspect its committed bounded plan, then choose an evidence graph and main-model answer.
+
+Both use the ordinary installed brokered Host extension and project service-routing paths.

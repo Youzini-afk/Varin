@@ -17,7 +17,7 @@ const nativeStructs = Object.entries(schema.nativeRuntimeStructs ?? {}).map(([na
     const field = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
     return `    pub ${field}: ${type},`;
   });
-  return `#[derive(Debug, Clone, Serialize, Deserialize)]\n#[serde(rename_all = "camelCase", deny_unknown_fields)]\npub struct ${name} {\n${fields.join("\n")}\n}\n`;
+  return `#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]\n#[serde(rename_all = "camelCase", deny_unknown_fields)]\npub struct ${name} {\n${fields.join("\n")}\n}\n`;
 }).join("\n");
 const nativeRustGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\nuse serde::{Deserialize, Serialize};\n\n' + Object.entries(schema.nativeRuntimeEnums ?? {}).map(([name, variants]) => `#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(rename_all = "snake_case")]\npub enum ${name} {\n${variants.map(v => `    ${v},`).join('\n')}\n}\n`).join('\n') + '\n' + nativeStructs;
 const checkOnly = process.argv.includes('--check');

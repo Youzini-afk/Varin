@@ -139,7 +139,7 @@ fn content_format_marker_mismatch_never_reinterprets_existing_references() {
     let fixture = Fixture::new();
     let store = fixture.store();
     let mut db = collection_db();
-    db.execute_batch("PRAGMA user_version=3; CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY,version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,2)").unwrap();
+    db.execute_batch("PRAGMA user_version=3; CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY,version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,3)").unwrap();
     initialize(&mut db, &store).unwrap();
     assert_eq!(
         db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
@@ -196,7 +196,7 @@ fn gc_removes_abandoned_staging_only_after_successful_mark() {
 #[test]
 fn current_format_gc_preserves_request_original_history_output_and_input_references() {
     let fixture=Fixture::new();let store=fixture.store();let mut db=collection_db();
-    db.execute_batch("PRAGMA user_version=3; CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY,version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,2)").unwrap();
+    db.execute_batch("PRAGMA user_version=3; CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY,version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,3)").unwrap();
     let request=json!({"request_id":"same","opaque":[null,{"signed":"request"}]});
     let original=json!({"signed":"provider original","unknown":[2,null]});
     let history=json!({"content":{"text":"visible"},"provider":{"signature":"keep"}});

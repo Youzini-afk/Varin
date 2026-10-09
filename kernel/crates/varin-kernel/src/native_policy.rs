@@ -78,7 +78,7 @@ impl AgentPolicy for HostPolicy {
             self.bridge.send(json!({"v":1,"kind":"agent-policy-request","id":id,"kernelEpoch":epoch,
                 "runId":self.run_id,"binding":{"reference":self.reference,"identity":self.identity},
                 "input":{"view":{"run_id":view.run_id,"state":view.state,"history_count":view.history.len(),"history_head_id":view.history.last().map(|item| &item.id),
-                    "pending_tool_calls":view.pending_tool_calls},"event":event_view(event),"state":checkpoint}}))?;
+                    "pending_tool_calls":view.pending_tool_calls,"model_capabilities":view.model_capabilities},"event":event_view(event),"state":checkpoint}}))?;
             loop {
                 if cancel.is_cancelled() {
                     let _ = self.bridge.send(json!({"v":1,"kind":"agent-policy-cancel","id":id,"kernelEpoch":epoch,"runId":self.run_id}));

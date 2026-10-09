@@ -288,6 +288,14 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
     apply: 'next-run', ui: { page: 'agents', titleKey: 'settings.page.agents.title', keywords: ['custom agent', 'team', 'multiagent', 'instructions', 'tools'] },
   },
   {
+    id: 'harness.models.agentPlanning', category: 'harness', owner: 'pi-settings',
+    field: { path: 'harness.models.agentPlanning', kind: 'json', scope: 'user',
+      note: '{enabled?: boolean, providerId?: string, modelId?: string}; explicit model for selected native policy planning, never inherits the main model' },
+    apply: 'next-run',
+    ui: { page: 'harness-context', titleKey: 'settings.harness.role.agentPlanning',
+      keywords: ['planning', 'policy', 'agentPlanning', 'model', 'enable', 'disable'] },
+  },
+  {
     id: 'harness.next-step', category: 'harness', owner: 'pi-settings',
     fields: [
       { path: 'harness.nextStep', kind: 'json', scope: 'user',

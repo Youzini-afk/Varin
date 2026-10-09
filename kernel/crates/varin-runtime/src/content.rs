@@ -247,6 +247,15 @@ impl ContentStore {
             let result=crate::catalog::policy::graph_result(&op,&intent)?;
             for receipt in result.receipts.values() { if let Some(output)=&receipt.output {references.push(Reference{content_object:output.content_ref.clone()});} }
         }
+        let mut jobs=db.prepare("SELECT body FROM operations WHERE json_extract(body,'$.intent.kind')='policy_model_job_v1'")?;
+        for row in jobs.query_map([],|r|r.get::<_,String>(0))? {
+            let op:crate::types::Operation=serde_json::from_str(&row?)?;
+            crate::catalog::policy_model::model_intent(&op)?.ok_or_else(||RuntimeError::Invalid("planning intent missing".into()))?;
+            let result=crate::catalog::policy_model::model_result(&op)?;
+            references.push(serde_json::from_value(result.request_ref)?);
+            if let Some(original)=result.original_ref{references.push(serde_json::from_value(original)?);}
+            if let Some(output)=result.receipt.and_then(|r|r.output){references.push(Reference{content_object:output.content_ref});}
+        }
         for reference in references {
             let manifest: Manifest =
                 serde_json::from_slice(&self.read_bytes(&reference.content_object)?)?;
@@ -311,7 +320,7 @@ impl ContentStore {
 pub(crate) fn initialize(db: &mut Connection, _content: &ContentStore) -> Result<()> {
     let version:i64=db.pragma_query_value(None,"user_version",|r|r.get(0))?;
     let format:i64=db.query_row("SELECT version FROM runtime_content_format WHERE id=1",[],|r|r.get(0))?;
-    if version!=3||format!=2 {return Err(RuntimeError::Invalid("unsupported native content format; data was preserved".into()));}
+    if version!=3||format!=3 {return Err(RuntimeError::Invalid("unsupported native content format; data was preserved".into()));}
     db.prepare("SELECT input_id,body FROM input_history_content")?;
     Ok(())
 }

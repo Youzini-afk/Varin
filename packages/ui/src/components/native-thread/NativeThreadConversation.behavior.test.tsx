@@ -24,7 +24,7 @@ vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: 
 const identity: NativeThreadIdentity = { runtime: 'nativeThread', threadId: 'nativeThread:ui-fixture', branchId: 'nativeBranch:ui-fixture' };
 function initialSnapshot(active = false): NativeThreadSnapshot {
   const run = { id: 'ui-run', thread_id: identity.threadId, branch_id: identity.branchId, state: 'generating' as const, revision: 1, epoch: 1, configuration: { providerId: 'fixture-provider', model: 'fixture-model' }, cancel_requested: false, waiting_on: null };
-  return { identity, thread: { thread_id: identity.threadId, branches: [{ branch_id: identity.branchId, head: null, active_run_id: active ? run.id : null, latest_run: active ? run : null }] }, activeRun: active ? run : null,
+  return { identity, thread: { thread_id: identity.threadId, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: null, active_run_id: active ? run.id : null, latest_run: active ? run : null }] }, activeRun: active ? run : null,
     history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], launch: null, context: { checkpoint: null, jobs: [] } };
 }
 function fixture(active = false) {
