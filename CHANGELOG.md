@@ -5,7 +5,7 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
-## 0.9.25 - 2026-10-09
+## 0.9.26 - 2026-10-09
 
 ### 更新摘要
 
@@ -15,6 +15,7 @@ private runtime protocol and product surfaces still move together.
 
 - 调整只读工具的调度，减少长检索对同批其他工具的阻塞；请求取消贯穿后台准备和文件盘点。
 - LSP 按工作区预热，隔离代码视图各自准备。修复 Worker 启动时目录准备依赖尚未登记的会话，导致子任务启动失败的问题。
+- 文件监听按实际内容修订核对语言视图，避免延迟事件清除已经更新的诊断；语言扩展激活失败保留明确的失败状态。
 - Windows 文件工具识别 MSYS 盘符路径和临时目录路径；批量编辑对照原文匹配并检测重叠，编辑失败只显示一次错误。
 - Todo 使用明确的进度状态并简化输入；文档多页读取、隐藏文件检索及 Shell 输出标记处理得到修正。
 - 修复已结束子任务的待输入状态及过期接续任务控件，减少已结束队友和重复消息对上下文的干扰。
@@ -23,6 +24,7 @@ private runtime protocol and product surfaces still move together.
 
 - Windows 输入接入原生控制器，改进窗口激活、输入取消和焦点恢复，并修复鼠标输入参数类型错误。
 - 区分取消电脑作业、人工接管与交还。取消通知 Agent 并清理作业展示；同一桌面的子任务操作由主任务协调。
+- 未派发输入的动作拒绝按拒绝结果记录，取消后重新观察现场再开始新作业。
 - 完善鼠标移动、点击和键盘输入反馈，以及工作概览中的电脑作业状态。
 - 修复 `computer.run` 的异步脚本执行；观察文本支持截断和续读，截图改为按需请求。
 
@@ -40,12 +42,13 @@ private runtime protocol and product surfaces still move together.
 
 ### Release highlights
 
-Varin 0.9.25 improves concurrent tools, child-task startup, Windows Computer Use, conversation updates and native MCP settings.
+Varin 0.9.26 improves concurrent tools, child-task startup, Windows Computer Use, conversation updates and native MCP settings.
 
 #### Tools and child tasks
 
 - Adjust read-tool scheduling so long retrieval calls do not unnecessarily hold up other tools in the batch. Propagate cancellation through preparation and file inventory.
 - Prewarm workspace language services and prepare isolated code views separately. Fix Worker startup materialization looking up a session before its running-state binding exists.
+- Compare watched disk content with the current language binding so delayed events do not clear fresh diagnostics. Preserve explicit language-extension activation failures.
 - Recognize MSYS drive and temporary paths in Windows file tools. Match batch edits against original content, reject overlaps and display edit failures once.
 - Clarify Todo progress states and simplify plan input. Repair multi-page document input, hidden-file search and Shell output framing.
 - Refresh finished-task attention and expired continuation controls; reduce repeated settled-teammate and message material.
@@ -54,6 +57,7 @@ Varin 0.9.25 improves concurrent tools, child-task startup, Windows Computer Use
 
 - Use native Windows input control with improved activation, cancellation and focus restoration. Fix the mouse-input parameter type.
 - Separate work cancellation, explicit user takeover and return of control. Notify the Agent when work is cancelled and clear its display; coordinate child-task access to each desktop.
+- Record rejected input as rejected when nothing was dispatched; re-observe after cancellation before starting fresh work.
 - Improve pointer, click and keyboard feedback and computer-work status in the work overview.
 - Repair asynchronous `computer.run` scripts. Page observation text and request screenshots explicitly.
 
@@ -67,7 +71,7 @@ Varin 0.9.25 improves concurrent tools, child-task startup, Windows Computer Use
 - Refine the elevated composer and diffuse focus halo, remove generation glow sweeps and improve conversation navigation and Agent/IDE transitions.
 - Update Pi, Electron, PDF, Canvas and related runtime dependencies.
 
-[完整提交记录 / Full changelog](https://github.com/Youzini-afk/Varin/compare/v0.9.24...v0.9.25)
+[完整提交记录 / Full changelog](https://github.com/Youzini-afk/Varin/compare/v0.9.24...v0.9.26)
 
 ## 0.9.24 - 2026-10-06
 
