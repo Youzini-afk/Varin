@@ -56,6 +56,13 @@ fn error(e: impl ToString) -> ExecutionError {
     ExecutionError::new("question", e.to_string())
 }
 impl ToolExecutor for Questions {
+    fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken)
+        -> Result<varin_runtime::execution::ToolPreparation, ExecutionError> {
+        if call.name == QUESTION_TOOL {
+            self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+        } else { self.inner.plan(call, context, cancel) }
+    }
+
     fn watch_admission(&self, context: &ToolExecutionContext, call: &ToolCall, contract: &ToolContract, cancel: &CancellationToken)
         -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError> {
         if call.name == QUESTION_TOOL { Ok(None) } else { self.inner.watch_admission(context, call, contract, cancel) }

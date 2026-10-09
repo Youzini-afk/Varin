@@ -166,6 +166,13 @@ impl ProcessWaitTools {
     }
 }
 impl ToolExecutor for ProcessWaitTools {
+    fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken)
+        -> Result<varin_runtime::execution::ToolPreparation, ExecutionError> {
+        if call.name == WAIT_TOOL {
+            self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+        } else { self.inner.plan(call, context, cancel) }
+    }
+
     fn execution_class(&self, call: &ToolCall, contract: &ToolContract) -> varin_runtime::execution_capacity::ExecutionClass {
         if call.name == WAIT_TOOL { varin_runtime::execution_capacity::ExecutionClass::Unmetered }
         else { self.inner.execution_class(call, contract) }

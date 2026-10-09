@@ -125,6 +125,11 @@ impl AgentPolicy for SummaryPolicy {
 }
 struct NoTools;
 impl ToolExecutor for NoTools {
+    fn plan(&self, call: &crate::execution::ToolCall, context: &crate::execution::FrozenToolContext,
+        cancel: &crate::execution::CancellationToken) -> Result<crate::execution::ToolPreparation, crate::execution::ExecutionError> {
+        self.prepare(call, context, cancel).map(crate::execution::ToolPreparation::Ready)
+    }
+
     fn prepare(&self, _: &ToolCall, _: &FrozenToolContext, _cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
         Err(ExecutionError::new(
             "compaction_tools",

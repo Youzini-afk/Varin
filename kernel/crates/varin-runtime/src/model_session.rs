@@ -79,6 +79,11 @@ pub fn build_provider(configuration:ModelSessionConfiguration,credentials:Arc<dy
 }
 struct NoTools;
 impl ToolExecutor for NoTools {
+    fn plan(&self, call: &crate::execution::ToolCall, context: &crate::execution::FrozenToolContext,
+        cancel: &crate::execution::CancellationToken) -> Result<crate::execution::ToolPreparation, crate::execution::ExecutionError> {
+        self.prepare(call, context, cancel).map(crate::execution::ToolPreparation::Ready)
+    }
+
     fn prepare(&self,_:&ToolCall,_:&FrozenToolContext, _cancel: &CancellationToken)->Result<ToolContract,ExecutionError>{Err(ExecutionError::new("tool_unavailable","this binding has no tools"))}
     fn authorize(&self,_:&ToolExecutionContext,_:&ToolCall,_:&ToolContract,_:&CancellationToken)->Result<(),ExecutionError>{Err(ExecutionError::new("tool_unavailable","this binding has no tools"))}
     fn execute(&self,_:&ToolExecutionContext,_:&ToolCall,_:&ToolContract,_:&CancellationToken)->ToolCompletion{ToolCompletion::NotDispatched{reason:"no tool binding exists".into()}}

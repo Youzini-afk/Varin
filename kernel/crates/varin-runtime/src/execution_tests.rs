@@ -72,6 +72,11 @@ struct Tools {
     calls: AtomicUsize,
 }
 impl ToolExecutor for Tools {
+    fn plan(&self, call: &crate::execution::ToolCall, context: &crate::execution::FrozenToolContext,
+        cancel: &crate::execution::CancellationToken) -> Result<crate::execution::ToolPreparation, crate::execution::ExecutionError> {
+        self.prepare(call, context, cancel).map(crate::execution::ToolPreparation::Ready)
+    }
+
     fn prepare(
         &self,
         call: &ToolCall,
@@ -550,6 +555,11 @@ fn independent_fast_tool_finishes_while_another_tool_is_still_running() {
         fast_done: std::sync::mpsc::Sender<()>,
     }
     impl ToolExecutor for IndependentTools {
+        fn plan(&self, call: &crate::execution::ToolCall, context: &crate::execution::FrozenToolContext,
+            cancel: &crate::execution::CancellationToken) -> Result<crate::execution::ToolPreparation, crate::execution::ExecutionError> {
+            self.prepare(call, context, cancel).map(crate::execution::ToolPreparation::Ready)
+        }
+
         fn prepare(
             &self,
             call: &ToolCall,
@@ -689,6 +699,11 @@ fn cancelling_one_queued_operation_does_not_fail_its_run_or_execute_it() {
         queued_calls: AtomicUsize,
     }
     impl ToolExecutor for Writes {
+        fn plan(&self, call: &crate::execution::ToolCall, context: &crate::execution::FrozenToolContext,
+            cancel: &crate::execution::CancellationToken) -> Result<crate::execution::ToolPreparation, crate::execution::ExecutionError> {
+            self.prepare(call, context, cancel).map(crate::execution::ToolPreparation::Ready)
+        }
+
         fn prepare(
             &self,
             call: &ToolCall,

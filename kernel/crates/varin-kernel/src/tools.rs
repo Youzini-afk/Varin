@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 use std::sync::{mpsc, Arc};
 use varin_runtime::execution::{
     Access, CancellationToken, CompletionKind, ExecutionError, FrozenToolContext, ToolOrigin, ResourceClaim,
-    ToolCall, ToolCompletion, ToolContract, ToolExecutionContext, ToolExecutor, ToolSchema,
+    ResourceIntent, ToolCall, ToolCompletion, ToolContract, ToolExecutionContext, ToolExecutor, ToolPreparation, ToolSchema,
 };
 use varin_runtime::{Effect, Lifetime, Outcome};
 
@@ -732,9 +732,35 @@ impl KernelToolExecutor {
         }
         Ok(contract)
     }
+    fn frozen_operation(&self, call: &ToolCall, request: &FrozenToolContext) -> Result<ResourceOperation, ExecutionError> {
+        if request.run_id != self.binding.run_id {
+            return Err(ExecutionError::new("unauthorized", "request Run does not match tool binding"));
+        }
+        let operation = self.operation(None, call)?;
+        let expected = self.schemas.iter().find(|schema| schema.name == call.name).expect("selected tool");
+        if !request.tools.iter().any(|schema| schema == expected) {
+            return Err(ExecutionError::new("stale_tool_schema", "tool does not match the frozen request schema"));
+        }
+        Ok(operation)
+    }
 
 }
 impl ToolExecutor for KernelToolExecutor {
+    fn plan(&self, call: &ToolCall, request: &FrozenToolContext, _: &CancellationToken)
+        -> Result<ToolPreparation, ExecutionError> {
+        let operation = self.frozen_operation(call, request)?;
+        if self.physical_file(&operation) {
+            // Storage canonicalizes parents, junctions and root aliases. Until it resolves the
+            // target, only the canonical physical-file namespace is known. A workspace/root ID
+            // would incorrectly separate two aliases of the same file. Static resource owners
+            // (process output, language, discovery, fixed views) can still bypass this intent.
+            let access = if matches!(operation, ResourceOperation::FileMutation(_)) { Access::Write } else { Access::Read };
+            Ok(ToolPreparation::Resolve {
+                resources: vec![ResourceIntent::Prefix { key_prefix: "[\"file\",".into(), access }],
+                class: varin_runtime::execution_capacity::ExecutionClass::Unmetered,
+            })
+        } else { Ok(ToolPreparation::Ready(self.contract(call, &operation))) }
+    }
     fn watch_admission(&self, _: &ToolExecutionContext, _: &ToolCall, _: &ToolContract, cancel: &CancellationToken)
         -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError> {
         self.resources.admission_control.as_ref().map(|watch| watch(&self.binding, cancel)).transpose()
@@ -771,28 +797,7 @@ impl ToolExecutor for KernelToolExecutor {
         request: &FrozenToolContext,
         _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
-        if request.run_id != self.binding.run_id {
-            return Err(ExecutionError::new(
-                "unauthorized",
-                "request Run does not match tool binding",
-            ));
-        }
-        let operation = self.operation(None, call)?;
-        let expected = self
-            .schemas
-            .iter()
-            .find(|schema| schema.name == call.name)
-            .expect("selected tool");
-        if !request
-            .tools
-            .iter()
-            .any(|schema| schema == expected)
-        {
-            return Err(ExecutionError::new(
-                "stale_tool_schema",
-                "tool does not match the frozen request schema",
-            ));
-        }
+        let operation = self.frozen_operation(call, request)?;
         self.planned_contract(&ToolExecutionContext {
             run_id: self.binding.run_id.clone(), origin: request.origin.clone(),
             operation_id: match &request.origin {
