@@ -836,84 +836,9 @@ impl Catalog {
         policy: PolicyIdentity,
         initial_policy_state: Value,
     ) -> Result<ExecutionInput> {
-        self.prepare_execution_inner(run_id, binding, policy, initial_policy_state, false)
-    }
-    pub(super) fn prepare_execution_with_completed_tools(&self, run_id: &str, binding: RequestBinding, policy: PolicyIdentity, initial_policy_state: Value) -> Result<ExecutionInput> {
-        self.prepare_execution_inner(run_id, binding, policy, initial_policy_state, true)
-    }
-    fn prepare_execution_inner(&self, run_id: &str, mut binding: RequestBinding, policy: PolicyIdentity, initial_policy_state: Value, completed_tools: bool) -> Result<ExecutionInput> {
-        let run = self.run(run_id)?;
-        if run.epoch != self.epoch
-            || run.cancel_requested
-            || !matches!(run.state, RunState::Accepted | RunState::Runnable)
-        {
-            return Err(RuntimeError::Conflict(
-                "run is not admitted for execution".into(),
-            ));
-        }
-        let active: Option<String> = self.db.query_row(
-            "SELECT active_run FROM branches WHERE id=?1",
-            [&run.branch_id],
-            |r| r.get(0),
-        )?;
-        if active.as_deref() != Some(run_id) {
-            return Err(RuntimeError::Conflict("branch owner changed".into()));
-        }
-        let unresolved: i64 = self.db.query_row(
-            "SELECT count(*) FROM model_steps WHERE run_id=?1 AND state!='completed' AND json_extract(body,'$.superseded_by_input') IS NULL",
-            [run_id],
-            |r| r.get(0),
-        )?;
-        let unpaired:i64=self.db.query_row("SELECT count(*) FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0",[run_id],|r|r.get(0))?;
-        if unresolved != 0 || (unpaired != 0 && !completed_tools) {
-            return Err(RuntimeError::Conflict(
-                "execution needs explicit model/tool recovery".into(),
-            ));
-        }
-        let completed_model_steps: u64 = self.db.query_row(
-            "SELECT count(*) FROM model_steps WHERE run_id=?1",
-            [run_id],
-            |r| read_number(r, 0),
-        )?;
-        let saved: Option<(String, String)> = self
-            .db
-            .query_row(
-                "SELECT identity,state FROM policy_checkpoints WHERE run_id=?1",
-                [run_id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()?;
-        let policy_state = if let Some((identity, state)) = saved {
-            if serde_json::from_str::<PolicyIdentity>(&identity)? != policy {
-                return Err(RuntimeError::Conflict(
-                    "policy checkpoint belongs to another implementation version".into(),
-                ));
-            }
-            serde_json::from_str(&state)?
-        } else {
-            initial_policy_state
-        };
-        binding.history_range.branch_id = run.branch_id.clone();
-        binding.history_range.leaf_id = self.head(&run.branch_id)?;
-        let history = self.execution_history(&run.branch_id)?;
-        if binding
-            .history_range
-            .ancestor_id
-            .as_ref()
-            .is_some_and(|id| !history.iter().any(|item| &item.id == id))
-        {
-            return Err(RuntimeError::Conflict(
-                "request ancestor is not on the active branch".into(),
-            ));
-        }
-        Ok(ExecutionInput {
-            run_id: run_id.into(),
-            owner_generation: run.epoch,
-            binding,
-            history,
-            policy_state,
-            completed_model_steps,
-        })
+        self.capture_execution_preparation(
+            run_id, binding, policy, initial_policy_state, false, false, false,
+        )?.load()
     }
 }
 
