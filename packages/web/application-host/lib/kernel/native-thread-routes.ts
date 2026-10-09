@@ -24,8 +24,11 @@ const identity = (body: Record<string, unknown>): NativeThreadIdentity => {
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
 export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAdapter, requireAuth: RequestHandler): void {
   const fields: Record<string, readonly string[]> = {
+    'context/compact': ['runtime', 'threadId', 'branchId', 'key', 'throughId', 'expectedRevision', 'model'],
+    'context/publish': ['runtime', 'threadId', 'branchId', 'runId'], 'context/cancel': ['runtime', 'threadId', 'branchId', 'runId'], 'context/resume': ['runtime', 'threadId', 'branchId', 'runId'],
+    fork: ['runtime', 'threadId', 'branchId', 'key', 'headId'],
     create: ['key'], list: [], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'expectedHead', 'model', 'source'],
-    snapshot: ['runtime', 'threadId', 'branchId'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'mode'],
+    snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'mode'],
     'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
     run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], events: ['cursor'],
   };
@@ -47,6 +50,16 @@ export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAd
   post('models', () => adapter.listModels());
   post('list', async () => (await adapter.runtime.threads()).filter(thread => thread.thread_id.startsWith('nativeThread:')));
   post('create', body => adapter.create(text(body.key)));
+  post('fork', body => adapter.fork({ ...identity(body), key: text(body.key), headId: body.headId === null ? null : text(body.headId) }));
+  post('context/compact', body => {
+    const model = object(body.model);
+    if (Object.keys(model).some(key => !['providerId', 'modelId'].includes(key))) throw new Error('Unsupported model selection field');
+    return adapter.compact({ ...identity(body), key: text(body.key), throughId: text(body.throughId), expectedRevision: revision(body.expectedRevision),
+      model: { providerId: text(model.providerId), modelId: text(model.modelId) } });
+  });
+  post('context/publish', body => adapter.publishContext(identity(body), text(body.runId)));
+  post('context/cancel', body => adapter.cancelContext(identity(body), text(body.runId)));
+  post('context/resume', async body => { await adapter.resumeContext(identity(body), text(body.runId)); return {}; });
   post('submit', async body => {
     const model = object(body.model);
     if (Object.keys(model).some(key => !['providerId', 'modelId'].includes(key))) throw new Error('Unsupported model selection field');
@@ -66,6 +79,7 @@ export function registerNativeThreadRoutes(app: Express, adapter: NativeThreadAd
     }
     return adapter.submit(input);
   });
+  post('history/page', body => adapter.historyPage(identity(body), { headId: text(body.headId), beforeId: text(body.beforeId) }));
   post('snapshot', body => adapter.snapshot(identity(body)));
   post('enqueue', async body => {
     const selected = identity(body); await adapter.requireIdentity(selected);

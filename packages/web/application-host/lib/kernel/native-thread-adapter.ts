@@ -1,7 +1,7 @@
 import type { ImageAttachment } from '@varin/protocol';
 import { nativeThreadInput } from './native-thread-images.js';
 import { createHash } from 'node:crypto';
-import type { NativeThreadIdentity, NativeThreadSubmit, NativeThreadSource, NativeThreadSnapshot } from '@varin/application-client';
+import type { NativeThreadIdentity, NativeThreadSubmit, NativeThreadSource, NativeThreadSnapshot, NativeThreadHistoryPage, NativeThreadCompact, NativeThreadContextState } from '@varin/application-client';
 import type { NativeInputMode, NativeModelSessionConfiguration, NativeCredentialScope, NativeRuntimeStreamEvent } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './native-credential-owner.js';
 import { NativeRuntimeClient } from './native-runtime-client.js';
@@ -30,8 +30,70 @@ export class NativeThreadAdapter {
     return identity;
   }
 
+  async fork(input: NativeThreadIdentity & { key: string; headId: string | null }): Promise<NativeThreadIdentity> {
+    await this.requireIdentity(input);
+    const digest = createHash('sha256').update(JSON.stringify([input.threadId, input.branchId, input.headId, input.key])).digest('hex');
+    const result = await this.runtime.forkBranch(input.branchId, `nativeBranch:${digest}`, input.headId);
+    return { runtime: 'nativeThread', ...result };
+  }
+
+  async compact(input: NativeThreadCompact) {
+    await this.requireIdentity(input);
+    const key = createHash('sha256').update(JSON.stringify([input.threadId, input.branchId, input.key])).digest('hex');
+    const [checkpoint, jobs] = await Promise.all([this.runtime.context(input.branchId), this.runtime.contextJobs(input.branchId)]);
+    // An uncertain create retry keeps its original prompt/memory recipe even after publication.
+    const previous = jobs.find(job => job.request.key === key);
+    const recipe = previous?.request ?? checkpoint?.proposal;
+    const model = await this.models.resolveModel(input.model);
+    const job = await this.runtime.createContextJob({ key, branchId: input.branchId, throughId: input.throughId,
+      expectedRevision: input.expectedRevision, effectiveSystemPrompt: recipe?.effective_system_prompt ?? '',
+      instructionSources: recipe?.instruction_sources ?? [], memoryCheckpoint: recipe?.memory_checkpoint ?? null,
+      configuration: model.configuration, credentialScope: await model.credentialOwner.scope() });
+    const run = await this.runtime.run(job.receipt.run_id);
+    if (['accepted', 'preparing', 'runnable'].includes(run.state)) {
+      void this.runtime.startRunWithCredentialOwner(run.id, model.credentialOwner).catch(error => this.recordLaunchFailure(run.id, error));
+    }
+    return job;
+  }
+
+  async context(identity: NativeThreadIdentity): Promise<NativeThreadContextState> {
+    const [checkpoint, jobs] = await Promise.all([this.runtime.context(identity.branchId), this.runtime.contextJobs(identity.branchId)]);
+    return { checkpoint, jobs: await Promise.all(jobs.map(async job => ({ job, run: await this.runtime.run(job.receipt.run_id) }))) };
+  }
+
+  async requireContextJob(identity: NativeThreadIdentity, runId: string) {
+    await this.requireIdentity(identity);
+    const job = await this.runtime.contextJob(runId);
+    if (job.request.branch_id !== identity.branchId) throw new Error('Context job does not belong to the selected branch');
+    return job;
+  }
+
+  async publishContext(identity: NativeThreadIdentity, runId: string) {
+    await this.requireContextJob(identity, runId);
+    return this.runtime.publishContextJob(runId);
+  }
+
+  async cancelContext(identity: NativeThreadIdentity, runId: string) {
+    await this.requireContextJob(identity, runId);
+    return this.runtime.cancelRun(runId);
+  }
+
+  async resumeContext(identity: NativeThreadIdentity, runId: string): Promise<void> {
+    await this.requireContextJob(identity, runId);
+    await this.resumeContextRun(runId);
+  }
+
+  private async resumeContextRun(runId: string): Promise<void> {
+    const run = await this.runtime.run(runId);
+    const launch = await this.runtime.launch(runId);
+    if (!launch?.selection.credential_scope) throw new Error('Context job has no durable credential binding');
+    const { context_job: _recipe, ...configuration } = run.configuration as NativeModelSessionConfiguration & { context_job: unknown };
+    const owner = await this.models.rebindModel(configuration as NativeModelSessionConfiguration, launch.selection.credential_scope);
+    await this.runtime.startRunWithCredentialOwner(runId, owner);
+  }
+
   assertIdentity(identity: NativeThreadIdentity): void {
-    if (identity.runtime !== 'nativeThread' || !identity.threadId.startsWith('nativeThread:') || !identity.branchId.startsWith('nativeBranch:')) {
+    if (identity.runtime !== 'nativeThread' || !identity.threadId.startsWith('nativeThread:')) {
       throw new Error('An explicit nativeThread identity is required');
     }
   }
@@ -60,8 +122,7 @@ export class NativeThreadAdapter {
   }
 
   async enqueue(input: NativeThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; mode: NativeInputMode }) {
-    await this.requireIdentity(input);
-    const thread = await this.runtime.thread(input.threadId);
+    const thread = await this.requireIdentity(input);
     const branch = thread.branches.find(candidate => candidate.branch_id === input.branchId)!;
     const previous = branch.active_run_id ? await this.runtime.run(branch.active_run_id) : branch.latest_run;
     if (!previous) throw new Error('An initial model selection is required');
@@ -85,10 +146,11 @@ export class NativeThreadAdapter {
     }
   }
 
-  async requireIdentity(identity: NativeThreadIdentity): Promise<void> {
+  async requireIdentity(identity: NativeThreadIdentity) {
     this.assertIdentity(identity);
     const thread = await this.runtime.thread(identity.threadId);
     if (!thread.branches.some(branch => branch.branch_id === identity.branchId)) throw new Error('Native branch does not belong to the selected thread');
+    return thread;
   }
 
   async requireRun(runId: string) {
@@ -109,9 +171,25 @@ export class NativeThreadAdapter {
     return operation;
   }
 
-  async snapshot(identity: NativeThreadIdentity): Promise<NativeThreadSnapshot> {
+  async historyPage(identity: NativeThreadIdentity, cursor: { headId: string; beforeId: string }): Promise<NativeThreadHistoryPage> {
     await this.requireIdentity(identity);
-    const [thread, history, inputs] = await Promise.all([this.runtime.thread(identity.threadId), this.runtime.history(identity.branchId), this.runtime.inputs(identity.branchId)]);
+    return this.readHistoryPage(identity.branchId, cursor);
+  }
+
+  private async readHistoryPage(branchId: string, cursor?: { headId: string; beforeId?: string }): Promise<NativeThreadHistoryPage> {
+    const page = await this.runtime.historyPage({ branchId, ...cursor, limit: 20 });
+    const items = await Promise.all(page.items.map(item => this.runtime.historyItem(item)));
+    return { head: page.head, previous: page.previous, items };
+  }
+
+  async snapshot(identity: NativeThreadIdentity): Promise<NativeThreadSnapshot> {
+    const thread = await this.requireIdentity(identity);
+    const branch = thread.branches.find(branch => branch.branch_id === identity.branchId)!;
+    const [page, inputs, activeOperations, context] = await Promise.all([
+      this.readHistoryPage(identity.branchId, branch.head ? { headId: branch.head } : undefined),
+      this.runtime.inputs(identity.branchId), this.runtime.activeOperations(identity.threadId), this.context(identity),
+    ]);
+    const history = page.items;
     if (history.some(item => item.thread_id !== identity.threadId) || inputs.some(item => item.thread_id !== identity.threadId)) {
       throw new Error('Native branch does not belong to the selected thread');
     }
@@ -121,16 +199,20 @@ export class NativeThreadAdapter {
       const completion = conversation?.content?.kind === 'tool_result' ? conversation.content.result?.completion : undefined;
       if (completion?.kind === 'job_accepted' && typeof completion.operation_id === 'string') operationIds.add(completion.operation_id);
     }
-    const operations = await Promise.all([...operationIds].map(id => this.requireOperation(id)));
-    const branch = thread.branches.find(branch => branch.branch_id === identity.branchId)!;
+    const operations = new Map(activeOperations.map(operation => [operation.id, operation]));
+    const visible = await Promise.all([...operationIds].filter(id => !operations.has(id)).map(id => this.requireOperation(id)));
+    for (const operation of visible) operations.set(operation.id, operation);
     const latest = branch.latest_run;
     const activeRun = branch.active_run_id ? await this.runtime.run(branch.active_run_id) : null;
     const launch = latest ? await this.runtime.launch(latest.id) : null;
-    return { identity, thread, activeRun, history, inputs, operations, launch };
+    return { identity, thread, activeRun, history, historyPage: { head: page.head, previous: page.previous }, inputs, operations: [...operations.values()], launch, context };
   }
 
   private async recordLaunchFailure(runId: string, error: unknown): Promise<void> {
-    try { await this.runtime.failLaunch(runId, 'preparation_failed'); }
+    const errorCode = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : '';
+    const code = ['credential-scope-changed', 'native-model-configuration-changed'].includes(errorCode) ? 'binding_changed'
+      : errorCode.startsWith('credential-') ? 'credentials_unavailable' : 'preparation_failed';
+    try { await this.runtime.failLaunch(runId, code); }
     catch (recordError) { this.onLaunchError(runId, recordError); }
     this.onLaunchError(runId, error);
   }
@@ -139,8 +221,16 @@ export class NativeThreadAdapter {
     const pending = await this.runtime.pendingLaunches();
     await Promise.all(pending.map(async launch => {
       const run = await this.runtime.run(launch.run_id);
-      if (!run.thread_id.startsWith('nativeThread:') || ['completed', 'failed', 'cancelled'].includes(run.state)) return;
-      try { await this.resume(run.id); }
+      if (['completed', 'failed', 'cancelled'].includes(run.state)) return;
+      try {
+        if (run.thread_id.startsWith('nativeThread:')) await this.resume(run.id);
+        else if (run.thread_id.startsWith('context-job-thread:')) {
+          const job = await this.runtime.contextJob(run.id);
+          const sources = await this.runtime.threads();
+          if (!sources.some(thread => thread.thread_id.startsWith('nativeThread:') && thread.branches.some(branch => branch.branch_id === job.request.branch_id))) return;
+          await this.resumeContextRun(run.id);
+        }
+      }
       catch (error) { await this.recordLaunchFailure(run.id, error); }
     }));
   }

@@ -21,13 +21,20 @@ export function createNativeThreadsHttpAPI(): NativeThreadsAPI {
       throw new NativeThreadRequestError(response.status, typeof failure.code === 'string' ? failure.code
         : response.status === 413 ? 'native-http-body-too-large' : 'native-thread-request-failed');
     }
-    return response.json() as Promise<T>;
+    const result = await response.json() as T;
+    if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during native thread request');
+    return result;
   };
   return {
     list: () => post('list', {}), listModels: () => post('models', {}),
-    create: key => post('create', { key }), submit: input => post('submit', input), enqueue: input => post('enqueue', input),
+    create: key => post('create', { key }), fork: input => post('fork', input), submit: input => post('submit', input), enqueue: input => post('enqueue', input),
+    compact: input => post('context/compact', input),
+    publishContext: (identity, runId) => post('context/publish', { ...identity, runId }),
+    cancelContext: (identity, runId) => post('context/cancel', { ...identity, runId }),
+    async resumeContext(identity, runId) { await post('context/resume', { ...identity, runId }); },
     editInput: (inputId, expectedRevision, text, images) => post('input/edit', { inputId, expectedRevision, text, ...(images === undefined ? {} : { images }) }),
     cancelInput: (inputId, expectedRevision) => post('input/cancel', { inputId, expectedRevision }),
+    historyPage: (identity, cursor) => post('history/page', { ...identity, ...cursor }),
     snapshot: selected => post('snapshot', selected), run: runId => post('run', { runId }),
     cancelRun: runId => post('run/cancel', { runId }), operation: operationId => post('operation', { operationId }),
     cancelOperation: operationId => post('operation/cancel', { operationId }),

@@ -5,6 +5,7 @@ use crate::protocol::{
     reject_unknown_fields, response_ok, validate_method_params, PROTOCOL_VERSION,
 };
 use crate::protocol_generated::*;
+use base64::Engine as _;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -98,6 +99,13 @@ pub(crate) fn spawn(
     finished: impl Fn(&str) + Send + Sync + 'static,
 ) -> JoinHandle<()> {
     let finished: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(finished);
+    let (content_tasks, content_jobs) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
+    thread::spawn(move || {
+        for job in content_jobs {
+            job();
+        }
+    });
+
     thread::spawn(move || {
         let mut identity: Option<(PathBuf, String)> = None;
         let mut runtime: Option<Arc<RunSupervisor>> = None;
@@ -321,7 +329,24 @@ pub(crate) fn spawn(
                                 })?;
                                 catalog.run(&p.run_id).map_err(domain)?
                             };
-                            let configuration = serde_json::from_value(run.configuration)?;
+                            let is_context_job = run.configuration.get("context_job").is_some();
+                            if is_context_job && (selected.is_some() || p.tool_binding.is_some()) {
+                                return Err(KernelError::Protocol(
+                                    "context jobs use their fixed tool-free launch".into(),
+                                ));
+                            }
+                            let mut configuration = run.configuration.clone();
+                            if is_context_job {
+                                configuration
+                                    .as_object_mut()
+                                    .ok_or_else(|| {
+                                        KernelError::Protocol(
+                                            "model configuration must be an object".into(),
+                                        )
+                                    })?
+                                    .remove("context_job");
+                            }
+                            let configuration = serde_json::from_value(configuration)?;
                             let mut selected_credential_scope = None;
                             let mut start = if let Some(scope) = p.credential_scope {
                                 let scope = varin_runtime::providers::auth::CredentialScope {
@@ -347,6 +372,10 @@ pub(crate) fn spawn(
                                 model_session::bind(configuration)
                             }
                             .map_err(|e| KernelError::Operation(e.to_string()))?;
+                            if is_context_job {
+                                start =
+                                    varin_runtime::context_job::configure_compaction_start(start);
+                            }
                             if let Some(selected) = selected {
                                 let kinds: std::collections::BTreeSet<
                                     crate::native_tools::NativeToolKind,
@@ -492,6 +521,37 @@ pub(crate) fn spawn(
                                 .map_err(|e| KernelError::Operation(e.to_string()))?;
                             return Ok(json!({"runId":handle.run_id,"epoch":handle.epoch}));
                         }
+                        if method == "runtime.history.body" {
+                            let p: NativeHistoryBodyParams = serde_json::from_value(params)?;
+                            let chunk_index = usize::try_from(p.chunk_index).map_err(|_| {
+                                KernelError::Protocol(
+                                    "content chunk index must be nonnegative".into(),
+                                )
+                            })?;
+                            let read = runtime
+                                .catalog()
+                                .lock()
+                                .map_err(|_| {
+                                    KernelError::Storage("native catalog owner failed".into())
+                                })?
+                                .history_body_reader(&p.item_id)
+                                .map_err(domain)?;
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            content_tasks.send(Box::new(move || {
+                                let result=(||->Result<Value,KernelError>{
+                                    if cancelled.load(Ordering::Acquire){return Err(KernelError::Cancelled);}
+                                    let chunk=read.chunk(chunk_index).map_err(domain)?;
+                                    Ok(json!({"itemId":p.item_id,"contentRef":chunk.content_ref,"chunkIndex":chunk.chunk_index,"chunkCount":chunk.chunk_count,"totalBytes":chunk.total_bytes,"bytesBase64":base64::engine::general_purpose::STANDARD.encode(chunk.bytes)}))
+                                })();
+                                let response=match result {Ok(value)=>response_ok(&response_id,value),Err(error)=>response_error(&response_id,&error)};
+                                done(&response_id);let _=response_sender.send(response);
+                            })).map_err(|_|KernelError::Storage("native content reader unavailable".into()))?;
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
                         if method == "runtime.run.reconcile" {
                             let p: NativeRunReconcileParams = serde_json::from_value(params)?;
                             let binding: crate::native_tools::NativeToolBinding =
@@ -621,6 +681,113 @@ pub(crate) fn spawn(
     })
 }
 fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value, KernelError> {
+    if method == "runtime.branch.fork" {
+        let p: NativeBranchForkParams = serde_json::from_value(params)?;
+        catalog
+            .fork_branch(&p.source_branch_id, &p.branch_id, p.head_id.0.as_deref())
+            .map_err(domain)?;
+        let thread_id = catalog.branch_thread_id(&p.branch_id).map_err(domain)?;
+        return Ok(json!({"threadId":thread_id,"branchId":p.branch_id}));
+    }
+    if method == "runtime.context_job.list" {
+        let p: NativeHistoryParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(
+            catalog.context_jobs(&p.branch_id).map_err(domain)?,
+        )?);
+    }
+    if method == "runtime.context.inspect" {
+        let p: NativeHistoryParams = serde_json::from_value(params)?;
+        catalog.head(&p.branch_id).map_err(domain)?;
+        return Ok(serde_json::to_value(
+            catalog.active_context(&p.branch_id).map_err(domain)?,
+        )?);
+    }
+    if method == "runtime.context_job.inspect" || method == "runtime.context_job.publish" {
+        let p: NativeRunParams = serde_json::from_value(params)?;
+        return if method == "runtime.context_job.publish" {
+            Ok(serde_json::to_value(
+                catalog.publish_context_job(&p.run_id).map_err(domain)?,
+            )?)
+        } else {
+            Ok(serde_json::to_value(
+                catalog.context_job(&p.run_id).map_err(domain)?,
+            )?)
+        };
+    }
+    if method == "runtime.context_job.create" {
+        let p: NativeContextJobCreateParams = serde_json::from_value(params)?;
+        let configuration: varin_runtime::ModelSessionConfiguration =
+            serde_json::from_value(p.configuration.clone())?;
+        let scope = p
+            .credential_scope
+            .map(|scope| {
+                Ok::<_, KernelError>(varin_runtime::providers::auth::CredentialScope {
+                    reference: scope.reference,
+                    authority: scope.authority,
+                    account: scope.account,
+                    generation: u64::try_from(scope.generation).map_err(|_| {
+                        KernelError::Protocol("credential generation must be nonnegative".into())
+                    })?,
+                })
+            })
+            .transpose()?;
+        let identity = if let Some(scope) = scope.as_ref() {
+            model_session::connection_identity_with_scope(&configuration, scope)
+        } else {
+            model_session::connection_identity(&configuration)
+        }
+        .map_err(|error| KernelError::Protocol(error.to_string()))?;
+        let launch = varin_runtime::catalog::launches::LaunchSelection {
+            credential_scope: scope,
+            connection_identity: identity,
+            provider_family: configuration.provider_family,
+            model: configuration.model,
+            configuration_generation: configuration.configuration_generation,
+            tool_schema_generation: 0,
+            tools: Vec::new(),
+            policy: varin_runtime::context_job::policy_identity(),
+            source: None,
+        };
+        let request = varin_runtime::catalog::context_jobs::ContextJobRequest {
+            key: p.key,
+            branch_id: p.branch_id,
+            through_id: p.through_id,
+            expected_revision: u64::try_from(p.expected_revision).map_err(|_| {
+                KernelError::Protocol("context revision must be nonnegative".into())
+            })?,
+            effective_system_prompt: p.effective_system_prompt,
+            instruction_sources: p.instruction_sources,
+            memory_checkpoint: p.memory_checkpoint.0,
+        };
+        return Ok(serde_json::to_value(
+            catalog
+                .create_context_job(request, launch, p.configuration)
+                .map_err(domain)?,
+        )?);
+    }
+    if method == "runtime.history.page" {
+        let p: NativeHistoryPageParams = serde_json::from_value(params)?;
+        let limit = u32::try_from(p.limit)
+            .map_err(|_| KernelError::Protocol("history page limit out of range".into()))?;
+        return Ok(serde_json::to_value(
+            catalog
+                .history_page(
+                    &p.branch_id,
+                    p.head_id.as_deref(),
+                    p.before_id.as_deref(),
+                    limit,
+                )
+                .map_err(domain)?,
+        )?);
+    }
+    if method == "runtime.thread.operations.active" {
+        let p: NativeThreadParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(
+            catalog
+                .active_thread_operations(&p.thread_id)
+                .map_err(domain)?,
+        )?);
+    }
     if method == "runtime.thread.inspect" {
         let p: NativeThreadParams = serde_json::from_value(params)?;
         return catalog.inspect_thread(&p.thread_id).map_err(domain);

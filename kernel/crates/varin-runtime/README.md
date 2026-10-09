@@ -68,11 +68,28 @@ continuation state in the same transaction.
 Transient provider progress uses a bounded, nonblocking sink. Durable tool results and model output
 remain available independently of whether a viewer consumed progress.
 
+## Explicit context compaction
+
+`Catalog::create_context_job` admits a summarization Run and its dedicated branch atomically. The
+job fixes an original-history ancestor, checkpoint revision and continuation instruction/memory
+snapshot. Its model launch uses the normal durable request, output, cancellation and recovery paths;
+`context_job::configure_compaction_start` supplies a one-generation policy and a tool-free provider
+binding. Historical source items are quoted with their identities and roles as external data under
+summarizer instructions, rather than replayed as live user instructions or tool calls.
+
+The source branch remains usable while the job runs. `publish_context_job` accepts only that Run's
+single successful, complete textual generation and rechecks the source ancestor and checkpoint
+revision. Publishing preserves both original history and newly appended tail items. A failed,
+cancelled, incomplete or stale candidate does not replace the active checkpoint. Job branches reject
+additional input; list/inspect APIs retain the original admission and make pending work discoverable
+after restart. This is explicitly requested compaction, not an automatic token-budget trigger or a
+complete migration of the existing Pi memory workflow.
+
 ## Remaining integration
 
 The native provider adapters and control boundary are foundations for the full cutover, not evidence
 of provider/platform parity. Production configuration/credential routing, all existing tools and
-MCP/extension capabilities, context/compaction, running-input queues, UI projections, import and
+MCP/extension capabilities, automatic context/compaction and memory workflow, running-input queues, UI projections, import and
 single-writer ownership transfer remain tracked in
 [`docs/plan/native-agent-runtime-implementation.md`](../../../docs/plan/native-agent-runtime-implementation.md).
 That matrix owns actual validation and incomplete capabilities. No measured speedup or platform

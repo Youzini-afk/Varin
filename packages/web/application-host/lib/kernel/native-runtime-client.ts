@@ -1,8 +1,9 @@
+import type { NativeContextJob, NativeContextCheckpoint } from '@varin/application-client';
 import { startNativeRunFromSource, type NativeSourceLaunch } from './native-source-launch.js';
 import type { ExistingHostCredentialOwner } from './native-credential-owner.js';
 import type { KernelClient } from './kernel-client.js';
 import type {
-  NativeRunReconcileResult, NativeThreadSummary, NativeLaunchIntent, NativeLaunchSelectParams, NativeInputSubmitParams, NativeReceipt, NativeRun, NativeOperation,
+  NativeContextJobCreateParams, NativeHistoryPage, NativeHistoryPageParams, NativeHistoryReference, NativeHistoryBodyChunk, NativeRunReconcileResult, NativeThreadSummary, NativeLaunchIntent, NativeLaunchSelectParams, NativeInputSubmitParams, NativeReceipt, NativeRun, NativeOperation,
   NativeHistoryItem, NativeEvent, NativeStatus, NativeRunStartReceipt, NativeInputEnqueueParams, NativeInputReceipt, NativeQueuedInput,
 } from './protocol.generated.js';
 
@@ -27,6 +28,24 @@ export class NativeRuntimeClient {
   }
   createThread(threadId: string, branchId: string, signal?: AbortSignal): Promise<{ threadId: string; branchId: string }> {
     return this.kernel.nativeRuntimeRequest('runtime.thread.create', { threadId, branchId }, signal);
+  }
+  forkBranch(sourceBranchId: string, branchId: string, headId: string | null, signal?: AbortSignal): Promise<{ threadId: string; branchId: string }> {
+    return this.kernel.nativeRuntimeRequest('runtime.branch.fork', { sourceBranchId, branchId, headId }, signal);
+  }
+  context(branchId: string, signal?: AbortSignal): Promise<NativeContextCheckpoint | null> {
+    return this.kernel.nativeRuntimeRequest('runtime.context.inspect', { branchId }, signal);
+  }
+  contextJobs(branchId: string, signal?: AbortSignal): Promise<NativeContextJob[]> {
+    return this.kernel.nativeRuntimeRequest('runtime.context_job.list', { branchId }, signal);
+  }
+  contextJob(runId: string, signal?: AbortSignal): Promise<NativeContextJob> {
+    return this.kernel.nativeRuntimeRequest('runtime.context_job.inspect', { runId }, signal);
+  }
+  createContextJob(input: NativeContextJobCreateParams, signal?: AbortSignal): Promise<NativeContextJob> {
+    return this.kernel.nativeRuntimeRequest('runtime.context_job.create', input, signal);
+  }
+  publishContextJob(runId: string, signal?: AbortSignal): Promise<NativeContextCheckpoint> {
+    return this.kernel.nativeRuntimeRequest('runtime.context_job.publish', { runId }, signal);
   }
   submit(input: NativeInputSubmitParams, signal?: AbortSignal): Promise<NativeReceipt> {
     return this.kernel.nativeRuntimeRequest('runtime.input.submit', input, signal);
@@ -139,6 +158,28 @@ export class NativeRuntimeClient {
   }
   cancelOperation(operationId: string, signal?: AbortSignal): Promise<NativeOperation> {
     return this.kernel.nativeRuntimeRequest('runtime.operation.cancel', { operationId }, signal);
+  }
+  historyPage(params: NativeHistoryPageParams, signal?: AbortSignal): Promise<NativeHistoryPage> {
+    return this.kernel.nativeRuntimeRequest('runtime.history.page', params, signal);
+  }
+  async historyItem(reference: NativeHistoryReference, signal?: AbortSignal): Promise<NativeHistoryItem> {
+    const chunks: Buffer[] = [];
+    let count = 1;
+    let total = 0;
+    for (let index = 0; index < count; index += 1) {
+      const chunk = await this.kernel.nativeRuntimeRequest<NativeHistoryBodyChunk, 'runtime.history.body'>('runtime.history.body', { itemId: reference.id, chunkIndex: index }, signal);
+      if (chunk.itemId !== reference.id || chunk.contentRef !== reference.content_ref || chunk.chunkIndex !== index) throw new Error('History content identity changed');
+      if (index === 0) { count = chunk.chunkCount; total = chunk.totalBytes; }
+      else if (chunk.chunkCount !== count || chunk.totalBytes !== total) throw new Error('History content manifest changed');
+      chunks.push(Buffer.from(chunk.bytesBase64, 'base64'));
+    }
+    const bytes = Buffer.concat(chunks);
+    if (bytes.length !== total) throw new Error('History content length does not match its manifest');
+    const body = JSON.parse(bytes.toString('utf8')) as Pick<NativeHistoryItem, 'content' | 'provider'>;
+    return { id: reference.id, thread_id: reference.thread_id, parent: reference.parent, source: reference.source, content: body.content, provider: body.provider };
+  }
+  activeOperations(threadId: string, signal?: AbortSignal): Promise<NativeOperation[]> {
+    return this.kernel.nativeRuntimeRequest('runtime.thread.operations.active', { threadId }, signal);
   }
   history(branchId: string, signal?: AbortSignal): Promise<NativeHistoryItem[]> {
     return this.kernel.nativeRuntimeRequest('runtime.history.read', { branchId }, signal);

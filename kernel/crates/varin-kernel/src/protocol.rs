@@ -151,6 +151,9 @@ mod tests {
 pub(crate) fn write_frame(output: &mut impl Write, value: &Value) -> io::Result<()> {
     let payload = serde_json::to_vec(value)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    write_encoded_frame(output, &payload)
+}
+pub(crate) fn write_encoded_frame(output: &mut impl Write, payload: &[u8]) -> io::Result<()> {
     if payload.len() > MAX_FRAME_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -160,6 +163,6 @@ pub(crate) fn write_frame(output: &mut impl Write, value: &Value) -> io::Result<
     let length = u32::try_from(payload.len())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "kernel frame is too large"))?;
     output.write_all(&length.to_be_bytes())?;
-    output.write_all(&payload)?;
+    output.write_all(payload)?;
     output.flush()
 }

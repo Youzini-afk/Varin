@@ -1,6 +1,8 @@
 import express from 'express';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
+import { createHash } from 'node:crypto';
+import { crc32 } from 'node:zlib';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -158,4 +160,105 @@ it('an image exceeding the existing kernel frame limit leaves unrelated executio
   expect((await f.api.snapshot(target)).history).toEqual([]);
   expect(f.requests).toHaveLength(1);
   await f.api.cancelRun(activeRun.run_id);
+}, 30_000);
+
+
+function largePngFixture() {
+  const image = Buffer.from(imageFixture.data, 'base64');
+  const payload = Buffer.concat([Buffer.from('fixture\0'), Buffer.alloc(4 * 1024 * 1024, 'p')]);
+  const type = Buffer.from('tEXt');
+  const length = Buffer.alloc(4); length.writeUInt32BE(payload.length);
+  const checksum = Buffer.alloc(4); checksum.writeUInt32BE(crc32(Buffer.concat([type, payload])));
+  return { mimeType: 'image/png', data: Buffer.concat([image.subarray(0, -12), length, type, payload, checksum, image.subarray(-12)]).toString('base64') };
+}
+function inlineImages(value: unknown): string[] {
+  if (typeof value === 'string') return value.startsWith('data:image/') ? [value] : [];
+  if (Array.isArray(value)) return value.flatMap(inlineImages);
+  if (value && typeof value === 'object') return Object.values(value).flatMap(inlineImages);
+  return [];
+}
+const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+
+it('public history hydrates accumulated images larger than one kernel frame without losing bytes or the kernel epoch', async () => {
+  const f = await fixture(false, true);
+  const identity = await f.api.create('http-large-history');
+  const before = await f.runtime.status();
+  const image = largePngFixture();
+  const captions = Array.from({ length: 3 }, (_, index) => `图像第 ${index} 轮 🧪 café résumé`);
+  let head: string | null = null;
+  let snapshot: Awaited<ReturnType<typeof f.api.snapshot>> | undefined;
+  for (let index = 0; index < 3; index++) {
+    const receipt = await f.api.submit({ ...identity, key: `large-history-${index}`, expectedHead: head, text: captions[index]!, images: [image], model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
+    await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');
+    snapshot = await f.api.snapshot(identity);
+    head = snapshot.thread.branches.find(branch => branch.branch_id === identity.branchId)!.head;
+  }
+  expect(Buffer.byteLength(JSON.stringify(snapshot!.history))).toBeGreaterThan(16 * 1024 * 1024);
+  const expected = digest(`data:${image.mimeType};base64,${image.data}`);
+  expect(inlineImages(snapshot!.history).map(digest)).toEqual([expected, expected, expected]);
+  expect(snapshot!.history.filter(item => item.source === 'user').map(item => (item.content as { text: string }).text)).toEqual(captions);
+  expect(inlineImages(f.requests.at(-1)!.body.input).map(digest)).toEqual([expected, expected, expected]);
+  expect((await f.runtime.status()).epoch).toBe(before.epoch);
+}, 60_000);
+
+it('load-earlier HTTP history keeps its pinned head while newer conversation turns arrive', async () => {
+  const f = await fixture(false, true);
+  const identity = await f.api.create('http-pinned-history');
+  let head: string | null = null;
+  for (let index = 0; index < 12; index++) {
+    const receipt = await f.api.submit({ ...identity, key: `paged-history-${index}`, expectedHead: head, text: `paged turn ${index}`, ...(index === 0 ? { images: [imageFixture] } : {}), model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
+    await expect.poll(async () => (await f.api.run(receipt.run_id)).state).toBe('completed');
+    head = (await f.runtime.thread(identity.threadId)).branches.find(branch => branch.branch_id === identity.branchId)!.head;
+  }
+  const pinned = await f.api.snapshot(identity);
+  expect(pinned.history).toHaveLength(20);
+  expect(pinned.historyPage.head).toBe(head);
+  expect(pinned.historyPage.previous).toBeTruthy();
+  const newest = await f.api.submit({ ...identity, key: 'after-pinned-window', expectedHead: head, text: 'new turn after history was pinned', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
+  await expect.poll(async () => (await f.api.run(newest.run_id)).state).toBe('completed');
+  const earlier = await f.api.historyPage(identity, { headId: pinned.historyPage.head!, beforeId: pinned.historyPage.previous! });
+  expect(earlier.head).toBe(pinned.historyPage.head);
+  expect(earlier.previous).toBeNull();
+  const combined = [...earlier.items, ...pinned.history];
+  expect(combined).toHaveLength(24);
+  expect(new Set(combined.map(item => item.id)).size).toBe(24);
+  expect(combined.at(-1)!.id).toBe(pinned.historyPage.head);
+  expect(JSON.stringify(combined)).not.toContain('new turn after history was pinned');
+  expect(inlineImages(earlier.items)).toContain(`data:${imageFixture.mimeType};base64,${imageFixture.data}`);
+  const live = await f.api.snapshot(identity);
+  expect(live.historyPage.head).not.toBe(pinned.historyPage.head);
+  // A valid record can still be an invalid cursor for this immutable view.
+  await expect(f.api.historyPage(identity, { headId: pinned.historyPage.head!, beforeId: live.historyPage.head! })).rejects.toMatchObject({ status: 409, code: 'native-thread-conflict' });
+  const unrelated = await f.api.create('http-unrelated-history');
+  await expect(f.api.historyPage(unrelated, { headId: pinned.historyPage.head!, beforeId: pinned.historyPage.previous! })).rejects.toMatchObject({ status: 409, code: 'native-thread-conflict' });
+  await expect(f.api.historyPage({ ...identity, branchId: unrelated.branchId }, { headId: pinned.historyPage.head!, beforeId: pinned.historyPage.previous! })).rejects.toMatchObject({ status: 400 });
+}, 45_000);
+
+it('forks an immutable prefix, executes independently, and retries without rewinding the new branch', async () => {
+  const f = await fixture();
+  const original = await f.api.create('http-fork-source');
+  const first = await f.api.submit({ ...original, key: 'fork-source-input', expectedHead: null, text: 'shared source question', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
+  await expect.poll(async () => (await f.api.run(first.run_id)).state).toBe('completed');
+  const source = await f.api.snapshot(original);
+  const unrelated = await f.api.create('http-fork-unrelated');
+  await expect(f.api.fork({ ...original, branchId: unrelated.branchId, key: 'mismatched-fork', headId: null })).rejects.toMatchObject({ status: 400 });
+  expect((await f.api.list()).flatMap(thread => thread.branches)).toHaveLength(2);
+  const cut = source.history[0]!.id;
+  const request = { ...original, key: 'stable-fork-request', headId: cut };
+  const branch = await f.api.fork(request);
+  expect(branch.threadId).toBe(original.threadId);
+  expect(branch.branchId).not.toBe(original.branchId);
+  const forked = await f.api.snapshot(branch);
+  expect(forked.history.map(item => item.id)).toEqual([cut]);
+  expect(forked.activeRun).toBeNull();
+  expect(forked.launch).toBeNull();
+  const next = await f.api.submit({ ...branch, key: 'fork-only-input', expectedHead: cut, text: 'new branch question', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
+  await expect.poll(async () => (await f.api.run(next.run_id)).state).toBe('completed');
+  const advanced = await f.api.snapshot(branch);
+  expect(JSON.stringify(advanced.history)).toContain('new branch question');
+  expect((await f.api.snapshot(original)).history).toEqual(source.history);
+  expect(await f.api.fork(request)).toEqual(branch);
+  expect((await f.api.snapshot(branch)).historyPage.head).toBe(advanced.historyPage.head);
+  // A sibling-only message cannot become a cut on the original branch.
+  await expect(f.api.fork({ ...original, key: 'invalid-sibling-cut', headId: advanced.historyPage.head })).rejects.toMatchObject({ status: 400 });
 }, 30_000);
