@@ -5,7 +5,7 @@ use crate::{
     protocol::response_ok,
 };
 use serde_json::{json, Value};
-use std::sync::{mpsc::SyncSender, Arc};
+use std::sync::Arc;
 use varin_runtime::supervisor::RunSupervisor;
 
 pub(crate) fn reconcile(
@@ -14,7 +14,7 @@ pub(crate) fn reconcile(
     binding: ToolBinding,
     operations: Vec<varin_runtime::Operation>,
     request_id: String,
-    responses: SyncSender<Value>,
+    responses: crate::transport::Sender,
     finished: Arc<dyn Fn(&str) + Send + Sync>,
 ) -> Result<(), KernelError> {
     std::thread::Builder::new()

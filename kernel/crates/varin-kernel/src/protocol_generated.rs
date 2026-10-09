@@ -6,6 +6,26 @@ use serde::Deserialize;
 use serde_json::Value;
 
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
+pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
+    "kernel.handshake",
+    "kernel.ping",
+    "kernel.shutdown",
+    "authority.grant.revoke",
+    "runtime.status",
+    "runtime.run.inspect",
+    "runtime.run.cancel",
+    "runtime.operation.inspect",
+    "runtime.operation.cancel",
+    "runtime.input.cancel",
+    "runtime.input.inspect",
+    "runtime.admission.inspect",
+    "process.inspect",
+    "process.kill",
+    "process.resize",
+    "process.release",
+    "process.subscription.ack",
+    "process.subscription.unsubscribe",
+];
 pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &["runtime.history.body"];
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1758,9 +1778,6 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.operation.cancel" => serde_json::from_value::<OperationParams>(params.clone())
-            .map(|_| ())
-            .map_err(|error| error.to_string()),
-        "runtime.history.read" => serde_json::from_value::<HistoryParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.events.read" => serde_json::from_value::<EventsParams>(params.clone())

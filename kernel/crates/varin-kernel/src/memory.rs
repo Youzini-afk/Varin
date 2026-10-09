@@ -59,22 +59,9 @@ fn basis(catalog: &Catalog, run_id: &str) -> Result<Option<PersonalizationBasis>
     }
     Ok(basis)
 }
-pub(crate) fn configure(
-    mut start: varin_runtime::supervisor::RunStart,
-    catalog: Arc<Mutex<Catalog>>,
-    bridge: MemoryBridge,
-    mutations: bool,
-) -> varin_runtime::supervisor::RunStart {
-    if !start.binding.tools.iter().any(|tool| tool.name == TOOL) {
-        start.binding.tools.push(schema(mutations));
-    }
-    start.tools = Arc::new(MemoryTools {
-        inner: start.tools,
-        catalog: catalog.clone(),
-        bridge: bridge.clone(),
-        mutations,
-    });
-    configure_context(start, catalog, bridge)
+pub(crate) fn declaration(catalog: Arc<Mutex<Catalog>>, bridge: MemoryBridge, mutations: bool)
+    -> varin_runtime::composition::tools::ToolDeclaration {
+    varin_runtime::composition::tools::ToolDeclaration::new(schema(mutations), Arc::new(MemoryTools { catalog, bridge, mutations }))
 }
 pub(crate) fn configure_context(
     mut start: varin_runtime::supervisor::RunStart,
@@ -85,66 +72,21 @@ pub(crate) fn configure_context(
     start
 }
 struct MemoryTools {
-    inner: Arc<dyn ToolExecutor>,
     catalog: Arc<Mutex<Catalog>>,
     bridge: MemoryBridge,
     mutations: bool,
 }
 impl ToolExecutor for MemoryTools {
-    fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken)
-        -> Result<varin_runtime::execution::ToolPreparation, ExecutionError> {
-        if call.name == TOOL {
-            self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
-        } else { self.inner.plan(call, context, cancel) }
+    fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken) -> Result<ToolPreparation, ExecutionError> {
+        self.prepare(call, context, cancel).map(ToolPreparation::Ready)
     }
-
-    fn execution_class(
-        &self,
-        call: &ToolCall,
-        contract: &ToolContract,
-    ) -> varin_runtime::execution_capacity::ExecutionClass {
-        if call.name == TOOL {
-            varin_runtime::execution_capacity::ExecutionClass::Unmetered
-        } else {
-            self.inner.execution_class(call, contract)
-        }
-    }
-    fn watch_admission(
-        &self,
-        context: &ToolExecutionContext,
-        call: &ToolCall,
-        contract: &ToolContract,
-        cancel: &CancellationToken,
-    ) -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError> {
-        if call.name == TOOL {
-            Ok(None)
-        } else {
-            self.inner.watch_admission(context, call, contract, cancel)
-        }
-    }
-    fn supports_policy_read(
-        &self,
-        context: &FrozenToolContext,
-        call: &ToolCall,
-        contract: &ToolContract,
-    ) -> bool {
-        if call.name != TOOL {
-            return self.inner.supports_policy_read(context, call, contract);
-        }
-        contract.read_only
-            && contract.completion == CompletionKind::Result
-            && args(call, self.mutations)
-                .is_ok_and(|a| matches!(a.action.as_str(), "read" | "search"))
-    }
+    fn supports_policy_read(&self, _: &FrozenToolContext, call: &ToolCall, contract: &ToolContract) -> bool { contract.read_only && contract.completion == CompletionKind::Result && args(call, self.mutations).is_ok_and(|a| matches!(a.action.as_str(), "read" | "search")) }
     fn prepare(
         &self,
         call: &ToolCall,
         request: &FrozenToolContext,
         _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
-        if call.name != TOOL {
-            return self.inner.prepare(call, request, _cancel);
-        }
         let schema = schema(self.mutations);
         if call.schema_version != schema.version || !request.tools.contains(&schema) {
             return Err(error("memory schema is not bound"));
@@ -166,9 +108,6 @@ impl ToolExecutor for MemoryTools {
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
-        if call.name != TOOL {
-            return self.inner.authorize(context, call, contract, cancel);
-        }
         if cancel.is_cancelled() {
             return Err(error("memory action cancelled"));
         }
@@ -188,9 +127,6 @@ impl ToolExecutor for MemoryTools {
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> ToolCompletion {
-        if call.name != TOOL {
-            return self.inner.execute(context, call, contract, cancel);
-        }
         let result = (|| {
             let basis = {
                 let catalog = self.catalog.lock().map_err(error)?;
@@ -344,7 +280,7 @@ pub(crate) fn reconcile(
     bridge: MemoryBridge,
     run_id: String,
     request_id: String,
-    responses: std::sync::mpsc::SyncSender<Value>,
+    responses: crate::transport::Sender,
     finished: Arc<dyn Fn(&str) + Send + Sync>,
 ) -> Result<(), crate::error::KernelError> {
     std::thread::Builder::new().name("memory-reconcile".into()).spawn(move || {

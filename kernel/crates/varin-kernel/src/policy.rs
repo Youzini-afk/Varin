@@ -10,7 +10,8 @@ struct State { epoch: Option<String>, pending: HashMap<String, Pending> }
 #[derive(Clone)]
 pub(crate) struct PolicyBridge { state: Arc<Mutex<State>>, events: Arc<Mutex<Option<mpsc::Sender<Value>>>> }
 impl PolicyBridge {
-    pub(crate) fn new(output: mpsc::SyncSender<Value>) -> Self {
+    pub(crate) fn new(output: impl Into<crate::transport::Sender>) -> Self {
+        let output = output.into();
         let (tx, rx) = mpsc::channel();
         let state = Arc::new(Mutex::new(State { epoch: None, pending: HashMap::new() }));
         let failed = state.clone();

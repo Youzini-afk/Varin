@@ -2,7 +2,11 @@
 
 The Application Host owns one `KernelClient` for its lifetime. `KernelClient.start()` spawns the
 real `varin-kernel` executable, performs the build/protocol/epoch/grant handshake, and keeps the private
-length-framed stdin/stdout transport separate from stderr. The kernel reports a compiled build identity and
+authenticated local control/content connections after a stdin-only bootstrap, separate from stderr.
+Windows named pipes use overlapped I/O so a pending read cannot serialize the opposite-direction write.
+Content bodies use per-stream sequencing, credits and fair chunk rotation; body encoding, assembly and
+decoding run on managed workers. The frame bound applies to a packet rather than an entire result.
+The kernel reports a compiled build identity and
 target; packaged Hosts verify the adjacent manifest, executable SHA-256 and actual PE/ELF/Mach-O architecture before spawning it. Large blob
 uploads and branch create/write batches use acknowledged request chunks through the handshake's request-credit window; `AbortSignal` cancellation
 stops queued admission or signals the active kernel operation without returning its credit before native acknowledgement. `close()` drains admitted work, sends shutdown when possible, and waits for the
@@ -214,7 +218,8 @@ kernel in `web-materials.native.test.ts`; Host map fixtures alone cannot verify
 record-type admission.
 
 The executable `main.rs` only invokes the library runtime. `lib.rs` owns crate assembly and `runtime.rs`
-owns framed transport, handshake, request admission, cancellation, and authorized dispatch. A single
+owns handshake, request admission, cancellation, and authorized dispatch; `transport.rs` owns the
+authenticated connections and content stream lifecycle. A single
 `storage::Storage` owns the SQLite connection, object root, process lock, cancellation state, and active
 builders. Its implementation is divided into `core`, `operations`, `authority_store`, `objects`,
 `state_tree`, `branches`, `recovery`, `file_resources`, `compute_resources`, `records`, `gc`, `maintenance`, and `dispatch` modules. Read-only compute workers live in crate `compute/{source,inventory,query,structure}` and receive admitted source handles/recipes from the Storage owner; they do not open a writable catalog or bypass grant checks. These are

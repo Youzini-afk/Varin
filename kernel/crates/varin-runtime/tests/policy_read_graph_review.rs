@@ -579,7 +579,7 @@ fn admitted(f: &Fixture, nodes: Vec<Value>) -> PolicyGraphIntent {
                     node_id: node.id.clone(),
                 },
                 tool_schema_generation: f.input.binding.tool_schema_generation,
-                tools: f.input.binding.tools.clone(),
+                tools: Arc::new(f.input.binding.tools.clone()),
                 source: boundary.source.clone(),
             };
             let contract = tools.prepare(&node.call, &context, &CancellationToken::default()).unwrap();

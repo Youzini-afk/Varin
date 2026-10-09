@@ -37,11 +37,6 @@ pub fn schema() -> ToolSchema {
     }
 }
 pub fn configure(mut start: RunStart, catalog: Arc<Mutex<Catalog>>) -> RunStart {
-    start.binding.tools.push(schema());
-    start.tools = Arc::new(Questions {
-        inner: start.tools,
-        catalog: catalog.clone(),
-    });
     start.policy = Arc::new(QuestionPolicy {
         inner: start.policy,
         catalog,
@@ -49,7 +44,6 @@ pub fn configure(mut start: RunStart, catalog: Arc<Mutex<Catalog>>) -> RunStart 
     start
 }
 struct Questions {
-    inner: Arc<dyn ToolExecutor>,
     catalog: Arc<Mutex<Catalog>>,
 }
 fn error(e: impl ToString) -> ExecutionError {
@@ -58,33 +52,15 @@ fn error(e: impl ToString) -> ExecutionError {
 impl ToolExecutor for Questions {
     fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken)
         -> Result<varin_runtime::execution::ToolPreparation, ExecutionError> {
-        if call.name == QUESTION_TOOL {
-            self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
-        } else { self.inner.plan(call, context, cancel) }
+        self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
     }
 
-    fn watch_admission(&self, context: &ToolExecutionContext, call: &ToolCall, contract: &ToolContract, cancel: &CancellationToken)
-        -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError> {
-        if call.name == QUESTION_TOOL { Ok(None) } else { self.inner.watch_admission(context, call, contract, cancel) }
-    }
-
-    fn execution_class(&self, call: &ToolCall, contract: &ToolContract) -> varin_runtime::execution_capacity::ExecutionClass {
-        if call.name == QUESTION_TOOL { varin_runtime::execution_capacity::ExecutionClass::Unmetered }
-        else { self.inner.execution_class(call, contract) }
-    }
-
-    fn supports_policy_read(&self, context: &FrozenToolContext, call: &ToolCall, contract: &ToolContract) -> bool {
-        call.name != QUESTION_TOOL && self.inner.supports_policy_read(context, call, contract)
-    }
     fn prepare(
         &self,
         call: &ToolCall,
         request: &FrozenToolContext,
         _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
-        if call.name != QUESTION_TOOL {
-            return self.inner.prepare(call, request, _cancel);
-        }
         if call.schema_version != "1" || !request.tools.iter().any(|s| s == &schema())
         {
             return Err(error("question schema is not bound"));
@@ -106,9 +82,6 @@ impl ToolExecutor for Questions {
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
-        if call.name != QUESTION_TOOL {
-            return self.inner.authorize(c, call, contract, cancel);
-        }
         if cancel.is_cancelled() {
             return Err(error("question cancelled"));
         }
@@ -121,9 +94,6 @@ impl ToolExecutor for Questions {
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> ToolCompletion {
-        if call.name != QUESTION_TOOL {
-            return self.inner.execute(c, call, contract, cancel);
-        }
         let result = self
             .catalog
             .lock()
@@ -193,11 +163,8 @@ pub fn default_policy_identity() -> PolicyIdentity {
         version: "1+1".into(),
     }
 }
-pub fn wrap_tools(
-    inner: Arc<dyn ToolExecutor>,
-    catalog: Arc<Mutex<Catalog>>,
-) -> Arc<dyn ToolExecutor> {
-    Arc::new(Questions { inner, catalog })
+pub fn declaration(catalog: Arc<Mutex<Catalog>>) -> varin_runtime::composition::tools::ToolDeclaration {
+    varin_runtime::composition::tools::ToolDeclaration::new(schema(), Arc::new(Questions { catalog }))
 }
 
 /// Effective launch/checkpoint identity includes the core clarification behavior.

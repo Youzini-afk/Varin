@@ -532,7 +532,7 @@ pub struct FrozenToolContext {
     pub run_id: String,
     pub origin: ToolOrigin,
     pub tool_schema_generation: u64,
-    pub tools: Vec<ToolSchema>,
+    pub tools: Arc<Vec<ToolSchema>>,
     pub source: Option<crate::catalog::launches::SourceSelection>,
 }
 #[path = "policy_actions.rs"]
@@ -542,7 +542,37 @@ pub use policy_actions::*;
 pub mod policy_model;
 pub use policy_model::*;
 
-pub trait ToolExecutor: Send + Sync {
+/// A selected invocation. External arguments are decoded when this handle is created, and the
+/// same implementation and typed input are retained through preparation, admission and dispatch.
+pub trait PreparedToolCall: Send {
+    fn plan(&self, cancel: &CancellationToken) -> Result<ToolPreparation, ExecutionError>;
+    fn prepare(&self, cancel: &CancellationToken) -> Result<ToolContract, ExecutionError>;
+    fn execution_class(&self, contract: &ToolContract) -> crate::execution_capacity::ExecutionClass;
+    fn watch_admission(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken)
+        -> Result<Option<crate::execution_capacity::AdmissionControlGuard>, ExecutionError>;
+    fn supports_policy_read(&self, contract: &ToolContract) -> bool;
+    fn authorize(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken) -> Result<(), ExecutionError>;
+    fn execute(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken) -> ToolCompletion;
+}
+
+struct ExecutorCall<T: ?Sized> { executor: Arc<T>, call: ToolCall, context: FrozenToolContext }
+impl<T: ToolExecutor + ?Sized> PreparedToolCall for ExecutorCall<T> {
+    fn plan(&self, cancel: &CancellationToken) -> Result<ToolPreparation, ExecutionError> { self.executor.plan(&self.call, &self.context, cancel) }
+    fn prepare(&self, cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> { self.executor.prepare(&self.call, &self.context, cancel) }
+    fn execution_class(&self, contract: &ToolContract) -> crate::execution_capacity::ExecutionClass { self.executor.execution_class(&self.call, contract) }
+    fn watch_admission(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken) -> Result<Option<crate::execution_capacity::AdmissionControlGuard>, ExecutionError> { self.executor.watch_admission(context, &self.call, contract, cancel) }
+    fn supports_policy_read(&self, contract: &ToolContract) -> bool { self.executor.supports_policy_read(&self.context, &self.call, contract) }
+    fn authorize(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken) -> Result<(), ExecutionError> { self.executor.authorize(context, &self.call, contract, cancel) }
+    fn execute(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken) -> ToolCompletion { self.executor.execute(context, &self.call, contract, cancel) }
+}
+
+pub trait ToolExecutor: Send + Sync + 'static {
+    /// Freeze before the model request is sent. A directory returns only the selected pins;
+    /// simple typed adapters may use their already immutable instance directly.
+    fn freeze(&self, _: &[ToolSchema]) -> Result<Option<Arc<dyn ToolExecutor>>, ExecutionError> { Ok(None) }
+    fn bind_call(self: Arc<Self>, call: &ToolCall, context: &FrozenToolContext, _: &CancellationToken) -> Result<Box<dyn PreparedToolCall>, ExecutionError> {
+        Ok(Box::new(ExecutorCall { executor: self, call: call.clone(), context: context.clone() }))
+    }
     /// Establish ordering before any owner lookup. This must be local and nonblocking: no I/O,
     /// service preparation, credentials or permission waits. Wrappers forward calls they do not own.
     fn plan(
@@ -893,6 +923,10 @@ pub struct ExecutionReport {
 /// the Run worker, outside Catalog transactions; prepared snapshots never pass through it.
 pub trait ContextPreparation: Send + Sync {
     fn prepare(&self, run_id: &str, owner_generation: u64, cancel: &CancellationToken) -> Result<(), ExecutionError>;
+    /// Inspect the complete serialized candidate before admission. A successful checkpoint
+    /// publication asks the engine to compile the same legal boundary again.
+    fn prepare_request(&self, _owner_generation: u64, _view: &RequestView, _serialized: &Value,
+        _cancel: &CancellationToken) -> Result<bool, ExecutionError> { Ok(false) }
 }
 pub struct NoopContextPreparation;
 impl ContextPreparation for NoopContextPreparation {
@@ -965,6 +999,7 @@ impl<
         if pending.is_none() {
             recovered_results.clear();
         }
+        let mut pending_tools = pending.as_ref().map(|(snapshot, _)| self.tools.freeze(&snapshot.view.binding.tools)).transpose()?.flatten();
         let resumed_graph = self.persistence.policy_graph(&input.run_id,input.owner_generation)?;
         if pending.is_some() && resumed_graph.as_ref().is_some_and(|graph|!graph.terminal) { return Err(ExecutionError::new("unclosed_model_exchange","policy graph conflicts with model exchange")); }
         if let Some(graph)=resumed_graph {
@@ -1176,6 +1211,7 @@ impl<
                         finish!('agent, RunState::Failed, None, Some(error));
                     }
                     binding.history_range.leaf_id = history_cursor.clone();
+                    let request_tools = self.tools.freeze(&binding.tools)?;
                     let mut request_history=compile_history(&history,&input.binding.provider_family,&input.binding.connection_identity);
                     let mut selected=BTreeSet::new();
                     for reference in evidence {
@@ -1200,6 +1236,14 @@ impl<
                         Ok(serialized) => serialized,
                         Err(error) => finish!('agent, RunState::Failed, None, Some(error)),
                     };
+                    match self.context_preparation.prepare_request(input.owner_generation, &view, &serialized, &cancel) {
+                        Ok(true) => { steps -= 1; policy_state = previous_policy_state; continue 'agent; }
+                        Ok(false) => (),
+                        Err(error) => {
+                            if cancel.is_cancelled() { steps -= 1; policy_state = previous_policy_state; continue 'agent; }
+                            finish!('agent, RunState::Failed, None, Some(error));
+                        }
+                    }
                     let snapshot = RequestSnapshot { view, serialized };
                     match self.commit(
                         &input,
@@ -1353,6 +1397,7 @@ impl<
                     };
                     if !calls.is_empty() {
                         pending = Some((snapshot, calls));
+                        pending_tools = request_tools;
                     }
                 }
                 PolicyAction::ExecuteTools => {
@@ -1366,7 +1411,7 @@ impl<
                         },
                     )?;
                     let results =
-                        self.execute_batch(&input, &snapshot, calls, &cancel, &recovered_results)?;
+                        self.execute_batch(&input, &snapshot, calls, &cancel, &recovered_results, pending_tools.take())?;
                     recovered_results.clear();
                     self.commit(
                         &input,
@@ -1507,13 +1552,14 @@ impl<
         calls: Vec<ToolCall>,
         cancel: &CancellationToken,
         cached: &BTreeMap<String, ToolResult>,
+        tools: Option<Arc<dyn ToolExecutor>>,
     ) -> Result<Vec<ToolResult>, ExecutionError> {
         let frozen = FrozenToolContext {
             run_id: input.run_id.clone(),
             origin: ToolOrigin::ModelStep {
                 request_id: snapshot.view.request_id.clone(),
             },
-            tools: snapshot.view.binding.tools.clone(),
+            tools: Arc::new(snapshot.view.binding.tools.clone()),
             tool_schema_generation: snapshot.view.binding.tool_schema_generation,
             source: self.persistence.tool_source(&input.run_id)?,
         };
@@ -1534,11 +1580,20 @@ impl<
             let operation_id = format!("{}:tool:{}", snapshot.view.request_id, call.call_id);
             let operation_cancel = cancel.child(&operation_id);
             operation_tokens.push(operation_cancel.clone());
+            let bound = match tools.as_ref().map(|tools| tools.clone().bind_call(call, &frozen, &operation_cancel))
+                .unwrap_or_else(|| self.tools.clone().bind_call(call, &frozen, &operation_cancel)) {
+                Ok(bound) => bound,
+                Err(error) => {
+                    results[index] = Some(self.unprepared_result(input, snapshot, call,
+                        ToolCompletion::failure(&error.code, &error.message, Effect::None)));
+                    continue;
+                }
+            };
             let preparation = if operation_cancel.is_cancelled() {
                 None
             } else {
                 match guarded("tool_plan_panicked", || {
-                    self.tools.plan(call, &frozen, &operation_cancel)
+                    bound.plan(&operation_cancel)
                 }) {
                     Ok(preparation) => Some(preparation),
                     Err(error) => {
@@ -1582,7 +1637,7 @@ impl<
                         continue;
                     }
                     let class = match guarded("tool_plan_panicked", || {
-                        Ok(self.tools.execution_class(call, contract))
+                        Ok(bound.execution_class(contract))
                     }) {
                         Ok(class) => class,
                         Err(error) => {
@@ -1639,15 +1694,14 @@ impl<
                 class,
                 &operation_cancel,
             )?;
-            planned.push((index, preparation, reservation, class, operation_cancel));
+            planned.push((index, bound, preparation, reservation, class, operation_cancel));
         }
         let mut persistence_failure = None;
         std::thread::scope(|scope| {
             let (tx, rx) = mpsc::channel();
             let count = planned.len();
-            for (index, preparation, mut reservation, class, operation_cancel) in planned {
+            for (index, bound, preparation, mut reservation, class, operation_cancel) in planned {
                 let tx = tx.clone();
-                let frozen = &frozen;
                 let call = &calls[index];
                 scope.spawn(move || {
                     let result = guarded("tool_worker_panicked", || {
@@ -1655,7 +1709,7 @@ impl<
                             ToolPreparation::Ready(contract) => Ok(contract),
                             ToolPreparation::Resolve { .. } => {
                                 guarded("tool_prepare_panicked", || {
-                                    self.tools.prepare(call, frozen, &operation_cancel)
+                                    bound.prepare(&operation_cancel)
                                 })
                             }
                         };
@@ -1695,7 +1749,7 @@ impl<
                                 ))
                             }
                         };
-                        if self.tools.execution_class(call, &contract) != class {
+                        if bound.execution_class(&contract) != class {
                             return Ok(self.unprepared_result(
                                 input,
                                 snapshot,
@@ -1732,7 +1786,7 @@ impl<
                                 },
                             )?;
                         }
-                        self.execute_one(input, snapshot, &tool, &operation_cancel, reservation)
+                        self.execute_one(input, snapshot, &tool, bound.as_ref(), &operation_cancel, reservation)
                     });
                     let _ = tx.send((index, result));
                 });
@@ -1792,6 +1846,7 @@ impl<
         input: &ExecutionInput,
         snapshot: &RequestSnapshot,
         tool: &AdmittedTool,
+        bound: &dyn PreparedToolCall,
         cancel: &CancellationToken,
         reservation: crate::resource_admission::ResourceReservation,
     ) -> Result<ToolResult, ExecutionError> {
@@ -1808,8 +1863,7 @@ impl<
         let completion = if cancel.is_cancelled() {
             ToolCompletion::cancelled()
         } else if let Err(error) = guarded("tool_authorize_panicked", || {
-            self.tools
-                .authorize(&context, &tool.call, &tool.contract, cancel)
+            bound.authorize(&context, &tool.contract, cancel)
         }) {
             ToolCompletion::failure(&error.code, &error.message, Effect::None)
         } else if cancel.is_cancelled() {
@@ -1817,8 +1871,7 @@ impl<
         } else {
             let ready = prepare_dispatch(cancel, || {
                 _admission_control =
-                    self.tools
-                        .watch_admission(&context, &tool.call, &tool.contract, cancel)?;
+                    bound.watch_admission(&context, &tool.contract, cancel)?;
                 lease = reservation
                     .take()
                     .expect("one admission per call")
@@ -1843,8 +1896,7 @@ impl<
                 .task_family(&input.run_id, input.owner_generation)
                 .and_then(|_| {
                     guarded("tool_authorize_panicked", || {
-                        self.tools
-                            .authorize(&context, &tool.call, &tool.contract, cancel)
+                        bound.authorize(&context, &tool.contract, cancel)
                     })
                 })
             {
@@ -1885,8 +1937,7 @@ impl<
             let result = if cancel.is_cancelled() {
                 Ok(ToolCompletion::NotDispatched { reason: "cancelled".into() })
             } else { std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.tools
-                    .execute(&context, &tool.call, &tool.contract, cancel)
+                bound.execute(&context, &tool.contract, cancel)
             })) };
             match result {
                 Ok(completion) => {

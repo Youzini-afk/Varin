@@ -1,11 +1,11 @@
 use crate::error::{response_error, KernelError};
 use crate::protocol::*;
-use crate::protocol_generated::{KERNEL_REQUEST_WINDOW, KERNEL_RUNTIME_DATA_METHODS};
+use crate::protocol_generated::KERNEL_REQUEST_WINDOW;
+use crate::transport::{Incoming, Lane};
 use crate::storage::Storage;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
@@ -37,7 +37,7 @@ enum WorkerRequest {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum WireLane { Storage, Agent }
+enum WireLane { Control, Data }
 
 struct ActiveRequest {
     token: Arc<AtomicBool>,
@@ -45,6 +45,8 @@ struct ActiveRequest {
     grant_id: Option<String>,
     runtime_cancel: Option<varin_runtime::execution::CancellationToken>,
     wire_lane: Option<WireLane>,
+    pending_body: bool,
+    body_cancel_receipt: bool,
 }
 
 impl ActiveRequest {
@@ -122,9 +124,9 @@ impl Drop for Kernel {
 }
 
 impl Kernel {
-    fn new() -> Self {
+    fn new(epoch: String) -> Self {
         Self {
-            epoch: Uuid::new_v4().to_string(),
+            epoch,
             host_id: None,
             host_generation: None,
             build_version: None,
@@ -473,11 +475,10 @@ impl Kernel {
 }
 
 pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
-    // The Host holds at most this many acknowledgement-backed credits. The
-    // stdin reader therefore stays available for cancel/revoke even while the
-    // serial Storage worker is busy. Upload chunks consume the same credits.
+    let transport = crate::transport::Transport::bootstrap()?;
+    let transport_epoch = transport.epoch.clone();
     let (request_tx, request_rx) = mpsc::channel::<WorkerRequest>();
-    let (response_tx, response_rx) = mpsc::sync_channel::<Value>(1);
+    let response_tx = transport.sender.clone();
     let cancellations = Arc::new(Mutex::new(HashMap::<String, ActiveRequest>::new()));
     let revoked_grants = Arc::new(Mutex::new(HashSet::<String>::new()));
     let admission_epoch = Arc::new(Mutex::new(None::<String>));
@@ -523,7 +524,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         let key = format!("resource:{}", Uuid::new_v4());
         resource_cancellations.lock().map_err(|_| KernelError::Storage("cancellation state lock poisoned".into()))?
-            .insert(key.clone(), ActiveRequest { token:call.cancellation.shared_flag(), epoch:Some(epoch), grant_id:Some(call.binding.grant_id.clone()), runtime_cancel:Some(call.cancellation.clone()), wire_lane:None });
+            .insert(key.clone(), ActiveRequest { token:call.cancellation.shared_flag(), epoch:Some(epoch), grant_id:Some(call.binding.grant_id.clone()), runtime_cancel:Some(call.cancellation.clone()), wire_lane:None, pending_body:false, body_cancel_receipt:false });
         // The actor clears this registration after the actual resource receipt, never on mere
         // cancellation request. Attach the key to the typed message, not to a JSON envelope.
         let mut call = call;
@@ -552,7 +553,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         let key = format!("admission:{}", Uuid::new_v4());
         admission_cancellations.lock().map_err(|_| failed())?.insert(key.clone(), ActiveRequest {
             token: cancel.shared_flag(), epoch: Some(epoch), grant_id: Some(binding.grant_id.clone()),
-            runtime_cancel: Some(cancel.clone()), wire_lane: None,
+            runtime_cancel: Some(cancel.clone()), wire_lane: None, pending_body: false, body_cancel_receipt:false,
         });
         drop(revoked);
         let active = admission_cancellations.clone();
@@ -579,7 +580,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let worker_writer_failed = writer_failed.clone();
     let capture_completions = request_tx.clone();
     let worker = thread::spawn(move || {
-        let mut kernel = Kernel::new();
+        let mut kernel = Kernel::new(transport_epoch);
         let mut stopping = false;
         for message in request_rx {
             if stopping && kernel.active_materializations == 0 { break; }
@@ -776,49 +777,34 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
-    let writer_failed_for_thread = writer_failed.clone();
-    let writer = thread::spawn(move || {
-        let stdout = io::stdout();
-        let mut output = stdout.lock();
-        for response in response_rx {
-            let mut payload=match serde_json::to_vec(&response){Ok(payload)=>payload,Err(_)=>{writer_failed_for_thread.store(true,Ordering::Release);break;}};
-            if payload.len()>MAX_FRAME_BYTES {
-                // A large result is one failed read, not a broken shared transport. Transient
-                // streams can lose an update; their sequence/cursor lets the Host resynchronize.
-                if response.get("kind").and_then(Value::as_str)==Some("runtime-event") && response.get("stream").and_then(Value::as_str)==Some("progress") {continue;}
-                if let Some(id)=response.get("id").and_then(Value::as_str).filter(|_|response.get("kind").and_then(Value::as_str)==Some("response")) {
-                    let failure=response_error(id,&KernelError::Operation("response exceeds the transport frame limit; use paged history/content reads".into()));
-                    payload=serde_json::to_vec(&failure).expect("response error is JSON");
+    for incoming in &transport.incoming {
+        let (request, lane) = match incoming {
+            Incoming::Disconnected => break,
+            Incoming::Abort(meta) => {
+                if meta["kind"] == "request" {
+                    let id = meta["id"].as_str().unwrap_or_default();
+                    let acknowledged = cancellations.lock().ok().and_then(|mut active| active.remove(id))
+                        .is_some_and(|request| request.body_cancel_receipt);
+                    if !acknowledged { let _ = response_tx.send_control(response_error(id, &KernelError::Cancelled)); }
                 }
+                continue;
             }
-            if write_encoded_frame(&mut output, &payload).is_err() {
-                writer_failed_for_thread.store(true, Ordering::Release);
-                // There is no safe way to drain stdin after stdout is gone:
-                // the Host cannot receive any pending response. Exit the
-                // process so it observes a real disconnect and can rebuild
-                // the epoch instead of waiting forever.
-                std::process::exit(1);
+            Incoming::Open(meta) => {
+                let id = meta["id"].as_str().filter(|id| !id.is_empty()).ok_or("stream request identity required")?;
+                let grant_id = meta["grantId"].as_str().map(str::to_string);
+                let revoked = grant_id.as_ref().is_some_and(|grant| revoked_grants.lock().map(|grants| grants.contains(grant)).unwrap_or(true));
+                let mut active = cancellations.lock().map_err(|_| "cancellation owner poisoned")?;
+                if active.contains_key(id) || active.values().filter(|request| request.wire_lane == Some(WireLane::Data)).count() >= KERNEL_REQUEST_WINDOW {
+                    eprintln!("invalid content request admission"); break;
+                }
+                active.insert(id.to_string(), ActiveRequest { token:Arc::new(AtomicBool::new(revoked)),
+                    epoch:meta["epoch"].as_str().map(str::to_string), grant_id, runtime_cancel:None,
+                    wire_lane:Some(WireLane::Data), pending_body:true, body_cancel_receipt:false });
+                continue;
             }
-        }
-    });
-    let stdin = io::stdin();
-    let mut input = stdin.lock();
-    loop {
-        let payload = match read_frame(&mut input) {
-            Ok(Some(payload)) => payload,
-            Ok(None) => break,
-            Err(error) => { eprintln!("kernel input disconnected: {error}"); break; }
+            Incoming::Frame(request, lane) => (request, lane),
         };
-        if writer_failed.load(Ordering::Acquire) {
-            break;
-        }
-        let request: Value = match serde_json::from_slice(&payload) {
-            Ok(value) => value,
-            Err(error) => {
-                eprintln!("invalid JSON frame: {error}");
-                break;
-            }
-        };
+        if writer_failed.load(Ordering::Acquire) { break; }
         // Private secret-bearing replies must never enter method validation, durable queues,
         // public tool grants, or diagnostic formatting. Malformed/old replies are discarded.
         if request.get("kind").and_then(Value::as_str) == Some("agent-policy-response") {
@@ -870,12 +856,17 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             let cancel_epoch = request.get("epoch").and_then(Value::as_str);
             let cancel_grant = request.get("grantId").and_then(Value::as_str);
-            if let Ok(active) = cancellations.lock() {
-                if let Some(request) = active.get(&id) {
+            if let Ok(mut active) = cancellations.lock() {
+                if let Some(request) = active.get_mut(&id) {
                     if request.epoch.as_deref() == cancel_epoch
                         && request.grant_id.as_deref() == cancel_grant
                     {
                         request.cancel();
+                        if request.pending_body && !request.body_cancel_receipt {
+                            request.body_cancel_receipt = true;
+                            request.wire_lane = None;
+                            let _ = response_tx.send_control(response_error(&id, &KernelError::Cancelled));
+                        }
                     }
                 }
             }
@@ -885,7 +876,19 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("invalid kernel request admission");
             break;
         }
-        let token = Arc::new(AtomicBool::new(false));
+        let token = {
+            let mut active = cancellations.lock().map_err(|_| "cancellation owner poisoned")?;
+            match active.get_mut(&id) {
+                Some(request) if lane == Lane::Data && request.pending_body && request.body_cancel_receipt => {
+                    active.remove(&id);
+                    continue;
+                }
+                Some(request) if lane == Lane::Data && request.pending_body => { request.pending_body = false; request.token.clone() }
+                Some(_) => { eprintln!("duplicate in-flight request id"); break; }
+                None if lane == Lane::Data => { eprintln!("content request lost admission identity"); break; }
+                None => Arc::new(AtomicBool::new(false)),
+            }
+        };
         let request_epoch = request
             .get("epoch")
             .and_then(Value::as_str)
@@ -901,26 +904,14 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 mark_grant_revoked(&revoked_grants, &cancellations, &target);
             }
         }
-        let wire_lane = if request.get("method").and_then(Value::as_str).is_some_and(|method| (method.starts_with("runtime.") && !KERNEL_RUNTIME_DATA_METHODS.contains(&method)) || method.starts_with("process.subscription.")) {
-            WireLane::Agent
-        } else { WireLane::Storage };
-        if !id.is_empty() {
-            if let Ok(mut active) = cancellations.lock() {
-                if active.contains_key(&id) { eprintln!("duplicate in-flight request id"); break; }
-                if active.values().filter(|request| request.wire_lane == Some(wire_lane)).count() >= KERNEL_REQUEST_WINDOW {
-                    eprintln!("kernel external request admission window exceeded"); break;
-                }
-                active.insert(
-                    id,
-                    ActiveRequest {
-                        token: token.clone(),
-                        epoch: request_epoch,
-                        grant_id: request_grant,
-                        runtime_cancel: None,
-                        wire_lane: Some(wire_lane),
-                    },
-                );
+        let wire_lane = if lane == Lane::Control { WireLane::Control } else { WireLane::Data };
+        if lane == Lane::Control {
+            let mut active = cancellations.lock().map_err(|_| "cancellation owner poisoned")?;
+            if active.values().filter(|request| request.wire_lane == Some(wire_lane)).count() >= KERNEL_REQUEST_WINDOW {
+                eprintln!("kernel external request admission window exceeded"); break;
             }
+            active.insert(id, ActiveRequest { token:token.clone(), epoch:request_epoch,
+                grant_id:request_grant, runtime_cancel:None, wire_lane:Some(wire_lane), pending_body:false, body_cancel_receipt:false });
         }
         if request.get("method").and_then(Value::as_str).is_some_and(|method|method.starts_with("process.subscription.")) {
             if subscription_tx.send(crate::process::subscriptions::ControlCommand::Request{value:request,cancellation:token}).is_err(){break;}
@@ -946,6 +937,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             break;
         }
     }
+    transport.shutdown();
     if let Ok(active) = cancellations.lock() {
         for request in active.values() { request.cancel(); }
     }
@@ -970,7 +962,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _ = agent_worker.join();
     drop(subscriptions);
     drop(response_tx);
-    let _ = writer.join();
+
     Ok(())
 }
 

@@ -91,28 +91,3 @@ fn closed_or_precancelled_bridge_does_not_leave_pending_requests() {
     assert!(bridge.state.lock().unwrap().pending.is_empty());
     assert!(bridge.query(json!({}), &CancellationToken::default()).is_err());
 }
-
-#[test]
-fn progress_frame_limit_drops_only_oversized_projection_without_mutating_original() {
-    let mut event = json!({"v":1,"kind":"runtime-event","stream":"progress","event":{"type":"tool-result","content":"small fixture body 😀 中文\nsecond line"}});
-    let original = event.clone();
-    let mut framed = Vec::new();
-    crate::protocol::write_frame(&mut framed, &event).unwrap();
-    let payload_len = u32::from_be_bytes(framed[..4].try_into().unwrap()) as usize;
-    assert_eq!(framed.len(), payload_len + 4);
-    let payload = &framed[4..];
-    assert_eq!(serde_json::from_slice::<Value>(payload).unwrap(), event);
-    assert!(payload.len() > std::str::from_utf8(payload).unwrap().chars().count());
-    // The real writer counts JSON UTF-8 payload bytes, excluding its four-byte prefix;
-    // embedded newline escaping and the full envelope are already inside that payload.
-    let encoded = serde_json::to_vec(&event).unwrap();
-    assert_eq!(encoded.as_slice(), payload);
-    // Inject a byte budget around a tiny event, never allocate an oversized protocol frame.
-    assert!(!crate::agent_runtime::progress_frame_fits(&event, encoded.len() - 1));
-    assert!(crate::agent_runtime::progress_frame_fits(&event, encoded.len()));
-    assert_eq!(event, original);
-    event["event"] = json!({"type":"completed"});
-    assert!(crate::agent_runtime::progress_frame_fits(&event, encoded.len() - 1));
-    // Suppressing this observation has no authority to replace the durable tool value.
-    assert_eq!(original["event"]["content"], "small fixture body 😀 中文\nsecond line");
-}

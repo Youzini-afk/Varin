@@ -381,8 +381,17 @@ export class AgentRuntimeClient {
   activeOperations(threadId: string, branchId?: string, signal?: AbortSignal): Promise<Operation[]> {
     return this.kernel.agentRuntimeRequest('runtime.thread.operations.active', { threadId, ...(branchId ? { branchId } : {}) }, signal);
   }
-  history(branchId: string, signal?: AbortSignal): Promise<HistoryItem[]> {
-    return this.kernel.agentRuntimeRequest('runtime.history.read', { branchId }, signal);
+  async history(branchId: string, signal?: AbortSignal): Promise<HistoryItem[]> {
+    const pages: HistoryItem[][] = [];
+    let head: string | undefined;
+    let before: string | undefined;
+    do {
+      const page = await this.historyPage({branchId, limit: 20, ...(head ? {headId: head} : {}), ...(before ? {beforeId: before} : {})}, signal);
+      head = page.head ?? undefined;
+      pages.push(await Promise.all(page.items.map(item => this.historyItem(item, signal))));
+      before = page.previous ?? undefined;
+    } while (before);
+    return pages.reverse().flat();
   }
   async observerEvents(observerId: string, threadId: string, limit: number, signal?: AbortSignal, throughCursor?: number): Promise<RuntimeEvent[]> {
     // Manual inspection can request the current head. The background observer always supplies

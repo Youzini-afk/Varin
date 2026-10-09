@@ -10,35 +10,6 @@ mod fixture;
 const HOST: &str = "review-host";
 const GENERATION: &str = "review-generation";
 const EPOCH: &str = "review-epoch";
-struct Unused;
-impl ToolExecutor for Unused {
-    fn plan(&self, call: &varin_runtime::execution::ToolCall, context: &varin_runtime::execution::FrozenToolContext,
-        cancel: &varin_runtime::execution::CancellationToken) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError> {
-        self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
-    }
-
-    fn prepare(&self, _: &ToolCall, _: &FrozenToolContext, _cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
-        panic!("unexpected inner tool")
-    }
-    fn authorize(
-        &self,
-        _: &ToolExecutionContext,
-        _: &ToolCall,
-        _: &ToolContract,
-        _: &CancellationToken,
-    ) -> Result<(), ExecutionError> {
-        panic!("unexpected inner authority")
-    }
-    fn execute(
-        &self,
-        _: &ToolExecutionContext,
-        _: &ToolCall,
-        _: &ToolContract,
-        _: &CancellationToken,
-    ) -> ToolCompletion {
-        panic!("unexpected inner execution")
-    }
-}
 fn dispatch(storage: &mut Storage, method: &str, params: Value) -> Value {
     let (grant, params) = storage
         .authorize(Some("setup"), EPOCH, HOST, GENERATION, method, &params)
@@ -136,12 +107,9 @@ fn boundary(revoke_before: bool) {
         environment_run_id: None,
         enabled_tools: kinds,
     };
-    let executor = crate::collaboration::wrap_tools(
-        Arc::new(Unused),
-        db.clone(),
-        Some(binding),
-        resources,
-    );
+    let directory = Arc::new(varin_runtime::composition::tools::ToolDirectory::assemble(
+        crate::collaboration::declarations(db.clone(), Some(binding), resources),
+    ).unwrap());
     let call = ToolCall {
         call_id: "dispatch-call".into(),
         name: "dispatch".into(),
@@ -152,14 +120,15 @@ fn boundary(revoke_before: bool) {
         run_id: f.context.run_id.clone(),
         origin: f.context.origin.clone(),
         tool_schema_generation: 1,
-        tools: vec![schema],
+        tools: Arc::new(vec![schema]),
         source: Some(f.pin.source),
     };
-    let contract = executor.prepare(&call, &frozen, &CancellationToken::default()).unwrap();
+    let executor = directory.bind_call(&call, &frozen, &CancellationToken::default()).unwrap();
+    let contract = executor.prepare(&CancellationToken::default()).unwrap();
     executor
-        .authorize(&f.context, &call, &contract, &CancellationToken::default())
+        .authorize(&f.context, &contract, &CancellationToken::default())
         .unwrap();
-    let completion = executor.execute(&f.context, &call, &contract, &CancellationToken::default());
+    let completion = executor.execute(&f.context, &contract, &CancellationToken::default());
     if revoke_before {
         assert!(!matches!(completion, ToolCompletion::JobAccepted { .. }));
         assert!(db.lock().unwrap().child_tasks().unwrap().is_empty());

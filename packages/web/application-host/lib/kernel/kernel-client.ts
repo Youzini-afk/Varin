@@ -1,10 +1,10 @@
-import { PlanBridge, unavailablePlanResult, type PrivatePlanResponse } from './plan-bridge.js';
+import { PlanBridge, type PrivatePlanResponse } from './plan-bridge.js';
 import type { PlanOwner } from './plan-owner.js';
-import { MemoryBridge, unavailableMemoryResult, type PrivateMemoryResponse } from './memory-bridge.js';
+import { MemoryBridge, type PrivateMemoryResponse } from './memory-bridge.js';
 import type { MemoryToolOwner } from './memory-owner.js';
-import { RetrievalBridge, unavailableRetrievalResult, type PrivateRetrievalResponse } from './retrieval-bridge.js';
+import { RetrievalBridge, type PrivateRetrievalResponse } from './retrieval-bridge.js';
 import type { RetrievalOwner } from './retrieval-owner.js';
-import { LanguageBridge, unavailableLanguageResult, type PrivateLanguageResponse } from './language-bridge.js';
+import { LanguageBridge, type PrivateLanguageResponse } from './language-bridge.js';
 import type { LanguageToolOwner } from './language-owner.js';
 import { AgentPolicyBridge, type AgentPolicyLease, type AgentPolicyBinding, type PrivatePolicyResponse } from './agent-policy.js';
 import { McpBridge, type McpLease, type McpBinding, type PrivateMcpResponse } from './mcp-bridge.js';
@@ -15,12 +15,11 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { KernelRequestWindow } from "./request-window.js";
 import fs from "node:fs";
 import path from "node:path";
-import type { Writable } from "node:stream";
+import { KernelTransport, CONTROL_METHODS, controlFrame } from "./kernel-transport.js";
 import { fileURLToPath } from "node:url";
 import {
   KERNEL_PROTOCOL_VERSION,
   KERNEL_REQUEST_WINDOW,
-  KERNEL_RUNTIME_DATA_METHODS,
   type KernelBranchReadResult,
   type KernelBranchChange,
   type KernelCreateEntry,
@@ -48,8 +47,6 @@ import {
   type KernelProcessSubscribeResult,
 } from "./protocol.generated.js";
 
-const RUNTIME_DATA_METHODS: ReadonlySet<string> = new Set(KERNEL_RUNTIME_DATA_METHODS);
-
 export interface KernelClientOptions {
   hostId: string;
   storageRoot: string;
@@ -59,6 +56,7 @@ export interface KernelClientOptions {
   env?: NodeJS.ProcessEnv;
   /** Used by focused tests; production always uses a real child process. */
   spawnProcess?: typeof spawn;
+  transportFactory?: typeof KernelTransport.prepare;
   allowCargoDevRunner?: boolean;
   hostGeneration?: string;
   kernelBuildIdentity?: string;
@@ -452,14 +450,6 @@ interface PendingRequest {
   grantId?: string | undefined;
 }
 
-const frame = (payload: string): Buffer => {
-  const body = Buffer.from(payload, "utf8");
-  if (body.byteLength > 16 * 1024 * 1024) throw new KernelClientError({ code: "kernel-frame-too-large", message: "Rust kernel frame exceeds transport limit", retryable: false });
-  const header = Buffer.allocUnsafe(4);
-  header.writeUInt32BE(body.byteLength, 0);
-  return Buffer.concat([header, body]);
-};
-
 const KERNEL_BATCH_TARGET_BYTES = 512 * 1024;
 
 const batchForKernelTransport = <T>(values: readonly T[]): T[][] => {
@@ -551,7 +541,7 @@ export class KernelClient {
   private readonly options: KernelClientOptions;
   private readonly spawnProcess: typeof spawn;
   private child: ChildProcessWithoutNullStreams | null = null;
-  private buffer = Buffer.alloc(0);
+  private transport: KernelTransport | undefined;
   private readonly pending = new Map<string, PendingRequest>();
   private readonly processSubscriptions = new Map<string, ProcessSubscriptionEntry>();
   private readonly agentRuntimeListeners = new Set<(event: AgentRuntimeStreamEvent) => void>();
@@ -591,48 +581,16 @@ export class KernelClient {
   constructor(options: KernelClientOptions) {
     this.options = options;
     this.spawnProcess = options.spawnProcess ?? spawn;
-    this.policyBridge = new AgentPolicyBridge(() => this.epoch, response => {
-      // Preflight before writing anything. A policy's invalid/oversized decision is a local
-      // failure; actual stream failures still invalidate the shared transport below.
-      let encoded: Buffer;
-      try { encoded = frame(JSON.stringify(response)); }
-      catch {
-        return this.write({ v: 1, kind: 'agent-policy-response', id: response.id,
-          kernelEpoch: response.kernelEpoch, ok: false, error: { code: 'policy_frame_invalid' } });
-      }
-      return this.write(response, encoded);
-    },
+    this.policyBridge = new AgentPolicyBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "policy-channel-failed", message: "Private policy channel failed", retryable: false }), true));
-    this.retrievalBridge = new RetrievalBridge(() => this.epoch, response => {
-      let encoded: Buffer;
-      try { encoded = frame(JSON.stringify(response)); }
-      catch { return this.write({ v: 1, kind: 'retrieval-response', id: response.id, kernelEpoch: response.kernelEpoch,
-        result: unavailableRetrievalResult('Retrieval result exceeds the transport frame budget or is not serializable') }); }
-      return this.write(response, encoded);
-    }, () => this.failAll(new KernelClientError({ code: 'retrieval-channel-failed', message: 'Private retrieval channel failed', retryable: false }), true));
-    this.memoryBridge = new MemoryBridge(() => this.epoch, response => {
-      let encoded: Buffer;
-      try { encoded = frame(JSON.stringify(response)); }
-      catch { return this.write({ v: 1, kind: 'memory-response', id: response.id, kernelEpoch: response.kernelEpoch,
-        result: unavailableMemoryResult('Memory result exceeds the transport frame budget; reconcile the original mutation receipt') }); }
-      return this.write(response, encoded);
-    }, () => this.failAll(new KernelClientError({ code: 'memory-channel-failed', message: 'Private memory channel failed', retryable: false }), true));
-    this.planBridge = new PlanBridge(() => this.epoch, response => {
-      let encoded: Buffer;
-      try { encoded = frame(JSON.stringify(response)); }
-      catch { return this.write({ v: 1, kind: 'plan-response', id: response.id, kernelEpoch: response.kernelEpoch,
-        result: unavailablePlanResult('Plan result exceeds the transport frame budget; reconcile the original mutation receipt') }); }
-      return this.write(response, encoded);
-    }, () => this.failAll(new KernelClientError({ code: 'plan-channel-failed', message: 'Private plan channel failed', retryable: false }), true));
-    this.languageBridge = new LanguageBridge(() => this.epoch, response => {
-      // Check serialization/frame budget before touching the shared writer. A large language
-      // result fails only its caller; chunked language results are not implemented yet.
-      let encoded: Buffer;
-      try { encoded = frame(JSON.stringify(response)); }
-      catch { return this.write({ v: 1, kind: 'language-response', id: response.id, kernelEpoch: response.kernelEpoch,
-        result: unavailableLanguageResult('Language result exceeds the transport frame budget or is not serializable') }); }
-      return this.write(response, encoded);
-    }, () => this.failAll(new KernelClientError({ code: 'language-channel-failed', message: 'Private language channel failed', retryable: false }), true));
+    this.retrievalBridge = new RetrievalBridge(() => this.epoch, response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: "retrieval-channel-failed", message: "Private retrieval channel failed", retryable: false }), true));
+    this.memoryBridge = new MemoryBridge(() => this.epoch, response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: "memory-channel-failed", message: "Private memory channel failed", retryable: false }), true));
+    this.planBridge = new PlanBridge(() => this.epoch, response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: "plan-channel-failed", message: "Private plan channel failed", retryable: false }), true));
+    this.languageBridge = new LanguageBridge(() => this.epoch, response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: "language-channel-failed", message: "Private language channel failed", retryable: false }), true));
     this.mcpBridge = new McpBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "mcp-channel-failed", message: "Private MCP channel failed", retryable: false }), true));
     this.credentialBridge = new CredentialBridge(() => this.epoch,
@@ -786,6 +744,8 @@ export class KernelClient {
     this.controlWindow = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
     this.transportFailed = false;
     this.revokedGrants.clear();
+    const transport = await (this.options.transportFactory ?? KernelTransport.prepare)(value => this.consumeFrame(value), error => this.failAll(error, true));
+    this.transport = transport;
     const child = this.spawnProcess(command.command, [...command.args, "--stdio"], {
       cwd: this.options.cwd ?? process.cwd(),
       env: {
@@ -805,7 +765,7 @@ export class KernelClient {
         retryable: true,
       }));
     });
-    child.stdout.on("data", (chunk: Buffer | string) => { if (this.child === child) this.consume(chunk); });
+    child.stdout.resume();
     child.stderr.on("data", (chunk: Buffer | string) => {
       // stderr is intentionally separate from the protocol. Keep it out of
       // request responses; the Host can attach a logger at the process layer.
@@ -824,6 +784,9 @@ export class KernelClient {
     });
     let result: KernelHandshakeResult;
     try {
+    await new Promise<void>((resolve, reject) => child.stdin.write(controlFrame(transport.bootstrap()), error => error ? reject(error) : resolve()));
+    child.stdin.end();
+    await transport.bound;
     result = await this.requestRaw<KernelHandshakeResult>("kernel.handshake", {
         protocolVersion: KERNEL_PROTOCOL_VERSION,
         buildVersion: this.options.buildVersion,
@@ -838,7 +801,7 @@ export class KernelClient {
     }
     const requiredCapabilities = ["storage", "workingState", "recovery", "branchCas", "pins", "gc"];
     const expectedHostGeneration = this.options.hostGeneration ?? `${this.options.hostId}:${process.pid}`;
-    if (result.protocolVersion !== KERNEL_PROTOCOL_VERSION || result.requestWindow !== KERNEL_REQUEST_WINDOW || !result.kernelEpoch || result.applicationBuildVersion !== this.options.buildVersion
+    if (result.protocolVersion !== KERNEL_PROTOCOL_VERSION || result.requestWindow !== KERNEL_REQUEST_WINDOW || !result.kernelEpoch || result.kernelEpoch !== transport.kernelEpoch || result.applicationBuildVersion !== this.options.buildVersion
       || result.buildVersion !== result.kernelBuildIdentity
       || (manifest && (result.kernelBuildIdentity !== manifest.buildIdentity || result.targetTriple !== manifest.targetTriple || result.arch !== manifest.arch))
       || (this.options.kernelBuildIdentity !== undefined && result.kernelBuildIdentity !== this.options.kernelBuildIdentity)
@@ -870,21 +833,13 @@ export class KernelClient {
     return result;
   }
 
-  private consume(chunk: Buffer | string): void {
-    this.buffer = Buffer.concat([this.buffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
-    while (this.buffer.byteLength >= 4) {
-      const length = this.buffer.readUInt32BE(0);
-      if (length > 16 * 1024 * 1024) {
-        this.failAll(new KernelClientError({ code: "kernel-frame-too-large", message: "Rust kernel response exceeds transport limit", retryable: false }), true);
-        return;
-      }
-      if (this.buffer.byteLength < length + 4) return;
-      const body = this.buffer.subarray(4, length + 4);
-      this.buffer = this.buffer.subarray(length + 4);
-      let response: KernelResponse | KernelProcessStreamEvent | AgentRuntimeStreamEvent;
-      try { response = JSON.parse(body.toString("utf8")) as KernelResponse | KernelProcessStreamEvent | AgentRuntimeStreamEvent; }
-      catch (error) { this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: `Invalid Rust kernel response: ${String(error)}`, retryable: false }), true); return; }
-      if (this.credentialBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.mcpBridge.consume(response) || this.policyBridge.consume(response)) continue;
+  private consumeFrame(value: unknown): void {
+    if (!value || typeof value !== "object") {
+      this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: "Invalid Rust kernel envelope" }), true);
+      return;
+    }
+    const response = value as KernelResponse | KernelProcessStreamEvent | AgentRuntimeStreamEvent;
+      if (this.credentialBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.mcpBridge.consume(response) || this.policyBridge.consume(response)) return;
       if (response.kind === "runtime-event") {
         if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch
           || !["durable", "progress"].includes(response.stream)
@@ -898,26 +853,25 @@ export class KernelClient {
           // Presentation consumers cannot take down the authority transport.
           try { listener(response); } catch { this.agentRuntimeListeners.delete(listener); }
         }
-        continue;
+        return;
       }
       if (response.kind === "process-event") {
         this.consumeProcessEvent(response);
         if (this.transportFailed) return;
-        continue;
+        return;
       }
       if (response.v !== KERNEL_PROTOCOL_VERSION || response.kind !== "response" || typeof response.id !== "string" || typeof response.ok !== "boolean") {
         this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: "Rust kernel response envelope is malformed", retryable: false }), true);
         return;
       }
       const pending = this.pending.get(response.id);
-      if (!pending) continue;
+      if (!pending) return;
       this.pending.delete(response.id);
       pending.release();
       if (response.ok) pending.resolve(response.result);
       else {
         pending.reject(new KernelClientError(response.error ?? { code: "kernel-error", message: "Rust kernel request failed" }));
       }
-    }
   }
 
   private consumeProcessEvent(event: KernelProcessStreamEvent): void {
@@ -975,22 +929,22 @@ export class KernelClient {
     this.epoch = null;
     this.managementGrant = null;
     this.handshakeResult = null;
-    this.buffer = Buffer.alloc(0);
+    void this.transport?.close();
+    this.transport = undefined;
     if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
-  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateMcpResponse | PrivatePolicyResponse | PrivateMemoryResponse | PrivatePlanResponse | PrivateLanguageResponse | PrivateRetrievalResponse, encoded?: Buffer): Promise<void> {
-    const stdin = this.child?.stdin;
-    if (!stdin || stdin.destroyed) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel stdin is unavailable", retryable: true });
-    const writable = stdin as Writable;
-    // The callback settles on delivery or stream failure, including destruction
-    // while backpressured. Waiting only for 'drain' can hang after disconnect.
-    await new Promise<void>((resolve, reject) => writable.write(encoded ?? frame(JSON.stringify(request)), error => error ? reject(error) : resolve()));
+  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateMcpResponse | PrivatePolicyResponse | PrivateMemoryResponse | PrivatePlanResponse | PrivateLanguageResponse | PrivateRetrievalResponse): Promise<void> {
+    const transport = this.transport;
+    if (!transport) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel transport is unavailable", retryable: true });
+    const control = request.kind === "cancel" || request.kind === "credential-response"
+      || (request.kind === "request" && CONTROL_METHODS.has(request.method));
+    await transport.send(request as unknown as Record<string, unknown>, control ? "control" : "data");
   }
 
   private async requestRaw<T, M extends KernelMethod = KernelMethod>(method: M, params: KernelMethodParams[M], options: { signal?: AbortSignal | undefined; grant?: KernelGrantHandle | undefined; allowBootstrap?: boolean | undefined; settleCancellation?: boolean | undefined } = {}): Promise<T> {
     const cancelled = () => new KernelClientError({ code: "cancelled", message: "Kernel request cancelled", retryable: true });
-    const release = this.closed && method === "kernel.shutdown" ? () => undefined : await ((method.startsWith("runtime.") && !RUNTIME_DATA_METHODS.has(method)) || method.startsWith("process.subscription.") ? this.controlWindow : this.window).acquire(options.signal, cancelled);
+    const release = this.closed && method === "kernel.shutdown" ? () => undefined : await (CONTROL_METHODS.has(method) ? this.controlWindow : this.window).acquire(options.signal, cancelled);
     let admitted = false;
     try {
       if (this.closed && method !== "kernel.shutdown") throw new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closed" });
@@ -1003,8 +957,6 @@ export class KernelClient {
       }
       const identity = { ...(this.epoch ? { epoch: this.epoch } : {}), ...(grant ? { grantId: grant.grantId } : {}) };
       const request = { v: KERNEL_PROTOCOL_VERSION, kind: "request", id, method, params, ...identity } as KernelRequest;
-      // Local encoding/size rejection has sent nothing; it must not fail the shared transport.
-      const encoded = frame(JSON.stringify(request));
       let rejectPending!: (error: unknown) => void;
       let cancelSent = false;
       const abort = () => {
@@ -1014,6 +966,7 @@ export class KernelClient {
         // Keep the ledger entry/credit until Rust acknowledges the actual stop.
         // Control frames bypass the ordinary request window.
         void this.write({ v: KERNEL_PROTOCOL_VERSION, kind: "cancel", id, ...identity }).catch(error => this.failAll(error instanceof Error ? error : new Error(String(error)), true));
+        this.transport?.cancelRequest(id);
       };
       const promise = new Promise<T>((resolve, reject) => {
         rejectPending = reject;
@@ -1023,7 +976,9 @@ export class KernelClient {
       void promise.catch(() => undefined);
       options.signal?.addEventListener("abort", abort, { once: true });
       try {
-        await this.write(request, encoded);
+        void this.write(request).catch(error => {
+          if (!cancelSent && this.pending.has(id)) this.failAll(error instanceof Error ? error : new Error(String(error)), true);
+        });
         return await promise;
       } catch (error) {
         if (!cancelSent && this.pending.has(id)) this.failAll(error instanceof Error ? error : new Error(String(error)), true);
@@ -1596,7 +1551,7 @@ export class KernelClient {
     this.controlWindow.close(new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closing" }));
     for (const pending of this.pending.values()) pending.cancel();
     const child = this.child;
-    if (!child) return;
+    if (!child) { await this.transport?.close(); this.transport = undefined; return; }
     const bounded = async (work: Promise<unknown>): Promise<boolean> => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -1606,6 +1561,8 @@ export class KernelClient {
     if (await bounded(Promise.all([this.window.whenIdle(), this.controlWindow.whenIdle()])) && this.handshakeResult && !child.killed) {
       await bounded(this.requestRaw("kernel.shutdown", {}, { grant: this.managementGrant ?? undefined }));
     }
+    await this.transport?.close();
+    this.transport = undefined;
     const waitForExit = (): Promise<boolean> => new Promise(resolve => {
       if (child.exitCode !== null || child.signalCode !== null) { resolve(true); return; }
       const onExit = () => { clearTimeout(timer); resolve(true); };

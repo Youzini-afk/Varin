@@ -203,7 +203,7 @@ impl Catalog {
         if let Some(launch) = self.launch_intent(run_id)? {
             if launch.selection.policy != *identity
                 || nodes.iter().any(|n| {
-                    n.context.tools != launch.selection.tools
+                    n.context.tools.as_ref() != &launch.selection.tools
                         || n.context.tool_schema_generation
                             != launch.selection.tool_schema_generation
                         || n.context.source != launch.selection.source
