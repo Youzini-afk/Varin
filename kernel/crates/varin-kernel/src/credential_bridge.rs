@@ -13,7 +13,8 @@ pub(crate) struct CredentialBridge {
     events: Arc<Mutex<Option<mpsc::Sender<Value>>>>,
 }
 impl CredentialBridge {
-    pub(crate) fn new(output: mpsc::SyncSender<Value>) -> Self {
+    pub(crate) fn new(output: impl Into<crate::transport::Sender>) -> Self {
+        let output = output.into();
         let (events, rx) = mpsc::channel();
         // Never hold credential/model locks while waiting for the shared stdout writer.
         std::thread::spawn(move || {

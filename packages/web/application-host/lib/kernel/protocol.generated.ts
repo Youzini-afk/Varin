@@ -5,6 +5,8 @@
 
 export const KERNEL_PROTOCOL_VERSION = 1 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
+export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
+export const KERNEL_CONTROL_METHODS = ["kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.run.inspect","runtime.run.cancel","runtime.operation.inspect","runtime.operation.cancel","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.history.body"] as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
 
@@ -52,7 +54,6 @@ export type KernelMethod =
   | "runtime.question.answer"
   | "runtime.operation.inspect"
   | "runtime.operation.cancel"
-  | "runtime.history.read"
   | "runtime.events.read"
   | "process.subscribe"
   | "process.subscription.ack"
@@ -2058,7 +2059,6 @@ export type KernelMethodParams = {
   "runtime.question.answer": QuestionAnswerParams;
   "runtime.operation.inspect": OperationParams;
   "runtime.operation.cancel": OperationParams;
-  "runtime.history.read": HistoryParams;
   "runtime.events.read": EventsParams;
   "runtime.observer.read": ObserverReadParams;
   "runtime.observer.delivery": ObserverDeliveryParams;
@@ -2544,15 +2544,6 @@ export type KernelRequest =
       id: string;
       method: "runtime.operation.cancel";
       params: OperationParams;
-      epoch?: string;
-      grantId?: string;
-    }
-  | {
-      v: typeof KERNEL_PROTOCOL_VERSION;
-      kind: "request";
-      id: string;
-      method: "runtime.history.read";
-      params: HistoryParams;
       epoch?: string;
       grantId?: string;
     }

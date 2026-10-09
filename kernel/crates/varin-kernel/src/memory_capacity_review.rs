@@ -268,22 +268,19 @@ fn combined(ending: Ending) {
     );
     start = crate::collaboration::configure(start, db.clone());
     start = crate::process_wait::configure(start, db.clone());
-    start.tools = crate::collaboration::wrap_tools(
-        start.tools,
-        db.clone(),
-        Some(binding.clone()),
-        client.clone(),
-    );
-    start.binding.tools = crate::collaboration::schemas(start.binding.tools, true);
-    // Match source-backed main launch: -> Questions -> Collaboration ->
-    // ProcessWait -> Memory -> Plan. Every wrapper must preserve inner scheduling hooks.
-    start.tools = crate::process_wait::wrap_tools(start.tools, db.clone(), binding, client);
-    start.binding.tools = crate::process_wait::schemas(start.binding.tools);
-    let start = configure(start, db.clone(), bridge.clone(), true);
+    let mut declarations = KernelToolExecutor::new(binding.clone(), client.clone()).unwrap().declarations(true);
+    declarations.push(crate::questions::declaration(db.clone()));
+    declarations.extend(crate::collaboration::declarations(db.clone(), Some(binding.clone()), client.clone()));
+    declarations.extend(crate::process_wait::declarations(db.clone(), binding, client));
+    declarations.push(declaration(db.clone(), bridge.clone(), true));
+    let mut start = configure_context(start, db.clone(), bridge.clone());
     let (plan_output, _plan_messages) = mpsc::sync_channel(8);
     let plan_bridge = crate::plan_bridge::PlanBridge::new(plan_output);
     plan_bridge.initialize(EPOCH);
-    let start = crate::plan::configure(start, db.clone(), plan_bridge);
+    declarations.push(crate::plan::declaration(db.clone(), plan_bridge));
+    let directory = varin_runtime::composition::tools::ToolDirectory::assemble(declarations).unwrap();
+    start.binding.tools = directory.schemas().to_vec();
+    start.tools = Arc::new(directory);
     input.binding = start.binding.clone();
     let tools = start.tools.clone();
     let admission = db.lock().unwrap().resource_admission();
@@ -322,37 +319,34 @@ fn combined(ending: Ending) {
         run_id: input.run_id.clone(),
         origin: context.origin.clone(),
         tool_schema_generation: 1,
-        tools: vec![schema(true)],
+        tools: Arc::new(vec![schema(true)]),
         source: None,
     };
-    let contract = tools.prepare(&memory, &frozen, &CancellationToken::default()).unwrap();
+    let memory_call = tools.clone().bind_call(&memory, &frozen, &CancellationToken::default()).unwrap();
+    let contract = memory_call.prepare(&CancellationToken::default()).unwrap();
     assert_eq!(
-        tools.execution_class(&memory, &contract),
+        memory_call.execution_class(&contract),
         ExecutionClass::Unmetered
     );
-    assert!(
-        tools
-            .watch_admission(&context, &memory, &contract, &CancellationToken::default())
-            .unwrap()
-            .is_none()
-    );
+    let _memory_watch = memory_call.watch_admission(&context, &contract, &CancellationToken::default()).unwrap();
     let plan = ToolCall {
         call_id: "plan-read".into(), name: "todo".into(), schema_version: "1".into(),
         arguments: json!({"action":"read"}),
     };
     let plan_frozen = FrozenToolContext {
-        tools: vec![crate::plan::schema()], ..frozen.clone()
+        tools: Arc::new(vec![crate::plan::schema()]), ..frozen.clone()
     };
-    let plan_contract = tools.prepare(&plan, &plan_frozen, &CancellationToken::default()).unwrap();
-    assert_eq!(tools.execution_class(&plan, &plan_contract), ExecutionClass::Unmetered);
-    assert!(tools.watch_admission(&context, &plan, &plan_contract, &CancellationToken::default()).unwrap().is_none());
+    let plan_call = tools.clone().bind_call(&plan, &plan_frozen, &CancellationToken::default()).unwrap();
+    let plan_contract = plan_call.prepare(&CancellationToken::default()).unwrap();
+    assert_eq!(plan_call.execution_class(&plan_contract), ExecutionClass::Unmetered);
+    let _plan_watch = plan_call.watch_admission(&context, &plan_contract, &CancellationToken::default()).unwrap();
     // Actual plan execution is covered by Host IPC tests; this assertion is solely admission classification.
     assert_eq!(registrations.load(Ordering::SeqCst), 0);
-    tools
-        .authorize(&context, &memory, &contract, &CancellationToken::default())
+    memory_call
+        .authorize(&context, &contract, &CancellationToken::default())
         .unwrap();
     assert!(matches!(
-        tools.execute(&context, &memory, &contract, &CancellationToken::default()),
+        memory_call.execute(&context, &contract, &CancellationToken::default()),
         ToolCompletion::Result {
             outcome: Outcome::Succeeded,
             ..
@@ -407,17 +401,12 @@ fn combined(ending: Ending) {
                 .unwrap()
                 .revoke_grant(&json!({"grantId":"search"}), HOST)
                 .unwrap();
-            assert!(
-                tools
-                    .watch_admission(&context, &memory, &contract, &CancellationToken::default())
-                    .unwrap()
-                    .is_none()
-            );
-            tools
-                .authorize(&context, &memory, &contract, &CancellationToken::default())
+            let _watch = memory_call.watch_admission(&context, &contract, &CancellationToken::default()).unwrap();
+            memory_call
+                .authorize(&context, &contract, &CancellationToken::default())
                 .unwrap();
             assert!(matches!(
-                tools.execute(&context, &memory, &contract, &CancellationToken::default()),
+                memory_call.execute(&context, &contract, &CancellationToken::default()),
                 ToolCompletion::Result {
                     outcome: Outcome::Succeeded,
                     ..
@@ -454,6 +443,10 @@ fn combined(ending: Ending) {
         );
     }
     drop(results);
+    drop(memory_call);
+    drop(plan_call);
+    drop(_memory_watch);
+    drop(_plan_watch);
     drop(tools);
     drop(start);
     bridge.close();

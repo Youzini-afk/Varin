@@ -31,7 +31,8 @@ fn failed(code: &str) -> ExecutionError {
     ExecutionError::new(code, code)
 }
 impl MemoryBridge {
-    pub(crate) fn new(output: mpsc::SyncSender<Value>) -> Self {
+    pub(crate) fn new(output: impl Into<crate::transport::Sender>) -> Self {
+        let output = output.into();
         let (tx, rx) = mpsc::channel();
         let state = Arc::new(Mutex::new(State {
             epoch: None,

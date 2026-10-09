@@ -82,23 +82,11 @@ pub(crate) fn eligible(catalog: &Catalog, run_id: &str) -> Result<bool, Executio
             .map_err(error)?
             .is_none())
 }
-pub(crate) fn configure(
-    mut start: varin_runtime::supervisor::RunStart,
-    catalog: Arc<Mutex<Catalog>>,
-    bridge: PlanBridge,
-) -> varin_runtime::supervisor::RunStart {
-    if !start.binding.tools.iter().any(|tool| tool.name == TOOL) {
-        start.binding.tools.push(schema());
-    }
-    start.tools = Arc::new(PlanTools {
-        inner: start.tools,
-        catalog,
-        bridge,
-    });
-    start
+pub(crate) fn declaration(catalog: Arc<Mutex<Catalog>>, bridge: PlanBridge)
+    -> varin_runtime::composition::tools::ToolDeclaration {
+    varin_runtime::composition::tools::ToolDeclaration::new(schema(), Arc::new(PlanTools { catalog, bridge }))
 }
 struct PlanTools {
-    inner: Arc<dyn ToolExecutor>,
     catalog: Arc<Mutex<Catalog>>,
     bridge: PlanBridge,
 }
@@ -213,45 +201,8 @@ fn mutation_result(query: &Value, value: &Value) -> Option<(Outcome, Effect)> {
     }
 }
 impl ToolExecutor for PlanTools {
-    fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken)
-        -> Result<varin_runtime::execution::ToolPreparation, ExecutionError> {
-        if call.name == TOOL {
-            self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
-        } else { self.inner.plan(call, context, cancel) }
-    }
-
-    fn execution_class(
-        &self,
-        call: &ToolCall,
-        contract: &ToolContract,
-    ) -> varin_runtime::execution_capacity::ExecutionClass {
-        if call.name == TOOL {
-            varin_runtime::execution_capacity::ExecutionClass::Unmetered
-        } else {
-            self.inner.execution_class(call, contract)
-        }
-    }
-    fn watch_admission(
-        &self,
-        context: &ToolExecutionContext,
-        call: &ToolCall,
-        contract: &ToolContract,
-        cancel: &CancellationToken,
-    ) -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError>
-    {
-        if call.name == TOOL {
-            Ok(None)
-        } else {
-            self.inner.watch_admission(context, call, contract, cancel)
-        }
-    }
-    fn supports_policy_read(
-        &self,
-        context: &FrozenToolContext,
-        call: &ToolCall,
-        contract: &ToolContract,
-    ) -> bool {
-        call.name != TOOL && self.inner.supports_policy_read(context, call, contract)
+    fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken) -> Result<ToolPreparation, ExecutionError> {
+        self.prepare(call, context, cancel).map(ToolPreparation::Ready)
     }
     fn prepare(
         &self,
@@ -259,9 +210,6 @@ impl ToolExecutor for PlanTools {
         context: &FrozenToolContext,
         _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
-        if call.name != TOOL {
-            return self.inner.prepare(call, context, _cancel);
-        }
         if call.schema_version != "1"
             || !context.tools.contains(&schema())
             || !matches!(context.origin, ToolOrigin::ModelStep { .. })
@@ -284,9 +232,6 @@ impl ToolExecutor for PlanTools {
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
-        if call.name != TOOL {
-            return self.inner.authorize(context, call, contract, cancel);
-        }
         if cancel.is_cancelled() {
             return Err(error("plan action cancelled"));
         }
@@ -306,9 +251,6 @@ impl ToolExecutor for PlanTools {
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> ToolCompletion {
-        if call.name != TOOL {
-            return self.inner.execute(context, call, contract, cancel);
-        }
         // A failed local check precedes any dispatch and therefore has no external effect.
         let query = match (|| {
             if cancel.is_cancelled() {
@@ -406,7 +348,7 @@ pub(crate) fn reconcile(
     bridge: PlanBridge,
     run_id: String,
     request_id: String,
-    responses: std::sync::mpsc::SyncSender<Value>,
+    responses: crate::transport::Sender,
     finished: Arc<dyn Fn(&str) + Send + Sync>,
 ) -> Result<(), crate::error::KernelError> {
     std::thread::Builder::new()

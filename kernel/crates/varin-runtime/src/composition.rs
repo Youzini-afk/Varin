@@ -4,13 +4,14 @@
 //! revocation invalidates both future admission and outstanding execution leases.
 pub mod resolver;
 pub mod context;
+pub mod tools;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{
     atomic::{AtomicU8, Ordering},
-    Arc, Weak,
+    Arc, Weak, Mutex,
 };
 use thiserror::Error;
 
@@ -62,6 +63,7 @@ struct Binding<T> {
     schema: Arc<Value>,
     implementation: Arc<T>,
     state: AtomicU8,
+    revocations: Mutex<Vec<Weak<crate::execution::CancellationToken>>>,
 }
 
 pub struct BindingHandle<T>(Arc<Binding<T>>);
@@ -115,6 +117,15 @@ impl<T> CallLease<T> {
     pub fn implementation(&self) -> Result<&T, CompositionError> {
         self.validate()?;
         Ok(self.0 .0.implementation.as_ref())
+    }
+    /// Keep cancellation local to this execution. Retirement never signals these registrations.
+    pub fn watch_revocation(&self, cancel: &crate::execution::CancellationToken) -> crate::execution_capacity::AdmissionControlGuard {
+        let token = Arc::new(cancel.clone());
+        let mut watchers = self.0.0.revocations.lock().unwrap_or_else(|e| e.into_inner());
+        watchers.retain(|watcher| watcher.strong_count() > 0);
+        watchers.push(Arc::downgrade(&token));
+        if self.validate().is_err() { token.cancel(); }
+        crate::execution_capacity::AdmissionControlGuard::new(move || drop(token))
     }
 }
 
@@ -251,6 +262,7 @@ impl<T> CompositionRegistry<T> {
                     schema: Arc::new(spec.schema),
                     implementation: spec.implementation,
                     state: AtomicU8::new(PREPARED),
+                    revocations: Mutex::new(Vec::new()),
                 }))
             };
             bindings.insert(spec.capability, binding);
@@ -321,6 +333,9 @@ impl<T> CompositionRegistry<T> {
     pub fn revoke(&mut self, id: BindingId) -> bool {
         if let Some(binding) = self.generations.get(&id).and_then(Weak::upgrade) {
             binding.state.store(REVOKED, Ordering::Release);
+            let watchers: Vec<_> = binding.revocations.lock().unwrap_or_else(|e| e.into_inner())
+                .iter().filter_map(Weak::upgrade).collect();
+            for token in watchers { token.cancel(); }
             self.authorization = Arc::new(());
             true
         } else {

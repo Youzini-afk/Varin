@@ -17,7 +17,8 @@ pub(crate) struct LanguageBridge {
 struct Reply { v: u64, kind: String, id: String, kernel_epoch: String, result: Value }
 fn failed(code: &str) -> ExecutionError { ExecutionError::new(code, code) }
 impl LanguageBridge {
-    pub(crate) fn new(output: mpsc::SyncSender<Value>) -> Self {
+    pub(crate) fn new(output: impl Into<crate::transport::Sender>) -> Self {
+        let output = output.into();
         let (tx, rx) = mpsc::channel();
         let state = Arc::new(Mutex::new(State { epoch: None, pending: HashMap::new() }));
         let failed_state = state.clone();

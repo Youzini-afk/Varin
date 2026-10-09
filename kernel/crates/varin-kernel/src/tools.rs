@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 use std::sync::{mpsc, Arc};
 use varin_runtime::execution::{
     Access, CancellationToken, CompletionKind, ExecutionError, FrozenToolContext, ToolOrigin, ResourceClaim,
-    ResourceIntent, ToolCall, ToolCompletion, ToolContract, ToolExecutionContext, ToolExecutor, ToolPreparation, ToolSchema,
+    PreparedToolCall, ResourceIntent, ToolCall, ToolCompletion, ToolContract, ToolExecutionContext, ToolExecutor, ToolPreparation, ToolSchema,
 };
 use varin_runtime::{Effect, Lifetime, Outcome};
 
@@ -225,7 +225,17 @@ impl ResourceOperation {
                 serde_json::from_value(args.clone()).map(Self::ProcessRead)
             }
             ToolKind::ProcessSpawn => {
-                serde_json::from_value(args.clone()).map(Self::ProcessSpawn)
+                let mut arguments = args.clone();
+                if arguments.get("env").is_none() {
+                    let environment = std::env::vars_os().map(|(name, value)| {
+                        Ok(EnvironmentEntry {
+                            name: name.into_string().map_err(|_| ExecutionError::new("environment_encoding", "process environment name is not UTF-8"))?,
+                            value: value.into_string().map_err(|_| ExecutionError::new("environment_encoding", "process environment value is not UTF-8"))?,
+                        })
+                    }).collect::<Result<Vec<_>, ExecutionError>>()?;
+                    arguments["env"] = json!(environment);
+                }
+                serde_json::from_value(arguments).map(Self::ProcessSpawn)
             }
         }
         .map_err(|error| ExecutionError::new("invalid_tool_arguments", error.to_string()))?;
@@ -639,8 +649,13 @@ impl KernelToolExecutor {
     }
     pub(crate) fn with_retrieval(mut self, bridge: crate::retrieval::RetrievalBridge, project_id: Option<String>) -> Self { self.retrieval = Some(bridge); self.retrieval_project_id = project_id; self }
     pub(crate) fn with_language(mut self, bridge: crate::language::LanguageBridge) -> Self { self.language = Some(bridge); self }
-    pub(crate) fn schemas(&self) -> Vec<ToolSchema> {
-        self.schemas.clone()
+    pub(crate) fn declarations(self, managed_process_observation: bool) -> Vec<varin_runtime::composition::tools::ToolDeclaration> {
+        let endpoint = Arc::new(self);
+        endpoint.schemas.iter()
+            .filter(|schema| !managed_process_observation || !matches!(schema.name.as_str(), "process_inspect" | "process_read"))
+            .cloned()
+            .map(|schema| varin_runtime::composition::tools::ToolDeclaration::new(schema, endpoint.clone()))
+            .collect()
     }
     pub(crate) fn selected_schemas(enabled_tools: &BTreeSet<ToolKind>) -> Vec<ToolSchema> {
         enabled_tools
@@ -746,20 +761,14 @@ impl KernelToolExecutor {
 
 }
 impl ToolExecutor for KernelToolExecutor {
+    fn bind_call(self: Arc<Self>, call: &ToolCall, request: &FrozenToolContext, _: &CancellationToken) -> Result<Box<dyn PreparedToolCall>, ExecutionError> {
+        let operation = self.frozen_operation(call, request)?;
+        Ok(Box::new(KernelCall { executor: self, call: call.clone(), request: request.clone(), operation }))
+    }
     fn plan(&self, call: &ToolCall, request: &FrozenToolContext, _: &CancellationToken)
         -> Result<ToolPreparation, ExecutionError> {
         let operation = self.frozen_operation(call, request)?;
-        if self.physical_file(&operation) {
-            // Storage canonicalizes parents, junctions and root aliases. Until it resolves the
-            // target, only the canonical physical-file namespace is known. A workspace/root ID
-            // would incorrectly separate two aliases of the same file. Static resource owners
-            // (process output, language, discovery, fixed views) can still bypass this intent.
-            let access = if matches!(operation, ResourceOperation::FileMutation(_)) { Access::Write } else { Access::Read };
-            Ok(ToolPreparation::Resolve {
-                resources: vec![ResourceIntent::Prefix { key_prefix: "[\"file\",".into(), access }],
-                class: varin_runtime::execution_capacity::ExecutionClass::Unmetered,
-            })
-        } else { Ok(ToolPreparation::Ready(self.contract(call, &operation))) }
+        Ok(self.plan_operation(call, &operation))
     }
     fn watch_admission(&self, _: &ToolExecutionContext, _: &ToolCall, _: &ToolContract, cancel: &CancellationToken)
         -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError> {
@@ -767,15 +776,42 @@ impl ToolExecutor for KernelToolExecutor {
     }
     fn execution_class(&self, call: &ToolCall, _: &ToolContract) -> varin_runtime::execution_capacity::ExecutionClass {
         use varin_runtime::execution_capacity::ExecutionClass;
-        match ToolKind::from_name(&call.name).filter(|kind| self.binding.enabled_tools.contains(kind)) {
-            Some(ToolKind::FileSearch) => ExecutionClass::LocalCompute,
-            // Directory lists, plain reads and control stay independent. Host composite retrieval
-            // and language waits have their own stages/owners and do not take a local CPU permit.
-            _ => ExecutionClass::Unmetered,
+        if call.name == "file_search" { ExecutionClass::LocalCompute } else { ExecutionClass::Unmetered }
+    }
+    fn supports_policy_read(&self, context: &FrozenToolContext, call: &ToolCall, contract: &ToolContract) -> bool {
+        self.operation(None, call).is_ok_and(|operation| self.policy_read(context, &operation, contract))
+    }
+    fn prepare(&self, call: &ToolCall, request: &FrozenToolContext, cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
+        let operation = self.frozen_operation(call, request)?;
+        self.planned_contract(&execution_context(&self.binding.run_id, call, &request.origin), call, &operation, cancel)
+    }
+    fn authorize(&self, context: &ToolExecutionContext, call: &ToolCall, contract: &ToolContract, cancel: &CancellationToken) -> Result<(), ExecutionError> {
+        let operation = self.operation(Some(context), call)?;
+        self.authorize_operation(context, call, &operation, contract, cancel)
+    }
+    fn execute(&self, context: &ToolExecutionContext, call: &ToolCall, contract: &ToolContract, cancel: &CancellationToken) -> ToolCompletion {
+        match self.operation(Some(context), call) {
+            Ok(operation) => self.execute_operation(context, call, operation, contract, cancel),
+            Err(error) => ToolCompletion::NotDispatched { reason: error.to_string() },
         }
     }
+}
+impl KernelToolExecutor {
+    fn plan_operation(&self, call: &ToolCall, operation: &ResourceOperation) -> ToolPreparation {
+        if self.physical_file(&operation) {
+            // Storage canonicalizes parents, junctions and root aliases. Until it resolves the
+            // target, only the canonical physical-file namespace is known. A workspace/root ID
+            // would incorrectly separate two aliases of the same file. Static resource owners
+            // (process output, language, discovery, fixed views) can still bypass this intent.
+            let access = if matches!(operation, ResourceOperation::FileMutation(_)) { Access::Write } else { Access::Read };
+            ToolPreparation::Resolve {
+                resources: vec![ResourceIntent::Prefix { key_prefix: "[\"file\",".into(), access }],
+                class: varin_runtime::execution_capacity::ExecutionClass::Unmetered,
+            }
+        } else { ToolPreparation::Ready(self.contract(call, operation)) }
+    }
 
-    fn supports_policy_read(&self, context: &FrozenToolContext, call: &ToolCall, contract: &ToolContract) -> bool {
+    fn policy_read(&self, context: &FrozenToolContext, operation: &ResourceOperation, contract: &ToolContract) -> bool {
         // Eligibility is this trusted adapter's promise, never extension/MCP metadata.
         let Some(source) = &context.source else { return false; };
         let Some(bound) = &self.binding.file_source else { return false; };
@@ -788,32 +824,20 @@ impl ToolExecutor for KernelToolExecutor {
             && source.environment_run_id == self.binding.environment_run_id
             && source.branch_id.as_deref() == Some(bound.branch_id.as_str())
             && source.revision == u64::try_from(bound.revision).ok()
-            && matches!(self.operation(None, call), Ok(ResourceOperation::FileRead(_) | ResourceOperation::FileQuery(_)))
+            && matches!(operation, ResourceOperation::FileRead(_) | ResourceOperation::FileQuery(_))
             && contract.read_only && contract.completion == CompletionKind::Result
     }
-    fn prepare(
-        &self,
-        call: &ToolCall,
-        request: &FrozenToolContext,
-        _cancel: &CancellationToken,
-    ) -> Result<ToolContract, ExecutionError> {
-        let operation = self.frozen_operation(call, request)?;
-        self.planned_contract(&ToolExecutionContext {
-            run_id: self.binding.run_id.clone(), origin: request.origin.clone(),
-            operation_id: match &request.origin {
-                ToolOrigin::ModelStep { request_id } => format!("{request_id}:tool:{}", call.call_id),
-                ToolOrigin::PolicyAction { action_id, node_id } => format!("{action_id}:node:{node_id}"),
-            },
-        }, call, &operation, _cancel)
-    }
-    fn authorize(
+    fn authorize_operation(
         &self,
         context: &ToolExecutionContext,
         call: &ToolCall,
+        operation: &ResourceOperation,
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
-        let operation = self.operation(Some(context), call)?;
+        if context.run_id != self.binding.run_id || context.operation_id.is_empty() {
+            return Err(ExecutionError::new("unauthorized", "tool execution identity does not match bound Run"));
+        }
         if let ResourceOperation::RetrievalQuery(args) = &operation {
             if &self.contract(call, &operation) != contract { return Err(ExecutionError::new("stale_tool_contract", "retrieval contract changed")); }
             return self.admit_retrieval(context, args, cancel);
@@ -830,27 +854,20 @@ impl ToolExecutor for KernelToolExecutor {
         }
         if self.physical_file(&operation) { return Ok(()); }
         self.resources
-            .call(&self.binding, context, operation, true, cancel)
+            .call(&self.binding, context, operation.clone(), true, cancel)
             .map(|_| ())
             .map_err(|failure| {
                 ExecutionError::new(error_code(&failure.error), failure.error.to_string())
             })
     }
-    fn execute(
+    fn execute_operation(
         &self,
         context: &ToolExecutionContext,
         call: &ToolCall,
+        operation: ResourceOperation,
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> ToolCompletion {
-        let operation = match self.operation(Some(context), call) {
-            Ok(value) => value,
-            Err(error) => {
-                return ToolCompletion::NotDispatched {
-                    reason: error.to_string(),
-                }
-            }
-        };
         let mut expected = self.contract(call, &operation);
         if self.physical_file(&operation) { expected.resources = contract.resources.clone(); }
         if &expected != contract {
@@ -938,6 +955,46 @@ impl ToolExecutor for KernelToolExecutor {
     }
 }
 
+struct KernelCall {
+    executor: Arc<KernelToolExecutor>,
+    call: ToolCall,
+    request: FrozenToolContext,
+    operation: ResourceOperation,
+}
+fn execution_context(run_id: &str, call: &ToolCall, origin: &ToolOrigin) -> ToolExecutionContext {
+    ToolExecutionContext {
+        run_id: run_id.into(), origin: origin.clone(),
+        operation_id: match origin {
+            ToolOrigin::ModelStep { request_id } => format!("{request_id}:tool:{}", call.call_id),
+            ToolOrigin::PolicyAction { action_id, node_id } => format!("{action_id}:node:{node_id}"),
+        },
+    }
+}
+impl PreparedToolCall for KernelCall {
+    fn plan(&self, _: &CancellationToken) -> Result<ToolPreparation, ExecutionError> {
+        Ok(self.executor.plan_operation(&self.call, &self.operation))
+    }
+    fn prepare(&self, cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
+        self.executor.planned_contract(&execution_context(&self.request.run_id, &self.call, &self.request.origin), &self.call, &self.operation, cancel)
+    }
+    fn execution_class(&self, contract: &ToolContract) -> varin_runtime::execution_capacity::ExecutionClass {
+        self.executor.execution_class(&self.call, contract)
+    }
+    fn watch_admission(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken)
+        -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError> {
+        self.executor.watch_admission(context, &self.call, contract, cancel)
+    }
+    fn supports_policy_read(&self, contract: &ToolContract) -> bool {
+        self.executor.policy_read(&self.request, &self.operation, contract)
+    }
+    fn authorize(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken) -> Result<(), ExecutionError> {
+        self.executor.authorize_operation(context, &self.call, &self.operation, contract, cancel)
+    }
+    fn execute(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken) -> ToolCompletion {
+        self.executor.execute_operation(context, &self.call, self.operation.clone(), contract, cancel)
+    }
+}
+
 fn tool_schema(kind: ToolKind) -> Value {
     let (properties, required) = match kind {
         ToolKind::CodeRetrieval => return retrieval::schema(),
@@ -966,7 +1023,7 @@ fn tool_schema(kind: ToolKind) -> Value {
         ),
         ToolKind::ProcessSpawn => (
             json!({"cwd":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},
-            "env":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"]}},
+            "env":{"type":"array","description":"Complete process environment. Omit to inherit this execution environment; an empty array starts with no environment variables.","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"]}},
             "mode":{"type":"string","enum":["pipe","pty"]},"cols":{"type":"integer","minimum":1,"maximum":1000},"rows":{"type":"integer","minimum":1,"maximum":500},"windowsRawArguments":{"type":"string"}}),
             vec!["cwd", "command", "args", "mode"],
         ),

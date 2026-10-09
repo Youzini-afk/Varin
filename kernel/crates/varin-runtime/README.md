@@ -19,6 +19,10 @@ writing Pi session files or the Host harness's existing execution records.
   actual schema/implementation; explicit revocation still rejects execution.
 - The kernel's control worker is independent of its Storage queue. The Host client has separate
   request credits. Commands are currently Host-management-only, not delegated tools.
+- `composition::tools` assembles tool declarations into one schema/endpoint directory. A ModelStep
+  pins its selected endpoints through tool settlement. Each call binds one invocation through
+  preparation, resource admission, authorization and execution; revocation cancellation is registered
+  at binding. Ordinary replacement preserves old pins. The frozen batch schema is shared by `Arc`.
 
 The wire source remains `kernel/protocol/schema.json`; it generates the state enums and the
 Host request/response DTOs. Domain implementation types remain private to Rust.
@@ -94,7 +98,9 @@ history and restores request/output/receipt bodies through read-only SQLite and 
 Publication rechecks the Run epoch/revision, branch owner/head and its own relevant event cursor;
 unrelated Runs do not invalidate preparation. Queued promotion and cancellation retain their original
 identities. See the [control isolation review](../../../docs/reviews/runtime-control-isolation-2026-10-09.md)
-for tested boundaries and remaining transport/cold-open work.
+for the earlier verified boundaries. Catalog cold opening/recovery now runs on an initialization
+worker; authenticated requests wait only for that owner, with their cancellation flags intact.
+Explicit context-job capture and publication also stage bodies outside the Catalog lock.
 
 ## Policy-originated read graphs
 

@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
 import { createKernelClient } from './kernel-client.js';
+import { TransportFixture } from './tests/transport-fixture.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { KERNEL_PROTOCOL_VERSION, KERNEL_REQUEST_WINDOW } from './protocol.generated.js';
@@ -17,51 +18,29 @@ const buildVersion = (JSON.parse(await fs.readFile(path.join(repository, 'packag
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 type Envelope = { kind: string; id: string; method?: string; epoch?: string; grantId?: string; ok?: boolean; error?: { code: string; message: string }; result?: unknown };
-function frame(value: unknown) { const body = Buffer.from(JSON.stringify(value)); const header = Buffer.alloc(4); header.writeUInt32BE(body.length); return Buffer.concat([header, body]); }
 
 async function fixture() {
   await fs.access(kernelPath);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-client-review-'));
-  const requests: Envelope[] = [];
+  const probe = new TransportFixture();
+  const requests = probe.sent as Envelope[];
   const responses = new Map<string, Envelope>();
-  const held: Buffer[] = [];
+  const held = probe.held;
   let holdMethod: string | undefined;
+  probe.onReceive = value => { if (typeof value.id === 'string') responses.set(value.id, value as Envelope); };
+  probe.hold = value => !!holdMethod && requests.find(request => request.id === value.id)?.method === holdMethod;
   let child!: ChildProcessWithoutNullStreams;
-  let releaseHeld = () => {};
   const options = { hostId: 'client-review', storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false };
-  const host = createKernelClient({ ...options, spawnProcess: ((command, args, input) => {
+  const host = createKernelClient({ ...options, transportFactory: probe.create, spawnProcess: ((command, args, input) => {
     child = spawn(command, args ?? [], input ?? {}) as ChildProcessWithoutNullStreams;
-    const write = child.stdin.write;
-    child.stdin.write = ((...values: unknown[]) => {
-      const bytes = values[0];
-      if (Buffer.isBuffer(bytes) && bytes.length >= 4 && bytes.readUInt32BE(0) === bytes.length - 4) requests.push(JSON.parse(bytes.subarray(4).toString()) as Envelope);
-      return Reflect.apply(write, child.stdin, values);
-    }) as typeof child.stdin.write;
-    // Delay delivery of selected real responses, without mocking kernel execution.
-    const emit = child.stdout.emit;
-    let buffer = Buffer.alloc(0);
-    child.stdout.emit = ((event: string | symbol, ...values: unknown[]) => {
-      if (event !== 'data') return Reflect.apply(emit, child.stdout, [event, ...values]);
-      buffer = Buffer.concat([buffer, Buffer.from(values[0] as Uint8Array)]);
-      while (buffer.length >= 4 && buffer.length >= 4 + buffer.readUInt32BE(0)) {
-        const end = 4 + buffer.readUInt32BE(0);
-        const bytes = Buffer.from(buffer.subarray(0, end));
-        buffer = buffer.subarray(end);
-        const response = JSON.parse(bytes.subarray(4).toString()) as Envelope;
-        responses.set(response.id, response);
-        if (holdMethod && requests.find(request => request.id === response.id)?.method === holdMethod) held.push(bytes);
-        else Reflect.apply(emit, child.stdout, ['data', bytes]);
-      }
-      return true;
-    }) as typeof child.stdout.emit;
-    releaseHeld = () => { holdMethod = undefined; for (const bytes of held.splice(0)) Reflect.apply(emit, child.stdout, ['data', bytes]); };
     return child;
   }) as typeof spawn });
+  const releaseHeld = () => { holdMethod = undefined; for (const value of held.splice(0)) (host as unknown as {consumeFrame(value: unknown): void}).consumeFrame(value); };
   cleanups.push(async () => { releaseHeld(); await host.close(); await fs.rm(root, { recursive: true, force: true }); });
   await host.start();
   return { host, runtimeClient: new AgentRuntimeClient(host), root, options, requests, responses, held, hold(method: string) { holdMethod = method; }, release: () => releaseHeld(),
     async crash() { const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited; },
-    async raw(value: Record<string, unknown>) { const id = `review-${requests.length}`; child.stdin.write(frame({ v: KERNEL_PROTOCOL_VERSION, kind: 'request', id, epoch: host.kernelEpoch, ...value })); await expect.poll(() => responses.has(id)).toBe(true); return responses.get(id)!; },
+    async raw(value: Record<string, unknown>) { const id = `review-${requests.length}`; await probe.send({ v: KERNEL_PROTOCOL_VERSION, kind: 'request', id, epoch: host.kernelEpoch, ...value }); await expect.poll(() => responses.has(id)).toBe(true); return responses.get(id)!; },
   };
 }
 
@@ -401,7 +380,7 @@ it('process push subscription rejects another actor ack and supports explicit un
   const actor = f.host.scoped(grant);
   const root = await actor.fileRootRegister({ workspaceId: 'subscription-workspace', executionWorkspaceId: 'subscription-workspace', canonicalRoot: workspace });
   const identity = { workspaceId: 'subscription-workspace', processId: 'subscription-process' };
-  await actor.processSpawn({ ...identity, rootId: String(root.rootId), cwd: '', command: process.execPath, args: ['-e', 'process.stdout.write("pushed fixture output")'], env: [], mode: 'pipe' });
+  await actor.processSpawn({ ...identity, rootId: String(root.rootId), cwd: '', command: process.execPath, args: ['-e', 'process.stdout.write("pushed fixture output")'], env: Object.entries(process.env).flatMap(([name, value]) => value === undefined ? [] : [{name, value}]), mode: 'pipe' });
   const events: Array<{ stream: string; sequence: number; subscriptionId: string }> = [];
   const chunks: Buffer[] = [];
   const subscription = await actor.processSubscribe({ ...identity, cursor: 0 }, event => {
@@ -608,7 +587,7 @@ it('queued source launch survives kernel loss and rebinds fresh authority to the
   });
   await f.runtimeClient.createThread('rebind-thread', 'rebind-conversation');
   const predecessor = await f.runtimeClient.submit({ key: 'rebind-predecessor', threadId: 'rebind-thread', branchId: 'rebind-conversation', expectedHead: null, input: { text: 'held predecessor' }, configuration: provider.configuration });
-  await f.runtimeClient.startRun(predecessor.run_id);
+  await f.runtimeClient.startFromSource({runId: predecessor.run_id, workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'rebind-source', revision, mode: 'fixed_branch', tools: ['file_read']});
   await expect.poll(() => provider.requests.length).toBe(1);
   const next = await f.runtimeClient.enqueue({ key: 'rebind-next', threadId: 'rebind-thread', branchId: 'rebind-conversation', mode: 'next_run', input: { text: 'queued source request' } });
   const selection = { runId: next.run_id, workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'rebind-source', revision, mode: 'fixed_branch' as const, tools: ['file_read'] as const };

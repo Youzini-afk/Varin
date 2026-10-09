@@ -61,68 +61,28 @@ pub(crate) fn configure(mut start: RunStart, catalog: Arc<Mutex<Catalog>>) -> Ru
     });
     start
 }
-pub(crate) fn wrap_tools(
-    inner: Arc<dyn ToolExecutor>,
-    catalog: Arc<Mutex<Catalog>>,
-    binding: Option<ToolBinding>,
-    resources: KernelResourceClient,
-) -> Arc<dyn ToolExecutor> {
-    Arc::new(CollaborationTools {
-        inner,
-        catalog,
-        binding,
-        resources,
-    })
+pub(crate) fn declarations(catalog: Arc<Mutex<Catalog>>, binding: Option<ToolBinding>, resources: KernelResourceClient)
+    -> Vec<varin_runtime::composition::tools::ToolDeclaration> {
+    let fixed = binding.as_ref().is_some_and(|binding| binding.source_mode == varin_runtime::SourceMode::FixedBranch);
+    let endpoint = Arc::new(CollaborationTools { catalog, binding, resources });
+    schemas(Vec::new(), fixed).into_iter().map(|schema| varin_runtime::composition::tools::ToolDeclaration::new(schema, endpoint.clone())).collect()
 }
 struct CollaborationTools {
-    inner: Arc<dyn ToolExecutor>,
     catalog: Arc<Mutex<Catalog>>,
     binding: Option<ToolBinding>,
     resources: KernelResourceClient,
 }
 impl ToolExecutor for CollaborationTools {
-    fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken)
-        -> Result<varin_runtime::execution::ToolPreparation, ExecutionError> {
-        if is_tool(&call.name) {
-            self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
-        } else { self.inner.plan(call, context, cancel) }
+    fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken) -> Result<ToolPreparation, ExecutionError> {
+        self.prepare(call, context, cancel).map(ToolPreparation::Ready)
     }
-
-    fn watch_admission(&self, context: &ToolExecutionContext, call: &ToolCall, contract: &ToolContract, cancel: &CancellationToken)
-        -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError> {
-        if is_tool(&call.name) { Ok(None) } else { self.inner.watch_admission(context, call, contract, cancel) }
-    }
-
-    fn execution_class(&self, call: &ToolCall, contract: &ToolContract) -> varin_runtime::execution_capacity::ExecutionClass {
-        if is_tool(&call.name) { varin_runtime::execution_capacity::ExecutionClass::Unmetered }
-        else { self.inner.execution_class(call, contract) }
-    }
-
-    fn supports_policy_read(
-        &self,
-        c: &FrozenToolContext,
-        call: &ToolCall,
-        contract: &ToolContract,
-    ) -> bool {
-        if is_tool(&call.name) {
-            matches!(
-                call.name.as_str(),
-                collaboration::STATUS_TOOL | collaboration::REPORT_TOOL
-            ) && contract.read_only
-                && contract.completion == CompletionKind::Result
-        } else {
-            self.inner.supports_policy_read(c, call, contract)
-        }
-    }
+    fn supports_policy_read(&self, _: &FrozenToolContext, call: &ToolCall, contract: &ToolContract) -> bool { matches!(call.name.as_str(), collaboration::STATUS_TOOL | collaboration::REPORT_TOOL) && contract.read_only && contract.completion == CompletionKind::Result }
     fn prepare(
         &self,
         call: &ToolCall,
         request: &FrozenToolContext,
         _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
-        if !is_tool(&call.name) {
-            return self.inner.prepare(call, request, _cancel);
-        }
         let fixed = self
             .binding
             .as_ref()
@@ -188,9 +148,6 @@ impl ToolExecutor for CollaborationTools {
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
-        if !is_tool(&call.name) {
-            return self.inner.authorize(c, call, contract, cancel);
-        }
         if cancel.is_cancelled() {
             return Err(error("collaboration cancelled"));
         }
@@ -223,9 +180,6 @@ impl ToolExecutor for CollaborationTools {
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> ToolCompletion {
-        if !is_tool(&call.name) {
-            return self.inner.execute(c, call, contract, cancel);
-        }
         let result = (|| -> Result<ToolCompletion, ExecutionError> {
             if cancel.is_cancelled() {
                 return Err(error("collaboration cancelled"));

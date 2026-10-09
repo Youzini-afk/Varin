@@ -93,10 +93,6 @@ fn domain(error: varin_runtime::RuntimeError) -> KernelError {
         other => KernelError::Storage(other.to_string()),
     }
 }
-/// Transient progress is lossy; a protocol-sized guard must run before the shared writer.
-pub(crate) fn progress_frame_fits(event: &Value, frame_limit: usize) -> bool {
-    serde_json::to_vec(event).is_ok_and(|bytes| bytes.len() <= frame_limit)
-}
 pub(crate) fn spawn(
     commands: mpsc::Receiver<Command>,
     self_sender: mpsc::Sender<Command>,
@@ -109,7 +105,7 @@ pub(crate) fn spawn(
     plan_bridge: crate::plan_bridge::PlanBridge,
     retrieval_bridge: crate::retrieval::RetrievalBridge,
     policy_bridge: crate::policy::PolicyBridge,
-    responses: mpsc::SyncSender<Value>,
+    responses: crate::transport::Sender,
     finished: impl Fn(&str) + Send + Sync + 'static,
 ) -> JoinHandle<()> {
     let finished: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(finished);
@@ -147,6 +143,10 @@ pub(crate) fn spawn(
                 }
                 Command::Stop => break,
                 Command::ProcessTerminal(fact) => {
+                    if opening {
+                        waiting.push_back(Command::ProcessTerminal(fact));
+                        continue;
+                    }
                     if let Some(runtime) = runtime.as_ref() {
                         let result = apply_process_terminal(runtime, &fact);
                         if let Err(error) = result {
@@ -159,6 +159,10 @@ pub(crate) fn spawn(
                     }
                 }
                 Command::ProcessReplayFailed(reason) => {
+                    if opening {
+                        waiting.push_back(Command::ProcessReplayFailed(reason));
+                        continue;
+                    }
                     if let Some(runtime) = runtime.as_ref() {
                         let catalog = runtime.catalog();
                         if let Ok(mut catalog) = catalog.lock() {
@@ -518,6 +522,7 @@ pub(crate) fn spawn(
                                     start.binding.tools.push(crate::memory::schema(true));
                                     if plan_eligible { start.binding.tools.push(crate::plan::schema()); }
                                 }
+                                start.binding.tools.sort_by(|left, right| left.name.cmp(&right.name));
                                 start.binding.tool_schema_generation =
                                     start.binding.configuration_generation;
                                 let source = selected
@@ -577,6 +582,8 @@ pub(crate) fn spawn(
                                 return Ok(serde_json::to_value(intent)?);
                             }
                             let mut launch_source = None;
+                            let mut declarations = Vec::new();
+                            let mut collaboration_source = None;
                             if let Some(binding) = p.tool_binding {
                                 let binding: crate::tools::ToolBinding =
                                     serde_json::from_value(binding)?;
@@ -598,38 +605,30 @@ pub(crate) fn spawn(
                                 .map_err(|e| KernelError::Authorization(e.to_string()))?
                                 .with_language(language_bridge.clone())
                                 .with_retrieval(retrieval_bridge.clone(), retrieval_project_id);
-                                start.binding.tools = tools.schemas();
                                 start.binding.tool_schema_generation =
                                     start.binding.configuration_generation;
-                                start.tools = Arc::new(tools);
-                                // The source executor replaced the initial built-ins; keep the existing policy wrapper.
-                                if !is_child {
-                                    start.tools = crate::questions::wrap_tools(start.tools, runtime.catalog());
-                                    start.binding.tools.push(crate::questions::schema());
-                                    start.binding.tools = crate::collaboration::schemas(start.binding.tools, collaboration_binding.source_mode == varin_runtime::SourceMode::FixedBranch);
-                                    start.tools = crate::collaboration::wrap_tools(start.tools, runtime.catalog(), Some(collaboration_binding.clone()), resources.clone());
-                                    start.tools = crate::process_wait::wrap_tools(start.tools, runtime.catalog(), collaboration_binding, resources.clone());
-                                    start.binding.tools = crate::process_wait::schemas(start.binding.tools);
-                                }
-                            }
-                            if launch_source.is_none() && !is_context_job && !is_child {
-                                start.binding.tools = crate::collaboration::schemas(start.binding.tools, false);
-                                start.tools = crate::collaboration::wrap_tools(start.tools, runtime.catalog(), None, resources.clone());
+                                declarations.extend(tools.declarations(!is_child));
+                                collaboration_source = Some(collaboration_binding);
                             }
                             if !is_context_job && !is_child {
-                                start = crate::memory::configure(start, runtime.catalog(), memory_bridge.clone(), true);
+                                declarations.push(crate::questions::declaration(runtime.catalog()));
+                                declarations.extend(crate::collaboration::declarations(runtime.catalog(), collaboration_source.clone(), resources.clone()));
+                                if let Some(source) = collaboration_source {
+                                    declarations.extend(crate::process_wait::declarations(runtime.catalog(), source, resources.clone()));
+                                }
+                                declarations.push(crate::memory::declaration(runtime.catalog(), memory_bridge.clone(), true));
                             }
-                            if plan_eligible { start = crate::plan::configure(start, runtime.catalog(), plan_bridge.clone()); }
+                            if plan_eligible { declarations.push(crate::plan::declaration(runtime.catalog(), plan_bridge.clone())); }
                             let mcp_binding = p.mcp_binding.map(mcp_binding).transpose()?;
                             if let Some(binding) = &mcp_binding {
                                 binding.validate().map_err(domain)?;
-                                if binding.tools.iter().any(|tool| start.binding.tools.iter().any(|existing| existing.name == tool.name)) {
-                                    return Err(KernelError::Protocol("MCP tool collides with another selected capability".into()));
-                                }
-                                start.binding.tools.extend(binding.tools.iter().cloned());
-                                start.tools = mcp_bridge.wrap(p.run_id.clone(), binding.clone(), start.tools)
-                                    .map_err(|error| KernelError::Authorization(error.to_string()))?;
+                                declarations.extend(mcp_bridge.declarations(p.run_id.clone(), binding.clone())
+                                    .map_err(|error| KernelError::Authorization(error.to_string()))?);
                             }
+                            let directory = varin_runtime::composition::tools::ToolDirectory::assemble(declarations)
+                                .map_err(|error| KernelError::Protocol(error.to_string()))?;
+                            start.binding.tools = directory.schemas().to_vec();
+                            start.tools = Arc::new(directory);
                             let policy_models = runtime.catalog().lock()
                                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                                 .launch_intent(&p.run_id).map_err(domain)?
@@ -684,11 +683,7 @@ pub(crate) fn spawn(
                             thread::spawn(move || {
                                 for update in updates {
                                     let event = json!({"v":PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":progress_epoch,"stream":"progress","runId":update.run_id,"streamId":progress_stream_id,"sequence":update.sequence,"event":update.event});
-                                    // Progress is already lossy; never let a large tool projection kill
-                                    // the shared writer. Durable history retains its chunked read path.
-                                    if progress_frame_fits(&event, crate::protocol::MAX_FRAME_BYTES) {
-                                        let _ = progress_responses.try_send(event);
-                                    }
+                                    let _ = progress_responses.try_send(event);
                                 }
                             });
                             let handle = runtime
@@ -710,6 +705,38 @@ pub(crate) fn spawn(
                                 }
                             });
                             return Ok(receipt);
+                        }
+                        if method == "runtime.context_job.create" || method == "runtime.context_job.publish" {
+                            let catalog = runtime.catalog();
+                            let create = if method == "runtime.context_job.create" {
+                                let p: ContextJobCreateParams = serde_json::from_value(params.clone())?;
+                                Some(prepare_context_job(&*catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?, p)?)
+                            } else { None };
+                            let publish = if create.is_none() {
+                                let p: RunParams = serde_json::from_value(params)?;
+                                Some(catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.prepare_context_job_publication(&p.run_id).map_err(domain)?)
+                            } else { None };
+                            let response_id = id.clone(); let response_sender = responses.clone(); let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            thread::spawn(move || {
+                                let result = (|| -> Result<Value,KernelError> {
+                                    if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                                    if let Some(create) = create {
+                                        let prepared = create.load().map_err(domain)?;
+                                        if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                                        let result = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.admit_prepared_context_job(prepared).map_err(domain)?;
+                                        Ok(serde_json::to_value(result)?)
+                                    } else {
+                                        let prepared = publish.expect("publication captured").load().map_err(domain)?;
+                                        if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                                        let result = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.publish_prepared_context_job(prepared).map_err(domain)?;
+                                        Ok(serde_json::to_value(result)?)
+                                    }
+                                })();
+                                let response = match result { Ok(value) => response_ok(&response_id,value), Err(error) => response_error(&response_id,&error) };
+                                done(&response_id); let _ = response_sender.send(response);
+                            });
+                            deferred = true; return Ok(Value::Null);
                         }
                         if method == "runtime.history.body" {
                             let p: HistoryBodyParams = serde_json::from_value(params)?;
@@ -1005,60 +1032,6 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
             )?)
         };
     }
-    if method == "runtime.context_job.create" {
-        let p: ContextJobCreateParams = serde_json::from_value(params)?;
-        let configuration: varin_runtime::ModelSessionConfiguration =
-            serde_json::from_value(p.configuration.clone())?;
-        let scope = p
-            .credential_scope
-            .map(|scope| {
-                Ok::<_, KernelError>(varin_runtime::providers::auth::CredentialScope {
-                    reference: scope.reference,
-                    authority: scope.authority,
-                    account: scope.account,
-                    generation: u64::try_from(scope.generation).map_err(|_| {
-                        KernelError::Protocol("credential generation must be nonnegative".into())
-                    })?,
-                })
-            })
-            .transpose()?;
-        let identity = if let Some(scope) = scope.as_ref() {
-            model_session::connection_identity_with_scope(&configuration, scope)
-        } else {
-            model_session::connection_identity(&configuration)
-        }
-        .map_err(|error| KernelError::Protocol(error.to_string()))?;
-        let launch = varin_runtime::catalog::launches::LaunchSelection {
-            policy_models: Vec::new(),
-            mcp_binding: None,
-            credential_scope: scope,
-            connection_identity: identity,
-            provider_family: configuration.provider_family,
-            model: configuration.model,
-            configuration_generation: configuration.configuration_generation,
-            tool_schema_generation: 0,
-            tools: Vec::new(),
-            policy: varin_runtime::context_job::policy_identity(),
-            source: None,
-        };
-        let request = varin_runtime::catalog::context_jobs::ContextJobRequest {
-            personalization: p.personalization.map(personalization_basis).transpose()?,
-            key: p.key,
-            branch_id: p.branch_id,
-            through_id: p.through_id,
-            expected_revision: u64::try_from(p.expected_revision).map_err(|_| {
-                KernelError::Protocol("context revision must be nonnegative".into())
-            })?,
-            effective_system_prompt: p.effective_system_prompt,
-            instruction_sources: p.instruction_sources,
-            memory_checkpoint: p.memory_checkpoint.0,
-        };
-        return Ok(serde_json::to_value(
-            catalog
-                .create_context_job(request, launch, p.configuration)
-                .map_err(domain)?,
-        )?);
-    }
     if method == "runtime.history.page" {
         let p: HistoryPageParams = serde_json::from_value(params)?;
         let limit = u32::try_from(p.limit)
@@ -1268,6 +1241,7 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                             tools = crate::process_wait::schemas(tools);
                             tools.push(crate::memory::schema(true));
                             if plan_eligible { tools.push(crate::plan::schema()); }
+                            tools.sort_by(|left, right| left.name.cmp(&right.name));
                             tools
                         },
                         policy: crate::process_wait::default_policy_identity(),
@@ -1330,12 +1304,6 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
             let p: HistoryParams = serde_json::from_value(params)?;
             Ok(serde_json::to_value(
                 catalog.queued_inputs(&p.branch_id).map_err(domain)?,
-            )?)
-        }
-        "runtime.history.read" => {
-            let p: HistoryParams = serde_json::from_value(params)?;
-            Ok(serde_json::to_value(
-                catalog.history(&p.branch_id).map_err(domain)?,
             )?)
         }
         "runtime.observer.read" => {
@@ -1495,4 +1463,54 @@ fn personalization_basis(value: ContextPersonalization) -> Result<varin_runtime:
         original_sections: value.original_sections.into_iter().map(|section| varin_runtime::catalog::personalization::SystemSection { name: section.name, content: section.content }).collect(),
         instruction_sources: value.instruction_sources,
     })
+}
+
+fn prepare_context_job(catalog: &Catalog, p: ContextJobCreateParams) -> Result<varin_runtime::catalog::context_jobs::ContextJobPreparation, KernelError> {
+        let configuration: varin_runtime::ModelSessionConfiguration =
+            serde_json::from_value(p.configuration.clone())?;
+        let scope = p
+            .credential_scope
+            .map(|scope| {
+                Ok::<_, KernelError>(varin_runtime::providers::auth::CredentialScope {
+                    reference: scope.reference,
+                    authority: scope.authority,
+                    account: scope.account,
+                    generation: u64::try_from(scope.generation).map_err(|_| {
+                        KernelError::Protocol("credential generation must be nonnegative".into())
+                    })?,
+                })
+            })
+            .transpose()?;
+        let identity = if let Some(scope) = scope.as_ref() {
+            model_session::connection_identity_with_scope(&configuration, scope)
+        } else {
+            model_session::connection_identity(&configuration)
+        }
+        .map_err(|error| KernelError::Protocol(error.to_string()))?;
+        let launch = varin_runtime::catalog::launches::LaunchSelection {
+            policy_models: Vec::new(),
+            mcp_binding: None,
+            credential_scope: scope,
+            connection_identity: identity,
+            provider_family: configuration.provider_family,
+            model: configuration.model,
+            configuration_generation: configuration.configuration_generation,
+            tool_schema_generation: 0,
+            tools: Vec::new(),
+            policy: varin_runtime::context_job::policy_identity(),
+            source: None,
+        };
+        let request = varin_runtime::catalog::context_jobs::ContextJobRequest {
+            personalization: p.personalization.map(personalization_basis).transpose()?,
+            key: p.key,
+            branch_id: p.branch_id,
+            through_id: p.through_id,
+            expected_revision: u64::try_from(p.expected_revision).map_err(|_| {
+                KernelError::Protocol("context revision must be nonnegative".into())
+            })?,
+            effective_system_prompt: p.effective_system_prompt,
+            instruction_sources: p.instruction_sources,
+            memory_checkpoint: p.memory_checkpoint.0,
+        };
+    catalog.prepare_context_job(request, launch, p.configuration).map_err(domain)
 }

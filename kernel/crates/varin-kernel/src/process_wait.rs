@@ -55,21 +55,14 @@ pub(crate) fn configure(mut start: RunStart, catalog: Arc<Mutex<Catalog>>) -> Ru
     });
     start
 }
-pub(crate) fn wrap_tools(
-    inner: Arc<dyn ToolExecutor>,
-    catalog: Arc<Mutex<Catalog>>,
-    binding: ToolBinding,
-    resources: KernelResourceClient,
-) -> Arc<dyn ToolExecutor> {
-    Arc::new(ProcessWaitTools {
-        inner,
-        catalog,
-        binding,
-        resources,
-    })
+pub(crate) fn declarations(catalog: Arc<Mutex<Catalog>>, binding: ToolBinding, resources: KernelResourceClient)
+    -> Vec<varin_runtime::composition::tools::ToolDeclaration> {
+    let selected = crate::tools::KernelToolExecutor::selected_schemas(&binding.enabled_tools);
+    let endpoint = Arc::new(ProcessWaitTools { catalog, binding, resources });
+    schemas(selected).into_iter().filter(|schema| schema.name == WAIT_TOOL || observes(&schema.name))
+        .map(|schema| varin_runtime::composition::tools::ToolDeclaration::new(schema, endpoint.clone())).collect()
 }
 struct ProcessWaitTools {
-    inner: Arc<dyn ToolExecutor>,
     catalog: Arc<Mutex<Catalog>>,
     binding: ToolBinding,
     resources: KernelResourceClient,
@@ -166,30 +159,8 @@ impl ProcessWaitTools {
     }
 }
 impl ToolExecutor for ProcessWaitTools {
-    fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken)
-        -> Result<varin_runtime::execution::ToolPreparation, ExecutionError> {
-        if call.name == WAIT_TOOL {
-            self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
-        } else { self.inner.plan(call, context, cancel) }
-    }
-
-    fn execution_class(&self, call: &ToolCall, contract: &ToolContract) -> varin_runtime::execution_capacity::ExecutionClass {
-        if call.name == WAIT_TOOL { varin_runtime::execution_capacity::ExecutionClass::Unmetered }
-        else { self.inner.execution_class(call, contract) }
-    }
-    fn watch_admission(&self, context: &ToolExecutionContext, call: &ToolCall, contract: &ToolContract, cancel: &CancellationToken)
-        -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError> {
-        if call.name == WAIT_TOOL { Ok(None) }
-        else { self.inner.watch_admission(context, call, contract, cancel) }
-    }
-
-    fn supports_policy_read(
-        &self,
-        c: &FrozenToolContext,
-        call: &ToolCall,
-        contract: &ToolContract,
-    ) -> bool {
-        call.name != WAIT_TOOL && self.inner.supports_policy_read(c, call, contract)
+    fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken) -> Result<ToolPreparation, ExecutionError> {
+        self.prepare(call, context, cancel).map(ToolPreparation::Ready)
     }
     fn prepare(
         &self,
@@ -197,8 +168,8 @@ impl ToolExecutor for ProcessWaitTools {
         frozen: &FrozenToolContext,
         _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
-        if call.name != WAIT_TOOL {
-            return self.inner.prepare(call, frozen, _cancel);
+        if observes(&call.name) {
+            return crate::tools::KernelToolExecutor::new(self.binding.clone(), self.resources.clone())?.prepare(call, frozen, _cancel);
         }
         let schema = schemas(crate::tools::KernelToolExecutor::selected_schemas(
             &self.binding.enabled_tools,
@@ -236,9 +207,6 @@ impl ToolExecutor for ProcessWaitTools {
             self.validate_contract(c, call, contract)?;
             return self.observe(c, call, true, cancel).map(|_| ());
         }
-        if call.name != WAIT_TOOL {
-            return self.inner.authorize(c, call, contract, cancel);
-        }
         if cancel.is_cancelled() {
             return Err(error("process observation cancelled"));
         }
@@ -272,9 +240,6 @@ impl ToolExecutor for ProcessWaitTools {
                     content: json!({"error":e.code,"message":e.message}),
                 },
             };
-        }
-        if call.name != WAIT_TOOL {
-            return self.inner.execute(c, call, contract, cancel);
         }
         let result = (|| -> Result<ToolCompletion, ExecutionError> {
             self.authorize(c, call, contract, cancel)?;

@@ -170,6 +170,7 @@ impl<
             .policy_boundary(&input.run_id, input.owner_generation)?;
         let action_id = format!("{}:policy:{}", input.run_id, boundary.id);
         let mut admitted = Vec::new();
+        let schemas = Arc::new(input.binding.tools.clone());
         for node in nodes {
             if !input.binding.tools.iter().any(|schema| {
                 schema.name == node.call.name && schema.version == node.call.schema_version
@@ -185,13 +186,13 @@ impl<
                     action_id: action_id.clone(),
                     node_id: node.id.clone(),
                 },
-                tools: input.binding.tools.clone(),
+                tools: schemas.clone(),
                 tool_schema_generation: input.binding.tool_schema_generation,
                 source: boundary.source.clone(),
             };
-            let contract = guarded("tool_prepare_panicked", || {
-                self.tools.prepare(&node.call, &context, cancel)
-            })?;
+            let node_cancel = cancel.child(&format!("{action_id}:node:{}", node.id));
+            let bound = self.tools.clone().bind_call(&node.call, &context, &node_cancel)?;
+            let contract = guarded("tool_prepare_panicked", || bound.prepare(cancel))?;
             if contract.name != node.call.name
                 || contract.schema_version != node.call.schema_version
                 || !contract.read_only
@@ -200,9 +201,7 @@ impl<
                     .resources
                     .iter()
                     .any(|resource| resource.access != Access::Read)
-                || !self
-                    .tools
-                    .supports_policy_read(&context, &node.call, &contract)
+                || !bound.supports_policy_read(&contract)
             {
                 return Err(ExecutionError::new(
                     "policy_read_denied",
@@ -285,6 +284,7 @@ impl<
                                     operation_id: format!("{}:node:{}", action, node.id),
                                 };
                                 let token = cancel.child(&context.operation_id);
+                                let bound = self.tools.clone().bind_call(&node.call, &admitted.context, &token)?;
                                 let mut lease = None;
                                 let mut _admission_control = None;
                                 let completion = if blocked {
@@ -298,22 +298,17 @@ impl<
                                 } else {
                                     // Revalidate the retained implementation and grant on every retry.
                                     let current =
-                                        self.tools.prepare(&node.call, &admitted.context, &token)?;
+                                        bound.prepare(&token)?;
                                     if current != admitted.contract
-                                        || !self.tools.supports_policy_read(
-                                            &admitted.context,
-                                            &node.call,
-                                            &current,
-                                        )
+                                        || !bound.supports_policy_read(&current)
                                     {
                                         return Err(ExecutionError::new(
                                             "policy_read_denied",
                                             "retained read binding changed",
                                         ));
                                     }
-                                    match self.tools.authorize(
+                                    match bound.authorize(
                                         &context,
-                                        &node.call,
                                         &admitted.contract,
                                         &token,
                                     ) {
@@ -322,7 +317,7 @@ impl<
                                         },
                                         Ok(()) => {
                                             let ready = prepare_dispatch(&token, || {
-                                                _admission_control = self.tools.watch_admission(&context, &node.call, &admitted.contract, &token)?;
+                                                _admission_control = bound.watch_admission(&context, &admitted.contract, &token)?;
                                                 let admission = self.persistence.resource_admission();
                                                 let identity = crate::execution_capacity::AdmissionIdentity {
                                                     run_id: input.run_id.clone(), owner_generation: input.owner_generation,
@@ -331,7 +326,7 @@ impl<
                                                 };
                                                 lease = admission.acquire_scheduled(
                                                     &context.operation_id, &admitted.contract.resources, &identity,
-                                                    self.tools.execution_class(&node.call, &admitted.contract), &token,
+                                                    bound.execution_class(&admitted.contract), &token,
                                                 )?;
                                                 Ok(lease.is_some())
                                             })?;
@@ -341,9 +336,8 @@ impl<
                                                 }
                                             } else if let Err(error) = self.persistence.task_family(&input.run_id, input.owner_generation) {
                                                 ToolCompletion::NotDispatched { reason: format!("{}: {}", error.code, error.message) }
-                                            } else if let Err(error) = self.tools.authorize(
+                                            } else if let Err(error) = bound.authorize(
                                                 &context,
-                                                &node.call,
                                                 &admitted.contract,
                                                 &token,
                                             ) {
@@ -358,9 +352,8 @@ impl<
                                             } else {
                                                 std::panic::catch_unwind(
                                                     std::panic::AssertUnwindSafe(|| {
-                                                        self.tools.execute(
+                                                        bound.execute(
                                                             &context,
-                                                            &node.call,
                                                             &admitted.contract,
                                                             &token,
                                                         )

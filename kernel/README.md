@@ -1,8 +1,16 @@
 # Varin Rust system kernel
 
 This workspace contains the private kernel executable used by each Application Host. It is not a
-public server and it does not expose a TCP port. The Host starts `varin-kernel` with stdin/stdout
-framed JSON (`u32` big-endian length followed by one UTF-8 JSON envelope); stderr is diagnostics only.
+public server and it does not expose a TCP port. The Host supplies private local control/content
+endpoints and a one-time bearer through stdin bootstrap. Windows uses named pipes with overlapped
+I/O; Unix uses local sockets. Both connections authenticate the same fresh kernel epoch. Stderr
+is diagnostics only; requests and output no longer share stdin/stdout.
+
+Control envelopes use length-framed JSON. Content uses separately acknowledged UUID/sequence chunks,
+rotating between ready streams at the selected socket-buffer granularity. Frame size bounds individual
+packets, not total content. JSON body encoding/decoding runs outside the control readers and domain
+actors. Closing either connection invalidates that epoch. A request identity is registered before its
+body arrives, so cancellation can acknowledge and discard an unfinished upload without executing it.
 
 The wire source is [`protocol/schema.json`](protocol/schema.json). TypeScript DTOs used by the Host
 client are generated at `packages/web/application-host/lib/kernel/protocol.generated.ts` and checked by

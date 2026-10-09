@@ -4,6 +4,7 @@ import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-a
 import { createShellSupervisor } from "../harness/shell-supervisor.js";
 import { createOutputStore } from "../harness/output-store.js";
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { TransportFixture } from "./tests/transport-fixture.js";
 import { createKernelProcessService } from "./process-service.js";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -51,7 +52,8 @@ async function fixture(env: NodeJS.ProcessEnv = {}) {
   await fs.mkdir(path.join(workspace, "child"), { recursive: true });
   const storageRoot = path.join(root, "storage");
   let kernelChild: ChildProcessWithoutNullStreams | undefined;
-  const host = createKernelClient({ hostId: "process-test", storageRoot, kernelPath, buildVersion, allowCargoDevRunner: false, env,
+  const probe = new TransportFixture();
+  const host = createKernelClient({ hostId: "process-test", storageRoot, kernelPath, buildVersion, allowCargoDevRunner: false, env, transportFactory: probe.create,
     spawnProcess: ((command: string, args: string[], options: Parameters<typeof nodeSpawn>[2]) => {
       const child = nodeSpawn(command, args, options) as ChildProcessWithoutNullStreams; kernelChild = child; return child;
     }) as typeof nodeSpawn,
@@ -70,7 +72,7 @@ async function fixture(env: NodeJS.ProcessEnv = {}) {
     env: Object.entries({ ...process.env, ELECTRON_RUN_AS_NODE: "1" }).flatMap(([name, value]) => value === undefined ? [] : [{ name, value }]),
     cols: 90, rows: 30,
   });
-  return { root, workspace, storageRoot, host, client, scoped, address, spawn, kernelChild: kernelChild! };
+  return { root, workspace, storageRoot, host, client, scoped, address, spawn, probe, kernelChild: kernelChild! };
 }
 async function waitFor(client: KernelScopedClient, processId: string, predicate: (snapshot: KernelProcessSnapshot) => boolean) {
   const deadline = Date.now() + 15_000;
@@ -210,15 +212,7 @@ it("raw output above the native buffer bound reaches real exit before any reader
 it("the Host stream adapter uses native push delivery and closes after complete binary I/O", async () => {
   const f = await fixture();
   const methods: string[] = [];
-  const originalWrite = f.kernelChild.stdin.write;
-  f.kernelChild.stdin.write = ((...values: unknown[]) => {
-    const bytes = values[0];
-    if (Buffer.isBuffer(bytes) && bytes.length >= 4 && bytes.readUInt32BE(0) === bytes.length - 4) {
-      const envelope = JSON.parse(bytes.subarray(4).toString()) as { method?: string };
-      if (envelope.method) methods.push(envelope.method);
-    }
-    return Reflect.apply(originalWrite, f.kernelChild.stdin, values);
-  }) as typeof f.kernelChild.stdin.write;
+  f.probe.onSend = envelope => { if (typeof envelope.method === 'string') methods.push(envelope.method); };
   const service = createKernelProcessService({ client: f.host, resolveIdentity: async () => ({ workspaceId: "ws", executionWorkspaceId: "ws", canonicalRoot: f.workspace }) });
   try {
     const child = await service.spawn(process.execPath, ["-e", "process.stdin.pipe(process.stdout)"], { cwd: path.join(f.workspace, "child"), env: process.env, stdio: "pipe" });

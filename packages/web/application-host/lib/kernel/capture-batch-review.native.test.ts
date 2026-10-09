@@ -1,10 +1,10 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
+import { TransportFixture } from './tests/transport-fixture.js';
 import { createKernelClient } from './kernel-client.js';
 import { KernelStorageAdapter, KernelWorkingStateRootStore } from './storage-adapter.js';
 
@@ -24,32 +24,14 @@ async function fixture() {
   const replies: string[] = [];
   let captureSent!: (request: Request) => void;
   const captureRequest = new Promise<Request>(resolve => { captureSent = resolve; });
-  const host = createKernelClient({ hostId: 'capture-review', storageRoot, kernelPath, buildVersion, allowCargoDevRunner: false,
-    spawnProcess: ((command, args, options) => {
-      const child = spawn(command, args ?? [], options ?? {}) as ChildProcessWithoutNullStreams;
-      const write = child.stdin.write;
-      child.stdin.write = ((...values: unknown[]) => {
-        const bytes = values[0];
-        if (Buffer.isBuffer(bytes) && bytes.length >= 4 && bytes.readUInt32BE(0) === bytes.length - 4) {
-          const request = JSON.parse(bytes.subarray(4).toString()) as Request;
-          requests.push(request);
-          if (request.method === 'file.captureBatch') captureSent(request);
-        }
-        return Reflect.apply(write, child.stdin, values);
-      }) as typeof child.stdin.write;
-      let buffer = Buffer.alloc(0);
-      child.stdout.on('data', (bytes: Buffer) => {
-        buffer = Buffer.concat([buffer, bytes]);
-        while (buffer.length >= 4 && buffer.length >= 4 + buffer.readUInt32BE(0)) {
-          const end = 4 + buffer.readUInt32BE(0);
-          const response = JSON.parse(buffer.subarray(4, end).toString()) as { id: string };
-          replies.push(response.id);
-          buffer = buffer.subarray(end);
-        }
-      });
-      return child;
-    }) as typeof spawn,
-  });
+  const probe = new TransportFixture();
+  probe.onSend = envelope => {
+    const request = envelope as Request;
+    requests.push(request);
+    if (request.method === 'file.captureBatch') captureSent(request);
+  };
+  probe.onReceive = response => { if (typeof response.id === 'string') replies.push(response.id); };
+  const host = createKernelClient({ hostId: 'capture-review', storageRoot, kernelPath, buildVersion, allowCargoDevRunner: false, transportFactory: probe.create });
   const adapter = new KernelStorageAdapter({ client: host, hostId: 'capture-review', storageRoot, resolveWorkspaceRoot: async () => workspace });
   cleanups.push(async () => { await adapter.dispose(); await host.close(); await fs.rm(root, { recursive: true, force: true }); });
   await host.start();

@@ -2,7 +2,7 @@
 //! Frames are private, epoch-bound, and name concrete retained tools, never arbitrary Host methods.
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 use varin_runtime::execution::*;
@@ -19,7 +19,7 @@ pub(crate) struct McpBridge {
     events: Arc<Mutex<Option<mpsc::Sender<Value>>>>,
 }
 impl McpBridge {
-    pub(crate) fn new(output: mpsc::SyncSender<Value>) -> Self {
+    pub(crate) fn new(output: crate::transport::Sender) -> Self {
         let (tx, rx) = mpsc::channel();
         let state = Arc::new(Mutex::new(State { epoch: None, pending: HashMap::new() }));
         let failed_state = state.clone();
@@ -89,10 +89,12 @@ impl McpBridge {
         if let Ok(mut state) = self.state.lock() { state.pending.remove(&id); }
         result
     }
-    pub(crate) fn wrap(&self, run_id: String, binding: McpBinding, inner: Arc<dyn ToolExecutor>) -> Result<Arc<dyn ToolExecutor>, ExecutionError> {
+    pub(crate) fn declarations(&self, run_id: String, binding: McpBinding) -> Result<Vec<varin_runtime::composition::tools::ToolDeclaration>, ExecutionError> {
         binding.validate().map_err(|_| failed("mcp_binding_invalid"))?;
-        let tools = binding.tools.iter().map(|schema| (schema.name.clone(), schema.clone())).collect();
-        Ok(Arc::new(McpTools { run_id, binding, tools, bridge: self.clone(), inner }))
+        Ok(binding.tools.iter().map(|schema| varin_runtime::composition::tools::ToolDeclaration {
+            schema: schema.clone(), content_version: format!("{}:{}:{}", binding.reference, binding.generation, schema.version),
+            implementation: Arc::new(McpTools { run_id: run_id.clone(), binding: binding.clone(), schema: schema.clone(), bridge: self.clone() }),
+        }).collect())
     }
 }
 #[derive(Deserialize)]
@@ -110,13 +112,12 @@ fn unknown() -> ToolCompletion {
         content: json!({"error":"mcp_effect_unknown"}) }
 }
 struct McpTools {
-    run_id: String, binding: McpBinding, tools: BTreeMap<String, ToolSchema>,
-    bridge: McpBridge, inner: Arc<dyn ToolExecutor>,
+    run_id: String, binding: McpBinding, schema: ToolSchema,
+    bridge: McpBridge,
 }
 impl McpTools {
     fn contract(&self, call: &ToolCall) -> Result<ToolContract, ExecutionError> {
-        let schema = self.tools.get(&call.name).ok_or_else(|| failed("mcp_tool_unavailable"))?;
-        if schema.version != call.schema_version || !call.arguments.is_object() { return Err(failed("mcp_schema_changed")); }
+        if self.schema.name != call.name || self.schema.version != call.schema_version || !call.arguments.is_object() { return Err(failed("mcp_schema_changed")); }
         let discovery = call.name == "mcp_discover";
         let target = if call.name == "mcp_call" {
             format!("server:{}", call.arguments.get("server").and_then(Value::as_str).ok_or_else(|| failed("mcp_target_required"))?)
@@ -138,38 +139,20 @@ impl McpTools {
 impl ToolExecutor for McpTools {
     fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken)
         -> Result<varin_runtime::execution::ToolPreparation, ExecutionError> {
-        if self.tools.contains_key(&call.name) {
-            self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
-        } else { self.inner.plan(call, context, cancel) }
+        self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
     }
 
-    fn watch_admission(&self, context: &ToolExecutionContext, call: &ToolCall, contract: &ToolContract, cancel: &CancellationToken)
-        -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError> {
-        if self.tools.contains_key(&call.name) { Ok(None) } else { self.inner.watch_admission(context, call, contract, cancel) }
-    }
-
-    fn execution_class(&self, call: &ToolCall, contract: &ToolContract) -> varin_runtime::execution_capacity::ExecutionClass {
-        if self.tools.contains_key(&call.name) { varin_runtime::execution_capacity::ExecutionClass::Unmetered }
-        else { self.inner.execution_class(call, contract) }
-    }
-
-    fn supports_policy_read(&self, context: &FrozenToolContext, call: &ToolCall, contract: &ToolContract) -> bool {
-        !self.tools.contains_key(&call.name) && self.inner.supports_policy_read(context, call, contract)
-    }
     fn prepare(&self, call: &ToolCall, request: &FrozenToolContext, _cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
-        let Some(schema) = self.tools.get(&call.name) else { return self.inner.prepare(call, request, _cancel); };
-        if request.run_id != self.run_id || !request.tools.contains(schema) { return Err(failed("mcp_frozen_schema_changed")); }
+        if request.run_id != self.run_id || !request.tools.contains(&self.schema) { return Err(failed("mcp_frozen_schema_changed")); }
         self.contract(call)
     }
     fn authorize(&self, context: &ToolExecutionContext, call: &ToolCall, contract: &ToolContract, cancel: &CancellationToken) -> Result<(), ExecutionError> {
-        if !self.tools.contains_key(&call.name) { return self.inner.authorize(context, call, contract, cancel); }
         self.validate(context, call, contract)?;
         let reply = self.bridge.call("authorize", &self.binding, context, call, cancel)?;
         if !reply.ok || reply.completion.is_some() { return Err(failed("mcp_authorization_failed")); }
         Ok(())
     }
     fn execute(&self, context: &ToolExecutionContext, call: &ToolCall, contract: &ToolContract, cancel: &CancellationToken) -> ToolCompletion {
-        if !self.tools.contains_key(&call.name) { return self.inner.execute(context, call, contract, cancel); }
         if self.validate(context, call, contract).is_err() || cancel.is_cancelled() {
             return ToolCompletion::NotDispatched { reason: "mcp_cancelled_or_binding_changed".into() };
         }

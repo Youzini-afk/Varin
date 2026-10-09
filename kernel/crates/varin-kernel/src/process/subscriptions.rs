@@ -33,12 +33,13 @@ struct Subscription {
 }
 struct Inner {
     subscriptions: Mutex<HashMap<String, Arc<Subscription>>>,
-    outbound: mpsc::SyncSender<Value>,
+    outbound: crate::transport::Sender,
 }
 #[derive(Clone)]
 pub(crate) struct ProcessSubscriptions(Arc<Inner>);
 impl ProcessSubscriptions {
-    pub(crate) fn new(outbound: mpsc::SyncSender<Value>) -> Self {
+    pub(crate) fn new(outbound: impl Into<crate::transport::Sender>) -> Self {
+        let outbound = outbound.into();
         Self(Arc::new(Inner {
             subscriptions: Mutex::new(HashMap::new()),
             outbound,
@@ -266,7 +267,7 @@ fn projection(subscription: &Subscription, buffer: &super::Buffer, cursor: u64) 
 fn control_loop(
     subscription: Arc<Subscription>,
     owner: Weak<Inner>,
-    outbound: mpsc::SyncSender<Value>,
+    outbound: crate::transport::Sender,
 ) {
     loop {
         let mut buffer = subscription.output.shared.lock();
@@ -321,7 +322,7 @@ fn control_loop(
         }
     }
 }
-fn data_loop(subscription: Arc<Subscription>, outbound: mpsc::SyncSender<Value>) {
+fn data_loop(subscription: Arc<Subscription>, outbound: crate::transport::Sender) {
     loop {
         let mut buffer = subscription.output.shared.lock();
         let (cursor, mut spool) = loop {
@@ -391,7 +392,7 @@ pub(crate) fn spawn_control(
     commands: mpsc::Receiver<ControlCommand>,
     subscriptions: ProcessSubscriptions,
     current_epoch: Arc<Mutex<Option<String>>>,
-    responses: mpsc::SyncSender<Value>,
+    responses: crate::transport::Sender,
     finished: impl Fn(&str) + Send + 'static,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
