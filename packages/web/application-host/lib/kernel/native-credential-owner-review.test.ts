@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import { createNativeModelAuthority } from './native-model-authority.js';
 import { NativeCredentialBridge, type PrivateCredentialResponse } from './native-credential-bridge.js';
 import { ExistingHostCredentialOwner, type NativeCredentialOwnerOptions, type NativeCredentialScope } from './native-credential-owner.js';
 
@@ -97,8 +98,8 @@ it('anonymous mode requires explicit permission and cannot disguise a missing ow
   await expect(owner({ allowAnonymous: true, runtime: { getAuth: async () => undefined } }).resolve(scope)).rejects.toMatchObject({ code: 'credential-missing' });
 });
 
-it('Vertex credentials require an explicit bearer or API-key mode', async () => {
-  await expect(owner({ providerFamily: 'google-vertex' }).resolve(scope)).rejects.toMatchObject({ code: 'vertex-auth-mode-required' });
+it('Vertex explicit Cloud API keys and bearer headers retain their distinct modes', async () => {
+  expect((await owner({ providerFamily: 'google-vertex' }).resolve(scope)).headers['x-goog-api-key']).toBe('fake-test-key');
   const bearer = owner({ providerFamily: 'google-vertex', runtime: { getAuth: async () => ({ auth: { apiKey: 'fake-unused', headers: { authorization: 'Bearer fake-vertex-value' } } }) } });
   expect((await bearer.resolve(scope)).headers.authorization).toBe('Bearer fake-vertex-value');
   const key = owner({ providerFamily: 'google-vertex', runtime: { getAuth: async () => ({ auth: { headers: { 'x-goog-api-key': 'fake-explicit-key' } } }) } });
@@ -144,4 +145,56 @@ it('private bridge drops a late credential result after its Run registration is 
   await persisted.promise;
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(replies).toHaveLength(0);
+});
+
+
+it('trusted Bedrock model selection binds its ARN region and fake bearer through the existing owner', async () => {
+  const model = { providerId: 'bedrock-fixture', modelId: 'arn:aws:bedrock:us-west-2:123456789012:inference-profile/fixture', name: 'Fixture model', api: 'bedrock-converse-stream', baseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com', maxTokens: 128, input: ['text', 'image'] };
+  const authority = createNativeModelAuthority({
+    selectedModel: async (providerId, modelId) => { expect([providerId, modelId]).toEqual([model.providerId, model.modelId]); return model; },
+    listModels: async () => [model], currentScope: async () => scope, currentProviderAccount: async () => undefined,
+    routingEnvironment: async () => ({ AWS_REGION: 'eu-west-1' }),
+    getAuth: async () => ({ auth: { apiKey: 'fake-bedrock-bearer' } }),
+  });
+  expect(await authority.listModels()).toContainEqual({ providerId: model.providerId, modelId: model.modelId, name: model.name, acceptsImages: true });
+  const selected = await authority.resolveModel({ providerId: model.providerId, modelId: model.modelId });
+  expect(selected.configuration.endpoint).toBe(`https://bedrock-runtime.us-west-2.amazonaws.com/model/${encodeURIComponent(model.modelId)}/converse-stream`);
+  expect((await selected.credentialOwner.resolve(scope)).headers.authorization).toBe('Bearer fake-bedrock-bearer');
+});
+
+
+it.each([
+  ['https://aiplatform.googleapis.com', 'https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-fixture:streamGenerateContent'],
+  ['https://vertex.example.test/proxy/v1', 'https://vertex.example.test/proxy/v1/publishers/google/models/gemini-fixture:streamGenerateContent'],
+])('Vertex Cloud API key uses the registered collection base %s', async (baseUrl, endpoint) => {
+  const model = { providerId: 'vertex-fixture', modelId: 'gemini-fixture', name: 'Vertex fixture', api: 'google-vertex', baseUrl, maxTokens: 128 };
+  const authority = createNativeModelAuthority({ selectedModel: async () => model, listModels: async () => [model],
+    currentScope: async () => scope, currentProviderAccount: async () => undefined, routingEnvironment: async () => ({}),
+    getAuth: async () => ({ auth: { apiKey: 'fake-cloud-api-key', baseUrl } }),
+  });
+  const selected = await authority.resolveModel({ providerId: model.providerId, modelId: model.modelId });
+  expect(selected.configuration.endpoint).toBe(endpoint);
+  expect((await selected.credentialOwner.resolve(scope)).headers['x-goog-api-key']).toBe('fake-cloud-api-key');
+});
+
+it('trusted header-only connection supports provider-specific authentication headers without ambient keys', async () => {
+  const credential = owner({ runtime: { getAuth: async () => ({ auth: { headers: { 'x-custom-token': 'fake-custom-token' } }, source: 'configured headers' }) } });
+  expect((await credential.resolve(scope)).headers).toEqual({ 'x-custom-token': 'fake-custom-token' });
+  await expect(owner({ runtime: { getAuth: async () => ({ auth: { headers: {} }, source: 'configured headers' }) } }).resolve(scope)).rejects.toMatchObject({ code: 'credential-missing' });
+});
+
+it.each([
+  ['', 'us-central1', 'https://us-central1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/us-central1/publishers/google/models/gemini-fixture:streamGenerateContent'],
+  ['https://{location}-aiplatform.googleapis.com', 'global', 'https://aiplatform.googleapis.com/v1/projects/fixture-project/locations/global/publishers/google/models/gemini-fixture:streamGenerateContent'],
+  ['https://vertex.example.test/custom/v1', 'us-central1', 'https://vertex.example.test/custom/v1/publishers/google/models/gemini-fixture:streamGenerateContent'],
+])('Vertex ADC preserves its project/location routing and custom collection %s %s', async (baseUrl, location, endpoint) => {
+  const model = { providerId: 'google-vertex', modelId: 'gemini-fixture', name: 'Vertex ADC fixture', api: 'google-vertex', baseUrl, maxTokens: 128 };
+  const authority = createNativeModelAuthority({ selectedModel: async () => model, listModels: async () => [model],
+    currentScope: async () => scope, currentProviderAccount: async () => undefined,
+    routingEnvironment: async () => ({ GOOGLE_CLOUD_PROJECT: 'fixture-project', GOOGLE_CLOUD_LOCATION: location }), vertexAuthentication: async () => 'adc',
+    getAuth: async () => ({ auth: { headers: { authorization: 'Bearer fake-adc-bearer' } }, source: 'Google ADC' }),
+  });
+  const selected = await authority.resolveModel({ providerId: model.providerId, modelId: model.modelId });
+  expect(selected.configuration.endpoint).toBe(endpoint);
+  expect((await selected.credentialOwner.resolve(scope)).headers.authorization).toBe('Bearer fake-adc-bearer');
 });

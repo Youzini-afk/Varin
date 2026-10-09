@@ -1,0 +1,87 @@
+import express from 'express';
+import { createServer, type Server, type IncomingHttpHeaders } from 'node:http';
+import { once } from 'node:events';
+import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { afterEach, expect, it } from 'vitest';
+import { createNativeThreadsHttpAPI, configureRuntimeUrlResolver, setRuntimeExtraHeaders } from '@varin/application-client';
+import { createNativeModelAuthority } from './native-model-authority.js';
+import { createKernelClient } from './kernel-client.js';
+import { NativeRuntimeClient } from './native-runtime-client.js';
+import { NativeThreadAdapter } from './native-thread-adapter.js';
+import { registerNativeThreadRoutes } from './native-thread-routes.js';
+import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
+const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
+// Load the credential owner's source through a runtime fixture boundary; Host compilation owns only Host sources.
+const { HostCredentialAuthority } = await import(pathToFileURL(path.join(repository, 'packages/pi-host/src/credential-authority.ts')).href);
+const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repository, 'kernel/target/release/varin-kernel');
+const buildVersion = (JSON.parse(await fs.readFile(path.join(repository, 'package.json'), 'utf8')) as {version: string}).version;
+const cleanups: Array<() => Promise<void>> = [];
+afterEach(async () => { setRuntimeExtraHeaders(null); configureRuntimeUrlResolver({apiBaseUrl:'',realtimeBaseUrl:''}); for(const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
+async function listen(server: Server) {
+ server.listen(0,'127.0.0.1'); await once(server,'listening'); const address=server.address();
+ if(!address || typeof address==='string') throw new Error('missing listener');
+ cleanups.push(async()=>{server.closeAllConnections(); await new Promise<void>(resolve=>server.close(()=>resolve()));});
+ return `http://127.0.0.1:${address.port}`;
+}
+const credentials = { accessKeyId: 'FAKEACCESSKEYFORTEST', secretAccessKey: 'fake-secret-for-signature-comparison', sessionToken: 'fake-session-for-signature-comparison' };
+
+it('native Bedrock signs the exact captured UTF-8 HTTP body with the pinned SDK source and never follows redirects or leaks auth', async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'varin-bedrock-sign-review-'));
+ cleanups.push(()=>fs.rm(root,{recursive:true,force:true}));
+ let redirected=0;
+ const redirect=await listen(createServer((_request,response)=>{redirected++;response.writeHead(200).end();}));
+ const captured: Array<{body:string;headers:IncomingHttpHeaders;method:string;url:string}>=[];
+ const endpoint=await listen(createServer((request,response)=>{const chunks:Buffer[]=[];request.on('data',chunk=>chunks.push(chunk));request.on('end',()=>{
+  captured.push({body:Buffer.concat(chunks).toString('utf8'),headers:request.headers,method:request.method!,url:request.url!});
+  response.writeHead(307,{location:`${redirect}/capture`}).end();
+ });}));
+ const agentDir=path.join(root,'agent');await fs.mkdir(agentDir);
+ await fs.writeFile(path.join(agentDir,'models.json'),JSON.stringify({providers:{'bedrock-fixture':{api:'bedrock-converse-stream',baseUrl:endpoint,models:[{id:'anthropic.fixture-v1',name:'Fixture'}]}}}));
+ const authority=HostCredentialAuthority.open(agentDir);
+ await authority.modifyWithIntent('bedrock-fixture','replace',async()=>({type:'api_key',env:{AWS_ACCESS_KEY_ID:credentials.accessKeyId,AWS_SECRET_ACCESS_KEY:credentials.secretAccessKey,AWS_SESSION_TOKEN:credentials.sessionToken,AWS_REGION:'us-west-2',AWS_SHARED_CREDENTIALS_FILE:path.join(root,'absent-credentials'),AWS_CONFIG_FILE:path.join(root,'absent-config'),AWS_EC2_METADATA_DISABLED:'true'}}));
+ const models=createNativeModelAuthority(authority);
+ const selected=await models.resolveModel({providerId:'bedrock-fixture',modelId:'anthropic.fixture-v1'});
+ const originalScope=await selected.credentialOwner.scope();
+ await expect(selected.credentialOwner.resolve(originalScope,undefined,{method:'POST',endpoint:`${redirect}/capture`,body:'{}'})).rejects.toMatchObject({code:'credential-request-target-changed'});
+ const signedProbe=await selected.credentialOwner.resolve(originalScope,undefined,{method:'POST',endpoint:selected.configuration.endpoint,body:'{"messages":[]}'});
+ expect(signedProbe.headers.authorization).toMatch(/^AWS4-HMAC-SHA256 /);
+ const kernel=createKernelClient({hostId:'bedrock-sign-review',storageRoot:path.join(root,'kernel'),buildVersion,kernelPath,allowCargoDevRunner:false});
+ cleanups.push(()=>kernel.close());
+ const runtime=new NativeRuntimeClient(kernel);const errors:unknown[]=[];
+ const adapter=new NativeThreadAdapter(runtime,models,async()=>{throw new Error('no source');},(_id,error)=>errors.push(error));
+ const app=express();registerCommonRequestMiddleware(app,{express});registerNativeThreadRoutes(app,adapter,(_req,_res,next)=>next());
+ const host=await listen(createServer(app));configureRuntimeUrlResolver({apiBaseUrl:host,realtimeBaseUrl:host});
+ const api=createNativeThreadsHttpAPI();const identity=await api.create('bedrock-signature');
+ const receipt=await api.submit({...identity,key:'unicode-input',expectedHead:null,text:'Unicode 原文 café 🧪 with "quotes" and \\slashes',model:{providerId:'bedrock-fixture',modelId:'anthropic.fixture-v1'}});
+ await expect.poll(async()=>({captured:captured.length,state:(await api.run(receipt.run_id)).state,errors}),{timeout:10_000}).toMatchObject({captured:1});
+ await expect.poll(async()=>(await api.run(receipt.run_id)).state,{timeout:10_000}).toBe('failed');
+ expect(redirected).toBe(0);expect(errors).toEqual([]);
+ const wire=captured[0]!;expect(wire.body).toContain('原文');expect(wire.headers.authorization).toMatch(/^AWS4-HMAC-SHA256 /);
+ // Resolve the official signer independently of Varin's credential-owner implementation.
+ const aiRoot=await fs.realpath(path.join(repository,'packages/pi-host/node_modules/@earendil-works/pi-ai'));
+ const ai=createRequire(path.join(aiRoot,'package.json'));
+ const aws=createRequire(ai.resolve('@aws-sdk/client-bedrock-runtime'));const core=createRequire(aws.resolve('@aws-sdk/core'));
+ const {SignatureV4}=await import(pathToFileURL(core.resolve('@smithy/signature-v4')).href);
+ const {BedrockRuntimeClient}=await import(pathToFileURL(ai.resolve('@aws-sdk/client-bedrock-runtime')).href);
+ const client=new BedrockRuntimeClient({region:'us-west-2',credentials});
+ const signer=new SignatureV4({region:'us-west-2',service:'bedrock',credentials,sha256:client.config.sha256});
+ const date=String(wire.headers['x-amz-date']);const signingDate=new Date(`${date.slice(0,4)}-${date.slice(4,6)}-${date.slice(6,8)}T${date.slice(9,11)}:${date.slice(11,13)}:${date.slice(13,15)}Z`);
+ expect(wire.headers['x-amz-content-sha256']).toBe(createHash('sha256').update(wire.body,'utf8').digest('hex'));
+ const signedNames=/SignedHeaders=([^,]+)/.exec(String(wire.headers.authorization))![1]!.split(';');
+ const headers=Object.fromEntries(signedNames.map(name=>[name,String(wire.headers[name])]));
+ const url=new URL(selected.configuration.endpoint);
+ const expected=await signer.sign({method:wire.method,protocol:url.protocol,hostname:url.hostname,port:Number(url.port),path:wire.url,headers,body:wire.body},{signingDate});
+ expect(wire.headers.authorization).toBe(expected.headers.authorization);
+ expect(wire.headers['x-amz-security-token']).toBe(credentials.sessionToken);
+ const publicState=JSON.stringify({snapshot:await api.snapshot(identity),events:await api.events(0),run:await api.run(receipt.run_id)});
+ for(const secret of Object.values(credentials)) expect(publicState).not.toContain(secret);
+ expect(await authority.currentScope('bedrock-fixture','anthropic.fixture-v1')).toEqual(originalScope);
+ await authority.modifyWithIntent('bedrock-fixture','replace',async (current: {type: string; env?: Record<string,string>} | undefined)=>({...current!,type:'api_key',env:{...(current!.type==='api_key'?current!.env:{}),AWS_ACCESS_KEY_ID:'FAKEREPLACEMENTKEY'}}));
+ await expect(selected.credentialOwner.resolve(originalScope,undefined,{method:'POST',endpoint:selected.configuration.endpoint,body:wire.body})).rejects.toMatchObject({code:'credential-scope-changed'});
+ expect(captured).toHaveLength(1);
+},30_000);

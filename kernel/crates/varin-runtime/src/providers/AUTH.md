@@ -77,11 +77,10 @@ account change advance it in the same credential write. Verified provider accoun
 and Codex requires it. Native model selection comes from the trusted Host catalog; endpoints cannot be
 supplied by the renderer. Durable launch selection pins the scope used when rebinding after restart.
 
-The native kernel rendezvous carries only scope/request metadata outward and transient header replies
-inward. Host HTTP credential writes and utility OAuth refresh also use the shared owner. Standalone
+The native kernel rendezvous carries scope and, for body-signed requests, exact serialized request bytes
+outward and transient header replies inward; neither body nor credentials enter public events. Host HTTP credential writes and utility OAuth refresh also use the shared owner. Standalone
 Pi launches retain their existing owner because they have no parent Application Host channel.
-Credential helper/env keys preserve existing Pi resolution in the child; native bindings to dynamic
-command/env output remain explicitly gated pending source-owned continuity. Literal `models.json`
+Credential helper/env keys preserve existing Pi resolution in the child. Literal `models.json`
 keys use the same Host authority and the existing configuration lock/JSONC writer. Their provider
 record receives a durable local handle; the scope combines it with a nonsecret filesystem revision
 (device/inode/size/mtime/ctime), never a key digest. An edit anywhere in that file invalidates its
@@ -89,6 +88,50 @@ configured-key bindings, including unrelated provider edits. Stored `auth.json` 
 and retain SDK precedence. Per-provider revision precision is a future optimization. Dispatch refreshes
 the catalog and checks scope again before returning transient headers; a changed source cannot reuse
 a prior opaque-history identity.
+
+Native command/env key sources use an owner-local resolved-value lease. The scope includes a random
+local handle, never a token hash; values are compared only in memory. Environment changes create a new
+lease. Commands use the locked SDK resolver's process-lifetime command cache. Native dispatch passes
+that pinned value through the SDK's explicit API-key override, avoiding a second uncached configured
+helper execution. Model enumeration does not run helpers. After owner restart, dynamic scopes require
+a fresh trusted selection/new run; the current same-scope resume cannot silently adopt another lease.
+No resolved helper output or environment secret is persisted in native history or credential metadata.
+Configured provider/model headers are resolved by the same owner and included in the source binding.
+Stored credentials retain precedence; configured header sources add the models-file revision and,
+for dynamic values, an owner-local value lease. Native dispatch requests model-specific SDK auth and
+checks resolved configured headers before returning them. Header helpers retain the SDK's uncached
+semantics: changed output invalidates the pinned native selection instead of sending another account
+under an old opaque identity. Header-only configured connections use these pinned headers directly;
+failed stored OAuth never falls through to them. Enumeration inspects configured expressions without
+executing helpers or writing binding metadata.
+
+Ambient SDK API keys and explicit bearer headers likewise receive owner-local leases, including
+Bedrock's ambient bearer-token mode. They require fresh selection after token change or Host restart.
+Native Vertex explicit Cloud API keys use `x-goog-api-key` and Vertex express-mode routing; configured
+collection endpoints retain their registered path. Bedrock stored/configured bearer keys route to
+ConverseStream, with model ARN region preceding explicit owner region for standard catalog endpoints.
+
+Vertex ADC now uses the locked SDK's Google Auth dependency through the existing Host owner. An
+explicit/default ADC file's nonsecret filesystem identity is pinned; metadata-service credentials use
+an owner-local identity. Google's client owns token refresh/cache and no second credential file is
+written. ADC selects project/location routing while explicit Cloud keys retain express routing.
+Independent review used a temporary fake ADC file and loopback token endpoint to verify real library
+loading, refresh, stable scope, sanitized invalid-grant failure and no bearer persistence.
+
+Bedrock IAM/profile/default-chain credentials now use the locked SDK's Bedrock client credential
+provider and Smithy SigV4 signer. The private request carries method, registered endpoint and the exact
+serialized body. The Host checks the frozen endpoint before signing. One Rust serializer supplies both
+signature input and outbound HTTP bytes; the native transport sends those bytes without JSON rewriting.
+The Host source identity is pinned independently of SDK-refreshed temporary credentials, and ARN region
+precedes endpoint/owner region. Headers and signatures are transient. No standalone AWS credential
+store, new grant, user token or paid request is needed for this integration.
+
+Remaining credential integration: Anthropic workload-identity federation still requires its
+provider-specific token-exchange owner. Dynamic environment/helper, metadata ADC and AWS source scopes
+require fresh selection after Host restart rather than silently adopting another identity. Real IAM,
+ADC, subscription accounts, proxies and platform-specific credential chains still need live acceptance;
+fixture evidence does not establish live-provider parity.
+
 
 Reviewer evidence includes temporary fake-store refresh/relink/reopen, a real Pi worker through the
 production parent client proving the worker's decoy credential file is untouched, and native private

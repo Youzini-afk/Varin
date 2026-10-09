@@ -8,10 +8,14 @@ export interface NativeCredentialScope {
   account: string;
   generation: number;
 }
+export interface NativeCredentialDispatch { method: string; endpoint: string; body: string }
+interface NativeResolvedAuth {
+  auth: { apiKey?: string; headers?: Record<string, string | null>; baseUrl?: string };
+  source?: string;
+}
 export interface ExistingModelAuthRuntime {
-  getAuth(providerId: string): Promise<{
-    auth: { apiKey?: string; headers?: Record<string, string | null>; baseUrl?: string };
-  } | undefined>;
+  getAuth(providerId: string): Promise<NativeResolvedAuth | undefined>;
+  resolveRequest?(providerId: string, request: NativeCredentialDispatch): Promise<NativeResolvedAuth | undefined>;
 }
 export interface NativeCredentialOwnerOptions {
   runtime: ExistingModelAuthRuntime;
@@ -82,18 +86,23 @@ export class ExistingHostCredentialOwner {
     try { return validateScope(await this.#options.currentScope()); }
     catch { return fail('credential-scope-unavailable'); }
   }
-  resolve(expectedScope: NativeCredentialScope, signal?: AbortSignal): Promise<PrivateCredentialResolution> {
+  resolve(expectedScope: NativeCredentialScope, signal?: AbortSignal, dispatch?: NativeCredentialDispatch): Promise<PrivateCredentialResolution> {
     const expected = validateScope(expectedScope);
     if (signal?.aborted) return Promise.reject(new NativeCredentialOwnerError('credential-cancelled'));
     // No caller cancellation is passed to getAuth. The existing owner's bounded refresh must
     // finish and persist a rotated token even if the native request no longer needs the answer.
-    return waitWithoutCancellingOwner(this.#resolve(expected), signal);
+    return waitWithoutCancellingOwner(this.#resolve(expected, dispatch), signal);
   }
-  async #resolve(expected: NativeCredentialScope): Promise<PrivateCredentialResolution> {
+  async #resolve(expected: NativeCredentialScope, dispatch?: NativeCredentialDispatch): Promise<PrivateCredentialResolution> {
     try {
       const before = validateScope(await this.#options.currentScope());
       if (!sameScope(before, expected)) return fail('credential-scope-changed');
-      const resolved = await this.#options.runtime.getAuth(this.#options.providerId);
+      if (dispatch && (dispatch.method !== 'POST' || registeredEndpoint(dispatch.endpoint).toString() !== this.#endpoint.toString())) {
+        return fail('credential-request-target-changed');
+      }
+      const resolved = dispatch && this.#options.runtime.resolveRequest
+        ? await this.#options.runtime.resolveRequest(this.#options.providerId, dispatch)
+        : await this.#options.runtime.getAuth(this.#options.providerId);
       const after = validateScope(await this.#options.currentScope());
       if (!sameScope(after, expected)) return fail('credential-scope-changed');
       if (!resolved) return fail('credential-missing');
@@ -114,7 +123,7 @@ export class ExistingHostCredentialOwner {
       if (key) {
         switch (this.#options.providerFamily) {
           case 'openai-responses': case 'openai-completions': case 'mistral-conversations':
-          case 'openai-codex-responses':
+          case 'openai-codex-responses': case 'bedrock-converse-stream':
             if (!headers.has('authorization')) headers.set('authorization', `Bearer ${key}`);
             break;
           case 'anthropic-messages':
@@ -127,8 +136,9 @@ export class ExistingHostCredentialOwner {
             if (!headers.has('x-goog-api-key')) headers.set('x-goog-api-key', key);
             break;
           case 'google-vertex':
-            // Vertex key and cloud bearer modes are deliberately not guessed from an apiKey.
-            if (!headers.has('authorization') && !headers.has('x-goog-api-key')) return fail('vertex-auth-mode-required');
+            // The SDK's Vertex auth result uses apiKey only for explicit Cloud API keys;
+            // ADC is represented by an empty auth result, never a token in this field.
+            if (!headers.has('authorization') && !headers.has('x-goog-api-key')) headers.set('x-goog-api-key', key);
             break;
           default: return fail('unsupported-credential-family');
         }
@@ -142,7 +152,8 @@ export class ExistingHostCredentialOwner {
         headers.set('chatgpt-account-id', verified || account!);
       }
       const authenticated = ['authorization', 'x-api-key', 'api-key', 'x-goog-api-key']
-        .some(name => Boolean(headers.get(name)));
+        .some(name => Boolean(headers.get(name)))
+        || (resolved.source === 'configured headers' && [...headers.values()].some(Boolean));
       if (!authenticated && !this.#options.allowAnonymous) return fail('credential-missing');
       const values: Record<string, string> = Object.create(null);
       headers.forEach((value, name) => { values[name] = value; });

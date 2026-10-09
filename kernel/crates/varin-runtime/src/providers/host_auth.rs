@@ -1,6 +1,7 @@
-//! Private Host credential rendezvous. Only metadata is emitted; secret replies are one-shot,
-//! epoch-bound in-memory values. The Host retains sole refresh/persistence authority.
-use super::{auth::CredentialScope, failure, CredentialResolver, ModelFailure};
+//! Private Host credential rendezvous. Scope and optional exact request bytes are private,
+//! transient values; secret replies are one-shot and epoch-bound. Nothing enters durable events.
+//! The Host retains sole refresh/persistence/signing authority.
+use super::{auth::CredentialScope, failure, CredentialDispatch, CredentialResolver, ModelFailure};
 use crate::execution::CancellationToken;
 use reqwest::header::HeaderMap;
 use serde::{Deserialize, Serialize};
@@ -12,12 +13,13 @@ use std::{
     },
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct HostCredentialRequest {
     pub request_id: String,
     pub epoch: String,
     pub run_id: String,
     pub scope: CredentialScope,
+    pub dispatch: Option<CredentialDispatch>,
 }
 struct Pending {
     scope: CredentialScope,
@@ -171,6 +173,7 @@ impl HostCredentialChannel {
         &self,
         run_id: &str,
         scope: &CredentialScope,
+        dispatch: Option<CredentialDispatch>,
         cancel: &CancellationToken,
     ) -> Result<HeaderMap, ModelFailure> {
         if cancel.is_cancelled() {
@@ -248,6 +251,7 @@ impl HostCredentialChannel {
             epoch: self.epoch.clone(),
             run_id: run_id.into(),
             scope: scope.clone(),
+            dispatch,
         })
         .map_err(|_| {
             failure(
@@ -280,6 +284,14 @@ impl CredentialResolver for HostCredentialResolver {
                 "credential reference does not match the registered owner",
             ));
         }
-        self.channel.resolve(&self.run_id, &self.scope, cancel)
+        self.channel.resolve(&self.run_id, &self.scope, None, cancel)
     }
+    fn request_headers(&self, reference: Option<&str>, dispatch: &CredentialDispatch,
+        cancel: &CancellationToken) -> Result<HeaderMap, ModelFailure> {
+        if reference != Some(self.scope.reference.as_str()) {
+            return Err(failure("unknown_credential_ref", "credential reference does not match the registered owner"));
+        }
+        self.channel.resolve(&self.run_id, &self.scope, Some(dispatch.clone()), cancel)
+    }
+
 }

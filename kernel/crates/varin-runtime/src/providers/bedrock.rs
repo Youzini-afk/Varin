@@ -1,5 +1,4 @@
-//! Bedrock ConverseStream over AWS binary eventstream. This binding uses bearer credentials;
-//! AWS credential-chain discovery and body-aware SigV4 signing are a separate owner capability.
+//! Bedrock ConverseStream over AWS binary eventstream, with dispatch-bound bearer or SigV4 auth.
 use super::*;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde_json::json;
@@ -163,22 +162,25 @@ impl ModelProvider for BedrockProvider {
         if cancel.is_cancelled() {
             return Err(failure("cancelled", "generation cancelled"));
         }
-        let headers = self
-            .connection
-            .credentials
-            .headers(request.view.binding.credential_ref.as_deref(), cancel)?;
+        let dispatch = CredentialDispatch {
+            method: "POST".into(), endpoint: self.connection.endpoint.clone(),
+            body: String::from_utf8(request_body(&request.serialized)?)
+                .map_err(|_| failure("request_serialization", "model request is not UTF-8"))?,
+        };
+        let headers = self.connection.credentials.request_headers(
+            request.view.binding.credential_ref.as_deref(), &dispatch, cancel)?;
         if !headers
             .get("authorization")
             .and_then(|v| v.to_str().ok())
             .is_some_and(|v| {
                 v.split_once(' ').is_some_and(|(scheme, token)| {
-                    scheme.eq_ignore_ascii_case("bearer") && !token.trim().is_empty()
+                    (scheme.eq_ignore_ascii_case("bearer") || scheme == "AWS4-HMAC-SHA256") && !token.trim().is_empty()
                 })
             })
         {
             return Err(failure(
-                "bedrock_bearer_required",
-                "Bedrock binding requires bearer authentication; AWS signing is not configured",
+                "bedrock_authentication_required",
+                "Bedrock binding requires bearer or request-bound AWS authentication",
             ));
         }
         let mut decoder = super::aws_eventstream::Decoder::new(self.connection.max_event_bytes);
