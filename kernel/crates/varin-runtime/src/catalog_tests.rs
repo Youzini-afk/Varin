@@ -95,6 +95,30 @@ fn branch_cas_and_opaque_history_survive_restart() {
     );
 }
 #[test]
+fn failed_initial_install_leaves_no_partial_catalog_and_can_reopen() {
+    let f = Fixture::new();
+    std::fs::create_dir_all(&f.0).unwrap();
+    let mut raw = Connection::open(f.0.join("conversation.sqlite")).unwrap();
+    let content = crate::content::ContentStore::open(f.0.join("content")).unwrap();
+    // Actual SQLite capacity failure, not a mocked installation path.
+    raw.pragma_update(None, "max_page_count", 2).unwrap();
+    assert!(initialize_metadata(&mut raw, 0, &content).is_err());
+    assert_eq!(inspect_catalog_format(&raw).unwrap(), 0);
+    let tables: i64 = raw.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        [], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(tables, 0);
+    raw.pragma_update(None, "max_page_count", 1_000_000).unwrap();
+    drop(raw);
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    drop(db);
+    let db = f.open();
+    assert_eq!(db.run(&receipt.run_id).unwrap().state, RunState::Accepted);
+    assert_eq!(db.history("main").unwrap().len(), 1);
+}
+#[test]
 fn single_writer_and_unknown_formats_preserve_assets() {
     let f = Fixture::new();
     let db = f.open();
