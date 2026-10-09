@@ -50,6 +50,14 @@ Host deployment boundaries and normal operation permissions still apply. An expl
 does not change the session default. Native acceptance covers cross-root writes/rereads and a
 permission-inspected external command followed by a command at the original default directory.
 
+## Shared MCP authority
+
+`mcp-service.ts` binds the Pi worker's `mcp.owner` requests to its authenticated actor and
+the Host's shared `McpAuthority`. Native execution uses the same owner directly. MCP
+configuration/OAuth storage remain their existing SDK files; only the Application Host
+owns live connections. See the [owner contract](../../../../pi-host/src/mcp-authority.md)
+for explicit preparation, frozen declaration/grant identities, resource keys and revocation.
+
 ## Architecture
 
 ```

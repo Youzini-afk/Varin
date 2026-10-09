@@ -48,6 +48,14 @@ pub(crate) struct NativeHistoryParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeContextRefreshParams {
+    pub(crate) branch_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) context: NativeInitialContext,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeHistoryPageParams {
     pub(crate) branch_id: String,
     pub(crate) head_id: Option<String>,
@@ -129,7 +137,15 @@ pub(crate) struct NativeLaunchSelectParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeMcpPrepareParams {
+    pub(crate) run_id: String,
+    pub(crate) binding: NativeMcpBinding,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeRunStartParams {
+    pub(crate) mcp_binding: Option<NativeMcpBinding>,
     pub(crate) run_id: String,
     pub(crate) tool_binding: Option<Value>,
     pub(crate) credential_scope: Option<NativeCredentialScope>,
@@ -153,6 +169,23 @@ pub(crate) struct NativeInputSubmitParams {
     pub(crate) expected_head: RequiredNullable<String>,
     pub(crate) input: Value,
     pub(crate) configuration: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativePermissionOpenParams {
+    pub(crate) operation_id: String,
+    pub(crate) permission_id: String,
+    pub(crate) call: Value,
+    pub(crate) scope: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativePermissionDecideParams {
+    pub(crate) operation_id: String,
+    pub(crate) permission_id: String,
+    pub(crate) decision: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1144,6 +1177,15 @@ pub(crate) struct NativeCredentialScope {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeInitialContext {
+    pub(crate) personalization: Option<NativeContextPersonalization>,
+    pub(crate) effective_system_prompt: String,
+    pub(crate) instruction_sources: Vec<String>,
+    pub(crate) memory_checkpoint: RequiredNullable<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeLaunchSourceParams {
     pub(crate) environment_run_id: Option<String>,
     pub(crate) materialized: bool,
@@ -1155,10 +1197,11 @@ pub(crate) struct NativeLaunchSourceParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeInitialContext {
-    pub(crate) effective_system_prompt: String,
-    pub(crate) instruction_sources: Vec<String>,
-    pub(crate) memory_checkpoint: RequiredNullable<String>,
+pub(crate) struct NativeMcpBinding {
+    pub(crate) resources: std::collections::BTreeMap<String, String>,
+    pub(crate) reference: String,
+    pub(crate) generation: i64,
+    pub(crate) tools: Vec<NativeLaunchTool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1321,6 +1364,25 @@ pub(crate) struct KernelComputeFile {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeContextPersonalization {
+    pub(crate) context_composition: Option<NativeContextComposition>,
+    pub(crate) revision: i64,
+    pub(crate) session_id: String,
+    pub(crate) project_id: RequiredNullable<String>,
+    pub(crate) original_sections: Vec<NativeSystemSection>,
+    pub(crate) instruction_sources: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeLaunchTool {
+    pub(crate) name: String,
+    pub(crate) version: String,
+    pub(crate) schema: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelDraftProvenance {
     pub(crate) path: String,
     pub(crate) base_revision: RequiredNullable<String>,
@@ -1363,6 +1425,23 @@ pub(crate) struct KernelReviewFinding {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeContextComposition {
+    pub(crate) provider_id: String,
+    pub(crate) content_version: String,
+    pub(crate) scope_id: String,
+    pub(crate) selection_revision: i64,
+    pub(crate) sections: Vec<NativeContextFragment>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeSystemSection {
+    pub(crate) name: String,
+    pub(crate) content: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelVerificationEnvSummary {
     pub(crate) path: Option<bool>,
     pub(crate) virtual_env: Option<String>,
@@ -1389,6 +1468,14 @@ pub(crate) struct KernelVerificationInputIdentity {
     pub(crate) reason: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeContextFragment {
+    pub(crate) name: String,
+    pub(crate) kind: String,
+    pub(crate) content: String,
+}
+
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
         "runtime.branch.fork" => serde_json::from_value::<NativeBranchForkParams>(params.clone())
@@ -1411,6 +1498,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.context.inspect" => serde_json::from_value::<NativeHistoryParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.context.refresh" => {
+            serde_json::from_value::<NativeContextRefreshParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.history.page" => serde_json::from_value::<NativeHistoryPageParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -1460,6 +1552,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "runtime.launch.mcp.prepare" => {
+            serde_json::from_value::<NativeMcpPrepareParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.launch.inspect" => serde_json::from_value::<NativeRunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -1486,6 +1583,21 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.run.cancel" => serde_json::from_value::<NativeRunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.permission.open" => {
+            serde_json::from_value::<NativePermissionOpenParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.permission.decide" => {
+            serde_json::from_value::<NativePermissionDecideParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.permission.consume" => {
+            serde_json::from_value::<NativePermissionOpenParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.question.answer" => {
             serde_json::from_value::<NativeQuestionAnswerParams>(params.clone())
                 .map(|_| ())

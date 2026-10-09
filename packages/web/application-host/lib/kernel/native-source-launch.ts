@@ -45,10 +45,10 @@ export async function startNativeRunFromSource(
       || source.materialized !== (selection.mode === 'materialized')
       || (source.environment_run_id ?? undefined) !== selection.environmentRunId) throw new Error('Native rebind cannot change its durable source selection');
     const selectedNames = tools.map(tool => `native_${tool}`).sort();
-    if (JSON.stringify(selectedNames) !== JSON.stringify(saved.selection.tools.filter(tool => tool.name !== 'native_ask_user').map(tool => tool.name).sort())) throw new Error('Native rebind cannot change its durable tools');
+    if (JSON.stringify(selectedNames) !== JSON.stringify(saved.selection.tools.filter(tool => tool.name !== 'native_ask_user' && !saved.selection.mcp_binding?.tools.some(mcp => mcp.name === tool.name)).map(tool => tool.name).sort())) throw new Error('Native rebind cannot change its durable tools');
   }
   const credentialScope = options.credentialOwner ? await options.credentialOwner.scope() : undefined;
-  await runtime.selectLaunch({ runId: run.id,
+  if (!saved) await runtime.selectLaunch({ runId: run.id,
     source: { materialized: selection.mode === 'materialized', workspaceId: selection.workspaceId,
       executionWorkspaceId: selection.executionWorkspaceId, branchId: selection.branchId, revision: selection.revision,
       ...(selection.environmentRunId ? { environmentRunId: selection.environmentRunId } : {}) },
@@ -70,6 +70,7 @@ export async function startNativeRunFromSource(
     if (source.workspaceId !== selection.workspaceId || source.branchId !== selection.branchId
       || source.view !== 'revision' || source.revision !== selection.revision) throw new Error('Native launch source returned a different fixed revision');
     let rootId: string | undefined;
+    let executionCwd: string | undefined;
     if (selection.mode === 'materialized') {
       const handshake = kernel.handshake ?? await kernel.start();
       const storageRoot = await canonicalizePathIdentity(handshake.storageRoot);
@@ -93,6 +94,7 @@ export async function startNativeRunFromSource(
       const registered = await actor.fileRootRegister({ workspaceId: selection.workspaceId, executionWorkspaceId: selection.executionWorkspaceId, canonicalRoot }, signal);
       if (typeof registered.rootId !== 'string') throw new Error('Native execution root registration failed');
       rootId = registered.rootId;
+      executionCwd = canonicalRoot;
     }
     const fixed = { branchId: selection.branchId, revision: selection.revision };
     const toolBinding = {
@@ -103,6 +105,7 @@ export async function startNativeRunFromSource(
       ...(selection.mode === 'fixed_branch' ? { fileSource: fixed } : { rootId, materializedSource: fixed }),
     };
     await runtime.reconcileRun(run.id, toolBinding, signal);
+    await runtime.prepareMcp(run.id, selection, executionCwd, signal);
     return options.credentialOwner
       ? await runtime.startRunWithCredentialOwner(run.id, options.credentialOwner, signal, toolBinding)
       : await runtime.startRun(run.id, signal, toolBinding);

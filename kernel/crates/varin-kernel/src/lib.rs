@@ -7,6 +7,7 @@ mod model;
 mod native_runtime;
 mod native_tools;
 mod native_questions;
+mod native_mcp;
 mod process;
 mod protocol;
 mod protocol_generated;

@@ -15,6 +15,7 @@
       "@varin/pi-host": ["packages/pi-host/src/index.ts"],
       "@varin/pi-host/discovery": ["packages/pi-host/src/runtime-discovery.ts"],
       "@varin/pi-host/sdk": ["packages/pi-host/src/pi-sdk-packages.ts"],
+      "@varin/pi-host/mcp-authority": ["packages/pi-host/src/mcp-authority.ts"],
       "@varin/pi-host/credentials": ["packages/pi-host/src/credential-authority.ts"],
       "@varin/protocol": ["packages/protocol/src/index.ts"],
       "@varin/runtime-client": ["packages/runtime-client/src/index.ts"]

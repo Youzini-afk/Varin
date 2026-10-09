@@ -71,6 +71,7 @@ const rustType = (type) => {
   if (type.startsWith("Native") && schema.nativeRuntimeEnums?.[type.slice(6)]) return `varin_runtime::${type.slice(6)}`;
   if (type.endsWith('[]')) return `Vec<${rustType(type.slice(0, -2))}>`;
   if (type === 'string') return 'String';
+  if (type === 'Record<string, string>') return 'std::collections::BTreeMap<String, String>';
   if (type === 'number' || type === 'protocolVersion') return 'i64';
   if (type === 'boolean') return 'bool';
   if (type === 'unknown') return 'Value';

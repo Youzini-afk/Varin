@@ -1,5 +1,9 @@
 import { createNativeThreadSourcePreparer } from './lib/kernel/native-thread-sources.js';
 import { createNativeThreadContext } from './lib/kernel/native-thread-context.js';
+import { createNativeContextComposition } from './lib/kernel/native-context-composition.js';
+import { McpAuthority, mcpHostAgentDir, mcpHostProjectTrusted, readMcpHostPermissionPolicy } from '@varin/pi-host/mcp-authority';
+import { createNativeMcpLease } from './lib/kernel/native-mcp-owner.js';
+import { createMcpHarnessServices } from './lib/harness/mcp-service.js';
 import { sharedHostCredentialAuthority } from '@varin/runtime-broker';
 import { NativeRuntimeClient } from './lib/kernel/native-runtime-client.js';
 import { NativeThreadAdapter } from './lib/kernel/native-thread-adapter.js';
@@ -1968,6 +1972,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     onError: (error) => console.error('[VarinMemory]', errorMessage(error)),
   });
+  let refreshNativePersonalization: (() => Promise<void>) | undefined;
   const agentPersonalization = createAgentPersonalization({
     client: kernelClient,
     context: async (sessionId) => {
@@ -1984,7 +1989,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const project = projects.find(entry => cwd && projectContainsPath(entry, cwd));
       return { bot: false, threadRole, ...(project ? { projectId: project.id } : {}) };
     },
-    onChanged: () => broadcastGlobalUiEvent?.({ type: 'varin:agent-personalization-changed', properties: {} }),
+    onChanged: () => {
+      broadcastGlobalUiEvent?.({ type: 'varin:agent-personalization-changed', properties: {} });
+      void refreshNativePersonalization?.().catch(() => console.error('[NativeThread] Personalization refresh requires attention'));
+    },
   });
   // Bot background memory organizer reads durable session/run sources.
   // filters them with the memory-organization fast decision when bound, and
@@ -2852,8 +2860,44 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       );
     }
   }, { appliesToWorkFocus: ['research'] });
-  const nativeThreads = new NativeThreadAdapter(new NativeRuntimeClient(kernelClient),
-    createNativeModelAuthority(options.piRuntimeBroker?.credentialAuthority ?? sharedHostCredentialAuthority(process.env.VARIN_AGENT_DIR)), async source => {
+  const hostCredentialAuthority = options.piRuntimeBroker?.credentialAuthority ?? sharedHostCredentialAuthority(process.env.VARIN_AGENT_DIR);
+  const mcpAgentDir = mcpHostAgentDir(process.env.VARIN_AGENT_DIR);
+  const mcpAuthority = new McpAuthority({
+    providerToken: async (_scope, provider) => (await hostCredentialAuthority.getAuth(provider))?.auth.apiKey,
+    credentialScope: async (_scope, provider) => hostCredentialAuthority.currentScope(provider),
+  });
+  const nativeRuntime = new NativeRuntimeClient(kernelClient, async (input, signal) => {
+    // A read-only fixed branch has no executable filesystem view. Global MCP capabilities run
+    // in the neutral Host scope; they must not borrow the mutable project directory.
+    const workspace = input.source && input.executionCwd
+      ? await documentsAuthority.inspectWorkspace(input.source.workspaceId) : undefined;
+    const configCwd = workspace?.root ?? mcpAgentDir;
+    const scope = {
+      agentDir: mcpAgentDir, configCwd, executionCwd: input.executionCwd ?? mcpAgentDir,
+      environmentId: workspace ? `${hostId}:${input.source!.executionWorkspaceId}` : `${hostId}:global`,
+      executionScope: workspace ? 'workspace' as const : 'global' as const,
+      projectTrusted: Boolean(workspace) && mcpHostProjectTrusted(mcpAgentDir, configCwd),
+      sessionId: `native:${input.threadId}`,
+    };
+    const inspection = mcpAuthority.inspect(scope);
+    const lease = await mcpAuthority.acquire(scope, {
+      servers: inspection.servers.filter(server => server.hasDirectTools && server.status !== 'disabled' && server.exposure !== 'hidden').map(server => server.name),
+      ...(signal ? { signal } : {}),
+    });
+    return createNativeMcpLease({ lease, kernel: kernelClient,
+      ...(input.source && !input.executionCwd ? { unavailableWorkspaceScope: {
+        workspaceId: input.source.workspaceId,
+        reason: 'Project MCP capabilities require a prepared execution environment matching the pinned source. Only global Host MCP capabilities are available for this read-only source.',
+      } } : {}),
+      currentPolicy: async () => {
+        const trusted = Boolean(workspace) && mcpHostProjectTrusted(mcpAgentDir, configCwd);
+        if (scope.projectTrusted && !trusted) throw new Error('MCP project trust was revoked');
+        return readMcpHostPermissionPolicy(mcpAgentDir, configCwd, trusted);
+      },
+    });
+  });
+  const nativeThreads = new NativeThreadAdapter(nativeRuntime,
+    createNativeModelAuthority(hostCredentialAuthority), async source => {
       // Public source coordinates identify existing Host workspaces, never arbitrary roots/grants.
       await documentsAuthority.inspectWorkspace(source.workspaceId);
       await documentsAuthority.inspectWorkspace(source.executionWorkspaceId);
@@ -2862,6 +2906,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       console.error('[NativeThread] Launch preparation requires attention:', runId);
     }, createNativeThreadSourcePreparer({ documents: documentsAuthority, workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter) }),
     createNativeThreadContext({ personalization: agentPersonalization,
+      composition: createNativeContextComposition(extensionRuntime),
       workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter),
       projectForWorkspace: async workspaceId => {
         const { root } = await documentsAuthority.inspectWorkspace(workspaceId);
@@ -2869,6 +2914,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         return projects.find(project => projectContainsPath(project, root))?.id;
       },
     }));
+  refreshNativePersonalization = () => nativeThreads.refreshPersonalization();
+  void refreshNativePersonalization().catch(() => console.error('[NativeThread] Personalization refresh requires attention'));
   void nativeThreads.recover().catch(() => console.error('[NativeThread] Saved launch discovery requires attention'));
   registerNativeThreadRoutes(app, nativeThreads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerHarnessThreadRoutes(app, {
@@ -4051,6 +4098,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     cancelExploreQuery: (actor, queryId) => harnessServiceHost.exploreQueryStore.cancel(actor, queryId),
   });
   registerHarnessServices(harnessRouter, harnessServiceHost);
+  const mcpHarness = createMcpHarnessServices(mcpAuthority, async ctx => {
+    // Read the existing session authority so one-session trust is not mistaken for denial.
+    // Unlike settings.get (which reloads files), this scope cut is read-only and out-of-band.
+    const settings = await piRuntimeBroker.requestForSession(ctx.sessionId, 'settings.context', {});
+    const configCwd = ctx.actor.cwd ?? ctx.actor.authorityRoot ?? mcpAgentDir;
+    if (path.resolve(settings.cwd) !== path.resolve(configCwd)) throw new Error('MCP session configuration scope changed');
+    return {
+      agentDir: mcpAgentDir, configCwd, executionCwd: ctx.actor.cwd ?? mcpAgentDir,
+      // MCP remains a Host-owned capability. A remote shell placement does not relocate it.
+      environmentId: ctx.workspaceId ? `${hostId}:${ctx.workspaceId}` : `${hostId}:global`,
+      executionScope: ctx.workspaceId ? 'workspace' : 'global',
+      projectTrusted: settings.projectTrusted, sessionId: ctx.sessionId,
+    };
+  });
+  harnessRouter.register('mcp.owner', mcpHarness.services['mcp.owner']);
   botLifecycleRuntime = createBotLifecycleRuntime({
     hostId, registry: threadRegistry, runtime: threadRuntime, broker: piRuntimeBroker, computers: computerService,
     stopSessionProcesses: harnessServiceHost.closeSessionShell,
@@ -4150,6 +4212,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         // organizer cover whatever the session wrote before it went away.
         memoryOrganizer.noteSessionSettled(event.sessionId);
         if (ownsRegisteredSession) {
+          mcpHarness.disposeSession(event.sessionId);
           releaseSessionPrewarm(event.sessionId);
           clientSurfaceBridge.dropSession(event.sessionId);
           sessionSnapshots.delete(event.sessionId);
@@ -4170,6 +4233,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       kernelSessionActors.delete(sessionId);
       memoryOrganizer.noteSessionSettled(sessionId);
       if (ownsRegisteredSession) {
+        mcpHarness.disposeSession(sessionId);
         releaseSessionPrewarm(sessionId);
         clientSurfaceBridge.dropSession(sessionId);
         knowledgeContextRuntime.dropSession(sessionId);
@@ -4487,6 +4551,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await nativeProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       for (const error of processShutdownErrors) console.error('[VarinKernel] Native process shutdown incomplete:', errorMessage(error));
       await piRuntimeGateway.stop();
+      mcpHarness.dispose();
+      await mcpAuthority.close();
       await recoveryTurnCoordinator.dispose();
       await piWriterTracker.dispose();
       await documentsAuthority.dispose();

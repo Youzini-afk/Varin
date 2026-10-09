@@ -51,9 +51,9 @@
 
 | 设计要求 | 当前实际 owner / 已有实现 | 尚缺的不变量或调用路径 | 下一工程纵切 | 验收证据（未执行不得记为通过） |
 | --- | --- | --- | --- | --- |
-| 扩设 §4–6、§10：同一能力合同与预绑定调用 | `kernel/crates/varin-runtime/src/composition.rs` 的 `CompositionRegistry`/pins；`composition/resolver.rs` 的根可达依赖图；`packages/extension-host/src/service-registry.ts` 的 provider/drain/候选替换 | Rust 组合原语尚未连接 Host 安装/选择到实际原生调用；Host `invoke()` 仍逐调用遍历 providers 并检查 JSON。原生 `native_tools.rs` 的静态工具选择不是统一扩展 registry | 选一个真实检索/上下文能力，把已有配置选择、依赖解析、实例句柄、原生调用及同一合同发现接成一条路径；内部 Rust 直接调用，JS 仅在真实进程边界编码 | 两个项目选择不同实现；工具/调用方无需修改；加未使用扩展不改变调用扫描范围；普通缺失与选定实现失败分别呈现 |
+| 扩设 §4–6、§10：同一能力合同与预绑定调用 | `kernel/crates/varin-runtime/src/composition.rs` 的 `CompositionRegistry`/pins；`composition/resolver.rs` 的根可达依赖图；`packages/extension-host/src/service-registry.ts` 的 provider/drain/候选替换 | `varin.context.fragments@1` 已贯穿真实 Host 安装/作用域选择、broker 声明、Rust resolver/registry、预绑定纯变换与实际模型请求；Host 显式 provider 直查及 service 索引已接通。通用检索/工具组合仍未完成，不能把静态工具选择视为统一 registry | 在已验收 context-fragments 纵切上推进真实 Decision/Observer 消费者，再逐域接检索/工具合同；保持内部 Rust 直接调用、仅真实边界编码 | 两个项目选择不同实现；工具/调用方无需修改；加未使用扩展不改变调用扫描范围；普通缺失与选定实现失败分别呈现 |
 | 扩设 §5.2–5.4、§9：作用域、共享实例及局部准备 | resolver 已有 `ScopedSelection`/`PreparationKey`/`preparable`，把优先级解析明确交给现有 routing owner；Host supervisor 已有候选及 owner | `broker-supervisor.ts` 的公共 `#queue` 仍包住 prepare/activate/dispose；纯 resolver 的可并行节点不等于真实并行启用。父子作用域差量、共享实例准备仍需接线 | 耗时准备与释放移到实际实例/依赖范围，公共 owner 仅核对并发布选择；同共享键合并准备；不另外建安装器或配置库 | A 的 activate 或 dispose 未完成，独立 B 仍可启用/停用/调用；同依赖只启动一次；可选缺失不吞掉已选实现的启动失败；冲突选择给出实际来源 |
-| 扩设 §6：Provider / Transform / Decision / Observer 四类参与方式 | Rust `ModelProvider`、`ToolExecutor`、`AgentPolicy`、`ProgressSink` 和 Catalog durable events 各自存在；Host SDK 有 services/effect/Surface 贡献 | 这些接口尚未构成扩展作者可用的四类合同。没有统一的纯变换顺序/补丁冲突路径，也没有从已提交事实到受管扩展 Observer 的完整游标消费路径；非阻塞 progress 不等于第三方执行隔离 | 在上述真实能力纵切中接入一个不可变 Transform、一个明确边界 Decision 和一个经 broker 消费提交事实的 Observer；复用事实游标与既有 worker，慢计算作为真实 Operation | 慢/同步阻塞观察插件不阻止工具提交与无关 worker；观察者重连按游标恢复；变换不修改原历史；决策只阻塞依赖自己的工作；观察者后续动作有新命令来源 |
+| 扩设 §6：Provider / Transform / Decision / Observer 四类参与方式 | Rust `ModelProvider`、`ToolExecutor`、`AgentPolicy`、`ProgressSink` 和 Catalog durable events 各自存在；Host SDK 有 services/effect/Surface 贡献 | SDK 已有声明式 `provideContextFragments` 与同合同 inspect，内置默认/可安装项目实例经真实模型请求验收。Decision/Observer 作者合同、多变换顺序/冲突及完整观察游标消费仍未完成；非阻塞 progress 不等于第三方执行隔离 | 在上述真实能力纵切中接入一个不可变 Transform、一个明确边界 Decision 和一个经 broker 消费提交事实的 Observer；复用事实游标与既有 worker，慢计算作为真实 Operation | 慢/同步阻塞观察插件不阻止工具提交与无关 worker；观察者重连按游标恢复；变换不修改原历史；决策只阻塞依赖自己的工作；观察者后续动作有新命令来源 |
 | 总设 §11、扩设 §7：完整可替换 AgentPolicy | `execution.rs` 已有合法行动检查、版本化 `PolicyCheckpoint` 和默认循环；`model_session.rs` 默认绑定 `DefaultAgentPolicy` | `PolicyAction` 仅有 RequestModel/ExecuteTools/Wait/Complete/Fail；ExecuteTools 只解释模型给出的待结算批次。策略不能通过该合同提交独立工具图/子任务、多模型工作、交付或暂停；配置选择和安全边界替换未接通 | 以研究/计划执行的一条真实策略路径补行动受理与状态关联，接组合选择；慢规划模型用独立推理工作，不在 `decide()` 内做 I/O；保留核心交换配对 | 替换策略后原文/模型 opaque 仍可读；规划等待期间其他 Run 可执行；重开不会重做已受理行动；不兼容私有状态不伪造迁移；策略卸载不删除已受理子任务 |
 | 扩设 §9：热变更、旧调用及持久工作寿命 | Composition handle/lease/pins 区分 retired 与 revoked，按实际实现持有引用；HostServiceRegistry 有 inFlight/drain | Rust pins 尚未贯穿生产 Host/Surface 世代发布。现有局部通过不能证明模型生成时更新工具包、无 UI backend、独占资源交接和已提交选择重启恢复 | 让真实工具包的候选选择直接驱动组合发布；旧 ModelStep 保留 schema/实现，后续请求取新绑定；显式禁用沿执行身份取消；Surface 只作为声明的组依赖 | 候选失败保留旧组合；旧参数按旧实现完成；撤权后的新副作用被拒；关窗口不杀后台作业；旧无关实现引用释放；独占能力只暂停自己的新调用 |
 | 总设 §7–8：按真实资源的跨 Run 调度和便宜读取 | `execution.rs::execute_tools` 先建合同、按 `contracts_conflict` 排序、独立完成工具；`catalog_execution.rs` 已避免为普通只读结果建立持久 Operation | 当前依赖扫描限于单一模型批次，并为每项就绪工具启动线程。没有 runtime 级任务族公平准入；不同 Run 的同资源冲突不能由这个局部图解决。文件 CAS 是提交保证，不代替资源调度 | 把准入归到共享资源 owner：由已有可信资源计划确定 environment/view/真实目标，跨 Run 排队；短读保留内存身份；执行队列区分交互、阻塞 I/O、CPU 和维护，容量由资源/配置决定 | 两个 Run 的冲突写按资源顺序；不同资源继续；大量检索不会饿死另一个任务的交互；取消排队项不取消共享服务；无需给每个内部 helper 建 Operation |
@@ -84,6 +84,16 @@
 
 ## 能力清单与现有复用入口
 
+### 本轮底层验证与剩余边界
+
+- 跨 Run 的资源准入复用 Catalog 所属协调器，原子申请完整资源集合；冲突请求按队列推进，无关资源可继续。真实多 Engine 反例验证排队取消不派发、独立工作推进、后台 Job 保留占用及重启恢复。发现并修复了同步执行器已死但锁残留、以及执行端已停止却因业务效果未知而保留锁的问题。9 项新增回归、79 项 runtime 单测、8 项 kernel 单测和 26 项文件资源审计通过；Windows/macOS 路径行为未在本 Linux 环境验证。
+- 原生 file_list/file_search 已移除 10 ms 轮询，复用 compute 作业的输出/终态通知；生产者背压也改为事件等待。取消注册可移除，完成前先确认 cursor 释放 buffer credit。独立核验包括 1,000 个完成/取消交错、10,000 次正常等待无注册积累、真实超过 1 MiB 结果排空、截断清理及背压中撤权；新构建原生消费者 22/22、资源准入 9/9 和额外撤权反例通过。
+- 个性化上下文按已有 catalog 的 revision 刷新，已发模型请求保持原快照，下个请求读取新笔记/配置；固定源 AGENTS 不随工作区漂移。实际 HTTP 验证编辑、删除、重置、摘要冲突和重启重试；重启后对象键顺序改变导致同 revision 哈希不同的问题，已改为规范化键序，未放松 CAS。
+- 原生权限走独立 Operation/Wait，实际 HTTP 验证单次许可、拒绝、重复调用、身份/策略漂移、取消和重启。普通用户问题不是权限批准。MCP 共享 Host owner、Pi/原生生产接线、懒发现、冻结 schema、凭据世代与无 UI 释放已通过聚焦核验：真实 MCP 4/4、权限 HTTP 3/3 与 Rust 2/2、凭据刷新/重绑 2/2、控制器/代理/单次项目信任 16/16。超过现有 16 MiB 限制时只结算对应连接/输出失败，不杀共享 kernel，不把未收到的回执说成确定效果；完整长输出保存、MCP Tasks、脚本与多模态映射仍未完成。
+- Host 精确世代的预绑定服务句柄及只准备选定 provider 的路径已交付到 `26778086`。独立反例发现并修复了旧 pin 阻塞停用、异步释放期间权限仍可用、强制终止后 reconcile 恢复权限、释放异常遗留 worker 等问题；42 项聚焦测试、类型和空白检查通过。Rust 组合与可替换上下文的生产连接通过 5 项真实原生/broker 测试和 1 项 Rust 绑定测试，包含实际示例安装、项目路由、失败保留旧 checkpoint、旧请求不变及重复读取复用。四类扩展参与合同、策略行动范围及整体成本证据仍未完整实现，不能用这一条纵切代替。
+
+本轮 Host/Pi-host 类型、协议生成一致性与文档链接检查通过。已安装的 SDK 补丁实际参与上述测试；cloud lock 按官方 staging 的 production manifests 核对后完成 frozen install。完整发行布局因缺少生成的 Web CLI/UI 产物未验，不据此声明所有平台或 release 包通过。
+
 下表的“现有入口”是迁移来源，不表示其中代码都应保留，亦不把既有实现误记为新原生合同已完成。
 
 | 能力 | 当前入口/权威 | 目标交付 | 原生实现状态 |
@@ -105,6 +115,15 @@
 | Web/材料/科研/Bot领域工具 | 现有Host领域服务与harness工具 | 通过相同Operations接入；保留材料来源、产物及用户配置行为 | 未完成 |
 | Web/Electron/Mobile、远端、发行 | `application-client`/`protocol`、各surface、Host环境服务、kernel packaging | 同一后端生命周期；snapshot/cursor投影；环境绑定/fencing；平台驱动与安装升级实际验证 | 未完成 |
 | 用户资产与Pi退出 | Pi JSONL/配置/凭据引用/用户扩展源文件 | 一次性导入保留entry ID、分支、工具配对、压缩、opaque及未知项；原文件保留；切换结算在途工作 | 未开始 |
+
+## 下一阶段：各一条真实 Decision / Observer 消费路径
+
+在当前组合切片独立验收后推进，不把以下范围误记为已交付，也不同时扩到任意工具图和子任务框架。
+
+- **Decision：有界研究/证据收集策略。** 沿现有 Host service 路由选定 `varin.agent.policy@1`，经既有 broker worker 在 `execution.rs::AgentPolicy` 的命名边界计算决定；先按整个 Run 固定策略实例与版本，不声称可热迁移不兼容私有状态。策略只选择继续推理、执行已受理工具交换或结束；原有 `PolicyCheckpoint` / `catalog_recovery.rs` 保持私有状态身份核对，核心 history、provider opaque 项、ModelStep 配对及工具受理仍由现有 owner 控制。跨进程决定调用必须带取消上下文，慢/失联策略只能阻塞本 Run，不能让取消、别的 Run 或 Catalog 事务等待第三方回调。非法决定先按核心规则结算已登记交换；策略不能给自己扩权或重放未知效果。
+- **Observer：Run 完成/活动视图扩展。** 复用 `catalog_observe.rs` 的非阻塞通知、`Catalog::events_after` 已提交事实游标及 `Catalog::set_delivery` 的 selected → sent → committed 记录；独立 Host 消费者把所选事实交给 broker，确认精确事实身份后推进交付状态。无需再造事实库或逐 token 持久队列。恢复按 at-least-once 表达，扩展按稳定订阅身份与事实游标去重；后续业务动作必须作为有自身来源、幂等键和授权的新命令受理，不能伪装为原工具成功路径或声称外部效果 exactly-once。观察者慢、崩溃或停用不得延迟生产者提交/工具回执。
+
+验收分别证明：真实选定策略在取消/重开时不破坏交换和私有状态；真实观察 worker 停滞时生产继续，重开重送同一事实可去重。两条路径均复用已有 owner，不引入平行配置、授权或任务状态权威。
 
 ## 不可省略的实现决定
 
@@ -156,6 +175,7 @@
 - `src/providers/tests.rs`：逐字节SSE、opaque与签名保留、矛盾重复项拒绝、截断/乱序；真实loopback TCP/HTTP→适配器、错误headers及headers/body停滞取消通过；共享transport只建一次client/runtime、并发请求/取消/headers隔离通过。Chat工具分片/finish后usage/DONE边界及Azure显式query/version/deployment/credential header与opaque家族fixture通过。Google/Vertex签名和可选工具ID配对、Mistral思考分片/ID碰撞配对、Codex instructions与绑定account/session headers通过；同家族不同connection identity不转发opaque。这不是各云端真实认证或全API家族验证
 - `src/content_tests.rs`及Catalog回归：大请求原文/opaque重开、追加历史块复用、各相位不回写整请求、GC保留live对象、缺失/损坏阻止sweep、孤儿staging清理、转换事务中途失败完整回滚、格式marker冲突拒绝通过。缺对象时public dispatch先写Dispatched的真实反例已修复并复验；另通过格式v2→v3升级不嵌套已有request引用、多领域GC根、拒绝输出及队列编辑/交付GC后重开；不代表模拟真实断电或所有文件系统
 - `tests/composition_resolution.rs`：不相关依赖不成屏障，optional不吞实现失败，真实环路/歧义、陈旧准备/作用域变化、集合顺序通过；尚未接上完整生产扩展装配
+- context-fragments 独立纵切验收：`packages/web/application-host/lib/kernel/native-context-composition-review.native.test.ts` 5 项真实 broker/原生模型请求通过；内置默认、项目实例、失败保留 checkpoint、同记忆 revision 更新及无关路由不重复 describe。`kernel/crates/varin-runtime/tests/context_composition_review.rs` 1 项证明连续 5 次复用同 binding ID、替换产生新 ID、旧 pins 在移除后可完成纯变换、data 保留 ExternalData。Host tests TypeScript 0 diagnostics；这不覆盖尚未实现的 Decision/Observer。
 - LaunchSelection在materialization前select持久化，准备途中重开仍可列出并重新绑定（06:18增量2项通过）；同计划绑定幂等，connection/config/schema/source变化拒绝；重开需Host重绑，重绑不允许重发未决ModelStep。当前保存非敏感选择，不保存可复用grant/credential；实际Host恢复编排仍须接线
 - `tests/credential_broker.rs`：注入事务store的同reference刷新单飞、不同reference独立、取消等待不丢已轮转token、scope不匹配/持久化失败不给headers；`bind_with_credentials`真实localhost请求不回退环境凭据通过。全部是假凭据；Host既有credential owner接线已有独立TS/真实worker验证，真实OAuth账号仍未验收
 - `tests/model_session_configuration.rs`：未知provider不回退、默认不匿名、凭据仅在dispatch解析、不进入request body、无工具绑定不产生工具授权通过

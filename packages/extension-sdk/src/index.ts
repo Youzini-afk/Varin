@@ -703,3 +703,5 @@ export const defineTestProvider = (
   });
   context.effect(async () => { await client.unregisterProvider(descriptor.providerId); });
 });
+
+export * from "./context-fragments.js";

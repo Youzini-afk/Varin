@@ -31,23 +31,46 @@ impl ExecutionError {
 struct CancellationState {
     cancelled: Arc<AtomicBool>,
     changed: tokio::sync::Notify,
+    cancel_wakes: std::sync::Mutex<BTreeMap<u64, mpsc::SyncSender<()>>>,
+    next_cancel_wake: AtomicU64,
     children:
         std::sync::Mutex<std::collections::HashMap<String, std::sync::Weak<CancellationState>>>,
 }
 #[derive(Debug, Clone, Default)]
 pub struct CancellationToken(Arc<CancellationState>);
+#[must_use = "keep the registration alive until the wait ends"]
+pub struct CancellationRegistration {
+    state: std::sync::Weak<CancellationState>,
+    id: u64,
+}
+impl Drop for CancellationRegistration {
+    fn drop(&mut self) {
+        if let Some(state) = self.state.upgrade() {
+            state.cancel_wakes.lock().unwrap_or_else(|p| p.into_inner()).remove(&self.id);
+        }
+    }
+}
 impl CancellationToken {
     pub fn cancel(&self) {
         let mut pending = vec![self.0.clone()];
         while let Some(state) = pending.pop() {
             state.cancelled.store(true, Ordering::Release);
             state.changed.notify_waiters();
+            for (_, wake) in std::mem::take(&mut *state.cancel_wakes.lock().unwrap_or_else(|p| p.into_inner())) { let _ = wake.try_send(()); }
             let children = state
                 .children
                 .lock()
                 .unwrap_or_else(|poison| poison.into_inner());
             pending.extend(children.values().filter_map(std::sync::Weak::upgrade));
         }
+    }
+    /// Keep the returned registration alive while waiting. Cancellation coalesces with
+    /// other control notifications without retaining completed callers on long-lived tokens.
+    pub fn wake_on_cancel(&self, wake: mpsc::SyncSender<()>) -> CancellationRegistration {
+        let mut wakes = self.0.cancel_wakes.lock().unwrap_or_else(|p| p.into_inner());
+        let id = self.0.next_cancel_wake.fetch_add(1, Ordering::Relaxed);
+        if self.is_cancelled() { let _ = wake.try_send(()); } else { wakes.insert(id, wake); }
+        CancellationRegistration { state: Arc::downgrade(&self.0), id }
     }
     pub fn is_cancelled(&self) -> bool {
         self.0.cancelled.load(Ordering::Acquire)
@@ -509,6 +532,9 @@ pub struct ContextProjection {
 }
 
 pub trait Persistence: Send + Sync {
+    /// All engines sharing one durable authority must share its admission owner.
+    fn resource_admission(&self) -> Option<Arc<crate::resource_admission::ResourceAdmission>> { None }
+
     fn compile_context(
         &self,
         run_id: &str,
@@ -1402,6 +1428,7 @@ impl<
         };
         let operation_cancel = cancel.child(&context.operation_id);
         let cancel = &operation_cancel;
+        let mut lease = None;
         let completion = if cancel.is_cancelled() {
             ToolCompletion::cancelled()
         } else if let Err(error) = guarded("tool_authorize_panicked", || {
@@ -1412,6 +1439,22 @@ impl<
         } else if cancel.is_cancelled() {
             ToolCompletion::cancelled()
         } else {
+            if let Some(admission) = self.persistence.resource_admission() {
+                lease = admission.acquire(&context.operation_id, &tool.contract.resources, cancel)?;
+                if lease.is_none() {
+                    return self.settle_tool(input, tool, ToolResult {
+                        request_id: snapshot.view.request_id.clone(),
+                        call_id: tool.call.call_id.clone(),
+                        completion: ToolCompletion::cancelled(),
+                    });
+                }
+            }
+            if cancel.is_cancelled() {
+                return self.settle_tool(input, tool, ToolResult {
+                    request_id: snapshot.view.request_id.clone(), call_id: tool.call.call_id.clone(),
+                    completion: ToolCompletion::cancelled(),
+                });
+            }
             if !tool.contract.read_only || tool.contract.completion == CompletionKind::Job {
                 self.commit(
                     input,
@@ -1420,8 +1463,9 @@ impl<
                         call_id: tool.call.call_id.clone(),
                     },
                 )?;
+                if let Some(lease) = lease.as_mut() { lease.dispatched(); }
             }
-            // No catalog lock, tool-environment lock, or dependency lease is held across execution.
+            // Only this operation's resource plan is held; no catalog or tool-environment mutex.
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.tools
                     .execute(&context, &tool.call, &tool.contract, cancel)
@@ -1444,13 +1488,21 @@ impl<
             call_id: tool.call.call_id.clone(),
             completion,
         };
+        let settled = self.settle_tool(input, tool, result);
+        // Catalog settlement releases synchronous occupancy atomically after its durable receipt.
+        // Background jobs and a failed durable receipt remain owned until executor reconciliation.
+        if let Some(lease) = lease {
+            if settled.is_err() || matches!(settled.as_ref().map(|r| &r.completion),
+                Ok(ToolCompletion::JobAccepted { .. }) | Ok(ToolCompletion::Result { effect: Effect::Unknown, .. })
+            ) && tool.contract.completion == CompletionKind::Job { lease.handoff(); }
+            else { lease.release(); }
+        }
+        settled
+    }
+
+    fn settle_tool(&self, input: &ExecutionInput, tool: &AdmittedTool, result: ToolResult) -> Result<ToolResult, ExecutionError> {
         if !tool.contract.read_only || tool.contract.completion == CompletionKind::Job {
-            self.commit(
-                input,
-                ExecutionRecord::ToolSettled {
-                    result: result.clone(),
-                },
-            )?;
+            self.commit(input, ExecutionRecord::ToolSettled { result: result.clone() })?;
         }
         self.progress
             .emit(&input.run_id, ExecutionEvent::ToolCompleted(result.clone()));

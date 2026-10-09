@@ -579,6 +579,11 @@ export interface HostMethodMap {
     params: Record<string, never>;
     result: PiSettingsSnapshot;
   };
+  /** Internal synchronous scope read; preserves session-only trust without reloading settings. */
+  "settings.context": {
+    params: Record<string, never>;
+    result: { cwd: string; projectTrusted: boolean };
+  };
   "settings.update": {
     params: {
       expectedRevision: string;

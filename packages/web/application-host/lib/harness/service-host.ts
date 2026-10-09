@@ -80,6 +80,7 @@ export function deriveHarnessCapabilities(
     // Hidden session extensions use these even when their corresponding
     // user-facing tools are not shown.
     "context.session",
+    "control.mcp",
     "read.lsp",
     "read.output",
   ]);

@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { McpAuthority } from "../src/mcp-authority.js";
 import {
   createPiMcpConfigBridgeExtension,
   PI_MCP_RPC_READY_EVENT,
@@ -70,20 +71,18 @@ describe("pi-mcp-adapter config bridge", () => {
     const projectPath = join(cwd, ".pi", "mcp.json");
     const global = JSON.stringify({ mcpServers: { docs: { command: "node", enabled: false, exposure: "direct" } } });
     writeFileSync(globalPath, global); writeFileSync(projectPath, '{"mcpServers":{}}');
-    const bridge = new PiMcpConfigBridge();
-    bridge.startSession("main", cwd);
+    const authority = new McpAuthority();
+    const scope = { agentDir, configCwd: cwd, executionCwd: cwd, environmentId: "fixture", executionScope: "workspace" as const,
+      projectTrusted: true, sessionId: "main" };
     try {
-      const options = bridge.nativeOptions(agentDir, () => {});
-      const ctx = { ...context("main", cwd), isProjectTrusted: () => true };
-      const loaded = await options.loadConfig!(ctx);
-      const entry = loaded.servers.find(server => server.name === "docs")!;
-      await options.updateConfig!({ ...entry, override: projectPath }, { enabled: true, exposure: "codemode" });
+      const opened = authority.open(scope);
+      await authority.updateConfig(opened.scope, "docs", { enabled: true, exposure: "codemode" }, true);
       assert.equal(readFileSync(globalPath, "utf8"), global);
       assert.deepEqual(JSON.parse(readFileSync(projectPath, "utf8")).mcpServers.docs, { enabled: true, exposure: "codemode" });
-      const refreshed = await options.loadConfig!(ctx);
+      const refreshed = authority.open(scope).config;
       assert.equal(refreshed.servers.find(server => server.name === "docs")?.config.enabled, true);
       assert.equal(refreshed.servers.find(server => server.name === "docs")?.override, projectPath);
-    } finally { bridge.endSession(); rmSync(root, { recursive: true, force: true }); }
+    } finally { await authority.close(); rmSync(root, { recursive: true, force: true }); }
   });
 
   it("distinguishes unavailable from an authoritative empty catalog", async () => {

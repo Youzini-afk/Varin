@@ -4,6 +4,10 @@ use crate::execution::*;
 use std::sync::Mutex;
 
 impl Persistence for Mutex<Catalog> {
+    fn resource_admission(&self) -> Option<std::sync::Arc<crate::resource_admission::ResourceAdmission>> {
+        Some(self.lock().unwrap_or_else(|p| p.into_inner()).resource_admission.clone())
+    }
+
     fn compile_context(&self, run_id:&str, epoch:u64, expected_head:Option<&str>) -> std::result::Result<Option<ContextProjection>,ExecutionError> {
         let read={self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.prepare_context_read(run_id,epoch,expected_head).map_err(|error|ExecutionError::new("context_compile",error.to_string()))?};
         read.map(|read|read.load()).transpose().map_err(|error|ExecutionError::new("context_content",error.to_string()))
@@ -440,6 +444,7 @@ impl Catalog {
                 };
                 op.revision += 1;
                 op.executor = Some(tool.call.name);
+                tx.execute("INSERT INTO resource_occupancy(operation_id,claims) VALUES(?1,?2)", params![key, encode(&tool.contract.resources)?])?;
                 put(&tx, "operations", &key, &op)?;
             }
             ExecutionRecord::ToolSettled { result } => {
@@ -448,6 +453,13 @@ impl Catalog {
                 if op.run_id != run_id || op.epoch != epoch || op.phase == OperationPhase::Terminal
                 {
                     return Err(RuntimeError::Conflict("tool completion is stale".into()));
+                }
+                // Settle the permission rendezvous even when cancellation prevented a decision.
+                if let Some(wait_id) = op.waiting_on.clone().filter(|id| id.starts_with("permission:")) {
+                    let mut wait: Wait = super::record(&tx, "waits", &wait_id)?;
+                    if wait.trigger_cursor.is_none() { wait.cancelled = true; }
+                    put(&tx, "waits", &wait_id, &wait)?;
+                    op.waiting_on = None;
                 }
                 match &result.completion {
                     ToolCompletion::NotDispatched { reason } => {
@@ -505,6 +517,13 @@ impl Catalog {
                         apply_external_terminal(&mut op, &receipt);
                     }
                 }
+                // Effect uncertainty and executor occupancy are separate facts. A returned
+                // synchronous call has stopped; an unconfirmed background job may still run.
+                let tool: AdmittedTool = serde_json::from_value(op.intent.clone())?;
+                let stopped = tool.contract.completion != CompletionKind::Job
+                    || matches!(result.completion, ToolCompletion::NotDispatched { .. })
+                    || matches!(result.completion, ToolCompletion::Result { effect, .. } if effect != Effect::Unknown);
+                if stopped { tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1", [&key])?; }
                 op.revision += 1;
                 put(&tx, "operations", &key, &op)?;
                 if op.phase == OperationPhase::Terminal {
@@ -603,6 +622,10 @@ impl Catalog {
             json!({"kind":serde_json::to_value(record)?.get("kind")}),
         )?;
         tx.commit()?;
+        if let ExecutionRecord::ToolSettled { result } = record {
+            let owner = operation_id(&result.request_id, &result.call_id);
+            self.release_stopped_resource_owner(&owner)?;
+        }
         if matches!(record, ExecutionRecord::ToolSettled { .. } | ExecutionRecord::ToolBatchCommitted { .. }) {
             self.reconcile_waits()?;
         }
@@ -933,6 +956,20 @@ impl Catalog {
         operation_id: &str,
         receipt: ExternalReceipt,
     ) -> Result<Operation> {
+        // An unambiguous terminal outcome establishes stop; disappearance/unknown does not.
+        // Consumers with independent liveness evidence must use the explicit method below.
+        let executor_stopped = receipt.outcome != Outcome::Indeterminate;
+        self.record_external_receipt_with_stop(operation_id, receipt, executor_stopped)
+    }
+
+    /// Trusted executor liveness evidence, independent of the business outcome/effect. Never
+    /// infer `executor_stopped` from cancellation, connection loss, or a model-supplied result.
+    pub fn record_external_receipt_with_stop(
+        &mut self,
+        operation_id: &str,
+        receipt: ExternalReceipt,
+        executor_stopped: bool,
+    ) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let mut op: Operation = super::record(&tx, "operations", operation_id)?;
         if receipt.identity != op.id
@@ -950,7 +987,12 @@ impl Catalog {
         }
         if let Some(previous) = &op.external_receipt {
             if previous == &receipt {
-                drop(tx);
+                // Stop evidence may arrive after an identical uncertain business receipt.
+                if executor_stopped {
+                    tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1", [operation_id])?;
+                }
+                tx.commit()?;
+                self.release_stopped_resource_owner(operation_id)?;
                 self.reconcile_waits()?;
                 return Ok(op);
             }
@@ -988,9 +1030,19 @@ impl Catalog {
             },
             serde_json::to_value(&op)?,
         )?;
+        if executor_stopped {
+            tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1", [operation_id])?;
+        }
         tx.commit()?;
+        self.release_stopped_resource_owner(operation_id)?;
         self.reconcile_waits()?;
         Ok(op)
+    }
+
+    fn release_stopped_resource_owner(&self, owner: &str) -> Result<()> {
+        let occupied: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM resource_occupancy WHERE operation_id=?1)", [owner], |r| r.get(0))?;
+        if !occupied { self.resource_admission.release(owner); }
+        Ok(())
     }
 }
 

@@ -59,5 +59,10 @@ A bound handle admits ordinary calls while its generation is active. A caller fr
 can explicitly pin that generation, including its real broker drain lifetime, and must release the
 pin after settling the exchange. Normal replacement preserves pinned calls; disable/crash drainage
 revokes both the active generation and older retained generations without waiting for abandoned pins.
-These Host bindings do not yet connect Host-selected implementations to the Rust composition resolver,
-nor do they implement the proposed Transform/Decision/Observer SDK contracts.
+The first production native consumer is `varin.context.fragments@1`: existing scoped routing selects
+one brokered package, its frozen declaration crosses the private context boundary, and Rust's existing
+composition resolver/registry binds a typed immutable transform. The SDK's `provideContextFragments`
+helper and `inspect` metadata share the contract; the packaged default and installable project example
+use the ordinary lifecycle. This does not yet provide general Decision/Observer author contracts or
+arbitrary retrieval/tool composition. See `examples/extensions/project-context` for the actual author
+and project-selection path.

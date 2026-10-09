@@ -182,9 +182,8 @@ export function createPermissionGateExtension(options: PermissionGateOptions): E
       }
 
       let result: GateResult = evaluateGate(toolName, params, policy);
-      if (target.action === "unknown" && policy.mode !== "bypass") {
-        result = { decision: "ask", reason: "unknown third-party action requires confirmation" };
-      }
+      // Explicit Host rules remain authoritative even for unknown third-party effects.
+      // The shared evaluator defaults unknown tools to ask; annotations cannot upgrade that.
       if (result.reason === "unknown tool requires confirmation") {
         result = {
           decision: defaultDecisionForAction(target.action, policy.mode),

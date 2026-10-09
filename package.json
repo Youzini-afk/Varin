@@ -194,6 +194,7 @@
     "vitest": "^5.0.3"
   },
   "patchedDependencies": {
+    "@earendil-works/pi-mcp@1.0.4": "packages/pi-host/patches/@earendil-works%2Fpi-mcp@1.0.4.patch",
     "@earendil-works/pi-ai@1.0.4": "packages/pi-host/patches/@earendil-works%2Fpi-ai@1.0.4.patch",
     "@tanstack/virtual-core@3.17.3": "bun-patches/@tanstack+virtual-core+3.17.3.patch",
     "ghostty-web@0.4.0": "bun-patches/ghostty-web+0.4.0.patch",

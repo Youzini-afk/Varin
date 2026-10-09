@@ -85,6 +85,13 @@ fixtures; UI consumers use Vitest. Controlled local MCP/provider fixtures need n
 Production packaging must include the Host patch directory and native QuickJS worker/WASM dependencies,
 and refresh `scripts/cloud-runtime.bun.lock` after the final dependency/patch change.
 
+The MCP adaptation also exports the lazy connection runtime and adds an embedding-owner seam
+for the Application Host. Pi delegates through that seam; native execution leases the same
+connections. The connection's asynchronous pre-dispatch guard must survive upgrades, including
+reconnect paths. MCP OAuth binding metadata belongs to the existing credential state and must
+remain stable across token refresh while changing for a new authorization grant. See the
+[shared owner contract](../../packages/pi-host/src/mcp-authority.md).
+
 Native MCP is the default without an external package. The former foundational-package provisioning
 and restore APIs have been retired; already installed adapters remain ordinary Pi packages. Package
 mutations retain broker serialization and a shared agent-directory filesystem lock. The UI preserves
@@ -101,3 +108,14 @@ combined model/tool receipts. The experimental durable runtime assessment is rec
 
 The report only runs default-branch code and reads PR metadata; it neither installs PR dependencies nor
 executes PR code or project tests. `node --test scripts/dependabot-report.test.mjs` exercises its parsing.
+
+## MCP oversized-frame failure
+
+The pinned `@earendil-works/pi-mcp` patch preserves the dependency's existing 16 MiB stdio
+message limit. Exceeding that real framing budget emits typed `McpMessageTooLargeError`
+(`mcp_message_too_large`), immediately rejects only that client's pending calls, and closes its
+transport. Ordinary transport errors and benign late-response diagnostics do not trigger this path.
+A dispatched tool retains unknown effects and is never replayed automatically; other MCP servers
+and the kernel remain available. The patch does not claim to preserve oversized response content.
+Keep this patch in both workspace and cloud-runtime locks, and verify real non-ASCII stdio frames,
+client closure, no replay and unaffected independent work after dependency updates.

@@ -78,6 +78,7 @@
     "@varin/extension-contract": "workspace:*",
     "@varin/extension-host": "workspace:*",
     "@varin/protocol": "workspace:*",
+    "@varin/pi-host": "workspace:*",
     "@varin/runtime-broker": "workspace:*",
     "@varin/settings-store": "workspace:*",
     "adm-zip": "^0.6.1",

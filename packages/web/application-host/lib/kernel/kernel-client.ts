@@ -1,3 +1,4 @@
+import { NativeMcpBridge, type NativeMcpLease, type NativeMcpBinding, type PrivateMcpResponse } from './native-mcp-bridge.js';
 import { NativeCredentialBridge, type PrivateCredentialResponse } from "./native-credential-bridge.js";
 import type { ExistingHostCredentialOwner, NativeCredentialScope } from "./native-credential-owner.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -546,6 +547,7 @@ export class KernelClient {
     return () => this.nativeRuntimeListeners.delete(listener);
   }
   private readonly credentialBridge: NativeCredentialBridge;
+  private readonly mcpBridge: NativeMcpBridge;
   private window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private nativeWindow = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private closePromise: Promise<void> | undefined;
@@ -563,6 +565,8 @@ export class KernelClient {
   constructor(options: KernelClientOptions) {
     this.options = options;
     this.spawnProcess = options.spawnProcess ?? spawn;
+    this.mcpBridge = new NativeMcpBridge(() => this.epoch, response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: "mcp-channel-failed", message: "Private MCP channel failed", retryable: false }), true));
     this.credentialBridge = new NativeCredentialBridge(() => this.epoch,
       response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "credential-channel-failed", message: "Private credential channel failed", retryable: false }), true));
@@ -581,6 +585,12 @@ export class KernelClient {
     return this.credentialBridge.register(runId, owner);
   }
   unregisterNativeCredentialOwner(runId: string): void { this.credentialBridge.unregister(runId); }
+  async registerNativeMcpOwner(runId: string, lease: NativeMcpLease): Promise<NativeMcpBinding> {
+    if (!this.handshakeResult) await this.start();
+    return this.mcpBridge.register(runId, lease);
+  }
+  nativeMcpBinding(runId: string): NativeMcpBinding | undefined { return this.mcpBridge.binding(runId); }
+  unregisterNativeMcpOwner(runId: string): void { this.mcpBridge.unregister(runId); }
 
   get kernelEpoch(): string | null { return this.epoch; }
   get handshake(): KernelHandshakeResult | null { return this.handshakeResult; }
@@ -761,7 +771,7 @@ export class KernelClient {
       let response: KernelResponse | KernelProcessStreamEvent | NativeRuntimeStreamEvent;
       try { response = JSON.parse(body.toString("utf8")) as KernelResponse | KernelProcessStreamEvent | NativeRuntimeStreamEvent; }
       catch (error) { this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: `Invalid Rust kernel response: ${String(error)}`, retryable: false }), true); return; }
-      if (this.credentialBridge.consume(response)) continue;
+      if (this.credentialBridge.consume(response) || this.mcpBridge.consume(response)) continue;
       if (response.kind === "runtime-event") {
         if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch
           || !["durable", "progress"].includes(response.stream)
@@ -831,6 +841,7 @@ export class KernelClient {
     }
     this.transportFailed = true;
     this.credentialBridge.close();
+    this.mcpBridge.close();
     this.window.close(error);
     this.nativeWindow.close(error);
     for (const pending of this.pending.values()) { pending.reject(error); pending.release(); }
@@ -848,7 +859,7 @@ export class KernelClient {
     if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
-  private async write(request: KernelRequest | PrivateCredentialResponse, encoded?: Buffer): Promise<void> {
+  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateMcpResponse, encoded?: Buffer): Promise<void> {
     const stdin = this.child?.stdin;
     if (!stdin || stdin.destroyed) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel stdin is unavailable", retryable: true });
     const writable = stdin as Writable;
@@ -1450,6 +1461,7 @@ export class KernelClient {
   private async closeInternal(): Promise<void> {
     this.closed = true;
     this.credentialBridge.close();
+    this.mcpBridge.close();
     this.window.close(new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closing" }));
     this.nativeWindow.close(new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closing" }));
     for (const pending of this.pending.values()) pending.cancel();

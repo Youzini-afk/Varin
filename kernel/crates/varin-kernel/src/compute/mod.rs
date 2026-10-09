@@ -8,7 +8,7 @@ mod query;
 use crate::protocol_generated::{KernelComputeGrammarParams, KernelComputeStartParams};
 use serde_json::{json, Value};
 use std::{collections::{HashMap, VecDeque}, fs::File, path::PathBuf,
-    sync::{Arc, Condvar, Mutex, atomic::{AtomicBool, Ordering}}, thread::{self, JoinHandle}, time::Duration};
+    sync::{mpsc, Arc, Condvar, Mutex, Weak, atomic::{AtomicBool, Ordering}}, thread::{self, JoinHandle}};
 
 pub(crate) type Result<T> = std::result::Result<T, String>;
 const BUFFER_BYTES: usize = 1024 * 1024;
@@ -48,11 +48,17 @@ pub(crate) struct Shared {
     space: Condvar,
     pub cancelled: AtomicBool,
     done: AtomicBool,
+    watchers: Mutex<Vec<Weak<mpsc::SyncSender<()>>>>,
 }
 impl Shared {
     fn new() -> Self { Self { state: Mutex::new(State { status: "queued", records: VecDeque::new(),
         bytes: 0, base: 0, end: 0, scanned: 0, message: None, discard: false }),
-        space: Condvar::new(), cancelled: AtomicBool::new(false), done: AtomicBool::new(false) } }
+        space: Condvar::new(), cancelled: AtomicBool::new(false), done: AtomicBool::new(false), watchers: Mutex::new(Vec::new()) } }
+    fn notify_watchers(&self) {
+        self.watchers.lock().unwrap_or_else(|p| p.into_inner()).retain(|watcher| {
+            if let Some(wake) = watcher.upgrade() { let _ = wake.try_send(()); true } else { false }
+        });
+    }
     pub fn check(&self) -> Result<()> {
         if self.cancelled.load(Ordering::Acquire) { Err("cancelled".into()) } else { Ok(()) }
     }
@@ -64,12 +70,13 @@ impl Shared {
         let mut state = self.state.lock().unwrap_or_else(|e|e.into_inner());
         while state.bytes > 0 && state.bytes + bytes > BUFFER_BYTES && !state.discard {
             self.check()?;
-            state = self.space.wait_timeout(state, Duration::from_millis(50)).unwrap_or_else(|e|e.into_inner()).0;
+            state = self.space.wait(state).unwrap_or_else(|e|e.into_inner());
         }
         self.check()?;
         if !state.discard {
             let cursor = state.end; state.end += 1; state.bytes += bytes;
             state.records.push_back(Buffered {cursor,bytes,record});
+            self.notify_watchers();
         }
         Ok(())
     }
@@ -83,6 +90,7 @@ impl Shared {
             Err(message) => { state.status=if state.end==0 {"failed"} else {"partial"}; state.message=Some(message); }
         } }
         self.done.store(true,Ordering::Release); self.space.notify_all();
+        self.notify_watchers();
     }
     fn cancel(&self) {
         self.cancelled.store(true,Ordering::Release);
@@ -120,7 +128,38 @@ pub(crate) struct Job {
     pub revoked:bool,
     shared:Arc<Shared>,
 }
-impl Job { pub fn done(&self)->bool {self.shared.done.load(Ordering::Acquire)} }
+impl Job {
+    pub fn done(&self)->bool {self.shared.done.load(Ordering::Acquire)}
+    pub fn watch(&self) -> ComputeWatch { ComputeWatch(self.shared.clone()) }
+}
+/// A read-only notification handle to the admitted job, not another job registry.
+/// It remains valid through revocation/removal and identifies this exact execution.
+pub(crate) struct ComputeWatch(Arc<Shared>);
+impl ComputeWatch {
+    pub fn wait(&self, cursor: u64, terminal_only: bool, cancel: &varin_runtime::execution::CancellationToken) -> bool {
+        let (wake, events) = mpsc::sync_channel(1);
+        let wake = Arc::new(wake);
+        let _cancellation = cancel.wake_on_cancel((*wake).clone());
+        {
+            let mut watchers = self.0.watchers.lock().unwrap_or_else(|p| p.into_inner());
+            watchers.retain(|watcher| watcher.strong_count() > 0);
+            watchers.push(Arc::downgrade(&wake));
+        }
+        loop {
+            // Register before checking the authoritative predicate; notifications
+            // coalesce but neither completion nor cancellation can be missed.
+            if cancel.is_cancelled() { return false; }
+            {
+                let state = self.0.state.lock().unwrap_or_else(|p| p.into_inner());
+                if self.0.done.load(Ordering::Acquire) || (!terminal_only && state.end > cursor) {
+                    return true;
+                }
+            }
+            // No Storage, catalog, queue or job-state lock is held while waiting.
+            if events.recv().is_err() { return false; }
+        }
+    }
+}
 #[derive(Default)]
 pub(crate) struct ComputeManager {
     pub jobs:HashMap<String,Job>,
@@ -160,7 +199,7 @@ impl ComputeManager {
         let job=self.jobs.get(id).ok_or("Computation handle is unavailable")?;
         let mut state=job.shared.state.lock().unwrap_or_else(|e|e.into_inner());
         // Cancellation deliberately discards buffered output; a caller still
-        // polls the task's real terminal state before releasing reader pins.
+        // observes the task's real terminal state before releasing reader pins.
         let cursor=if state.discard{state.end}else{cursor};
         if cursor<state.base||cursor>state.end{return Err("Computation cursor is expired or beyond produced output".into());}
         while state.records.front().is_some_and(|r|r.cursor<cursor) {

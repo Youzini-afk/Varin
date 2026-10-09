@@ -5,9 +5,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fauxProvider } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/compat";
-import { createAgentSession, createMcpExtension, createCodemodeExtension, createToolSearchExtension, DefaultResourceLoader, ModelRuntime, SessionManager,
+import { createAgentSession, createMcpExtension, createCodemodeExtension, loadMcpRuntime, createToolSearchExtension, DefaultResourceLoader, ModelRuntime, SessionManager,
   type ExtensionFactory, type AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { McpAuthority, type McpAuthorityLease } from "../src/mcp-authority.js";
+import { createMcpHarnessServices } from "../../web/application-host/lib/harness/mcp-service.js";
+import type { McpOwnerRequest } from "@varin/protocol";
 import { PiMcpConfigBridge, createPiMcpConfigBridgeExtension } from "../src/pi-mcp-config-bridge.js";
 import { createPermissionGateExtension } from "../src/harness/permission-gate-extension.js";
 import type { HostServicesBridge } from "../src/harness/host-services-bridge.js";
@@ -139,6 +142,21 @@ test("native MCP, codemode, permissions, nested events, and shutdown share one o
   await runtime.setRuntimeApiKey(model.provider, "faux-key");
   const manager = SessionManager.inMemory(root);
   const bridge = new PiMcpConfigBridge(); const states: unknown[] = [];
+  const mcpRuntime = await loadMcpRuntime(); let transports = 0;
+  const authority = new McpAuthority({ createTransport: (...args) => { transports++; return mcpRuntime.createDefaultTransport(...args); } });
+  const ownerScope = { agentDir, configCwd: root, executionCwd: root, environmentId: "fixture",
+    executionScope: "workspace" as const, projectTrusted: true, sessionId: manager.getSessionId() };
+  const host = createMcpHarnessServices(authority, () => ownerScope);
+  const hostBridge = { request: async (method: string, params: unknown, options?: { signal?: AbortSignal }) => {
+    assert.equal(method, "mcp.owner");
+    return host.services["mcp.owner"].handle(params as McpOwnerRequest, {
+      actor: { authorityInstanceId: "fixture", workerId: "pi-fixture", workerGeneration: 1,
+        sessionId: manager.getSessionId(), workspaceId: "fixture", grantedCapabilities: ["control.mcp"] },
+      sessionId: manager.getSessionId(), workspaceId: "fixture", authorizedPaths: [],
+      signal: options?.signal ?? new AbortController().signal,
+    });
+  } } as Pick<HostServicesBridge, "request">;
+  let nativeLease: McpAuthorityLease | undefined;
   const permissionCalls: string[] = [];
   let allowedTools: readonly string[] | undefined;
   const gate = createPermissionGateExtension({ cwd: root, sessionId: manager.getSessionId(),
@@ -154,7 +172,7 @@ test("native MCP, codemode, permissions, nested events, and shutdown share one o
   const loader = new DefaultResourceLoader({ cwd: root, agentDir, extensionFactories: [
     { name: "codemode", builtin: true, replaceable: true, factory: createCodemodeExtension() },
     { name: "tool-search", builtin: true, replaceable: true, factory: createToolSearchExtension() },
-    { name: "mcp", builtin: true, replaceable: true, factory: createMcpExtension(bridge.nativeOptions(agentDir, (_event, data) => states.push(data))) },
+    { name: "mcp", builtin: true, replaceable: true, factory: createMcpExtension(bridge.nativeOptions(agentDir, (_event, data) => states.push(data), hostBridge)) },
     { name: "config-bridge", factory: createPiMcpConfigBridgeExtension(bridge) },
     { name: "permission-gate", factory: gate },
   ] });
@@ -170,6 +188,13 @@ test("native MCP, codemode, permissions, nested events, and shutdown share one o
     () => fauxAssistantMessage("blocked done"),
   ]);
   try {
+    nativeLease = await authority.acquire(ownerScope, { servers: ["fixture"] });
+    assert.equal(transports, 1, "Pi and native leases share one real MCP transport");
+    const echo = nativeLease.binding.tools.find(tool => tool.tool === "echo")!;
+    assert.ok(echo);
+    assert.throws(() => nativeLease!.validateArguments(echo.name, echo.schemaVersion, { text: 7 }), /mcp-arguments-invalid/);
+    assert.equal((await nativeLease.callTool(echo.name, { text: "shared owner" }, { schemaVersion: echo.schemaVersion,
+      signal: new AbortController().signal })).structuredContent?.echoed, "shared owner");
     await session.prompt("native script");
     const results = manager.getBranch().filter(entry => entry.type === "message" && entry.message.role === "toolResult");
     const result = results[0]?.type === "message" && results[0].message.role === "toolResult" ? results[0].message : undefined;
@@ -184,6 +209,7 @@ test("native MCP, codemode, permissions, nested events, and shutdown share one o
     assert.doesNotMatch(JSON.stringify(snapshot), /password|token=secret/);
     const command = session.extensionRunner?.getCommand("mcp"); assert.ok(command);
     await command.handler("disable fixture", session.extensionRunner!.createCommandContext());
+    assert.throws(() => nativeLease!.assertCallable(echo.name, echo.schemaVersion), /mcp-owner-revoked/);
     const saved = await readFile(join(agentDir, "mcp.json"), "utf8");
     assert.match(saved, /keep-this/);
     assert.match(saved, /"enabled": false/);
@@ -195,6 +221,7 @@ test("native MCP, codemode, permissions, nested events, and shutdown share one o
     assert.match(JSON.stringify(final), /authorized tool set/);
   } finally {
     await session.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
+    nativeLease?.release(); host.dispose(); await authority.close();
     session.dispose();
     await rm(root, { recursive: true, force: true });
   }

@@ -1,0 +1,113 @@
+diff --git a/dist/transports/transport.js b/dist/transports/transport.js
+--- a/dist/transports/transport.js
++++ b/dist/transports/transport.js
+@@ -1,5 +1,13 @@
+ import { toError } from "../protocol/jsonrpc.js";
+ export const DEFAULT_MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
++/** The existing transport frame budget was exceeded; this stream cannot yield the pending reply. */
++export class McpMessageTooLargeError extends Error {
++    code = "mcp_message_too_large";
++    constructor(maxMessageBytes) {
++        super(`MCP message exceeds ${maxMessageBytes} bytes`);
++        this.name = "McpMessageTooLargeError";
++    }
++}
+ /** Listener bookkeeping shared by transports. `emitClose` fires at most once per transport. */
+ export class TransportEvents {
+     messageListeners = new Set();
+diff --git a/dist/transports/transport.d.ts b/dist/transports/transport.d.ts
+--- a/dist/transports/transport.d.ts
++++ b/dist/transports/transport.d.ts
+@@ -1,5 +1,9 @@
+ import { type JsonRpcMessage } from "../protocol/jsonrpc.ts";
+ export declare const DEFAULT_MAX_MESSAGE_BYTES: number;
++export declare class McpMessageTooLargeError extends Error {
++    readonly code = "mcp_message_too_large";
++    constructor(maxMessageBytes: number);
++}
+ export type McpTransportMessageListener = (message: JsonRpcMessage) => void;
+ export type McpTransportErrorListener = (error: Error) => void;
+ export type McpTransportCloseListener = () => void;
+diff --git a/dist/transports/stdio.js b/dist/transports/stdio.js
+--- a/dist/transports/stdio.js
++++ b/dist/transports/stdio.js
+@@ -2,7 +2,7 @@
+ import process from "node:process";
+ import crossSpawn from "cross-spawn";
+ import { McpConnectionClosedError, parseJsonRpcMessage } from "../protocol/jsonrpc.js";
+-import { DEFAULT_MAX_MESSAGE_BYTES, TransportEvents } from "./transport.js";
++import { DEFAULT_MAX_MESSAGE_BYTES, McpMessageTooLargeError, TransportEvents } from "./transport.js";
+ const DEFAULT_MAX_STDERR_BYTES = 64 * 1024;
+ const DEFAULT_CLOSE_TIMEOUT_MS = 2_000;
+ /** How long a server gets to exit on its own after stdin closes, before it is sent SIGTERM. */
+@@ -161,6 +161,7 @@
+         });
+     }
+     handleStdout(chunk) {
++        if (this.closed) return;
+         this.stdoutBuffer = Buffer.concat([this.stdoutBuffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+         const maxMessageBytes = this.options.maxMessageBytes ?? DEFAULT_MAX_MESSAGE_BYTES;
+         while (true) {
+@@ -168,15 +169,15 @@
+             if (newline < 0) {
+                 if (this.stdoutBuffer.length > maxMessageBytes) {
+                     this.stdoutBuffer = Buffer.alloc(0);
+-                    this.emitError(new Error(`MCP stdio message exceeds ${maxMessageBytes} bytes`));
++                    this.emitError(new McpMessageTooLargeError(maxMessageBytes));
+                 }
+                 return;
+             }
+             const line = this.stdoutBuffer.subarray(0, newline);
+             this.stdoutBuffer = this.stdoutBuffer.subarray(newline + 1);
+             if (line.length > maxMessageBytes) {
+-                this.emitError(new Error(`MCP stdio message exceeds ${maxMessageBytes} bytes`));
+-                continue;
++                this.emitError(new McpMessageTooLargeError(maxMessageBytes));
++                return;
+             }
+             const text = line.toString("utf8").replace(/\r$/, "");
+             if (!text.trim())
+diff --git a/dist/client.js b/dist/client.js
+--- a/dist/client.js
++++ b/dist/client.js
+@@ -1,5 +1,6 @@
+ import { isJsonRpcId, isJsonRpcNotification, isJsonRpcRequest, isJsonRpcResponse, isObject, JSON_RPC_ERROR_CODES, McpAbortError, McpConnectionClosedError, McpError, McpTimeoutError, toError, } from "./protocol/jsonrpc.js";
+ import { LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS, } from "./protocol/types.js";
++import { McpMessageTooLargeError } from "./transports/transport.js";
+ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+ const MAX_LIST_PAGES = 1_000;
+ function validateInitializeResult(value) {
+@@ -116,8 +117,15 @@
+         this.transport = transport;
+         this.disposers = [
+             transport.onMessage((message) => this.handleMessage(message)),
+-            // Transport errors are reported only. Pending requests fail when the transport closes.
+-            transport.onError((error) => this.emitError(error)),
++            // Ordinary transport errors are observational. A typed fatal framing error means
++            // the reply was discarded, so settle this client's pending calls now, never at timeout.
++            transport.onError((error) => {
++                if (error instanceof McpMessageTooLargeError) {
++                    this.markClosed(error);
++                    void this.close().catch((closeError) => this.emitError(closeError));
++                }
++                this.emitError(error);
++            }),
+             transport.onClose(() => this.handleTransportClose()),
+         ];
+         try {
+diff --git a/dist/index.js b/dist/index.js
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1,3 +1,4 @@
++export { McpMessageTooLargeError } from "./transports/transport.js";
+ export { McpClient } from "./client.js";
+ export { toLlmContent, } from "./protocol/content.js";
+ export { isJsonRpcNotification, isJsonRpcRequest, isJsonRpcResponse, JSON_RPC_ERROR_CODES, McpAbortError, McpConnectionClosedError, McpError, McpTimeoutError, parseJsonRpcMessage, } from "./protocol/jsonrpc.js";
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -1,3 +1,4 @@
++export { McpMessageTooLargeError } from "./transports/transport.ts";
+ export type { AuthProvider, McpFetch, UnauthorizedContext } from "./auth-provider.ts";
+ export { McpClient, type McpClientOptions, type McpRequestOptions } from "./client.ts";
+ export { type AudioContent, type BlobResourceContents, type CallToolResult, type ContentAnnotations, type ContentBlock, type EmbeddedResourceContent, type ImageContent, type LlmContent, type ResourceLinkContent, type TextContent, type TextResourceContents, toLlmContent, } from "./protocol/content.ts";

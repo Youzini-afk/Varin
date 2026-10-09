@@ -19,6 +19,8 @@ pub struct ContextCheckpoint {
     pub id: String,
     pub revision: u64,
     pub proposal: ContextProposal,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub personalization: Option<super::personalization::PersonalizationBasis>,
 }
 
 pub(super) fn initialize(db: &mut Connection) -> Result<()> {
@@ -85,6 +87,14 @@ impl Catalog {
         &self,
         proposal: ContextProposal,
     ) -> Result<(ContextCheckpoint, Value)> {
+        self.stage_context_with_personalization(proposal, None)
+    }
+    pub(super) fn stage_context_with_personalization(
+        &self,
+        proposal: ContextProposal,
+        personalization: Option<super::personalization::PersonalizationBasis>,
+    ) -> Result<(ContextCheckpoint, Value)> {
+        if let Some(basis) = &personalization { basis.validate()?; }
         let duplicate: Option<String> = self
             .db
             .query_row(
@@ -126,10 +136,15 @@ impl Catalog {
             .expected_revision
             .checked_add(1)
             .ok_or_else(|| RuntimeError::Invalid("context revision exhausted".into()))?;
+        let personalization = match personalization {
+            Some(basis) => Some(basis),
+            None => self.active_context(&proposal.branch_id)?.and_then(|context| context.personalization),
+        };
         let checkpoint = ContextCheckpoint {
             id: proposal.key.clone(),
             revision,
             proposal,
+            personalization,
         };
         let reference = self.content.save(&serde_json::to_value(&checkpoint)?)?;
         Ok((checkpoint, reference))
@@ -173,6 +188,8 @@ impl Catalog {
         }
         suffix.reverse();
         Ok(Some(ContextRead(ContextReadKind::Checkpoint {
+            compositions: self.context_compositions.clone(),
+            branch_id: run.branch_id.clone(),
             content: self.content.clone(),
             checkpoint_id,
             reference: serde_json::from_str(&reference)?,
@@ -224,6 +241,8 @@ pub struct ContextRead(ContextReadKind);
 
 enum ContextReadKind {
     Checkpoint {
+        compositions: std::sync::Arc<crate::composition::context::ContextCompositions>,
+        branch_id: String,
         content: crate::content::ContentStore,
         checkpoint_id: String,
         reference: Value,
@@ -237,13 +256,14 @@ enum ContextReadKind {
 }
 impl ContextRead {
     pub fn load(self) -> Result<ContextProjection> {
-        let (content, checkpoint_id, reference, suffix) = match self.0 {
+        let (content, checkpoint_id, reference, suffix, compositions, branch_id) = match self.0 {
             ContextReadKind::Checkpoint {
+                compositions, branch_id,
                 content,
                 checkpoint_id,
                 reference,
                 suffix,
-            } => (content, checkpoint_id, reference, suffix),
+            } => (content, checkpoint_id, reference, suffix, compositions, branch_id),
             ContextReadKind::Summary {
                 content,
                 request,
@@ -295,6 +315,15 @@ impl ContextRead {
         };
         let checkpoint: ContextCheckpoint = serde_json::from_value(content.load(&reference)?)?;
         let mut history = Vec::new();
+        // Body hydration, composition assembly and the pure typed transform execute outside
+        // the Catalog mutex. The cache reuses unchanged selected handles across model requests.
+        let composition = checkpoint.personalization.as_ref().and_then(|basis| basis.context_composition.as_ref());
+        let fragments = compositions.bind(&branch_id, composition).map_err(RuntimeError::Invalid)?;
+        let mut instruction_sources = checkpoint.proposal.instruction_sources.clone();
+        if let Some(composition) = composition {
+            instruction_sources.push(format!("{}:{}:{}", crate::composition::context::CAPABILITY,
+                composition.provider_id, composition.content_version));
+        }
         if !checkpoint.proposal.effective_system_prompt.is_empty() {
             history.push(ConversationItem {
                 id: format!("context:{}:system", checkpoint.id),
@@ -306,6 +335,9 @@ impl ContextRead {
                 },
                 opaque: None,
             });
+        }
+        if let Some(fragments) = fragments {
+            history.extend(fragments.apply(&checkpoint.id).map_err(RuntimeError::Invalid)?);
         }
         if checkpoint.proposal.through_id.is_some() {
             history.push(ConversationItem {
@@ -333,7 +365,7 @@ impl ContextRead {
         Ok(ContextProjection {
             checkpoint_id,
             history,
-            instruction_sources: checkpoint.proposal.instruction_sources,
+            instruction_sources,
             memory_checkpoint: checkpoint.proposal.memory_checkpoint,
         })
     }

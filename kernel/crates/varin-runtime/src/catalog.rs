@@ -99,6 +99,8 @@ fn fence(run: &Run, epoch: u64) -> Result<()> {
 pub struct Catalog {
     db: Connection,
     content: crate::content::ContentStore,
+    resource_admission: std::sync::Arc<crate::resource_admission::ResourceAdmission>,
+    context_compositions: std::sync::Arc<crate::composition::context::ContextCompositions>,
     _owner: File,
     epoch: u64,
 }
@@ -133,6 +135,8 @@ impl Catalog {
         if version == 0 {
             db.execute_batch(SCHEMA)?;
         }
+        db.execute_batch("CREATE TABLE IF NOT EXISTS resource_occupancy (operation_id TEXT PRIMARY KEY REFERENCES operations(id), claims TEXT NOT NULL)")?;
+        let resource_admission = std::sync::Arc::new(crate::resource_admission::ResourceAdmission::default());
         let content = crate::content::ContentStore::open(root.as_ref().join("content"))?;
         inputs::initialize(&mut db)?;
         crate::content::initialize(&mut db, &content)?;
@@ -146,10 +150,19 @@ impl Catalog {
         let mut this = Self {
             db,
             content,
+            resource_admission,
+            context_compositions: std::sync::Arc::new(crate::composition::context::ContextCompositions::default()),
             _owner: owner,
             epoch,
         };
         this.recover()?;
+        {
+            let mut rows = this.db.prepare("SELECT operation_id,claims FROM resource_occupancy")?;
+            for row in rows.query_map([], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?)))? {
+                let (owner, claims) = row?;
+                this.resource_admission.restore(owner, serde_json::from_str(&claims)?);
+            }
+        }
         this.reconcile_waits()?;
         Ok(this)
     }
@@ -204,6 +217,9 @@ impl Catalog {
     /// Trusted first-input context is committed with input and launch, never before admission.
     /// Existing checkpoints (including uncertain retries) remain the frozen authority.
     pub fn submit_with_initial_context(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>, inherit_source: bool, initial: Option<context::ContextProposal>) -> Result<Receipt> {
+        self.submit_with_context_snapshot(command, launch, inherit_source, initial, None)
+    }
+    pub fn submit_with_context_snapshot(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>, inherit_source: bool, initial: Option<context::ContextProposal>, personalization: Option<personalization::PersonalizationBasis>) -> Result<Receipt> {
         if inherit_source && launch.as_ref().is_none_or(|selection| selection.source.is_some() || selection.tools.iter().any(|tool| tool.name != questions::QUESTION_TOOL)) {
             return Err(RuntimeError::Invalid("source inheritance requires an unoverridden model launch".into()));
         }
@@ -211,7 +227,7 @@ impl Catalog {
             if proposal.branch_id != command.branch_id || proposal.through_id.is_some() || proposal.expected_revision != 0 || !proposal.summary.is_empty() {
                 return Err(RuntimeError::Invalid("initial context must be a first-input system snapshot".into()));
             }
-            if self.active_context(&command.branch_id)?.is_none() { Some(self.stage_context(proposal)?) } else { None }
+            if self.active_context(&command.branch_id)?.is_none() { Some(self.stage_context_with_personalization(proposal, personalization)?) } else { None }
         } else { None };
         self.submit_admission(command, launch, false, inherit_source, staged)
     }
@@ -267,7 +283,9 @@ impl Catalog {
                     if source.materialized && source.environment_run_id.is_none() {
                         source.environment_run_id = Some(previous_run);
                     }
-                    selection.tools = previous.selection.tools;
+                    let mcp_names: std::collections::BTreeSet<String> = previous.selection.mcp_binding.as_ref()
+                        .map(|binding| binding.tools.iter().map(|tool| tool.name.clone()).collect()).unwrap_or_default();
+                    selection.tools = previous.selection.tools.into_iter().filter(|tool| !mcp_names.contains(&tool.name)).collect();
                     selection.tool_schema_generation = selection.configuration_generation;
                 }
                 selection.validate()?;
@@ -546,7 +564,7 @@ impl Catalog {
                 instruction_sources: checkpoint.proposal.instruction_sources,
                 memory_checkpoint: checkpoint.proposal.memory_checkpoint,
             };
-            let checkpoint = context::ContextCheckpoint { id: proposal.key.clone(), revision: 1, proposal };
+            let checkpoint = context::ContextCheckpoint { id: proposal.key.clone(), revision: 1, proposal, personalization: checkpoint.personalization };
             let reference = self.content.save(&serde_json::to_value(&checkpoint)?)?;
             Ok::<_, RuntimeError>((checkpoint, reference))
         }).transpose()?;
@@ -713,7 +731,11 @@ impl Catalog {
             "operation.settled",
             serde_json::to_value(&op)?,
         )?;
+        if outcome != Outcome::Indeterminate {
+            tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1", [key])?;
+        }
         tx.commit()?;
+        if outcome != Outcome::Indeterminate { self.resource_admission.release(key); }
         Ok(op)
     }
     pub fn request_cancel_operation(&mut self, key: &str) -> Result<Operation> {
@@ -1130,7 +1152,28 @@ impl Catalog {
         }
         let operations: Vec<Operation> = read_all(&tx, "operations")?;
         for mut op in operations {
+            // A Result contract owns a local dispatch window, whose executor died with the
+            // previous Catalog process. This proves occupancy ended, not that its effect is known.
+            // Job owners can outlive that process and require independent stop evidence.
+            let occupied: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM resource_occupancy WHERE operation_id=?1)", [&op.id], |r| r.get(0))?;
+            if occupied {
+                let tool: crate::execution::AdmittedTool = serde_json::from_value(op.intent.clone())?;
+                if tool.contract.completion == crate::execution::CompletionKind::Result {
+                    tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1", [&op.id])?;
+                }
+            }
             if op.phase != OperationPhase::Terminal {
+                // A live user's one-action decision cannot survive its authorizing owner.
+                if op.effect == Effect::None && op.result.as_ref().is_some_and(|v| v.get("permission").is_some()) {
+                    if let Some(wait_id) = &op.waiting_on {
+                        let mut wait: Wait = record(&tx, "waits", wait_id)?;
+                        wait.cancelled = true;
+                        put(&tx, "waits", wait_id, &wait)?;
+                    }
+                    op.phase = OperationPhase::Accepted;
+                    op.waiting_on = None;
+                    op.result = None;
+                }
                 if matches!(
                     op.effect,
                     Effect::Dispatched | Effect::Partial | Effect::Unknown
@@ -1223,3 +1266,9 @@ pub mod context_jobs;
 
 #[path = "catalog_questions.rs"]
 pub mod questions;
+
+#[path = "catalog_personalization.rs"]
+pub mod personalization;
+
+#[path = "catalog_permissions.rs"]
+pub mod permissions;

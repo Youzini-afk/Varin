@@ -14,9 +14,31 @@ pub struct SourceSelection {
     pub branch_id: Option<String>,
     pub revision: Option<u64>,
 }
+/// Credential-free retained Host MCP generation, frozen before any model request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct HostToolBinding {
+    pub reference: String,
+    pub generation: u64,
+    pub tools: Vec<ToolSchema>,
+    pub resources: std::collections::BTreeMap<String, String>,
+}
+impl HostToolBinding {
+    pub fn validate(&self) -> Result<()> {
+        let mut names = std::collections::BTreeSet::new();
+        if self.reference.is_empty() || self.resources.iter().any(|(name, key)| name.is_empty() || key.is_empty()) || self.tools.iter().any(|tool| tool.name.is_empty()
+            || tool.name.starts_with("native_") || tool.version.is_empty() || !tool.schema.is_object()
+            || !names.insert(&tool.name)) {
+            return Err(RuntimeError::Invalid("MCP binding requires unique frozen tool identities".into()));
+        }
+        Ok(())
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchSelection {
+    #[serde(default)]
+    pub mcp_binding: Option<HostToolBinding>,
     #[serde(default)]
     pub credential_scope: Option<crate::providers::auth::CredentialScope>,
     pub connection_identity: String,
@@ -35,6 +57,7 @@ impl LaunchSelection {
         source: Option<SourceSelection>,
     ) -> Self {
         Self {
+            mcp_binding: None,
             credential_scope: None,
             connection_identity: binding.connection_identity.clone(),
             provider_family: binding.provider_family.clone(),
@@ -47,6 +70,12 @@ impl LaunchSelection {
         }
     }
     pub(super) fn validate(&self) -> Result<()> {
+        if let Some(binding) = &self.mcp_binding {
+            binding.validate()?;
+            if binding.tools.iter().any(|tool| !self.tools.contains(tool)) {
+                return Err(RuntimeError::Invalid("MCP launch schemas do not match retained owner".into()));
+            }
+        }
         if self.connection_identity.is_empty()
             || self.provider_family.is_empty()
             || self.model.is_empty()
@@ -117,6 +146,32 @@ pub(super) fn initialize(db: &mut Connection) -> Result<()> {
     Ok(())
 }
 impl Catalog {
+    /// Preparation can append one concrete MCP generation only before the launch is bound or used.
+    /// It cannot revise a source, model, base capability, or an already frozen tool description.
+    pub fn prepare_mcp_launch(&mut self, run_id: &str, binding: HostToolBinding) -> Result<LaunchIntent> {
+        binding.validate()?;
+        let tx = self.db.transaction()?;
+        let run: Run = record(&tx, "runs", run_id)?;
+        fence(&run, self.epoch)?;
+        let mut launch: LaunchIntent = record(&tx, "run_launches", run_id)?;
+        if let Some(previous) = &launch.selection.mcp_binding {
+            if previous == &binding { return Ok(launch); }
+            return Err(RuntimeError::Conflict("MCP owner generation changed".into()));
+        }
+        let steps: i64 = tx.query_row("SELECT count(*) FROM model_steps WHERE run_id=?1", [run_id], |row| row.get(0))?;
+        if run.cancel_requested || run.state.terminal() || launch.bound_epoch.is_some() || steps != 0 {
+            return Err(RuntimeError::Conflict("MCP preparation cannot change a used launch".into()));
+        }
+        launch.selection.tools.extend(binding.tools.iter().cloned());
+        launch.selection.mcp_binding = Some(binding);
+        launch.selection.validate()?;
+        launch.revision += 1;
+        put(&tx, "run_launches", run_id, &launch)?;
+        event(&tx, run_id, launch.revision, "run.mcp_prepared", serde_json::to_value(&launch)?)?;
+        tx.commit()?;
+        Ok(launch)
+    }
+
     /// Store the selected plan before starting a worker. Retries can only rebind the same plan.
     /// Durable intent is not proof of authorization or worker liveness.
     pub fn bind_launch(

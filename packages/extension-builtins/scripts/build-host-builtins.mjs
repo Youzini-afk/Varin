@@ -139,6 +139,7 @@ const {
   VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION,
   VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION,
   VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION,
+  VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION,
 } = await import('../dist/index.js');
 const { VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE } = await import('../dist/host.js');
 
@@ -303,3 +304,11 @@ await writeFile(
   'utf8',
 );
 await writePackageFingerprint(recoveryOutputRoot, VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE);
+
+const contextOutputRoot = join(builtinOutputRoot, 'context-fragments');
+await rm(contextOutputRoot, { force: true, recursive: true });
+await mkdir(contextOutputRoot, { recursive: true });
+await bundleNodeServer(join(packageDirectory, 'src', 'host', 'context-fragments-extension.ts'), join(contextOutputRoot, 'host.cjs'));
+await writePackageJson(contextOutputRoot, { name: 'varin-builtin-context-fragments', private: true, type: 'module', version: VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION.manifest.version });
+await writeFile(join(contextOutputRoot, 'varin.extension.json'), `${JSON.stringify(VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION.manifest, null, 2)}\n`, 'utf8');
+await writePackageFingerprint(contextOutputRoot, VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE);

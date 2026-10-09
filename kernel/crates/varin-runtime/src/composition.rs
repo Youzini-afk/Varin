@@ -3,6 +3,7 @@
 //! A normal replacement closes ordinary admission but permits a frozen model exchange to finish;
 //! revocation invalidates both future admission and outstanding execution leases.
 pub mod resolver;
+pub mod context;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

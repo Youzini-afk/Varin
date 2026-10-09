@@ -39,6 +39,7 @@ const CLOUD_RUNTIME_PATCHED_PACKAGES = Object.freeze([
   '@earendil-works/pi-ai',
   '@earendil-works/pi-agent-core',
   '@earendil-works/pi-coding-agent',
+  '@earendil-works/pi-mcp',
 ]);
 
 const cloudRuntimePatches = (rootPackage) => {
