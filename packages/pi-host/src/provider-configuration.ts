@@ -561,23 +561,63 @@ async function atomicWrite(path: string, content: string): Promise<void> {
   }
 }
 
+/** Enumerate configured native connections without resolving helpers or creating binding metadata. */
+export async function configuredCredentialModels(path: string, models: readonly { provider: string; id: string }[]): Promise<Set<string>> {
+  const document = await readDocument(path);
+  const configured = new Set<string>();
+  const hasHeaders = (value: unknown) => isObject(value) && Object.keys(value).length > 0;
+  for (const model of models) {
+    const entry = providerRecord(document, model.provider);
+    if (!entry) continue;
+    const override = isObject(entry.modelOverrides) ? entry.modelOverrides[model.id] : undefined;
+    const definition = Array.isArray(entry.models) ? entry.models.find(value => isObject(value) && value.id === model.id) : undefined;
+    if (entry.apiKey !== undefined || hasHeaders(entry.headers)
+      || (isObject(override) && hasHeaders(override.headers))
+      || (isObject(definition) && hasHeaders(definition.headers))) configured.add(JSON.stringify([model.provider, model.id]));
+  }
+  return configured;
+}
+
 /** Nonsecret configured-key identity. Uses the existing models-file lock and JSONC writer.
  * The file revision deliberately invalidates configured bindings after ANY models-file edit.
- * No key material is returned, hashed, or copied to the credential store.
+ * The private owner receives the expression for dispatch resolution; it is never hashed or
+ * copied to the credential store, public model metadata, or durable native history.
  */
-export async function configuredCredentialBinding(path: string, providerId: string): Promise<{ handle: string; revision: string } | undefined> {
+export async function configuredCredentialBinding(path: string, providerId: string,
+  options: { includeKey?: boolean; modelId?: string } = {},
+): Promise<{ handle: string; revision: string; key?: string; headers: Record<string, string>; generatedAuthorization: boolean } | undefined> {
   if (!await pathExists(path)) return undefined;
   const release = await acquireLock(path);
   try {
     const document = await readDocument(path);
     const entry = providerRecord(document, providerId);
-    if (entry?.apiKey === undefined) return undefined;
-    if (typeof entry.apiKey !== "string" || !entry.apiKey) throw new Error("configured-key-invalid");
-    const { credentialValueResolver } = await import("./credential-value-resolver.js");
-    const resolver = await credentialValueResolver();
-    if (resolver.isCommandConfigValue(entry.apiKey) || resolver.getConfigValueEnvVarNames(entry.apiKey).length) {
-      throw new Error("credential-source-binding-required");
+    if (!entry) return undefined;
+    const key = options.includeKey === false ? undefined : entry.apiKey;
+    if (key !== undefined && (typeof key !== "string" || !key)) throw new Error("configured-key-invalid");
+    const headers: Record<string, string> = Object.create(null);
+    const mergeHeaders = (value: unknown) => {
+      if (value === undefined) return;
+      if (!isObject(value)) throw new Error("configured-headers-invalid");
+      for (const [name, expression] of Object.entries(value)) {
+        if (typeof expression !== "string") throw new Error("configured-headers-invalid");
+        headers[name.toLowerCase()] = expression;
+      }
+    };
+    mergeHeaders(entry.headers);
+    // Include configured values in source identity even when authHeader supersedes them.
+    // Model headers are applied after the generated Authorization header by the SDK.
+    let generatedAuthorization = entry.authHeader === true;
+    if (options.modelId) {
+      const overrides = isObject(entry.modelOverrides) ? entry.modelOverrides[options.modelId] : undefined;
+      const overrideHeaders = isObject(overrides) ? overrides.headers : undefined;
+      mergeHeaders(overrideHeaders);
+      if (isObject(overrideHeaders) && Object.keys(overrideHeaders).some(name => name.toLowerCase() === "authorization")) generatedAuthorization = false;
+      const definition = Array.isArray(entry.models) ? entry.models.find(model => isObject(model) && model.id === options.modelId) : undefined;
+      const modelHeaders = isObject(definition) ? definition.headers : undefined;
+      mergeHeaders(modelHeaders);
+      if (isObject(modelHeaders) && Object.keys(modelHeaders).some(name => name.toLowerCase() === "authorization")) generatedAuthorization = false;
     }
+    if (key === undefined && Object.keys(headers).length === 0) return undefined;
     let binding = entry.$varinCredentialBinding;
     if (binding === undefined) {
       binding = { schema: 1, handle: randomUUID() };
@@ -592,7 +632,7 @@ export async function configuredCredentialBinding(path: string, providerId: stri
     // These are filesystem revision facts, never a digest of credentials. ctime also catches
     // in-place edits which restore mtime; inode identifies atomic replacements across restart.
     const info = await stat(path, { bigint: true });
-    return { handle: binding.handle, revision: [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(":") };
+    return { handle: binding.handle, revision: [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(":"), ...(typeof key === "string" ? { key } : {}), headers, generatedAuthorization };
   } finally { await release(); }
 }
 

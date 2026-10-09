@@ -19,6 +19,16 @@ use crate::execution::*;
 use serde_json::Value;
 use std::sync::{Arc, OnceLock};
 
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct CredentialDispatch {
+    pub method: String,
+    pub endpoint: String,
+    pub body: String,
+}
+/// One serializer supplies both the signature input and the HTTP request bytes.
+fn request_body(body: &Value) -> Result<Vec<u8>, ModelFailure> {
+    serde_json::to_vec(body).map_err(|_| failure("request_serialization", "model request could not be serialized"))
+}
 pub trait CredentialResolver: Send + Sync {
     /// Return dispatch-only headers. Implementations own refresh/single-flight and cancellation.
     fn headers(
@@ -26,6 +36,10 @@ pub trait CredentialResolver: Send + Sync {
         credential_ref: Option<&str>,
         cancel: &CancellationToken,
     ) -> Result<reqwest::header::HeaderMap, ModelFailure>;
+    fn request_headers(&self, credential_ref: Option<&str>, _dispatch: &CredentialDispatch,
+        cancel: &CancellationToken) -> Result<reqwest::header::HeaderMap, ModelFailure> {
+        self.headers(credential_ref, cancel)
+    }
 }
 pub struct HttpRequest<'a> {
     pub endpoint: &'a str,
@@ -149,10 +163,14 @@ impl NativeHttpTransport {
             })
             .as_ref()
             .map_err(Clone::clone)?;
+        let body = request_body(request.body)?;
+        let mut headers = request.headers;
+        headers.insert(reqwest::header::ACCEPT, reqwest::header::HeaderValue::from_str(content_type)
+            .map_err(|_| failure("invalid_header", "invalid transport content type"))?);
+        headers.insert(reqwest::header::CONTENT_TYPE, reqwest::header::HeaderValue::from_static("application/json"));
         state.runtime.block_on(async {
             let client=&state.client;
-            let send = client.post(request.endpoint).headers(request.headers)
-                .header("accept", content_type).json(request.body).send();
+            let send = client.post(request.endpoint).headers(headers).body(body).send();
             let mut response = tokio::select! {
                 biased;
                 _ = cancel.cancelled() => return Err(failure("cancelled", "generation cancelled")),

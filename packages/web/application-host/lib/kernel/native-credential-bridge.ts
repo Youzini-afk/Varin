@@ -1,11 +1,11 @@
 /** Private Host/kernel rendezvous. Secret replies bypass public RPC, event buses and histories. */
-import { ExistingHostCredentialOwner, NativeCredentialOwnerError, type NativeCredentialScope } from './native-credential-owner.js';
+import { ExistingHostCredentialOwner, NativeCredentialOwnerError, type NativeCredentialScope, type NativeCredentialDispatch } from './native-credential-owner.js';
 export interface PrivateCredentialResponse {
   v: 1; kind: 'credential-response'; id: string; kernelEpoch: string; ok: boolean;
   result?: { scope: NativeCredentialScope; headers: { name: string; value: string }[] };
   error?: { code: string; message: string };
 }
-interface Request { v: 1; kind: 'credential-request'; id: string; kernelEpoch: string; runId: string; scope: NativeCredentialScope }
+interface Request { v: 1; kind: 'credential-request'; id: string; kernelEpoch: string; runId: string; scope: NativeCredentialScope; dispatch?: NativeCredentialDispatch | null }
 interface OwnerEntry { owner: ExistingHostCredentialOwner; scope: NativeCredentialScope; epoch: string; abort: AbortController; active: Set<string> }
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const scopeValid = (value: unknown): value is NativeCredentialScope => record(value)
@@ -37,7 +37,11 @@ export class NativeCredentialBridge {
     if (value.v !== 1 || typeof value.id !== 'string' || !value.id
       || typeof value.kernelEpoch !== 'string' || value.kernelEpoch !== this.currentEpoch()
       || typeof value.runId !== 'string' || !value.runId || !scopeValid(value.scope)
-      || Object.keys(value).some(key => !['v', 'kind', 'id', 'kernelEpoch', 'runId', 'scope'].includes(key))) return true;
+      || Object.keys(value).some(key => !['v', 'kind', 'id', 'kernelEpoch', 'runId', 'scope', 'dispatch'].includes(key))) return true;
+    if (value.dispatch !== undefined && value.dispatch !== null && (!record(value.dispatch)
+      || value.dispatch.method !== 'POST' || typeof value.dispatch.endpoint !== 'string'
+      || typeof value.dispatch.body !== 'string'
+      || Object.keys(value.dispatch).some(key => !['method', 'endpoint', 'body'].includes(key)))) return true;
     const request = value as unknown as Request;
     const entry = this.#owners.get(request.runId);
     if (!entry || entry.epoch !== request.kernelEpoch || !same(entry.scope, request.scope)) {
@@ -57,7 +61,7 @@ export class NativeCredentialBridge {
   }
   async #resolve(request: Request, entry: OwnerEntry): Promise<void> {
     try {
-      const result = await entry.owner.resolve(entry.scope, entry.abort.signal);
+      const result = await entry.owner.resolve(entry.scope, entry.abort.signal, request.dispatch ?? undefined);
       if (this.currentEpoch() !== request.kernelEpoch || this.#owners.get(request.runId) !== entry || entry.abort.signal.aborted) return;
       if (!same(result.scope, entry.scope)) { await this.#reject(request, 'credential-scope-changed'); return; }
       await this.send({ v: 1, kind: 'credential-response', id: request.id, kernelEpoch: request.kernelEpoch, ok: true,
