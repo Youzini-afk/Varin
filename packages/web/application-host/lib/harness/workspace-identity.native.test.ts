@@ -250,8 +250,11 @@ describe("owning vs execution workspace identity", () => {
       expect(await registry.listThreads(execution.workspaceId, { kind: "thread", id: parentThread.id })).toEqual([]);
       await vi.waitFor(async () => {
         const run = await registry.getActiveRun(owning.workspaceId, grandchildId);
-        expect(run?.workerState).toBe("running");
+        expect(run?.workerState, run?.exitReason ?? JSON.stringify(run)).toBe("running");
         expect(run?.sessionId).toBeTruthy();
+      });
+      expect(await registry.getThreadById(owning.workspaceId, grandchildId)).toMatchObject({
+        worktree: { viewMode: "materialized", materialized: true, preparationStage: "ready" },
       });
 
       const listed = await request("thread.list", {});
