@@ -417,6 +417,55 @@ fn planning_dispatch_rejects_a_head_changed_since_admission() {
         "a request frozen before the current head must not start after the correction");
 }
 
+#[test]
+#[ignore = "manual diagnostic for Catalog wait during full quoted-history parsing"]
+fn quoted_history_catalog_wait_diagnostic() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Instant;
+    for mib in [1, 32, 64] {
+        let f = Fixture::new();
+        let (intent, mut snapshot) = frozen_job(&f, json!({"request":true}));
+        let quoted = vec![ConversationItem {
+            id: "source".into(), provenance: Provenance::UserInstruction { input_id: "source".into() },
+            content: Content::Text { text: "a".repeat(mib * 1024 * 1024) }, opaque: None,
+        }];
+        snapshot.view.history.push(ConversationItem {
+            id: "quoted-context".into(), provenance: Provenance::ExternalData {
+                source: "committed-conversation-context".into(),
+            },
+            content: Content::Text { text: format!("Frozen source context\n{}", serde_json::to_string(&quoted).unwrap()) },
+            opaque: None,
+        });
+        f.db.admit_policy_model(&f.input.run_id, f.input.owner_generation, &intent, &snapshot).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let reader_db = f.db.clone();
+        let reader_stop = stop.clone();
+        let reader_run = f.input.run_id.clone();
+        let start = Arc::new(std::sync::Barrier::new(2));
+        let reader_start = start.clone();
+        let reader = std::thread::spawn(move || {
+            let mut max = std::time::Duration::ZERO;
+            let mut count = 0;
+            reader_start.wait();
+            while !reader_stop.load(Ordering::Acquire) {
+                let t = Instant::now();
+                reader_db.lock().unwrap().run(&reader_run).unwrap();
+                max = max.max(t.elapsed());
+                count += 1;
+                std::thread::yield_now();
+            }
+            (max, count)
+        });
+        start.wait();
+        let t = Instant::now();
+        f.db.dispatch_policy_model(&f.input.run_id, f.input.owner_generation, intent.action_id()).unwrap();
+        let total = t.elapsed();
+        stop.store(true, Ordering::Release);
+        let (max, count) = reader.join().unwrap();
+        eprintln!("quoted_history={mib} MiB dispatch={total:?} longest_independent_catalog_query={max:?} queries={count}");
+    }
+}
+
 fn engine(
     f: &Fixture,
     planner: Arc<Provider>,
