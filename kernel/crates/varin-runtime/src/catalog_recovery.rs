@@ -92,7 +92,7 @@ impl ExecutionPreparation {
         )?;
         let saved: Option<(String, String)> = database
             .query_row(
-                "SELECT identity,state FROM policy_checkpoints WHERE run_id=?1",
+                "SELECT identity,state_ref FROM policy_checkpoints WHERE run_id=?1",
                 [&self.run.id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -103,7 +103,7 @@ impl ExecutionPreparation {
                     "policy checkpoint belongs to another implementation version".into(),
                 ));
             }
-            serde_json::from_str(&state)?
+            self.content.load(&serde_json::from_str(&state)?)?
         } else {
             self.policy_state.clone()
         };
@@ -204,6 +204,7 @@ impl RecoveryPreparation {
                 let snapshot_read = database.transaction()?;
                 let model = Catalog::read_model_recovery(
                     &snapshot_read,
+                    &self.execution.content,
                     &self.execution.run.id,
                     step.clone(),
                     policy,
@@ -526,7 +527,7 @@ impl Catalog {
         let policy_identity = if let Some(job) = policy_job {
             Some(job.intent.checkpoint().0.clone())
         } else {
-            self.policy_graph(run_id, self.epoch)?
+            self.prepare_policy_graph_read(run_id, self.epoch)?
                 .map(|graph| graph.intent.checkpoint().0.clone())
         };
         let kind = if let Some(identity) = policy_identity {
@@ -594,6 +595,7 @@ impl Catalog {
 
     fn read_model_recovery(
         database: &Connection,
+        content: &crate::content::ContentStore,
         run_id: &str,
         step: ModelStep,
         policy: &PolicyIdentity,
@@ -700,7 +702,7 @@ impl Catalog {
         }
         let saved: Option<(String, String, String)> = database
             .query_row(
-                "SELECT identity,state,action FROM policy_checkpoints WHERE run_id=?1",
+                "SELECT identity,state_ref,action_ref FROM policy_checkpoints WHERE run_id=?1",
                 [run_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -718,8 +720,8 @@ impl Catalog {
             saved
                 .map(|(_, state, action)| {
                     Ok::<_, RuntimeError>(PolicyDecision {
-                        state: serde_json::from_str(&state)?,
-                        action: serde_json::from_str(&action)?,
+                        state: content.load(&serde_json::from_str(&state)?)?,
+                        action: serde_json::from_value(content.load(&serde_json::from_str(&action)?)?)?,
                     })
                 })
                 .transpose()?
@@ -732,6 +734,9 @@ impl Catalog {
         }) = &decision
         {
             let wait: Wait = record(database, "waits", wait_id)?;
+            if wait.run_id != run_id {
+                return Err(RuntimeError::Invalid("policy wait owner differs from its checkpoint".into()));
+            }
             if wait.trigger_cursor.is_some() || wait.cancelled {
                 decision = None;
             }

@@ -11,6 +11,7 @@ pub struct PolicyGraphSchemaPreparation {
 pub struct PreparedPolicyGraphSchemas {
     intent: PolicyGraphIntent,
     reference: Option<Value>,
+    checkpoint: super::policy_checkpoint::PolicyCheckpointReferences,
     _publication: crate::content::ContentPublication,
 }
 impl PolicyGraphSchemaPreparation {
@@ -20,7 +21,24 @@ impl PolicyGraphSchemaPreparation {
             return Err(RuntimeError::Conflict("graph nodes differ in their selected tools".into()));
         }
         let reference = tools.map(|tools| self.content.save(&serde_json::to_value(tools)?)).transpose()?;
-        Ok(PreparedPolicyGraphSchemas { intent: intent.clone(), reference, _publication: self.publication })
+        let action = PolicyAction::ReadGraph {nodes:intent.nodes().iter().map(|node|node.node.clone()).collect()};
+        let checkpoint = super::policy_checkpoint::PolicyCheckpointReferences::write(&self.content,intent.checkpoint().1,&action)?;
+        Ok(PreparedPolicyGraphSchemas { intent: intent.clone(), reference, checkpoint, _publication: self.publication })
+    }
+}
+pub struct PolicyGraphRead {
+    pub(crate) intent: PolicyGraphIntent,
+    result: PolicyGraphResult,
+    terminal: bool,
+    checkpoint: Option<super::policy_checkpoint::PolicyCheckpointRead>,
+    cancel_requested: bool,
+    _publication: crate::content::ContentPublication,
+}
+impl PolicyGraphRead {
+    pub fn load(self) -> Result<PolicyGraphState> {
+        let decision = self.checkpoint.map(|checkpoint|checkpoint.load_pending()).transpose()?.flatten()
+            .filter(|decision|!matches!(decision.action,PolicyAction::ReadGraph {..}));
+        Ok(PolicyGraphState {intent:self.intent,result:self.result,terminal:self.terminal,decision,cancel_requested:self.cancel_requested})
     }
 }
 
@@ -133,6 +151,9 @@ impl Catalog {
         Ok(PolicyBoundary { id, source })
     }
     pub fn policy_graph(&self, run_id: &str, epoch: u64) -> Result<Option<PolicyGraphState>> {
+        self.prepare_policy_graph_read(run_id,epoch)?.map(PolicyGraphRead::load).transpose()
+    }
+    pub fn prepare_policy_graph_read(&self, run_id: &str, epoch: u64) -> Result<Option<PolicyGraphRead>> {
         let run = self.run(run_id)?;
         fence(&run, epoch)?;
         let key:Option<String>=self.db.query_row("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_read_graph_v1','policy_model_job_v1') ORDER BY rowid DESC LIMIT 1",[run_id],|r|r.get(0)).optional()?;
@@ -149,38 +170,17 @@ impl Catalog {
         if op.phase == OperationPhase::Terminal && model > admitted {
             return Ok(None);
         }
-        let saved: (String, String) = self.db.query_row(
-            "SELECT state,action FROM policy_checkpoints WHERE run_id=?1",
-            [run_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
-        let action: PolicyAction = serde_json::from_str(&saved.1)?;
-        let mut decision = if op.phase == OperationPhase::Terminal
-            && !matches!(action, PolicyAction::ReadGraph { .. })
-        {
-            Some(PolicyDecision {
-                state: serde_json::from_str(&saved.0)?,
-                action,
-            })
-        } else {
-            None
-        };
-        if let Some(PolicyDecision {
-            action: PolicyAction::Wait { wait_id },
-            ..
-        }) = &decision
-        {
-            let wait: Wait = record(&self.db, "waits", wait_id)?;
-            if wait.trigger_cursor.is_some() || wait.cancelled {
-                decision = None;
-            }
+        let checkpoint = if op.phase == OperationPhase::Terminal { self.capture_policy_checkpoint(run_id)? } else { None };
+        if checkpoint.as_ref().is_some_and(|saved| &saved.identity != intent.checkpoint().0) {
+            return Err(RuntimeError::Conflict("policy checkpoint identity changed".into()));
         }
-        Ok(Some(PolicyGraphState {
+        Ok(Some(PolicyGraphRead {
             intent,
             result,
             terminal: op.phase == OperationPhase::Terminal,
-            decision,
+            checkpoint,
             cancel_requested: op.cancel_requested,
+            _publication: self.content.begin_publication(),
         }))
     }
     pub fn admit_policy_graph(
@@ -190,19 +190,19 @@ impl Catalog {
         intent: &PolicyGraphIntent,
     ) -> Result<PolicyGraphState> {
         let schemas = self.prepare_policy_graph_schemas().load(intent)?;
-        self.admit_policy_graph_prepared(run_id, epoch, schemas)
+        self.admit_policy_graph_prepared(run_id, epoch, schemas)?.load()
     }
     pub fn prepare_policy_graph_schemas(&self) -> PolicyGraphSchemaPreparation {
         PolicyGraphSchemaPreparation { content: self.content.clone(), publication: self.content.begin_publication() }
     }
     pub fn admit_policy_graph_prepared(&mut self, run_id: &str, epoch: u64,
-        schemas: PreparedPolicyGraphSchemas) -> Result<PolicyGraphState> {
+        schemas: PreparedPolicyGraphSchemas) -> Result<PolicyGraphRead> {
         let intent = &schemas.intent;
         let PolicyGraphIntent::PolicyReadGraphV1 {
             action_id,
             boundary,
             identity,
-            state,
+            state: _,
             nodes,
         } = intent;
         let run = self.run(run_id)?;
@@ -215,12 +215,13 @@ impl Catalog {
                     "policy boundary intent changed".into(),
                 ));
             }
-            return Ok(PolicyGraphState {
+            return Ok(PolicyGraphRead {
                 result: graph_result(&previous, &saved)?,
                 intent: saved,
                 terminal: previous.phase == OperationPhase::Terminal,
-                decision: None,
+                checkpoint: None,
                 cancel_requested: previous.cancel_requested,
+                _publication: self.content.begin_publication(),
             });
         }
         if run.cancel_requested
@@ -290,10 +291,7 @@ impl Catalog {
         {
             return Err(RuntimeError::Conflict("policy identity changed".into()));
         }
-        let action = PolicyAction::ReadGraph {
-            nodes: nodes.iter().map(|n| n.node.clone()).collect(),
-        };
-        tx.execute("INSERT INTO policy_checkpoints(run_id,identity,state,action) VALUES(?1,?2,?3,?4) ON CONFLICT(run_id) DO UPDATE SET identity=excluded.identity,state=excluded.state,action=excluded.action",params![run_id,encode(identity)?,encode(state)?,encode(&action)?])?;
+        schemas.checkpoint.publish(&tx,run_id,identity)?;
         tx.execute(
             "INSERT INTO operations(id,run_id,body) VALUES(?1,?2,?3)",
             params![action_id, run_id, encode(&op)?],
@@ -306,14 +304,15 @@ impl Catalog {
             json!({"run_id":run_id}),
         )?;
         tx.commit()?;
-        Ok(PolicyGraphState {
-            intent: intent.clone(),
+        Ok(PolicyGraphRead {
+            intent: schemas.intent,
             result: PolicyGraphResult {
                 receipts: BTreeMap::new(),
             },
             terminal: false,
-            decision: None,
+            checkpoint: None,
             cancel_requested: false,
+            _publication: schemas._publication,
         })
     }
     pub fn settle_policy_node(

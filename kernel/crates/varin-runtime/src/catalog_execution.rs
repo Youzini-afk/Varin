@@ -37,10 +37,9 @@ impl Persistence for Mutex<Catalog> {
             (catalog.content.clone(), catalog.content.begin_publication())
         };
         let deliveries = super::memory::PreparedMemoryDeliveries::prepare(snapshot).map_err(policy_error)?;
-        let reference = content.save(&serde_json::to_value(snapshot).map_err(|error| policy_error(error.into()))?).map_err(policy_error)?;
-        let capability_ref = content.save(&serde_json::to_value(intent.capability()).map_err(|error| policy_error(error.into()))?).map_err(policy_error)?;
+        let references = super::policy_model::PolicyModelAdmissionReferences::write(&content,intent,snapshot).map_err(policy_error)?;
         let read = self.lock().map_err(catalog_lock_error)?
-            .admit_policy_model_reference(run, epoch, intent, snapshot, reference, capability_ref, deliveries).map_err(policy_error)?;
+            .admit_policy_model_reference(run, epoch, intent, snapshot, references, deliveries).map_err(policy_error)?;
         read.load().map_err(policy_error)
     }
     fn dispatch_policy_model(&self, run: &str, epoch: u64, action: &str) -> std::result::Result<(), ExecutionError> {
@@ -62,11 +61,15 @@ impl Persistence for Mutex<Catalog> {
             .record_policy_model_prepared(run, epoch, action, output, receipt, &reference, deliveries, output_refs).map_err(policy_error)
     }
     fn policy_boundary(&self, run:&str, epoch:u64)->std::result::Result<PolicyBoundary,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.policy_boundary(run,epoch).map_err(policy_error)}
-    fn policy_graph(&self, run:&str, epoch:u64)->std::result::Result<Option<PolicyGraphState>,ExecutionError>{self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.policy_graph(run,epoch).map_err(policy_error)}
+    fn policy_graph(&self, run:&str, epoch:u64)->std::result::Result<Option<PolicyGraphState>,ExecutionError>{
+        let read = self.lock().map_err(catalog_lock_error)?.prepare_policy_graph_read(run,epoch).map_err(policy_error)?;
+        read.map(|read|read.load()).transpose().map_err(policy_error)
+    }
     fn admit_policy_graph(&self,run:&str,epoch:u64,intent:&PolicyGraphIntent)->std::result::Result<PolicyGraphState,ExecutionError>{
         let preparation = self.lock().map_err(catalog_lock_error)?.prepare_policy_graph_schemas();
         let schemas = preparation.load(intent).map_err(policy_error)?;
-        self.lock().map_err(catalog_lock_error)?.admit_policy_graph_prepared(run,epoch,schemas).map_err(policy_error)
+        let read = self.lock().map_err(catalog_lock_error)?.admit_policy_graph_prepared(run,epoch,schemas).map_err(policy_error)?;
+        read.load().map_err(policy_error)
     }
     fn settle_policy_node(&self,run:&str,epoch:u64,action:&str,node:&str,completion:&ToolCompletion)->std::result::Result<PolicyNodeReceipt,ExecutionError>{
         let (content, _publication) = {
@@ -253,6 +256,7 @@ struct PreparedExecutionBodies {
     _publication: crate::content::ContentPublication,
     request: Option<Value>,
     tools_ref: Option<Value>,
+    policy_checkpoint: Option<super::policy_checkpoint::PolicyCheckpointReferences>,
     frozen_history_range: Option<HistoryRange>,
     memory_deliveries: Option<super::memory::PreparedMemoryDeliveries>,
     history: std::collections::HashMap<String, Value>,
@@ -267,6 +271,10 @@ impl ExecutionBodyPreparation {
         };
         let tools_ref = match record {
             ExecutionRecord::RequestPrepared { snapshot } => Some(self.content.save(&serde_json::to_value(&snapshot.view.binding.tools)?)?),
+            _ => None,
+        };
+        let policy_checkpoint = match record {
+            ExecutionRecord::PolicyCheckpoint { state, action, .. } => Some(super::policy_checkpoint::PolicyCheckpointReferences::write(&self.content,state,action)?),
             _ => None,
         };
         let snapshot: Option<RequestSnapshot> = self.frozen_request.as_ref()
@@ -293,7 +301,7 @@ impl ExecutionBodyPreparation {
             (Some(self.content.save_originals(&provider_originals(items))?),
              Some(self.content.save(&json!({"status":"committed","record":record}))?))
         } else { (None, None) };
-        Ok(PreparedExecutionBodies { _publication: self.publication, request, tools_ref, frozen_history_range, memory_deliveries, history, originals, output })
+        Ok(PreparedExecutionBodies { _publication: self.publication, request, tools_ref, policy_checkpoint, frozen_history_range, memory_deliveries, history, originals, output })
     }
 }
 impl Catalog {
@@ -332,7 +340,7 @@ impl Catalog {
         &mut self, run_id: &str, epoch: u64, record: &ExecutionRecord, prepared: PreparedExecutionBodies,
     ) -> Result<()> {
         let PreparedExecutionBodies {
-            _publication, request: prepared_request, tools_ref, frozen_history_range, memory_deliveries, history: prepared_history,
+            _publication, request: prepared_request, tools_ref, policy_checkpoint, frozen_history_range, memory_deliveries, history: prepared_history,
             originals: prepared_originals, output: prepared_output,
         } = prepared;
         // A receipt retry confirms the original completion. Keep exact request/owner fencing,
@@ -829,8 +837,8 @@ impl Catalog {
             }
             ExecutionRecord::PolicyCheckpoint {
                 identity,
-                state,
                 action,
+                ..
             } => {
                 let saved:Option<String>=tx.query_row("SELECT identity FROM policy_checkpoints WHERE run_id=?1",[run_id],|r|r.get(0)).optional()?;
                 if saved.map(|raw|serde_json::from_str::<PolicyIdentity>(&raw)).transpose()?.is_some_and(|saved|saved!=*identity) { return Err(RuntimeError::Conflict("policy identity changed".into())); }
@@ -841,7 +849,7 @@ impl Catalog {
                         return Err(RuntimeError::Conflict("policy wait unavailable".into()));
                     }
                 }
-                tx.execute("INSERT INTO policy_checkpoints(run_id,identity,state,action) VALUES(?1,?2,?3,?4) ON CONFLICT(run_id) DO UPDATE SET identity=excluded.identity,state=excluded.state,action=excluded.action",params![run_id,encode(identity)?,encode(state)?,encode(action)?])?;
+                policy_checkpoint.as_ref().ok_or_else(||RuntimeError::Invalid("prepared policy checkpoint is missing".into()))?.publish(&tx,run_id,identity)?;
             }
         }
         if let ExecutionRecord::ContextPreparationFailed { failure } = record {
