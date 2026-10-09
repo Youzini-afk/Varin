@@ -1,8 +1,10 @@
-import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildWait, LiveRoot, ContextPersonalization, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, ImageAttachment } from '@varin/protocol';
+import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildWait, LiveRoot, ContextPersonalization, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, ImageAttachment } from '@varin/protocol';
 
 /** Explicit authority selection. A thread never opens a Pi session. */
 export interface ThreadIdentity { runtime: 'agent'; threadId: string; branchId: string }
-export interface ThreadModel { providerId: string; modelId: string }
+export type ThreadThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export interface ThreadModel { providerId: string; modelId: string; thinkingLevel?: ThreadThinkingLevel }
+export interface ThreadModelInfo extends ThreadModel { name?: string; acceptsImages?: boolean; contextWindowTokens?: number; thinkingLevels?: ThreadThinkingLevel[] }
 interface ThreadSourceBase {
   workspaceId: string;
   executionWorkspaceId: string;
@@ -90,7 +92,7 @@ export interface ThreadPlanAPI {
 export interface ThreadsAPI {
   plan?: ThreadPlanAPI;
   collaboration?: ThreadCollaborationAPI;
-  listModels(): Promise<Array<ThreadModel & { name?: string; acceptsImages?: boolean }>>;
+  listModels(): Promise<ThreadModelInfo[]>;
   list(): Promise<ThreadSummary[]>;
   create(key: string): Promise<ThreadIdentity>;
   prepareSource(input: ThreadPrepareSource): Promise<ThreadPreparedSource>;
@@ -98,7 +100,7 @@ export interface ThreadsAPI {
   fork(input: ThreadIdentity & { key: string; headId: string | null }): Promise<ThreadIdentity>;
   compact(input: ThreadCompact): Promise<ContextJob>;
   publishContext(identity: ThreadIdentity, runId: string): Promise<ContextCheckpoint>;
-  cancelContext(identity: ThreadIdentity, runId: string): Promise<Run>;
+  cancelContext(identity: ThreadIdentity, runId: string): Promise<RunCancellationReceipt>;
   resumeContext(identity: ThreadIdentity, runId: string): Promise<void>;
   submit(input: ThreadSubmit): Promise<InputSubmitReceipt>;
   enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; mode: InputMode }): Promise<InputReceipt>;
@@ -107,9 +109,9 @@ export interface ThreadsAPI {
   historyPage(identity: ThreadIdentity, cursor: { headId: string; beforeId: string }): Promise<ThreadHistoryPage>;
   snapshot(identity: ThreadIdentity): Promise<ThreadSnapshot>;
   run(runId: string): Promise<Run>;
-  cancelRun(runId: string): Promise<Run>;
+  cancelRun(runId: string): Promise<RunCancellationReceipt>;
   operation(operationId: string): Promise<Operation>;
-  cancelOperation(operationId: string): Promise<Operation>;
+  cancelOperation(operationId: string): Promise<OperationCancellationReceipt>;
   decidePermission(input: ThreadIdentity & { operationId: string; permissionId: string; decision: 'allow_once' | 'deny' }): Promise<Operation>;
   answerQuestion(input: ThreadIdentity & { operationId: string; answer: string }): Promise<Operation>;
   resume(runId: string): Promise<void>;

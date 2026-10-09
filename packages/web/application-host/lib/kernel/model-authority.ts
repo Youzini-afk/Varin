@@ -2,7 +2,16 @@
 import { createHash } from 'node:crypto';
 import { ExistingHostCredentialOwner, type ExistingModelAuthRuntime, type CredentialScope, type CredentialDispatch } from './credential-owner.js';
 import type { ModelSessionConfiguration } from './protocol.generated.js';
-interface SelectedModel { providerId: string; modelId: string; name: string; api: string; baseUrl: string; maxTokens: number; input?: readonly string[]; compat?: Record<string, unknown> }
+import type { ThreadModel, ThreadModelInfo, ThreadThinkingLevel } from '@varin/application-client';
+import { modelOptions, thinkingLevels } from './model-options.js';
+export interface SelectedModel {
+  providerId: string; modelId: string; name: string; api: string; baseUrl: string; maxTokens: number;
+  input?: readonly string[]; contextWindow?: number; reasoning?: boolean;
+  thinkingLevelMap?: Partial<Record<ThreadThinkingLevel, string | null>>;
+  samplingParams?: Record<string, unknown>;
+  samplingParamsByThinkingLevel?: Partial<Record<ThreadThinkingLevel, Record<string, unknown>>>;
+  compat?: Record<string, unknown>;
+}
 interface ModelAuthority extends ExistingModelAuthRuntime {
   selectedModel(providerId: string, modelId: string): Promise<SelectedModel>;
   listModels(): Promise<SelectedModel[]>;
@@ -14,7 +23,7 @@ interface ModelAuthority extends ExistingModelAuthRuntime {
   vertexAuthentication?(providerId: string, modelId?: string): Promise<'api-key' | 'adc'>;
 }
 const families = new Set(['openai-responses', 'openai-completions', 'anthropic-messages', 'azure-openai-responses',
-  'google-generative-ai', 'google-vertex', 'mistral-conversations', 'openai-codex-responses', 'bedrock-converse-stream']);
+  'google-generative-ai', 'google-vertex', 'mistral-conversations', 'openai-codex-responses', 'bedrock-converse-stream', 'pi-messages']);
 const failed = (code: string): never => { throw Object.assign(new Error(code), { code }); };
 function trustedUrl(value: string): URL {
   let url: URL; try { url = new URL(value); } catch { return failed('model-endpoint-missing'); }
@@ -33,7 +42,7 @@ function sameScope(left: CredentialScope, right: CredentialScope): boolean {
   return left.reference === right.reference && left.authority === right.authority && left.account === right.account && left.generation === right.generation;
 }
 export function createModelAuthority(authority: ModelAuthority) {
-  async function configurationFor(model: SelectedModel): Promise<ModelSessionConfiguration> {
+  async function configurationFor(model: SelectedModel, thinkingLevel?: ThreadThinkingLevel): Promise<ModelSessionConfiguration> {
     if (!families.has(model.api)) return failed('model-protocol-unavailable');
     const env = await authority.routingEnvironment(model.providerId);
     const anthropicOauth = model.api === 'anthropic-messages' && await authority.anthropicAuthentication?.(model.providerId, model.modelId) === 'oauth';
@@ -63,6 +72,7 @@ export function createModelAuthority(authority: ModelAuthority) {
       switch (model.api) {
         case 'openai-responses': endpoint = append(url, 'responses'); break;
         case 'openai-completions': endpoint = append(url, 'chat/completions'); break;
+        case 'pi-messages': endpoint = append(url, 'messages'); break;
         case 'anthropic-messages': endpoint = append(url, url.pathname.replace(/\/+$/, '').endsWith('/v1') ? 'messages' : 'v1/messages'); break;
         case 'mistral-conversations': endpoint = append(url, url.pathname.replace(/\/+$/, '').endsWith('/v1') ? 'chat/completions' : 'v1/chat/completions'); break;
         case 'openai-codex-responses': endpoint = append(url, url.pathname.replace(/\/+$/, '').endsWith('/codex') ? 'responses' : 'codex/responses'); break;
@@ -101,10 +111,15 @@ export function createModelAuthority(authority: ModelAuthority) {
     const acceptsImages = model.input?.includes('image') ?? false;
     const legacy = model.compat?.maxTokensField === 'max_tokens';
     const streamUsage = model.compat?.supportsUsageInStreaming !== false;
+    if (model.contextWindow !== undefined && (!Number.isSafeInteger(model.contextWindow) || model.contextWindow <= 0)) return failed('model-context-capacity-invalid');
+    const resolved = modelOptions(model, thinkingLevel, max);
     const generation = Number.parseInt(createHash('sha256').update(JSON.stringify({ providerId: model.providerId,
-      family: model.api, model: model.modelId, endpoint, max, deployment, apiVersion, legacy, streamUsage, acceptsImages, ...(model.api === 'anthropic-messages' ? { anthropicOauth } : {}) })).digest('hex').slice(0, 12), 16);
+      family: model.api, model: model.modelId, endpoint, max, deployment, apiVersion, legacy, streamUsage, acceptsImages,
+      contextWindow: model.contextWindow, ...resolved, ...(model.api === 'anthropic-messages' ? { anthropicOauth } : {}) })).digest('hex').slice(0, 12), 16);
     return { providerId: model.providerId, providerFamily: model.api, model: model.modelId, endpoint,
       credentialEnvironment: null, allowAnonymous: false, acceptsImages, configurationGeneration: generation, maxOutputTokens: max,
+      adapterId: model.api, adapterVersion: '1', ...resolved,
+      ...(model.contextWindow === undefined ? {} : { contextWindowTokens: model.contextWindow }),
       ...(model.api === 'anthropic-messages' ? { anthropicOauth } : {}),
       ...(deployment ? { azureDeployment: deployment } : {}), ...(apiVersion ? { azureApiVersion: apiVersion } : {}),
       ...(model.api === 'openai-completions' ? { legacyMaxTokens: legacy, includeStreamUsage: streamUsage } : {}) };
@@ -129,13 +144,14 @@ export function createModelAuthority(authority: ModelAuthority) {
       currentProviderAccount: () => authority.currentProviderAccount(providerId) });
   }
   return {
-    async listModels(): Promise<Array<{ providerId: string; modelId: string; name?: string; acceptsImages: boolean }>> {
+    async listModels(): Promise<ThreadModelInfo[]> {
       return (await authority.listModels()).filter(model => families.has(model.api))
-        .map(model => ({ providerId: model.providerId, modelId: model.modelId, name: model.name, acceptsImages: model.input?.includes('image') ?? false }));
+        .map(model => ({ providerId: model.providerId, modelId: model.modelId, name: model.name, acceptsImages: model.input?.includes('image') ?? false,
+          ...(model.contextWindow === undefined ? {} : { contextWindowTokens: model.contextWindow }), thinkingLevels: thinkingLevels(model) }));
     },
-    async resolveModel(selection: { providerId: string; modelId: string }) {
+    async resolveModel(selection: ThreadModel) {
       const model = await authority.selectedModel(selection.providerId, selection.modelId);
-      const configuration = await configurationFor(model);
+      const configuration = await configurationFor(model, selection.thinkingLevel);
       const credentialOwner = ownerFor(configuration);
       await credentialOwner.scope();
       return { configuration, credentialOwner, acceptsImages: configuration.acceptsImages ?? false };
@@ -143,7 +159,8 @@ export function createModelAuthority(authority: ModelAuthority) {
     async rebindModel(configuration: ModelSessionConfiguration, expectedScope: CredentialScope) {
       if (!expectedScope) return failed('credential-selection-missing');
       const providerId = configuration.providerId || failed('provider-identity-required');
-      const current = await configurationFor(await authority.selectedModel(providerId, configuration.model));
+      const configuredLevel = configuration.thinkingLevel as ThreadThinkingLevel | undefined;
+      const current = await configurationFor(await authority.selectedModel(providerId, configuration.model), configuredLevel);
       if (current.configurationGeneration !== configuration.configurationGeneration || current.endpoint !== configuration.endpoint
         || current.providerFamily !== configuration.providerFamily) return failed('model-configuration-changed');
       const owner = ownerFor(configuration);

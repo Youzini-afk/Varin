@@ -6,7 +6,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub(crate) const PROTOCOL_VERSION: u64 = 1;
+pub(crate) const PROTOCOL_VERSION: u64 = crate::protocol_generated::KERNEL_PROTOCOL_VERSION;
 pub(crate) const KERNEL_VERSION: &str = "0.1.0";
 pub(crate) const KERNEL_BUILD_IDENTITY: &str = match option_env!("VARIN_KERNEL_BUILD_IDENTITY") {
     Some(value) => value,
@@ -23,7 +23,7 @@ pub(crate) const KERNEL_ARCH: &str = match option_env!("VARIN_KERNEL_ARCH") {
 pub(crate) const STORAGE_FORMAT_VERSION: &str = "10";
 // Control frames are deliberately bounded. Content bytes travel through the
 // begin/data/finish stream and therefore do not need a giant JSON envelope.
-pub(crate) const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_FRAME_BYTES: usize = crate::protocol_generated::KERNEL_MAX_FRAME_BYTES;
 pub(crate) const MAX_BLOB_RESPONSE_BYTES: usize = (MAX_FRAME_BYTES * 3 / 4).saturating_sub(1024);
 pub(crate) const KERNEL_CAPABILITIES: [&str; 9] = [
     "storage",

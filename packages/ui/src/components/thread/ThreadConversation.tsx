@@ -9,7 +9,7 @@ import { fileToImageAttachment } from '@/components/chat/composer/imageAttachmen
 import { useI18n } from '@/lib/i18n';
 import React from 'react';
 import { ThreadRequestError, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
-import type { ThreadIdentity, ThreadSnapshot, ThreadsAPI, ThreadHistoryPage, ThreadPreparedSource } from '@varin/application-client';
+import type { ThreadIdentity, ThreadModelInfo, ThreadThinkingLevel, ThreadSnapshot, ThreadsAPI, ThreadHistoryPage, ThreadPreparedSource } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
@@ -37,7 +37,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   draftRef.current = { text, images };
   const [providerId, setProviderId] = React.useState('');
   const [modelId, setModelId] = React.useState('');
-  const [models, setModels] = React.useState<Array<{ providerId: string; modelId: string; name?: string; acceptsImages?: boolean }>>([]);
+  const [thinkingLevel, setThinkingLevel] = React.useState<ThreadThinkingLevel>('off');
+  const [models, setModels] = React.useState<ThreadModelInfo[]>([]);
   React.useEffect(() => { let active = true; void api.listModels().then(value => { if (active) setModels(value); }, value => { if (active) setError(value instanceof Error ? value.message : 'Model catalog unavailable'); }); return () => { active = false; }; }, [api, host]);
   const [error, setError] = React.useState<string>();
   const [inputMode, setInputMode] = React.useState<'boundary' | 'interrupt' | 'next_run'>('boundary');
@@ -60,8 +61,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const acceptsImages = active ? (run?.configuration as { acceptsImages?: boolean } | undefined)?.acceptsImages
     : models.find(model => model.providerId === providerId && model.modelId === modelId)?.acceptsImages;
   React.useEffect(() => {
-    const config = run?.configuration as { providerId?: string; model?: string } | undefined;
-    if (config?.providerId && config.model && (active || !providerId)) { setProviderId(config.providerId); setModelId(config.model); }
+    const config = run?.configuration as { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel } | undefined;
+    if (config?.providerId && config.model && (active || !providerId)) { setProviderId(config.providerId); setModelId(config.model); setThinkingLevel(config.thinkingLevel ?? 'off'); }
   }, [run?.configuration, active, providerId]);
   const act = async (work: () => Promise<unknown>) => {
     const generation = identityGeneration.current;
@@ -116,17 +117,17 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     if (!snapshot) return;
     const generation = identityGeneration.current;
     const expectedRevision = snapshot.context.checkpoint?.revision ?? 0;
-    const fingerprint = JSON.stringify([throughId, expectedRevision, providerId, modelId]);
+    const fingerprint = JSON.stringify([throughId, expectedRevision, providerId, modelId, thinkingLevel]);
     let key = compactionKeys.current.get(fingerprint);
     if (!key) { key = crypto.randomUUID(); compactionKeys.current.set(fingerprint, key); }
     await act(async () => {
-      await api.compact({ ...identity, key, throughId, expectedRevision, model: { providerId, modelId } });
+      await api.compact({ ...identity, key, throughId, expectedRevision, model: { providerId, modelId, thinkingLevel } });
       if (generation === identityGeneration.current) compactionKeys.current.delete(fingerprint);
     });
   };
   const visibleHistory = historyView?.items ?? snapshot?.history ?? [];
   const previousHistory = historyView ? historyView.previous : snapshot?.historyPage.previous;
-  const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, text, images, providerId, modelId, inputMode, preparedSource?.source]);
+  const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, text, images, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source]);
   const sourceCannotBeApplied = active && Boolean(preparedSource) && pendingInput.current?.fingerprint !== submissionFingerprint();
   return <section className="flex h-full min-h-0 flex-col" aria-label="Thread conversation">
     <div className="border-b px-4 py-2 text-xs text-muted-foreground">thread · {identity.threadId} · branch {identity.branchId.slice(-8)} · {run?.state ?? 'Ready'}{run?.waiting_on ? ` · ${run.waiting_on}` : ''}</div>
@@ -208,7 +209,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         const fingerprint = submissionFingerprint();
         if (pendingInput.current?.fingerprint !== fingerprint) {
           const key = crypto.randomUUID();
-          const submit = { ...identity, key, text, images, expectedHead: branch?.head ?? null, model: { providerId, modelId }, ...(preparedSource ? { source: preparedSource.source } : {}) };
+          const submit = { ...identity, key, text, images, expectedHead: branch?.head ?? null, model: { providerId, modelId, thinkingLevel }, ...(preparedSource ? { source: preparedSource.source } : {}) };
           const queued = { ...identity, key, text, images, mode: inputMode };
           pendingInput.current = { fingerprint, send: active ? () => api.enqueue(queued) : () => api.submit(submit) };
         }
@@ -225,10 +226,16 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       <select aria-label="Registered model" disabled={active} className="w-full rounded border bg-background px-2 py-1 text-sm"
         value={JSON.stringify([providerId, modelId])} onChange={event => {
           const [provider, model] = JSON.parse(event.target.value) as [string, string]; setProviderId(provider); setModelId(model);
+          const available = models.find(candidate => candidate.providerId === provider && candidate.modelId === model)?.thinkingLevels ?? ['off'];
+          if (!available.includes(thinkingLevel)) setThinkingLevel(available[0] ?? 'off');
         }}>
         <option value={JSON.stringify(['', ''])}>Choose a registered model</option>
         {models.map(model => <option key={JSON.stringify([model.providerId, model.modelId])} value={JSON.stringify([model.providerId, model.modelId])}>{model.providerId} · {model.name ?? model.modelId}</option>)}
       </select>
+      {(models.find(model => model.providerId === providerId && model.modelId === modelId)?.thinkingLevels?.length ?? 0) > 1 && <select aria-label="Thinking level" disabled={active}
+        className="rounded border bg-background px-2 py-1 text-sm" value={thinkingLevel} onChange={event => setThinkingLevel(event.target.value as ThreadThinkingLevel)}>
+        {models.find(model => model.providerId === providerId && model.modelId === modelId)?.thinkingLevels?.map(level => <option key={level} value={level}>{level}</option>)}
+      </select>}
       {active && <select aria-label="Input delivery" className="rounded border bg-background text-sm" value={inputMode} onChange={event => setInputMode(event.target.value as typeof inputMode)}>
         <option value="boundary">At next model boundary</option><option value="interrupt">Interrupt current generation</option><option value="next_run">After current run</option>
       </select>}

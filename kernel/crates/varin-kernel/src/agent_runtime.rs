@@ -16,6 +16,16 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 use varin_runtime::{model_session, supervisor::RunSupervisor, Catalog, SubmitInput};
 
+fn run_cancellation_receipt(run: &varin_runtime::Run) -> Value {
+    json!({"id":run.id,"thread_id":run.thread_id,"branch_id":run.branch_id,"state":run.state,
+        "revision":run.revision,"epoch":run.epoch,"cancel_requested":run.cancel_requested,"waiting_on":run.waiting_on})
+}
+fn operation_cancellation_receipt(op: &varin_runtime::Operation) -> Value {
+    json!({"id":op.id,"run_id":op.run_id,"epoch":op.epoch,"revision":op.revision,"phase":op.phase,"outcome":op.outcome,
+        "effect":op.effect,"cancel_requested":op.cancel_requested,"lifetime":op.lifetime,"handed_off":op.handed_off,
+        "executor":op.executor,"waiting_on":op.waiting_on})
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct AgentControl(Arc<Mutex<Option<AgentOwner>>>);
 struct AgentOwner {
@@ -884,25 +894,22 @@ pub(crate) fn spawn(
                             if let Some(operation_id) = waiting.as_deref().and_then(|id| id.strip_prefix("question:")) {
                                 runtime.quiesce_question(operation_id).map_err(|e| KernelError::Operation(e.to_string()))?;
                             }
-                            return Ok(serde_json::to_value(
-                                runtime
-                                    .cancel(&p.run_id)
-                                    .map_err(|e| KernelError::Operation(e.to_string()))?,
-                            )?);
+                            return Ok(run_cancellation_receipt(&runtime.cancel(&p.run_id)
+                                .map_err(|e| KernelError::Operation(e.to_string()))?));
                         }
                         if method == "runtime.operation.cancel" {
                             let p: OperationParams = serde_json::from_value(params)?;
                             if runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                                 .operation(&p.operation_id).map_err(domain)?.executor.as_deref() == Some("wait_process") {
                                 runtime.quiesce_process_waits().map_err(|e|KernelError::Operation(e.to_string()))?;
-                                return Ok(serde_json::to_value(runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.cancel_process_wait(&p.operation_id).map_err(domain)?)?);
+                                return Ok(operation_cancellation_receipt(&runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.cancel_process_wait(&p.operation_id).map_err(domain)?));
                             }
                             if runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                                 .operation(&p.operation_id).map_err(domain)?.executor.as_deref() == Some("ask_user") {
                                 runtime.quiesce_question(&p.operation_id).map_err(|e| KernelError::Operation(e.to_string()))?;
                                 let operation = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                                     .cancel_question(&p.operation_id).map_err(domain)?;
-                                return Ok(serde_json::to_value(operation)?);
+                                return Ok(operation_cancellation_receipt(&operation));
                             }
                             let operation = runtime
                                 .cancel_operation(&p.operation_id)
@@ -927,7 +934,7 @@ pub(crate) fn spawn(
                                     resources.cancel_process(&operation.id, &operation.run_id)?;
                                 }
                             }
-                            return Ok(serde_json::to_value(operation)?);
+                            return Ok(operation_cancellation_receipt(&operation));
                         }
                         let catalog = runtime.catalog();
                         let mut catalog = catalog.lock().map_err(|_| {
@@ -1264,25 +1271,13 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         }
         "runtime.run.inspect" | "runtime.run.cancel" => {
             let p: RunParams = serde_json::from_value(params)?;
-            Ok(serde_json::to_value(
-                if method.ends_with("cancel") {
-                    catalog.request_cancel_run(&p.run_id)
-                } else {
-                    catalog.run(&p.run_id)
-                }
-                .map_err(domain)?,
-            )?)
+            if method.ends_with("cancel") { Ok(run_cancellation_receipt(&catalog.request_cancel_run(&p.run_id).map_err(domain)?)) }
+            else { Ok(serde_json::to_value(catalog.run(&p.run_id).map_err(domain)?)?) }
         }
         "runtime.operation.inspect" | "runtime.operation.cancel" => {
             let p: OperationParams = serde_json::from_value(params)?;
-            Ok(serde_json::to_value(
-                if method.ends_with("cancel") {
-                    catalog.request_cancel_operation(&p.operation_id)
-                } else {
-                    catalog.operation(&p.operation_id)
-                }
-                .map_err(domain)?,
-            )?)
+            if method.ends_with("cancel") { Ok(operation_cancellation_receipt(&catalog.request_cancel_operation(&p.operation_id).map_err(domain)?)) }
+            else { Ok(serde_json::to_value(catalog.operation(&p.operation_id).map_err(domain)?)?) }
         }
         "runtime.input.edit" => {
             let p: InputEditParams = serde_json::from_value(params)?;

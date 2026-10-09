@@ -11,6 +11,9 @@ pub mod google;
 pub mod host_auth;
 pub mod mistral;
 pub mod responses;
+pub mod registry;
+mod builtins;
+pub mod pi_messages;
 mod sse;
 #[cfg(test)]
 mod tests;
@@ -85,6 +88,12 @@ impl Default for ReqwestTransport {
     fn default() -> Self {
         Self::new(reqwest::Client::builder)
     }
+}
+/// Request headers and credentials remain per dispatch. Immutable outbound policy shares
+/// connection pools and its I/O executor across Runs instead of creating threads per model.
+pub fn shared_transport() -> Arc<dyn HttpTransport> {
+    static TRANSPORT: OnceLock<Arc<ReqwestTransport>> = OnceLock::new();
+    TRANSPORT.get_or_init(|| Arc::new(ReqwestTransport::default())).clone()
 }
 impl ReqwestTransport {
     pub fn new(builder: impl Fn() -> reqwest::ClientBuilder + Send + Sync + 'static) -> Self {

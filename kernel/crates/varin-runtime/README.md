@@ -23,6 +23,14 @@ writing Pi session files or the Host harness's existing execution records.
   pins its selected endpoints through tool settlement. Each call binds one invocation through
   preparation, resource admission, authorization and execution; revocation cancellation is registered
   at binding. Ordinary replacement preserves old pins. The frozen batch schema is shared by `Arc`.
+- `providers::registry` selects typed model adapters through the same composition leases. Factories
+  run outside the registry lock; replacement preserves retained implementations and explicit revocation
+  cancels active generation. Builtin protocol options are validated by family. The `pi-messages` HTTP
+  adapter preserves signed blocks and tool pairing without executing a Pi agent loop. Production model
+  bindings share the immutable default outbound connection pool and I/O executor.
+- Host model admission retains actual context capacity, thinking mappings and configured sampling
+  parameters. Unknown capacity remains unknown. Desired/active model changes within a Run and automatic
+  capacity-triggered compaction are not yet connected to the product path.
 
 The wire source remains `kernel/protocol/schema.json`; it generates the state enums and the
 Host request/response DTOs. Domain implementation types remain private to Rust.

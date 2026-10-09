@@ -179,3 +179,17 @@ fn azure_factory_does_not_infer_missing_deployment_or_api_version() {
     config.azure_deployment = Some("deployment".into());
     assert!(model_session::bind(config).is_err());
 }
+
+#[test]
+fn adapter_options_reject_wrong_family_and_frozen_input_replacement() {
+    let mut config = configuration();
+    config.model_options = Some(serde_json::json!({"protocol":{"thinkingConfig":{"thinkingBudget":2048}}}));
+    assert!(matches!(model_session::bind(config.clone()), Err(error) if error.code=="model_options"));
+    config.model_options = Some(serde_json::json!({"samplingParams":{"model":"different-model"}}));
+    assert!(matches!(model_session::bind(config.clone()), Err(error) if error.code=="sampling_parameters"));
+    config.model_options = Some(serde_json::json!({"temperature":0.3,"samplingParams":{"top_p":0.8}}));
+    let start = model_session::bind(config).unwrap();
+    let view = RequestView { request_id:"request".into(),run_id:"run".into(),origin:varin_runtime::execution::RequestOrigin::Conversation { step:1,history_range:start.binding.history_range.clone() },binding:start.binding,history:vec![] };
+    let payload = start.provider.serialize(&view).unwrap();
+    assert_eq!(payload["temperature"], 0.3); assert_eq!(payload["top_p"],0.8); assert_eq!(payload["model"],"local-test");
+}

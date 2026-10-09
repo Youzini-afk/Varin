@@ -127,4 +127,9 @@ pub struct ModelSessionConfiguration {
     pub include_stream_usage: Option<bool>,
     pub reasoning_effort: Option<String>,
     pub anthropic_oauth: Option<bool>,
+    pub adapter_id: Option<String>,
+    pub adapter_version: Option<String>,
+    pub context_window_tokens: Option<u64>,
+    pub thinking_level: Option<String>,
+    pub model_options: Option<serde_json::Value>,
 }

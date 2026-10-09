@@ -4,6 +4,24 @@ import { CredentialBridge, type PrivateCredentialResponse } from './credential-b
 import { ExistingHostCredentialOwner, type CredentialOwnerOptions, type CredentialScope } from './credential-owner.js';
 
 const scope: CredentialScope = { reference: 'fake-ref', authority: 'fake-authority', account: 'fake-local-binding-handle', generation: 7 };
+it('model selection preserves capacity, thinking mapping and sampling through credential rebinding', async () => {
+  let topP = 0.8;
+  const model = () => ({ providerId: 'fixture-provider', modelId: 'deepseek-fixture', name: 'Fixture',
+    api: 'openai-completions', baseUrl: 'https://model.example.test/v1', maxTokens: 32768, contextWindow: 131072, reasoning: true,
+    thinkingLevelMap: { xhigh: null }, samplingParams: { top_p: topP }, samplingParamsByThinkingLevel: { high: { temperature: 0.5 } },
+    compat: { thinkingFormat: 'deepseek', supportsReasoningEffort: true } });
+  const authority = createModelAuthority({ selectedModel: async () => model(), listModels: async () => [model()],
+    currentScope: async () => scope, currentProviderAccount: async () => undefined, routingEnvironment: async () => ({}),
+    getAuth: async () => ({ auth: { apiKey: 'fake-test-key' } }) });
+  expect((await authority.listModels())[0]).toMatchObject({ contextWindowTokens: 131072, thinkingLevels: ['off', 'minimal', 'low', 'medium', 'high'] });
+  const { configuration } = await authority.resolveModel({ providerId: 'fixture-provider', modelId: 'deepseek-fixture', thinkingLevel: 'high' });
+  expect(configuration).toMatchObject({ adapterId: 'openai-completions', adapterVersion: '1', thinkingLevel: 'high', reasoningEffort: 'high', contextWindowTokens: 131072,
+    modelOptions: { samplingParams: { thinking: { type: 'enabled' }, top_p: 0.8, temperature: 0.5 } } });
+  await authority.rebindModel(configuration, scope);
+  await expect(authority.resolveModel({ providerId: 'fixture-provider', modelId: 'deepseek-fixture', thinkingLevel: 'xhigh' })).rejects.toMatchObject({ code: 'model-thinking-level-unavailable' });
+  topP = 0.9;
+  await expect(authority.rebindModel(configuration, scope)).rejects.toMatchObject({ code: 'model-configuration-changed' });
+});
 function owner(overrides: Partial<CredentialOwnerOptions> = {}) {
   return new ExistingHostCredentialOwner({ providerId: 'fixture-provider', providerFamily: 'openai-responses', endpoint: 'https://model.example.test/v1/responses', currentScope: async () => ({ ...scope }), runtime: { getAuth: async () => ({ auth: { apiKey: 'fake-test-key' } }) }, ...overrides });
 }
@@ -156,7 +174,7 @@ it('trusted Bedrock model selection binds its ARN region and fake bearer through
     routingEnvironment: async () => ({ AWS_REGION: 'eu-west-1' }),
     getAuth: async () => ({ auth: { apiKey: 'fake-bedrock-bearer' } }),
   });
-  expect(await authority.listModels()).toContainEqual({ providerId: model.providerId, modelId: model.modelId, name: model.name, acceptsImages: true });
+    expect(await authority.listModels()).toContainEqual(expect.objectContaining({ providerId: model.providerId, modelId: model.modelId, name: model.name, acceptsImages: true }));
   const selected = await authority.resolveModel({ providerId: model.providerId, modelId: model.modelId });
   expect(selected.configuration.endpoint).toBe(`https://bedrock-runtime.us-west-2.amazonaws.com/model/${encodeURIComponent(model.modelId)}/converse-stream`);
   expect((await selected.credentialOwner.resolve(scope)).headers.authorization).toBe('Bearer fake-bedrock-bearer');

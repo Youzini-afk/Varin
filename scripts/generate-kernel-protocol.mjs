@@ -11,7 +11,7 @@ const protocolTarget = path.join(root, 'packages', 'protocol', 'src', 'agent-run
 const runtimeTypesTarget = path.join(root, 'kernel', 'crates', 'varin-runtime', 'src', 'types_generated.rs');
 const structs = Object.entries(schema.runtimeStructs ?? {}).map(([name, spec]) => {
   const fields = Object.entries(spec.fields).map(([key, value]) => {
-    let type = ({string:"String", number:"u64", boolean:"bool", "string | null":"Option<String>", "number | null":"Option<u64>"})[value.type];
+    let type = ({string:"String", number:"u64", boolean:"bool", unknown:"serde_json::Value", "string | null":"Option<String>", "number | null":"Option<u64>"})[value.type];
     if (value.optional && type && !type.startsWith("Option<")) type = `Option<${type}>`;
     if (!type) throw new Error(`Unsupported runtime field type ${value.type}`);
     const field = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
@@ -52,6 +52,7 @@ export const KERNEL_PROTOCOL_VERSION = ${schema.protocolVersion} as const;
 export const KERNEL_REQUEST_WINDOW = ${schema.requestWindow} as const;
 export const KERNEL_MAX_FRAME_BYTES = ${schema.maxFrameBytes} as const;
 export const KERNEL_CONTROL_METHODS = ${JSON.stringify(schema.controlMethods)} as const;
+export const KERNEL_CONTROL_RESPONSE_METHODS = ${JSON.stringify(schema.controlResponseMethods)} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ${JSON.stringify(schema.runtimeDataMethods ?? [])} as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v${schema.protocolVersion}" as const;
 
@@ -115,7 +116,7 @@ const workingDocumentDto = {
   'working.verification.parent': 'KernelWorkingVerificationDocument',
   'working.review': 'KernelWorkingReviewDocument',
 };
-const unformattedRust = `// Generated from kernel/protocol/schema.json. Do not hand-edit.\n#![allow(dead_code)]\n\nuse crate::model::PathState;\nuse serde::Deserialize;\nuse serde_json::Value;\n\npub(crate) const KERNEL_REQUEST_WINDOW: usize = ${schema.requestWindow};\npub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[${schema.controlMethods.map(value => JSON.stringify(value)).join(", ")}];\npub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[${(schema.runtimeDataMethods ?? []).map(value => JSON.stringify(value)).join(", ")}];\n\n#[derive(Clone, Debug, Deserialize)]\n#[serde(transparent)]\npub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);\n\n${[...rustDtoNames].map(renderRustDto).join('\n\n')}\n\npub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {\n    match method {\n${Object.entries(methodParams).map(([method, paramsType]) => `        ${JSON.stringify(method)} => serde_json::from_value::<${paramsType}>(params.clone()).map(|_| ()).map_err(|error| error.to_string()),`).join('\n')}\n        _ => Ok(()),\n    }\n}\n\npub(crate) fn validate_generated_working_document(record_type: &str, document: &Value) -> Result<(), String> {\n    match record_type {\n${Object.entries(workingDocumentDto).map(([recordType, dto]) => `        ${JSON.stringify(recordType)} => serde_json::from_value::<${dto}>(document.clone()).map(|_| ()).map_err(|error| error.to_string()),`).join('\n')}\n        _ => Ok(()),\n    }\n}\n`;
+const unformattedRust = `// Generated from kernel/protocol/schema.json. Do not hand-edit.\n#![allow(dead_code)]\n\nuse crate::model::PathState;\nuse serde::Deserialize;\nuse serde_json::Value;\n\npub(crate) const KERNEL_PROTOCOL_VERSION: u64 = ${schema.protocolVersion};\npub(crate) const KERNEL_MAX_FRAME_BYTES: usize = ${schema.maxFrameBytes};\npub(crate) const KERNEL_REQUEST_WINDOW: usize = ${schema.requestWindow};\npub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[${schema.controlMethods.map(value => JSON.stringify(value)).join(", ")}];\npub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[${schema.controlResponseMethods.map(value => JSON.stringify(value)).join(", ")}];\npub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[${(schema.runtimeDataMethods ?? []).map(value => JSON.stringify(value)).join(", ")}];\n\n#[derive(Clone, Debug, Deserialize)]\n#[serde(transparent)]\npub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);\n\n${[...rustDtoNames].map(renderRustDto).join('\n\n')}\n\npub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {\n    match method {\n${Object.entries(methodParams).map(([method, paramsType]) => `        ${JSON.stringify(method)} => serde_json::from_value::<${paramsType}>(params.clone()).map(|_| ()).map_err(|error| error.to_string()),`).join('\n')}\n        _ => Ok(()),\n    }\n}\n\npub(crate) fn validate_generated_working_document(record_type: &str, document: &Value) -> Result<(), String> {\n    match record_type {\n${Object.entries(workingDocumentDto).map(([recordType, dto]) => `        ${JSON.stringify(recordType)} => serde_json::from_value::<${dto}>(document.clone()).map(|_| ()).map_err(|error| error.to_string()),`).join('\n')}\n        _ => Ok(()),\n    }\n}\n`;
 const rustfmt = spawnSync(process.platform === 'win32' ? 'rustfmt.exe' : 'rustfmt', ['--emit', 'stdout', '--edition', '2021'], {
   input: unformattedRust,
   encoding: 'utf8',

@@ -13,7 +13,7 @@ export class TransportFixture {
   hold?: (value: Envelope) => boolean;
   private transport!: KernelTransport;
   private deliver!: (value: unknown) => void;
-  readonly create: typeof KernelTransport.prepare = async (onFrame, onFailure) => {
+  readonly create: typeof KernelTransport.prepare = async (onFrame, onFailure, onResponseDiscarded) => {
     this.deliver = onFrame;
     const transport = await KernelTransport.prepare(value => {
       const envelope = value as Envelope;
@@ -21,7 +21,10 @@ export class TransportFixture {
       this.onReceive?.(envelope);
       if (this.hold?.(envelope)) this.held.push(envelope);
       else onFrame(value);
-    }, onFailure);
+    }, onFailure, requestId => {
+      this.onReceive?.({kind:'response-discarded', id:requestId});
+      onResponseDiscarded(requestId);
+    });
     this.transport = transport;
     const send = transport.send.bind(transport);
     transport.send = (value, lane) => {

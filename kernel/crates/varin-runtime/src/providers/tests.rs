@@ -43,6 +43,33 @@ fn connection(events: Vec<Value>, chunk: usize) -> Connection {
         Arc::new(Stream { bytes, chunk }),
     )
 }
+#[test]
+fn pi_messages_fragmented_signed_thinking_and_tool_exchange_roundtrip() {
+    let provider = pi_messages::PiMessagesProvider { connection: connection(vec![
+        json!({"type":"start"}),
+        json!({"type":"thinking_start","contentIndex":0}),
+        json!({"type":"thinking_delta","contentIndex":0,"delta":"内部推理"}),
+        json!({"type":"thinking_end","contentIndex":0,"content":"内部推理","contentSignature":"signed-thinking"}),
+        json!({"type":"toolcall_start","contentIndex":1,"id":"call-1","toolName":"read"}),
+        json!({"type":"toolcall_delta","contentIndex":1,"delta":"{\"path\":\"文件.rs\"}"}),
+        json!({"type":"toolcall_end","contentIndex":1,"toolCall":{"type":"toolCall","id":"call-1","name":"read","arguments":{"path":"文件.rs"}}}),
+        json!({"type":"done","reason":"toolUse","usage":{"input":20,"output":3,"cacheRead":10,"cacheWrite":0},"rewrite":{"policyId":"fixture","changed":false}}),
+    ], 1), max_output_tokens: Some(100), reasoning:Some("low".into()),cache_retention:None };
+    let (result, events) = generate(&provider, pi_messages::FAMILY);
+    assert_eq!(result.unwrap(), FinishReason::ToolCalls);
+    let mut replay = view(pi_messages::FAMILY);
+    replay.history = events.into_iter().filter_map(|event| match event {
+        ProviderEvent::ItemCompleted { item } => Some(ConversationItem { id:item.id,provenance:Provenance::Assistant,content:item.content,opaque:item.opaque }), _=>None,
+    }).collect();
+    replay.history.push(ConversationItem { id:"result".into(),provenance:Provenance::ToolData {call_id:"call-1".into()},
+        content:Content::ToolResult {result:ToolResult {request_id:"request".into(),call_id:"call-1".into(),completion:ToolCompletion::Result {outcome:crate::Outcome::Succeeded,effect:crate::Effect::None,content:json!({"text":"source"})}}},opaque:None });
+    let wire = provider.serialize(&replay).unwrap();
+    assert_eq!(wire["context"]["messages"][0]["toolsAdded"][0]["name"], "read");
+    assert_eq!(wire["context"]["messages"][1]["content"][0]["thinkingSignature"], "signed-thinking");
+    assert_eq!(wire["context"]["messages"][2]["toolCallId"], "call-1");
+    assert_eq!(wire["context"]["messages"][2]["toolName"], "read");
+    assert_eq!(wire["options"]["reasoning"], "low");
+}
 fn view(family: &str) -> RequestView {
     RequestView {
         request_id: "request".into(),
