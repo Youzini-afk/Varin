@@ -252,7 +252,7 @@ impl ContentStore {
              UNION ALL SELECT json_extract(body,'$.content') FROM history
              UNION ALL SELECT body FROM model_outputs
              UNION ALL SELECT body FROM input_history_content".to_string();
-        if contexts {roots.push_str(" UNION ALL SELECT body FROM context_checkpoints");}
+        if contexts {roots.push_str(" UNION ALL SELECT body FROM context_checkpoints UNION ALL SELECT body FROM memory_states");}
         roots.push_str(" UNION ALL SELECT recipe FROM context_jobs UNION ALL SELECT body FROM context_job_parts");
         let mut references=Vec::new();
         let mut stmt=db.prepare(&roots)?;

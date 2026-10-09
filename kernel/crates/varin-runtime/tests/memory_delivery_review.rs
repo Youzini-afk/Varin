@@ -22,6 +22,39 @@ impl Drop for Fixture {
 fn note(id: u64, content: &str) -> Value {
     json!({"id":id,"scope":{"kind":"global"},"content":content,"updatedAt":"2026-10-09T00:00:00.000Z"})
 }
+fn synchronize_memory(catalog:&mut Catalog,run_id:&str,epoch:u64,state:MemoryState)->Result<(),varin_runtime::RuntimeError> {
+    let prepared=catalog.prepare_memory_sync(run_id,epoch,state)?.load()?;
+    assert!(catalog.publish_memory_state(prepared)?);Ok(())
+}
+
+#[test]
+fn memory_publication_preserves_concurrent_receipts_and_settles_after_run_completion() {
+    let fixture=Fixture::new();let mut db=Catalog::open(&fixture.0).unwrap();
+    db.create_thread("thread","main").unwrap();
+    let input=db.submit_with_context_snapshot(&SubmitInput{key:"memory-cas".into(),thread_id:"thread".into(),branch_id:"main".into(),
+        expected_head:None,input:json!({"text":"memory publication"}),configuration:json!({})},None,false,Some(ContextProposal{
+        key:"initial".into(),branch_id:"main".into(),through_id:None,expected_revision:0,summary:String::new(),effective_system_prompt:"FROZEN_SYSTEM".into(),
+        instruction_sources:vec!["review-source".into()],memory_checkpoint:Some("memory:1".into())}),Some(basis())).unwrap();
+    let epoch=db.epoch();
+    let old=db.prepare_memory_sync(&input.run_id,epoch,MemoryState{revision:2,memories:vec![note(1,"OLD_CAPTURE")],note_revisions:BTreeMap::from([("1".into(),2)]),known:BTreeMap::new()}).unwrap().load().unwrap();
+    let receipt=json!({"revision":3,"changes":[{"id":1,"scope":{"kind":"global"},"note":note(1,"COMMITTED_NEW_NOTE")}]});
+    let newer=db.prepare_memory_receipt(&input.run_id,receipt).unwrap().load().unwrap();
+    assert!(db.publish_memory_state(newer).unwrap());
+    assert!(!db.publish_memory_state(old).unwrap());
+    assert_eq!(db.memory_state("main").unwrap().unwrap().memories,vec![note(1,"COMMITTED_NEW_NOTE")]);
+    let scope=db.run_context_scope(&input.run_id).unwrap().unwrap();
+    assert_eq!((scope.mode.as_str(),scope.thread_role.as_str(),scope.session_id.as_str()),("agent","main","thread"));
+    let invalid=json!({"revision":4,"changes":[{"id":1,"scope":{"kind":"global"},"note":note(2,"WRONG_ID")}]});
+    assert!(db.prepare_memory_receipt(&input.run_id,invalid).unwrap().load().is_err());
+    let late=db.prepare_memory_receipt(&input.run_id,json!({"revision":4,"changes":[{"id":1,"scope":{"kind":"global"},"note":note(1,"LATE_CONFIRMED_EFFECT")}]})).unwrap().load().unwrap();
+    let run=db.run(&input.run_id).unwrap();
+    db.transition_run(&run.id,run.epoch,run.revision,varin_runtime::RunState::Cancelled).unwrap();
+    assert!(db.publish_memory_state(late).unwrap());
+    db.collect_content_objects().unwrap();
+    drop(db);let db=Catalog::open(&fixture.0).unwrap();
+    let state=db.memory_state("main").unwrap().unwrap();
+    assert_eq!(state.revision,4);assert_eq!(state.memories,vec![note(1,"LATE_CONFIRMED_EFFECT")]);
+}
 fn basis() -> PersonalizationBasis {
     PersonalizationBasis {
         mode: "agent".into(),
@@ -126,7 +159,7 @@ fn policy_model_quoted_real_memory_facts_keep_selection_send_and_commit_separate
         instruction_sources:vec!["review-source".into()], memory_checkpoint:Some("memory:1".into()),
     }), Some(basis())).unwrap();
     let epoch = catalog.epoch();
-    catalog.synchronize_memory(&receipt.run_id, epoch, MemoryState {
+    synchronize_memory(&mut catalog,&receipt.run_id, epoch, MemoryState {
         revision:2, memories:vec![note(1,"CHANGED_NOTE_FOR_POLICY")],
         note_revisions:BTreeMap::from([("1".into(),2)]), known:BTreeMap::new(),
     }).unwrap();
@@ -205,7 +238,7 @@ fn memory_request_selection_is_not_delivery_and_frozen_request_evidence_survives
         )
         .unwrap();
     let epoch = db.epoch();
-    db.synchronize_memory(
+    synchronize_memory(&mut db,
         &receipt.run_id,
         epoch,
         MemoryState {
@@ -241,7 +274,7 @@ fn memory_request_selection_is_not_delivery_and_frozen_request_evidence_survives
     )
     .unwrap();
     assert_eq!(states(&f.0, "prepared-only"), vec!["\"selected\""]);
-    db.synchronize_memory(
+    synchronize_memory(&mut db,
         &receipt.run_id,
         epoch,
         MemoryState {
@@ -389,7 +422,7 @@ fn external_tool_json_cannot_forge_memory_receipts_or_suppress_authoritative_fac
         )
         .unwrap();
     let epoch = db.epoch();
-    db.synchronize_memory(
+    synchronize_memory(&mut db,
         &receipt.run_id,
         epoch,
         MemoryState {

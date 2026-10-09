@@ -29,7 +29,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 6;
+pub(crate) const FORMAT: i64 = 7;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -157,7 +157,7 @@ impl Catalog {
         db.pragma_update(None, "synchronous", "FULL")?;
         if version == 0 {
             db.execute_batch(SCHEMA)?;
-            db.execute_batch("CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY REFERENCES input_queue(id),body TEXT NOT NULL); CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,3); PRAGMA user_version=6;")?;
+            db.execute_batch("CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY REFERENCES input_queue(id),body TEXT NOT NULL); CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,3); PRAGMA user_version=7;")?;
             context_jobs::initialize_new(&db)?;
         }
         db.execute_batch("CREATE TABLE IF NOT EXISTS resource_occupancy (operation_id TEXT PRIMARY KEY REFERENCES operations(id), claims TEXT NOT NULL)")?;
@@ -257,7 +257,7 @@ impl Catalog {
             if proposal.branch_id != command.branch_id || proposal.through_id.is_some() || proposal.expected_revision != 0 || !proposal.summary.is_empty() {
                 return Err(RuntimeError::Invalid("initial context must be a first-input system snapshot".into()));
             }
-            if self.active_context(&command.branch_id)?.is_none() { Some(self.stage_context_with_personalization(proposal, personalization)?) } else { None }
+            if self.capture_active_checkpoint(&command.branch_id)?.is_none() { Some(self.stage_context_with_personalization(proposal, personalization)?) } else { None }
         } else { None };
         self.submit_admission(command, launch, false, inherit_source, staged, None, None)
     }
@@ -1369,6 +1369,8 @@ pub(crate) mod policy_model;
 
 #[path = "catalog_memory.rs"]
 pub mod memory;
+#[path = "catalog_memory_state.rs"]
+pub mod memory_state;
 #[path = "catalog_collaboration.rs"]
 pub mod collaboration;
 
