@@ -265,3 +265,68 @@ Collaboration preflight verifies complete nonpartial unique keys, their BINARY c
 ascending key columns, the actual primary-key index origin, and exact FK mappings/actions/match.
 A partial or differently collated index cannot stand in for the admitted identity constraints.
 These checks precede mutable catalog open and never migrate an unsupported catalog.
+
+## Native search capacity and task-family admission
+
+The Catalog-owned `ResourceAdmission` now admits selected local computation together with its whole
+resource plan. Pending calls hold neither resource claims nor execution capacity. Conflicting claims
+retain FIFO order; runnable local-compute families rotate, so many queued searches from one task do
+not put all of that task's work ahead of another waiting task. A family is the root native Thread
+obtained from the Catalog's existing child/parent Run lineage, never a project, path, or model-supplied
+family value. Parent completion does not change that identity. No second task tree or durable scheduler
+log is created.
+
+The first classified production capability is bound `NativeToolKind::FileSearch`, including policy
+read-graph calls. Plain file reads, directory lists, dispatch, questions and control do not consume its
+capacity. The trusted executor supplies the classification; wrappers forward capabilities they do not
+own. MCP annotations cannot assign local execution classes. FileList, composite retrieval stages,
+LSP/service waits, model-provider quotas, maintenance and direct non-native `compute.start` consumers
+are not yet covered by task-family scheduling. The latter still share the kernel's original compute
+queues; this slice does not claim global execution fairness across those callers.
+
+`VARIN_NATIVE_COMPUTE_CONCURRENCY` selects a positive foreground concurrency at process startup.
+Absent an override, the existing conservative two-worker budget is retained, reduced to one on a
+single-core host. This is a deployment default, not a task/tool-count rejection or a measured optimal
+setting. One process-frozen budget configures both the real foreground compute workers and native
+admission. Background compute retains its separate worker. Invalid configuration is an error; a
+partially created worker pool is not published as full capacity. Configuration changes require restart.
+
+Each pending call retains its actual Run generation and model-request/tool-call or policy-action/node
+origin. `runtime.status` exposes only capacity/count summaries. `runtime.admission.inspect` takes the
+Run ID/generation and existing origin/call identity (discoverable in model-step/tool history or the
+policy Operation), validates ownership, then returns one bounded projection. `admissionId` is a
+transient call handle, not proof of a durable Operation. `queued`/`active` describe current admission;
+`settled` requires a durable tool/node receipt; `not_active` makes no terminal claim. Unknown calls,
+foreign origins and expired generations fail explicitly. Queue reasons distinguish resources,
+capacity and family turn. No full unbounded queue is sent in one IPC frame.
+
+Run cancellation and queued grant revocation wake the original call token. A scoped registration in
+the existing capability-control owner spans the queue wait; releasing it does not revoke the shared
+service or another caller. Dispatch rechecks Run generation and current authorization. Cancellation of
+running computation retains occupancy until its actual completion/stop receipt. Already dispatched
+model requests and unknown external effects keep their original recovery rules; transient admission
+never causes paid replay. Reopened pure-read recovery, when already permitted by the Catalog, derives
+family again and reenters the same current capacity budget.
+
+This slice still starts a waiting thread per ready tool/node and uses the existing compute workers.
+It does not implement a universal bounded worker executor, priority aging, per-device memory budgets,
+or all execution classes. Independent behavior acceptance is required before marking this slice
+verified in the implementation matrix.
+
+### Independent slice acceptance (2026-10-09)
+
+The frozen implementation passed 8 runtime Rust cases and 2 Host-source-client/kernel cases.
+The latter used the actual diagnostic kernel, configured foreground capacities 1 and 3, real
+FileSearch, worker-count observation and precise admission identity/status checks. They are not
+packaged-Host acceptance or a saturated control-latency measurement. Rust covers family rotation,
+resource FIFO, atomic capacity/resource admission, cancellation retaining running occupancy,
+Catalog lineage, trusted executor grant-watch registration and policy read-graph admission.
+Two initial reviewer fixtures were corrected (existing receipt state and mismatched node/call IDs);
+failed logs were retained and all eight cases rerun. Production source did not change.
+
+The actual kernel binary SHA256 is
+`c12c8985f89a1e7059cce156eed3dedabd2f6f8b7769ca7a94d454cfba4771bb`,
+with build identity 0.9.24 and debug profile. This evidence does not establish real-Kernel queued
+grant-revocation/epoch wakeups, OS thread-creation failure rollback, changed-runtime restart replay
+behavior, or fairness for all compute consumers. Integration with the memory/context branch needs
+MemoryTools to forward execution_class and watch_admission and separate combined verification.
