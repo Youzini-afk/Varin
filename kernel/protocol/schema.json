@@ -155,6 +155,7 @@
     "compute.grammar.register": "KernelComputeGrammarParams"
   },
   "dto": {
+    "NativeLanguageQuery": {"fields":{"runId":{"type":"string"},"threadId":{"type":"string"},"workspaceId":{"type":"string"},"executionWorkspaceId":{"type":"string"},"liveRoot":{"type":"NativeLiveRoot"},"method":{"type":"string"},"path":{"type":"string"},"line":{"type":"number","optional":true},"character":{"type":"number","optional":true}}},
     "NativeHistoryPageParams": {"fields":{"branchId":{"type":"string"},"headId":{"type":"string","optional":true},"beforeId":{"type":"string","optional":true},"limit":{"type":"number"}}},
     "NativeHistoryBodyParams": {"fields":{"itemId":{"type":"string"},"chunkIndex":{"type":"number"}}},
     "NativeHistoryReference": {"fields":{"id":{"type":"string"},"thread_id":{"type":"string"},"parent":{"type":"string | null"},"source":{"type":"NativeHistorySource"},"content_ref":{"type":"string"}}},

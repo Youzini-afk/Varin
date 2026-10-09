@@ -30,6 +30,9 @@ import {
   mapTextEdits,
   mapWorkspaceEdit,
   resourceFromUri,
+  rejectedLocationReason,
+  strictLocationRejection,
+  validLanguageRange,
 } from './mapping.js';
 import type { LanguageResource } from './mapping.js';
 import type { DocumentAuthority, DocumentMutationObservation } from '../documents/authority.js';
@@ -100,6 +103,7 @@ type ResolveCollectionName =
 interface LanguageSessionRecord extends ManagedProcessOwner<ManagedPipedProcessHandle> {
   activeRequests: number;
   documentEpoch: number;
+  diagnosticSnapshots: Map<string, { contentRevision: string; documentVersion: number | null; viewRevision: number; items: ReturnType<typeof mapDiagnostic>[]; omissions: { outOfScope: number; unmappable: number } }>;
   nextDocumentVersion: number;
   pendingTermination?: Promise<void>;
   callHierarchyItems: Map<string, unknown>;
@@ -432,6 +436,7 @@ export const createLanguageSupervisor = ({
   const pendingExits = new Set<Promise<void>>();
 
   const clearRecordDiagnostics = (record: LanguageSessionRecord): void => {
+    record.diagnosticSnapshots.clear();
     for (const [resourceId] of record.documents) {
       emit(record.workspaceId, {
         kind: 'diagnostics',
@@ -472,6 +477,7 @@ export const createLanguageSupervisor = ({
     record.pendingTermination = exited;
     pendingExits.add(exited);
     record.documents.clear();
+    record.diagnosticSnapshots.clear();
     record.callHierarchyItems?.clear();
     record.completionResolveItems?.clear();
     record.codeActionResolveItems?.clear();
@@ -519,6 +525,7 @@ export const createLanguageSupervisor = ({
     documents: new Map<string, OpenLanguageDocument>(),
     activeRequests: 0,
     documentEpoch: 0,
+    diagnosticSnapshots: new Map(),
     nextDocumentVersion: 0,
     child: null,
     rpc: null,
@@ -718,16 +725,23 @@ export const createLanguageSupervisor = ({
         ? notification.version
         : undefined;
       if (open && Number.isFinite(documentVersion) && documentVersion !== open.documentVersion) return;
+      const omissions = { outOfScope: 0, unmappable: 0 };
       const items = Array.isArray(notification.diagnostics) ? notification.diagnostics.map((diagnostic) => mapDiagnostic(diagnostic, {
         workspaceId,
         root: record.root,
         pathModule,
         resource,
         documentVersion: typeof documentVersion === 'number' && Number.isFinite(documentVersion) ? documentVersion : null,
+        onRejectedLocation: reason => { omissions[reason] += 1; },
         severity: lspSeverity,
         providerId: record.providerId,
         generation: record.generation,
       })) : [];
+      if (open?.contentRevision && Array.isArray(notification.diagnostics) && (documentVersion === undefined || documentVersion === open.documentVersion)) {
+        const rawItems = Array.isArray(notification.diagnostics) ? notification.diagnostics : [];
+        const nativeItems = items.filter((_item, index) => { if (validLanguageRange(asRecord(rawItems[index])?.range) && typeof asRecord(rawItems[index])?.message === 'string') return true; omissions.unmappable += 1; return false; });
+        record.diagnosticSnapshots.set(resourceId, { contentRevision: open.contentRevision, documentVersion: documentVersion ?? null, viewRevision: record.documentEpoch, items: nativeItems, omissions });
+      } else record.diagnosticSnapshots.delete(resourceId);
       emit(workspaceId, {
         kind: 'diagnostics',
         workspaceId,
@@ -905,6 +919,7 @@ export const createLanguageSupervisor = ({
       }
       if (!oldestId) return;
       record.documents.delete(oldestId);
+      record.diagnosticSnapshots.delete(oldestId);
       desired.delete(oldestId);
       try {
         record.rpc?.notify('textDocument/didClose', {
@@ -992,6 +1007,7 @@ export const createLanguageSupervisor = ({
         return { status: 'absent' };
       }
       record.documents.delete(resourceId);
+      record.diagnosticSnapshots.delete(resourceId);
       if (!hostOwned || open.fixed) record.documentEpoch += 1;
       record.rpc.notify('textDocument/didClose', { textDocument: { uri: toFileUri(absolutePath) } });
       const result = {
@@ -1352,6 +1368,7 @@ export const createLanguageSupervisor = ({
       const language = languageIdForPath(resourceId);
       if (open || (language && record.languageIds.includes(language)) || /\.(?:json|toml|yaml|yml|xml)$/.test(resourceId)) {
         record.documentEpoch += 1;
+        record.diagnosticSnapshots.clear();
         emit(record.workspaceId, { kind: 'diagnostics-invalidated', view: record.view });
       }
       // A closed disk document is once again read by the server from disk.
@@ -1360,6 +1377,7 @@ export const createLanguageSupervisor = ({
         if (isHostOwnedView(record.view) && open) {
           record.rpc.notify('textDocument/didClose', { textDocument: { uri: toFileUri(absolute) } });
           record.documents.delete(resourceId);
+          record.diagnosticSnapshots.delete(resourceId);
           desiredDocuments.get(key)?.delete(resourceId);
         }
         record.rpc.notify('workspace/didChangeWatchedFiles', { changes: [{ uri: toFileUri(absolute), type: event.kind === 'created' ? 1 : event.kind === 'deleted' ? 3 : 2 }] });
@@ -1494,13 +1512,29 @@ export const createLanguageSupervisor = ({
     },
     releaseIdleHostViews,
     syncDocument,
-    pullDiagnostics: (request: LanguageRequest, options: { signal?: AbortSignal } = {}) => requestFeature('textDocument/diagnostic', request, (raw, record) => {
+    /** Retain actual publications; unversioned evidence stays pending, never a clean document. */
+    diagnosticsSnapshot: (request: LanguageRequest) => {
+      const record = request.resource && request.languageId ? sessions.get(sessionKey(request.resource.workspaceId, request.languageId, asView(request.view))) : undefined;
+      const snapshot = request.resource && record?.diagnosticSnapshots.get(request.resource.resourceId);
+      if (!record || !snapshot) return { status: 'pending' as const };
+      if (record.generation !== request.generation || snapshot.contentRevision !== request.expectedRevision
+        || (snapshot.documentVersion !== null && snapshot.documentVersion !== request.documentVersion) || snapshot.viewRevision !== record.documentEpoch
+        || request.expectedViewRevision !== record.documentEpoch) return { status: 'stale' as const };
+      return { status: snapshot.documentVersion === null ? 'pending' as const : 'ready' as const,
+        ...(snapshot.documentVersion === null ? { diagnosticVerification: 'unversioned' as const } : {}),
+        value: snapshot.items, omissions: snapshot.omissions, providerId: record.providerId, generation: record.generation };
+    },
+    pullDiagnostics: (request: LanguageRequest, options: { signal?: AbortSignal; onRejectedLocation?: (reason: 'outOfScope' | 'unmappable') => void } = {}) => requestFeature('textDocument/diagnostic', request, (raw, record) => {
       const report = asRecord(raw);
       if (report?.kind !== 'full' || !Array.isArray(report.items)) return null;
-      return report.items.map(item => mapDiagnostic(item, {
+      return report.items.filter(item => {
+        if (options.onRejectedLocation && (!validLanguageRange(asRecord(item)?.range) || typeof asRecord(item)?.message !== 'string')) { options.onRejectedLocation('unmappable'); return false; }
+        return true;
+      }).map(item => mapDiagnostic(item, {
         workspaceId: record.workspaceId, root: record.root, pathModule, resource: request.resource!,
         documentVersion: request.documentVersion ?? null, severity: lspSeverity,
         providerId: record.providerId, generation: record.generation,
+        ...(options.onRejectedLocation ? { onRejectedLocation: options.onRejectedLocation } : {}),
       }));
     }, options),
     completion: (request: LanguageRequest) => requestFeature('textDocument/completion', request, (raw, record) => {
@@ -1521,13 +1555,32 @@ export const createLanguageSupervisor = ({
     ),
     hover: (request: LanguageRequest, options: { signal?: AbortSignal } = {}) => requestFeature('textDocument/hover', request, mapHover, options),
     signatureHelp: (request: LanguageRequest) => requestFeature('textDocument/signatureHelp', request, mapSignatureHelp),
-    definition: (request: LanguageRequest, options: { signal?: AbortSignal } = {}) => requestFeature('textDocument/definition', request, (raw, record) => {
-      const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
-      return values.map((value) => mapLocationLink(value, record.workspaceId, record.root, pathModule)).filter(Boolean);
+    definition: (request: LanguageRequest, options: { signal?: AbortSignal; onRejectedLocation?: (reason: 'outOfScope' | 'unmappable') => void } = {}) => requestFeature('textDocument/definition', request, (raw, record) => {
+      if (raw === undefined) options.onRejectedLocation?.('unmappable');
+      const values = Array.isArray(raw) ? raw : raw !== null && raw !== undefined ? [raw] : [];
+      return values.map((value) => {
+        if (options.onRejectedLocation) {
+          const rejection = strictLocationRejection(value, record.root, pathModule, true);
+          if (rejection) { options.onRejectedLocation(rejection); return null; }
+        }
+        const mapped = mapLocationLink(value, record.workspaceId, record.root, pathModule);
+        if (!mapped) options.onRejectedLocation?.(rejectedLocationReason(value, record.root, pathModule));
+        return mapped;
+      }).filter(Boolean);
     }, options),
-    references: (request: LanguageRequest, options: { signal?: AbortSignal } = {}) => requestFeature('textDocument/references', request, (raw, record) => {
+    references: (request: LanguageRequest, options: { signal?: AbortSignal; onRejectedLocation?: (reason: 'outOfScope' | 'unmappable') => void } = {}) => requestFeature('textDocument/references', request, (raw, record) => {
+      if (raw === undefined) options.onRejectedLocation?.('unmappable');
       const values = Array.isArray(raw) ? raw : [];
-      return values.map((value) => mapLocation(value, record.workspaceId, record.root, pathModule)).filter(Boolean);
+      if (raw !== null && raw !== undefined && !Array.isArray(raw)) options.onRejectedLocation?.('unmappable');
+      return values.map((value) => {
+        if (options.onRejectedLocation) {
+          const rejection = strictLocationRejection(value, record.root, pathModule, false);
+          if (rejection) { options.onRejectedLocation(rejection); return null; }
+        }
+        const mapped = mapLocation(value, record.workspaceId, record.root, pathModule);
+        if (!mapped) options.onRejectedLocation?.(rejectedLocationReason(value, record.root, pathModule));
+        return mapped;
+      }).filter(Boolean);
     }, options),
     prepareCallHierarchy: (request: LanguageRequest) => requestFeature('textDocument/prepareCallHierarchy', request, (raw, record) => {
       const values = Array.isArray(raw) ? raw : [];
@@ -1713,6 +1766,7 @@ export const createLanguageSupervisor = ({
             record.rpc?.notify('textDocument/didClose', { textDocument: { uri: toFileUri(pathModule.resolve(record.root, resourceId)) } });
           }
           record.documents.clear();
+          record.diagnosticSnapshots.clear();
           record.documentEpoch += 1;
           record.usedAt = now();
           desiredDocuments.delete(key);

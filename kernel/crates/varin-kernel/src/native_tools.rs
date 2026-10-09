@@ -21,6 +21,9 @@ use varin_runtime::{Effect, Lifetime, Outcome};
 mod discovery;
 #[path = "native_tools_reconciliation.rs"]
 mod reconciliation;
+#[path = "native_tools_language.rs"]
+mod language;
+use language::LanguageQueryArgs;
 use discovery::FileQueryArgs;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
@@ -34,6 +37,9 @@ pub(crate) enum NativeToolKind {
     ProcessInspect,
     ProcessRead,
     ProcessSpawn,
+    LanguageDefinition,
+    LanguageReferences,
+    LanguageDiagnostics,
 }
 impl NativeToolKind {
     fn name(self) -> &'static str {
@@ -46,6 +52,9 @@ impl NativeToolKind {
             Self::ProcessInspect => "native_process_inspect",
             Self::ProcessRead => "native_process_read",
             Self::ProcessSpawn => "native_process_spawn",
+            Self::LanguageDefinition => "native_language_definition",
+            Self::LanguageReferences => "native_language_references",
+            Self::LanguageDiagnostics => "native_language_diagnostics",
         }
     }
     fn from_name(name: &str) -> Option<Self> {
@@ -58,6 +67,7 @@ impl NativeToolKind {
             Self::ProcessInspect,
             Self::ProcessRead,
             Self::ProcessSpawn,
+            Self::LanguageDefinition, Self::LanguageReferences, Self::LanguageDiagnostics,
         ]
         .into_iter()
         .find(|kind| kind.name() == name)
@@ -155,6 +165,7 @@ struct ProcessSpawnArgs {
 enum ResourceOperation {
     FileRead(FileReadArgs),
     FileQuery(FileQueryArgs),
+    LanguageQuery(LanguageQueryArgs),
     ObserveCompute { reply: mpsc::Sender<crate::compute::ComputeWatch> },
     ComputeControl {
         method: &'static str,
@@ -181,6 +192,9 @@ impl ResourceOperation {
             ));
         }
         let parsed = match kind {
+            NativeToolKind::LanguageDefinition | NativeToolKind::LanguageReferences | NativeToolKind::LanguageDiagnostics => {
+                return LanguageQueryArgs::parse(kind, args).map(Self::LanguageQuery);
+            }
             NativeToolKind::FileList | NativeToolKind::FileSearch => {
                 serde_json::from_value::<FileQueryArgs>(args.clone()).map(|mut args| {
                     args.search = kind == NativeToolKind::FileSearch;
@@ -255,6 +269,7 @@ impl ResourceOperation {
         context: &ToolExecutionContext,
     ) -> (&'static str, Value) {
         match self {
+            Self::LanguageQuery(args) => ("file.read", json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,"path":args.path})),
             Self::FileQuery(args) => ("compute.start", args.params(binding, context)),
             Self::ObserveCompute { .. } => ("compute.read", json!({
                 "workspaceId": binding.workspace_id, "jobId": context.operation_id, "cursor": 0
@@ -435,6 +450,7 @@ impl NativeResourceClient {
 pub(crate) struct NativeToolExecutor {
     binding: NativeToolBinding,
     resources: NativeResourceClient,
+    language: Option<crate::native_language::LanguageBridge>,
 }
 impl NativeToolExecutor {
     pub(crate) fn new(
@@ -518,8 +534,12 @@ impl NativeToolExecutor {
                 "process spawn requires a registered root",
             ));
         }
-        Ok(Self { binding, resources })
+        if binding.source_mode != NativeSourceMode::LiveRoot && binding.enabled_tools.iter().any(|kind| matches!(kind, NativeToolKind::LanguageDefinition | NativeToolKind::LanguageReferences | NativeToolKind::LanguageDiagnostics)) {
+            return Err(ExecutionError::new("language_source_unavailable", "Language tools require live_root; fixed dependency closure is not available"));
+        }
+        Ok(Self { binding, resources, language: None })
     }
+    pub(crate) fn with_language(mut self, bridge: crate::native_language::LanguageBridge) -> Self { self.language = Some(bridge); self }
     pub(crate) fn schemas(&self) -> Vec<ToolSchema> {
         Self::selected_schemas(&self.binding.enabled_tools)
     }
@@ -568,6 +588,7 @@ impl NativeToolExecutor {
                 unreachable!("private receipt queries have no model contract"),
             // Discovery snapshots have their own short Storage coordination and consume fixed bytes.
             // Their long search/scan wait must not hold a directory-wide write barrier.
+            ResourceOperation::LanguageQuery(_) => (key(json!(["language-view", self.binding.execution_workspace_id, self.binding.root_id])), Access::Read),
             ResourceOperation::FileQuery(_) => (key(json!(["discovery", self.binding.execution_workspace_id, self.binding.root_id, self.binding.file_source])), Access::Read),
             ResourceOperation::FileMutation(mutation) => (key(json!(["unresolved-file", mutation.path()])), Access::Write),
             ResourceOperation::FileRead(args) if self.binding.source_mode != NativeSourceMode::FixedBranch =>
@@ -665,6 +686,10 @@ impl ToolExecutor for NativeToolExecutor {
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
         let operation = self.operation(Some(context), call)?;
+        if let ResourceOperation::LanguageQuery(args) = &operation {
+            if &self.contract(call, &operation) != contract { return Err(ExecutionError::new("stale_tool_contract", "language contract changed")); }
+            return self.admit_language_path(context, &args.path, cancel).map(|_| ());
+        }
         if &self.planned_contract(context, call, &operation, cancel)? != contract {
             return Err(ExecutionError::new(
                 "stale_tool_contract",
@@ -701,6 +726,7 @@ impl ToolExecutor for NativeToolExecutor {
                 reason: "tool contract changed".into(),
             };
         }
+        if let ResourceOperation::LanguageQuery(args) = &operation { return self.execute_language(context, args, cancel); }
         let spawn = matches!(operation, ResourceOperation::ProcessSpawn(_));
         let mutation = matches!(operation, ResourceOperation::FileMutation(_));
         let result = if let ResourceOperation::FileQuery(args) = &operation {
@@ -781,6 +807,7 @@ impl ToolExecutor for NativeToolExecutor {
 
 fn tool_schema(kind: NativeToolKind) -> Value {
     let (properties, required) = match kind {
+        NativeToolKind::LanguageDefinition | NativeToolKind::LanguageReferences | NativeToolKind::LanguageDiagnostics => return language::schema(kind),
         NativeToolKind::FileList | NativeToolKind::FileSearch => {
             return discovery::schema(kind == NativeToolKind::FileSearch)
         }

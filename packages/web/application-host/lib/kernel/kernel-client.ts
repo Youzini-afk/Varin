@@ -1,3 +1,5 @@
+import { NativeLanguageBridge, unavailableLanguageResult, type PrivateLanguageResponse } from './native-language-bridge.js';
+import type { NativeLanguageOwner } from './native-language-owner.js';
 import { NativeAgentPolicyBridge, type NativeAgentPolicyLease, type NativeAgentPolicyBinding, type PrivatePolicyResponse } from './native-agent-policy.js';
 import { NativeMcpBridge, type NativeMcpLease, type NativeMcpBinding, type PrivateMcpResponse } from './native-mcp-bridge.js';
 import { NativeCredentialBridge, type PrivateCredentialResponse } from "./native-credential-bridge.js";
@@ -549,6 +551,7 @@ export class KernelClient {
   }
   private readonly credentialBridge: NativeCredentialBridge;
   private readonly mcpBridge: NativeMcpBridge;
+  private readonly languageBridge: NativeLanguageBridge;
   private readonly policyBridge: NativeAgentPolicyBridge;
   private readonly nativePreparations = new Map<string, Set<AbortController>>();
   private window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
@@ -586,6 +589,15 @@ export class KernelClient {
       return this.write(response, encoded);
     },
       () => this.failAll(new KernelClientError({ code: "policy-channel-failed", message: "Private policy channel failed", retryable: false }), true));
+    this.languageBridge = new NativeLanguageBridge(() => this.epoch, response => {
+      // Check serialization/frame budget before touching the shared writer. A large language
+      // result fails only its caller; chunked language results are not implemented yet.
+      let encoded: Buffer;
+      try { encoded = frame(JSON.stringify(response)); }
+      catch { return this.write({ v: 1, kind: 'language-response', id: response.id, kernelEpoch: response.kernelEpoch,
+        result: unavailableLanguageResult('Language result exceeds the transport frame budget or is not serializable') }); }
+      return this.write(response, encoded);
+    }, () => this.failAll(new KernelClientError({ code: 'language-channel-failed', message: 'Private language channel failed', retryable: false }), true));
     this.mcpBridge = new NativeMcpBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "mcp-channel-failed", message: "Private MCP channel failed", retryable: false }), true));
     this.credentialBridge = new NativeCredentialBridge(() => this.epoch,
@@ -611,6 +623,7 @@ export class KernelClient {
     if (!this.handshakeResult) await this.start();
     return this.mcpBridge.register(runId, lease);
   }
+  setNativeLanguageOwner(owner: NativeLanguageOwner): void { this.languageBridge.setOwner(owner); }
   nativeMcpBinding(runId: string): NativeMcpBinding | undefined { return this.mcpBridge.binding(runId); }
   unregisterNativeMcpOwner(runId: string): void { this.mcpBridge.unregister(runId); }
 
@@ -820,7 +833,7 @@ export class KernelClient {
       let response: KernelResponse | KernelProcessStreamEvent | NativeRuntimeStreamEvent;
       try { response = JSON.parse(body.toString("utf8")) as KernelResponse | KernelProcessStreamEvent | NativeRuntimeStreamEvent; }
       catch (error) { this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: `Invalid Rust kernel response: ${String(error)}`, retryable: false }), true); return; }
-      if (this.credentialBridge.consume(response) || this.mcpBridge.consume(response) || this.policyBridge.consume(response)) continue;
+      if (this.credentialBridge.consume(response) || this.languageBridge.consume(response) || this.mcpBridge.consume(response) || this.policyBridge.consume(response)) continue;
       if (response.kind === "runtime-event") {
         if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch
           || !["durable", "progress"].includes(response.stream)
@@ -891,6 +904,7 @@ export class KernelClient {
     this.transportFailed = true;
     this.credentialBridge.close();
     this.mcpBridge.close();
+    this.languageBridge.close();
     this.policyBridge.close();
     for (const runId of this.nativePreparations.keys()) this.cancelNativeRunPreparation(runId);
     this.window.close(error);
@@ -910,7 +924,7 @@ export class KernelClient {
     if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
-  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateMcpResponse | PrivatePolicyResponse, encoded?: Buffer): Promise<void> {
+  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateMcpResponse | PrivatePolicyResponse | PrivateLanguageResponse, encoded?: Buffer): Promise<void> {
     const stdin = this.child?.stdin;
     if (!stdin || stdin.destroyed) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel stdin is unavailable", retryable: true });
     const writable = stdin as Writable;
@@ -1513,6 +1527,7 @@ export class KernelClient {
     this.closed = true;
     this.credentialBridge.close();
     this.mcpBridge.close();
+    this.languageBridge.close();
     this.policyBridge.close();
     for (const runId of this.nativePreparations.keys()) this.cancelNativeRunPreparation(runId);
     this.window.close(new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closing" }));

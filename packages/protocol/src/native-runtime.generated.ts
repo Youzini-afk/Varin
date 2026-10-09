@@ -1,5 +1,17 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export interface NativeLanguageQuery {
+  runId: string;
+  threadId: string;
+  workspaceId: string;
+  executionWorkspaceId: string;
+  liveRoot: NativeLiveRoot;
+  method: string;
+  path: string;
+  line?: number;
+  character?: number;
+}
+
 export interface NativeHistoryPageParams {
   branchId: string;
   headId?: string;

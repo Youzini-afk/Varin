@@ -157,3 +157,26 @@ last-document close and idle release wait for pending startup and native close. 
 remain degraded/failed with the owner retained. Synchronous fake-child unit seams are explicit;
 real LSP initialization/completion/disposal is covered by the
 [native consumer tests](../kernel/process-consumers.native.test.ts). See [process ownership](../process/DOCUMENTATION.md).
+
+## Native live queries
+
+Native Threads call this same supervisor through the private native language adapter. They bind the
+Host disk view only, using the selected live environment's Documents identity. Native navigation opts
+into strict URI/range projection and omission reasons; ordinary Pi/editor location shapes are unchanged.
+The supervisor retains diagnostic publications for native readers. Snapshot reads do not start
+a service or wait for a future publication; missing/unversioned evidence is pending, while changed view
+or generation is stale. Nonempty unversioned observations may be returned with explicit unversioned
+verification and no claimed range revision; empty unversioned publications never certify clean. Its cache is owned by the existing language session and expires with it.
+
+Returned locations are still server observations. The native resource owner separately admits and reads
+the target before delivery; a cross-file observed revision does not certify which bytes produced an LSP
+range. Imports, native project configuration and compiler libraries remain live dependencies. No fixed
+or materialized native language mode is offered without a pinned dependency closure.
+
+Focused native acceptance includes the real already-bundled TypeScript provider through all three
+native tools: cross-file definition/reference and actual unversioned diagnostics retained as pending.
+Versioned/pull correctness, independent preparation/cancellation, malformed URI/range rejection and
+stale source behavior also have controlled-provider coverage; existing Pi navigation and diagnostic
+adapter regressions passed. Exact suite counts and the frozen native build are recorded in the
+[implementation plan](../../../../../docs/plan/native-agent-runtime-implementation.md#已核验增量live-root-原生语言工具).
+This does not certify fixed dependency closure, all language providers or all deployment platforms.

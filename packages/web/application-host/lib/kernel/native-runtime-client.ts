@@ -146,7 +146,7 @@ export class NativeRuntimeClient {
         return options.credentialOwner ? this.startRunWithCredentialOwner(runId, options.credentialOwner, options.signal) : this.startRun(runId, options.signal);
       }
 
-      const names = { native_file_read: 'file_read', native_file_list: 'file_list', native_file_search: 'file_search', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn' } as const;
+      const names = { native_file_read: 'file_read', native_file_list: 'file_list', native_file_search: 'file_search', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn', native_language_definition: 'language_definition', native_language_references: 'language_references', native_language_diagnostics: 'language_diagnostics' } as const;
       const tools = launch.selection.tools.filter(tool => tool.name !== 'native_ask_user' && !launch.selection.mcp_binding?.tools.some(mcp => mcp.name === tool.name)).map(tool => {
         if (!(tool.name in names)) throw new Error('Saved capability requires its original extension owner');
         return names[tool.name as keyof typeof names];
@@ -174,7 +174,7 @@ export class NativeRuntimeClient {
         return options.credentialOwner ? this.startRunWithCredentialOwner(runId, options.credentialOwner, options.signal) : this.startRun(runId, options.signal);
       }
 
-      const names = { native_file_read: 'file_read', native_file_list: 'file_list', native_file_search: 'file_search', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn' } as const;
+      const names = { native_file_read: 'file_read', native_file_list: 'file_list', native_file_search: 'file_search', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn', native_language_definition: 'language_definition', native_language_references: 'language_references', native_language_diagnostics: 'language_diagnostics' } as const;
       const tools = previous.selection.tools.filter(tool => tool.name !== 'native_ask_user' && !previous.selection.mcp_binding?.tools.some(mcp => mcp.name === tool.name)).map(tool => {
         if (!(tool.name in names)) throw new Error('Saved capability requires its original extension owner');
         return names[tool.name as keyof typeof names];
