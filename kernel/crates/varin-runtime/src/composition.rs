@@ -278,6 +278,23 @@ impl<T> CompositionRegistry<T> {
         &mut self,
         candidate: PreparedPlan<T>,
     ) -> Result<Arc<CompositionPlan<T>>, CompositionError> {
+        self.validate_candidate(&candidate)?;
+        let revision = candidate.expected_revision + 1;
+        for (key, old) in &self.active.bindings {
+            if !candidate.bindings.get(key).is_some_and(|new| Arc::ptr_eq(&old.0, &new.0)) {
+                let _ = old.0.state.compare_exchange(ACTIVE, RETIRED, Ordering::AcqRel, Ordering::Acquire);
+            }
+        }
+        for binding in candidate.bindings.values() {
+            let _ = binding.0.state.compare_exchange(PREPARED, ACTIVE, Ordering::AcqRel, Ordering::Acquire);
+            self.generations.insert(binding.id(), Arc::downgrade(&binding.0));
+        }
+        self.active = Arc::new(CompositionPlan { revision, bindings: candidate.bindings });
+        self.generations.retain(|_, binding| binding.strong_count() > 0);
+        Ok(self.active())
+    }
+    /// Check readiness without publishing or retiring the current plan.
+    pub fn validate_candidate(&self, candidate: &PreparedPlan<T>) -> Result<(), CompositionError> {
         if !Arc::ptr_eq(&self.identity, &candidate.owner) {
             return Err(CompositionError::ForeignCandidate);
         }
@@ -285,7 +302,7 @@ impl<T> CompositionRegistry<T> {
         if !Arc::ptr_eq(&self.authorization, &candidate.authorization) {
             return Err(CompositionError::AuthorizationChanged);
         }
-        let revision = candidate
+        candidate
             .expected_revision
             .checked_add(1)
             .ok_or(CompositionError::IdentityExhausted)?;
@@ -295,38 +312,7 @@ impl<T> CompositionRegistry<T> {
                 return Err(CompositionError::Revoked(binding.id()));
             }
         }
-        for (key, old) in &self.active.bindings {
-            if !candidate
-                .bindings
-                .get(key)
-                .is_some_and(|new| Arc::ptr_eq(&old.0, &new.0))
-            {
-                let _ = old.0.state.compare_exchange(
-                    ACTIVE,
-                    RETIRED,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                );
-            }
-        }
-        for binding in candidate.bindings.values() {
-            // Only newly prepared bindings change state; revoked bindings must never resurrect.
-            let _ = binding.0.state.compare_exchange(
-                PREPARED,
-                ACTIVE,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            );
-            self.generations
-                .insert(binding.id(), Arc::downgrade(&binding.0));
-        }
-        self.active = Arc::new(CompositionPlan {
-            revision,
-            bindings: candidate.bindings,
-        });
-        self.generations
-            .retain(|_, binding| binding.strong_count() > 0);
-        Ok(self.active())
+        Ok(())
     }
     /// Explicit revocation also reaches retired generations retained by model pins or calls.
     /// Returns false when the generation no longer exists. This does not claim driver stopping.

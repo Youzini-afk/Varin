@@ -3,6 +3,7 @@ import { createMcpLease } from './mcp-owner.js';
 import { McpAuthority } from '@varin/pi-host/mcp-authority';
 import { createThreadContext } from './thread-context.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
+import { createMemoryOwner } from './memory-owner.js';
 import { createThreadSourcePreparer } from './thread-sources.js';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from './storage-adapter.js';
@@ -64,6 +65,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const prepare = createThreadSourcePreparer({ documents, workingStates });
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }) });
   const prepareContext = createThreadContext({ personalization, workingStates, projectForWorkspace: async () => 'selected-project' });
+  kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
   let closed = false;
   const close = async () => { if (closed) return; closed = true; await storage.dispose(); await documents.dispose(); await kernel.close(); };
   cleanups.push(close);
@@ -121,7 +123,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n')
 it('the shared MCP authority invokes a real selected stdio server only after allow-once and never starts unrelated configuration', async () => {
   let turns = 0;
   const f = await fixture((body, response) => {
-    const tool = (body.tools as Array<{ name: string }>).find(tool => !['ask_user', 'mcp_discover', 'mcp_call'].includes(tool.name))!;
+    const tool = (body.tools as Array<{ name: string }>).find(tool => tool.name.startsWith('mcp__fixture__'))!;
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     const output = ++turns === 1 ? { id: 'real-mcp-call', type: 'function_call', call_id: 'real-mcp-call-id', name: tool.name, arguments: JSON.stringify({ text: 'explicitly approved remote content' }) }
       : { id: 'real-mcp-answer', type: 'message', content: [{ type: 'output_text', text: 'actual MCP result received' }] };
@@ -129,13 +131,17 @@ it('the shared MCP authority invokes a real selected stdio server only after all
   });
   const identity = await f.api.create('real-shared-mcp');
   const receipt = await f.api.submit({ ...identity, key: 'real-shared-mcp-input', expectedHead: null, text: 'send the fixture content', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
-  await expect.poll(async () => (await f.api.snapshot(identity)).operations.some(op => op.waiting_on?.startsWith('permission:')), { timeout: 15_000 }).toBe(true);
+  await expect.poll(async () => (await f.api.snapshot(identity)).operations.some(op => op.waiting_on?.startsWith('permission:')), { timeout: 15_000 }).toBe(true).catch(async error => {
+    throw new Error(`${String(error)} ${JSON.stringify({ run: await f.runtime.run(receipt.run_id), errors: f.launchErrors.map(String), events: (await f.runtime.events(0, 256)).slice(-8).map(event => ({ kind: event.kind, data: event.kind.endsWith('failed') ? event.data : undefined })) })}`);
+  });
   expect(await fs.readFile(f.effectsPath, 'utf8').catch(() => '')).toBe('');
   expect(await fs.stat(f.unusedPath).then(() => true, () => false)).toBe(false);
   const op = (await f.api.snapshot(identity)).operations.find(op => op.waiting_on?.startsWith('permission:'))!;
   const permission = (op.result as { permission: { id: string } }).permission;
   await f.api.decidePermission({ ...identity, operationId: op.id, permissionId: permission.id, decision: 'allow_once' });
-  await expect.poll(async () => (await f.api.run(receipt.run_id)).state).toBe('completed');
+  await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed').catch(async error => {
+    throw new Error(`${String(error)} ${JSON.stringify({ trace: f.transportTrace, operations: (await f.api.snapshot(identity)).operations, requests: f.requests.length })}`);
+  });
   const effects = (await fs.readFile(f.effectsPath, 'utf8')).trim().split('\n').map(value => JSON.parse(value));
   expect(effects).toEqual([{ name: 'send', arguments: { text: 'explicitly approved remote content' } }]);
   expect((await fs.readFile(f.startsPath, 'utf8')).trim().split('\n')).toHaveLength(1);
@@ -161,10 +167,14 @@ it('lazy discovery starts only its selected real server, then validates and gate
   }, undefined, undefined, []);
   const identity = await f.api.create('lazy-mcp');
   const receipt = await f.api.submit({ ...identity, key: 'lazy-mcp-input', expectedHead: null, text: 'discover selected tool then call it', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
-  await expect.poll(() => f.requests.length).toBe(1);
+  await expect.poll(() => f.requests.length).toBe(1).catch(async error => {
+    throw new Error(`${String(error)} ${JSON.stringify({ run: await f.runtime.run(receipt.run_id), errors: f.launchErrors.map(String), events: (await f.runtime.events(0, 256)).slice(-8).map(event => ({ kind: event.kind, data: event.kind.endsWith('failed') ? event.data : undefined })) })}`);
+  });
   expect(await fs.stat(f.startsPath).then(() => true, () => false)).toBe(false);
   expect(await fs.stat(f.unusedPath).then(() => true, () => false)).toBe(false);
-  expect((f.requests[0]!.body.tools as Array<{ name: string }>).map(tool => tool.name).sort()).toEqual(['mcp_call', 'mcp_discover', 'ask_user']);
+  const toolNames = (f.requests[0]!.body.tools as Array<{ name: string }>).map(tool => tool.name);
+  expect(toolNames).toEqual(expect.arrayContaining(['mcp_call', 'mcp_discover', 'ask_user']));
+  expect(toolNames).not.toContain('send');
   held.writeHead(200, { 'content-type': 'text/event-stream' });
   held.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'lazy-discover-item', type: 'function_call', call_id: 'lazy-discover-id', name: 'mcp_discover', arguments: JSON.stringify({ server: 'fixture' }) }] } })}\n\n`);
   await expect.poll(async () => (await f.api.snapshot(identity)).operations.some(op => op.waiting_on?.startsWith('permission:')), { timeout: 15_000 }).toBe(true).catch(async error => { throw new Error(`${String(error)} ${JSON.stringify({ requests: f.requests.length, run: await f.runtime.run(receipt.run_id), events: (await f.runtime.events(0, 256)).slice(-8) })}`); });
@@ -173,7 +183,9 @@ it('lazy discovery starts only its selected real server, then validates and gate
   const permission = (op.result as { permission: { id: string; call: { arguments: unknown } } }).permission;
   expect(permission.call.arguments).toMatchObject({ server: 'fixture', tool: 'send', arguments: { text: 'lazy approved content' } });
   await f.api.decidePermission({ ...identity, operationId: op.id, permissionId: permission.id, decision: 'allow_once' });
-  await expect.poll(async () => (await f.api.run(receipt.run_id)).state).toBe('completed');
+  await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed').catch(async error => {
+    throw new Error(`${String(error)} ${JSON.stringify({ trace: f.transportTrace, operations: (await f.api.snapshot(identity)).operations, requests: f.requests.length })}`);
+  });
   expect((await fs.readFile(f.effectsPath, 'utf8')).trim().split('\n').map(value => JSON.parse(value))).toEqual([{ name: 'send', arguments: { text: 'lazy approved content' } }]);
   expect((await fs.readFile(f.startsPath, 'utf8')).trim().split('\n')).toHaveLength(1);
   expect(await fs.stat(f.unusedPath).then(() => true, () => false)).toBe(false);

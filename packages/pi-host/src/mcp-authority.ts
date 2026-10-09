@@ -283,7 +283,9 @@ export class McpAuthority {
       const readiness = this.#inspectScope(record, selected);
       return {
         binding: freeze({ reference: `mcp-owner:${createHash('sha256').update(record.key).digest('hex')}`,
-          generation: 1 + Number.parseInt(createHash('sha256').update(stable([record.key, entries.map(entry => this.#configurationIdentity(record, entry)).sort()])).digest('hex').slice(0, 12), 16),
+          generation: 1 + Number.parseInt(createHash('sha256').update(stable([record.key,
+            [...record.entries.values()].map(entry => ({ name: entry.name, identity: this.#configurationIdentity(record, entry) })).sort((a, b) => a.name.localeCompare(b.name)),
+            tools])).digest('hex').slice(0, 12), 16),
           tools, readiness, servers: readiness.servers }),
         inspect: () => { if (released || record.released) fail('mcp-lease-released'); return this.#inspectScope(record, selected); },
         discover,

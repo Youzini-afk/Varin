@@ -1,6 +1,7 @@
 /** Private Host/kernel tool rendezvous. There is no renderer or generic method dispatch here.
  * The shared MCP authority owns connections, frozen schemas, credentials and permission decisions.
  */
+import { isDeepStrictEqual } from 'node:util';
 export interface McpToolSchema { name: string; version: string; schema: Record<string, unknown> }
 export interface McpBinding { reference: string; generation: number; resources: Record<string, string>; tools: McpToolSchema[] }
 export interface McpCall {
@@ -20,7 +21,7 @@ export interface McpLease {
 }
 interface Request {
   v: 1; kind: 'mcp-tool-request'; id: string; kernelEpoch: string;
-  phase: 'authorize' | 'execute'; binding: { reference: string; generation: number }; call: McpCall;
+  phase: 'authorize' | 'execute'; binding: { reference: string; generation: number; holderId: string }; call: McpCall;
 }
 export interface PrivateMcpResponse {
   v: 1; kind: 'mcp-tool-response'; id: string; kernelEpoch: string;
@@ -29,7 +30,7 @@ export interface PrivateMcpResponse {
 interface CallEntry { identity: string; authorized: boolean; started: boolean; result?: Promise<McpCompletion> }
 interface OwnerEntry {
   lease: McpLease; binding: McpBinding; epoch: string; closing: boolean;
-  active: Map<string, AbortController>; calls: Map<string, CallEntry>;
+  selected: boolean; holders: Set<string>; active: Map<string, AbortController>; calls: Map<string, CallEntry>;
 }
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const exact = (value: Record<string, unknown>, keys: readonly string[]) => Object.keys(value).every(key => keys.includes(key));
@@ -51,63 +52,120 @@ function waitForOwner<T>(work: Promise<T>, signal: AbortSignal, aborted: () => T
   });
 }
 export class McpBridge {
-  readonly #owners = new Map<string, OwnerEntry>();
+  readonly #owners = new Map<string, Map<string, OwnerEntry>>();
+  readonly #selected = new Map<string, string>();
   constructor(private readonly currentEpoch: () => string | null,
     private readonly send: (response: PrivateMcpResponse) => Promise<void>, private readonly transportFailed: () => void) {}
-  register(runId: string, lease: McpLease): McpBinding {
+  register(runId: string, lease: McpLease, selected = true): McpBinding {
     const epoch = this.currentEpoch();
     const binding = structuredClone(lease.binding);
-    if (!epoch || !text(runId) || this.#owners.has(runId) || !text(binding.reference) || !generation(binding.generation)
+    if (!epoch || !text(runId) || !text(binding.reference) || !generation(binding.generation)
       || !record(binding.resources) || Object.values(binding.resources).some(value => !text(value))
       || !Array.isArray(binding.tools) || binding.tools.some(tool => !text(tool.name)
         || !text(tool.version) || !record(tool.schema)) || new Set(binding.tools.map(tool => tool.name)).size !== binding.tools.length) {
       throw new Error('mcp_owner_registration_invalid');
     }
-    this.#owners.set(runId, { lease, binding, epoch, closing: false, active: new Map(), calls: new Map() });
+    const entries = this.#owners.get(runId) ?? new Map<string, OwnerEntry>();
+    const key = this.#key(binding);
+    const previous = entries.get(key);
+    if (previous) {
+      if (previous.closing || previous.epoch !== epoch || !isDeepStrictEqual(previous.binding, binding)) {
+        throw new Error('mcp_owner_generation_changed');
+      }
+      if (previous.lease !== lease) lease.release();
+    } else {
+      entries.set(key, { lease, binding, epoch, closing: false, selected: false, holders: new Set(), active: new Map(), calls: new Map() });
+      this.#owners.set(runId, entries);
+    }
+    if (selected) this.#activate(runId, key);
     return structuredClone(binding);
   }
+  #key(binding: { reference: string; generation: number }): string { return JSON.stringify([binding.reference, binding.generation]); }
+  #activate(runId: string, key: string): void {
+    const entries = this.#owners.get(runId);
+    const entry = entries?.get(key);
+    if (!entry || entry.closing || entry.epoch !== this.currentEpoch()) return;
+    const previousKey = this.#selected.get(runId);
+    this.#selected.set(runId, key);
+    entry.selected = true;
+    if (previousKey && previousKey !== key) {
+      const previous = entries!.get(previousKey);
+      if (previous) { previous.selected = false; this.#collect(runId, previousKey, previous); }
+    }
+  }
+  #collect(runId: string, key: string, entry: OwnerEntry): void {
+    if (entry.selected || entry.holders.size || entry.active.size) return;
+    const entries = this.#owners.get(runId);
+    if (entries?.get(key) !== entry) return;
+    entries.delete(key);
+    if (!entries.size) this.#owners.delete(runId);
+    entry.closing = true;
+    entry.lease.release();
+  }
   binding(runId: string): McpBinding | undefined {
-    const owner = this.#owners.get(runId);
+    const key = this.#selected.get(runId);
+    const owner = key ? this.#owners.get(runId)?.get(key) : undefined;
     return owner && !owner.closing && owner.epoch === this.currentEpoch() ? structuredClone(owner.binding) : undefined;
   }
   unregister(runId: string): void {
-    const entry = this.#owners.get(runId);
-    if (!entry) return;
+    const entries = this.#owners.get(runId);
+    if (!entries) return;
     this.#owners.delete(runId);
-    entry.closing = true;
-    for (const controller of entry.active.values()) controller.abort();
-    entry.lease.release();
+    this.#selected.delete(runId);
+    for (const entry of entries.values()) {
+      entry.closing = true;
+      for (const controller of entry.active.values()) controller.abort();
+      entry.lease.release();
+    }
   }
   close(): void { for (const runId of this.#owners.keys()) this.unregister(runId); }
   consume(value: unknown): boolean {
-    if (!record(value) || !['mcp-tool-request', 'mcp-tool-cancel', 'mcp-owner-release'].includes(String(value.kind))) return false;
+    if (!record(value) || !['mcp-tool-request', 'mcp-tool-cancel', 'mcp-owner-release', 'mcp-binding-retain', 'mcp-binding-release', 'mcp-binding-activate'].includes(String(value.kind))) return false;
     // Consume malformed/private traffic rather than letting it reach public protocol consumers.
     if (value.kind === 'mcp-owner-release') {
       if (value.v === 1 && value.kernelEpoch === this.currentEpoch() && text(value.runId)
         && exact(value, ['v', 'kind', 'kernelEpoch', 'runId'])) this.unregister(value.runId);
       return true;
     }
+    if (['mcp-binding-retain', 'mcp-binding-release', 'mcp-binding-activate'].includes(String(value.kind))) {
+      if (value.v !== 1 || value.kernelEpoch !== this.currentEpoch() || !text(value.runId)
+        || !text(value.reference) || !generation(value.generation) || !text(value.holderId)
+        || !exact(value, ['v', 'kind', 'kernelEpoch', 'runId', 'reference', 'generation', 'holderId'])) return true;
+      const key = this.#key(value as { reference: string; generation: number });
+      const entry = this.#owners.get(value.runId)?.get(key);
+      if (!entry || entry.closing || entry.epoch !== value.kernelEpoch) return true;
+      if (value.kind === 'mcp-binding-retain') entry.holders.add(value.holderId);
+      else if (value.kind === 'mcp-binding-release') {
+        entry.holders.delete(value.holderId);
+        this.#collect(value.runId, key, entry);
+      } else if (entry.holders.has(value.holderId)) this.#activate(value.runId, key);
+      return true;
+    }
     if (value.v !== 1 || !text(value.id) || value.kernelEpoch !== this.currentEpoch()) return true;
     if (value.kind === 'mcp-tool-cancel') {
       if (!exact(value, ['v', 'kind', 'id', 'kernelEpoch', 'runId']) || !text(value.runId)) return true;
-      this.#owners.get(value.runId)?.active.get(value.id)?.abort();
+      for (const owner of this.#owners.get(value.runId)?.values() ?? []) owner.active.get(value.id)?.abort();
       return true;
     }
     if (!exact(value, ['v', 'kind', 'id', 'kernelEpoch', 'phase', 'binding', 'call'])
       || !['authorize', 'execute'].includes(String(value.phase)) || !record(value.binding)
-      || !exact(value.binding, ['reference', 'generation']) || !text(value.binding.reference)
-      || !generation(value.binding.generation) || !callValid(value.call)) return true;
+      || !exact(value.binding, ['reference', 'generation', 'holderId']) || !text(value.binding.reference)
+      || !generation(value.binding.generation) || !text(value.binding.holderId) || !callValid(value.call)) return true;
     const request = value as unknown as Request;
-    const entry = this.#owners.get(request.call.runId);
+    const key = this.#key(request.binding);
+    const entry = this.#owners.get(request.call.runId)?.get(key);
     if (!entry || entry.closing || entry.epoch !== request.kernelEpoch
-      || entry.binding.reference !== request.binding.reference || entry.binding.generation !== request.binding.generation) {
+      || !entry.holders.has(request.binding.holderId)) {
       void this.#reply(request, { ok: false, error: { code: 'mcp_owner_unavailable' } });
       return true;
     }
     if (entry.active.has(request.id)) return true;
     const controller = new AbortController();
     entry.active.set(request.id, controller);
-    void this.#invoke(request, entry, controller.signal).finally(() => entry.active.delete(request.id));
+    void this.#invoke(request, entry, controller.signal).finally(() => {
+      entry.active.delete(request.id);
+      this.#collect(request.call.runId, key, entry);
+    });
     return true;
   }
   async #reply(request: Request, response: Pick<PrivateMcpResponse, 'ok' | 'completion' | 'error'>): Promise<void> {

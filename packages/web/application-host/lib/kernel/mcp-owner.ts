@@ -77,6 +77,16 @@ export function createMcpLease(options: McpOwnerOptions): McpLease {
       signal.throwIfAborted();
       const selected = selection(call);
       if (selected.kind === 'discover') return;
+      const approval = approved.get(call.operationId);
+      if (approval) {
+        const current = await policy();
+        if (approval.identity !== JSON.stringify(call) || approval.policy !== current.generation
+          || decision(current.value, approval.target).decision === 'deny') throw new Error('mcp_authorization_changed');
+        lease.validateArguments(approval.target.tool.name, approval.target.tool.schemaVersion, approval.target.args);
+        lease.assertCallable(approval.target.tool.name, approval.target.tool.schemaVersion);
+        signal.throwIfAborted();
+        return;
+      }
       // Safe undispatched restart rebind: prepare only the named dependency and verify the model's
       // recorded target version. This occurs before permission and resource occupancy acquisition.
       const target = selected.kind === 'direct' ? selected.target : {
