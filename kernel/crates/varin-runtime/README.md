@@ -32,13 +32,20 @@ writing Pi session files or the Host harness's existing execution records.
   parameters. Unknown capacity remains unknown. Desired model choices prepare independently and activate
   at the next closed ModelStep boundary; each request retains its actual provider, tool bindings and
   credential owner. Failed choices cannot fall back to a previously active model. Accepted queued Runs
-  retain their configuration; later queue admissions inherit the selected target. Automatic capacity
-  compaction remains in progress.
+  retain their configuration; later queue admissions inherit the selected target.
 - Context compilation walks anchored immutable history on a read worker. Repeated summary jobs freeze
   the previously published checkpoint and summarize its continuation instead of repeatedly loading the
   entire ancestor. A manual earlier boundary can select the original history. Personalization refresh
   stages unchanged/new candidates outside Catalog, preserves the admitted memory snapshot, and publishes
   against the captured active checkpoint. Failed, cancelled or stale candidates leave that checkpoint intact.
+- Automatic capacity preparation consumes existing user/trusted-project settings and the actual selected
+  model capacity. Local estimates include serialized tools and text; unknown media costs remain unknown.
+  A summary is an independent, tool-free Run with its own credential owner. Background preparation leaves
+  sendable requests running; a blocking request parks on a durable context Wait before model dispatch.
+  Publication or definitive summary failure resumes only that parked owner after worker quiescence.
+  Restart publishes retained completed output without another model request; interrupted dispatch stays
+  unresolved. Oversized-source partitioning, provider capacity-error recovery and replaceable budget
+  strategies remain to be implemented.
 
 The wire source remains `kernel/protocol/schema.json`; it generates the state enums and the
 Host request/response DTOs. Domain implementation types remain private to Rust.
@@ -80,10 +87,11 @@ input for its current public API; cancellation preserves its content reference. 
 and tool-receipt records remain their existing inline domains in this slice.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 3 and content format 3 select the typed-request-origin reader; older request bodies are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
+Catalog version 5 stores context-job ownership and immutable recipe references separately from model
+configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. `Catalog::collect_content_objects` marks requests, provider originals,
 history, all model outputs (including rejected output), queued-history references, context
-checkpoints, and strictly typed policy-graph node and planning-model request/output references. It verifies every live object
+checkpoints, summary recipes, and strictly typed policy-graph node and planning-model request/output references. It verifies every live object
 before sweeping and preserves unknown files; it never deletes history or invokes system-kernel GC.
 
 Provider serialization still visits and sends full legal requests; chunk reuse is not remote

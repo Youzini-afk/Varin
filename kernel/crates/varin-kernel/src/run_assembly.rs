@@ -18,7 +18,8 @@ pub(crate) struct RunAssembly {
     pub mcp: crate::mcp::McpBridge,
     pub language: crate::language::LanguageBridge,
     pub retrieval: crate::retrieval::RetrievalBridge,
-    pub memory: crate::memory_bridge::MemoryBridge,
+    pub memory: crate::host_query::OwnerChannel,
+    pub context: crate::host_query::OwnerChannel,
     pub plan: crate::plan_bridge::PlanBridge,
     pub policy: crate::policy::PolicyBridge,
     pub models: Arc<crate::run_models::RunModels>,
@@ -99,7 +100,8 @@ impl RunAssembly {
             crate::plan::eligible(&catalog, &run.id)
                 .map_err(|error| KernelError::Authorization(error.to_string()))?
         };
-        let is_context_job = run.configuration.get("context_job").is_some();
+        let is_context_job = runtime.catalog().lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?
+            .is_context_job(&run.id).map_err(domain)?;
         let is_child = runtime
             .catalog()
             .lock()
@@ -122,20 +124,7 @@ impl RunAssembly {
                 "context jobs use their fixed tool-free launch".into(),
             ));
         }
-        let mut configuration = run.configuration.clone();
-        if is_context_job {
-            configuration
-                .as_object_mut()
-                .ok_or_else(|| {
-                    KernelError::Protocol("model configuration must be an object".into())
-                })?
-                .remove("context_job");
-            configuration
-                .as_object_mut()
-                .unwrap()
-                .remove("context_job_source");
-        }
-        let configuration = serde_json::from_value(configuration)?;
+        let configuration = serde_json::from_value(run.configuration.clone())?;
         check_cancelled()?;
         let mut selected_credential_scope = None;
         let mut start = if let Some(scope) = p.credential_scope {
@@ -400,6 +389,7 @@ impl RunAssembly {
         check_cancelled()?;
         if !is_context_job {
             start.provider = self.models.wrap(start.provider);
+            start.context_preparation = Arc::new(crate::context::CapacityPreparation::new(start.context_preparation,runtime.catalog(),self.context.clone()));
         }
         let (progress, updates) = varin_runtime::execution::ProgressSink::channel(64);
         start.progress = progress;

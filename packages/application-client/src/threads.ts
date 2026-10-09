@@ -40,7 +40,7 @@ export interface ThreadHistoryPage {
 }
 /** Durable context records projected by the Host; original conversation history stays intact. */
 export interface ContextJob {
-  request: { personalization?: ContextPersonalization; key: string; branch_id: string; through_id: string; expected_revision: number;
+  request: { owner_run_id?: string; personalization?: ContextPersonalization; key: string; branch_id: string; through_id: string; expected_revision: number;
     effective_system_prompt: string; instruction_sources: string[]; memory_checkpoint: string | null };
   receipt: InputSubmitReceipt;
 }

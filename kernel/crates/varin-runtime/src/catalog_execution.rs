@@ -471,6 +471,12 @@ impl Catalog {
                 )?;
             }
             ExecutionRecord::ModelDispatched { request_id } => {
+                if let Some(parent_id) = super::context_jobs::context_job_parent(&tx,run_id)? {
+                    let parent:Run = super::record(&tx,"runs",&parent_id)?;
+                    if parent.cancel_requested || parent.state == RunState::Cancelled {
+                        return Err(RuntimeError::Conflict("context job owner was cancelled".into()));
+                    }
+                }
                 let interrupt:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM input_queue WHERE run_id=?1 AND state='queued' AND mode='interrupt')",[run_id],|row|row.get(0))?;
                 if interrupt{return Err(RuntimeError::InputPending);}
 

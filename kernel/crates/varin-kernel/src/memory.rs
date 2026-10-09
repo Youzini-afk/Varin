@@ -1,5 +1,5 @@
 //! Ordinary memory tools and explicit safe-boundary context preparation.
-use super::memory_bridge::MemoryBridge;
+use super::host_query::OwnerChannel;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -60,21 +60,21 @@ fn basis(catalog: &Arc<Mutex<Catalog>>, run_id: &str) -> Result<Option<Personali
     }
     Ok(basis)
 }
-pub(crate) fn declaration(catalog: Arc<Mutex<Catalog>>, bridge: MemoryBridge, mutations: bool)
+pub(crate) fn declaration(catalog: Arc<Mutex<Catalog>>, bridge: OwnerChannel, mutations: bool)
     -> varin_runtime::composition::tools::ToolDeclaration {
     varin_runtime::composition::tools::ToolDeclaration::new(schema(mutations), Arc::new(MemoryTools { catalog, bridge, mutations }))
 }
 pub(crate) fn configure_context(
     mut start: varin_runtime::supervisor::RunStart,
     catalog: Arc<Mutex<Catalog>>,
-    bridge: MemoryBridge,
+    bridge: OwnerChannel,
 ) -> varin_runtime::supervisor::RunStart {
     start.context_preparation = Arc::new(Prepare { catalog, bridge });
     start
 }
 struct MemoryTools {
     catalog: Arc<Mutex<Catalog>>,
-    bridge: MemoryBridge,
+    bridge: OwnerChannel,
     mutations: bool,
 }
 impl ToolExecutor for MemoryTools {
@@ -195,7 +195,7 @@ struct Prepared {
 }
 struct Prepare {
     catalog: Arc<Mutex<Catalog>>,
-    bridge: MemoryBridge,
+    bridge: OwnerChannel,
 }
 impl ContextPreparation for Prepare {
     fn prepare(
@@ -263,7 +263,7 @@ impl ContextPreparation for Prepare {
 /// The domain owner is queried on a worker; control and other Runs remain available.
 pub(crate) fn reconcile(
     runtime: Arc<varin_runtime::supervisor::RunSupervisor>,
-    bridge: MemoryBridge,
+    bridge: OwnerChannel,
     run_id: String,
     request_id: String,
     responses: crate::transport::Sender,

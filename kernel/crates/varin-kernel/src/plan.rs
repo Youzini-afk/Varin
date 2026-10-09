@@ -70,9 +70,10 @@ pub(crate) fn schema() -> ToolSchema {
 /// Both schema exposure and execution revalidate the real ordinary main Thread admission.
 pub(crate) fn eligible(catalog: &Catalog, run_id: &str) -> Result<bool, ExecutionError> {
     let run = catalog.run(run_id).map_err(error)?;
+    if catalog.is_context_job(run_id).map_err(error)? {return Ok(false);}
     let basis = catalog.run_personalization(run_id).map_err(error)?;
-    Ok(run.configuration.get("context_job").is_none()
-        && basis.is_some_and(|basis| {
+    Ok(
+        basis.is_some_and(|basis| {
             basis.mode == "agent"
                 && basis.thread_role == "main"
                 && basis.session_id == run.thread_id

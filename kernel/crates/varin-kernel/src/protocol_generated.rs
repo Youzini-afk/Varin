@@ -76,6 +76,7 @@ pub(crate) struct PlanContainsParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ContextJobCreateParams {
+    pub(crate) owner_run_id: Option<String>,
     pub(crate) personalization: Option<ContextPersonalization>,
     pub(crate) key: String,
     pub(crate) branch_id: String,
@@ -1690,6 +1691,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.context_job.publish" => serde_json::from_value::<RunParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.context_job.resume" => serde_json::from_value::<RunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.context.inspect" => serde_json::from_value::<HistoryParams>(params.clone())

@@ -29,7 +29,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 4;
+pub(crate) const FORMAT: i64 = 5;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -111,6 +111,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
     }
     if version == FORMAT {
         db.prepare("SELECT id,run_id,revision,status,active,body FROM model_selections")?;
+        context_jobs::check_format(db)?;
         launches::check_format(db)?;
         collaboration::check_format(db)?;
         context::check_format(db)?;
@@ -156,7 +157,8 @@ impl Catalog {
         db.pragma_update(None, "synchronous", "FULL")?;
         if version == 0 {
             db.execute_batch(SCHEMA)?;
-            db.execute_batch("CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY REFERENCES input_queue(id),body TEXT NOT NULL); CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,3); PRAGMA user_version=4;")?;
+            db.execute_batch("CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY REFERENCES input_queue(id),body TEXT NOT NULL); CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,3); PRAGMA user_version=5;")?;
+            context_jobs::initialize_new(&db)?;
         }
         db.execute_batch("CREATE TABLE IF NOT EXISTS resource_occupancy (operation_id TEXT PRIMARY KEY REFERENCES operations(id), claims TEXT NOT NULL)")?;
         let resource_admission = std::sync::Arc::new(crate::resource_admission::ResourceAdmission::default());
@@ -230,14 +232,14 @@ impl Catalog {
         self.submit_with_launch(command, None)
     }
     pub fn submit_with_launch(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>) -> Result<Receipt> {
-        self.submit_admission(command, launch, false, false, None, None)
+        self.submit_admission(command, launch, false, false, None, None, None)
     }
     /// Inherit the last committed source within admission, while retaining the new model/credential selection.
     pub fn submit_with_inherited_source(&mut self, command: &SubmitInput, launch: launches::LaunchSelection) -> Result<Receipt> {
         if launch.source.is_some() || launch.tools.iter().any(|tool| !matches!(tool.name.as_str(), questions::QUESTION_TOOL | collaboration::STATUS_TOOL | collaboration::WAIT_TOOL | collaboration::REPORT_TOOL | "memory" | "todo")) {
             return Err(RuntimeError::Invalid("source inheritance cannot also override source or tools".into()));
         }
-        self.submit_admission(command, Some(launch), false, true, None, None)
+        self.submit_admission(command, Some(launch), false, true, None, None, None)
     }
     /// Trusted first-input context is committed with input and launch, never before admission.
     /// Existing checkpoints (including uncertain retries) remain the frozen authority.
@@ -257,9 +259,9 @@ impl Catalog {
             }
             if self.active_context(&command.branch_id)?.is_none() { Some(self.stage_context_with_personalization(proposal, personalization)?) } else { None }
         } else { None };
-        self.submit_admission(command, launch, false, inherit_source, staged, None)
+        self.submit_admission(command, launch, false, inherit_source, staged, None, None)
     }
-    fn submit_admission(&mut self, command: &SubmitInput, mut launch: Option<launches::LaunchSelection>, create_thread: bool, inherit_source: bool, initial_context: Option<(context::ContextCheckpoint, Value)>, child_operation: Option<&str>) -> Result<Receipt> {
+    fn submit_admission(&mut self, command: &SubmitInput, mut launch: Option<launches::LaunchSelection>, create_thread: bool, inherit_source: bool, initial_context: Option<(context::ContextCheckpoint, Value)>, child_operation: Option<&str>, context_job: Option<&context_jobs::ContextJobAdmission>) -> Result<Receipt> {
         if let Some(selection)=launch.as_ref(){selection.validate()?;}
         execution_persistence::user_input_items("admission",&command.input)?;
         let history_content = if let Some(operation_id) = child_operation {
@@ -393,6 +395,7 @@ impl Catalog {
             params![command.key, input, encode(&receipt)?],
         )?;
         if let Some(operation_id) = child_operation { collaboration::publish_submission(&tx, operation_id, &receipt)?; }
+        if let Some(job) = context_job { job.publish(&tx, &receipt.run_id)?; }
         tx.commit()?;
         Ok(receipt)
     }

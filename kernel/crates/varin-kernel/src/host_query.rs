@@ -1,4 +1,4 @@
-//! Private epoch-fenced rendezvous with the existing ordinary memory owner.
+//! Private epoch-fenced rendezvous with a selected Host domain owner.
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -14,7 +14,8 @@ struct State {
     pending: HashMap<String, Pending>,
 }
 #[derive(Clone)]
-pub(crate) struct MemoryBridge {
+pub(crate) struct OwnerChannel {
+    namespace: &'static str,
     state: Arc<Mutex<State>>,
     events: Arc<Mutex<Option<mpsc::Sender<Value>>>>,
 }
@@ -27,11 +28,15 @@ struct Reply {
     kernel_epoch: String,
     result: Value,
 }
-fn failed(code: &str) -> ExecutionError {
-    ExecutionError::new(code, code)
-}
-impl MemoryBridge {
-    pub(crate) fn new(output: impl Into<crate::transport::Sender>) -> Self {
+impl OwnerChannel {
+    fn failed(&self, suffix: &str) -> ExecutionError {
+        let code = format!("{}_{}", self.namespace, suffix);
+        ExecutionError::new(&code, &code)
+    }
+    pub(crate) fn new(
+        namespace: &'static str,
+        output: impl Into<crate::transport::Sender>,
+    ) -> Self {
         let output = output.into();
         let (tx, rx) = mpsc::channel();
         let state = Arc::new(Mutex::new(State {
@@ -54,6 +59,7 @@ impl MemoryBridge {
             }
         });
         Self {
+            namespace,
             state,
             events: Arc::new(Mutex::new(Some(tx))),
         }
@@ -83,7 +89,10 @@ impl MemoryBridge {
         let Ok(reply) = serde_json::from_value::<Reply>(value) else {
             return;
         };
-        if reply.v != 1 || reply.kind != "memory-response" || !reply.result.is_object() {
+        if reply.v != 1
+            || reply.kind != format!("{}-response", self.namespace)
+            || !reply.result.is_object()
+        {
             return;
         }
         if let Ok(mut state) = self.state.lock() {
@@ -99,11 +108,11 @@ impl MemoryBridge {
     fn send(&self, value: Value) -> Result<(), ExecutionError> {
         self.events
             .lock()
-            .map_err(|_| failed("memory_channel_failed"))?
+            .map_err(|_| self.failed("channel_failed"))?
             .as_ref()
-            .ok_or_else(|| failed("memory_channel_closed"))?
+            .ok_or_else(|| self.failed("channel_closed"))?
             .send(value)
-            .map_err(|_| failed("memory_channel_closed"))
+            .map_err(|_| self.failed("channel_closed"))
     }
     pub(crate) fn query(
         &self,
@@ -111,7 +120,7 @@ impl MemoryBridge {
         cancel: &CancellationToken,
     ) -> Result<Value, ExecutionError> {
         if cancel.is_cancelled() {
-            return Err(failed("memory_cancelled"));
+            return Err(self.failed("cancelled"));
         }
         let id = uuid::Uuid::new_v4().to_string();
         let (reply, rx) = mpsc::channel();
@@ -121,34 +130,32 @@ impl MemoryBridge {
             let mut state = self
                 .state
                 .lock()
-                .map_err(|_| failed("memory_channel_failed"))?;
+                .map_err(|_| self.failed("channel_failed"))?;
             let epoch = state
                 .epoch
                 .clone()
-                .ok_or_else(|| failed("memory_channel_unavailable"))?;
+                .ok_or_else(|| self.failed("channel_unavailable"))?;
             state.pending.insert(id.clone(), Pending { reply, wake });
             epoch
         };
         let result = (|| {
             self.send(
-                json!({"v":1,"kind":"memory-request","id":id,"kernelEpoch":epoch,"query":query}),
+                json!({"v":1,"kind":format!("{}-request",self.namespace),"id":id,"kernelEpoch":epoch,"query":query}),
             )?;
             loop {
                 if cancel.is_cancelled() {
                     // Cancellation ends this waiter. The domain receipt, not transport state, determines any mutation effect.
-                    self.send(json!({"v":1,"kind":"memory-cancel","id":id,"kernelEpoch":epoch}))?;
-                    return Err(failed("memory_cancelled"));
+                    self.send(json!({"v":1,"kind":format!("{}-cancel",self.namespace),"id":id,"kernelEpoch":epoch}))?;
+                    return Err(self.failed("cancelled"));
                 }
                 match rx.try_recv() {
                     Ok(reply) => return Ok(reply.result),
                     Err(mpsc::TryRecvError::Disconnected) => {
-                        return Err(failed("memory_channel_closed"))
+                        return Err(self.failed("channel_closed"))
                     }
                     Err(mpsc::TryRecvError::Empty) => {}
                 }
-                changed
-                    .recv()
-                    .map_err(|_| failed("memory_channel_closed"))?;
+                changed.recv().map_err(|_| self.failed("channel_closed"))?;
             }
         })();
         if let Ok(mut state) = self.state.lock() {

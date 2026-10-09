@@ -52,6 +52,7 @@ struct PendingLaunch {
     completion: mpsc::Sender<Result<ExecutionReport>>,
 }
 struct Worker {
+    parent_run_id: Option<String>,
     cancel: CancellationToken,
     join: Option<JoinHandle<()>>,
     pending: Option<PendingLaunch>,
@@ -129,6 +130,7 @@ impl RunSupervisor {
             workers.insert(
                 run_id.into(),
                 Worker {
+                    parent_run_id: None,
                     cancel: cancel.clone(),
                     join: None,
                     pending: None,
@@ -144,15 +146,53 @@ impl RunSupervisor {
                     "Run is cancelled or terminal",
                 ));
             }
-            Ok((run.epoch, catalog.is_queued_run(run_id).map_err(error)?))
+            Ok((
+                run.epoch,
+                catalog.is_queued_run(run_id).map_err(error)?,
+                catalog.context_job_parent(run_id).map_err(error)?,
+            ))
         })();
-        let (epoch, queued) = match admission {
+        let (epoch, queued, parent) = match admission {
             Ok(value) => value,
             Err(error) => {
                 self.remove_reservation(run_id, &cancel)?;
                 return Err(error);
             }
         };
+        if let Some(parent) = parent {
+            let relation = (|| -> Result<()> {
+                {
+                    let mut workers = self.workers.lock().map_err(error)?;
+                    if workers
+                        .get(&parent)
+                        .is_some_and(|worker| worker.cancel.is_cancelled())
+                    {
+                        cancel.cancel();
+                    }
+                    let worker = workers
+                        .get_mut(run_id)
+                        .filter(|worker| same_reservation(&worker.cancel, &cancel))
+                        .ok_or_else(|| {
+                            ExecutionError::new("supervisor_stopped", "worker reservation is gone")
+                        })?;
+                    worker.parent_run_id = Some(parent.clone());
+                }
+                let parent = self
+                    .catalog
+                    .lock()
+                    .map_err(error)?
+                    .run(&parent)
+                    .map_err(error)?;
+                if parent.cancel_requested || parent.state == RunState::Cancelled {
+                    cancel.cancel();
+                }
+                Ok(())
+            })();
+            if let Err(failure) = relation {
+                self.remove_reservation(run_id, &cancel)?;
+                return Err(failure);
+            }
+        }
         let (completion, receiver) = mpsc::channel();
         let pending = PendingLaunch {
             epoch,
@@ -277,7 +317,9 @@ impl RunSupervisor {
                         let mut owner = catalog.lock().map_err(error)?;
                         let run = owner.run(&identity).map_err(error)?;
                         if !run.cancel_requested && run.state == RunState::Preparing {
-                            owner.transition_run(&identity, epoch, run.revision, RunState::Runnable).map_err(error)?;
+                            owner
+                                .transition_run(&identity, epoch, run.revision, RunState::Runnable)
+                                .map_err(error)?;
                         }
                     }
                     let binding = start.binding;
@@ -520,10 +562,19 @@ impl RunSupervisor {
     }
     pub fn cancel_control(&self, run_id: &str) -> bool {
         if let Ok(workers) = self.workers.lock() {
-            if let Some(worker) = workers.get(run_id) {
-                worker.cancel.cancel();
-                return true;
+            let tokens: Vec<_> = workers
+                .iter()
+                .filter(|(id, worker)| {
+                    id.as_str() == run_id || worker.parent_run_id.as_deref() == Some(run_id)
+                })
+                .map(|(_, worker)| worker.cancel.clone())
+                .collect();
+            drop(workers);
+            let found = !tokens.is_empty();
+            for token in tokens {
+                token.cancel();
             }
+            return found;
         }
         false
     }
@@ -557,6 +608,25 @@ impl RunSupervisor {
             if let Some(join) = worker.join.take() {
                 join.join()
                     .map_err(|_| error("question worker teardown failed"))?;
+            }
+        }
+        Ok(())
+    }
+    pub fn quiesce_context_job(&self, job_id: &str) -> Result<()> {
+        let parent = self
+            .catalog
+            .lock()
+            .map_err(error)?
+            .context_job_waiter(job_id)
+            .map_err(error)?;
+        let Some(parent) = parent else {
+            return Ok(());
+        };
+        let worker = self.workers.lock().map_err(error)?.remove(&parent);
+        if let Some(mut worker) = worker {
+            if let Some(join) = worker.join.take() {
+                join.join()
+                    .map_err(|_| error("context wait teardown failed"))?;
             }
         }
         Ok(())
@@ -644,6 +714,7 @@ impl RunSupervisor {
                 .is_none_or(|worker| worker.join.is_none());
             let launch = if no_execution {
                 let worker = workers.entry(run_id.into()).or_insert_with(|| Worker {
+                    parent_run_id: None,
                     cancel: CancellationToken::default(),
                     join: None,
                     pending: None,
@@ -667,7 +738,10 @@ impl RunSupervisor {
             } else if !run.state.terminal() {
                 // Pure preparation has no outstanding effect to await. Fence its late worker
                 // now; dispatched requests and unclosed tool exchanges still require receipts.
-                if let Some(settled) = catalog.cancel_preparing_execution(run_id, run.epoch).map_err(error)? {
+                if let Some(settled) = catalog
+                    .cancel_preparing_execution(run_id, run.epoch)
+                    .map_err(error)?
+                {
                     run = settled;
                 }
             }

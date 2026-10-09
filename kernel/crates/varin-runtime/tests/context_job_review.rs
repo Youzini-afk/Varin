@@ -180,7 +180,7 @@ fn exercise(mode: Mode) {
             memory_checkpoint: None,
         })
         .unwrap();
-    let request = ContextJobRequest {
+    let request = ContextJobRequest { owner_run_id: None,
         personalization: None,
         key: "compact".into(),
         branch_id: "main".into(),
@@ -194,6 +194,9 @@ fn exercise(mode: Mode) {
     let job = db
         .create_context_job(request.clone(), launch.clone(), json!({}))
         .unwrap();
+    assert_eq!(db.run(&job.receipt.run_id).unwrap().configuration,json!({}));
+    db.collect_content_objects().unwrap();
+    assert_eq!(db.context_job(&job.receipt.run_id).unwrap(),job);
     assert_eq!(
         db.create_context_job(request.clone(), launch, json!({}))
             .unwrap(),

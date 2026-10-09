@@ -2,6 +2,8 @@ import { createPlanOwner } from './lib/kernel/plan-owner.js';
 import { PlanService } from './lib/kernel/plan-service.js';
 import { createPersonalizationContextResolver } from './lib/memory/personalization-context.js';
 import { createMemoryOwner } from './lib/kernel/memory-owner.js';
+import { ContextService } from './lib/kernel/context-service.js';
+import { readContextPolicy } from './lib/kernel/context-settings.js';
 import { ThreadCollaboration } from './lib/kernel/thread-collaboration.js';
 import { createSemanticInferenceLedger } from './lib/knowledge/semantic/inference-ledger.js';
 import { createSemanticInference } from './lib/knowledge/semantic/runtime-inference.js';
@@ -2939,6 +2941,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     });
   kernelClient.setPlanOwner(createPlanOwner(getUserKnowledgeStore, agentRuntime));
   kernelClient.setMemoryOwner(createMemoryOwner({ personalization: agentPersonalization, prepareContext: threadContext }));
+  const contextService=new ContextService(agentRuntime,modelAuthority,threadContext,async(run,launch)=>{
+    const source=launch?.selection.source;
+    const root=source ? (await documentsAuthority.inspectWorkspace(source.workspace_id)).root : undefined;
+    const model=run.configuration as {providerId?:string;model:string};
+    return readContextPolicy({agentDir:mcpAgentDir,...(root?{projectRoot:root}:{}),projectTrusted:root!==undefined && mcpHostProjectTrusted(mcpAgentDir,root),
+      ...(model.providerId?{providerId:model.providerId}:{}),modelId:model.model});
+  },runId=>threads.continueContext(runId));
+  kernelClient.setContextOwner(contextService);
   const threads = new ThreadAdapter(agentRuntime,
     modelAuthority, async (source, identity) => {
       if (source.mode === 'live_root') return liveSources.admit(source, identity.threadId);
@@ -2958,6 +2968,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   void collaboration.recover();
   const refreshThreadPersonalization = () => threads.refreshPersonalization();
   void refreshThreadPersonalization().catch(() => console.error('[Thread] Personalization refresh requires attention'));
+  void contextService.recover().catch(() => console.error('[Thread] Saved context job discovery requires attention'));
   void threads.recover().catch(() => console.error('[Thread] Saved launch discovery requires attention'));
   registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerHarnessThreadRoutes(app, {

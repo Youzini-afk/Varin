@@ -120,6 +120,9 @@ export class AgentRuntimeClient {
   publishContextJob(runId: string, signal?: AbortSignal): Promise<ContextCheckpoint> {
     return this.kernel.agentRuntimeRequest('runtime.context_job.publish', { runId }, signal);
   }
+  resumeContextJob(runId:string,signal?:AbortSignal):Promise<Run|null> {
+    return this.kernel.agentRuntimeRequest('runtime.context_job.resume',{runId},signal);
+  }
   submit(input: InputSubmitParams, signal?: AbortSignal): Promise<InputSubmitReceipt> {
     return this.kernel.agentRuntimeRequest('runtime.input.submit', input, signal);
   }
@@ -265,9 +268,9 @@ export class AgentRuntimeClient {
       const run = await this.run(runId, signal);
       signal.throwIfAborted();
       if (run.cancel_requested || ['completed', 'failed', 'cancelled'].includes(run.state)) throw new Error('Run is no longer eligible for policy preparation');
-      if (run.configuration && typeof run.configuration === 'object' && 'context_job' in run.configuration) return undefined;
-      if (await this.childForThread(run.thread_id, signal)) return undefined;
       const saved = await this.launch(runId, signal);
+      if (saved?.selection.policy.name === 'context_compaction') return undefined;
+      if (await this.childForThread(run.thread_id, signal)) return undefined;
       const expectsPolicy = saved && saved.selection.policy.name !== 'default+questions+collaboration+process-wait';
       if (!this.preparePolicyOwner) {
         if (expectsPolicy) throw new Error('Saved policy requires its exact original artifact and configuration');

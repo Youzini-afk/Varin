@@ -111,7 +111,8 @@ pub(crate) fn spawn(
     credential_bridge: crate::credential_bridge::CredentialBridge,
     mcp_bridge: crate::mcp::McpBridge,
     language_bridge: crate::language::LanguageBridge,
-    memory_bridge: crate::memory_bridge::MemoryBridge,
+    memory_bridge: crate::host_query::OwnerChannel,
+    context_bridge: crate::host_query::OwnerChannel,
     plan_bridge: crate::plan_bridge::PlanBridge,
     retrieval_bridge: crate::retrieval::RetrievalBridge,
     policy_bridge: crate::policy::PolicyBridge,
@@ -482,7 +483,7 @@ pub(crate) fn spawn(
                             let assembly = crate::run_assembly::RunAssembly {
                                 runtime: runtime.clone(), resources: resources.clone(), credentials: credential_bridge.clone(),
                                 mcp: mcp_bridge.clone(), language: language_bridge.clone(), retrieval: retrieval_bridge.clone(),
-                                memory: memory_bridge.clone(), plan: plan_bridge.clone(), policy: policy_bridge.clone(),
+                                memory: memory_bridge.clone(), context: context_bridge.clone(), plan: plan_bridge.clone(), policy: policy_bridge.clone(),
                                 models: run_models.as_ref().expect("initialized runtime models").clone(),
                                 responses: responses.clone(), epoch: epoch.clone(),
                             };
@@ -545,6 +546,45 @@ pub(crate) fn spawn(
                                 done(&response_id); let _ = response_sender.send(response);
                             });
                             deferred = true; return Ok(Value::Null);
+                        }
+                        if method == "runtime.context_job.resume" {
+                            let p:RunParams=serde_json::from_value(params)?;
+                            let runtime=runtime.clone();
+                            let response_id=id.clone();let response_sender=responses.clone();let done=finished.clone();
+                            thread::spawn(move||{
+                                let result=(||->Result<Value,KernelError>{
+                                    runtime.quiesce_context_job(&p.run_id).map_err(|error|KernelError::Operation(error.to_string()))?;
+                                    let resumed=runtime.catalog().lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?
+                                        .resume_context_job_wait(&p.run_id).map_err(domain)?;
+                                    Ok(serde_json::to_value(resumed)?)
+                                })();
+                                let response=match result{Ok(value)=>response_ok(&response_id,value),Err(error)=>response_error(&response_id,&error)};
+                                done(&response_id);let _=response_sender.send(response);
+                            });
+                            deferred=true;return Ok(Value::Null);
+                        }
+                        if method == "runtime.context_job.list" || method == "runtime.context_job.inspect" {
+                            let owner=runtime.catalog();
+                            let list=method=="runtime.context_job.list";
+                            let reads=if list {
+                                let p:HistoryParams=serde_json::from_value(params)?;
+                                owner.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?.capture_context_jobs(&p.branch_id).map_err(domain)?
+                            } else {
+                                let p:RunParams=serde_json::from_value(params)?;
+                                vec![owner.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?.capture_context_job(&p.run_id).map_err(domain)?]
+                            };
+                            let response_id=id.clone();let response_sender=responses.clone();let done=finished.clone();
+                            let cancelled=cancellation.clone();
+                            thread::spawn(move||{
+                                let result=(||->Result<Value,KernelError>{
+                                    if cancelled.load(Ordering::Acquire){return Err(KernelError::Cancelled);}
+                                    let mut jobs=reads.into_iter().map(|read|read.load().map_err(domain)).collect::<Result<Vec<_>,_>>()?;
+                                    Ok(if list {serde_json::to_value(jobs)?}else{serde_json::to_value(jobs.remove(0))?})
+                                })();
+                                let response=match result{Ok(value)=>response_ok(&response_id,value),Err(error)=>response_error(&response_id,&error)};
+                                done(&response_id);let _=response_sender.send(response);
+                            });
+                            deferred=true;return Ok(Value::Null);
                         }
                         if method == "runtime.context_job.create" || method == "runtime.context_job.publish" {
                             let catalog = runtime.catalog();
@@ -834,24 +874,6 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
             .map_err(domain)?;
         let thread_id = catalog.branch_thread_id(&p.branch_id).map_err(domain)?;
         return Ok(json!({"threadId":thread_id,"branchId":p.branch_id}));
-    }
-    if method == "runtime.context_job.list" {
-        let p: HistoryParams = serde_json::from_value(params)?;
-        return Ok(serde_json::to_value(
-            catalog.context_jobs(&p.branch_id).map_err(domain)?,
-        )?);
-    }
-    if method == "runtime.context_job.inspect" || method == "runtime.context_job.publish" {
-        let p: RunParams = serde_json::from_value(params)?;
-        return if method == "runtime.context_job.publish" {
-            Ok(serde_json::to_value(
-                catalog.publish_context_job(&p.run_id).map_err(domain)?,
-            )?)
-        } else {
-            Ok(serde_json::to_value(
-                catalog.context_job(&p.run_id).map_err(domain)?,
-            )?)
-        };
     }
     if method == "runtime.history.page" {
         let p: HistoryPageParams = serde_json::from_value(params)?;
@@ -1309,7 +1331,7 @@ fn prepare_context_job(catalog: &Catalog, p: ContextJobCreateParams) -> Result<v
             policy: varin_runtime::context_job::policy_identity(),
             source: None,
         };
-        let request = varin_runtime::catalog::context_jobs::ContextJobRequest {
+        let request = varin_runtime::catalog::context_jobs::ContextJobRequest { owner_run_id: p.owner_run_id,
             personalization: p.personalization.map(personalization_basis).transpose()?,
             key: p.key,
             branch_id: p.branch_id,
