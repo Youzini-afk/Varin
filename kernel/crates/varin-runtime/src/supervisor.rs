@@ -45,6 +45,8 @@ fn supervisor_error(value: impl ToString) -> ExecutionError {
     error(value)
 }
 struct PendingLaunch {
+    epoch: u64,
+    cancel: CancellationToken,
     start: RunStart,
     completion: mpsc::Sender<Result<ExecutionReport>>,
 }
@@ -52,6 +54,9 @@ struct Worker {
     cancel: CancellationToken,
     join: Option<JoinHandle<()>>,
     pending: Option<PendingLaunch>,
+}
+fn same_reservation(left: &CancellationToken, right: &CancellationToken) -> bool {
+    Arc::ptr_eq(&left.shared_flag(), &right.shared_flag())
 }
 #[derive(Debug, Clone)]
 pub struct WorkerStatus {
@@ -105,7 +110,7 @@ impl RunSupervisor {
             workers.insert(
                 run_id.into(),
                 Worker {
-                    cancel,
+                    cancel: cancel.clone(),
                     join: None,
                     pending: None,
                 },
@@ -125,26 +130,26 @@ impl RunSupervisor {
         let (epoch, queued) = match admission {
             Ok(value) => value,
             Err(error) => {
-                self.workers
-                    .lock()
-                    .map_err(supervisor_error)?
-                    .remove(run_id);
+                self.remove_reservation(run_id, &cancel)?;
                 return Err(error);
             }
         };
         let (completion, receiver) = mpsc::channel();
-        let pending = PendingLaunch { start, completion };
+        let pending = PendingLaunch { epoch, cancel: cancel.clone(), start, completion };
         if queued {
             let mut workers = self.workers.lock().map_err(error)?;
-            let worker = workers.get_mut(run_id).ok_or_else(|| {
+            let worker = workers.get_mut(run_id).filter(|worker| same_reservation(&worker.cancel, &cancel)).ok_or_else(|| {
                 ExecutionError::new("supervisor_stopped", "queued admission was cancelled")
             })?;
             worker.pending = Some(pending);
+            // Promotion/cancellation can commit between admission and installing this launch.
+            // Recheck on an actual notification after its reservation becomes visible.
+            drop(workers);
+            if let Some(sender) = self.wake.lock().map_err(error)?.as_ref() {
+                let _ = sender.send(());
+            }
         } else if let Err(error) = self.launch_ready(run_id, pending) {
-            self.workers
-                .lock()
-                .map_err(supervisor_error)?
-                .remove(run_id);
+            self.remove_reservation(run_id, &cancel)?;
             return Err(error);
         }
         Ok(RunHandle {
@@ -153,28 +158,23 @@ impl RunSupervisor {
             completion: receiver,
         })
     }
+    fn remove_reservation(&self, run_id: &str, cancel: &CancellationToken) -> Result<Option<Worker>> {
+        let mut workers = self.workers.lock().map_err(error)?;
+        Ok(if workers.get(run_id).is_some_and(|worker| same_reservation(&worker.cancel, cancel)) {
+            workers.remove(run_id)
+        } else { None })
+    }
     fn launch_ready(&self, run_id: &str, pending: PendingLaunch) -> Result<()> {
-        let cancel = {
-            let workers = self.workers.lock().map_err(error)?;
-            workers
-                .get(run_id)
-                .map(|worker| worker.cancel.clone())
-                .ok_or_else(|| {
-                    ExecutionError::new("supervisor_stopped", "worker reservation is gone")
-                })?
-        };
-        let (input, recovery) = self
-            .catalog
-            .lock()
-            .map_err(error)?
-            .prepare_recovered_execution(
-                run_id,
-                pending.start.binding,
-                pending.start.policy.identity(),
-                pending.start.policy_state,
-            )
-            .map_err(error)?;
-        let epoch = input.owner_generation;
+        // Keep only this short reservation/spawn publication under the control registry. In
+        // particular shutdown cannot remove the reservation before its JoinHandle is published.
+        let mut workers = self.workers.lock().map_err(error)?;
+        let worker = workers.get_mut(run_id).filter(|worker| same_reservation(&worker.cancel, &pending.cancel)).ok_or_else(|| {
+            ExecutionError::new("supervisor_stopped", "worker reservation is gone")
+        })?;
+        let cancel = worker.cancel.clone();
+        let epoch = pending.epoch;
+        let binding = pending.start.binding;
+        let policy_state = pending.start.policy_state;
         let engine = ExecutionEngine {
             persistence: self.catalog.clone(),
             context_preparation: pending.start.context_preparation,
@@ -191,7 +191,44 @@ impl RunSupervisor {
             .name(format!("run-{run_id}"))
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    engine.run_recovered(input, cancel, recovery)
+                    loop {
+                        if cancel.is_cancelled() {
+                            let settled = catalog.lock().map_err(error)?
+                                .cancel_preparing_execution(&identity, epoch).map_err(error)?;
+                            if let Some(run) = settled {
+                                return Ok(ExecutionReport {
+                                    state: run.state, history: vec![], policy_state,
+                                    model_steps: 0, waiting_on: run.waiting_on, failure: None,
+                                });
+                            }
+                        }
+                        let preparation = catalog.lock().map_err(error)?.capture_recovered_execution(
+                            &identity, binding.clone(), engine.policy.identity(), policy_state.clone(), true,
+                        ).map_err(error)?;
+                        if preparation.cancel_requested() && !cancel.is_cancelled() {
+                            cancel.cancel();
+                            continue;
+                        }
+                        let boundary = preparation.identity();
+                        let cancelled_before_read = cancel.is_cancelled();
+                        // Immutable content reads, hashing and decoding belong to this Run.
+                        let prepared = match preparation.load(&cancel) {
+                            Ok(Some(prepared)) => prepared,
+                            Ok(None) => continue,
+                            Err(_) if !cancelled_before_read && cancel.is_cancelled() => continue,
+                            Err(failure) => {
+                                if !catalog.lock().map_err(error)?.preparation_is_current(&boundary).map_err(error)? {
+                                    continue;
+                                }
+                                return Err(error(failure));
+                            }
+                        };
+                        let launch = catalog.lock().map_err(error)?
+                            .publish_recovered_execution(prepared).map_err(error)?;
+                        let Some(launch) = launch else { continue };
+                        if launch.cancel_requested { cancel.cancel(); }
+                        return engine.run_recovered(launch.input, cancel, launch.recovery);
+                    }
                 }))
                 .unwrap_or_else(|_| {
                     Err(ExecutionError::new(
@@ -233,17 +270,7 @@ impl RunSupervisor {
                 };
             })
             .map_err(error)?;
-        let mut workers = self.workers.lock().map_err(error)?;
-        if let Some(worker) = workers.get_mut(run_id) {
-            worker.join = Some(join);
-        } else {
-            drop(workers);
-            let _ = join.join();
-            return Err(ExecutionError::new(
-                "supervisor_stopped",
-                "worker admission was cancelled by shutdown",
-            ));
-        }
+        worker.join = Some(join);
         Ok(())
     }
     /// Called on actual completion/input notifications, never a timer or empty polling loop.
@@ -278,7 +305,8 @@ impl RunSupervisor {
                 continue;
             };
             if run.cancel_requested || run.state.terminal() {
-                self.workers.lock().map_err(error)?.remove(&id);
+                let run = if run.state.terminal() { run } else { self.cancel(&id)? };
+                self.remove_reservation(&id, &launch.cancel)?;
                 let _ = launch.completion.send(Ok(ExecutionReport {
                     state: run.state,
                     history: vec![],
@@ -289,7 +317,21 @@ impl RunSupervisor {
                 }));
             } else {
                 let reply = launch.completion.clone();
+                let cancel = launch.cancel.clone();
+                let policy_state = launch.start.policy_state.clone();
                 if let Err(failure) = self.launch_ready(&id, launch) {
+                    // Cancellation can remove a still-unspawned reservation after promotion.
+                    // Its completion is the durable cancellation, not a preparation failure.
+                    if cancel.is_cancelled() {
+                        if let Some(run) = self.catalog.lock().map_err(error)?
+                            .cancel_preparing_execution(&id, run.epoch).map_err(error)? {
+                            let _ = reply.send(Ok(ExecutionReport {
+                                state: run.state, history: vec![], policy_state, model_steps: 0,
+                                waiting_on: run.waiting_on, failure: None,
+                            }));
+                            continue;
+                        }
+                    }
                     let _ = reply.send(Err(failure.clone()));
                     self.failures
                         .lock()
@@ -300,7 +342,7 @@ impl RunSupervisor {
                         .map_err(error)?
                         .pause_failed_execution(&id, run.epoch, &failure.code, &failure.message)
                         .map_err(error)?;
-                    self.workers.lock().map_err(error)?.remove(&id);
+                    self.remove_reservation(&id, &cancel)?;
                 }
             }
         }
@@ -388,7 +430,7 @@ impl RunSupervisor {
             let mut workers = self.workers.lock().map_err(error)?;
             let no_execution = workers
                 .get(run_id)
-                .is_none_or(|worker| worker.pending.is_some());
+                .is_none_or(|worker| worker.join.is_none());
             let launch = if no_execution {
                 let worker = workers.entry(run_id.into()).or_insert_with(|| Worker {
                     cancel: CancellationToken::default(),
