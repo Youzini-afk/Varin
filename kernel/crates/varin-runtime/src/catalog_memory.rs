@@ -1,6 +1,6 @@
 //! Read-only projections of the ordinary memory owner. This module never mutates notes.
 use super::*;
-use crate::execution::{Content, ConversationItem, Provenance};
+use crate::execution::{Content, ConversationItem, Provenance, RequestOrigin, RequestSnapshot};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -302,31 +302,50 @@ impl Catalog {
     }
 }
 
-/// Request-scoped delivery evidence reuses the Catalog delivery owner. A committed row
-/// proves inclusion in a completed request, not model comprehension. Tail facts remain in
-/// later projections until a successful checkpoint covers them; no duplicate history row.
-pub(super) fn record_deliveries(
-    tx: &Transaction<'_>,
-    snapshot: &crate::execution::RequestSnapshot,
-    thread: &str,
-    stage: DeliveryState,
-) -> Result<()> {
-    let mut facts = std::collections::BTreeSet::new();
-    let mut quoted = Vec::new();
-    for item in &snapshot.view.history {
-        if matches!(
-            &snapshot.view.origin,
-            crate::execution::RequestOrigin::PolicyModelJob { .. }
-        ) && matches!(&item.provenance, Provenance::ExternalData { source } if source == "committed-conversation-context")
-        {
-            if let Content::Text { text } = &item.content {
-                if let Some((_, body)) = text.split_once('\n') {
-                    quoted.extend(serde_json::from_str::<Vec<ConversationItem>>(body)?);
+/// Worker-prepared candidates only. Operation ownership is still checked in the transaction;
+/// a receipt copied from external/model data cannot authenticate itself.
+pub(crate) struct PreparedMemoryDeliveries {
+    run_id: String,
+    request_id: String,
+    branch_id: String,
+    facts: std::collections::BTreeSet<(String, u64)>,
+    receipts: Vec<PreparedMemoryReceipt>,
+}
+struct PreparedMemoryReceipt {
+    request_id: String,
+    call_id: String,
+    receipt: Value,
+    facts: Result<Vec<(u64, u64, String)>>,
+}
+impl PreparedMemoryDeliveries {
+    /// Scanning the snapshot, decoding quoted policy history and parsing receipt bodies all
+    /// happen on the executing worker, before it reacquires Catalog ownership.
+    pub(super) fn prepare(snapshot: &RequestSnapshot) -> Result<Self> {
+        let mut prepared = Self {
+            run_id: snapshot.view.run_id.clone(),
+            request_id: snapshot.view.request_id.clone(),
+            branch_id: snapshot.view.binding.history_range.branch_id.clone(),
+            facts: std::collections::BTreeSet::new(),
+            receipts: Vec::new(),
+        };
+        for item in &snapshot.view.history {
+            prepared.include(item)?;
+            if matches!(&snapshot.view.origin, RequestOrigin::PolicyModelJob { .. })
+                && matches!(&item.provenance, Provenance::ExternalData { source } if source == "committed-conversation-context")
+            {
+                if let Content::Text { text } = &item.content {
+                    if let Some((_, body)) = text.split_once('\n') {
+                        let quoted: Vec<ConversationItem> = serde_json::from_str(body)?;
+                        for item in &quoted {
+                            prepared.include(item)?;
+                        }
+                    }
                 }
             }
         }
+        Ok(prepared)
     }
-    for item in snapshot.view.history.iter().chain(&quoted) {
+    fn include(&mut self, item: &ConversationItem) -> Result<()> {
         match (&item.provenance, &item.content) {
             (Provenance::EnvironmentFact { event_id }, Content::Text { text })
                 if event_id.starts_with("memory:") =>
@@ -336,35 +355,74 @@ pub(super) fn record_deliveries(
                 {
                     let receipt: Value = serde_json::from_str(json)?;
                     if let Some(revision) = receipt["revision"].as_u64() {
-                        facts.insert((event_id.clone(), revision));
+                        self.facts.insert((event_id.clone(), revision));
                     }
                 }
             }
-            (_, Content::ToolResult { result }) => {
+            (Provenance::ToolData { call_id }, Content::ToolResult { result })
+                if call_id == &result.call_id =>
+            {
                 if let crate::execution::ToolCompletion::Result { content, .. } = &result.completion
                 {
-                    let receipt = &content["memoryReceipt"];
-                    if !owned_receipt(tx, result)?.is_some_and(|owned| owned == *receipt) {
-                        continue;
-                    }
-                    if let (Some(revision), Some(changes)) =
-                        (receipt["revision"].as_u64(), receipt["changes"].as_array())
-                    {
-                        for change in changes {
-                            if let Some(id) = change["id"].as_u64() {
-                                facts.insert((
-                                    format!(
-                                        "memory:{thread}:{revision}:{id}:{}",
-                                        scope_key(&change["scope"])?
-                                    ),
-                                    revision,
-                                ));
-                            }
-                        }
+                    if let Some(receipt) = content.get("memoryReceipt") {
+                        self.receipts.push(PreparedMemoryReceipt {
+                            request_id: result.request_id.clone(),
+                            call_id: result.call_id.clone(),
+                            receipt: receipt.clone(),
+                            facts: receipt_facts(receipt),
+                        });
                     }
                 }
             }
             _ => (),
+        }
+        Ok(())
+    }
+}
+fn receipt_facts(receipt: &Value) -> Result<Vec<(u64, u64, String)>> {
+    let mut facts = Vec::new();
+    if let (Some(revision), Some(changes)) =
+        (receipt["revision"].as_u64(), receipt["changes"].as_array())
+    {
+        for change in changes {
+            if let Some(id) = change["id"].as_u64() {
+                facts.push((revision, id, scope_key(&change["scope"])?));
+            }
+        }
+    }
+    Ok(facts)
+}
+
+/// Request-scoped delivery evidence reuses the Catalog delivery owner. The transaction only
+/// validates prepared identities/owned receipts and commits fact cursors and stage transitions.
+/// No request history or quoted source body is parsed here.
+pub(super) fn record_deliveries(
+    tx: &Transaction<'_>,
+    prepared: PreparedMemoryDeliveries,
+    run: &Run,
+    request_id: &str,
+    stage: DeliveryState,
+) -> Result<()> {
+    if prepared.run_id != run.id
+        || prepared.request_id != request_id
+        || prepared.branch_id != run.branch_id
+    {
+        return Err(RuntimeError::Conflict(
+            "memory delivery request owner changed".into(),
+        ));
+    }
+    let thread = &run.thread_id;
+    let mut facts = prepared.facts;
+    for candidate in prepared.receipts {
+        if !owned_receipt(tx, &candidate.request_id, &candidate.call_id, thread)?
+            .is_some_and(|owned| owned == candidate.receipt)
+        {
+            continue;
+        }
+        // Errors in untrusted external receipts are ignored until the original successful
+        // memory Operation authenticates the exact body. The body parsing itself was off-lock.
+        for (revision, id, scope) in candidate.facts? {
+            facts.insert((format!("memory:{thread}:{revision}:{id}:{scope}"), revision));
         }
     }
     for (fact, revision) in facts {
@@ -388,24 +446,26 @@ pub(super) fn record_deliveries(
                 ))
             }
         };
-        let observer = format!(
-            "memory-delivery:{}:{fact}",
-            snapshot.view.binding.history_range.branch_id
-        );
+        let observer = format!("memory-delivery:{}:{fact}", prepared.branch_id);
         match stage {
             DeliveryState::Selected => {
-                tx.execute("INSERT INTO deliveries(observer,fact_cursor,request,state) VALUES(?1,?2,?3,?4) ON CONFLICT(observer,fact_cursor,request) DO NOTHING", params![observer, sql_number(cursor)?, snapshot.view.request_id, encode(&stage)?])?;
+                tx.execute("INSERT INTO deliveries(observer,fact_cursor,request,state) VALUES(?1,?2,?3,?4) ON CONFLICT(observer,fact_cursor,request) DO NOTHING", params![observer, sql_number(cursor)?, request_id, encode(&stage)?])?;
             }
             DeliveryState::Sent | DeliveryState::Committed => {
-                tx.execute("UPDATE deliveries SET state=?4 WHERE observer=?1 AND fact_cursor=?2 AND request=?3 AND (state='\"selected\"' AND ?4='\"sent\"' OR state='\"sent\"' AND ?4='\"committed\"' OR state=?4)", params![observer, sql_number(cursor)?, snapshot.view.request_id, encode(&stage)?])?;
+                tx.execute("UPDATE deliveries SET state=?4 WHERE observer=?1 AND fact_cursor=?2 AND request=?3 AND (state='\"selected\"' AND ?4='\"sent\"' OR state='\"sent\"' AND ?4='\"committed\"' OR state=?4)", params![observer, sql_number(cursor)?, request_id, encode(&stage)?])?;
             }
         }
     }
     Ok(())
 }
 
-fn owned_receipt(db: &Connection, result: &crate::execution::ToolResult) -> Result<Option<Value>> {
-    let key = format!("{}:tool:{}", result.request_id, result.call_id);
+fn owned_receipt(
+    db: &Connection,
+    request_id: &str,
+    call_id: &str,
+    thread: &str,
+) -> Result<Option<Value>> {
+    let key = format!("{request_id}:tool:{call_id}");
     let Some(operation) = optional_record::<Operation>(db, "operations", &key)? else {
         return Ok(None);
     };
@@ -416,7 +476,14 @@ fn owned_receipt(db: &Connection, result: &crate::execution::ToolResult) -> Resu
         return Ok(None);
     }
     let tool: crate::execution::AdmittedTool = serde_json::from_value(operation.intent)?;
-    if tool.call.name != "memory" || tool.call.call_id != result.call_id {
+    if tool.call.name != "memory" || tool.call.call_id != call_id {
+        return Ok(None);
+    }
+    let owned: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM model_steps m JOIN runs r ON r.id=m.run_id JOIN branches b ON b.id=r.branch_id WHERE m.id=?1 AND m.run_id=?2 AND b.thread_id=?3)",
+        params![request_id, operation.run_id, thread], |row| row.get(0),
+    )?;
+    if !owned {
         return Ok(None);
     }
     let Some(receipt) = operation
@@ -425,8 +492,7 @@ fn owned_receipt(db: &Connection, result: &crate::execution::ToolResult) -> Resu
     else {
         return Ok(None);
     };
-    if receipt["origin"].as_str() != Some(&format!("run:{}:{}", operation.run_id, operation.id))
-    {
+    if receipt["origin"].as_str() != Some(&format!("run:{}:{}", operation.run_id, operation.id)) {
         return Ok(None);
     }
     Ok(Some(receipt))

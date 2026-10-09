@@ -146,8 +146,9 @@ impl Catalog {
         snapshot: &RequestSnapshot,
     ) -> Result<PolicyModelState> {
         let _publication = self.content.begin_publication();
+        let deliveries = super::memory::PreparedMemoryDeliveries::prepare(snapshot)?;
         let reference = self.content.save(&serde_json::to_value(snapshot)?)?;
-        self.admit_policy_model_reference(run_id, epoch, intent, snapshot, reference)?.load()
+        self.admit_policy_model_reference(run_id, epoch, intent, snapshot, reference, deliveries)?.load()
     }
     pub(crate) fn admit_policy_model_reference(
         &mut self,
@@ -156,6 +157,7 @@ impl Catalog {
         intent: &PolicyModelIntent,
         snapshot: &RequestSnapshot,
         reference: Value,
+        deliveries: super::memory::PreparedMemoryDeliveries,
     ) -> Result<PolicyModelRead> {
         let PolicyModelIntent::PolicyModelJobV1 {
             action_id,
@@ -291,7 +293,7 @@ impl Catalog {
             "INSERT INTO operations(id,run_id,body) VALUES(?1,?2,?3)",
             params![action_id, run_id, encode(&op)?],
         )?;
-        super::memory::record_deliveries(&tx, snapshot, &run.thread_id, DeliveryState::Selected)?;
+        super::memory::record_deliveries(&tx, deliveries, &run, action_id, DeliveryState::Selected)?;
         event(
             &tx,
             action_id,
@@ -307,7 +309,8 @@ impl Catalog {
         let _publication = self.content.begin_publication();
         let reference = self.policy_model_request_reference(run_id, epoch, action)?;
         let snapshot = serde_json::from_value(self.content.load(&reference)?)?;
-        self.dispatch_policy_model_prepared(run_id, epoch, action, &reference, &snapshot)
+        let deliveries = super::memory::PreparedMemoryDeliveries::prepare(&snapshot)?;
+        self.dispatch_policy_model_prepared(run_id, epoch, action, &reference, &snapshot, deliveries)
     }
     pub(crate) fn policy_model_request_reference(&self, run_id: &str, epoch: u64, action: &str) -> Result<Value> {
         fence(&self.run(run_id)?, epoch)?;
@@ -320,6 +323,7 @@ impl Catalog {
     pub(crate) fn dispatch_policy_model_prepared(
         &mut self, run_id: &str, epoch: u64, action: &str,
         request_ref: &Value, snapshot: &RequestSnapshot,
+        deliveries: super::memory::PreparedMemoryDeliveries,
     ) -> Result<()> {
         let run = self.run(run_id)?;
         fence(&run, epoch)?;
@@ -336,7 +340,7 @@ impl Catalog {
                 "planning dispatch no longer allowed".into(),
             ));
         }
-        if &result.request_ref != request_ref {
+        if &result.request_ref != request_ref || snapshot.view.request_id != action {
             return Err(RuntimeError::Conflict("frozen planning request changed".into()));
         }
         result.dispatch = PolicyModelDispatch::Dispatched;
@@ -363,7 +367,7 @@ impl Catalog {
             return Err(RuntimeError::Conflict("planning dispatch boundary changed".into()));
         }
         put(&tx, "operations", action, &op)?;
-        super::memory::record_deliveries(&tx, snapshot, &run.thread_id, DeliveryState::Sent)?;
+        super::memory::record_deliveries(&tx, deliveries, &run, action, DeliveryState::Sent)?;
         event(
             &tx,
             action,
@@ -385,12 +389,15 @@ impl Catalog {
         let _publication = self.content.begin_publication();
         let reference = self.policy_model_request_reference(run_id, epoch, action)?;
         let snapshot = serde_json::from_value(self.content.load(&reference)?)?;
+        let deliveries = receipt.filter(|receipt| receipt.usable)
+            .map(|_| super::memory::PreparedMemoryDeliveries::prepare(&snapshot)).transpose()?;
         let output_refs = PolicyModelOutputReferences::write(&self.content, output, receipt)?;
-        self.record_policy_model_prepared(run_id, epoch, action, output, receipt, &reference, &snapshot, output_refs)
+        self.record_policy_model_prepared(run_id, epoch, action, output, receipt, &reference, deliveries, output_refs)
     }
     pub(crate) fn record_policy_model_prepared(
         &mut self, run_id: &str, epoch: u64, action: &str, output: &PolicyModelOutput,
-        receipt: Option<&PolicyModelReceipt>, request_ref: &Value, snapshot: &RequestSnapshot,
+        receipt: Option<&PolicyModelReceipt>, request_ref: &Value,
+        deliveries: Option<super::memory::PreparedMemoryDeliveries>,
         output_refs: PolicyModelOutputReferences,
     ) -> Result<()> {
         let run = self.run(run_id)?;
@@ -452,7 +459,11 @@ impl Catalog {
         op.revision += 1;
         let tx = self.db.transaction()?;
         put(&tx, "operations", action, &op)?;
-        if receipt.is_some_and(|receipt| receipt.usable) { super::memory::record_deliveries(&tx, snapshot, &run.thread_id, DeliveryState::Committed)?; }
+        if receipt.is_some_and(|receipt| receipt.usable) {
+            super::memory::record_deliveries(&tx,
+                deliveries.ok_or_else(|| RuntimeError::Invalid("prepared memory delivery missing".into()))?,
+                &run, action, DeliveryState::Committed)?;
+        }
         event(
             &tx,
             action,
