@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -224,6 +225,60 @@ it("audit: a restricted path grant cannot materialize the entire workspace root"
   const restricted = await f.scoped("restricted", "ws", ["nested"]);
   await assert.rejects(restricted.fileMaterialize({ ...f.address, operationId: "restricted-materialize", path: "nested", sourceRoot: String(source.root) }), /grant|scope/i);
   assert.deepEqual(await fs.readdir(path.join(f.workspace, "nested")), []);
+});
+
+it("audit: committed materialization retries return the original receipt after source release and GC", async () => {
+  const f = await fixture();
+  const source = await branch(f);
+  const request = { ...f.address, operationId: "committed-materialize", path: "nested", sourceRoot: String(source.root) };
+  const receipt = await f.client.fileMaterialize(request);
+  assert.equal(receipt.status, "materialized");
+  await f.client.deleteBranch({ operationId: "drop-committed-source", branchId: "source" });
+  await f.client.gc("gc-after-committed-materialize");
+  assert.deepEqual(await f.client.fileMaterialize(request), receipt);
+  await assert.rejects(f.client.fileMaterialize({ ...request, path: "different-target" }), /reused with different parameters/i);
+  assert.equal(await fs.readFile(path.join(f.workspace, "nested", "note.txt"), "utf8"), "immutable body");
+  await assert.rejects(fs.stat(path.join(f.workspace, "different-target")), { code: "ENOENT" });
+});
+
+it("audit: recovery preserves a replacement backup instead of moving it into the target", async () => {
+  const f = await fixture({ VARIN_KERNEL_FAIL_MATERIALIZE_AFTER_BACKUP: "1" });
+  const source = await branch(f);
+  const operationId = "replaced-backup-materialize";
+  await assert.rejects(f.client.fileMaterialize({ ...f.address, operationId, path: "nested", sourceRoot: String(source.root) }), /after backup/i);
+  await f.host.close();
+  const suffix = createHash("sha256").update(operationId).digest("hex").slice(0, 16);
+  const backup = path.join(f.workspace, `nested.varin-backup-${suffix}`);
+  await fs.rename(backup, `${backup}-original`);
+  await fs.mkdir(backup);
+  const asset = path.join(backup, "user-owned.txt");
+  await fs.writeFile(asset, "replacement backup asset");
+  await fs.rm(path.join(f.workspace, `nested.varin-staging-${suffix}`), { recursive: true });
+  const resumed = await restart(f);
+  const registered = await resumed.fileRootRegister({ workspaceId: "ws", executionWorkspaceId: "ws", canonicalRoot: f.workspace });
+  assert.equal(registered.pendingOperations, 0);
+  assert.equal(await fs.readFile(asset, "utf8"), "replacement backup asset");
+  await assert.rejects(fs.stat(path.join(f.workspace, "nested")), { code: "ENOENT" });
+  const reconciled = await resumed.fileOperationReconcile({ ...f.address, operationId });
+  assert.equal((reconciled.result as Record<string, unknown>).status, "conflict");
+});
+
+it("audit: recovery does not promote a replacement stage with identical source bytes", async () => {
+  const f = await fixture({ VARIN_KERNEL_FAIL_MATERIALIZE_AFTER_BACKUP: "1" });
+  const source = await branch(f);
+  const operationId = "replaced-stage-materialize";
+  await assert.rejects(f.client.fileMaterialize({ ...f.address, operationId, path: "nested", sourceRoot: String(source.root) }), /after backup/i);
+  await f.host.close();
+  const suffix = createHash("sha256").update(operationId).digest("hex").slice(0, 16);
+  const stage = path.join(f.workspace, `nested.varin-staging-${suffix}`);
+  await fs.rename(stage, `${stage}-original`);
+  await fs.cp(`${stage}-original`, stage, { recursive: true });
+  const resumed = await restart(f);
+  await resumed.fileRootRegister({ workspaceId: "ws", executionWorkspaceId: "ws", canonicalRoot: f.workspace });
+  assert.equal(await fs.readFile(path.join(stage, "note.txt"), "utf8"), "immutable body");
+  assert.deepEqual(await fs.readdir(path.join(f.workspace, "nested")), []);
+  const reconciled = await resumed.fileOperationReconcile({ ...f.address, operationId });
+  assert.equal((reconciled.result as Record<string, unknown>).status, "conflict");
 });
 
 it("audit: scan continuation rejects changed inventories instead of silently shifting offsets", async () => {
