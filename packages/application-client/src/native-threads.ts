@@ -6,7 +6,7 @@ export interface NativeThreadModel { providerId: string; modelId: string }
 interface NativeThreadSourceBase {
   workspaceId: string;
   executionWorkspaceId: string;
-  tools: Array<'file_read' | 'file_list' | 'file_search' | 'file_write' | 'file_edit' | 'process_inspect' | 'process_read' | 'process_spawn' | 'language_definition' | 'language_references' | 'language_diagnostics'>;
+  tools: Array<'file_read' | 'file_list' | 'file_search' | 'file_write' | 'file_edit' | 'process_inspect' | 'process_read' | 'process_spawn' | 'language_definition' | 'language_references' | 'language_diagnostics' | 'code_retrieval'>;
 }
 export type NativeThreadSource = NativeThreadSourceBase & (
   | { mode: 'fixed_branch' | 'materialized'; branchId: string; revision: number; liveRoot?: never }

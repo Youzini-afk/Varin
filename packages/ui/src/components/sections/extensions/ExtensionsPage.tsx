@@ -4,7 +4,6 @@ import type {
   VarinExtensionCatalogEntry,
   VarinExtensionCapabilityReference,
   VarinExtensionHostStateSnapshot,
-  VarinExtensionServiceProviderSnapshot,
 } from '@varin/extension-contract';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -46,11 +45,15 @@ import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import {
   VARIN_EDITOR_MONACO_SERVICE_ID,
   VARIN_EDITOR_MONACO_SERVICE_VERSION,
+  VARIN_RETRIEVAL_PLAN_SERVICE_ID,
+  VARIN_RETRIEVAL_PLAN_VERSION,
   resolveVarinExtensionServiceRouting,
   resolveVarinWorkbenchLayout,
   resolveVarinWorkbenchProfile,
   serviceRoutingScopeKey,
 } from '@varin/extension-contract';
+import { VARIN_BUILTIN_RETRIEVAL_DEFAULT_PROVIDER_KEY } from '@varin/extension-builtins';
+import { serviceRoutingOptions } from '@/lib/extensions/service-routing-options';
 import {
   selectActiveWorkbenchProfile,
   applyWorkbenchProfile,
@@ -553,12 +556,7 @@ const ServiceRoutingSection: React.FC = () => {
   const snapshot = catalog.snapshot;
   if (!snapshot?.routing.authoritative) return null;
 
-  const activeProviders = snapshot.services.providers.filter((provider) => provider.status === 'active');
-  const providerGroups = new Map<string, VarinExtensionServiceProviderSnapshot[]>();
-  for (const provider of activeProviders) {
-    const key = `${provider.descriptor.id}@${provider.descriptor.version}`;
-    providerGroups.set(key, [...(providerGroups.get(key) ?? []), provider]);
-  }
+  const providerGroups = serviceRoutingOptions(snapshot);
   const serviceKeys = new Set([
     ...[...providerGroups].filter(([, providers]) => providers.length > 1).map(([key]) => key),
     ...snapshot.routing.document.rules.map((rule) => `${rule.serviceId}@${rule.version}`),
@@ -624,21 +622,27 @@ const ServiceRoutingSection: React.FC = () => {
           const selectedMissing = selected !== '__automatic__'
             && !providers.some((provider) => provider.providerKey === selected);
           const resolution = resolveVarinExtensionServiceRouting({
-            candidates: providers.map((provider) => ({ providerId: provider.providerId, providerKey: provider.providerKey })),
+            // The pure resolver uses an opaque candidate identity. A declared option has no
+            // executable generation yet; selecting its stable key asks the Host to prepare it.
+            candidates: providers.map((provider) => ({ providerId: provider.providerId ?? provider.providerKey, providerKey: provider.providerKey })),
             context: routingContext,
             document: snapshot.routing.document,
             serviceId: id,
             version,
+            ...(id === VARIN_RETRIEVAL_PLAN_SERVICE_ID && version === VARIN_RETRIEVAL_PLAN_VERSION
+              ? { defaultProviderKey: VARIN_BUILTIN_RETRIEVAL_DEFAULT_PROVIDER_KEY } : {}),
           });
+          const resolved = providers.find((provider) => provider.providerKey === resolution.providerKey);
           return (
             <div key={key} className="grid gap-2 rounded-lg border border-border/60 px-3 py-3 @xl:grid-cols-[minmax(0,1fr)_minmax(14rem,0.8fr)] @xl:items-center">
               <div className="min-w-0">
-                <div className="typography-ui-label text-foreground">{serviceName(id)}</div>
+                <div className="typography-ui-label text-foreground">{id === VARIN_RETRIEVAL_PLAN_SERVICE_ID
+                  ? t('settings.varin.extensions.routing.retrieval') : serviceName(id)}</div>
                 <div className={resolution.status === 'resolved'
                   ? 'typography-micro text-muted-foreground'
                   : 'typography-micro text-[var(--status-warning)]'}>
                   {resolution.status === 'resolved'
-                    ? t('settings.varin.extensions.routing.status.ready')
+                    ? t(resolved?.status === 'active' ? 'settings.varin.extensions.routing.status.ready' : 'settings.varin.extensions.routing.status.declared')
                     : resolution.status === 'ambiguous'
                       ? t('settings.varin.extensions.routing.status.choose')
                       : t('settings.varin.extensions.routing.status.unavailable')}

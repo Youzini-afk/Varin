@@ -3384,6 +3384,8 @@ export const settingsDict = {
   'settings.varin.extensions.routing.automatic': '自動',
   'settings.varin.extensions.routing.missing': '提供者無法使用',
   'settings.varin.extensions.routing.status.ready': '可用',
+  'settings.varin.extensions.routing.status.declared': '已安裝，使用時啟用',
+  'settings.varin.extensions.routing.retrieval': '原生程式碼檢索',
   'settings.varin.extensions.routing.status.choose': '請選擇提供者',
   'settings.varin.extensions.routing.status.unavailable': '提供者無法使用',
   'settings.varin.extensions.workbench.title': '工作台',

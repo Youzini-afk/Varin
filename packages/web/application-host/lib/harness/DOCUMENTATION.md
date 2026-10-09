@@ -1212,3 +1212,13 @@ Incomplete stop keeps the command/writer retained and rejects callers. The old g
 unref workaround is removed. Thread setup also uses native pipes, awaits actual close and keeps
 unconfirmed native writers protected. Fixed-result verification accepts an unknown process exit
 without converting it to successful evidence. See [the process consumer map](../process/DOCUMENTATION.md).
+
+### Native retrieval composition
+
+`retrieval-pipeline.ts` binds the native code-retrieval stage selection without fabricating a Pi
+`ExploreQueryActor`. Native callers consume the same `createExploreQueryRun` algorithm with an explicit
+Run-granted source adapter; the session-keyed Explore store remains owned by its Pi caller. Pipeline
+selection publication is short and query-local capture is immutable. Prepared candidate failure leaves
+old selection usable; mutable provider resources remain with their existing owners. See the
+[Kernel native retrieval boundary](../kernel/DOCUMENTATION.md#native-code-retrieval) for authorization,
+source versions, disabled model defaults and current integration limits.

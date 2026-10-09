@@ -39,8 +39,9 @@ export async function startNativeRunFromSource(
     throw new Error('Native fixed source requires a complete branch revision');
   }
   const tools = [...new Set(selection.tools)];
-  if (tools.some(tool => !['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn', 'language_definition', 'language_references', 'language_diagnostics'].includes(tool))) throw new Error('Native source launch selected an unavailable tool');
+  if (tools.some(tool => !['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn', 'language_definition', 'language_references', 'language_diagnostics', 'code_retrieval'].includes(tool))) throw new Error('Native source launch selected an unavailable tool');
   if (selection.mode !== 'live_root' && tools.some(tool => tool.startsWith('language_'))) throw new Error('Language tools require live_root; fixed dependency closure is unavailable');
+  if (selection.mode !== 'live_root' && tools.includes('code_retrieval')) throw new Error('Code retrieval requires live_root; fixed retrieval inputs are unavailable');
   if (selection.mode === 'fixed_branch' && tools.some(tool => ['process_spawn', 'file_write', 'file_edit'].includes(tool))) throw new Error('Mutating tools require an explicitly selected physical source');
   const run = await runtime.run(selection.runId, signal);
   if (['completed', 'failed', 'cancelled'].includes(run.state) || run.cancel_requested) throw new Error('Native Run is closed to launch');

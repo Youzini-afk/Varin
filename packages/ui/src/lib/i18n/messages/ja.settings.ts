@@ -2956,6 +2956,8 @@ export const settingsDict = {
   'settings.varin.extensions.routing.automatic': '自動',
   'settings.varin.extensions.routing.missing': '利用できないプロバイダー',
   'settings.varin.extensions.routing.status.ready': '利用可能',
+  'settings.varin.extensions.routing.status.declared': 'インストール済み・使用時に有効化',
+  'settings.varin.extensions.routing.retrieval': 'ネイティブコード検索',
   'settings.varin.extensions.routing.status.choose': 'プロバイダーを選択',
   'settings.varin.extensions.routing.status.unavailable': 'プロバイダーを利用できません',
   'settings.varin.extensions.workbench.title': 'ワークベンチ',

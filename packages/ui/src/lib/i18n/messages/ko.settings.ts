@@ -3379,6 +3379,8 @@ export const settingsDict = {
   'settings.varin.extensions.routing.automatic': '자동',
   'settings.varin.extensions.routing.missing': '사용할 수 없는 공급자',
   'settings.varin.extensions.routing.status.ready': '사용 가능',
+  'settings.varin.extensions.routing.status.declared': '설치됨 · 사용 시 활성화',
+  'settings.varin.extensions.routing.retrieval': '네이티브 코드 검색',
   'settings.varin.extensions.routing.status.choose': '공급자 선택',
   'settings.varin.extensions.routing.status.unavailable': '공급자를 사용할 수 없음',
   'settings.varin.extensions.workbench.title': '워크벤치',

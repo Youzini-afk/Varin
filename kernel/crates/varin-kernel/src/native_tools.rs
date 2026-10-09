@@ -23,6 +23,9 @@ mod discovery;
 mod reconciliation;
 #[path = "native_tools_language.rs"]
 mod language;
+#[path = "native_tools_retrieval.rs"]
+mod retrieval;
+use retrieval::RetrievalQueryArgs;
 use language::LanguageQueryArgs;
 use discovery::FileQueryArgs;
 
@@ -40,6 +43,7 @@ pub(crate) enum NativeToolKind {
     LanguageDefinition,
     LanguageReferences,
     LanguageDiagnostics,
+    CodeRetrieval,
 }
 impl NativeToolKind {
     fn name(self) -> &'static str {
@@ -55,6 +59,7 @@ impl NativeToolKind {
             Self::LanguageDefinition => "native_language_definition",
             Self::LanguageReferences => "native_language_references",
             Self::LanguageDiagnostics => "native_language_diagnostics",
+            Self::CodeRetrieval => "native_code_retrieval",
         }
     }
     fn from_name(name: &str) -> Option<Self> {
@@ -68,6 +73,7 @@ impl NativeToolKind {
             Self::ProcessRead,
             Self::ProcessSpawn,
             Self::LanguageDefinition, Self::LanguageReferences, Self::LanguageDiagnostics,
+            Self::CodeRetrieval,
         ]
         .into_iter()
         .find(|kind| kind.name() == name)
@@ -166,6 +172,7 @@ enum ResourceOperation {
     FileRead(FileReadArgs),
     FileQuery(FileQueryArgs),
     LanguageQuery(LanguageQueryArgs),
+    RetrievalQuery(RetrievalQueryArgs),
     ObserveCompute { reply: mpsc::Sender<crate::compute::ComputeWatch> },
     ComputeControl {
         method: &'static str,
@@ -192,6 +199,7 @@ impl ResourceOperation {
             ));
         }
         let parsed = match kind {
+            NativeToolKind::CodeRetrieval => return RetrievalQueryArgs::parse(args).map(Self::RetrievalQuery),
             NativeToolKind::LanguageDefinition | NativeToolKind::LanguageReferences | NativeToolKind::LanguageDiagnostics => {
                 return LanguageQueryArgs::parse(kind, args).map(Self::LanguageQuery);
             }
@@ -269,6 +277,13 @@ impl ResourceOperation {
         context: &ToolExecutionContext,
     ) -> (&'static str, Value) {
         match self {
+            Self::RetrievalQuery(args) => {
+                // Revalidate the bound read grant and explicit scopes without inventing a root
+                // path or dispatching compute. Body reads receive separate per-file admission.
+                let mut params = json!({"workspaceId":binding.workspace_id});
+                if let Some(paths) = &args.paths { params["paths"] = json!(paths); }
+                ("storage.health", params)
+            }
             Self::LanguageQuery(args) => ("file.read", json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,"path":args.path})),
             Self::FileQuery(args) => ("compute.start", args.params(binding, context)),
             Self::ObserveCompute { .. } => ("compute.read", json!({
@@ -451,6 +466,8 @@ pub(crate) struct NativeToolExecutor {
     binding: NativeToolBinding,
     resources: NativeResourceClient,
     language: Option<crate::native_language::LanguageBridge>,
+    retrieval: Option<crate::native_retrieval::RetrievalBridge>,
+    retrieval_project_id: Option<String>,
 }
 impl NativeToolExecutor {
     pub(crate) fn new(
@@ -537,8 +554,12 @@ impl NativeToolExecutor {
         if binding.source_mode != NativeSourceMode::LiveRoot && binding.enabled_tools.iter().any(|kind| matches!(kind, NativeToolKind::LanguageDefinition | NativeToolKind::LanguageReferences | NativeToolKind::LanguageDiagnostics)) {
             return Err(ExecutionError::new("language_source_unavailable", "Language tools require live_root; fixed dependency closure is not available"));
         }
-        Ok(Self { binding, resources, language: None })
+        if binding.source_mode != NativeSourceMode::LiveRoot && binding.enabled_tools.contains(&NativeToolKind::CodeRetrieval) {
+            return Err(ExecutionError::new("retrieval_source_unavailable", "Code retrieval requires live_root; fixed-source retrieval is not available"));
+        }
+        Ok(Self { binding, resources, language: None, retrieval: None, retrieval_project_id: None })
     }
+    pub(crate) fn with_retrieval(mut self, bridge: crate::native_retrieval::RetrievalBridge, project_id: Option<String>) -> Self { self.retrieval = Some(bridge); self.retrieval_project_id = project_id; self }
     pub(crate) fn with_language(mut self, bridge: crate::native_language::LanguageBridge) -> Self { self.language = Some(bridge); self }
     pub(crate) fn schemas(&self) -> Vec<ToolSchema> {
         Self::selected_schemas(&self.binding.enabled_tools)
@@ -588,6 +609,7 @@ impl NativeToolExecutor {
                 unreachable!("private receipt queries have no model contract"),
             // Discovery snapshots have their own short Storage coordination and consume fixed bytes.
             // Their long search/scan wait must not hold a directory-wide write barrier.
+            ResourceOperation::RetrievalQuery(_) => (key(json!(["retrieval-view", self.binding.execution_workspace_id, self.binding.root_id])), Access::Read),
             ResourceOperation::LanguageQuery(_) => (key(json!(["language-view", self.binding.execution_workspace_id, self.binding.root_id])), Access::Read),
             ResourceOperation::FileQuery(_) => (key(json!(["discovery", self.binding.execution_workspace_id, self.binding.root_id, self.binding.file_source])), Access::Read),
             ResourceOperation::FileMutation(mutation) => (key(json!(["unresolved-file", mutation.path()])), Access::Write),
@@ -686,6 +708,10 @@ impl ToolExecutor for NativeToolExecutor {
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
         let operation = self.operation(Some(context), call)?;
+        if let ResourceOperation::RetrievalQuery(args) = &operation {
+            if &self.contract(call, &operation) != contract { return Err(ExecutionError::new("stale_tool_contract", "retrieval contract changed")); }
+            return self.admit_retrieval(context, args, cancel);
+        }
         if let ResourceOperation::LanguageQuery(args) = &operation {
             if &self.contract(call, &operation) != contract { return Err(ExecutionError::new("stale_tool_contract", "language contract changed")); }
             return self.admit_language_path(context, &args.path, cancel).map(|_| ());
@@ -726,6 +752,7 @@ impl ToolExecutor for NativeToolExecutor {
                 reason: "tool contract changed".into(),
             };
         }
+        if let ResourceOperation::RetrievalQuery(args) = &operation { return self.execute_retrieval(context, args, cancel); }
         if let ResourceOperation::LanguageQuery(args) = &operation { return self.execute_language(context, args, cancel); }
         let spawn = matches!(operation, ResourceOperation::ProcessSpawn(_));
         let mutation = matches!(operation, ResourceOperation::FileMutation(_));
@@ -807,6 +834,7 @@ impl ToolExecutor for NativeToolExecutor {
 
 fn tool_schema(kind: NativeToolKind) -> Value {
     let (properties, required) = match kind {
+        NativeToolKind::CodeRetrieval => return retrieval::schema(),
         NativeToolKind::LanguageDefinition | NativeToolKind::LanguageReferences | NativeToolKind::LanguageDiagnostics => return language::schema(kind),
         NativeToolKind::FileList | NativeToolKind::FileSearch => {
             return discovery::schema(kind == NativeToolKind::FileSearch)

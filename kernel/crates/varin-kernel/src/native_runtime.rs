@@ -101,6 +101,7 @@ pub(crate) fn spawn(
     credential_bridge: crate::credential_bridge::CredentialBridge,
     mcp_bridge: crate::native_mcp::McpBridge,
     language_bridge: crate::native_language::LanguageBridge,
+    retrieval_bridge: crate::native_retrieval::RetrievalBridge,
     policy_bridge: crate::native_policy::PolicyBridge,
     responses: mpsc::SyncSender<Value>,
     finished: impl Fn(&str) + Send + Sync + 'static,
@@ -499,12 +500,16 @@ pub(crate) fn spawn(
                                     ));
                                 }
                                 launch_source = Some(binding.source_selection()?);
+                                let retrieval_project_id = runtime.catalog().lock()
+                                    .map_err(|_| KernelError::Storage("native catalog owner failed".into()))?
+                                    .run_project_id(&p.run_id).map_err(domain)?;
                                 let tools = crate::native_tools::NativeToolExecutor::new(
                                     binding,
                                     resources.clone(),
                                 )
                                 .map_err(|e| KernelError::Authorization(e.to_string()))?
-                                .with_language(language_bridge.clone());
+                                .with_language(language_bridge.clone())
+                                .with_retrieval(retrieval_bridge.clone(), retrieval_project_id);
                                 start.binding.tools = tools.schemas();
                                 start.binding.tool_schema_generation =
                                     start.binding.configuration_generation;

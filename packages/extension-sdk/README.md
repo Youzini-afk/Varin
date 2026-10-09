@@ -80,3 +80,11 @@ the Host pins exact package/configuration identity for the Run. Return a permitt
 than calling models or tools in the decision handler. Core validates exchanges, permissions,
 registered waits and cancellation. [The bounded evidence example](../../examples/extensions/evidence-policy/README.md)
 shows the executable contract and current action limits.
+
+`provideRetrievalPlan(context, { configurationId, structure })` registers an immutable
+`varin.retrieval.plan@1` declaration with matching `inspect` schemas. Select `structure: 'native'`
+for the existing native structure stage or `'disabled'` for keyword-only retrieval. Do not perform
+filesystem, model, index or other external work during declaration. The Host supplies stages and
+keeps a generation pin for each native query; ordinary extension replacement preserves existing
+queries, while explicit disable/crash revokes their bindings. See the
+[authoring guide](../../docs/ops/varin-extension-authoring.md#native-retrieval-plans) for routing.

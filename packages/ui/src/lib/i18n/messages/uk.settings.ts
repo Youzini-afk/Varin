@@ -3378,6 +3378,8 @@ export const settingsDict = {
   'settings.varin.extensions.routing.automatic': 'Автоматично',
   'settings.varin.extensions.routing.missing': 'Постачальник недоступний',
   'settings.varin.extensions.routing.status.ready': 'Доступно',
+  'settings.varin.extensions.routing.status.declared': 'Встановлено; активується під час використання',
+  'settings.varin.extensions.routing.retrieval': 'Нативний пошук коду',
   'settings.varin.extensions.routing.status.choose': 'Виберіть постачальника',
   'settings.varin.extensions.routing.status.unavailable': 'Постачальник недоступний',
   'settings.varin.extensions.workbench.title': 'Робочий простір',

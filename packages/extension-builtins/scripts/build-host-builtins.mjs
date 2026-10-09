@@ -140,6 +140,8 @@ const {
   VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION,
   VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION,
   VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION,
+  VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION,
+  VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION,
 } = await import('../dist/index.js');
 const { VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE } = await import('../dist/host.js');
 
@@ -312,3 +314,16 @@ await bundleNodeServer(join(packageDirectory, 'src', 'host', 'context-fragments-
 await writePackageJson(contextOutputRoot, { name: 'varin-builtin-context-fragments', private: true, type: 'module', version: VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION.manifest.version });
 await writeFile(join(contextOutputRoot, 'varin.extension.json'), `${JSON.stringify(VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION.manifest, null, 2)}\n`, 'utf8');
 await writePackageFingerprint(contextOutputRoot, VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE);
+
+for (const [name, definition] of [
+  ['retrieval-structured', VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION],
+  ['retrieval-keyword', VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION],
+]) {
+  const outputRoot = join(builtinOutputRoot, name);
+  await rm(outputRoot, { force: true, recursive: true });
+  await mkdir(outputRoot, { recursive: true });
+  await bundleNodeServer(join(packageDirectory, 'src', 'host', `${name}-extension.ts`), join(outputRoot, 'host.cjs'));
+  await writePackageJson(outputRoot, { name: `varin-builtin-${name}`, private: true, type: 'module', version: definition.manifest.version });
+  await writeFile(join(outputRoot, 'varin.extension.json'), `${JSON.stringify(definition.manifest, null, 2)}\n`, 'utf8');
+  await writePackageFingerprint(outputRoot, VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE);
+}

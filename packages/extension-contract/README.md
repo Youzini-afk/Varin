@@ -72,3 +72,9 @@ inspectable input/output schemas. `parseVarinAgentPolicyInput` and `parseVarinAg
 validate detached run/event facts, finite actions and private JSON state. The view deliberately
 contains history count/head references and settlement metadata, not full histories or tool bodies.
 The native core remains the authority for legal action admission and durable checkpoints.
+
+`VARIN_RETRIEVAL_PLAN_CONTRACT` describes the declarative `varin.retrieval.plan@1` boundary.
+`describe([])` returns only an immutable `configurationId` and `structure: 'native' | 'disabled'`.
+The parser rejects unknown fields, including model or semantic settings. The selected native Host
+owns the keyword/structure implementations and all Run-granted reads; the extension gets no query,
+source text, root, filesystem or model capability through this contract.
