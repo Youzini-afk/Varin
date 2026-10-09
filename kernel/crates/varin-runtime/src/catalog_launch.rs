@@ -272,6 +272,7 @@ impl Catalog {
             return Err(RuntimeError::Conflict("MCP preparation cannot change a used launch".into()));
         }
         launch.selection.tools.extend(binding.tools.iter().cloned());
+        launch.selection.tools.sort_by(|left, right| left.name.cmp(&right.name));
         launch.selection.mcp_binding = Some(binding);
         launch.selection.validate()?;
         launch.revision += 1;

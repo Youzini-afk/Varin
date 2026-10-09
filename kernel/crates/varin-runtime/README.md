@@ -25,6 +25,10 @@ writing Pi session files or the Host harness's existing execution records.
   pins its selected endpoints through tool settlement. Each call binds one invocation through
   preparation, resource admission, authorization and execution; revocation cancellation is registered
   at binding. Ordinary replacement preserves old pins. The frozen batch schema is shared by `Arc`.
+  Ready directory candidates do not retire the active plan; unchanged endpoints reuse their binding.
+  The private MCP bridge retains concrete generations and scope holders. Retired generations drain
+  their calls; a waiting Run retains its active owner. Cancellation wakes the call and settles from
+  the actual Host receipt. Rechecking an approved action does not open another permission wait.
 - `providers::registry` selects typed model adapters through the same composition leases. Factories
   run outside the registry lock; replacement preserves retained implementations and explicit revocation
   cancels active generation. Builtin protocol options are validated by family. The `pi-messages` HTTP

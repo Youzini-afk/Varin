@@ -1,11 +1,12 @@
 //! Executable tool contributions over the existing composition owner. The declaration owns the
 //! external schema and the actual endpoint; all consumers use this same selected directory.
-use super::{BindingId, BindingSpec, CallLease, CompositionPlan, CompositionRegistry, ModelStepPins};
+use super::{BindingId, BindingSpec, CallLease, CompositionPlan, CompositionRegistry, ModelStepPins, PreparedPlan};
 use crate::execution::*;
 use crate::execution_capacity::{AdmissionControlGuard, ExecutionClass};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+#[derive(Clone)]
 pub struct ToolDeclaration {
     pub schema: ToolSchema,
     /// Implementation/configuration identity supplied by its existing resource or extension owner.
@@ -34,9 +35,11 @@ impl ToolDirectory {
     }
     /// Publication preserves old request pins. Failed candidates leave the active generation intact.
     pub fn replace(&self, expected_revision: u64, declarations: Vec<ToolDeclaration>) -> Result<Self, ExecutionError> {
-        let (plan, schemas) = publish(&mut *self.registry.lock().map_err(failed)?, expected_revision, declarations)?;
-        let indexes = schemas.iter().enumerate().map(|(index, schema)| (schema.name.clone(), index)).collect();
-        Ok(Self { registry: self.registry.clone(), plan, schemas, indexes })
+        self.prepare_replacement(expected_revision, declarations)?.publish()
+    }
+    pub fn prepare_replacement(&self, expected_revision: u64, declarations: Vec<ToolDeclaration>) -> Result<PreparedToolDirectory, ExecutionError> {
+        let (plan, schemas) = prepare(&mut *self.registry.lock().map_err(failed)?, expected_revision, declarations)?;
+        Ok(PreparedToolDirectory { registry: self.registry.clone(), plan, schemas })
     }
     pub fn revision(&self) -> u64 { self.plan.revision() }
     pub fn schemas(&self) -> &[ToolSchema] { &self.schemas }
@@ -52,21 +55,45 @@ impl ToolDirectory {
         Ok(FrozenDirectory { pins, schemas: schemas.to_vec() })
     }
 }
-fn publish(registry: &mut CompositionRegistry<Endpoint>, revision: u64, mut declarations: Vec<ToolDeclaration>)
+pub struct PreparedToolDirectory {
+    registry: Arc<Mutex<CompositionRegistry<Endpoint>>>,
+    plan: PreparedPlan<Endpoint>,
+    schemas: Vec<ToolSchema>,
+}
+impl PreparedToolDirectory {
+    pub fn schemas(&self) -> &[ToolSchema] { &self.schemas }
+    pub fn validate(&self) -> Result<(), ExecutionError> { self.registry.lock().map_err(failed)?.validate_candidate(&self.plan).map_err(failed) }
+    pub fn publish(self) -> Result<ToolDirectory, ExecutionError> {
+        let plan = self.registry.lock().map_err(failed)?.publish(self.plan).map_err(failed)?;
+        let indexes = self.schemas.iter().enumerate().map(|(index, schema)| (schema.name.clone(), index)).collect();
+        Ok(ToolDirectory { registry: self.registry, plan, schemas: self.schemas, indexes })
+    }
+}
+fn publish(registry: &mut CompositionRegistry<Endpoint>, revision: u64, declarations: Vec<ToolDeclaration>)
     -> Result<(Arc<CompositionPlan<Endpoint>>, Vec<ToolSchema>), ExecutionError> {
+    let (candidate, schemas) = prepare(registry, revision, declarations)?;
+    Ok((registry.publish(candidate).map_err(failed)?, schemas))
+}
+fn prepare(registry: &mut CompositionRegistry<Endpoint>, revision: u64, mut declarations: Vec<ToolDeclaration>)
+    -> Result<(PreparedPlan<Endpoint>, Vec<ToolSchema>), ExecutionError> {
     declarations.sort_by(|left, right| left.schema.name.cmp(&right.schema.name));
     let mut schemas = Vec::with_capacity(declarations.len());
     let mut specs = Vec::with_capacity(declarations.len());
     for declaration in declarations {
         let schema = declaration.schema;
         if schema.name.is_empty() || schema.version.is_empty() { return Err(ExecutionError::new("invalid_tool_declaration", "tool name and schema version are required")); }
+        let serialized = serde_json::to_value(&schema).map_err(failed)?;
+        let endpoint = registry.active().bind(&schema.name).ok().filter(|handle|
+            handle.content_version() == declaration.content_version && handle.schema() == &serialized
+            && Arc::ptr_eq(&handle.0.implementation.executor, &declaration.implementation))
+            .map(|handle| handle.0.implementation.clone())
+            .unwrap_or_else(|| Arc::new(Endpoint { executor: declaration.implementation }));
         specs.push(BindingSpec { capability: schema.name.clone(), content_version: declaration.content_version,
-            schema: serde_json::to_value(&schema).map_err(failed)?, implementation: Arc::new(Endpoint { executor: declaration.implementation }) });
+            schema: serialized, implementation: endpoint });
         schemas.push(schema);
     }
     let candidate = registry.prepare(revision, specs).map_err(failed)?;
-    let plan = registry.publish(candidate).map_err(failed)?;
-    Ok((plan, schemas))
+    Ok((candidate, schemas))
 }
 struct FrozenDirectory { pins: ModelStepPins<Endpoint>, schemas: Vec<ToolSchema> }
 struct SelectedCall { lease: CallLease<Endpoint>, invocation: Box<dyn PreparedToolCall>, _revocation: AdmissionControlGuard }
@@ -137,6 +164,22 @@ mod tests {
     }
     fn declaration(version: &'static str) -> ToolDeclaration {
         ToolDeclaration::new(ToolSchema {name: "query".into(), version: version.into(), schema: json!({"type":"object"})}, Arc::new(EndpointFixture(version)))
+    }
+    #[test]
+    fn ready_candidate_preserves_current_admission_and_reuses_unchanged_endpoints() {
+        let stable = declaration("stable");
+        let first = ToolDirectory::assemble(vec![stable.clone()]).unwrap();
+        let stable_id = first.binding_id("query").unwrap();
+        let mut extra = declaration("added");
+        extra.schema.name = "extra".into();
+        let candidate = first.prepare_replacement(first.revision(), vec![stable, extra]).unwrap();
+        assert_eq!(first.schemas().len(), 1);
+        assert!(first.freeze(first.schemas()).unwrap().is_some());
+        candidate.validate().unwrap();
+        let next = candidate.publish().unwrap();
+        assert_eq!(next.schemas().len(), 2);
+        assert_eq!(next.binding_id("query").unwrap(), stable_id);
+        assert!(first.freeze(first.schemas()).unwrap().is_some());
     }
     #[test]
     fn model_exchange_retains_its_endpoint_and_revocation_reaches_preparation() {
