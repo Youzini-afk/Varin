@@ -162,6 +162,7 @@ impl<
         input: &ExecutionInput,
         nodes: Vec<PolicyReadNode>,
         state: Value,
+        cancel: &CancellationToken,
     ) -> Result<PolicyGraphState, ExecutionError> {
         validate_policy_nodes(&nodes)?;
         let boundary = self
@@ -189,7 +190,7 @@ impl<
                 source: boundary.source.clone(),
             };
             let contract = guarded("tool_prepare_panicked", || {
-                self.tools.prepare(&node.call, &context)
+                self.tools.prepare(&node.call, &context, cancel)
             })?;
             if contract.name != node.call.name
                 || contract.schema_version != node.call.schema_version
@@ -297,7 +298,7 @@ impl<
                                 } else {
                                     // Revalidate the retained implementation and grant on every retry.
                                     let current =
-                                        self.tools.prepare(&node.call, &admitted.context)?;
+                                        self.tools.prepare(&node.call, &admitted.context, &token)?;
                                     if current != admitted.contract
                                         || !self.tools.supports_policy_read(
                                             &admitted.context,

@@ -12,7 +12,7 @@ const GENERATION: &str = "review-generation";
 const EPOCH: &str = "review-epoch";
 struct Unused;
 impl ToolExecutor for Unused {
-    fn prepare(&self, _: &ToolCall, _: &FrozenToolContext) -> Result<ToolContract, ExecutionError> {
+    fn prepare(&self, _: &ToolCall, _: &FrozenToolContext, _cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
         panic!("unexpected inner tool")
     }
     fn authorize(
@@ -150,7 +150,7 @@ fn boundary(revoke_before: bool) {
         tools: vec![schema],
         source: Some(f.pin.source),
     };
-    let contract = executor.prepare(&call, &frozen).unwrap();
+    let contract = executor.prepare(&call, &frozen, &CancellationToken::default()).unwrap();
     executor
         .authorize(&f.context, &call, &contract, &CancellationToken::default())
         .unwrap();

@@ -503,8 +503,7 @@ impl NativeToolExecutor {
         // complete projection by the existing wire-derived content budget, reserving 64
         // bytes for three growing safe-integer counters and the final status spelling.
         let metadata_size = serde_json::to_vec(&json!({"status":&reply.status,"snippets":[],
-            "plan":&reply.plan,"source":&reply.source,"omissions":&reply.omissions,"stages":&reply.stages,
-            "inferenceReceipts":&reply.inference_receipts}))
+            "source":&reply.source,"omissions":&reply.omissions}))
             .map_err(|_| invalid())?.len();
         let mut output_budget = crate::protocol::MAX_BLOB_RESPONSE_BYTES
             .checked_sub(metadata_size.saturating_add(64))
@@ -621,13 +620,9 @@ impl NativeToolExecutor {
             .into();
             snippets.clear();
         }
-        let mut result = json!({"status":reply.status,"snippets":snippets,"omissions":reply.omissions,"stages":reply.stages});
-        if !reply.inference_receipts.is_empty() {
-            result["inferenceReceipts"] = json!(reply.inference_receipts);
-        }
-        if let Some(plan) = reply.plan {
-            result["plan"] = json!(plan);
-        }
+        // The model needs verified evidence and coverage. Composition and inference bookkeeping
+        // remain with the bound pipeline and inference ledger, outside conversation tool content.
+        let mut result = json!({"status":reply.status,"snippets":snippets,"omissions":reply.omissions});
         if let Some(source) = reply.source {
             result["source"] = json!(source);
         }

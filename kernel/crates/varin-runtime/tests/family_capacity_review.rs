@@ -396,6 +396,7 @@ mod engines {
             &self,
             c: &ToolCall,
             _: &FrozenToolContext,
+            _cancel: &CancellationToken,
         ) -> Result<ToolContract, ExecutionError> {
             Ok(ToolContract {
                 name: c.name.clone(),
@@ -518,8 +519,9 @@ mod engines {
             &self,
             call: &ToolCall,
             context: &FrozenToolContext,
+            _cancel: &CancellationToken,
         ) -> Result<ToolContract, ExecutionError> {
-            self.inner.prepare(call, context)
+            self.inner.prepare(call, context, _cancel)
         }
         fn authorize(
             &self,
@@ -747,8 +749,9 @@ mod engines {
             &self,
             call: &ToolCall,
             c: &FrozenToolContext,
+            _cancel: &CancellationToken,
         ) -> Result<ToolContract, ExecutionError> {
-            self.inner.prepare(call, c)
+            self.inner.prepare(call, c, _cancel)
         }
         fn authorize(
             &self,

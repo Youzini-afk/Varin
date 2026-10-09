@@ -5,6 +5,7 @@ import type { NativeThreadIdentity, NativeThreadSnapshot, NativeThreadsAPI } fro
 export class NativeThreadProjection {
   private readonly abort = new AbortController();
   private cursor = 0;
+  private initialized = false;
   private refreshing = false;
   private dirty = false;
   private activeRunId: string | null = null;
@@ -27,6 +28,7 @@ export class NativeThreadProjection {
         this.dirty = false;
         const snapshot = await this.api.snapshot(this.identity);
         if (!this.abort.signal.aborted) {
+          if (!this.initialized) { this.cursor = snapshot.eventCursor; this.initialized = true; }
           this.activeRunId = snapshot.thread.branches.find(branch => branch.branch_id === this.identity.branchId)?.active_run_id ?? null;
           const head = snapshot.history.at(-1)?.id;
           if (!this.activeRunId || head !== this.historyHead) { this.progress.clear(); this.publishProgress(''); }
@@ -39,18 +41,21 @@ export class NativeThreadProjection {
   }
 
   start(): void {
-    // Subscribe before the first snapshot, then replay since the last committed cursor.
+    // Snapshot carries a cursor captured before its reads. Replay covers commits made during
+    // those reads, without replaying every older thread merely to display this branch.
     this.removeEndpoint = subscribeRuntimeEndpointWillChange(() => this.close());
     void this.observe();
-    void this.refresh();
   }
   close(): void { this.removeEndpoint?.(); this.abort.abort(); }
 
   private async observe(): Promise<void> {
     while (!this.abort.signal.aborted) {
       try {
-        await this.api.observe(this.cursor, event => {
+        if (!this.initialized) await this.refresh();
+        if (this.abort.signal.aborted) return;
+        if (this.initialized) await this.api.observe(this.cursor, event => {
           if ('cursor' in event && typeof event.cursor === 'number' && !('stream' in event)) {
+            if (event.cursor <= this.cursor) return;
             this.cursor = event.cursor;
             void this.refresh();
           } else if ('stream' in event && event.stream === 'progress' && event.runId === this.activeRunId) {

@@ -8,7 +8,7 @@ import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachment
 import { fileToImageAttachment } from '@/components/chat/composer/imageAttachments';
 import { useI18n } from '@/lib/i18n';
 import React from 'react';
-import { NativeThreadRequestError } from '@varin/application-client';
+import { NativeThreadRequestError, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import type { NativeThreadIdentity, NativeThreadSnapshot, NativeThreadsAPI, NativeThreadHistoryPage, NativeThreadPreparedSource } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -17,6 +17,7 @@ import { NativeThreadProjection, nativeHistoryText, nativeHistoryImages } from '
 
 export function NativeThreadConversation({ api, identity, onBranchCreated, initialWorkspacePath }: { api: NativeThreadsAPI; identity: NativeThreadIdentity; onBranchCreated?: (identity: NativeThreadIdentity) => void; initialWorkspacePath?: string }) {
   const { t } = useI18n();
+  const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const [images, setImages] = React.useState<ImageAttachment[]>([]);
   const fileInput = React.useRef<HTMLInputElement | null>(null);
   const fileReadGeneration = React.useRef(0);
@@ -37,7 +38,7 @@ export function NativeThreadConversation({ api, identity, onBranchCreated, initi
   const [providerId, setProviderId] = React.useState('');
   const [modelId, setModelId] = React.useState('');
   const [models, setModels] = React.useState<Array<{ providerId: string; modelId: string; name?: string; acceptsImages?: boolean }>>([]);
-  React.useEffect(() => { let active = true; void api.listModels().then(value => { if (active) setModels(value); }, value => { if (active) setError(value instanceof Error ? value.message : 'Model catalog unavailable'); }); return () => { active = false; }; }, [api]);
+  React.useEffect(() => { let active = true; void api.listModels().then(value => { if (active) setModels(value); }, value => { if (active) setError(value instanceof Error ? value.message : 'Model catalog unavailable'); }); return () => { active = false; }; }, [api, host]);
   const [error, setError] = React.useState<string>();
   const [inputMode, setInputMode] = React.useState<'boundary' | 'interrupt' | 'next_run'>('boundary');
   const [pending, setPending] = React.useState(false);
@@ -47,11 +48,12 @@ export function NativeThreadConversation({ api, identity, onBranchCreated, initi
     identityGeneration.current += 1; forkKeys.current.clear(); compactionKeys.current.clear();
     historyGeneration.current += 1; setHistoryView(null); setHistoryLoading(false);
     setPreparedSource(null); setPreparingSource(false);
+    setPending(false); setError(undefined);
     setSnapshot(undefined); setProgress(''); setImages([]); setReadingFiles(false); pendingInput.current = undefined; fileReadGeneration.current += 1;
     const view = new NativeThreadProjection(api, identity, setSnapshot, value => setError(value instanceof Error ? value.message : 'Native thread unavailable'), setProgress);
     projection.current = view; view.start();
     return () => { identityGeneration.current += 1; historyGeneration.current += 1; fileReadGeneration.current += 1; view.close(); };
-  }, [api, identity]);
+  }, [api, identity, host]);
   const branch = snapshot?.thread.branches.find(value => value.branch_id === identity.branchId);
   const run = snapshot?.activeRun ?? branch?.latest_run;
   const active = Boolean(branch?.active_run_id);
@@ -62,16 +64,20 @@ export function NativeThreadConversation({ api, identity, onBranchCreated, initi
     if (config?.providerId && config.model && (active || !providerId)) { setProviderId(config.providerId); setModelId(config.model); }
   }, [run?.configuration, active, providerId]);
   const act = async (work: () => Promise<unknown>) => {
+    const generation = identityGeneration.current;
+    const current = () => generation === identityGeneration.current && host === getRuntimeEndpointGeneration();
     setPending(true); setError(undefined);
-    try { await work(); await projection.current?.refresh(); }
+    try { await work(); if (current()) await projection.current?.refresh(); }
     catch (value) {
+      if (!current()) return;
       if (value instanceof NativeThreadRequestError && value.status === 409) { pendingInput.current = undefined; await projection.current?.refresh(); }
+      if (!current()) return;
       setError(value instanceof NativeThreadRequestError && ['kernel-frame-too-large', 'native-http-body-too-large'].includes(value.code)
         ? 'These images exceed the current transport request size. Remove or resize an image and retry; your attachments are still here.'
         : value instanceof NativeThreadRequestError && value.code === 'native-model-images-unsupported' ? 'The selected model does not accept images. Choose an image-capable model or remove the images.'
         : value instanceof Error ? value.message : 'Native thread request failed');
     }
-    finally { setPending(false); }
+    finally { if (current()) setPending(false); }
   };
   const addImages = async (files: File[]) => {
     const generation = fileReadGeneration.current;
@@ -108,13 +114,14 @@ export function NativeThreadConversation({ api, identity, onBranchCreated, initi
   };
   const compactThrough = async (throughId: string) => {
     if (!snapshot) return;
+    const generation = identityGeneration.current;
     const expectedRevision = snapshot.context.checkpoint?.revision ?? 0;
     const fingerprint = JSON.stringify([throughId, expectedRevision, providerId, modelId]);
     let key = compactionKeys.current.get(fingerprint);
     if (!key) { key = crypto.randomUUID(); compactionKeys.current.set(fingerprint, key); }
     await act(async () => {
       await api.compact({ ...identity, key, throughId, expectedRevision, model: { providerId, modelId } });
-      compactionKeys.current.delete(fingerprint);
+      if (generation === identityGeneration.current) compactionKeys.current.delete(fingerprint);
     });
   };
   const visibleHistory = historyView?.items ?? snapshot?.history ?? [];
@@ -196,6 +203,7 @@ export function NativeThreadConversation({ api, identity, onBranchCreated, initi
     <form className="mx-auto w-full max-w-3xl space-y-2 p-4" onSubmit={event => {
       event.preventDefault();
       if (preparingSource || sourceCannotBeApplied) return;
+      const generation = identityGeneration.current;
       void act(async () => {
         const fingerprint = submissionFingerprint();
         if (pendingInput.current?.fingerprint !== fingerprint) {
@@ -205,6 +213,7 @@ export function NativeThreadConversation({ api, identity, onBranchCreated, initi
           pendingInput.current = { fingerprint, send: active ? () => api.enqueue(queued) : () => api.submit(submit) };
         }
         await pendingInput.current.send();
+        if (generation !== identityGeneration.current || host !== getRuntimeEndpointGeneration()) return;
         pendingInput.current = undefined; setPreparedSource(null); returnToLatest();
         if (draftRef.current.text === text) setText('');
         setImages(current => current.filter(image => !images.includes(image)));

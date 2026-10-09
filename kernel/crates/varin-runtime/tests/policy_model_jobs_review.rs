@@ -192,7 +192,7 @@ impl ModelProvider for Provider {
 }
 struct NoTools;
 impl ToolExecutor for NoTools {
-    fn prepare(&self, _: &ToolCall, _: &FrozenToolContext) -> Result<ToolContract, ExecutionError> {
+    fn prepare(&self, _: &ToolCall, _: &FrozenToolContext, _cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
         panic!("planning tool output must not prepare tools")
     }
     fn authorize(
@@ -310,6 +310,7 @@ fn engine(
     };
     (
         ExecutionEngine {
+            context_preparation: Arc::new(NoopContextPreparation),
             persistence: f.db.clone(),
             provider: Arc::new(provider),
             tools: Arc::new(NoTools),
@@ -619,6 +620,7 @@ fn crashes_redeliver_completed_results_and_never_replay_ambiguous_dispatch() {
         let planner = Arc::new(Provider::new("DENY"));
         let (ordinary, _) = engine(&f, planner.clone(), false, false);
         let e = ExecutionEngine {
+            context_preparation: Arc::new(NoopContextPreparation),
             persistence: Arc::new(BoundaryPersistence {
                 db: f.db.clone(),
                 point,
@@ -773,6 +775,7 @@ fn input_winning_pre_dispatch_settles_old_operation_without_network() {
     let planner = Arc::new(Provider::new("MUST_NOT_GENERATE"));
     let (ordinary, main) = engine(&f, planner.clone(), false, false);
     let e = ExecutionEngine {
+        context_preparation: Arc::new(NoopContextPreparation),
         persistence: Arc::new(BoundaryPersistence {
             db: f.db.clone(),
             point: StopAt::InputBeforeDispatch,
@@ -799,7 +802,7 @@ impl ToolExecutor for Reads {
     fn supports_policy_read(&self, _: &FrozenToolContext, _: &ToolCall, _: &ToolContract) -> bool {
         true
     }
-    fn prepare(&self, c: &ToolCall, _: &FrozenToolContext) -> Result<ToolContract, ExecutionError> {
+    fn prepare(&self, c: &ToolCall, _: &FrozenToolContext, _cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
         Ok(ToolContract {
             name: c.name.clone(),
             schema_version: c.schema_version.clone(),
@@ -893,6 +896,7 @@ fn graph_model_graph_uses_committed_plan_and_distinct_action_boundaries() {
             calls: Mutex::new(vec![]),
         });
         let e = ExecutionEngine {
+            context_preparation: Arc::new(NoopContextPreparation),
             persistence: f.db.clone(),
             provider: base.provider.clone(),
             tools: reads.clone(),
@@ -979,6 +983,7 @@ fn partial_failed_provider_is_indeterminate_retains_usage_and_never_replays() {
     let planner = Arc::new(p);
     let (ordinary, _) = engine(&f, planner.clone(), false, false);
     let e = ExecutionEngine {
+        context_preparation: Arc::new(NoopContextPreparation),
         persistence: Arc::new(BoundaryPersistence {
             db: f.db.clone(),
             point: StopAt::Completed,
@@ -1037,6 +1042,7 @@ fn durable_cancel_between_job_load_and_control_registration_is_not_lost() {
     let planner = Arc::new(Provider::new("MUST_NOT_GENERATE"));
     let (base, main) = engine(&f, planner.clone(), false, false);
     let paused = ExecutionEngine {
+        context_preparation: Arc::new(NoopContextPreparation),
         persistence: Arc::new(BoundaryPersistence {
             db: f.db.clone(),
             point: StopAt::Admitted,
@@ -1063,6 +1069,7 @@ fn durable_cancel_between_job_load_and_control_registration_is_not_lost() {
             )
             .unwrap();
     let e = ExecutionEngine {
+        context_preparation: Arc::new(NoopContextPreparation),
         persistence: Arc::new(BoundaryPersistence {
             db: f.db.clone(),
             point: StopAt::CancelAfterLoad,
@@ -1121,6 +1128,7 @@ fn new_input_winning_job_admission_does_not_publish_proposed_checkpoint() {
     let planner = Arc::new(Provider::new("MUST_NOT_GENERATE"));
     let (base, main) = engine(&f, planner.clone(), false, false);
     let e = ExecutionEngine {
+        context_preparation: Arc::new(NoopContextPreparation),
         persistence: Arc::new(BoundaryPersistence {
             db: f.db.clone(),
             point: StopAt::InputBeforeAdmission,
@@ -1154,6 +1162,7 @@ fn local_dispatch_failure_preserves_actual_marker_and_settled_receipt_on_reopen(
     let planner = Arc::new(Provider::new("MUST_NOT_SEND"));
     let (base, main) = engine(&f, planner.clone(), false, false);
     let e = ExecutionEngine {
+        context_preparation: Arc::new(NoopContextPreparation),
         persistence: Arc::new(BoundaryPersistence {
             db: f.db.clone(),
             point: StopAt::ErrorAfterDispatch,

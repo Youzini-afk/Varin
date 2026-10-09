@@ -1031,10 +1031,10 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         )?);
     }
     if method == "runtime.thread.operations.active" {
-        let p: NativeThreadParams = serde_json::from_value(params)?;
+        let p: NativeThreadOperationsParams = serde_json::from_value(params)?;
         return Ok(serde_json::to_value(
             catalog
-                .active_thread_operations(&p.thread_id)
+                .active_thread_operations(&p.thread_id, p.branch_id.as_deref())
                 .map_err(domain)?,
         )?);
     }

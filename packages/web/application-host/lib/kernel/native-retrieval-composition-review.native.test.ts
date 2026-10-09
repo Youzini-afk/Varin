@@ -52,9 +52,9 @@ it('installed builtin plan selection reaches actual retrieval and a project rout
   expect(await f.runtime.history(first.branchId)).toEqual(firstHistory);
   const secondHistory = JSON.stringify(await f.runtime.history(second.branchId));
   expect(secondHistory).toContain('COMPOSED_SOURCE_EVIDENCE');
-  expect(secondHistory).toContain(keywordKey);
-  expect(secondHistory).toContain(f.bindings[1]!.selection.artifactId);
-  expect(JSON.stringify(firstHistory)).toContain(structuredKey);
+  expect(secondHistory).not.toContain(keywordKey);
+  expect(secondHistory).not.toContain(f.bindings[1]!.selection.artifactId);
+  expect(JSON.stringify(firstHistory)).not.toContain(structuredKey);
   expect(f.bindings[1]!.plan.stages.find(stage => stage.kind === 'structure')?.status).toBe('disabled');
   expect(f.bindings[1]!.plan.id).not.toBe(f.bindings[0]!.plan.id);
   const unrelated = await f.composition.prepare({ threadId: 'different-project-thread', projectId: 'different-project', workspaceId: f.documents.workspaceRoot });
@@ -82,7 +82,7 @@ it('a slow old query keeps its real selected service pin while another project s
     const retained = await f.composition.prepare({ threadId: old.binding.threadId, projectId: 'retrieval-project', workspaceId: f.documents.workspaceRoot });
     try { expect(retained.plan.id).toBe(original.plan.id); } finally { retained.release(); }
     f.gate.resolve(); await expect.poll(async () => (await f.runtime.run(old.receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');
-    expect(JSON.stringify(await f.runtime.history(old.branchId))).toContain(original.plan.id);
+    expect(JSON.stringify(await f.runtime.history(old.branchId))).not.toContain(original.plan.id);
     expect(JSON.stringify(await f.runtime.history(old.branchId))).toContain('COMPOSED_SOURCE_EVIDENCE');
   } finally { f.gate.resolve(); }
 }, 40_000);

@@ -89,6 +89,11 @@ export interface NativeThreadParams {
   threadId: string;
 }
 
+export interface NativeThreadOperationsParams {
+  threadId: string;
+  branchId?: string;
+}
+
 export interface NativeThreadBranch {
   branch_id: string;
   head: string | null;

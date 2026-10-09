@@ -91,8 +91,9 @@ pub(crate) struct NativeHistoryBodyParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeThreadParams {
+pub(crate) struct NativeThreadOperationsParams {
     pub(crate) thread_id: String,
+    pub(crate) branch_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -107,6 +108,12 @@ pub(crate) struct NativeRunReconcileParams {
 pub(crate) struct NativeLaunchFailedParams {
     pub(crate) run_id: String,
     pub(crate) code: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeThreadParams {
+    pub(crate) thread_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1664,7 +1671,7 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.thread.operations.active" => {
-            serde_json::from_value::<NativeThreadParams>(params.clone())
+            serde_json::from_value::<NativeThreadOperationsParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

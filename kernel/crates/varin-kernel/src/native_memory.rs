@@ -133,9 +133,10 @@ impl ToolExecutor for MemoryTools {
         &self,
         call: &ToolCall,
         request: &FrozenToolContext,
+        _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
         if call.name != TOOL {
-            return self.inner.prepare(call, request);
+            return self.inner.prepare(call, request, _cancel);
         }
         let schema = schema(self.mutations);
         if call.schema_version != schema.version || !request.tools.contains(&schema) {

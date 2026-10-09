@@ -905,8 +905,6 @@ export class BrokeredHostSupervisor {
           candidate.owner.generation,
           "active",
         )).catch(() => undefined);
-        await replacement.finalize();
-        if (active) await this.#disposeInstance(active, false);
       } catch (error) {
         await replacement?.rollback().catch(() => undefined);
         if (storageCommitted) await this.#rollbackInstanceStorage(candidate);
@@ -927,6 +925,10 @@ export class BrokeredHostSupervisor {
         this.#active.delete(entry.manifest.id);
         throw error;
       }
+      // Publication succeeded. A retirement/cleanup failure cannot resurrect the old owner
+      // after its service registrations or storage session have already been released.
+      await replacement.finalize();
+      if (active) await this.#disposeInstance(active, false);
     });
     this.#selectedPreparations.set(entry.manifest.id, { identity, promise });
     try { await promise; }
