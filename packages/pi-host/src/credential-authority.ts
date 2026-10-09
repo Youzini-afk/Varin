@@ -28,7 +28,14 @@ export interface HostEmbeddingProviderBinding {
   currentScope(): Promise<HostCredentialScope>;
   getAuth(): Promise<AuthResult | undefined>;
 }
-export interface HostSelectedModel { providerId: string; modelId: string; name: string; api: string; baseUrl: string; maxTokens: number; input: readonly string[]; compat?: Record<string, unknown> }
+export interface HostSelectedModel {
+  providerId: string; modelId: string; name: string; api: string; baseUrl: string;
+  maxTokens: number; input: readonly string[]; contextWindow?: number; reasoning?: boolean;
+  thinkingLevelMap?: Partial<Record<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max', string | null>>;
+  samplingParams?: Record<string, unknown>;
+  samplingParamsByThinkingLevel?: Partial<Record<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max', Record<string, unknown>>>;
+  compat?: Record<string, unknown>;
+}
 export interface HostCredentialScope { reference: string; authority: string; account: string; generation: number }
 interface BindingMetadata { schema: 1; handle: string; generation: number; providerAccount?: string }
 type Stored = Credential & { $varinCredentialBinding?: BindingMetadata };
@@ -593,7 +600,11 @@ export class HostCredentialAuthority implements CredentialStore {
     const model = runtime.getModel(providerId, modelId);
     if (!model) throw publicFailure('registered-model-not-found');
     return { providerId, modelId: model.id, name: model.name, api: model.api, baseUrl: model.baseUrl,
-      maxTokens: model.maxTokens, input: model.input, ...(model.compat ? { compat: model.compat as Record<string, unknown> } : {}) };
+      maxTokens: model.maxTokens, input: model.input, contextWindow: model.contextWindow, reasoning: model.reasoning,
+      ...(model.thinkingLevelMap ? { thinkingLevelMap: model.thinkingLevelMap } : {}),
+      ...(model.samplingParams ? { samplingParams: model.samplingParams } : {}),
+      ...(model.samplingParamsByThinkingLevel ? { samplingParamsByThinkingLevel: model.samplingParamsByThinkingLevel } : {}),
+      ...(model.compat ? { compat: model.compat as Record<string, unknown> } : {}) };
   }
   async listModels(): Promise<HostSelectedModel[]> {
     const runtime = await this.#modelRuntime();
@@ -605,6 +616,10 @@ export class HostCredentialAuthority implements CredentialStore {
     return models.filter(model => configured.has(model.provider) || runtime.hasConfiguredAuth(model.provider)
       || configuredModels.has(JSON.stringify([model.provider, model.id]))).map(model => ({ providerId: model.provider,
         modelId: model.id, name: model.name, api: model.api, baseUrl: model.baseUrl, maxTokens: model.maxTokens, input: model.input,
+        contextWindow: model.contextWindow, reasoning: model.reasoning,
+        ...(model.thinkingLevelMap ? { thinkingLevelMap: model.thinkingLevelMap } : {}),
+        ...(model.samplingParams ? { samplingParams: model.samplingParams } : {}),
+        ...(model.samplingParamsByThinkingLevel ? { samplingParamsByThinkingLevel: model.samplingParamsByThinkingLevel } : {}),
         ...(model.compat ? { compat: model.compat as Record<string, unknown> } : {}) }));
   }
   async routingEnvironment(providerId: string): Promise<Record<string, string>> {

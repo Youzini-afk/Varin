@@ -6,6 +6,12 @@ authenticated local control/content connections after a stdin-only bootstrap, se
 Windows named pipes use overlapped I/O so a pending read cannot serialize the opposite-direction write.
 Content bodies use per-stream sequencing, credits and fair chunk rotation; body encoding, assembly and
 decoding run on managed workers. The frame bound applies to a packet rather than an entire result.
+Both content directions support receiver stop and terminal acknowledgement, including cancellation
+before encoding and while a dispatched chunk is blocked. Cancelling observation does not roll back the
+domain effect; callers requiring the effect receipt continue receiving it. Generated method classifications
+separate control parameters from bounded control responses: large inspections use content streams and
+ordinary credits, while Run/Operation cancellation returns metadata without configuration, intent or result
+bodies. Durable event cursor notifications coalesce; original events remain available for replay.
 The kernel reports a compiled build identity and
 target; packaged Hosts verify the adjacent manifest, executable SHA-256 and actual PE/ELF/Mach-O architecture before spawning it. Large blob
 uploads and branch create/write batches use acknowledged request chunks through the handshake's request-credit window; `AbortSignal` cancellation

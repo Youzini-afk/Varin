@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
 import { TransportFixture } from "./tests/transport-fixture.js";
 import { createKernelClient } from "./kernel-client.js";
+import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KERNEL_REQUEST_WINDOW } from "./protocol.generated.js";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
@@ -114,6 +115,23 @@ it("content beyond one frame round-trips while stalled data leaves control and c
   } finally { data.resume(); }
   expect((await read)?.payloadJson).toBe(payloadJson);
 
+  // Stop observing a response whose first data chunk is still blocked. Its durable record
+  // remains intact; the content sender drains the dispatched chunk and releases the stream.
+  const readController = new AbortController();
+  const bytesBefore = data.bytesRead;
+  data.pause();
+  const stoppedRead = f.actor.getRecord('ws', record.recordId, readController.signal);
+  const readRejected = expect(stoppedRead).rejects.toThrow(/cancelled/i);
+  try {
+    await expect.poll(() => f.probe.incomingStreams()).toBe(1);
+    readController.abort();
+    await readRejected;
+    expect((await f.host.agentRuntimeRequest<{epoch: number}, 'runtime.status'>('runtime.status', {})).epoch).toBeGreaterThan(0);
+  } finally { data.resume(); }
+  await expect.poll(() => f.probe.incomingStreams()).toBe(0);
+  await expect.poll(() => f.outstanding.size).toBe(0);
+  expect(data.bytesRead - bytesBefore).toBeLessThan(payloadJson.length / 2);
+
   // Leave a real first chunk in the socket's write queue. Cancel must acknowledge the request
   // before that chunk drains, then discard it without applying the original operation.
   const controller = new AbortController();
@@ -128,4 +146,23 @@ it("content beyond one frame round-trips while stalled data leaves control and c
   } finally { data.uncork(); }
   expect(await f.actor.getRecord('ws', 'cancel-body')).toBeNull();
   expect((await f.actor.health()).integrity).toBe('ok');
+}, 30_000);
+
+it('Run inspection streams large configuration while cancellation returns a control receipt', async () => {
+  const f = await fixture();
+  const runtime = new AgentRuntimeClient(f.host);
+  await runtime.createThread('large-config', 'large-config-branch');
+  const configuration = { artifact: 'x'.repeat(17 * 1024 * 1024) };
+  const receipt = await runtime.submit({ key:'large-config', threadId:'large-config', branchId:'large-config-branch',
+    expectedHead:null, input:{text:'preserve configuration'}, configuration });
+  const data = f.probe.socket('data'); data.pause();
+  const read = runtime.run(receipt.run_id); void read.catch(() => undefined);
+  try {
+    await expect.poll(() => f.probe.incomingStreams()).toBe(1);
+    const cancelled = await runtime.cancelRun(receipt.run_id);
+    expect(cancelled).toMatchObject({id:receipt.run_id, cancel_requested:true});
+    expect(cancelled).not.toHaveProperty('configuration');
+    expect((await runtime.status()).epoch).toBeGreaterThan(0);
+  } finally { data.resume(); }
+  expect((await read).configuration).toEqual(configuration);
 }, 30_000);

@@ -4,17 +4,18 @@ import net, { type Server, type Socket } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { Worker } from "node:worker_threads";
-import { KERNEL_CONTROL_METHODS, KERNEL_MAX_FRAME_BYTES, KERNEL_PROTOCOL_VERSION } from "./protocol.generated.js";
+import { KERNEL_CONTROL_METHODS, KERNEL_CONTROL_RESPONSE_METHODS, KERNEL_MAX_FRAME_BYTES, KERNEL_PROTOCOL_VERSION } from "./protocol.generated.js";
 
 export const CONTROL_METHODS: ReadonlySet<string> = new Set(KERNEL_CONTROL_METHODS);
+export const CONTROL_RESPONSE_METHODS: ReadonlySet<string> = new Set(KERNEL_CONTROL_RESPONSE_METHODS);
 const DATA_HEADER_BYTES = 24;
 type Envelope = Record<string, unknown>;
 interface Outgoing {
   id: string; bytes?: Buffer; offset: number; sequence: number; ready: boolean; waiting: boolean;
-  requestId?: string; aborting: boolean;
+  requestId?: string; aborting: boolean; ending: boolean;
   resolve(): void; reject(error: Error): void;
 }
-interface Incoming { identity: Envelope; length?: number; received: number; sequence: number }
+interface Incoming { identity: Envelope; length?: number; received: number; sequence: number; stopping: boolean; abortSequence?: number }
 const identity = (value: Envelope): Envelope => Object.fromEntries(
   ["v", "kind", "id", "method", "epoch", "grantId", "kernelEpoch"].filter(key => value[key] !== undefined).map(key => [key, value[key]]),
 );
@@ -65,6 +66,7 @@ export class KernelTransport {
   private readonly sockets = new Set<Socket>();
   private readonly outgoing = new Map<string, Outgoing>();
   private readonly incoming = new Map<string, Incoming>();
+  private readonly cancelledResponses = new Set<string>();
   private order: string[] = [];
   private control?: Socket;
   private data?: Socket;
@@ -83,6 +85,7 @@ export class KernelTransport {
     private readonly directory: string | undefined,
     private readonly onFrame: (frame: unknown) => void,
     private readonly onFailure: (error: Error) => void,
+    private readonly onResponseDiscarded: (requestId: string) => void,
   ) {
     void this.bound.catch(() => undefined);
     this.worker.on("error", error => this.fail(error));
@@ -91,7 +94,7 @@ export class KernelTransport {
     servers[0]!.on("connection", socket => this.accept(socket, "control"));
     servers[1]!.on("connection", socket => this.accept(socket, "data"));
   }
-  static async prepare(onFrame: (frame: unknown) => void, onFailure: (error: Error) => void): Promise<KernelTransport> {
+  static async prepare(onFrame: (frame: unknown) => void, onFailure: (error: Error) => void, onResponseDiscarded: (requestId: string) => void): Promise<KernelTransport> {
     const directory = process.platform === "win32" ? undefined : await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-"));
     if (directory) await fs.chmod(directory, 0o700);
     const nonce = randomUUID();
@@ -99,7 +102,7 @@ export class KernelTransport {
       ? { control:path.join(directory, "control.sock"), data:path.join(directory, "data.sock") }
       : { control:`\\\\.\\pipe\\varin-kernel-${nonce}-control`, data:`\\\\.\\pipe\\varin-kernel-${nonce}-data` };
     const servers = [net.createServer(), net.createServer()];
-    const transport = new KernelTransport(endpoints, servers, directory, onFrame, onFailure);
+    const transport = new KernelTransport(endpoints, servers, directory, onFrame, onFailure, onResponseDiscarded);
     try {
       await Promise.all(servers.map((server, index) => new Promise<void>((resolve, reject) => {
         server.once("error", reject);
@@ -168,7 +171,7 @@ export class KernelTransport {
     if (this.failed) return Promise.reject(this.failed);
     const id = randomUUID();
     return new Promise<void>((resolve, reject) => {
-      this.outgoing.set(id, { id, offset:0, sequence:0, ready:false, waiting:false, aborting:false,
+      this.outgoing.set(id, { id, offset:0, sequence:0, ready:false, waiting:false, aborting:false, ending:false,
         ...(value.kind === "request" && typeof value.id === "string" ? {requestId:value.id} : {}), resolve, reject });
       this.order.push(id);
       // Announce identity before handing body work to the worker. Native cancellation therefore
@@ -182,17 +185,38 @@ export class KernelTransport {
   }
   private abortOutgoing(id: string, error: Error): void {
     const stream = this.outgoing.get(id); if (!stream) return;
-    if (stream.aborting) return;
+    if (stream.aborting || stream.ending) return;
     stream.aborting = true;
     delete stream.bytes;
     this.order = this.order.filter(item => item !== id);
     void this.command("transport-stream-abort", id, {sequence:stream.sequence}).catch(failure => this.fail(failure as Error));
     stream.reject(error);
   }
-  cancelRequest(requestId: string): void {
+  cancelRequest(requestId: string, discardResponse: boolean): void {
     for (const stream of this.outgoing.values()) {
       if (stream.requestId === requestId) this.abortOutgoing(stream.id, new DOMException("Body transfer cancelled", "AbortError"));
     }
+    if (!discardResponse) return;
+    this.cancelledResponses.add(requestId);
+    for (const [id, stream] of this.incoming) {
+      if (stream.identity.kind === 'response' && stream.identity.id === requestId) this.stopIncoming(id, stream);
+    }
+  }
+  private stopIncoming(id: string, stream: Incoming): void {
+    if (stream.stopping) return;
+    stream.stopping = true;
+    this.worker.postMessage({type:'abort', id});
+    void this.command('transport-stream-stop', id).catch(error => this.fail(error as Error));
+  }
+  private discardResponse(stream: Incoming): void {
+    if (stream.identity.kind !== 'response' || typeof stream.identity.id !== 'string') return;
+    this.cancelledResponses.delete(stream.identity.id);
+    this.onResponseDiscarded(stream.identity.id);
+  }
+  private finishAbort(id: string, stream: Incoming): void {
+    this.incoming.delete(id);
+    void this.command('transport-stream-aborted', id, {sequence:stream.sequence}).catch(error => this.fail(error as Error));
+    this.discardResponse(stream);
   }
   private fromWorker(message: Envelope): void {
     if (this.failed || this.intentionalClose) return;
@@ -202,9 +226,12 @@ export class KernelTransport {
       stream.bytes = Buffer.from(message.bytes as ArrayBuffer);
       void this.command("transport-stream-begin", id, { byteLength:stream.bytes.length }).catch(error => this.fail(error as Error));
     } else if (message.type === "ack") {
-      void this.command("transport-stream-ack", id, { sequence:message.sequence }).catch(error => this.fail(error as Error));
+      const stream = this.incoming.get(id);
+      if (stream && !stream.stopping && stream.abortSequence === undefined) void this.command("transport-stream-ack", id, { sequence:message.sequence }).catch(error => this.fail(error as Error));
     } else if (message.type === "decoded") {
-      this.onFrame(message.value);
+      const value = message.value as Envelope;
+      if (value.kind === 'response' && typeof value.id === 'string' && this.cancelledResponses.delete(value.id)) this.onResponseDiscarded(value.id);
+      else this.onFrame(value);
     } else if (message.type === "failed") {
       const error = new Error(`Kernel body ${String(message.operation)} failed: ${String(message.message)}`);
       if (message.operation === "encode") this.abortOutgoing(id, error); else this.fail(error);
@@ -225,20 +252,27 @@ export class KernelTransport {
     } catch (error) { this.fail(error instanceof Error ? error : new Error(String(error))); }
   }
   private consumeControl(value: Envelope): void {
-    if (typeof value.kind !== "string" || !value.kind.startsWith("transport-stream-")) { this.onFrame(value); return; }
+    if (typeof value.kind !== "string" || !value.kind.startsWith("transport-stream-")) {
+      if (value.kind === 'response' && typeof value.id === 'string') this.cancelledResponses.delete(value.id);
+      this.onFrame(value); return;
+    }
     if (value.v !== KERNEL_PROTOCOL_VERSION || value.kernelEpoch !== this.epoch || typeof value.streamId !== "string") throw new Error("Kernel stream epoch or identity mismatch");
     const id = value.streamId;
     const stream = this.outgoing.get(id);
     switch (value.kind) {
-      case "transport-stream-open":
+      case "transport-stream-open": {
         if (this.incoming.has(id) || !value.identity || typeof value.identity !== "object") throw new Error("Invalid incoming stream identity");
-        this.incoming.set(id, { identity:value.identity as Envelope, received:0, sequence:0 });
-        this.worker.postMessage({ type:"open", id, identity:value.identity }); break;
+        const received: Incoming = { identity:value.identity as Envelope, received:0, sequence:0, stopping:false };
+        this.incoming.set(id, received);
+        this.worker.postMessage({ type:"open", id, identity:value.identity });
+        if (received.identity.kind === 'response' && typeof received.identity.id === 'string' && this.cancelledResponses.has(received.identity.id)) this.stopIncoming(id, received);
+        break;
+      }
       case "transport-stream-begin": {
         const received = this.incoming.get(id);
         if (!received || received.length !== undefined || !Number.isSafeInteger(value.byteLength) || Number(value.byteLength) < 0) throw new Error("Invalid incoming stream length");
         received.length = Number(value.byteLength);
-        void this.command("transport-stream-ready", id).catch(error => this.fail(error as Error)); break;
+        if (!received.stopping) void this.command("transport-stream-ready", id).catch(error => this.fail(error as Error)); break;
       }
       case "transport-stream-ready":
         if (stream?.aborting) break;
@@ -251,14 +285,28 @@ export class KernelTransport {
       case "transport-stream-end": {
         const received = this.incoming.get(id);
         if (!received || received.length !== received.received || value.sequence !== received.sequence) throw new Error("Incomplete body stream");
-        this.incoming.delete(id); this.worker.postMessage({ type:"end", id }); break;
+        this.incoming.delete(id);
+        void this.command('transport-stream-ended', id, {sequence:received.sequence}).catch(error => this.fail(error as Error));
+        if (received.stopping) this.discardResponse(received);
+        else this.worker.postMessage({ type:"end", id }); break;
       }
-      case "transport-stream-abort":
-        if (!this.incoming.delete(id)) throw new Error("Unknown aborted stream");
-        this.worker.postMessage({ type:"abort", id }); break;
+      case "transport-stream-abort": {
+        const received = this.incoming.get(id);
+        if (!received || received.abortSequence !== undefined || !Number.isSafeInteger(value.sequence) || Number(value.sequence) < received.sequence) throw new Error("Invalid aborted stream");
+        received.stopping = true; received.abortSequence = Number(value.sequence);
+        this.worker.postMessage({ type:"abort", id });
+        if (received.sequence === received.abortSequence) this.finishAbort(id, received);
+        break;
+      }
+      case 'transport-stream-stop':
+        if (!stream) throw new Error('Unknown stopped stream');
+        this.abortOutgoing(id, new DOMException('Body receiver stopped', 'AbortError')); break;
       case "transport-stream-aborted":
         if (!stream?.aborting || value.sequence !== stream.sequence) throw new Error("Invalid aborted stream receipt");
         this.outgoing.delete(id); break;
+      case 'transport-stream-ended':
+        if (!stream?.ending || value.sequence !== stream.sequence) throw new Error('Invalid completed stream receipt');
+        this.outgoing.delete(id); stream.resolve(); break;
       default: throw new Error("Unknown kernel transport command");
     }
   }
@@ -272,6 +320,14 @@ export class KernelTransport {
     if (!stream || stream.length === undefined || !payload.length || !Number.isSafeInteger(sequence)
       || sequence !== stream.sequence + 1 || payload.length > stream.length - stream.received) throw new Error("Invalid kernel data sequence or length");
     stream.sequence = sequence; stream.received += payload.length;
+    if (stream.abortSequence !== undefined) {
+      if (sequence > stream.abortSequence) throw new Error('Data exceeds aborted sequence');
+      if (sequence === stream.abortSequence) this.finishAbort(id, stream);
+      return;
+    }
+    if (stream.stopping) {
+      void this.command('transport-stream-ack', id, {sequence}).catch(error => this.fail(error as Error)); return;
+    }
     const bytes = Uint8Array.from(payload);
     this.worker.postMessage({ type:"chunk", id, sequence, bytes:bytes.buffer }, [bytes.buffer]);
   }
@@ -284,13 +340,13 @@ export class KernelTransport {
         for (let count = this.order.length; count > 0; count--) {
           const id = this.order.shift()!; this.order.push(id);
           const stream = this.outgoing.get(id);
-          if (stream?.bytes && !stream.aborting && stream.ready && !stream.waiting) { selected = stream; break; }
+          if (stream?.bytes && !stream.aborting && !stream.ending && stream.ready && !stream.waiting) { selected = stream; break; }
         }
         if (!selected?.bytes) break;
         const stream = selected;
         if (stream.offset === stream.bytes!.length) {
-          this.outgoing.delete(stream.id); this.order = this.order.filter(id => id !== stream.id);
-          await this.command("transport-stream-end", stream.id, { sequence:stream.sequence }); stream.resolve(); continue;
+          stream.ending = true; delete stream.bytes; this.order = this.order.filter(id => id !== stream.id);
+          await this.command("transport-stream-end", stream.id, { sequence:stream.sequence }); continue;
         }
         const chunkBytes = Math.min(this.data!.writableHighWaterMark, KERNEL_MAX_FRAME_BYTES - DATA_HEADER_BYTES);
         const end = Math.min(stream.offset + chunkBytes, stream.bytes!.length);
@@ -309,7 +365,7 @@ export class KernelTransport {
     if (this.failed || this.intentionalClose) return;
     this.failed = error; this.rejectBound(error);
     for (const stream of this.outgoing.values()) stream.reject(error);
-    this.outgoing.clear(); this.incoming.clear(); this.order = [];
+    this.outgoing.clear(); this.incoming.clear(); this.cancelledResponses.clear(); this.order = [];
     for (const socket of this.sockets) socket.destroy();
     this.onFailure(error);
     void this.close();
@@ -320,7 +376,7 @@ export class KernelTransport {
     const error = this.failed ?? new Error("Kernel transport closed");
     this.rejectBound(error);
     for (const stream of this.outgoing.values()) stream.reject(error);
-    this.outgoing.clear(); this.incoming.clear(); this.order = [];
+    this.outgoing.clear(); this.incoming.clear(); this.cancelledResponses.clear(); this.order = [];
     for (const socket of this.sockets) socket.destroy();
     await Promise.all(this.servers.map(server => new Promise<void>(resolve => { server.close(() => resolve()); })));
     await this.worker.terminate();

@@ -126,7 +126,7 @@ export class ExistingHostCredentialOwner {
       if (key) {
         switch (this.#options.providerFamily) {
           case 'openai-responses': case 'openai-completions': case 'mistral-conversations':
-          case 'openai-codex-responses': case 'bedrock-converse-stream':
+            case 'openai-codex-responses': case 'bedrock-converse-stream': case 'pi-messages':
             if (!headers.has('authorization')) headers.set('authorization', `Bearer ${key}`);
             break;
           case 'anthropic-messages':

@@ -1,7 +1,7 @@
 import { PlanConflict } from './plan-service.js';
 import { parseThreadImages, threadInput } from './thread-images.js';
 import type { Express, RequestHandler } from 'express';
-import type { ThreadIdentity, ThreadSubmit } from '@varin/application-client';
+import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel } from '@varin/application-client';
 import { KernelClientError } from './kernel-client.js';
 import { ThreadAdapter } from './thread-adapter.js';
 
@@ -20,6 +20,13 @@ const revision = (value: unknown): number => {
 const identity = (body: Record<string, unknown>): ThreadIdentity => {
   if (body.runtime !== 'agent') throw new Error('Explicit thread runtime selection is required');
   return { runtime: 'agent', threadId: text(body.threadId), branchId: text(body.branchId) };
+};
+const modelSelection = (value: unknown): ThreadModel => {
+  const model = object(value);
+  if (Object.keys(model).some(key => !['providerId', 'modelId', 'thinkingLevel'].includes(key))) throw new Error('Unsupported model selection field');
+  if (model.thinkingLevel !== undefined && (typeof model.thinkingLevel !== 'string' || !['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(model.thinkingLevel))) throw new Error('Invalid thinking level');
+  return { providerId: text(model.providerId), modelId: text(model.modelId),
+    ...(model.thinkingLevel === undefined ? {} : { thinkingLevel: model.thinkingLevel as ThreadThinkingLevel }) };
 };
 
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
@@ -85,22 +92,18 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     return adapter.prepareSource({ ...identity(body), key: text(body.key), path: text(body.path), mode: body.mode });
   });
   post('context/compact', body => {
-    const model = object(body.model);
-    if (Object.keys(model).some(key => !['providerId', 'modelId'].includes(key))) throw new Error('Unsupported model selection field');
     return adapter.compact({ ...identity(body), key: text(body.key), throughId: text(body.throughId), expectedRevision: revision(body.expectedRevision),
-      model: { providerId: text(model.providerId), modelId: text(model.modelId) } });
+      model: modelSelection(body.model) });
   });
   post('context/publish', body => adapter.publishContext(identity(body), text(body.runId)));
   post('context/cancel', body => adapter.cancelContext(identity(body), text(body.runId)));
   post('context/resume', async body => { await adapter.resumeContext(identity(body), text(body.runId)); return {}; });
   post('submit', async body => {
-    const model = object(body.model);
-    if (Object.keys(model).some(key => !['providerId', 'modelId'].includes(key))) throw new Error('Unsupported model selection field');
     const images = parseThreadImages(body.images);
     if (typeof body.text !== 'string' || (!body.text.length && !images?.length)) throw new Error('Text or images are required');
     const input: ThreadSubmit = { ...identity(body), key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }),
       expectedHead: body.expectedHead === null ? null : text(body.expectedHead),
-      model: { providerId: text(model.providerId), modelId: text(model.modelId) } };
+      model: modelSelection(body.model) };
     if (body.source !== undefined) {
       const source = object(body.source);
       if (Object.keys(source).some(key => !['workspaceId', 'executionWorkspaceId', 'branchId', 'revision', 'mode', 'tools', 'liveRoot'].includes(key))) throw new Error('Unsupported source selection field');

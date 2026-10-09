@@ -15,7 +15,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { KernelRequestWindow } from "./request-window.js";
 import fs from "node:fs";
 import path from "node:path";
-import { KernelTransport, CONTROL_METHODS, controlFrame } from "./kernel-transport.js";
+import { KernelTransport, CONTROL_METHODS, CONTROL_RESPONSE_METHODS, controlFrame } from "./kernel-transport.js";
 import { fileURLToPath } from "node:url";
 import {
   KERNEL_PROTOCOL_VERSION,
@@ -744,9 +744,15 @@ export class KernelClient {
     this.controlWindow = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
     this.transportFailed = false;
     this.revokedGrants.clear();
-    const transport = await (this.options.transportFactory ?? KernelTransport.prepare)(value => this.consumeFrame(value), error => this.failAll(error, true));
+    const transport = await (this.options.transportFactory ?? KernelTransport.prepare)(value => this.consumeFrame(value), error => this.failAll(error, true), id => {
+      // Only a cancelled observer discards a response body. Domain effect receipts remain in
+      // their durable owner; this releases transport credit after the peer settles that body.
+      const pending = this.pending.get(id);
+      if (pending) { this.pending.delete(id); pending.release(); pending.reject(new KernelClientError({code:'kernel-response-discarded', message:'Kernel response body transfer stopped', retryable:false})); }
+    });
     this.transport = transport;
-    const child = this.spawnProcess(command.command, [...command.args, "--stdio"], {
+    let child: ChildProcessWithoutNullStreams;
+    try { child = this.spawnProcess(command.command, [...command.args, "--stdio"], {
       cwd: this.options.cwd ?? process.cwd(),
       env: {
         ...process.env,
@@ -755,7 +761,11 @@ export class KernelClient {
       },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
-    });
+    }); } catch (error) {
+      await transport.close();
+      if (this.transport === transport) this.transport = undefined;
+      throw new KernelClientError({code:'kernel-spawn-failed', message:error instanceof Error ? error.message : 'Kernel process could not start', retryable:true});
+    }
     this.child = child;
     child.stdin.on("error", (error) => {
       if (this.child !== child) return;
@@ -944,7 +954,7 @@ export class KernelClient {
 
   private async requestRaw<T, M extends KernelMethod = KernelMethod>(method: M, params: KernelMethodParams[M], options: { signal?: AbortSignal | undefined; grant?: KernelGrantHandle | undefined; allowBootstrap?: boolean | undefined; settleCancellation?: boolean | undefined } = {}): Promise<T> {
     const cancelled = () => new KernelClientError({ code: "cancelled", message: "Kernel request cancelled", retryable: true });
-    const release = this.closed && method === "kernel.shutdown" ? () => undefined : await (CONTROL_METHODS.has(method) ? this.controlWindow : this.window).acquire(options.signal, cancelled);
+    const release = this.closed && method === "kernel.shutdown" ? () => undefined : await (CONTROL_RESPONSE_METHODS.has(method) ? this.controlWindow : this.window).acquire(options.signal, cancelled);
     let admitted = false;
     try {
       if (this.closed && method !== "kernel.shutdown") throw new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closed" });
@@ -966,7 +976,7 @@ export class KernelClient {
         // Keep the ledger entry/credit until Rust acknowledges the actual stop.
         // Control frames bypass the ordinary request window.
         void this.write({ v: KERNEL_PROTOCOL_VERSION, kind: "cancel", id, ...identity }).catch(error => this.failAll(error instanceof Error ? error : new Error(String(error)), true));
-        this.transport?.cancelRequest(id);
+        this.transport?.cancelRequest(id, !options.settleCancellation);
       };
       const promise = new Promise<T>((resolve, reject) => {
         rejectPending = reject;

@@ -11,7 +11,7 @@ import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import type { KernelClient } from './kernel-client.js';
 import type {
   AdmissionInspectParams, AdmissionInspection, ChildTextPage, UnacceptedChildSource, ChildTask, ChildPrepareParams, ChildWait, ContextRefreshParams, ContextJobCreateParams, HistoryPage, HistoryPageParams, HistoryReference, HistoryBodyChunk, RunReconcileResult, ThreadSummary, LaunchIntent, LaunchSelectParams, InputSubmitParams, InputSubmitReceipt, Run, Operation,
-  HistoryItem, RuntimeEvent, RuntimeStatus, RunStartReceipt, InputEnqueueParams, InputReceipt, QueuedInput,
+  HistoryItem, RuntimeEvent, RuntimeStatus, RunStartReceipt, InputEnqueueParams, InputReceipt, QueuedInput, RunCancellationReceipt, OperationCancellationReceipt,
 } from './protocol.generated.js';
 
 export interface McpPreparation {
@@ -347,16 +347,16 @@ export class AgentRuntimeClient {
     if (['completed', 'failed', 'cancelled'].includes(run.state)) { this.kernel.cancelRunPreparation(runId); this.kernel.unregisterCredentialOwner(runId); this.kernel.unregisterMcpOwner(runId); this.kernel.unregisterPolicyOwner(runId); }
     return run;
   }
-  async cancelRun(runId: string, signal?: AbortSignal): Promise<Run> {
+  async cancelRun(runId: string, signal?: AbortSignal): Promise<RunCancellationReceipt> {
     this.kernel.cancelRunPreparation(runId);
-    const run = await this.kernel.agentRuntimeRequest<Run, 'runtime.run.cancel'>('runtime.run.cancel', { runId }, signal);
+    const run = await this.kernel.agentRuntimeRequest<RunCancellationReceipt, 'runtime.run.cancel'>('runtime.run.cancel', { runId }, signal);
     if (['completed', 'failed', 'cancelled'].includes(run.state)) { this.kernel.cancelRunPreparation(runId); this.kernel.unregisterCredentialOwner(runId); this.kernel.unregisterMcpOwner(runId); this.kernel.unregisterPolicyOwner(runId); }
     return run;
   }
   operation(operationId: string, signal?: AbortSignal): Promise<Operation> {
     return this.kernel.agentRuntimeRequest('runtime.operation.inspect', { operationId }, signal);
   }
-  cancelOperation(operationId: string, signal?: AbortSignal): Promise<Operation> {
+  cancelOperation(operationId: string, signal?: AbortSignal): Promise<OperationCancellationReceipt> {
     return this.kernel.agentRuntimeRequest('runtime.operation.cancel', { operationId }, signal);
   }
   historyPage(params: HistoryPageParams, signal?: AbortSignal): Promise<HistoryPage> {

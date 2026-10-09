@@ -2,15 +2,15 @@ import type { PlanService } from './plan-service.js';
 import type { ImageAttachment } from '@varin/protocol';
 import { threadInput } from './thread-images.js';
 import { createHash } from 'node:crypto';
-import type { ThreadIdentity, ThreadSubmit, ThreadSource, ThreadSnapshot, ThreadHistoryPage, ThreadCompact, ThreadContextState, ThreadPrepareSource, ThreadPreparedSource } from '@varin/application-client';
+import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadSubmit, ThreadSource, ThreadSnapshot, ThreadHistoryPage, ThreadCompact, ThreadContextState, ThreadPrepareSource, ThreadPreparedSource } from '@varin/application-client';
 import type { InputMode, InitialContext, ModelSessionConfiguration, CredentialScope, AgentRuntimeStreamEvent } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { ContextPreparer } from './thread-context.js';
 
 export interface ThreadModelAuthority {
-  listModels?(): Promise<Array<{ providerId: string; modelId: string; name?: string; acceptsImages?: boolean }>>;
-  resolveModel(selection: { providerId: string; modelId: string }): Promise<{ configuration: ModelSessionConfiguration; credentialOwner: ExistingHostCredentialOwner }>;
+  listModels?(): Promise<ThreadModelInfo[]>;
+  resolveModel(selection: ThreadModel): Promise<{ configuration: ModelSessionConfiguration; credentialOwner: ExistingHostCredentialOwner }>;
   rebindModel(configuration: ModelSessionConfiguration, expectedScope: CredentialScope): Promise<ExistingHostCredentialOwner>;
 }
 

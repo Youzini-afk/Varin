@@ -5,6 +5,8 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 1;
+pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "kernel.handshake",
@@ -21,6 +23,19 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.admission.inspect",
     "process.inspect",
     "process.kill",
+    "process.resize",
+    "process.release",
+    "process.subscription.ack",
+    "process.subscription.unsubscribe",
+];
+pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "kernel.handshake",
+    "kernel.ping",
+    "kernel.shutdown",
+    "authority.grant.revoke",
+    "runtime.status",
+    "runtime.run.cancel",
+    "runtime.operation.cancel",
     "process.resize",
     "process.release",
     "process.subscription.ack",
