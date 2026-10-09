@@ -100,8 +100,9 @@ impl RunAssembly {
             crate::plan::eligible(&catalog, &run.id)
                 .map_err(|error| KernelError::Authorization(error.to_string()))?
         };
-        let is_context_job = runtime.catalog().lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?
-            .is_context_job(&run.id).map_err(domain)?;
+        let summary_parts = runtime.catalog().lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?
+            .context_job_parts(&run.id).map_err(domain)?;
+        let is_context_job=summary_parts.is_some();
         let is_child = runtime
             .catalog()
             .lock()
@@ -161,8 +162,8 @@ impl RunAssembly {
         }
         .map_err(|e| KernelError::Operation(e.to_string()))?;
         check_cancelled()?;
-        if is_context_job {
-            start = varin_runtime::context_job::configure_compaction_start(start);
+        if let Some(parts)=summary_parts {
+            start = varin_runtime::context_job::configure_compaction_start(start,parts);
         }
         if let Some(binding) = p.policy_binding {
             start.policy = policy_bridge

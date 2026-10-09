@@ -24,7 +24,7 @@ fn db() -> Connection {
 fn collection_db() -> Connection {
     let db = db();
     db.execute_batch(
-        "CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE operations(id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE context_jobs(recipe TEXT NOT NULL)",
+        "CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE operations(id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE context_jobs(recipe TEXT NOT NULL); CREATE TABLE context_job_parts(body TEXT NOT NULL)",
     )
     .unwrap();
     db
@@ -115,7 +115,7 @@ fn corrupt_or_missing_live_object_aborts_sweep_before_deleting_other_objects() {
 }
 #[test]
 fn unsupported_catalog_versions_preserve_original_database_and_content() {
-    for version in [0, 1, 2, 3, 4, 6] {
+    for version in [0, 1, 2, 3, 4, 5, 7] {
         let fixture = Fixture::new();
         fs::create_dir_all(fixture.0.join("content/objects")).unwrap();
         let sentinel=fixture.0.join("content/objects/original-user-content");

@@ -41,12 +41,13 @@ it.each([
   await fs.writeFile(path.join(projectRoot,'.pi','settings.json'),'untrusted invalid configuration must not be read');
   const main:Array<{body:Record<string,unknown>;response:ServerResponse}>=[];
   const summaries:Array<ServerResponse>=[];
+  const summaryBodies:Array<Record<string,unknown>>=[];
   const server=createServer((request,response)=>{
     const chunks:Buffer[]=[];
     request.on('data',(bytes:Buffer)=>chunks.push(bytes));
     request.on('end',()=>{
       const body=JSON.parse(Buffer.concat(chunks).toString()) as Record<string,unknown>;
-      if(JSON.stringify(body.input).includes('Produce a faithful continuation summary')) summaries.push(response);
+      if(JSON.stringify(body.input).includes('Produce a faithful continuation summary')) {summaries.push(response);summaryBodies.push(body);}
       else {main.push({body,response});if(main.length===1) answer(response,'ACK: old source read');}
     });
   });
@@ -101,8 +102,13 @@ it.each([
   expect(jobs[0]!.request.owner_run_id).toBe(second.run_id);
   if(restart) {
     await runtime.enqueue({key:'tail-before-restart',threadId,branchId,mode:'boundary',input:{text:'NEW_TAIL before the Host restart'}});
+    answer(summaries[0]!,'PARTIAL_SUMMARY from the first source part');
+    await expect.poll(()=>summaries.length).toBe(2);
+    expect(JSON.stringify(summaryBodies[1]!.input)).toContain('PARTIAL_SUMMARY');
+    expect(JSON.stringify(summaryBodies[1]!.input)).toContain('OLD_EVIDENCE');
+    expect((await runtime.context(branchId))?.id).toBe(before?.id);
     if(restart==='completed') {
-      answer(summaries[0]!,'COMPACT_SUMMARY from the durable pre-crash output');
+      answer(summaries[1]!,'COMPACT_SUMMARY from the durable pre-crash output');
       await expect.poll(async()=>(await runtime.run(jobs[0]!.receipt.run_id)).state).toBe('completed');
       await expect.poll(()=>publicationEntered).toBe(true);
     }
@@ -120,6 +126,7 @@ it.each([
     } else {
       expect((await runtime.run(second.run_id)).state).toBe('waiting');
       expect((await runtime.run(jobs[0]!.receipt.run_id)).state).toBe('waiting');
+      expect(JSON.stringify(await runtime.history(jobs[0]!.receipt.branch_id))).toContain('PARTIAL_SUMMARY');
       await runtime.createThread('thread:independent','branch:independent');
       const independent=await runtime.submit({key:'independent',threadId:'thread:independent',branchId:'branch:independent',expectedHead:null,input:{text:'Independent work'},configuration});
       await runtime.startRun(independent.run_id);await expect.poll(()=>main.length).toBe(2);
@@ -128,23 +135,35 @@ it.each([
       expect((await runtime.run(second.run_id)).state).toBe('waiting');
       expect((await runtime.context(branchId))?.id).toBe(before?.id);
     }
-    expect(summaries).toHaveLength(1);
+    expect(summaries).toHaveLength(2);
   } else if(cancel) {
+    if(block) {
+      answer(summaries[0]!,'PARTIAL_SUMMARY before cancellation');
+      await expect.poll(()=>summaries.length).toBe(2);
+    }
     await runtime.cancelRun(second.run_id);
     await expect.poll(async()=>(await runtime.run(second.run_id)).state).toBe('cancelled');
     await expect.poll(async()=>(await runtime.run(jobs[0]!.receipt.run_id)).state).toBe('cancelled');
     expect((await runtime.context(branchId))?.id).toBe(before?.id);
   } else if(block) {
     if(fail) {
-      summaries[0]!.writeHead(500,{'content-type':'application/json'});
-      summaries[0]!.end(JSON.stringify({error:{message:'summary fixture failed'}}));
+      answer(summaries[0]!,'PARTIAL_SUMMARY before the failed final source part');
+      await expect.poll(()=>summaries.length).toBe(2);
+      summaries[1]!.writeHead(500,{'content-type':'application/json'});
+      summaries[1]!.end(JSON.stringify({error:{message:'summary fixture failed'}}));
       await expect.poll(async()=>(await runtime.run(second.run_id)).state).toBe('failed');
       expect(main).toHaveLength(1);
-      expect(summaries).toHaveLength(1);
+      expect(summaries).toHaveLength(2);
+      expect(JSON.stringify(await runtime.history(jobs[0]!.receipt.branch_id))).toContain('PARTIAL_SUMMARY');
       expect((await runtime.context(branchId))?.id).toBe(before?.id);
     } else {
       await runtime.enqueue({key:'tail-during-wait',threadId,branchId,mode:'boundary',input:{text:'NEW_TAIL during the durable context wait'}});
-      answer(summaries[0]!,'COMPACT_SUMMARY for the parked continuation');
+      answer(summaries[0]!,'PARTIAL_SUMMARY from the first source part');
+      await expect.poll(()=>summaries.length).toBe(2);
+      expect((await runtime.context(branchId))?.id).toBe(before?.id);
+      expect(JSON.stringify(summaryBodies[1]!.input)).toContain('PARTIAL_SUMMARY');
+      expect(JSON.stringify(summaryBodies[1]!.input)).toContain('OLD_EVIDENCE');
+      answer(summaries[1]!,'COMPACT_SUMMARY for the parked continuation');
       await expect.poll(()=>main.length).toBe(2);
       expect(JSON.stringify(main[1]!.body.input)).toContain('COMPACT_SUMMARY');
       expect(JSON.stringify(main[1]!.body.input)).toContain('NEW_TAIL');
@@ -152,7 +171,7 @@ it.each([
       answer(main[1]!.response,'Done after the durable wait');
       await expect.poll(async()=>(await runtime.run(second.run_id)).state).toBe('completed');
       expect((await runtime.context(branchId))?.revision).toBe(before!.revision+1);
-      expect(summaries).toHaveLength(1);
+      expect(summaries).toHaveLength(2);
     }
   } else {
     await runtime.enqueue({key:'new-tail',threadId,branchId,mode:'boundary',input:{text:'NEW_TAIL must survive the background summary'}});

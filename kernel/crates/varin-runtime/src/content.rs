@@ -253,7 +253,7 @@ impl ContentStore {
              UNION ALL SELECT body FROM model_outputs
              UNION ALL SELECT body FROM input_history_content".to_string();
         if contexts {roots.push_str(" UNION ALL SELECT body FROM context_checkpoints");}
-        roots.push_str(" UNION ALL SELECT recipe FROM context_jobs");
+        roots.push_str(" UNION ALL SELECT recipe FROM context_jobs UNION ALL SELECT body FROM context_job_parts");
         let mut references=Vec::new();
         let mut stmt=db.prepare(&roots)?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
