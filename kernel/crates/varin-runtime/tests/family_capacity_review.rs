@@ -612,7 +612,13 @@ mod engines {
             progress: ProgressSink::default(),
         };
         let worker = std::thread::spawn(move || engine.run(i, CancellationToken::default()));
-        wait_for(|| a.summary().queued == 1);
+        // Ordering reservations exist before the worker installs its revocation watch.
+        // Trigger revocation only once both parts of the queued-call fixture are ready.
+        wait_for(|| {
+            a.summary().queued == 1
+                && registrations.load(Ordering::SeqCst) == 1
+                && watched.lock().unwrap().is_some()
+        });
         assert_eq!(registrations.load(Ordering::SeqCst), 1);
         allowed.store(false, Ordering::SeqCst);
         watched.lock().unwrap().as_ref().unwrap().cancel();
