@@ -76,11 +76,49 @@ impl Catalog {
         memory_checkpoint: Option<String>,
         personalization: PersonalizationBasis,
     ) -> Result<context::ContextCheckpoint> {
+        let prepared = self.prepare_personalization_refresh(branch_id,expected_revision,effective_system_prompt,
+            instruction_sources,memory_checkpoint,personalization)?.load()?;
+        self.publish_personalization_refresh(prepared)
+    }
+    pub fn prepare_personalization_refresh(&self, branch_id: &str, expected_revision: u64,
+        effective_system_prompt: String, instruction_sources: Vec<String>, memory_checkpoint: Option<String>,
+        personalization: PersonalizationBasis) -> Result<PersonalizationRefresh> {
+        let current = self.capture_active_checkpoint(branch_id)?.ok_or_else(|| RuntimeError::Conflict("context has not been initialized".into()))?;
+        Ok(PersonalizationRefresh {current,content:self.content.clone(),branch_id:branch_id.into(),expected_revision,
+            effective_system_prompt,instruction_sources,memory_checkpoint,personalization,_publication:self.content.begin_publication()})
+    }
+    pub fn publish_personalization_refresh(&mut self, prepared: PreparedPersonalizationRefresh) -> Result<context::ContextCheckpoint> {
+        let current: Option<String> = self.db.query_row("SELECT checkpoint_id FROM active_contexts WHERE branch_id=?1",
+            [&prepared.checkpoint.proposal.branch_id],|row|row.get(0)).optional()?;
+        if current.as_deref() != Some(prepared.previous_id.as_str()) { return Err(RuntimeError::Conflict("active context checkpoint changed".into())); }
+        if !prepared.unchanged {
+            let tx = self.db.transaction()?;
+            context::publish_prepared(&tx, &prepared.checkpoint, &prepared.reference)?;
+            tx.commit()?;
+        }
+        Ok(prepared.checkpoint)
+    }
+}
+
+pub struct PersonalizationRefresh {
+    current: context::CheckpointRead,
+    content: crate::content::ContentStore,
+    branch_id: String, expected_revision: u64, effective_system_prompt: String, instruction_sources: Vec<String>,
+    memory_checkpoint: Option<String>, personalization: PersonalizationBasis,
+    _publication: crate::content::ContentPublication,
+}
+pub struct PreparedPersonalizationRefresh {
+    previous_id: String, checkpoint: context::ContextCheckpoint, reference: Value, unchanged: bool,
+    _publication: crate::content::ContentPublication,
+}
+impl PersonalizationRefresh {
+    pub fn load(self) -> Result<PreparedPersonalizationRefresh> {
+        let Self {current,content,branch_id,expected_revision,effective_system_prompt,instruction_sources,memory_checkpoint,personalization,_publication} = self;
         personalization.validate()?;
         if !instruction_sources.starts_with(&personalization.instruction_sources) {
             return Err(RuntimeError::Conflict("personalization refresh omitted frozen instruction identities".into()));
         }
-        let current = self.active_context(branch_id)?.ok_or_else(|| RuntimeError::Conflict("context has not been initialized".into()))?;
+        let current = current.load()?;
         let previous = current.personalization.as_ref().ok_or_else(|| RuntimeError::Invalid("context has no owned personalization basis".into()))?;
         if !previous.same_scope_and_source(&personalization) {
             return Err(RuntimeError::Conflict("personalization scope or frozen instruction source changed".into()));
@@ -95,7 +133,7 @@ impl Catalog {
             && current.proposal.instruction_sources == instruction_sources
             && current.proposal.memory_checkpoint == memory_checkpoint
             && previous == &personalization {
-            return Ok(current);
+            return Ok(PreparedPersonalizationRefresh {previous_id:current.id.clone(),checkpoint:current,reference:Value::Null,unchanged:true,_publication});
         }
         if current.revision != expected_revision {
             return Err(RuntimeError::Conflict("active context checkpoint changed".into()));
@@ -109,14 +147,12 @@ impl Catalog {
         }
         let proposal = context::ContextProposal {
             key: format!("personalization:{branch_id}:{}", current.revision.checked_add(1).ok_or_else(|| RuntimeError::Invalid("context revision exhausted".into()))?),
-            branch_id: branch_id.into(), through_id: current.proposal.through_id,
+            branch_id, through_id: current.proposal.through_id,
             expected_revision, summary: current.proposal.summary,
             effective_system_prompt, instruction_sources, memory_checkpoint,
         };
-        let (checkpoint, reference) = self.stage_context_with_personalization(proposal, Some(personalization))?;
-        let tx = self.db.transaction()?;
-        context::publish_prepared(&tx, &checkpoint, &reference)?;
-        tx.commit()?;
-        Ok(checkpoint)
+        let checkpoint = context::ContextCheckpoint {id:proposal.key.clone(),revision:current.revision+1,proposal,personalization:Some(personalization)};
+        let reference = content.save(&serde_json::to_value(&checkpoint)?)?;
+        Ok(PreparedPersonalizationRefresh {previous_id:current.id,checkpoint,reference,unchanged:false,_publication})
     }
 }

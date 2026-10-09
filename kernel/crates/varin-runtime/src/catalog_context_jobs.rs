@@ -2,6 +2,7 @@
 use super::*;
 pub use crate::context_job::{ContextJob, ContextJobRequest};
 use crate::execution::{Content, ConversationItem};
+use crate::context_job::SummarySource;
 
 impl Catalog {
     pub fn create_context_job(
@@ -16,14 +17,22 @@ impl Catalog {
 
     pub fn prepare_context_job(&self, request: ContextJobRequest, launch: launches::LaunchSelection,
         configuration: Value) -> Result<ContextJobPreparation> {
+        let duplicate: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM commands WHERE id=?1)", [format!("context-job:{}",request.key)], |row| row.get(0))?;
+        let source: Option<(u64, Option<String>, String)> = self.db.query_row(
+            "SELECT c.revision,c.through_id,c.body FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",
+            [&request.branch_id], |row| Ok((read_number(row,0)?, row.get(1)?, row.get(2)?))).optional()?;
+        if !duplicate && source.as_ref().map_or(0, |entry|entry.0) != request.expected_revision {
+            return Err(RuntimeError::Conflict("active context checkpoint changed".into()));
+        }
+        let source = source.map(|(_, through_id, reference)| Ok::<_, RuntimeError>(SummarySource {through_id,checkpoint:Some(serde_json::from_str(&reference)?)})).transpose()?.unwrap_or_default();
         Ok(ContextJobPreparation { database: self.db.path().ok_or_else(|| RuntimeError::Invalid("Catalog has no database".into()))?.into(),
             content: self.content.clone(), publication: self.content.begin_publication(),
-            duplicate: self.db.query_row("SELECT EXISTS(SELECT 1 FROM commands WHERE id=?1)", [format!("context-job:{}",request.key)], |row| row.get(0))?,
-            request, launch, configuration })
+            duplicate,
+            request, launch, configuration, source })
     }
 
     pub fn admit_prepared_context_job(&mut self, prepared: PreparedContextJob) -> Result<ContextJob> {
-        let PreparedContextJob { request, mut launch, mut configuration, _publication } = prepared;
+        let PreparedContextJob { request, mut launch, mut configuration, source, active_checkpoint, _publication } = prepared;
         if request.key.is_empty() || request.through_id.is_empty() {
             return Err(RuntimeError::Invalid(
                 "context job identity and boundary are required".into(),
@@ -37,7 +46,7 @@ impl Catalog {
         let config = configuration.as_object_mut().ok_or_else(|| {
             RuntimeError::Invalid("context job model configuration must be an object".into())
         })?;
-        if config.contains_key("context_job") {
+        if config.contains_key("context_job") || config.contains_key("context_job_source") {
             return Err(RuntimeError::Invalid(
                 "context_job is reserved for runtime admission".into(),
             ));
@@ -60,9 +69,11 @@ impl Catalog {
             let intent = self
                 .launch_intent(&receipt.run_id)?
                 .ok_or_else(|| RuntimeError::Invalid("context job launch is missing".into()))?;
+            let mut previous_configuration = self.run(&receipt.run_id)?.configuration;
+            previous_configuration.as_object_mut().ok_or_else(|| RuntimeError::Invalid("context job configuration is malformed".into()))?.remove("context_job_source");
             if job.request != request
                 || intent.selection != launch
-                || self.run(&receipt.run_id)?.configuration != configuration
+                || previous_configuration != configuration
             {
                 return Err(RuntimeError::Conflict(
                     "context job identity has different input".into(),
@@ -70,20 +81,18 @@ impl Catalog {
             }
             return Ok(job);
         }
-        let revision = self
-            .active_context(&request.branch_id)?
-            .map_or(0, |c| c.revision);
+        let revision: u64 = self.db.query_row("SELECT c.revision FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",
+            [&request.branch_id], |row|read_number(row,0)).optional()?.unwrap_or(0);
         if revision != request.expected_revision {
             return Err(RuntimeError::Conflict(
                 "active context checkpoint changed".into(),
             ));
         }
-        if request.personalization.is_none() && self.active_context(&request.branch_id)?.is_some_and(|checkpoint| checkpoint.personalization.is_some()) {
+        if request.personalization.is_none() && active_checkpoint.as_ref().is_some_and(|checkpoint| checkpoint.personalization.is_some()) {
             return Err(RuntimeError::Invalid("personalized compaction requires an explicit frozen candidate".into()));
         }
         if let Some(candidate) = &request.personalization {
-            candidate.validate()?;
-            let active = self.active_context(&request.branch_id)?.and_then(|checkpoint| checkpoint.personalization)
+            let active = active_checkpoint.as_ref().and_then(|checkpoint| checkpoint.personalization.as_ref())
                 .ok_or_else(|| RuntimeError::Invalid("memory compaction needs an admitted personalization basis".into()))?;
             if !active.same_scope_and_source(candidate) || active.configuration_digest != candidate.configuration_digest
                 || active.revision != candidate.revision || candidate.memory_snapshot.revision < active.memory_snapshot.revision {
@@ -91,6 +100,7 @@ impl Catalog {
             }
         }
         require_ancestor(&self.db, &request.branch_id, &request.through_id)?;
+        configuration.as_object_mut().unwrap().insert("context_job_source".into(), serde_json::to_value(source)?);
         let thread_id = format!("context-job-thread:{}", request.key);
         let branch_id = format!("context-job-branch:{}", request.key);
         let receipt = self.submit_admission(
@@ -234,23 +244,31 @@ pub(super) fn require_regular_branch(db: &Connection, branch_id: &str) -> Result
 pub struct ContextJobPreparation {
     database: std::path::PathBuf, content: crate::content::ContentStore,
     publication: crate::content::ContentPublication,
-    request: ContextJobRequest, launch: launches::LaunchSelection, configuration: Value, duplicate: bool,
+    request: ContextJobRequest, launch: launches::LaunchSelection, configuration: Value, duplicate: bool, source: SummarySource,
 }
 pub struct PreparedContextJob {
-    request: ContextJobRequest, launch: launches::LaunchSelection, configuration: Value,
+    request: ContextJobRequest, launch: launches::LaunchSelection, configuration: Value, source: SummarySource,
+    active_checkpoint: Option<context::ContextCheckpoint>,
     _publication: crate::content::ContentPublication,
 }
 impl ContextJobPreparation {
-    pub fn load(self) -> Result<PreparedContextJob> {
+    pub fn load(mut self) -> Result<PreparedContextJob> {
         let database = Connection::open_with_flags(&self.database,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+        let active_checkpoint = if self.duplicate { None } else { self.source.checkpoint.as_ref().map(|reference|
+            self.content.load(reference).and_then(|value|serde_json::from_value(value).map_err(Into::into))).transpose()? };
         if !self.duplicate {
+        if let Some(candidate) = &self.request.personalization { candidate.validate()?; }
         require_ancestor(&database, &self.request.branch_id, &self.request.through_id)?;
-        let source = source_metadata(&database, &self.request.through_id)?;
+        if let Some(boundary) = &self.source.through_id {
+            let visible: bool = database.query_row("WITH RECURSIVE ancestors(id,parent) AS (SELECT id,parent FROM history WHERE id=?1 UNION ALL SELECT h.id,h.parent FROM history h JOIN ancestors a ON h.id=a.parent) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=?2)",params![self.request.through_id,boundary],|row|row.get(0))?;
+            if !visible { self.source = SummarySource::default(); }
+        }
+        let source = source_metadata_until(&database, Some(&self.request.through_id), self.source.through_id.as_deref())?;
         let history = hydrate_source(&self.content, source)?;
         crate::execution::validate_history_pairs(&history).map_err(|error| RuntimeError::Conflict(error.to_string()))?;
         }
-        Ok(PreparedContextJob { request: self.request, launch: self.launch, configuration: self.configuration,
+        Ok(PreparedContextJob { request: self.request, launch: self.launch, configuration: self.configuration, source:self.source, active_checkpoint,
             _publication: self.publication })
     }
 }
@@ -301,11 +319,12 @@ pub(super) fn require_ancestor(database: &Connection, branch: &str, through: &st
     if !visible { return Err(RuntimeError::Conflict("context boundary is no longer on the selected branch".into())); }
     Ok(())
 }
-pub(super) fn source_metadata(database: &Connection, through: &str) -> Result<Vec<HistoryItem>> {
-    let mut cursor = Some(through.to_string());
+pub(super) fn source_metadata_until(database: &Connection, head: Option<&str>, through: Option<&str>) -> Result<Vec<HistoryItem>> {
+    let mut cursor = head.map(str::to_owned);
     let mut history = Vec::new();
     let mut visited = std::collections::BTreeSet::new();
-    while let Some(key) = cursor {
+    while cursor.as_deref() != through {
+        let key = cursor.ok_or_else(|| RuntimeError::Conflict("context boundary is not an ancestor of the selected history".into()))?;
         if !visited.insert(key.clone()) { return Err(RuntimeError::Invalid("history ancestry contains a cycle".into())); }
         let item: HistoryItem = record(database,"history",&key)?;
         cursor = item.parent.clone(); history.push(item);

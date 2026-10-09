@@ -31,6 +31,11 @@ writing Pi session files or the Host harness's existing execution records.
 - Host model admission retains actual context capacity, thinking mappings and configured sampling
   parameters. Unknown capacity remains unknown. Desired/active model changes within a Run and automatic
   capacity-triggered compaction are not yet connected to the product path.
+- Context compilation walks anchored immutable history on a read worker. Repeated summary jobs freeze
+  the previously published checkpoint and summarize its continuation instead of repeatedly loading the
+  entire ancestor. A manual earlier boundary can select the original history. Personalization refresh
+  stages unchanged/new candidates outside Catalog, preserves the admitted memory snapshot, and publishes
+  against the captured active checkpoint. Failed, cancelled or stale candidates leave that checkpoint intact.
 
 The wire source remains `kernel/protocol/schema.json`; it generates the state enums and the
 Host request/response DTOs. Domain implementation types remain private to Rust.

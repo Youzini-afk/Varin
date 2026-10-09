@@ -48,9 +48,10 @@ pub(crate) fn schema(mutations: bool) -> ToolSchema {
 fn scope(basis: &PersonalizationBasis) -> Value {
     json!({"mode":basis.mode,"sessionId":basis.session_id,"projectId":basis.project_id})
 }
-fn basis(catalog: &Catalog, run_id: &str) -> Result<Option<PersonalizationBasis>, ExecutionError> {
-    let run = catalog.run(run_id).map_err(error)?;
-    let basis = catalog.run_personalization(run_id).map_err(error)?;
+fn basis(catalog: &Arc<Mutex<Catalog>>, run_id: &str) -> Result<Option<PersonalizationBasis>, ExecutionError> {
+    let (run, read) = {let catalog = catalog.lock().map_err(error)?;
+        (catalog.run(run_id).map_err(error)?, catalog.capture_admitted_checkpoint(run_id).map_err(error)?)};
+    let basis = read.map(|read|read.load()).transpose().map_err(error)?.and_then(|checkpoint|checkpoint.personalization);
     if basis
         .as_ref()
         .is_some_and(|basis| basis.session_id != run.thread_id)
@@ -112,8 +113,7 @@ impl ToolExecutor for MemoryTools {
             return Err(error("memory action cancelled"));
         }
         args(call, self.mutations)?;
-        let catalog = self.catalog.lock().map_err(error)?;
-        let basis = basis(&catalog, &context.run_id)?
+        let basis = basis(&self.catalog, &context.run_id)?
             .ok_or_else(|| error("memory scope has not been admitted"))?;
         if basis.mode != "agent" {
             return Err(error("Bot memory has a separate owner"));
@@ -128,11 +128,7 @@ impl ToolExecutor for MemoryTools {
         cancel: &CancellationToken,
     ) -> ToolCompletion {
         let result = (|| {
-            let basis = {
-                let catalog = self.catalog.lock().map_err(error)?;
-                basis(&catalog, &context.run_id)?
-                    .ok_or_else(|| error("memory scope unavailable"))?
-            };
+            let basis = basis(&self.catalog, &context.run_id)?.ok_or_else(|| error("memory scope unavailable"))?;
             let origin = format!("run:{}:{}", context.run_id, context.operation_id);
             let value = self.bridge.query(json!({"action":"tool","runId":context.run_id,"scope":scope(&basis),"origin":origin,"arguments":call.arguments}), cancel)?;
             if value["status"] == "ready" && !value["memoryReceipt"].is_null() {
@@ -208,27 +204,19 @@ impl ContextPreparation for Prepare {
         owner_generation: u64,
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
+        let Some(admitted) = basis(&self.catalog, run_id)? else {return Ok(());};
         loop {
             if cancel.is_cancelled() {
                 return Err(error("context preparation cancelled"));
             }
-            let (checkpoint, admitted) = {
+            let checkpoint = {
                 let catalog = self.catalog.lock().map_err(error)?;
                 let run = catalog.run(run_id).map_err(error)?;
                 if run.epoch != owner_generation {
                     return Err(error("context owner generation changed"));
                 }
-                let Some(admitted) = basis(&catalog, run_id)? else {
-                    return Ok(());
-                };
-                (
-                    catalog
-                        .active_context(&run.branch_id)
-                        .map_err(error)?
-                        .ok_or_else(|| error("active context missing"))?,
-                    admitted,
-                )
-            };
+                catalog.capture_active_checkpoint(&run.branch_id).map_err(error)?.ok_or_else(|| error("active context missing"))?
+            }.load().map_err(error)?;
             let reply = self.bridge.query(json!({"action":"synchronize","runId":run_id,"scope":scope(&admitted),"checkpoint":checkpoint}), cancel)?;
             if reply["status"] != "ready" {
                 return Err(error(
@@ -244,28 +232,26 @@ impl ContextPreparation for Prepare {
             if cancel.is_cancelled() {
                 return Err(error("context preparation cancelled"));
             }
+            let refresh = {
+                let catalog = self.catalog.lock().map_err(error)?;
+                let current = catalog.capture_active_checkpoint(&checkpoint.proposal.branch_id).map_err(error)?.ok_or_else(||error("context disappeared"))?;
+                if current.revision != checkpoint.revision {continue;}
+                catalog.prepare_personalization_refresh(&checkpoint.proposal.branch_id,checkpoint.revision,
+                    prepared.effective_system_prompt,prepared.instruction_sources,prepared.memory_checkpoint,prepared.personalization).map_err(error)?
+            }.load().map_err(error)?;
             let mut catalog = self.catalog.lock().map_err(error)?;
             let run = catalog.run(run_id).map_err(error)?;
             if cancel.is_cancelled() || run.cancel_requested || run.state.terminal() || run.epoch != owner_generation {
                 return Err(error("context preparation is no longer active"));
             }
             let current = catalog
-                .active_context(&checkpoint.proposal.branch_id)
+                .capture_active_checkpoint(&checkpoint.proposal.branch_id)
                 .map_err(error)?
                 .ok_or_else(|| error("context disappeared"))?;
             if current.revision != checkpoint.revision {
                 continue;
             }
-            catalog
-                .refresh_personalization(
-                    &checkpoint.proposal.branch_id,
-                    checkpoint.revision,
-                    prepared.effective_system_prompt,
-                    prepared.instruction_sources,
-                    prepared.memory_checkpoint,
-                    prepared.personalization,
-                )
-                .map_err(error)?;
+            catalog.publish_personalization_refresh(refresh).map_err(error)?;
             catalog
                 .synchronize_memory(run_id, owner_generation, state)
                 .map_err(error)?;
@@ -285,12 +271,13 @@ pub(crate) fn reconcile(
 ) -> Result<(), crate::error::KernelError> {
     std::thread::Builder::new().name("memory-reconcile".into()).spawn(move || {
         let result = (|| -> Result<Value, ExecutionError> {
-            let (operations, admitted) = {
+            let owner = runtime.catalog();
+            let Some(admitted) = basis(&owner, &run_id)? else { return Ok(json!({"reconciled":[],"unresolved":[]})); };
+            let operations = {
                 let owner = runtime.catalog(); let catalog = owner.lock().map_err(error)?;
-                let Some(admitted) = basis(&catalog, &run_id)? else { return Ok(json!({"reconciled":[],"unresolved":[]})); };
                 let operations = catalog.pending_external_operations(TOOL).map_err(error)?.into_iter()
                     .map(|id| catalog.operation(&id).map_err(error)).collect::<Result<Vec<_>, _>>()?.into_iter().filter(|op| op.run_id == run_id).collect::<Vec<_>>();
-                (operations, admitted)
+                operations
             };
             let mut reconciled = Vec::new(); let mut unresolved = Vec::new();
             for operation in operations {
