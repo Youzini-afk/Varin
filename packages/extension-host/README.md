@@ -35,3 +35,11 @@ Registered built-in package roots must identify physical directories that the Ho
 copy. Archive-backed distributions resolve their logical module address to the corresponding unpacked
 directory before constructing the package manager; brokered processes are launched only from the
 resulting immutable artifact, never from an application archive.
+
+Host activation is serialized per extension owner, not across the catalog. Dependency preparation
+resolves before owner admission; concurrent consumers reuse the provider generation after its
+preparation finishes. Independent startup and retirement proceed in parallel. A canceled or stale
+preparation cannot publish, and shutdown closes admission before aborting unpublished broker owners.
+Service publication reserves only conflicting declared single-provider services during storage/catalog
+commit; registry publication itself is synchronous. Retired generations still drain their pinned calls
+before transport disposal. Failed replacement routing rollback touches only selections it changed.

@@ -73,6 +73,8 @@ export type BrokeredHostTransportFactory = (
 ) => BrokeredHostTransport;
 
 interface BrokeredHostInstance {
+  epoch: number;
+  preparation: AbortController;
   artifactIntegrity: string;
   broker: BrokeredHostTransport;
   desiredRevision: number;
@@ -309,7 +311,14 @@ export class BrokeredHostSupervisor {
   readonly #storage: ExtensionStorageStore;
   readonly #storageSessions = new Map<string, Map<string, BrokerStorageSession>>();
   readonly #transportFactory: BrokeredHostTransportFactory;
-  #queue: Promise<void> = Promise.resolve();
+  readonly #operations = new Map<string, Promise<void>>();
+  readonly #selectedPreparations = new Map<string, { identity: string; promise: Promise<void> }>();
+  readonly #candidatePreparations = new Map<string, { identity: string; promise: Promise<VarinExtensionCandidatePreparationResult> }>();
+  readonly #preparations = new Map<string, AbortController>();
+  readonly #preparationTargets = new Map<string, { integrity: string; slot: "candidate" | "selected"; desiredRevision: number }>();
+  readonly #epochs = new Map<string, number>();
+  #stopping = false;
+  #shutdown: Promise<void> | undefined;
 
   constructor(options: BrokeredHostSupervisorOptions) {
     this.#brokerScript = options.brokerScript;
@@ -327,20 +336,25 @@ export class BrokeredHostSupervisor {
     }));
   }
 
-  reconcile(snapshot?: VarinExtensionCatalogSnapshot): Promise<void> {
-    return this.#enqueue(async () => this.#reconcile(snapshot ?? await this.#catalog.snapshot()));
+  reconcile(_snapshot?: VarinExtensionCatalogSnapshot): Promise<void> {
+    // Callers may have spent time preparing or deleting data after obtaining their snapshot.
+    // Re-read the authority rather than retract a newer owner from that stale observation.
+    return this.#reconcileSnapshot();
   }
 
   prepareCandidate(extensionId: string, integrity: string): Promise<VarinExtensionCandidatePreparationResult> {
-    return this.#enqueue(() => this.#prepareCandidate(extensionId, integrity));
+    return this.#prepareCandidate(extensionId, integrity);
   }
 
   selectCandidate(extensionId: string, integrity: string, expectedRevision: number): Promise<VarinExtensionCatalogSnapshot> {
-    return this.#enqueue(() => this.#selectCandidate(extensionId, integrity, expectedRevision));
+    return this.#prepareCandidate(extensionId, integrity).then(() =>
+      this.#enqueue(extensionId, () => this.#selectCandidate(extensionId, integrity, expectedRevision)));
   }
 
   discardPreparedCandidate(extensionId: string, integrity: string): Promise<void> {
-    return this.#enqueue(async () => {
+    const preparing = this.#preparationTargets.get(extensionId);
+    if (preparing?.slot === "candidate" && preparing.integrity === integrity) this.#invalidate(extensionId);
+    return this.#enqueue(extensionId, async () => {
       const staged = this.#staged.get(extensionId);
       if (!staged || staged.artifactIntegrity !== integrity) return;
       this.#staged.delete(extensionId);
@@ -349,6 +363,7 @@ export class BrokeredHostSupervisor {
   }
 
   forceTerminate(extensionId: string): void {
+    this.#invalidate(extensionId);
     this.#active.get(extensionId)?.broker.forceTerminate();
     this.#staged.get(extensionId)?.broker.forceTerminate();
   }
@@ -357,40 +372,31 @@ export class BrokeredHostSupervisor {
     return [...this.#active.keys()].sort();
   }
 
-  activateExtension(extensionId: string): Promise<void> {
-    return this.#enqueue(async () => {
-      const snapshot = await this.#catalog.snapshot();
-      const entry = snapshot.extensions.find((value) => value.manifest.id === extensionId);
-      if (!entry?.desired.enabled || !entry.manifest.entrypoints?.host) return;
-      await this.#ensureSelectedActive(entry, snapshot, []);
-    });
+  async activateExtension(extensionId: string): Promise<void> {
+    this.#assertRunning();
+    const snapshot = await this.#catalog.snapshot();
+    const entry = snapshot.extensions.find((value) => value.manifest.id === extensionId);
+    if (!entry?.desired.enabled || !entry.manifest.entrypoints?.host) return;
+    await this.#ensureSelectedActive(entry, snapshot, []);
   }
 
-  deactivateExtension(extensionId: string): Promise<void> {
-    return this.#enqueue(async () => {
-      const snapshot = await this.#catalog.snapshot();
-      const staged = this.#staged.get(extensionId);
-      if (staged) {
-        this.#staged.delete(extensionId);
-        await this.#disposeInstance(staged, false);
-      }
-      await this.#deactivateWithDependents(extensionId, snapshot);
-    });
+  async deactivateExtension(extensionId: string, afterDeactivate?: () => Promise<void>): Promise<void> {
+    const snapshot = await this.#catalog.snapshot();
+    await this.#deactivateWithDependents(extensionId, snapshot, new Set(), afterDeactivate);
   }
 
-  activateForService(requestValue: VarinExtensionServiceInvocationRequest | unknown): Promise<void> {
+  async activateForService(requestValue: VarinExtensionServiceInvocationRequest | unknown): Promise<void> {
+    this.#assertRunning();
     const request = parseVarinExtensionServiceInvocationRequest(requestValue);
-    return this.#enqueue(async () => {
-      const snapshot = await this.#catalog.snapshot();
-      const providers = snapshot.extensions.filter((entry) => (
-        entry.desired.enabled
-        && Boolean(entry.manifest.entrypoints?.host)
-        && (entry.manifest.provides?.services ?? []).some((service) => (
-          service.id === request.serviceId && service.version === request.version
-        ))
-      ));
-      for (const provider of providers) await this.#ensureSelectedActive(provider, snapshot, []);
-    });
+    const snapshot = await this.#catalog.snapshot();
+    const providers = snapshot.extensions.filter((entry) => (
+      entry.desired.enabled
+      && Boolean(entry.manifest.entrypoints?.host)
+      && (entry.manifest.provides?.services ?? []).some((service) => (
+        service.id === request.serviceId && service.version === request.version
+      ))
+    ));
+    await Promise.all(providers.map((provider) => this.#ensureSelectedActive(provider, snapshot, [])));
   }
 
   hasStagedProvider(providerId: string): boolean {
@@ -417,26 +423,78 @@ export class BrokeredHostSupervisor {
   }
 
   shutdown(): Promise<void> {
-    return this.#enqueue(async () => {
+    if (this.#shutdown) return this.#shutdown;
+    this.#stopping = true;
+    for (const [id, controller] of this.#preparations) {
+      this.#invalidate(id);
+      controller.abort(new Error("Host supervisor is shutting down"));
+    }
+    this.#shutdown = (async () => {
+      await Promise.all([...this.#operations.values()]);
       const snapshot = await this.#catalog.snapshot();
-      for (const extensionId of [...this.#active.keys()]) {
-        await this.#deactivateWithDependents(extensionId, snapshot);
-      }
-      for (const instance of this.#staged.values()) await this.#disposeInstance(instance, false);
-      this.#staged.clear();
-    });
+      await Promise.all([...new Set([...this.#active.keys(), ...this.#staged.keys()])]
+        .map((id) => this.#deactivateWithDependents(id, snapshot)));
+    })();
+    return this.#shutdown;
   }
 
-  #enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.#queue.then(operation, operation);
-    this.#queue = result.then(() => undefined, () => undefined);
+  #assertRunning(): void {
+    if (this.#stopping) throw new Error("Host supervisor is shutting down");
+  }
+
+  #invalidate(extensionId: string): void {
+    this.#epochs.set(extensionId, (this.#epochs.get(extensionId) ?? 0) + 1);
+    this.#preparations.get(extensionId)?.abort(new Error(`Host activation was cancelled: ${extensionId}`));
+  }
+
+  // Only a single owner's preparation, storage transaction and retirement are serialized.
+  // Dependencies are resolved before entering this queue, so waiters share their provider's
+  // completed generation without holding an owner lock while traversing the graph.
+  #enqueue<T>(extensionId: string, operation: () => Promise<T>): Promise<T> {
+    const result = (this.#operations.get(extensionId) ?? Promise.resolve()).then(operation, operation);
+    const settled = result.then(() => undefined, () => undefined);
+    this.#operations.set(extensionId, settled);
+    void settled.then(() => {
+      if (this.#operations.get(extensionId) === settled) this.#operations.delete(extensionId);
+    });
     return result;
   }
 
+  async #reconcileSnapshot(): Promise<void> {
+    this.#assertRunning();
+    await this.#reconcile(await this.#catalog.snapshot());
+  }
+
+  async #assertCurrent(instance: BrokeredHostInstance): Promise<void> {
+    this.#assertRunning();
+    const snapshot = await this.#catalog.snapshot();
+    this.#assertRunning();
+    if ((this.#epochs.get(instance.owner.extensionId) ?? 0) !== instance.epoch) {
+      throw new Error(`Host activation was cancelled: ${instance.owner.extensionId}`);
+    }
+    const entry = snapshot.extensions.find((value) => value.manifest.id === instance.owner.extensionId);
+    const integrity = instance.slot === "candidate" ? entry?.candidate?.integrity : entry?.integrity;
+    if (!entry?.desired.enabled || entry.desired.revision !== instance.desiredRevision
+      || integrity !== instance.artifactIntegrity) throw new Error(`Host activation is stale: ${instance.owner.extensionId}`);
+    this.#assertDependencies(instance.manifest);
+  }
+
+  #assertDependencies(manifest: VarinExtensionManifest): void {
+    for (const requirement of manifest.requires?.services ?? []) {
+      if (!requirement.optional && this.#services.providersFor(requirement).length === 0) {
+        throw new Error(`Required Host service is unavailable: ${serviceKey(requirement.id, requirement.version)}`);
+      }
+    }
+  }
+
   async #prepareCandidate(extensionId: string, integrity: string): Promise<VarinExtensionCandidatePreparationResult> {
+    this.#assertRunning();
     const snapshot = await this.#catalog.snapshot();
     const entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
     if (!entry?.candidate || entry.candidate.integrity !== integrity) throw new Error(`Host candidate is no longer current: ${extensionId}`);
+    const preparing = this.#preparationTargets.get(extensionId);
+    if (preparing?.slot === "candidate" && preparing.integrity !== integrity) this.#invalidate(extensionId);
+    const epoch = this.#epochs.get(extensionId) ?? 0;
     if (!entry.candidate.capabilitiesReviewed) throw new Error(`Host candidate capability changes require review: ${extensionId}`);
     if (entry.candidate.manifest.entrypoints?.host?.mode === "native") {
       if (this.#active.has(extensionId)) {
@@ -463,18 +521,43 @@ export class BrokeredHostSupervisor {
         throw new Error(`Required Host service is unavailable: ${serviceKey(requirement.id, requirement.version)}`);
       }
     }
-    const current = this.#staged.get(extensionId);
-    if (current?.artifactIntegrity === integrity) return this.#candidatePreparation(current);
-    if (current) await this.#disposeInstance(current, false);
-    const instance = await this.#prepareInstance(entry, {
-      capabilityGrants: entry.candidate.capabilityGrants,
-      integrity,
-      manifest: entry.candidate.manifest,
-      slot: "candidate",
-      version: entry.candidate.resolvedVersion,
-    }, snapshot);
-    this.#staged.set(extensionId, instance);
-    return this.#candidatePreparation(instance);
+    const candidate = entry.candidate;
+    const identity = `${integrity}:${entry.desired.revision}:${epoch}`;
+    const pending = this.#candidatePreparations.get(extensionId);
+    if (pending?.identity === identity) return pending.promise;
+    const promise = this.#enqueue(extensionId, async () => {
+      this.#assertRunning();
+      if ((this.#epochs.get(extensionId) ?? 0) !== epoch) throw new Error("Host activation was cancelled");
+      const current = this.#staged.get(extensionId);
+      if (current?.artifactIntegrity === integrity && current.desiredRevision === entry.desired.revision && current.epoch === epoch) {
+        await this.#assertCurrent(current);
+        return this.#candidatePreparation(current);
+      }
+      if (current) {
+        this.#staged.delete(extensionId);
+        await this.#disposeInstance(current, false);
+      }
+      const instance = await this.#prepareInstance(entry, {
+        capabilityGrants: candidate.capabilityGrants,
+        integrity,
+        manifest: candidate.manifest,
+        slot: "candidate",
+        version: candidate.resolvedVersion,
+      }, snapshot);
+      try {
+        await this.#assertCurrent(instance);
+        this.#staged.set(extensionId, instance);
+        return this.#candidatePreparation(instance);
+      } catch (error) {
+        await this.#disposeInstance(instance, false);
+        throw error;
+      }
+    });
+    this.#candidatePreparations.set(extensionId, { identity, promise });
+    try { return await promise; }
+    finally {
+      if (this.#candidatePreparations.get(extensionId)?.promise === promise) this.#candidatePreparations.delete(extensionId);
+    }
   }
 
   async #selectCandidate(
@@ -482,17 +565,8 @@ export class BrokeredHostSupervisor {
     integrity: string,
     expectedRevision: number,
   ): Promise<VarinExtensionCatalogSnapshot> {
-    let staged = this.#staged.get(extensionId);
-    if (!staged) {
-      const snapshot = await this.#catalog.snapshot();
-      const entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
-      if (entry?.candidate?.integrity === integrity
-        && entry.candidate.capabilitiesReviewed
-        && entry.candidate.manifest.entrypoints?.host?.mode === "brokered") {
-        await this.#prepareCandidate(extensionId, integrity);
-        staged = this.#staged.get(extensionId);
-      }
-    }
+    const staged = this.#staged.get(extensionId);
+    this.#assertRunning();
     if (!staged) return this.#packages.selectCandidate({ candidateIntegrity: integrity, expectedRevision, extensionId });
     if (staged.artifactIntegrity !== integrity) throw new Error(`Prepared Host candidate is stale: ${extensionId}`);
     const previous = this.#active.get(extensionId);
@@ -501,10 +575,20 @@ export class BrokeredHostSupervisor {
     let selected: VarinExtensionCatalogSnapshot;
     if (previous) this.#setStoragePhase(previous, "draining");
     try {
+      await this.#assertCurrent(staged);
       await this.#commitInstanceStorage(staged);
       storageCommitted = true;
+      await this.#assertCurrent(staged);
       selected = await this.#packages.selectCandidate({ candidateIntegrity: integrity, expectedRevision, extensionId });
+      // Durable selection may finish after shutdown or an explicit disable cancelled this owner.
+      // The committed catalog can recover that artifact next startup; never publish a killed worker.
+      this.#assertRunning();
+      if ((this.#epochs.get(extensionId) ?? 0) !== staged.epoch || staged.preparation.signal.aborted) {
+        throw new Error(`Host candidate publication was cancelled: ${extensionId}`);
+      }
+      this.#assertDependencies(staged.manifest);
     } catch (error) {
+      await replacement.rollback();
       if (storageCommitted) await this.#rollbackInstanceStorage(staged);
       this.#setStoragePhase(staged, "activating");
       if (previous) this.#setStoragePhase(previous, "active");
@@ -528,13 +612,20 @@ export class BrokeredHostSupervisor {
   async #reconcile(snapshot: VarinExtensionCatalogSnapshot): Promise<void> {
     if (!snapshot.authoritative) return;
     const enabled = new Map(snapshot.extensions.filter((entry) => entry.desired.enabled).map((entry) => [entry.manifest.id, entry]));
-    for (const extensionId of [...this.#active.keys()]) {
+    for (const [extensionId, target] of this.#preparationTargets) {
       const entry = enabled.get(extensionId);
-      if (!entry || !entry.manifest.entrypoints?.host) {
-        await this.#deactivateWithDependents(extensionId, snapshot);
+      const integrity = target.slot === "candidate" ? entry?.candidate?.integrity : entry?.integrity;
+      if (!entry || integrity !== target.integrity || entry.desired.revision !== target.desiredRevision) {
+        this.#invalidate(extensionId);
       }
     }
-    for (const entry of enabled.values()) {
+    const owners = new Set([...this.#active.keys(), ...this.#staged.keys(), ...this.#preparations.keys(),
+      ...this.#selectedPreparations.keys(), ...this.#candidatePreparations.keys()]);
+    const deactivations = [...owners].filter((extensionId) => {
+      const entry = enabled.get(extensionId);
+      return !entry || !entry.manifest.entrypoints?.host;
+    }).map((extensionId) => this.#deactivateWithDependents(extensionId, snapshot));
+    await Promise.all([...deactivations, ...[...enabled.values()].map(async (entry) => {
       if (entry.candidate?.applyRequested
         && entry.candidate.manifest.entrypoints?.host
         && (entry.candidate.manifest.entrypoints?.surfaces ?? []).length === 0
@@ -542,14 +633,14 @@ export class BrokeredHostSupervisor {
         try {
           const current = await this.#catalog.snapshot();
           const candidate = current.extensions.find((value) => value.manifest.id === entry.manifest.id)?.candidate;
-          if (!candidate?.applyRequested || candidate.integrity !== entry.candidate.integrity) continue;
+          if (!candidate?.applyRequested || candidate.integrity !== entry.candidate.integrity) return;
           const selected = candidate.manifest.entrypoints?.host?.mode === "native"
             ? await this.#packages.selectCandidate({
               candidateIntegrity: candidate.integrity,
               expectedRevision: current.revision,
               extensionId: entry.manifest.id,
             })
-            : await this.#selectCandidate(entry.manifest.id, candidate.integrity, current.revision);
+            : await this.selectCandidate(entry.manifest.id, candidate.integrity, current.revision);
           const selectedEntry = selected.extensions.find((value) => value.manifest.id === entry.manifest.id);
           if (selectedEntry) await this.#ensureSelectedActive(selectedEntry, selected, []);
         } catch (error) {
@@ -562,9 +653,9 @@ export class BrokeredHostSupervisor {
             error instanceof Error ? error.message : String(error),
           )).catch(() => undefined);
         }
-        continue;
+        return;
       }
-      if (!entry.manifest.entrypoints?.host) continue;
+      if (!entry.manifest.entrypoints?.host) return;
       const activation = entry.manifest.entrypoints.host.activation ?? [];
       const startsWithApplication = activation.length === 0
         || activation.includes("application-startup")
@@ -579,7 +670,7 @@ export class BrokeredHostSupervisor {
             "inactive",
           )).catch(() => undefined);
         }
-        continue;
+        return;
       }
       try {
         await this.#ensureSelectedActive(entry, snapshot, []);
@@ -594,9 +685,9 @@ export class BrokeredHostSupervisor {
           native ? "trusted_native_host_activation_failed" : "brokered_host_activation_failed",
           error instanceof Error ? error.message : String(error),
         )).catch(() => undefined);
-        continue;
+        return;
       }
-    }
+    })]);
   }
 
   async #ensureSelectedActive(
@@ -604,31 +695,8 @@ export class BrokeredHostSupervisor {
     snapshot: VarinExtensionCatalogSnapshot,
     stack: string[],
   ): Promise<void> {
-    const active = this.#active.get(entry.manifest.id);
-    if (active && active.artifactIntegrity === entry.integrity && active.desiredRevision === entry.desired.revision) return;
-    const native = entry.manifest.entrypoints?.host?.mode === "native";
-    if (native && active && active.artifactIntegrity === entry.integrity) {
-      active.desiredRevision = entry.desired.revision;
-      await this.#reportActual(entry.manifest.id, diagnosticState(
-        snapshot.hostId,
-        entry.desired.revision,
-        active.owner.generation,
-        "active",
-      )).catch(() => undefined);
-      return;
-    }
-    if (native && (this.#nativeRestartRequired.has(entry.manifest.id) || (active && active.artifactIntegrity !== entry.integrity))) {
-      this.#nativeRestartRequired.add(entry.manifest.id);
-      await this.#reportActual(entry.manifest.id, diagnosticState(
-        snapshot.hostId,
-        entry.desired.revision,
-        active?.owner.generation ?? 0,
-        "restart-required",
-        "trusted_native_restart_required",
-        "The trusted-native Host generation can change only after the application host restarts",
-      )).catch(() => undefined);
-      return;
-    }
+    this.#assertRunning();
+    const epoch = this.#epochs.get(entry.manifest.id) ?? 0;
     if (stack.includes(entry.manifest.id)) {
       throw new Error(`Host service dependency cycle: ${[...stack, entry.manifest.id].join(" -> ")}`);
     }
@@ -637,13 +705,15 @@ export class BrokeredHostSupervisor {
       if (requirement.optional || this.#services.providersFor(requirement).length > 0) continue;
       const providers = this.#providerEntries(requirement, snapshot);
       for (const provider of providers) {
-        await this.#ensureSelectedActive(provider, snapshot, nextStack).catch(() => undefined);
+        await this.#ensureSelectedActive(provider, snapshot, nextStack).catch((error: unknown) => {
+          if (error instanceof Error && error.message.startsWith("Host service dependency cycle:")) throw error;
+        });
       }
       if (this.#services.providersFor(requirement).length === 0) {
         await this.#reportActual(entry.manifest.id, diagnosticState(
           snapshot.hostId,
           entry.desired.revision,
-          active?.owner.generation ?? 0,
+          this.#active.get(entry.manifest.id)?.owner.generation ?? 0,
           "waiting",
           "required_host_service_unavailable",
           `Required Host service is unavailable: ${serviceKey(requirement.id, requirement.version)}`,
@@ -651,50 +721,90 @@ export class BrokeredHostSupervisor {
         return;
       }
     }
-    if (!entry.integrity) throw new Error(`Host extension has no selected artifact: ${entry.manifest.id}`);
-    const candidate = await this.#prepareInstance(entry, {
-      capabilityGrants: entry.capabilityGrants,
-      integrity: entry.integrity,
-      manifest: entry.manifest,
-      slot: "selected",
-      version: entry.selectedVersion,
-    }, snapshot);
-    const replacement = this.#services.prepareOwnerReplacement(candidate.owner, candidate.provisions);
-    let storageCommitted = false;
-    if (active) this.#setStoragePhase(active, "draining");
-    try {
-      await this.#commitInstanceStorage(candidate);
-      storageCommitted = true;
-      replacement.commit();
-      this.#finalizeInstanceStorage(candidate);
-      this.#active.set(entry.manifest.id, candidate);
-      await this.#reportActual(entry.manifest.id, diagnosticState(
-        snapshot.hostId,
-        entry.desired.revision,
-        candidate.owner.generation,
-        "active",
-      ));
-      await replacement.finalize();
-      if (active) await this.#disposeInstance(active, false);
-    } catch (error) {
-      await replacement.rollback().catch(() => undefined);
-      if (storageCommitted) await this.#rollbackInstanceStorage(candidate);
-      await this.#disposeInstance(candidate, false);
-      if (active) {
-        this.#setStoragePhase(active, "active");
-        this.#active.set(entry.manifest.id, active);
+    const identity = `${entry.integrity}:${entry.desired.revision}:${epoch}`;
+    const pending = this.#selectedPreparations.get(entry.manifest.id);
+    if (pending?.identity === identity) return pending.promise;
+    const promise = this.#enqueue(entry.manifest.id, async () => {
+      this.#assertRunning();
+      if ((this.#epochs.get(entry.manifest.id) ?? 0) !== epoch) throw new Error("Host activation was cancelled");
+      const active = this.#active.get(entry.manifest.id);
+      if (active && active.artifactIntegrity === entry.integrity && active.desiredRevision === entry.desired.revision) return;
+      const native = entry.manifest.entrypoints?.host?.mode === "native";
+      if (native && active && active.artifactIntegrity === entry.integrity) {
+        active.desiredRevision = entry.desired.revision;
         await this.#reportActual(entry.manifest.id, diagnosticState(
           snapshot.hostId,
-          active.desiredRevision,
+          entry.desired.revision,
           active.owner.generation,
           "active",
-          "host_candidate_activation_failed",
-          error instanceof Error ? error.message : String(error),
-        ));
+        )).catch(() => undefined);
         return;
       }
-      this.#active.delete(entry.manifest.id);
-      throw error;
+      if (native && (this.#nativeRestartRequired.has(entry.manifest.id) || (active && active.artifactIntegrity !== entry.integrity))) {
+        this.#nativeRestartRequired.add(entry.manifest.id);
+        await this.#reportActual(entry.manifest.id, diagnosticState(
+          snapshot.hostId,
+          entry.desired.revision,
+          active?.owner.generation ?? 0,
+          "restart-required",
+          "trusted_native_restart_required",
+          "The trusted-native Host generation can change only after the application host restarts",
+        )).catch(() => undefined);
+        return;
+      }
+      if (!entry.integrity) throw new Error(`Host extension has no selected artifact: ${entry.manifest.id}`);
+      const candidate = await this.#prepareInstance(entry, {
+        capabilityGrants: entry.capabilityGrants,
+        integrity: entry.integrity,
+        manifest: entry.manifest,
+        slot: "selected",
+        version: entry.selectedVersion,
+      }, snapshot);
+      let replacement: ReturnType<HostServiceRegistry["prepareOwnerReplacement"]> | undefined;
+      let storageCommitted = false;
+      if (active) this.#setStoragePhase(active, "draining");
+      try {
+        await this.#assertCurrent(candidate);
+        replacement = this.#services.prepareOwnerReplacement(candidate.owner, candidate.provisions);
+        await this.#commitInstanceStorage(candidate);
+        storageCommitted = true;
+        await this.#assertCurrent(candidate);
+        replacement.commit();
+        this.#finalizeInstanceStorage(candidate);
+        this.#active.set(entry.manifest.id, candidate);
+        await this.#reportActual(entry.manifest.id, diagnosticState(
+          snapshot.hostId,
+          entry.desired.revision,
+          candidate.owner.generation,
+          "active",
+        )).catch(() => undefined);
+        await replacement.finalize();
+        if (active) await this.#disposeInstance(active, false);
+      } catch (error) {
+        await replacement?.rollback().catch(() => undefined);
+        if (storageCommitted) await this.#rollbackInstanceStorage(candidate);
+        await this.#disposeInstance(candidate, false);
+        if (active) {
+          this.#setStoragePhase(active, "active");
+          this.#active.set(entry.manifest.id, active);
+          await this.#reportActual(entry.manifest.id, diagnosticState(
+            snapshot.hostId,
+            active.desiredRevision,
+            active.owner.generation,
+            "active",
+            "host_candidate_activation_failed",
+            error instanceof Error ? error.message : String(error),
+          ));
+          return;
+        }
+        this.#active.delete(entry.manifest.id);
+        throw error;
+      }
+    });
+    this.#selectedPreparations.set(entry.manifest.id, { identity, promise });
+    try { await promise; }
+    finally {
+      if (this.#selectedPreparations.get(entry.manifest.id)?.promise === promise) this.#selectedPreparations.delete(entry.manifest.id);
     }
   }
 
@@ -720,82 +830,106 @@ export class BrokeredHostSupervisor {
     },
     snapshot: VarinExtensionCatalogSnapshot,
   ): Promise<BrokeredHostInstance> {
-    const artifact = await this.#packages.resolveBrokeredHostEntrypoint(entry.manifest.id, selection.slot, selection.integrity);
-    const generation = (this.#generations.get(entry.manifest.id) ?? 0) + 1;
-    this.#generations.set(entry.manifest.id, generation);
-    const owner: HostServiceOwnerIdentity = {
-      entrypointId: "host",
-      extensionId: entry.manifest.id,
-      extensionVersion: selection.version,
-      generation,
-    };
-    const grants = selection.capabilityGrants.filter((grant) => grant.realm === "host" && grant.manifestVersion === selection.version);
-    let crashed: Error | null = null;
-    const requestFromExtension = (method: string, params: unknown, signal: AbortSignal) => (
-      this.#handleChildRequest(owner, grants, method, params, signal)
-    );
-    const broker = selection.manifest.entrypoints?.host?.mode === "native"
-      ? new NativeHostTransport({ requestFromExtension })
-      : this.#transportFactory({
-        grants,
-        owner,
-        onCrash: (error) => {
-          crashed = error;
-          void this.#handleCrash(entry.manifest.id, owner, error, snapshot.hostId, entry.desired.revision);
-        },
-      });
-    const address = { extensionId: entry.manifest.id, key: "state", scope: "application" as const };
-    let storageSnapshot = await this.#storage.read(address);
-    const targetSchemaVersion = selection.manifest.storage?.schemaVersion ?? storageSnapshot.document.schemaVersion;
-    const storageSession: BrokerStorageSession = {
-      address,
-      phase: "activating",
-      schemaVersion: targetSchemaVersion,
-      snapshot: storageSnapshot,
-      transaction: null,
-    };
-    const storages = new Map([[storageAddressKey(address), storageSession]]);
-    this.#storageSessions.set(ownerStorageKey(owner), storages);
+    this.#assertRunning();
+    const epoch = this.#epochs.get(entry.manifest.id) ?? 0;
+    const controller = new AbortController();
+    let prepared = false;
+    this.#preparations.set(entry.manifest.id, controller);
+    this.#preparationTargets.set(entry.manifest.id, { integrity: selection.integrity, slot: selection.slot, desiredRevision: entry.desired.revision });
     try {
-      storageSession.transaction = await this.#storage.prepareMigration(address, targetSchemaVersion, async (input) => {
-        const migrated = await broker.request("migrate", { input, modulePath: artifact.modulePath });
-        if (!isRecord(migrated)) throw new Error("Host migration must return a JSON object");
-        return migrated as JsonObject;
-      });
-      if (storageSession.transaction) {
-        storageSnapshot = {
-          ...storageSession.transaction.previous,
-          document: {
-            ...storageSession.transaction.previous.document,
-            data: structuredClone(storageSession.transaction.targetData),
-            schemaVersion: storageSession.transaction.targetSchemaVersion,
-          },
-        };
-      }
-      storageSession.snapshot = storageSnapshot;
-      const activation = await broker.request("activate", {
-        modulePath: artifact.modulePath,
-        packageRoot: artifact.packageRoot,
-        storage: storageSnapshot,
-      }) as BrokerActivationResult;
-      if (crashed) throw crashed;
-      const provisions = this.#provisions(owner, broker, activation.provisions, selection.manifest);
-      return {
-        artifactIntegrity: selection.integrity,
-        broker,
-        desiredRevision: entry.desired.revision,
-        grants,
-        manifest: selection.manifest,
-        owner,
-        provisions,
-        slot: selection.slot,
-        storages,
+      const artifact = await this.#packages.resolveBrokeredHostEntrypoint(entry.manifest.id, selection.slot, selection.integrity);
+      controller.signal.throwIfAborted();
+      this.#assertRunning();
+      const generation = (this.#generations.get(entry.manifest.id) ?? 0) + 1;
+      this.#generations.set(entry.manifest.id, generation);
+      const owner: HostServiceOwnerIdentity = {
+        entrypointId: "host",
+        extensionId: entry.manifest.id,
+        extensionVersion: selection.version,
+        generation,
       };
-    } catch (error) {
-      storageSession.phase = "disposed";
-      this.#storageSessions.delete(ownerStorageKey(owner));
-      broker.forceTerminate();
-      throw error;
+      const grants = selection.capabilityGrants.filter((grant) => grant.realm === "host" && grant.manifestVersion === selection.version);
+      let crashed: Error | null = null;
+      const requestFromExtension = (method: string, params: unknown, signal: AbortSignal) => (
+        this.#handleChildRequest(owner, grants, method, params, signal)
+      );
+      const broker = selection.manifest.entrypoints?.host?.mode === "native"
+        ? new NativeHostTransport({ requestFromExtension })
+        : this.#transportFactory({
+          grants,
+          owner,
+          onCrash: (error) => {
+            crashed = error;
+            void this.#handleCrash(entry.manifest.id, owner, error, snapshot.hostId, entry.desired.revision);
+          },
+        });
+      const cancelPreparation = () => broker.forceTerminate();
+      controller.signal.addEventListener("abort", cancelPreparation, { once: true });
+      if (controller.signal.aborted) cancelPreparation();
+      try {
+        const address = { extensionId: entry.manifest.id, key: "state", scope: "application" as const };
+        let storageSnapshot = await this.#storage.read(address);
+        const targetSchemaVersion = selection.manifest.storage?.schemaVersion ?? storageSnapshot.document.schemaVersion;
+        const storageSession: BrokerStorageSession = {
+          address,
+          phase: "activating",
+          schemaVersion: targetSchemaVersion,
+          snapshot: storageSnapshot,
+          transaction: null,
+        };
+        const storages = new Map([[storageAddressKey(address), storageSession]]);
+        this.#storageSessions.set(ownerStorageKey(owner), storages);
+        storageSession.transaction = await this.#storage.prepareMigration(address, targetSchemaVersion, async (input) => {
+          const migrated = await broker.request("migrate", { input, modulePath: artifact.modulePath }, controller.signal);
+          if (!isRecord(migrated)) throw new Error("Host migration must return a JSON object");
+          return migrated as JsonObject;
+        });
+        if (storageSession.transaction) {
+          storageSnapshot = {
+            ...storageSession.transaction.previous,
+            document: {
+              ...storageSession.transaction.previous.document,
+              data: structuredClone(storageSession.transaction.targetData),
+              schemaVersion: storageSession.transaction.targetSchemaVersion,
+            },
+          };
+        }
+        storageSession.snapshot = storageSnapshot;
+        const activation = await broker.request("activate", {
+          modulePath: artifact.modulePath,
+          packageRoot: artifact.packageRoot,
+          storage: storageSnapshot,
+        }, controller.signal) as BrokerActivationResult;
+        controller.signal.throwIfAborted();
+        if ((this.#epochs.get(entry.manifest.id) ?? 0) !== epoch) throw new Error("Host activation was superseded");
+        if (crashed) throw crashed;
+        const provisions = this.#provisions(owner, broker, activation.provisions, selection.manifest);
+        prepared = true;
+        return {
+          preparation: controller,
+          epoch,
+          artifactIntegrity: selection.integrity,
+          broker,
+          desiredRevision: entry.desired.revision,
+          grants,
+          manifest: selection.manifest,
+          owner,
+          provisions,
+          slot: selection.slot,
+          storages,
+        };
+      } catch (error) {
+        for (const session of this.#storageSessions.get(ownerStorageKey(owner))?.values() ?? []) session.phase = "disposed";
+        this.#storageSessions.delete(ownerStorageKey(owner));
+        broker.forceTerminate();
+        if (selection.manifest.entrypoints?.host?.mode === "native") this.#nativeRestartRequired.add(entry.manifest.id);
+        throw error;
+      }
+    } finally {
+      if (!prepared && this.#preparations.get(entry.manifest.id) === controller) {
+        this.#preparations.delete(entry.manifest.id);
+        this.#preparationTargets.delete(entry.manifest.id);
+      }
     }
   }
 
@@ -852,17 +986,41 @@ export class BrokeredHostSupervisor {
     };
   }
 
-  async #deactivateWithDependents(extensionId: string, snapshot: VarinExtensionCatalogSnapshot): Promise<void> {
-    const instance = this.#active.get(extensionId);
-    if (!instance) return;
-    const provided = new Set(instance.provisions.map((provision) => serviceKey(provision.descriptor.id, provision.descriptor.version)));
-    for (const [dependentId, dependent] of [...this.#active]) {
+  async #deactivateWithDependents(
+    extensionId: string,
+    snapshot: VarinExtensionCatalogSnapshot,
+    visited = new Set<string>(),
+    afterDeactivate?: () => Promise<void>,
+  ): Promise<void> {
+    if (visited.has(extensionId)) return;
+    visited.add(extensionId);
+    this.#invalidate(extensionId);
+    const manifest = this.#active.get(extensionId)?.manifest
+      ?? snapshot.extensions.find((entry) => entry.manifest.id === extensionId)?.manifest;
+    const provided = new Set((manifest?.provides?.services ?? []).map((service) => serviceKey(service.id, service.version)));
+    for (const entry of snapshot.extensions) {
+      const dependentId = entry.manifest.id;
       if (dependentId === extensionId) continue;
-      const requiresProvider = (dependent.manifest.requires?.services ?? []).some((requirement) => (
+      const dependent = this.#active.get(dependentId)?.manifest ?? entry.manifest;
+      const requiresProvider = (dependent.requires?.services ?? []).some((requirement) => (
         !requirement.optional && provided.has(serviceKey(requirement.id, requirement.version))
       ));
-      if (requiresProvider) await this.#deactivateWithDependents(dependentId, snapshot);
+      if (requiresProvider) await this.#deactivateWithDependents(dependentId, snapshot, visited);
     }
+    return this.#enqueue(extensionId, async () => {
+      await this.#deactivateOwner(extensionId, snapshot);
+      await afterDeactivate?.();
+    });
+  }
+
+  async #deactivateOwner(extensionId: string, snapshot: VarinExtensionCatalogSnapshot): Promise<void> {
+    const staged = this.#staged.get(extensionId);
+    if (staged) {
+      this.#staged.delete(extensionId);
+      await this.#disposeInstance(staged, false);
+    }
+    const instance = this.#active.get(extensionId);
+    if (!instance) return;
     await this.#services.drainOwner(instance.owner);
     this.#active.delete(extensionId);
     this.#services.removeOwner(instance.owner);
@@ -891,6 +1049,10 @@ export class BrokeredHostSupervisor {
   }
 
   async #disposeInstance(instance: BrokeredHostInstance, terminate: boolean): Promise<void> {
+    if (this.#preparations.get(instance.owner.extensionId) === instance.preparation) {
+      this.#preparations.delete(instance.owner.extensionId);
+      this.#preparationTargets.delete(instance.owner.extensionId);
+    }
     this.#setStoragePhase(instance, "disposed");
     this.#storageSessions.delete(ownerStorageKey(instance.owner));
     if (terminate) await instance.broker.terminate();
@@ -904,7 +1066,7 @@ export class BrokeredHostSupervisor {
     hostId: string,
     desiredRevision: number,
   ): void {
-    void this.#enqueue(async () => {
+    void this.#enqueue(extensionId, async () => {
       await this.#handleCrashNow(extensionId, owner, error, hostId, desiredRevision);
     }).catch(() => undefined);
   }
@@ -926,7 +1088,7 @@ export class BrokeredHostSupervisor {
       const requiresProvider = (dependent.manifest.requires?.services ?? []).some((requirement) => (
         !requirement.optional && provided.has(serviceKey(requirement.id, requirement.version))
       ));
-      if (requiresProvider) await this.#deactivateWithDependents(dependentId, snapshot);
+      if (requiresProvider) await this.#deactivateWithDependents(dependentId, snapshot, new Set([extensionId]));
     }
     this.#services.removeOwner(owner);
     this.#active.delete(extensionId);
@@ -1084,6 +1246,10 @@ export class BrokeredHostSupervisor {
   }
 
   #finalizeInstanceStorage(instance: BrokeredHostInstance): void {
+    if (this.#preparations.get(instance.owner.extensionId) === instance.preparation) {
+      this.#preparations.delete(instance.owner.extensionId);
+      this.#preparationTargets.delete(instance.owner.extensionId);
+    }
     for (const session of instance.storages.values()) {
       session.phase = "active";
       session.transaction = null;
@@ -1097,7 +1263,7 @@ export class BrokeredHostSupervisor {
   #syncInstanceStorage(instance: BrokeredHostInstance): Promise<unknown> {
     return instance.broker.request("storage.sync", {
       storages: [...instance.storages.values()].map((session) => session.snapshot),
-    });
+    }, instance.preparation.signal);
   }
 
   async #reportActual(extensionId: string, state: VarinExtensionActualState): Promise<void> {

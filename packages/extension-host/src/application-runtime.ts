@@ -80,7 +80,9 @@ export class ApplicationExtensionRuntime {
   readonly #listeners = new Set<() => void>();
   readonly #serviceUnsubscribe: () => void;
   #revision = 0;
-  #mutationQueue: Promise<void> = Promise.resolve();
+  readonly #mutations = new Set<Promise<void>>();
+  readonly #builtinPreparations = new Map<string, Promise<void>>();
+  #stop: Promise<void> | undefined;
   #stopped = false;
 
   private constructor(options: ApplicationExtensionRuntimeOptions, hostId: string) {
@@ -232,21 +234,24 @@ export class ApplicationExtensionRuntime {
       if (!entry) throw new Error(`Varin extension is not installed: ${request.extensionId}`);
       if (entry.source.kind === "builtin") throw new Error(`Built-in Varin extensions are managed by the distribution: ${request.extensionId}`);
       if (entry.desired.enabled) throw new Error(`Disable the Varin extension before removing it: ${request.extensionId}`);
-      await this.supervisor.deactivateExtension(request.extensionId);
       try {
-        const removed = await this.catalog.remove(request.extensionId, request.expectedRevision);
-        await this.supervisor.reconcile(removed);
-        if (request.deleteData) {
-          try {
-            await this.storage.deleteExtensionData(request.extensionId);
-          } catch (error) {
-            throw new ExtensionStorageError(
-              "storage_write_failed",
-              `Varin extension ${request.extensionId} was removed, but its namespaced storage could not be deleted`,
-              { cause: error },
-            );
+        let removed: VarinExtensionCatalogSnapshot | undefined;
+        await this.supervisor.deactivateExtension(request.extensionId, async () => {
+          removed = await this.catalog.remove(request.extensionId, request.expectedRevision);
+          if (request.deleteData) {
+            try {
+              await this.storage.deleteExtensionData(request.extensionId);
+            } catch (error) {
+              throw new ExtensionStorageError(
+                "storage_write_failed",
+                `Varin extension ${request.extensionId} was removed, but its namespaced storage could not be deleted`,
+                { cause: error },
+              );
+            }
           }
-        }
+        });
+        if (!removed) throw new Error("Extension removal did not complete");
+        await this.supervisor.reconcile(removed);
         return removed;
       } catch (error) {
         await this.supervisor.reconcile(await this.catalog.snapshot()).catch(() => undefined);
@@ -291,18 +296,18 @@ export class ApplicationExtensionRuntime {
     return this.#mutate(async () => {
       const snapshot = await this.catalog.snapshot();
       if (!snapshot.authoritative) throw new Error("Cannot activate extensions from a stale catalog");
-      for (const entry of snapshot.extensions) {
-        if (!entry.desired.enabled || !entry.manifest.entrypoints?.host?.activation?.includes(event)) continue;
+      await Promise.all(snapshot.extensions.map(async (entry) => {
+        if (!entry.desired.enabled || !entry.manifest.entrypoints?.host?.activation?.includes(event)) return;
         // Built-in language ownership is known before activation. A TypeScript
         // request must not first materialize the unrelated Python/tooling pack.
         // Third-party workspace activations keep their declared event behavior.
         if (event === "workspace-match" && languageId && entry.source.kind === "builtin") {
           const bundled = VARIN_BUNDLED_LANGUAGE_SERVERS.filter((server) => server.extensionId === entry.manifest.id);
-          if (bundled.length > 0 && !bundled.some((server) => server.languageIds.includes(languageId))) continue;
+          if (bundled.length > 0 && !bundled.some((server) => server.languageIds.includes(languageId))) return;
         }
         await this.#ensureBuiltinArtifact(entry.manifest.id);
         await this.supervisor.activateExtension(entry.manifest.id);
-      }
+      }));
       this.#publish();
     });
   }
@@ -400,6 +405,7 @@ export class ApplicationExtensionRuntime {
   }
 
   invokeService(request: VarinExtensionServiceInvocationRequest | unknown, signal?: AbortSignal): Promise<JsonValue> {
+    if (this.#stopped) return Promise.reject(new Error("Application extension runtime is stopped"));
     const parsed = parseVarinExtensionServiceInvocationRequest(request);
     const providerId = parsed.providerId;
     if (typeof providerId === "string" && this.supervisor.hasStagedProvider(providerId)) {
@@ -497,13 +503,18 @@ export class ApplicationExtensionRuntime {
     });
   }
 
-  async stop(): Promise<void> {
-    if (this.#stopped) return;
+  stop(): Promise<void> {
+    if (this.#stop) return this.#stop;
     this.#stopped = true;
-    await this.#mutate(() => this.supervisor.shutdown());
-    this.#serviceUnsubscribe();
-    this.#publish();
-    this.#listeners.clear();
+    // Close supervisor admission and cancel unpublished workers before waiting for callers.
+    const shutdown = this.supervisor.shutdown();
+    this.#stop = (async () => {
+      await Promise.all([shutdown, ...this.#mutations]);
+      this.#serviceUnsubscribe();
+      this.#publish();
+      this.#listeners.clear();
+    })();
+    return this.#stop;
   }
 
   async #invokeRegisteredService(
@@ -540,12 +551,21 @@ export class ApplicationExtensionRuntime {
   }
 
   async #ensureBuiltinArtifact(extensionId: string): Promise<void> {
+    const pending = this.#builtinPreparations.get(extensionId);
+    if (pending) return pending;
     const definition = VARIN_BUILTIN_EXTENSION_DEFINITIONS.find((candidate) => (
       candidate.manifest.id === extensionId && candidate.manifest.entrypoints?.host
     ));
     if (!definition) return;
-    const snapshot = await this.catalog.snapshot();
-    await this.packages.reconcileBuiltinArtifacts([definition], snapshot);
+    const preparation = (async () => {
+      const snapshot = await this.catalog.snapshot();
+      await this.packages.reconcileBuiltinArtifacts([definition], snapshot);
+    })();
+    this.#builtinPreparations.set(extensionId, preparation);
+    try { await preparation; }
+    finally {
+      if (this.#builtinPreparations.get(extensionId) === preparation) this.#builtinPreparations.delete(extensionId);
+    }
   }
 
   async #ensureBuiltinServiceArtifacts(request: VarinExtensionServiceInvocationRequest): Promise<void> {
@@ -560,12 +580,20 @@ export class ApplicationExtensionRuntime {
         service.id === request.serviceId && service.version === request.version
       ))
     ));
-    if (definitions.length > 0) await this.packages.reconcileBuiltinArtifacts(definitions, snapshot);
+    await Promise.all(definitions.map((definition) => this.#ensureBuiltinArtifact(definition.manifest.id)));
   }
 
   #mutate<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.#mutationQueue.then(operation, operation);
-    this.#mutationQueue = result.then(() => undefined, () => undefined);
+    if (this.#stopped) return Promise.reject(new Error("Application extension runtime is stopped"));
+    // Catalog, routing and storage owners already serialize their revision-checked writes.
+    // Tracking admission here must not serialize downloads, activation or retirement.
+    const result = Promise.resolve().then(() => {
+      if (this.#stopped) throw new Error("Application extension runtime is stopped");
+      return operation();
+    });
+    const settled = result.then(() => undefined, () => undefined);
+    this.#mutations.add(settled);
+    void settled.then(() => this.#mutations.delete(settled));
     return result;
   }
 

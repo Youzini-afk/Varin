@@ -74,6 +74,7 @@ export class HostServiceRegistry {
   readonly #listeners = new Set<() => void>();
   readonly #providers = new Map<string, ActiveProvider>();
   readonly #selections = new Map<string, string>();
+  readonly #replacements = new Map<string, { owner: HostServiceOwnerIdentity; provisions: readonly { descriptor: VarinExtensionServiceProvision }[] }>();
   #revision = 0;
 
   constructor(hostId: string) {
@@ -112,17 +113,19 @@ export class HostServiceRegistry {
   } {
     const normalized = this.#normalizeProvisions(provisions);
     this.#validateReplacement(owner, normalized);
+    const reservationKey = exactOwnerKey(owner);
+    this.#replacements.set(reservationKey, { owner, provisions: normalized });
     let committed = false;
     let finalized = false;
     let previousProviders: ActiveProvider[] = [];
     let nextProviders: ActiveProvider[] = [];
-    let previousSelections = new Map<string, string>();
+    const changedSelections = new Map<string, { previous: string; next: string | undefined }>();
     return {
       commit: () => {
         if (committed) return;
         this.#validateReplacement(owner, normalized);
         previousProviders = [...this.#providers.values()].filter((provider) => ownerKey(provider.owner) === ownerKey(owner));
-        previousSelections = new Map(this.#selections);
+
         for (const provider of previousProviders) provider.status = "draining";
         nextProviders = normalized.map((provision) => this.#createProvider(owner, provision));
         for (const provider of nextProviders) this.#providers.set(provider.providerId, provider);
@@ -130,10 +133,12 @@ export class HostServiceRegistry {
           const key = serviceKey(previous.descriptor.id, previous.descriptor.version);
           if (this.#selections.get(key) !== previous.providerId) continue;
           const replacement = nextProviders.find((provider) => serviceKey(provider.descriptor.id, provider.descriptor.version) === key);
+          changedSelections.set(key, { previous: previous.providerId, next: replacement?.providerId });
           if (replacement) this.#selections.set(key, replacement.providerId);
           else this.#selections.delete(key);
         }
         committed = true;
+        this.#replacements.delete(reservationKey);
         this.#publish();
       },
       finalize: async () => {
@@ -144,6 +149,7 @@ export class HostServiceRegistry {
         if (previousProviders.length > 0) this.#publish();
       },
       rollback: async () => {
+        this.#replacements.delete(reservationKey);
         if (!committed || finalized) return;
         for (const provider of nextProviders) provider.status = "draining";
         this.#publish();
@@ -153,8 +159,9 @@ export class HostServiceRegistry {
           provider.status = "active";
           this.#providers.set(provider.providerId, provider);
         }
-        this.#selections.clear();
-        for (const [key, providerId] of previousSelections) this.#selections.set(key, providerId);
+        for (const [key, selection] of changedSelections) {
+          if (this.#selections.get(key) === selection.next) this.#selections.set(key, selection.previous);
+        }
         committed = false;
         this.#publish();
       },
@@ -191,6 +198,17 @@ export class HostServiceRegistry {
     const otherProviders = [...this.#providers.values()].filter((provider) => (
       ownerKey(provider.owner) !== ownerKey(owner) && provider.status === "active"
     ));
+    for (const reservation of this.#replacements.values()) {
+      if (ownerKey(reservation.owner) === ownerKey(owner)) continue;
+      for (const provision of reservation.provisions) {
+        for (const proposed of provisions) {
+          if (serviceKey(provision.descriptor.id, provision.descriptor.version) === serviceKey(proposed.descriptor.id, proposed.descriptor.version)
+            && (provision.descriptor.multiple !== true || proposed.descriptor.multiple !== true)) {
+            throw new Error(`Host service ${serviceKey(provision.descriptor.id, provision.descriptor.version)} has a pending exclusive provider`);
+          }
+        }
+      }
+    }
     for (const provision of provisions) {
       const key = serviceKey(provision.descriptor.id, provision.descriptor.version);
       const existing = otherProviders.filter((provider) => serviceKey(provider.descriptor.id, provider.descriptor.version) === key);
