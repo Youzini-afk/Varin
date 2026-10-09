@@ -83,8 +83,8 @@ impl Persistence for Mutex<Catalog> {
     }
     fn tool_source(&self,run:&str)->std::result::Result<Option<super::launches::SourceSelection>,ExecutionError>{Ok(self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?.launch_intent(run).map_err(policy_error)?.and_then(|launch|launch.selection.source))}
 
-    fn resource_admission(&self) -> Option<std::sync::Arc<crate::resource_admission::ResourceAdmission>> {
-        Some(self.lock().unwrap_or_else(|p| p.into_inner()).resource_admission.clone())
+    fn resource_admission(&self) -> std::sync::Arc<crate::resource_admission::ResourceAdmission> {
+        self.lock().unwrap_or_else(|p| p.into_inner()).resource_admission.clone()
     }
 
     fn compile_context(&self, run_id:&str, epoch:u64, expected_head:Option<&str>) -> std::result::Result<Option<ContextProjection>,ExecutionError> {

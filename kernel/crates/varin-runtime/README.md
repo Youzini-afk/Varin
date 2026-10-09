@@ -281,6 +281,8 @@ owner lookup. Wrappers forward this contract to the actual capability. The share
 registers these intents in model-call order before preparation workers start. Reservations hold
 neither resource leases nor compute capacity. Independent preparation, authorization, dispatch and
 settlement proceed per call; provider history still closes the complete exchange in original order.
+`Persistence` must return its retained coordinator for all engines, batches and policy calls; there
+is no optional admission path or per-batch coordinator/capacity default.
 
 An unresolved intent blocks only later claims that may conflict. Resolution must keep every canonical
 claim inside its declared exact key or namespace and cannot promote Read to Write. Admission rejects
