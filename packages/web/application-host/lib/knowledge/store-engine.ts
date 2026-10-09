@@ -75,6 +75,7 @@ import {
   type KnowledgeStore,
   type OpenWorkspaceKnowledgeDeps,
 } from "./store-contract.js";
+import { createNativePlanStore } from "./native-plan-store.js";
 import { createStorePersistence, trackStoreMutations } from "./persistence.js";
 import { resolveAssociations, type AssociationRefreshPort } from "./association-refresh.js";
 
@@ -818,7 +819,13 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       async releaseAssociationRefresh(id) { associationJobs.delete(id); },
     };
 
+    const nativePlans = createNativePlanStore({
+      lookup, enqueue: enqueueWrite, vector: placeholderVec,
+      commit: operations => { db.commitTransaction(operations); persistence.commit(); },
+      afterCommit: change => persistence.afterCommit(() => deps.onNativePlanChanged?.(change)),
+    });
     const store: KnowledgeStore = {
+      ...nativePlans,
       dim,
       knowledgeRevision,
 

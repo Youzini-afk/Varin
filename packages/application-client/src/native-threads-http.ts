@@ -26,6 +26,7 @@ export function createNativeThreadsHttpAPI(): NativeThreadsAPI {
     return result;
   };
   return {
+    plan: { read: identity => post('plan/read', identity), update: input => post('plan/update', input) },
     collaboration: {
       children: identity => post('child/list', identity),
       readReport: (identity, operationId, itemId, offset, maxBytes) => post('child/report', { ...identity, operationId, itemId, offset, maxBytes }),

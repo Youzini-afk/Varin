@@ -1,4 +1,4 @@
-import type { NativeChildTextPage, NativeChildTask, NativeChildWait, NativeLiveRoot, NativeContextPersonalization, NativeEvent, NativeHistoryItem, NativeInputMode, NativeInputReceipt, NativeQueuedInput, NativeReceipt, NativeRun, NativeOperation, NativeRuntimeStreamEvent, NativeThreadSummary, NativeLaunchIntent, ImageAttachment } from '@varin/protocol';
+import type { NativePlanSnapshot, NativePlanMutationResult, NativeChildTextPage, NativeChildTask, NativeChildWait, NativeLiveRoot, NativeContextPersonalization, NativeEvent, NativeHistoryItem, NativeInputMode, NativeInputReceipt, NativeQueuedInput, NativeReceipt, NativeRun, NativeOperation, NativeRuntimeStreamEvent, NativeThreadSummary, NativeLaunchIntent, ImageAttachment } from '@varin/protocol';
 
 /** Explicit authority selection. A nativeThread never opens a Pi session. */
 export interface NativeThreadIdentity { runtime: 'nativeThread'; threadId: string; branchId: string }
@@ -76,7 +76,17 @@ export interface NativeThreadSnapshot {
   context: NativeThreadContextState;
   children?: NativeChildTask[];
 }
+export interface NativeThreadPlanState {
+  identity: NativeThreadIdentity;
+  headId: string | null;
+  plan: NativePlanSnapshot | null;
+}
+export interface NativeThreadPlanAPI {
+  read(identity: NativeThreadIdentity): Promise<NativeThreadPlanState>;
+  update(input: NativeThreadIdentity & { key: string; expectedHeadId: string | null; expectedRef: string | null; content: string }): Promise<NativePlanMutationResult>;
+}
 export interface NativeThreadsAPI {
+  plan?: NativeThreadPlanAPI;
   collaboration?: NativeThreadCollaborationAPI;
   listModels(): Promise<Array<NativeThreadModel & { name?: string; acceptsImages?: boolean }>>;
   list(): Promise<NativeThreadSummary[]>;

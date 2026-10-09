@@ -96,6 +96,19 @@ describe('Varin events', () => {
     unsubscribe();
   });
 
+  test('dispatches native plan identity hints and rejects malformed envelopes', async () => {
+    const { subscribeVarinEvents } = await import('./varinEvents');
+    const events: unknown[] = [];
+    const unsubscribe = subscribeVarinEvents(event => events.push(event));
+    const source = MockEventSource.instances[0];
+    const properties = { threadId: 'native-thread', branchId: 'native-branch', ref: 'plan-version' };
+    source.onmessage?.({ data: JSON.stringify({ type: 'varin:native-plan-changed', properties }) });
+    source.onmessage?.({ data: JSON.stringify({ type: 'varin:native-plan-changed', properties: { ...properties, ref: null } }) });
+    source.onmessage?.({ data: JSON.stringify({ type: 'varin:native-plan-changed', properties: { ...properties, branchId: '' } }) });
+    expect(events).toEqual([{ type: 'native-plan-changed', ...properties }]);
+    unsubscribe();
+  });
+
   test('dispatches externally created session events', async () => {
     const { subscribeVarinEvents } = await import('./varinEvents');
     const events: unknown[] = [];
