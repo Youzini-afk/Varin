@@ -1,5 +1,5 @@
 //! Cold model/tool assembly belongs to a supervised Run, never the Agent command actor.
-use crate::agent_runtime::{bind_policy_model, domain, live_mcp_binding};
+use crate::agent_runtime::{bind_policy_model, domain, live_extension_binding, live_mcp_binding};
 use crate::error::KernelError;
 use crate::protocol::PROTOCOL_VERSION;
 use crate::protocol_generated::{LaunchSelectParams, RunStartParams};
@@ -99,9 +99,13 @@ impl RunAssembly {
             crate::plan::eligible(&catalog, &run.id)
                 .map_err(|error| KernelError::Authorization(error.to_string()))?
         };
-        let summary_parts = runtime.catalog().lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?
-            .context_job_parts(&run.id).map_err(domain)?;
-        let is_context_job=summary_parts.is_some();
+        let summary_parts = runtime
+            .catalog()
+            .lock()
+            .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+            .context_job_parts(&run.id)
+            .map_err(domain)?;
+        let is_context_job = summary_parts.is_some();
         let is_child = runtime
             .catalog()
             .lock()
@@ -109,7 +113,11 @@ impl RunAssembly {
             .require_child_launch(&run.id)
             .map_err(domain)?
             .is_some();
-        if is_child && (p.mcp_binding.is_some() || p.policy_binding.is_some()) {
+        if is_child
+            && (p.mcp_binding.is_some()
+                || p.extension_bindings.is_some()
+                || p.policy_binding.is_some())
+        {
             return Err(KernelError::Authorization(
                 "read-only child cannot expand its admitted capabilities".into(),
             ));
@@ -118,6 +126,7 @@ impl RunAssembly {
             && (selected.is_some()
                 || tool_binding.is_some()
                 || p.mcp_binding.is_some()
+                || p.extension_bindings.is_some()
                 || p.policy_binding.is_some())
         {
             return Err(KernelError::Protocol(
@@ -161,8 +170,8 @@ impl RunAssembly {
         }
         .map_err(|e| KernelError::Operation(e.to_string()))?;
         check_cancelled()?;
-        if let Some(parts)=summary_parts {
-            start = varin_runtime::context_job::configure_compaction_start(start,parts);
+        if let Some(parts) = summary_parts {
+            start = varin_runtime::context_job::configure_compaction_start(start, parts);
         }
         if let Some(binding) = p.policy_binding {
             start.policy = policy_bridge
@@ -252,7 +261,9 @@ impl RunAssembly {
             );
             selection.credential_scope = selected_credential_scope;
             check_cancelled()?;
-            let preparation = runtime.catalog().lock()
+            let preparation = runtime
+                .catalog()
+                .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                 .prepare_launch_selection(selection);
             let prepared = preparation.load().map_err(domain)?;
@@ -313,9 +324,20 @@ impl RunAssembly {
             ));
         }
         let mcp_live = p.mcp_binding.map(live_mcp_binding).transpose()?;
-        let mcp_binding = mcp_live.as_ref().map(|live|live.binding.clone());
-        if let Some(generation)=saved_schema_generation {start.binding.tool_schema_generation=generation;}
-        let directory = self.tools.prepare_scope(&p.run_id,declarations,mcp_live)
+        let mcp_binding = mcp_live.as_ref().map(|live| live.binding.clone());
+        let extensions = p
+            .extension_bindings
+            .unwrap_or_default()
+            .into_iter()
+            .map(live_extension_binding)
+            .collect::<Result<Vec<_>, _>>()?;
+        let extension_bindings = extensions.iter().map(|live| live.binding.clone()).collect();
+        if let Some(generation) = saved_schema_generation {
+            start.binding.tool_schema_generation = generation;
+        }
+        let directory = self
+            .tools
+            .prepare_scope(&p.run_id, declarations, mcp_live, extensions)
             .map_err(|error| KernelError::Protocol(error.to_string()))?;
         start.binding.tools = directory.schemas().to_vec();
         let policy_read = runtime
@@ -324,7 +346,11 @@ impl RunAssembly {
             .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
             .capture_launch(&p.run_id)
             .map_err(domain)?;
-        let policy_models = policy_read.map(|read| read.load_policy_models()).transpose().map_err(domain)?.unwrap_or_default();
+        let policy_models = policy_read
+            .map(|read| read.load_policy_models())
+            .transpose()
+            .map_err(domain)?
+            .unwrap_or_default();
         if is_context_job && !policy_models.is_empty() {
             return Err(KernelError::Protocol(
                 "context jobs cannot acquire planning capabilities".into(),
@@ -373,10 +399,13 @@ impl RunAssembly {
                 launch_source,
             );
             selection.mcp_binding = mcp_binding;
+            selection.extension_bindings = extension_bindings;
             selection.credential_scope = selected_credential_scope;
             selection.policy_models = policy_models;
             check_cancelled()?;
-            let preparation = runtime.catalog().lock()
+            let preparation = runtime
+                .catalog()
+                .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                 .prepare_launch_selection(selection);
             let prepared = preparation.load().map_err(domain)?;
@@ -388,13 +417,20 @@ impl RunAssembly {
                 .map_err(domain)?;
         }
         check_cancelled()?;
-        start.tools=if !is_context_job && !is_child {
-            self.tools.install(&p.run_id,start.binding.tool_schema_generation,directory)
-                .map_err(|error|KernelError::Operation(error.to_string()))?
-        } else {directory.into_static()};
+        start.tools = if !is_context_job && !is_child {
+            self.tools
+                .install(&p.run_id, start.binding.tool_schema_generation, directory)
+                .map_err(|error| KernelError::Operation(error.to_string()))?
+        } else {
+            directory.into_static()
+        };
         if !is_context_job {
             start.provider = self.models.wrap(start.provider);
-            start.context_preparation = Arc::new(crate::context::CapacityPreparation::new(start.context_preparation,runtime.catalog(),self.context.clone()));
+            start.context_preparation = Arc::new(crate::context::CapacityPreparation::new(
+                start.context_preparation,
+                runtime.catalog(),
+                self.context.clone(),
+            ));
         }
         let (progress, updates) = varin_runtime::execution::ProgressSink::channel(64);
         start.progress = progress;
@@ -431,7 +467,7 @@ impl RunAssembly {
                     json!({"v":1,"kind":"agent-policy-release","kernelEpoch":epoch,"runId":run_id}),
                 );
                 let _ = responses.send(
-                    json!({"v":1,"kind":"mcp-owner-release","kernelEpoch":epoch,"runId":run_id}),
+                    json!({"v":1,"kind":"host-tool-owner-release","kernelEpoch":epoch,"runId":run_id}),
                 );
             }
         });

@@ -1,5 +1,5 @@
 //! Adversarial preparation/dispatch checks against the public execution contract.
-#[path="fixtures/input_admission.rs"]
+#[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
 use serde_json::{json, Value};
@@ -42,7 +42,9 @@ struct Store {
     fail_settlement: bool,
 }
 impl Persistence for Store {
-    fn policy_action(&self, _: &str, _: u64) -> Result<Option<PolicyActionState>, ExecutionError> { Ok(None) }
+    fn policy_action(&self, _: &str, _: u64) -> Result<Option<PolicyActionState>, ExecutionError> {
+        Ok(None)
+    }
     fn resource_admission(&self) -> Arc<ResourceAdmission> {
         self.admission.clone()
     }
@@ -289,6 +291,9 @@ fn input(run: &str) -> ExecutionInput {
             configuration_generation: 1,
             tool_schema_generation: 1,
             tools: vec![ToolSchema {
+                description: String::new(),
+                output_schema: None,
+                metadata: None,
                 name: "fixture".into(),
                 version: "1".into(),
                 schema: json!({"type":"object"}),
@@ -540,7 +545,13 @@ fn cancellation_after_durable_dispatch_marker_settles_no_send_and_releases_occup
         cancel: CancellationToken,
     }
     impl Persistence for CancelAfterDispatch {
-        fn policy_action(&self, run: &str, epoch: u64) -> Result<Option<PolicyActionState>, ExecutionError> { self.db.policy_action(run, epoch) }
+        fn policy_action(
+            &self,
+            run: &str,
+            epoch: u64,
+        ) -> Result<Option<PolicyActionState>, ExecutionError> {
+            self.db.policy_action(run, epoch)
+        }
         fn resource_admission(&self) -> Arc<ResourceAdmission> {
             self.db.resource_admission()
         }
@@ -675,7 +686,11 @@ fn persistence_failure_cancels_queued_successor_without_releasing_uncertain_occu
         .unwrap()
         .iter()
         .find_map(|record| match record {
-            ExecutionRecord::ToolDispatched {context} if context.operation_id.ends_with(":tool:first") => Some(context.operation_id.clone()),
+            ExecutionRecord::ToolDispatched { context, .. }
+                if context.operation_id.ends_with(":tool:first") =>
+            {
+                Some(context.operation_id.clone())
+            }
             _ => None,
         })
         .expect("durable dispatch identity");

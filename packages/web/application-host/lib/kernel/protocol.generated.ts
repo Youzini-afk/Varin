@@ -6,8 +6,8 @@
 export const KERNEL_PROTOCOL_VERSION = 1 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
-export const KERNEL_CONTROL_METHODS = ["kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
-export const KERNEL_CONTROL_RESPONSE_METHODS = ["kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
+export const KERNEL_CONTROL_METHODS = ["kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
+export const KERNEL_CONTROL_RESPONSE_METHODS = ["kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.history.body"] as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
@@ -34,6 +34,7 @@ export type KernelMethod =
   | "runtime.thread.list"
   | "runtime.launch.select"
   | "runtime.launch.mcp.prepare"
+  | "runtime.launch.extensions.prepare"
   | "runtime.tools.select"
   | "runtime.tools.ready"
   | "runtime.launch.policy.prepare"
@@ -53,6 +54,7 @@ export type KernelMethod =
   | "runtime.admission.inspect"
   | "runtime.thread.create"
   | "runtime.input.submit"
+  | "runtime.run.scope"
   | "runtime.run.inspect"
   | "runtime.run.cancel"
   | "runtime.run.resume"
@@ -331,10 +333,48 @@ export interface LaunchSource {
   live_root: LiveRoot | null;
 }
 
+export interface ToolMetadata { service_id: string; service_version: number; completion: 'result'; operation: 'read' | 'effect'; examples?: unknown[]; source?: {path: string; line?: number}; }
+
+export interface HostToolCall {
+  runId: string;
+  operationId: string;
+  origin: ToolOrigin;
+  callId: string;
+  name: string;
+  schemaVersion: string;
+  arguments: unknown;
+}
+
+export interface ExtensionToolBinding {
+  providerKey: string;
+  extensionId: string;
+  extensionVersion: string;
+  serviceId: string;
+  serviceVersion: number;
+  artifactIntegrity: string;
+  declarationHash: string;
+  configurationIdentity: string | null;
+  tool: LaunchTool;
+}
+
+export interface LiveExtensionToolBinding {
+  ownerId: string;
+  generation: number;
+  binding: ExtensionToolBinding;
+}
+
+export interface ExtensionPrepareParams {
+  runId: string;
+  bindings: ExtensionToolBinding[];
+}
+
 export interface LaunchTool {
   name: string;
   version: string;
+  description: string;
   schema: unknown;
+  output_schema: unknown;
+  metadata: ToolMetadata | null;
 }
 
 export interface LaunchPolicy {
@@ -390,12 +430,14 @@ export interface ToolSelectParams {
 }
 
 export interface ToolReadyParams {
+  extensionBindings?: LiveExtensionToolBinding[];
   runId: string;
   selectionId: string;
   binding?: LiveMcpBinding;
 }
 
 export interface LaunchSelection {
+  extension_bindings: ExtensionToolBinding[];
   policy_models: PolicyModelCapability[];
   mcp_binding: McpBinding | null;
   credential_scope: CredentialScope | null;
@@ -503,6 +545,10 @@ export interface QueuedInput {
   cursor: number;
 }
 
+export type ToolOrigin = {kind: 'model_step'; request_id: string} | {kind: 'policy_action'; action_id: string; node_id: string};
+
+export type ExecutorOwner = {kind: 'kernel'} | {kind: 'external'; identity: string; epoch: string};
+
 export interface ExternalReceipt {
   executor: string;
   identity: string;
@@ -584,6 +630,7 @@ export interface RunModelSelections {
 }
 
 export interface RunStartParams {
+  extensionBindings?: LiveExtensionToolBinding[];
   policyBinding?: AgentPolicyBinding;
   mcpBinding?: LiveMcpBinding;
   runId: string;
@@ -712,6 +759,13 @@ export interface InputSubmitParams {
   configuration: unknown;
 }
 
+export interface RunContextScope {
+  mode: string;
+  threadRole: string;
+  sessionId: string;
+  projectId: string | null;
+}
+
 export interface RunParams {
   runId: string;
 }
@@ -737,7 +791,7 @@ export interface PolicyPauseInfo {
 export interface PermissionOpenParams {
   operationId: string;
   permissionId: string;
-  call: unknown;
+  call: HostToolCall;
   scope: unknown;
 }
 
@@ -843,6 +897,7 @@ export type OperationCallCompletion =
   | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime };
 
 export interface Operation {
+  execution_owner: ExecutorOwner | null;
   external_receipt: ExternalReceipt | null;
   call_completion: OperationCallCompletion | null;
   id: string;
@@ -2127,6 +2182,7 @@ export type KernelMethodParams = {
   "runtime.input.list": HistoryParams;
   "runtime.launch.select": LaunchSelectParams;
   "runtime.launch.mcp.prepare": McpPrepareParams;
+  "runtime.launch.extensions.prepare": ExtensionPrepareParams;
   "runtime.tools.select": ToolSelectParams;
   "runtime.tools.ready": ToolReadyParams;
   "runtime.launch.policy.prepare": PolicyPrepareParams;
@@ -2139,6 +2195,7 @@ export type KernelMethodParams = {
   "runtime.admission.inspect": AdmissionInspectParams;
   "runtime.thread.create": ThreadCreateParams;
   "runtime.input.submit": InputSubmitParams;
+  "runtime.run.scope": RunParams;
   "runtime.run.inspect": RunParams;
   "runtime.run.cancel": RunParams;
   "runtime.run.resume": RunResumeParams;
@@ -2505,6 +2562,15 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "runtime.launch.extensions.prepare";
+      params: ExtensionPrepareParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "runtime.tools.select";
       params: ToolSelectParams;
       epoch?: string;
@@ -2606,6 +2672,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.input.submit";
       params: InputSubmitParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.run.scope";
+      params: RunParams;
       epoch?: string;
       grantId?: string;
     }

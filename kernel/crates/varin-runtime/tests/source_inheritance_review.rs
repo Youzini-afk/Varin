@@ -1,11 +1,11 @@
-#[path="fixtures/input_admission.rs"]
+#[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
 use serde_json::json;
 use varin_runtime::catalog::launches::LaunchSelection;
 use varin_runtime::{Catalog, Receipt, RunState, SubmitInput};
 fn selection(model: &str, source: Option<&str>) -> LaunchSelection {
-    serde_json::from_value(json!({"connection_identity":format!("connection-{model}"),"provider_family":"fixture","model":model,"configuration_generation":2,"tool_schema_generation":if source.is_some(){2}else{0},"tools":if source.is_some(){json!([{"name":"file_read","version":"1","schema":{}}])}else{json!([])},"policy":{"name":"agent","version":"1"},"source":source.map(|id|json!({"workspace_id":"workspace","execution_workspace_id":"execution","branch_id":id,"revision":1,"mode":"materialized","live_root":null})),"credential_scope":{"reference":model,"authority":"fixture","account":"account","generation":1}})).unwrap()
+    serde_json::from_value(json!({"extension_bindings":[],"connection_identity":format!("connection-{model}"),"provider_family":"fixture","model":model,"configuration_generation":2,"tool_schema_generation":if source.is_some(){2}else{0},"tools":if source.is_some(){json!([{"name":"file_read","version":"1","description":"Fixture tool","output_schema":null,"metadata":null,"schema":{}}])}else{json!([])},"policy":{"name":"agent","version":"1"},"source":source.map(|id|json!({"workspace_id":"workspace","execution_workspace_id":"execution","branch_id":id,"revision":1,"mode":"materialized","live_root":null})),"credential_scope":{"reference":model,"authority":"fixture","account":"account","generation":1}})).unwrap()
 }
 fn command(db: &Catalog, key: &str, branch: &str) -> SubmitInput {
     SubmitInput {

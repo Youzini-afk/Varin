@@ -4,7 +4,7 @@
 //! persistence or the data stream. Adapters must observe that control during blocking I/O. This
 //! module never retries a dispatched model request or an ambiguous external effect.
 
-use crate::types::{Effect, Lifetime, Outcome, RunState};
+use crate::types::{Effect, ExecutorOwner, Lifetime, Outcome, RunState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -46,7 +46,11 @@ pub struct CancellationRegistration {
 impl Drop for CancellationRegistration {
     fn drop(&mut self) {
         if let Some(state) = self.state.upgrade() {
-            state.cancel_wakes.lock().unwrap_or_else(|p| p.into_inner()).remove(&self.id);
+            state
+                .cancel_wakes
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .remove(&self.id);
         }
     }
 }
@@ -56,7 +60,11 @@ impl CancellationToken {
         while let Some(state) = pending.pop() {
             state.cancelled.store(true, Ordering::Release);
             state.changed.notify_waiters();
-            for (_, wake) in std::mem::take(&mut *state.cancel_wakes.lock().unwrap_or_else(|p| p.into_inner())) { let _ = wake.try_send(()); }
+            for (_, wake) in
+                std::mem::take(&mut *state.cancel_wakes.lock().unwrap_or_else(|p| p.into_inner()))
+            {
+                let _ = wake.try_send(());
+            }
             let children = state
                 .children
                 .lock()
@@ -67,10 +75,21 @@ impl CancellationToken {
     /// Keep the returned registration alive while waiting. Cancellation coalesces with
     /// other control notifications without retaining completed callers on long-lived tokens.
     pub fn wake_on_cancel(&self, wake: mpsc::SyncSender<()>) -> CancellationRegistration {
-        let mut wakes = self.0.cancel_wakes.lock().unwrap_or_else(|p| p.into_inner());
+        let mut wakes = self
+            .0
+            .cancel_wakes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let id = self.0.next_cancel_wake.fetch_add(1, Ordering::Relaxed);
-        if self.is_cancelled() { let _ = wake.try_send(()); } else { wakes.insert(id, wake); }
-        CancellationRegistration { state: Arc::downgrade(&self.0), id }
+        if self.is_cancelled() {
+            let _ = wake.try_send(());
+        } else {
+            wakes.insert(id, wake);
+        }
+        CancellationRegistration {
+            state: Arc::downgrade(&self.0),
+            id,
+        }
     }
     pub fn is_cancelled(&self) -> bool {
         self.0.cancelled.load(Ordering::Acquire)
@@ -96,8 +115,14 @@ impl CancellationToken {
         child
     }
     pub(crate) fn alias_child(&self, identity: &str, child: &Self) {
-        self.0.children.lock().unwrap_or_else(|p|p.into_inner()).insert(identity.into(), Arc::downgrade(&child.0));
-        if self.is_cancelled() { child.cancel(); }
+        self.0
+            .children
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(identity.into(), Arc::downgrade(&child.0));
+        if self.is_cancelled() {
+            child.cancel();
+        }
     }
     pub fn cancel_children_with_prefix(&self, prefix: &str) -> bool {
         let children: Vec<_> = self
@@ -146,15 +171,32 @@ impl CancellationToken {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Provenance {
-    SystemInstruction { source: String },
-    UserInstruction { input_id: String },
+    SystemInstruction {
+        source: String,
+    },
+    UserInstruction {
+        input_id: String,
+    },
     Assistant,
-    PolicyOutput { action_id: String, identity: PolicyIdentity },
-    ToolData { call_id: String },
-    PolicyToolData { reference: PolicyEvidenceRef },
-    ExternalData { source: String },
-    AgentMessage { thread_id: String },
-    EnvironmentFact { event_id: String },
+    PolicyOutput {
+        action_id: String,
+        identity: PolicyIdentity,
+    },
+    ToolData {
+        call_id: String,
+    },
+    PolicyToolData {
+        reference: PolicyEvidenceRef,
+    },
+    ExternalData {
+        source: String,
+    },
+    AgentMessage {
+        thread_id: String,
+    },
+    EnvironmentFact {
+        event_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -202,7 +244,40 @@ pub struct ConversationItem {
 pub struct ToolSchema {
     pub name: String,
     pub version: String,
+    pub description: String,
     pub schema: Value,
+    pub output_schema: Option<Value>,
+    pub metadata: Option<ToolMetadata>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ToolMetadata {
+    pub service_id: String,
+    pub service_version: u64,
+    pub completion: RegisteredToolCompletion,
+    pub operation: ToolOperation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub examples: Option<Vec<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<ToolSourceLocation>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ToolSourceLocation {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u64>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RegisteredToolCompletion {
+    Result,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolOperation {
+    Read,
+    Effect,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -243,8 +318,15 @@ pub struct RequestView {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RequestOrigin {
-    Conversation { step: u64, history_range: HistoryRange },
-    PolicyModelJob { action_id: String, purpose: String, boundary_id: String },
+    Conversation {
+        step: u64,
+        history_range: HistoryRange,
+    },
+    PolicyModelJob {
+        action_id: String,
+        purpose: String,
+        boundary_id: String,
+    },
 }
 
 /// The provider receives an immutable reference to the exact durably prepared request.
@@ -317,12 +399,12 @@ pub struct ProviderItem {
 /// deterministic tuple of the globally owned request ID and the unmodified provider ID.
 /// Length-prefixing the request makes delimiters inside either component unambiguous.
 /// Opaque originals and the durable ProviderItem record retain provider-native IDs verbatim.
-pub(crate) fn model_history_id(request_id:&str,item_id:&str) -> String {
-    format!("model-item:{}:{}:{}",request_id.len(),request_id,item_id)
+pub(crate) fn model_history_id(request_id: &str, item_id: &str) -> String {
+    format!("model-item:{}:{}:{}", request_id.len(), request_id, item_id)
 }
 pub(crate) fn model_history_item(request_id: &str, item: &ProviderItem) -> ConversationItem {
     ConversationItem {
-        id: model_history_id(request_id,&item.id),
+        id: model_history_id(request_id, &item.id),
         provenance: Provenance::Assistant,
         content: item.content.clone(),
         opaque: item.opaque.clone(),
@@ -358,10 +440,20 @@ pub struct ModelFailure {
 pub trait ModelProvider: Send + Sync {
     /// Called only at a closed conversation exchange, before compiling the next request.
     /// The returned provider is retained by that ModelStep; subsequent selection cannot mutate it.
-    fn select_for_request(&self, _run_id: &str, _owner_generation: u64, _cancel: &CancellationToken)
-        -> Result<Option<SelectedModel>, ExecutionError> { Ok(None) }
-    fn policy_model_capabilities(&self) -> Vec<PolicyModelCapability> { Vec::new() }
-    fn policy_model_capability(&self, _id: &str) -> Option<BoundPolicyModel> { None }
+    fn select_for_request(
+        &self,
+        _run_id: &str,
+        _owner_generation: u64,
+        _cancel: &CancellationToken,
+    ) -> Result<Option<SelectedModel>, ExecutionError> {
+        Ok(None)
+    }
+    fn policy_model_capabilities(&self) -> Vec<PolicyModelCapability> {
+        Vec::new()
+    }
+    fn policy_model_capability(&self, _id: &str) -> Option<BoundPolicyModel> {
+        None
+    }
 
     /// Serialize and validate the semantic view. Reject unsupported attachment kinds explicitly.
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError>;
@@ -519,6 +611,40 @@ impl ToolCompletion {
     }
 }
 
+/// Trusted executor evidence, never author-controlled tool output. A returned observation may
+/// close the caller's exchange while the actual external execution is still unresolved.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ToolExecutionReceipt {
+    pub completion: ToolCompletion,
+    pub executor_stopped: bool,
+}
+impl ToolExecutionReceipt {
+    pub fn local(completion: ToolCompletion, contract: &ToolContract) -> Self {
+        let executor_stopped = !matches!(&completion, ToolCompletion::JobAccepted { .. })
+            && !(contract.completion == CompletionKind::Job
+                && matches!(
+                    &completion,
+                    ToolCompletion::Result {
+                        effect: Effect::Unknown,
+                        ..
+                    }
+                ));
+        Self {
+            completion,
+            executor_stopped,
+        }
+    }
+    pub fn not_dispatched(reason: impl Into<String>) -> Self {
+        Self {
+            completion: ToolCompletion::NotDispatched {
+                reason: reason.into(),
+            },
+            executor_stopped: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolResult {
     pub request_id: String,
@@ -568,25 +694,86 @@ pub use policy_model::*;
 /// A selected invocation. External arguments are decoded when this handle is created, and the
 /// same implementation and typed input are retained through preparation, admission and dispatch.
 pub trait PreparedToolCall: Send {
+    fn executor_owner(&self) -> ExecutorOwner {
+        ExecutorOwner::Kernel
+    }
     fn plan(&self, cancel: &CancellationToken) -> Result<ToolPreparation, ExecutionError>;
     fn prepare(&self, cancel: &CancellationToken) -> Result<ToolContract, ExecutionError>;
-    fn execution_class(&self, contract: &ToolContract) -> crate::execution_capacity::ExecutionClass;
-    fn watch_admission(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken)
-        -> Result<Option<crate::execution_capacity::AdmissionControlGuard>, ExecutionError>;
+    fn execution_class(&self, contract: &ToolContract)
+        -> crate::execution_capacity::ExecutionClass;
+    fn watch_admission(
+        &self,
+        context: &ToolExecutionContext,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> Result<Option<crate::execution_capacity::AdmissionControlGuard>, ExecutionError>;
     fn supports_policy_read(&self, contract: &ToolContract) -> bool;
-    fn authorize(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken) -> Result<(), ExecutionError>;
-    fn execute(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken) -> ToolCompletion;
+    fn authorize(
+        &self,
+        context: &ToolExecutionContext,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> Result<(), ExecutionError>;
+    fn execute(
+        &self,
+        context: &ToolExecutionContext,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> ToolExecutionReceipt;
 }
 
-struct ExecutorCall<T: ?Sized> { executor: Arc<T>, call: ToolCall, context: FrozenToolContext }
+struct ExecutorCall<T: ?Sized> {
+    executor: Arc<T>,
+    call: ToolCall,
+    context: FrozenToolContext,
+}
 impl<T: ToolExecutor + ?Sized> PreparedToolCall for ExecutorCall<T> {
-    fn plan(&self, cancel: &CancellationToken) -> Result<ToolPreparation, ExecutionError> { self.executor.plan(&self.call, &self.context, cancel) }
-    fn prepare(&self, cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> { self.executor.prepare(&self.call, &self.context, cancel) }
-    fn execution_class(&self, contract: &ToolContract) -> crate::execution_capacity::ExecutionClass { self.executor.execution_class(&self.call, contract) }
-    fn watch_admission(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken) -> Result<Option<crate::execution_capacity::AdmissionControlGuard>, ExecutionError> { self.executor.watch_admission(context, &self.call, contract, cancel) }
-    fn supports_policy_read(&self, contract: &ToolContract) -> bool { self.executor.supports_policy_read(&self.context, &self.call, contract) }
-    fn authorize(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken) -> Result<(), ExecutionError> { self.executor.authorize(context, &self.call, contract, cancel) }
-    fn execute(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken) -> ToolCompletion { self.executor.execute(context, &self.call, contract, cancel) }
+    fn executor_owner(&self) -> ExecutorOwner {
+        self.executor.executor_owner()
+    }
+    fn plan(&self, cancel: &CancellationToken) -> Result<ToolPreparation, ExecutionError> {
+        self.executor.plan(&self.call, &self.context, cancel)
+    }
+    fn prepare(&self, cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
+        self.executor.prepare(&self.call, &self.context, cancel)
+    }
+    fn execution_class(
+        &self,
+        contract: &ToolContract,
+    ) -> crate::execution_capacity::ExecutionClass {
+        self.executor.execution_class(&self.call, contract)
+    }
+    fn watch_admission(
+        &self,
+        context: &ToolExecutionContext,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> Result<Option<crate::execution_capacity::AdmissionControlGuard>, ExecutionError> {
+        self.executor
+            .watch_admission(context, &self.call, contract, cancel)
+    }
+    fn supports_policy_read(&self, contract: &ToolContract) -> bool {
+        self.executor
+            .supports_policy_read(&self.context, &self.call, contract)
+    }
+    fn authorize(
+        &self,
+        context: &ToolExecutionContext,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> Result<(), ExecutionError> {
+        self.executor
+            .authorize(context, &self.call, contract, cancel)
+    }
+    fn execute(
+        &self,
+        context: &ToolExecutionContext,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> ToolExecutionReceipt {
+        self.executor
+            .execute_receipt(context, &self.call, contract, cancel)
+    }
 }
 
 pub struct SelectedTools {
@@ -595,14 +782,46 @@ pub struct SelectedTools {
     pub executor: Arc<dyn ToolExecutor>,
 }
 pub trait ToolExecutor: Send + Sync + 'static {
+    fn executor_owner(&self) -> ExecutorOwner {
+        ExecutorOwner::Kernel
+    }
+    /// Local synchronous implementations provide their real return evidence here. External
+    /// bridges override this method instead of treating a cancelled waiter as a stopped executor.
+    fn execute_receipt(
+        &self,
+        context: &ToolExecutionContext,
+        call: &ToolCall,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> ToolExecutionReceipt {
+        ToolExecutionReceipt::local(self.execute(context, call, contract, cancel), contract)
+    }
     /// Ready candidates may publish only here, at a closed ModelStep boundary. Each request
     /// retains the selected executor; preparing another candidate cannot change that exchange.
-    fn select_for_request(&self, _: &str, _: u64, _: &CancellationToken) -> Result<Option<SelectedTools>, ExecutionError> { Ok(None) }
+    fn select_for_request(
+        &self,
+        _: &str,
+        _: u64,
+        _: &CancellationToken,
+    ) -> Result<Option<SelectedTools>, ExecutionError> {
+        Ok(None)
+    }
     /// Freeze before the model request is sent. A directory returns only the selected pins;
     /// simple typed adapters may use their already immutable instance directly.
-    fn freeze(&self, _: &[ToolSchema]) -> Result<Option<Arc<dyn ToolExecutor>>, ExecutionError> { Ok(None) }
-    fn bind_call(self: Arc<Self>, call: &ToolCall, context: &FrozenToolContext, _: &CancellationToken) -> Result<Box<dyn PreparedToolCall>, ExecutionError> {
-        Ok(Box::new(ExecutorCall { executor: self, call: call.clone(), context: context.clone() }))
+    fn freeze(&self, _: &[ToolSchema]) -> Result<Option<Arc<dyn ToolExecutor>>, ExecutionError> {
+        Ok(None)
+    }
+    fn bind_call(
+        self: Arc<Self>,
+        call: &ToolCall,
+        context: &FrozenToolContext,
+        _: &CancellationToken,
+    ) -> Result<Box<dyn PreparedToolCall>, ExecutionError> {
+        Ok(Box::new(ExecutorCall {
+            executor: self,
+            call: call.clone(),
+            context: context.clone(),
+        }))
     }
     /// Establish ordering before any owner lookup. This must be local and nonblocking: no I/O,
     /// service preparation, credentials or permission waits. Wrappers forward calls they do not own.
@@ -615,16 +834,29 @@ pub trait ToolExecutor: Send + Sync + 'static {
 
     /// Load classification comes only from the bound trusted capability. Wrappers must forward
     /// calls they do not own. This does not grant permission or classify external annotations.
-    fn execution_class(&self, _: &ToolCall, _: &ToolContract) -> crate::execution_capacity::ExecutionClass {
+    fn execution_class(
+        &self,
+        _: &ToolCall,
+        _: &ToolContract,
+    ) -> crate::execution_capacity::ExecutionClass {
         crate::execution_capacity::ExecutionClass::Unmetered
     }
 
     /// Retain the capability owner's revocation control while queued. No I/O or preparation.
-    fn watch_admission(&self, _: &ToolExecutionContext, _: &ToolCall, _: &ToolContract, _: &CancellationToken)
-        -> Result<Option<crate::execution_capacity::AdmissionControlGuard>, ExecutionError> { Ok(None) }
+    fn watch_admission(
+        &self,
+        _: &ToolExecutionContext,
+        _: &ToolCall,
+        _: &ToolContract,
+        _: &CancellationToken,
+    ) -> Result<Option<crate::execution_capacity::AdmissionControlGuard>, ExecutionError> {
+        Ok(None)
+    }
 
     /// Trusted implementation opt-in, never inferred from untrusted MCP annotations.
-    fn supports_policy_read(&self, _: &FrozenToolContext, _: &ToolCall, _: &ToolContract) -> bool { false }
+    fn supports_policy_read(&self, _: &FrozenToolContext, _: &ToolCall, _: &ToolContract) -> bool {
+        false
+    }
 
     /// Resolve an already-bound schema/contract and the complete canonical resource plan.
     /// Any resource-owner lookup must observe this call's cancellation.
@@ -713,10 +945,12 @@ pub enum ExecutionRecord {
     },
     ToolDispatched {
         context: ToolExecutionContext,
+        executor_owner: ExecutorOwner,
     },
     ToolSettled {
         context: ToolExecutionContext,
         completion: ToolCompletion,
+        executor_stopped: bool,
     },
     /// Ordered, complete pairing is committed before another model request can observe results.
     ToolBatchCommitted {
@@ -740,33 +974,166 @@ pub struct ContextProjection {
     pub memory_checkpoint: Option<String>,
 }
 
-pub enum ToolResume { New, Admitted { cancel_requested:bool }, Completed(crate::catalog::result_content::ToolCompletionRead) }
+pub enum ToolResume {
+    New,
+    Admitted { cancel_requested: bool },
+    Completed(crate::catalog::result_content::ToolCompletionRead),
+}
 
 pub trait Persistence: Send + Sync {
-    fn resume_tool(&self,_context:&ToolExecutionContext,_epoch:u64)->Result<ToolResume,ExecutionError>{Err(ExecutionError::new("policy_graph_unavailable","canonical tool invocation authority required"))}
+    fn resume_tool(
+        &self,
+        _context: &ToolExecutionContext,
+        _epoch: u64,
+    ) -> Result<ToolResume, ExecutionError> {
+        Err(ExecutionError::new(
+            "policy_graph_unavailable",
+            "canonical tool invocation authority required",
+        ))
+    }
     /// Only durable executor evidence may refine dispatched work to a no-effect result.
     /// Other persistence backends retain the conservative Unknown normalization.
-    fn confirms_no_effect(&self, _context: &ToolExecutionContext, _epoch: u64, _completion: &ToolCompletion)
-        -> Result<bool, ExecutionError> { Ok(false) }
+    fn confirms_no_effect(
+        &self,
+        _context: &ToolExecutionContext,
+        _epoch: u64,
+        _completion: &ToolCompletion,
+    ) -> Result<bool, ExecutionError> {
+        Ok(false)
+    }
 
     /// Catalog overrides this with its actual parent/child lineage and execution fence.
-    fn task_family(&self, run: &str, _epoch: u64) -> Result<String, ExecutionError> { Ok(run.into()) }
+    fn task_family(&self, run: &str, _epoch: u64) -> Result<String, ExecutionError> {
+        Ok(run.into())
+    }
 
-    fn policy_model_job(&self, _run: &str, _epoch: u64) -> Result<Option<PolicyModelState>, ExecutionError> { Ok(None) }
-    fn admit_policy_model(&self, _run: &str, _epoch: u64, _intent: &PolicyModelIntent, _snapshot: &RequestSnapshot) -> Result<PolicyModelState, ExecutionError> { Err(ExecutionError::new("policy_model_unavailable", "durable model job authority required")) }
-    fn dispatch_policy_model(&self, _run: &str, _epoch: u64, _action: &str) -> Result<(), ExecutionError> { Err(ExecutionError::new("policy_model_unavailable", "durable model job authority required")) }
-    fn record_policy_model(&self, _run: &str, _epoch: u64, _action: &str, _output: &PolicyModelOutput, _receipt: Option<&PolicyModelReceipt>) -> Result<(), ExecutionError> { Err(ExecutionError::new("policy_model_unavailable", "durable model job authority required")) }
+    fn policy_model_job(
+        &self,
+        _run: &str,
+        _epoch: u64,
+    ) -> Result<Option<PolicyModelState>, ExecutionError> {
+        Ok(None)
+    }
+    fn admit_policy_model(
+        &self,
+        _run: &str,
+        _epoch: u64,
+        _intent: &PolicyModelIntent,
+        _snapshot: &RequestSnapshot,
+    ) -> Result<PolicyModelState, ExecutionError> {
+        Err(ExecutionError::new(
+            "policy_model_unavailable",
+            "durable model job authority required",
+        ))
+    }
+    fn dispatch_policy_model(
+        &self,
+        _run: &str,
+        _epoch: u64,
+        _action: &str,
+    ) -> Result<(), ExecutionError> {
+        Err(ExecutionError::new(
+            "policy_model_unavailable",
+            "durable model job authority required",
+        ))
+    }
+    fn record_policy_model(
+        &self,
+        _run: &str,
+        _epoch: u64,
+        _action: &str,
+        _output: &PolicyModelOutput,
+        _receipt: Option<&PolicyModelReceipt>,
+    ) -> Result<(), ExecutionError> {
+        Err(ExecutionError::new(
+            "policy_model_unavailable",
+            "durable model job authority required",
+        ))
+    }
 
     /// Select the one latest durable action. Stores must explicitly implement recovery selection.
-    fn policy_action(&self, run: &str, epoch: u64) -> Result<Option<PolicyActionState>, ExecutionError>;
-    fn commit_policy_control(&self, _run: &str, _epoch: u64, _intent: &PolicyControlIntent) -> Result<PolicyControlReceipt, ExecutionError> { Err(ExecutionError::new("policy_action_unavailable", "durable policy action authority required")) }
-    fn policy_boundary(&self, _run: &str, _epoch: u64) -> Result<PolicyBoundary, ExecutionError> { Err(ExecutionError::new("policy_graph_unavailable", "durable policy action authority required")) }
-    fn policy_graph(&self, _run: &str, _epoch: u64) -> Result<Option<PolicyGraphState>, ExecutionError> { Ok(None) }
-    fn admit_policy_graph(&self, _run: &str, _epoch: u64, _intent: &PolicyGraphIntent) -> Result<PolicyGraphState, ExecutionError> { Err(ExecutionError::new("policy_graph_unavailable", "durable graph authority required")) }
-    fn settle_policy_node(&self, _run: &str, _epoch: u64, _action: &str, _node: &str, _completion: &ToolCompletion) -> Result<PolicyNodeReceipt, ExecutionError> { Err(ExecutionError::new("policy_graph_unavailable", "durable graph authority required")) }
-    fn policy_evidence(&self, _run: &str, _epoch: u64, _reference: &PolicyEvidenceRef) -> Result<PolicyEvidence, ExecutionError> { Err(ExecutionError::new("policy_graph_unavailable", "durable graph authority required")) }
-    fn policy_chunk(&self, _run: &str, _epoch: u64, _reference: &PolicyEvidenceRef, _index: usize) -> Result<crate::content::ContentChunk, ExecutionError> { Err(ExecutionError::new("policy_graph_unavailable", "durable graph authority required")) }
-    fn tool_source(&self, _run: &str) -> Result<Option<crate::catalog::launches::SourceSelection>, ExecutionError> { Ok(None) }
+    fn policy_action(
+        &self,
+        run: &str,
+        epoch: u64,
+    ) -> Result<Option<PolicyActionState>, ExecutionError>;
+    fn commit_policy_control(
+        &self,
+        _run: &str,
+        _epoch: u64,
+        _intent: &PolicyControlIntent,
+    ) -> Result<PolicyControlReceipt, ExecutionError> {
+        Err(ExecutionError::new(
+            "policy_action_unavailable",
+            "durable policy action authority required",
+        ))
+    }
+    fn policy_boundary(&self, _run: &str, _epoch: u64) -> Result<PolicyBoundary, ExecutionError> {
+        Err(ExecutionError::new(
+            "policy_graph_unavailable",
+            "durable policy action authority required",
+        ))
+    }
+    fn policy_graph(
+        &self,
+        _run: &str,
+        _epoch: u64,
+    ) -> Result<Option<PolicyGraphState>, ExecutionError> {
+        Ok(None)
+    }
+    fn admit_policy_graph(
+        &self,
+        _run: &str,
+        _epoch: u64,
+        _intent: &PolicyGraphIntent,
+    ) -> Result<PolicyGraphState, ExecutionError> {
+        Err(ExecutionError::new(
+            "policy_graph_unavailable",
+            "durable graph authority required",
+        ))
+    }
+    fn settle_policy_node(
+        &self,
+        _run: &str,
+        _epoch: u64,
+        _action: &str,
+        _node: &str,
+        _completion: &ToolCompletion,
+    ) -> Result<PolicyNodeReceipt, ExecutionError> {
+        Err(ExecutionError::new(
+            "policy_graph_unavailable",
+            "durable graph authority required",
+        ))
+    }
+    fn policy_evidence(
+        &self,
+        _run: &str,
+        _epoch: u64,
+        _reference: &PolicyEvidenceRef,
+    ) -> Result<PolicyEvidence, ExecutionError> {
+        Err(ExecutionError::new(
+            "policy_graph_unavailable",
+            "durable graph authority required",
+        ))
+    }
+    fn policy_chunk(
+        &self,
+        _run: &str,
+        _epoch: u64,
+        _reference: &PolicyEvidenceRef,
+        _index: usize,
+    ) -> Result<crate::content::ContentChunk, ExecutionError> {
+        Err(ExecutionError::new(
+            "policy_graph_unavailable",
+            "durable graph authority required",
+        ))
+    }
+    fn tool_source(
+        &self,
+        _run: &str,
+    ) -> Result<Option<crate::catalog::launches::SourceSelection>, ExecutionError> {
+        Ok(None)
+    }
 
     /// The durable authority owns and reuses one coordinator across every Run and policy call.
     /// Returning a newly allocated owner would split conflict ordering and execution capacity.
@@ -849,13 +1216,28 @@ pub struct PolicyIdentity {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PolicyAction {
     RequestModel,
-    RequestModelWithEvidence { evidence: Vec<PolicyEvidenceRef> },
-    RequestModelJob { capability_id: String, instructions: Vec<String>, evidence: Vec<PolicyEvidenceRef> },
-    ToolGraph { nodes: Vec<PolicyToolNode> },
-    ReadResult { reference: PolicyEvidenceRef, index: usize },
+    RequestModelWithEvidence {
+        evidence: Vec<PolicyEvidenceRef>,
+    },
+    RequestModelJob {
+        capability_id: String,
+        instructions: Vec<String>,
+        evidence: Vec<PolicyEvidenceRef>,
+    },
+    ToolGraph {
+        nodes: Vec<PolicyToolNode>,
+    },
+    ReadResult {
+        reference: PolicyEvidenceRef,
+        index: usize,
+    },
     ExecuteTools,
-    Deliver { text: String },
-    Pause { reason: String },
+    Deliver {
+        text: String,
+    },
+    Pause {
+        reason: String,
+    },
     /// Persistence must verify that this wait references a durably registered event condition.
     Wait {
         wait_id: String,
@@ -879,11 +1261,29 @@ pub enum PolicyEvent {
         input_ids: Vec<String>,
     },
     Started,
-    Delivered { action_id: String, item_id: String },
-    Resumed { action_id: String, wait_id: String },
-    ToolGraphCompleted { action_id: String, receipts: Vec<PolicyNodeReceipt> },
-    ModelJobCompleted { action_id: String, receipt: PolicyModelReceipt },
-    ResultChunk { reference: PolicyEvidenceRef, index: usize, total_chunks: usize, total_bytes: u64, bytes: Vec<u8> },
+    Delivered {
+        action_id: String,
+        item_id: String,
+    },
+    Resumed {
+        action_id: String,
+        wait_id: String,
+    },
+    ToolGraphCompleted {
+        action_id: String,
+        receipts: Vec<PolicyNodeReceipt>,
+    },
+    ModelJobCompleted {
+        action_id: String,
+        receipt: PolicyModelReceipt,
+    },
+    ResultChunk {
+        reference: PolicyEvidenceRef,
+        index: usize,
+        total_chunks: usize,
+        total_bytes: u64,
+        bytes: Vec<u8>,
+    },
     ModelCompleted {
         reason: FinishReason,
         tool_calls: usize,
@@ -930,7 +1330,9 @@ impl AgentPolicy for DefaultAgentPolicy {
         state: &Value,
         cancel: &CancellationToken,
     ) -> Result<PolicyDecision, ExecutionError> {
-        if cancel.is_cancelled() { return Err(ExecutionError::new("policy_cancelled", "policy cancelled")); }
+        if cancel.is_cancelled() {
+            return Err(ExecutionError::new("policy_cancelled", "policy cancelled"));
+        }
         let action = match event {
             PolicyEvent::Started | PolicyEvent::InputDelivered{..} => PolicyAction::RequestModel,
             PolicyEvent::ModelCompleted { tool_calls, .. } if *tool_calls > 0 => PolicyAction::ExecuteTools,
@@ -974,18 +1376,32 @@ pub struct ExecutionReport {
 pub enum ContextRequestPreparation {
     Ready,
     Recompile,
-    Waiting { wait_id:String },
+    Waiting { wait_id: String },
 }
 pub trait ContextPreparation: Send + Sync {
-    fn prepare(&self, run_id: &str, owner_generation: u64, cancel: &CancellationToken) -> Result<(), ExecutionError>;
+    fn prepare(
+        &self,
+        run_id: &str,
+        owner_generation: u64,
+        cancel: &CancellationToken,
+    ) -> Result<(), ExecutionError>;
     /// Inspect the complete serialized candidate before admission. A successful checkpoint
     /// publication asks the engine to compile the same legal boundary again.
-    fn prepare_request(&self, _owner_generation: u64, _view: &RequestView, _serialized: &Value,
-        _cancel: &CancellationToken) -> Result<ContextRequestPreparation, ExecutionError> { Ok(ContextRequestPreparation::Ready) }
+    fn prepare_request(
+        &self,
+        _owner_generation: u64,
+        _view: &RequestView,
+        _serialized: &Value,
+        _cancel: &CancellationToken,
+    ) -> Result<ContextRequestPreparation, ExecutionError> {
+        Ok(ContextRequestPreparation::Ready)
+    }
 }
 pub struct NoopContextPreparation;
 impl ContextPreparation for NoopContextPreparation {
-    fn prepare(&self, _: &str, _: u64, _: &CancellationToken) -> Result<(), ExecutionError> { Ok(()) }
+    fn prepare(&self, _: &str, _: u64, _: &CancellationToken) -> Result<(), ExecutionError> {
+        Ok(())
+    }
 }
 
 pub struct ExecutionEngine<P: ?Sized, M: ?Sized, T: ?Sized, A: ?Sized> {
@@ -1054,15 +1470,38 @@ impl<
         if pending.is_none() {
             recovered_results.clear();
         }
-        let mut pending_tools = pending.as_ref().map(|(snapshot, _)| self.tools.freeze(&snapshot.view.binding.tools)).transpose()?.flatten();
+        let mut pending_tools = pending
+            .as_ref()
+            .map(|(snapshot, _)| self.tools.freeze(&snapshot.view.binding.tools))
+            .transpose()?
+            .flatten();
         let mut pending_model: Option<Arc<dyn ModelProvider>> = None;
         let mut control_state = None;
-        if let Some(action) = self.persistence.policy_action(&input.run_id, input.owner_generation)? {
-            if pending.is_some() { return Err(ExecutionError::new("unclosed_model_exchange", "policy action conflicts with model exchange")); }
+        if let Some(action) = self
+            .persistence
+            .policy_action(&input.run_id, input.owner_generation)?
+        {
+            if pending.is_some() {
+                return Err(ExecutionError::new(
+                    "unclosed_model_exchange",
+                    "policy action conflicts with model exchange",
+                ));
+            }
             match action {
-                PolicyActionState::Graph(graph) => { recovered_decision = graph.decision.clone(); event = self.execute_tool_graph(&input, graph, &cancel, None)?; }
-                PolicyActionState::Model(job) => { recovered_decision = job.decision.clone(); event = self.execute_model_job(&input, job, &cancel)?; }
-                PolicyActionState::Control(control) => { policy_state = control.state; control_state = Some(policy_state.clone()); recovered_decision = control.decision; event = control.event; }
+                PolicyActionState::Graph(graph) => {
+                    recovered_decision = graph.decision.clone();
+                    event = self.execute_tool_graph(&input, graph, &cancel, None)?;
+                }
+                PolicyActionState::Model(job) => {
+                    recovered_decision = job.decision.clone();
+                    event = self.execute_model_job(&input, job, &cancel)?;
+                }
+                PolicyActionState::Control(control) => {
+                    policy_state = control.state;
+                    control_state = Some(policy_state.clone());
+                    recovered_decision = control.decision;
+                    event = control.event;
+                }
             }
         }
         let mut steps = input.completed_model_steps;
@@ -1130,7 +1569,9 @@ impl<
                         // The input is real history. It invalidates a not-yet-executed decision,
                         // not the original durable action's completion event or private state.
                         policy_state = committed_state.clone();
-                    } else { event = PolicyEvent::InputDelivered { input_ids }; }
+                    } else {
+                        event = PolicyEvent::InputDelivered { input_ids };
+                    }
                     recovered_decision = None;
                     interrupted_generation = false;
                     if state != RunState::Runnable {
@@ -1150,7 +1591,12 @@ impl<
                 state,
                 history: &history,
                 pending_tool_calls: pending.as_ref().map_or(0, |(_, calls)| calls.len()),
-                model_capabilities: self.provider.policy_model_capabilities().iter().map(PolicyModelAvailability::from).collect(),
+                model_capabilities: self
+                    .provider
+                    .policy_model_capabilities()
+                    .iter()
+                    .map(PolicyModelAvailability::from)
+                    .collect(),
             };
             let decision = match recovered_decision.take().map(Ok).unwrap_or_else(|| {
                 guarded("policy_panicked", || {
@@ -1159,7 +1605,9 @@ impl<
             }) {
                 Ok(decision) => decision,
                 Err(error) => {
-                    if cancel.is_cancelled() { continue 'agent; }
+                    if cancel.is_cancelled() {
+                        continue 'agent;
+                    }
                     if let Some((snapshot, calls)) = pending.take() {
                         self.close_unexecuted_batch(
                             &input,
@@ -1174,13 +1622,21 @@ impl<
                     finish!('agent, RunState::Failed, None, Some(error));
                 }
             };
-            if cancel.is_cancelled() { continue 'agent; }
+            if cancel.is_cancelled() {
+                continue 'agent;
+            }
             // A policy can neither fabricate a closed exchange nor bypass the tool admission path.
             let legal = match &decision.action {
                 PolicyAction::ExecuteTools => pending.is_some(),
-                PolicyAction::RequestModel | PolicyAction::RequestModelJob { .. } | PolicyAction::RequestModelWithEvidence { .. } | PolicyAction::ToolGraph { .. } | PolicyAction::ReadResult { .. } | PolicyAction::Deliver { .. } | PolicyAction::Pause { .. } | PolicyAction::Complete | PolicyAction::Wait { .. } => {
-                    pending.is_none()
-                }
+                PolicyAction::RequestModel
+                | PolicyAction::RequestModelJob { .. }
+                | PolicyAction::RequestModelWithEvidence { .. }
+                | PolicyAction::ToolGraph { .. }
+                | PolicyAction::ReadResult { .. }
+                | PolicyAction::Deliver { .. }
+                | PolicyAction::Pause { .. }
+                | PolicyAction::Complete
+                | PolicyAction::Wait { .. } => pending.is_none(),
                 PolicyAction::Fail { .. } => pending.is_none(),
             };
             if !legal {
@@ -1202,14 +1658,22 @@ impl<
                 finish!('agent, RunState::Failed, None,
                     Some(ExecutionError::new("illegal_policy_action", "unclosed tool exchange or no tools to execute")));
             }
-            if !matches!(decision.action,PolicyAction::ToolGraph{..}|PolicyAction::RequestModelJob{..}|PolicyAction::Deliver{..}|PolicyAction::Pause{..}) { self.commit(
-                &input,
-                ExecutionRecord::PolicyCheckpoint {
-                    identity: self.policy.identity(),
-                    state: decision.state.clone(),
-                    action: decision.action.clone(),
-                },
-            )?; }
+            if !matches!(
+                decision.action,
+                PolicyAction::ToolGraph { .. }
+                    | PolicyAction::RequestModelJob { .. }
+                    | PolicyAction::Deliver { .. }
+                    | PolicyAction::Pause { .. }
+            ) {
+                self.commit(
+                    &input,
+                    ExecutionRecord::PolicyCheckpoint {
+                        identity: self.policy.identity(),
+                        state: decision.state.clone(),
+                        action: decision.action.clone(),
+                    },
+                )?;
+            }
             let previous_policy_state = std::mem::replace(&mut policy_state, decision.state);
             match decision.action {
                 PolicyAction::Complete => finish!('agent, RunState::Completed, None, None),
@@ -1223,85 +1687,214 @@ impl<
                     finish!('agent, RunState::Waiting, Some(wait_id), None);
                 }
                 action @ (PolicyAction::Deliver { .. } | PolicyAction::Pause { .. }) => {
-                    let boundary = self.persistence.policy_boundary(&input.run_id, input.owner_generation)?;
-                    let intent = PolicyControlIntent { action_id: format!("{}:policy:{}", input.run_id, boundary.id), boundary,
-                        identity: self.policy.identity(), state: policy_state.clone(), expected_head: history_cursor.clone(), action };
-                    let receipt = match self.persistence.commit_policy_control(&input.run_id, input.owner_generation, &intent) {
+                    let boundary = self
+                        .persistence
+                        .policy_boundary(&input.run_id, input.owner_generation)?;
+                    let intent = PolicyControlIntent {
+                        action_id: format!("{}:policy:{}", input.run_id, boundary.id),
+                        boundary,
+                        identity: self.policy.identity(),
+                        state: policy_state.clone(),
+                        expected_head: history_cursor.clone(),
+                        action,
+                    };
+                    let receipt = match self.persistence.commit_policy_control(
+                        &input.run_id,
+                        input.owner_generation,
+                        &intent,
+                    ) {
                         Ok(receipt) => receipt,
-                        Err(error) if error.code == "input_pending" || cancel.is_cancelled() => { policy_state = previous_policy_state; continue 'agent; }
+                        Err(error) if error.code == "input_pending" || cancel.is_cancelled() => {
+                            policy_state = previous_policy_state;
+                            continue 'agent;
+                        }
                         Err(error) => return Err(error),
                     };
                     match receipt {
                         PolicyControlReceipt::Delivered { action_id, item } => {
                             history_cursor = Some(item.id.clone());
-                            event = PolicyEvent::Delivered { action_id, item_id: item.id.clone() };
+                            event = PolicyEvent::Delivered {
+                                action_id,
+                                item_id: item.id.clone(),
+                            };
                             control_state = Some(policy_state.clone());
                             history.push(item);
                         }
-                        PolicyControlReceipt::Paused { wait_id, .. } => return Ok(ExecutionReport { state: RunState::Waiting, history, policy_state, model_steps: steps, waiting_on: Some(wait_id), failure: None }),
+                        PolicyControlReceipt::Paused { wait_id, .. } => {
+                            return Ok(ExecutionReport {
+                                state: RunState::Waiting,
+                                history,
+                                policy_state,
+                                model_steps: steps,
+                                waiting_on: Some(wait_id),
+                                failure: None,
+                            })
+                        }
                     }
                 }
-                PolicyAction::RequestModelJob { capability_id, instructions, evidence } => {
-                    if self.context_preparation.prepare(&input.run_id, input.owner_generation, &cancel).is_err() {
+                PolicyAction::RequestModelJob {
+                    capability_id,
+                    instructions,
+                    evidence,
+                } => {
+                    if self
+                        .context_preparation
+                        .prepare(&input.run_id, input.owner_generation, &cancel)
+                        .is_err()
+                    {
                         policy_state = previous_policy_state;
-                        if cancel.is_cancelled() { continue 'agent; }
+                        if cancel.is_cancelled() {
+                            continue 'agent;
+                        }
                         fail_context_preparation!('agent);
                     }
-                    if cancel.is_cancelled() { policy_state = previous_policy_state; continue 'agent; }
-                    let job = match self.admit_model_job(&input, &history, history_cursor.as_deref(), capability_id, instructions, evidence, policy_state.clone()) {
+                    if cancel.is_cancelled() {
+                        policy_state = previous_policy_state;
+                        continue 'agent;
+                    }
+                    let job = match self.admit_model_job(
+                        &input,
+                        &history,
+                        history_cursor.as_deref(),
+                        capability_id,
+                        instructions,
+                        evidence,
+                        policy_state.clone(),
+                    ) {
                         Ok(job) => job,
-                        Err(error) if error.code == "input_pending" => { policy_state = previous_policy_state; continue 'agent; },
-                        Err(error) => { policy_state = previous_policy_state; finish!('agent,RunState::Failed,None,Some(error)); }
+                        Err(error) if error.code == "input_pending" => {
+                            policy_state = previous_policy_state;
+                            continue 'agent;
+                        }
+                        Err(error) => {
+                            policy_state = previous_policy_state;
+                            finish!('agent,RunState::Failed,None,Some(error));
+                        }
                     };
                     control_state = None;
                     event = self.execute_model_job(&input, job, &cancel)?;
                 }
                 PolicyAction::ToolGraph { nodes } => {
-                    let selected = match guarded("tool_selection_panicked",||self.tools.select_for_request(&input.run_id,input.owner_generation,&cancel)) {
-                        Ok(selected)=>selected,
-                        Err(_) if cancel.is_cancelled()=>{policy_state=previous_policy_state;continue 'agent;},
-                        Err(error)=>finish!('agent,RunState::Failed,None,Some(error)),
+                    let selected = match guarded("tool_selection_panicked", || {
+                        self.tools.select_for_request(
+                            &input.run_id,
+                            input.owner_generation,
+                            &cancel,
+                        )
+                    }) {
+                        Ok(selected) => selected,
+                        Err(_) if cancel.is_cancelled() => {
+                            policy_state = previous_policy_state;
+                            continue 'agent;
+                        }
+                        Err(error) => finish!('agent,RunState::Failed,None,Some(error)),
                     };
-                    if let Some(selected)=&selected {input.binding.tools=selected.schemas.clone();input.binding.tool_schema_generation=selected.generation;}
-                    let retained=match selected {Some(selected)=>Some(selected.executor),None=>self.tools.freeze(&input.binding.tools)?};
-                    let graph=match self.admit_tool_graph(&input,nodes,policy_state.clone(), &cancel) {Ok(graph)=>graph,Err(error) if error.code=="input_pending" || cancel.is_cancelled()=>{policy_state=previous_policy_state;continue 'agent},Err(error)=>{policy_state=previous_policy_state;finish!('agent,RunState::Failed,None,Some(error))}};
+                    if let Some(selected) = &selected {
+                        input.binding.tools = selected.schemas.clone();
+                        input.binding.tool_schema_generation = selected.generation;
+                    }
+                    let retained = match selected {
+                        Some(selected) => Some(selected.executor),
+                        None => self.tools.freeze(&input.binding.tools)?,
+                    };
+                    let graph =
+                        match self.admit_tool_graph(&input, nodes, policy_state.clone(), &cancel) {
+                            Ok(graph) => graph,
+                            Err(error)
+                                if error.code == "input_pending" || cancel.is_cancelled() =>
+                            {
+                                policy_state = previous_policy_state;
+                                continue 'agent;
+                            }
+                            Err(error) => {
+                                policy_state = previous_policy_state;
+                                finish!('agent,RunState::Failed,None,Some(error))
+                            }
+                        };
                     control_state = None;
-                    event=self.execute_tool_graph(&input,graph,&cancel,retained)?;
+                    event = self.execute_tool_graph(&input, graph, &cancel, retained)?;
                 }
-                PolicyAction::ReadResult { reference,index } => {
-                    let chunk=match self.persistence.policy_chunk(&input.run_id,input.owner_generation,&reference,index) {Ok(chunk)=>chunk,Err(error)=>finish!('agent,RunState::Failed,None,Some(error))};
+                PolicyAction::ReadResult { reference, index } => {
+                    let chunk = match self.persistence.policy_chunk(
+                        &input.run_id,
+                        input.owner_generation,
+                        &reference,
+                        index,
+                    ) {
+                        Ok(chunk) => chunk,
+                        Err(error) => finish!('agent,RunState::Failed,None,Some(error)),
+                    };
                     control_state = None;
-                    event=PolicyEvent::ResultChunk{reference,index,total_chunks:chunk.chunk_count,total_bytes:chunk.total_bytes,bytes:chunk.bytes};
+                    event = PolicyEvent::ResultChunk {
+                        reference,
+                        index,
+                        total_chunks: chunk.chunk_count,
+                        total_bytes: chunk.total_bytes,
+                        bytes: chunk.bytes,
+                    };
                 }
-                action @ (PolicyAction::RequestModel | PolicyAction::RequestModelWithEvidence { .. }) => {
-                    let evidence=match action {PolicyAction::RequestModelWithEvidence{evidence}=>evidence,_=>Vec::new()};
-                    let selected_model = match guarded("model_selection_panicked",||self.provider.select_for_request(&input.run_id,input.owner_generation,&cancel)) {
-                        Ok(selected)=>selected,
-                        Err(_) if cancel.is_cancelled()=>{policy_state = previous_policy_state;continue 'agent;},
-                        Err(error)=>finish!('agent,RunState::Failed,None,Some(error)),
+                action @ (PolicyAction::RequestModel
+                | PolicyAction::RequestModelWithEvidence { .. }) => {
+                    let evidence = match action {
+                        PolicyAction::RequestModelWithEvidence { evidence } => evidence,
+                        _ => Vec::new(),
+                    };
+                    let selected_model = match guarded("model_selection_panicked", || {
+                        self.provider.select_for_request(
+                            &input.run_id,
+                            input.owner_generation,
+                            &cancel,
+                        )
+                    }) {
+                        Ok(selected) => selected,
+                        Err(_) if cancel.is_cancelled() => {
+                            policy_state = previous_policy_state;
+                            continue 'agent;
+                        }
+                        Err(error) => finish!('agent,RunState::Failed,None,Some(error)),
                     };
                     if let Some(selected) = &selected_model {
-                        input.binding.connection_identity = selected.binding.connection_identity.clone();
+                        input.binding.connection_identity =
+                            selected.binding.connection_identity.clone();
                         input.binding.provider_family = selected.binding.provider_family.clone();
                         input.binding.model = selected.binding.model.clone();
                         input.binding.credential_ref = selected.binding.credential_ref.clone();
-                        input.binding.configuration_generation = selected.binding.configuration_generation;
+                        input.binding.configuration_generation =
+                            selected.binding.configuration_generation;
                     }
-                    let selected_tools = match guarded("tool_selection_panicked", || self.tools.select_for_request(&input.run_id,input.owner_generation,&cancel)) {
-                        Ok(selected)=>selected,
-                        Err(_) if cancel.is_cancelled()=>{policy_state=previous_policy_state;continue 'agent;},
-                        Err(error)=>finish!('agent,RunState::Failed,None,Some(error)),
+                    let selected_tools = match guarded("tool_selection_panicked", || {
+                        self.tools.select_for_request(
+                            &input.run_id,
+                            input.owner_generation,
+                            &cancel,
+                        )
+                    }) {
+                        Ok(selected) => selected,
+                        Err(_) if cancel.is_cancelled() => {
+                            policy_state = previous_policy_state;
+                            continue 'agent;
+                        }
+                        Err(error) => finish!('agent,RunState::Failed,None,Some(error)),
                     };
                     if let Some(selected) = &selected_tools {
                         input.binding.tools = selected.schemas.clone();
                         input.binding.tool_schema_generation = selected.generation;
                     }
-                    if self.context_preparation.prepare(&input.run_id, input.owner_generation, &cancel).is_err() {
+                    if self
+                        .context_preparation
+                        .prepare(&input.run_id, input.owner_generation, &cancel)
+                        .is_err()
+                    {
                         policy_state = previous_policy_state;
-                        if cancel.is_cancelled() { continue 'agent; }
+                        if cancel.is_cancelled() {
+                            continue 'agent;
+                        }
                         fail_context_preparation!('agent);
                     }
-                    if cancel.is_cancelled() { policy_state = previous_policy_state; continue 'agent; }
+                    if cancel.is_cancelled() {
+                        policy_state = previous_policy_state;
+                        continue 'agent;
+                    }
                     steps = steps.checked_add(1).ok_or_else(|| {
                         ExecutionError::new("step_overflow", "model step identity exhausted")
                     })?;
@@ -1320,14 +1913,29 @@ impl<
                     }
                     binding.history_range.leaf_id = history_cursor.clone();
                     let request_tools = match selected_tools {
-                        Some(selected)=>Some(selected.executor),
-                        None=>self.tools.freeze(&binding.tools)?,
+                        Some(selected) => Some(selected.executor),
+                        None => self.tools.freeze(&binding.tools)?,
                     };
-                    let mut request_history=compile_history(&history,&binding.provider_family,&binding.connection_identity);
-                    let mut selected=BTreeSet::new();
+                    let mut request_history = compile_history(
+                        &history,
+                        &binding.provider_family,
+                        &binding.connection_identity,
+                    );
+                    let mut selected = BTreeSet::new();
                     for reference in evidence {
-                        if !selected.insert((reference.action_id.clone(),reference.node_id.clone())) { finish!('agent,RunState::Failed,None,Some(ExecutionError::new("duplicate_evidence","evidence references must be unique"))); }
-                        let item=match self.persistence.policy_evidence(&input.run_id,input.owner_generation,&reference){Ok(item)=>item,Err(error)=>finish!('agent,RunState::Failed,None,Some(error))};
+                        if !selected
+                            .insert((reference.action_id.clone(), reference.node_id.clone()))
+                        {
+                            finish!('agent,RunState::Failed,None,Some(ExecutionError::new("duplicate_evidence","evidence references must be unique")));
+                        }
+                        let item = match self.persistence.policy_evidence(
+                            &input.run_id,
+                            input.owner_generation,
+                            &reference,
+                        ) {
+                            Ok(item) => item,
+                            Err(error) => finish!('agent,RunState::Failed,None,Some(error)),
+                        };
                         request_history.retain(|previous| !matches!(&previous.provenance,Provenance::EnvironmentFact{event_id} if item.memory_facts.contains(event_id)));
                         request_history.push(item.item);
                     }
@@ -1337,29 +1945,44 @@ impl<
                             input.run_id, input.owner_generation, steps
                         ),
                         run_id: input.run_id.clone(),
-                        origin: RequestOrigin::Conversation { step: steps, history_range: binding.history_range.clone() },
+                        origin: RequestOrigin::Conversation {
+                            step: steps,
+                            history_range: binding.history_range.clone(),
+                        },
                         binding,
                         history: request_history,
                     };
                     let model_cancel = cancel.child(&format!("model:{}", view.request_id));
-                    let serialized = match guarded("provider_serialize_panicked", || {
-                        match &selected_model {
-                            Some(selected)=>selected.provider.serialize(&view),
-                            None=>self.provider.serialize(&view),
+                    let serialized =
+                        match guarded("provider_serialize_panicked", || match &selected_model {
+                            Some(selected) => selected.provider.serialize(&view),
+                            None => self.provider.serialize(&view),
+                        }) {
+                            Ok(serialized) => serialized,
+                            Err(error) => finish!('agent, RunState::Failed, None, Some(error)),
+                        };
+                    match self.context_preparation.prepare_request(
+                        input.owner_generation,
+                        &view,
+                        &serialized,
+                        &cancel,
+                    ) {
+                        Ok(ContextRequestPreparation::Recompile) => {
+                            steps -= 1;
+                            policy_state = previous_policy_state;
+                            continue 'agent;
                         }
-                    }) {
-                        Ok(serialized) => serialized,
-                        Err(error) => finish!('agent, RunState::Failed, None, Some(error)),
-                    };
-                    match self.context_preparation.prepare_request(input.owner_generation, &view, &serialized, &cancel) {
-                        Ok(ContextRequestPreparation::Recompile) => { steps -= 1; policy_state = previous_policy_state; continue 'agent; }
                         Ok(ContextRequestPreparation::Ready) => (),
-                        Ok(ContextRequestPreparation::Waiting{wait_id}) => {
+                        Ok(ContextRequestPreparation::Waiting { wait_id }) => {
                             steps -= 1;
                             finish!('agent,RunState::Waiting,Some(wait_id),None);
                         }
                         Err(error) => {
-                            if cancel.is_cancelled() { steps -= 1; policy_state = previous_policy_state; continue 'agent; }
+                            if cancel.is_cancelled() {
+                                steps -= 1;
+                                policy_state = previous_policy_state;
+                                continue 'agent;
+                            }
                             finish!('agent, RunState::Failed, None, Some(error));
                         }
                     }
@@ -1370,7 +1993,9 @@ impl<
                             snapshot: snapshot.clone(),
                         },
                     ) {
-                        Ok(()) => { control_state = None; }
+                        Ok(()) => {
+                            control_state = None;
+                        }
                         Err(error)
                             if error.code == "input_pending" || model_cancel.is_cancelled() =>
                         {
@@ -1439,8 +2064,14 @@ impl<
                         }
                         Err(error) => return Err(error),
                     }
-                    let (items, deltas, usage, mut result) =
-                        self.generate(&input.run_id, &snapshot, &model_cancel, selected_model.as_ref().map(|selected|selected.provider.as_ref()));
+                    let (items, deltas, usage, mut result) = self.generate(
+                        &input.run_id,
+                        &snapshot,
+                        &model_cancel,
+                        selected_model
+                            .as_ref()
+                            .map(|selected| selected.provider.as_ref()),
+                    );
                     let cancelled = cancel.is_cancelled();
                     let interrupted = model_cancel.is_cancelled() && !cancelled;
                     let mut calls = Vec::new();
@@ -1507,9 +2138,14 @@ impl<
                         Err(failure) => finish!('agent, RunState::Failed, None,
                             Some(ExecutionError::new(failure.code, failure.message))),
                     };
-                    let committed: Vec<_> = items.iter()
-                        .map(|item| model_history_item(&snapshot.view.request_id, item)).collect();
-                    history_cursor = committed.last().map(|item| item.id.clone()).or(history_cursor);
+                    let committed: Vec<_> = items
+                        .iter()
+                        .map(|item| model_history_item(&snapshot.view.request_id, item))
+                        .collect();
+                    history_cursor = committed
+                        .last()
+                        .map(|item| item.id.clone())
+                        .or(history_cursor);
                     history.extend(committed);
                     event = PolicyEvent::ModelCompleted {
                         reason,
@@ -1518,7 +2154,7 @@ impl<
                     if !calls.is_empty() {
                         pending = Some((snapshot, calls));
                         pending_tools = request_tools;
-                        pending_model = selected_model.map(|selected|selected.provider);
+                        pending_model = selected_model.map(|selected| selected.provider);
                     }
                 }
                 PolicyAction::ExecuteTools => {
@@ -1531,8 +2167,14 @@ impl<
                             waiting_on: None,
                         },
                     )?;
-                    let results =
-                        self.execute_batch(&input, &snapshot, calls, &cancel, &recovered_results, pending_tools.take())?;
+                    let results = self.execute_batch(
+                        &input,
+                        &snapshot,
+                        calls,
+                        &cancel,
+                        &recovered_results,
+                        pending_tools.take(),
+                    )?;
                     recovered_results.clear();
                     self.commit(
                         &input,
@@ -1657,8 +2299,8 @@ impl<
                 Ok(())
             };
             match selected {
-                Some(provider)=>provider.generate(snapshot,cancel,&mut emit),
-                None=>self.provider.generate(snapshot,cancel,&mut emit),
+                Some(provider) => provider.generate(snapshot, cancel, &mut emit),
+                None => self.provider.generate(snapshot, cancel, &mut emit),
             }
         }))
         .unwrap_or_else(|_| {
@@ -1707,21 +2349,29 @@ impl<
             let operation_id = format!("{}:tool:{}", snapshot.view.request_id, call.call_id);
             let operation_cancel = cancel.child(&operation_id);
             operation_tokens.push(operation_cancel.clone());
-            let bound = match tools.as_ref().map(|tools| tools.clone().bind_call(call, &frozen, &operation_cancel))
-                .unwrap_or_else(|| self.tools.clone().bind_call(call, &frozen, &operation_cancel)) {
+            let bound = match tools
+                .as_ref()
+                .map(|tools| tools.clone().bind_call(call, &frozen, &operation_cancel))
+                .unwrap_or_else(|| {
+                    self.tools
+                        .clone()
+                        .bind_call(call, &frozen, &operation_cancel)
+                }) {
                 Ok(bound) => bound,
                 Err(error) => {
-                    results[index] = Some(self.unprepared_result(input, snapshot, call,
-                        ToolCompletion::failure(&error.code, &error.message, Effect::None)));
+                    results[index] = Some(self.unprepared_result(
+                        input,
+                        snapshot,
+                        call,
+                        ToolCompletion::failure(&error.code, &error.message, Effect::None),
+                    ));
                     continue;
                 }
             };
             let preparation = if operation_cancel.is_cancelled() {
                 None
             } else {
-                match guarded("tool_plan_panicked", || {
-                    bound.plan(&operation_cancel)
-                }) {
+                match guarded("tool_plan_panicked", || bound.plan(&operation_cancel)) {
                     Ok(preparation) => Some(preparation),
                     Err(error) => {
                         results[index] = Some(self.unprepared_result(
@@ -1763,20 +2413,24 @@ impl<
                         ));
                         continue;
                     }
-                    let class = match guarded("tool_plan_panicked", || {
-                        Ok(bound.execution_class(contract))
-                    }) {
-                        Ok(class) => class,
-                        Err(error) => {
-                            results[index] = Some(self.unprepared_result(
-                                input,
-                                snapshot,
-                                call,
-                                ToolCompletion::failure(&error.code, &error.message, Effect::None),
-                            ));
-                            continue;
-                        }
-                    };
+                    let class =
+                        match guarded("tool_plan_panicked", || Ok(bound.execution_class(contract)))
+                        {
+                            Ok(class) => class,
+                            Err(error) => {
+                                results[index] = Some(self.unprepared_result(
+                                    input,
+                                    snapshot,
+                                    call,
+                                    ToolCompletion::failure(
+                                        &error.code,
+                                        &error.message,
+                                        Effect::None,
+                                    ),
+                                ));
+                                continue;
+                            }
+                        };
                     (
                         contract
                             .resources
@@ -1821,7 +2475,14 @@ impl<
                 class,
                 &operation_cancel,
             )?;
-            planned.push((index, bound, preparation, reservation, class, operation_cancel));
+            planned.push((
+                index,
+                bound,
+                preparation,
+                reservation,
+                class,
+                operation_cancel,
+            ));
         }
         let mut persistence_failure = None;
         std::thread::scope(|scope| {
@@ -1910,8 +2571,13 @@ impl<
                                 ExecutionRecord::ToolAdmitted {
                                     context: ToolExecutionContext {
                                         run_id: input.run_id.clone(),
-                                        origin: ToolOrigin::ModelStep { request_id: snapshot.view.request_id.clone() },
-                                        operation_id: format!("{}:tool:{}", snapshot.view.request_id, call.call_id),
+                                        origin: ToolOrigin::ModelStep {
+                                            request_id: snapshot.view.request_id.clone(),
+                                        },
+                                        operation_id: format!(
+                                            "{}:tool:{}",
+                                            snapshot.view.request_id, call.call_id
+                                        ),
                                     },
                                     tool: tool.clone(),
                                 },
@@ -1919,11 +2585,25 @@ impl<
                         }
                         let context = ToolExecutionContext {
                             run_id: input.run_id.clone(),
-                            origin: ToolOrigin::ModelStep { request_id: snapshot.view.request_id.clone() },
-                            operation_id: format!("{}:tool:{}", snapshot.view.request_id, call.call_id),
+                            origin: ToolOrigin::ModelStep {
+                                request_id: snapshot.view.request_id.clone(),
+                            },
+                            operation_id: format!(
+                                "{}:tool:{}",
+                                snapshot.view.request_id, call.call_id
+                            ),
                         };
-                        let durable = !tool.contract.read_only || tool.contract.completion == CompletionKind::Job;
-                        let completion = self.execute_one(input, &context, &tool, bound.as_ref(), &operation_cancel, reservation, durable)?;
+                        let durable = !tool.contract.read_only
+                            || tool.contract.completion == CompletionKind::Job;
+                        let completion = self.execute_one(
+                            input,
+                            &context,
+                            &tool,
+                            bound.as_ref(),
+                            &operation_cancel,
+                            reservation,
+                            durable,
+                        )?;
                         Ok(self.unprepared_result(input, snapshot, call, completion))
                     });
                     let _ = tx.send((index, result));
@@ -1992,9 +2672,17 @@ impl<
         let mut lease = None;
         let mut reservation = Some(reservation);
         let mut _admission_control = None;
+        let mut executor_stopped = true;
         let completion = if cancel.is_cancelled() {
             ToolCompletion::NotDispatched {
                 reason: "cancelled".into(),
+            }
+        } else if let Err(error) = guarded("tool_admission_watch_panicked", || {
+            _admission_control = bound.watch_admission(context, &tool.contract, cancel)?;
+            Ok(())
+        }) {
+            ToolCompletion::NotDispatched {
+                reason: format!("{}: {}", error.code, error.message),
             }
         } else if let Err(error) = guarded("tool_authorize_panicked", || {
             bound.authorize(context, &tool.contract, cancel)
@@ -2004,7 +2692,6 @@ impl<
             }
         } else {
             let ready = prepare_dispatch(cancel, || {
-                _admission_control = bound.watch_admission(context, &tool.contract, cancel)?;
                 lease = reservation
                     .take()
                     .expect("one admission per call")
@@ -2037,6 +2724,7 @@ impl<
                         input,
                         ExecutionRecord::ToolDispatched {
                             context: context.clone(),
+                            executor_owner: bound.executor_owner(),
                         },
                     ) {
                         Ok(()) => {
@@ -2052,16 +2740,16 @@ impl<
                     false
                 };
                 let result = if dispatch_cancelled || cancel.is_cancelled() {
-                    Ok(ToolCompletion::NotDispatched {
-                        reason: "cancelled".into(),
-                    })
+                    Ok(ToolExecutionReceipt::not_dispatched("cancelled"))
                 } else {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         bound.execute(context, &tool.contract, cancel)
                     }))
                 };
                 match result {
-                    Ok(completion) => {
+                    Ok(receipt) => {
+                        executor_stopped = receipt.executor_stopped;
+                        let completion = receipt.completion;
                         let confirmed_no_effect = !tool.contract.read_only
                             && matches!(
                                 &completion,
@@ -2080,15 +2768,19 @@ impl<
                             .unwrap_or(false);
                         normalize_completion(completion, &tool.contract, confirmed_no_effect)
                     }
-                    Err(_) => ToolCompletion::failure(
-                        "tool_panicked",
-                        "tool worker stopped without a receipt",
-                        if tool.contract.read_only {
-                            Effect::None
-                        } else {
-                            Effect::Unknown
-                        },
-                    ),
+                    Err(_) => {
+                        executor_stopped = matches!(bound.executor_owner(), ExecutorOwner::Kernel)
+                            && tool.contract.completion != CompletionKind::Job;
+                        ToolCompletion::failure(
+                            "tool_panicked",
+                            "tool worker stopped without a receipt",
+                            if tool.contract.read_only {
+                                Effect::None
+                            } else {
+                                Effect::Unknown
+                            },
+                        )
+                    }
                 }
             }
         };
@@ -2098,6 +2790,7 @@ impl<
                 ExecutionRecord::ToolSettled {
                     context: context.clone(),
                     completion: completion.clone(),
+                    executor_stopped,
                 },
             )
             .map(|_| completion)
@@ -2106,16 +2799,7 @@ impl<
         };
         // Only original executor completion/stop evidence releases dispatched occupancy.
         if let Some(lease) = lease {
-            if settled.is_err()
-                || matches!(
-                    settled.as_ref(),
-                    Ok(ToolCompletion::JobAccepted { .. })
-                        | Ok(ToolCompletion::Result {
-                            effect: Effect::Unknown,
-                            ..
-                        })
-                ) && tool.contract.completion == CompletionKind::Job
-            {
+            if settled.is_err() || !executor_stopped {
                 lease.handoff();
             } else {
                 lease.release();
@@ -2123,7 +2807,6 @@ impl<
         }
         settled
     }
-
 }
 
 /// Cancellation wins only while no tool has been dispatched. Inspect it after admission
@@ -2221,7 +2904,11 @@ fn validate_model_items(
     Ok(calls)
 }
 
-fn normalize_completion(completion: ToolCompletion, contract: &ToolContract, confirmed_no_effect: bool) -> ToolCompletion {
+fn normalize_completion(
+    completion: ToolCompletion,
+    contract: &ToolContract,
+    confirmed_no_effect: bool,
+) -> ToolCompletion {
     match completion {
         ToolCompletion::JobAccepted {
             operation_id,

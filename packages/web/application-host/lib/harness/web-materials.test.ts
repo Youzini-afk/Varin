@@ -1,78 +1,6 @@
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { RetrievalArtifactRef, RetrievalEvidence, RetrievalReceiptAuthority, Thread } from "@varin/protocol";
-import type { WorkingStateRootContext, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
-import { createRetrievalArtifactAccess } from "./retrieval-artifacts.js";
-import { createWebMaterialStore } from "./web-materials.js";
-
-type TestRecord = {
-  recordId: string;
-  workspaceId: string;
-  recordType: string;
-  state: string;
-  sessionId?: string;
-  threadId?: string;
-  runId?: string;
-  recordRevision: number;
-  payloadJson: string;
-  references: Array<{ slot: string; objectHash: string }>;
-};
-
-const openStore = () => {
-  const objects = new Map<string, Buffer>();
-  const records = new Map<string, TestRecord>();
-  const store = {
-    async putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }> {
-      const hash = `sha256-${createHash("sha256").update(bytes).digest("hex")}`;
-      objects.set(hash, Buffer.from(bytes));
-      return { hash, byteLength: bytes.byteLength };
-    },
-    async getObject(hash: string): Promise<Buffer | null> {
-      const bytes = objects.get(hash);
-      return bytes ? Buffer.from(bytes) : null;
-    },
-    async getObjectSlice(hash: string, _byteLength: number, offset: number, length: number): Promise<Buffer | null> {
-      const bytes = objects.get(hash);
-      return bytes ? Buffer.from(bytes.subarray(offset, offset + length)) : null;
-    },
-  };
-  const context = {
-    records: {
-      async get(recordId: string): Promise<TestRecord | null> {
-        return records.get(recordId) ?? null;
-      },
-      async list(input: { recordType?: string }): Promise<TestRecord[]> {
-        return [...records.values()].filter((record) => !input.recordType || record.recordType === input.recordType);
-      },
-      async put(input: Omit<TestRecord, "recordRevision" | "workspaceId"> & { workspaceId?: string; operationId: string; expectedRecordRevision?: number }): Promise<TestRecord> {
-        const existing = records.get(input.recordId);
-        if (existing && input.expectedRecordRevision !== existing.recordRevision) throw new Error("record revision conflict");
-        const record = { ...input, workspaceId: input.workspaceId ?? "ws", recordRevision: (existing?.recordRevision ?? 0) + 1, references: [...(input.references ?? [])] };
-        records.set(record.recordId, record);
-        return record;
-      },
-      async release(_operationId: string, recordId: string): Promise<Record<string, unknown>> {
-        const released = records.delete(recordId);
-        return { recordId, released };
-      },
-    },
-  };
-  const workingStates: WorkspaceWorkingStateRootAccess = {
-    withBranchStore: async (_workspaceId, _purpose, operation) => operation(
-      store as unknown as WorkingStateRootStore,
-      context as unknown as WorkingStateRootContext,
-    ),
-  };
-  return {
-    records,
-    objects,
-    // A fresh store over the same maps simulates a Host restart: durable
-    // records remain resolvable while nothing about the process survived.
-    reopen: () => createWebMaterialStore(workingStates),
-    materials: createWebMaterialStore(workingStates),
-    retrieval: createRetrievalArtifactAccess(workingStates),
-  };
-};
+import { createMaterialStoreFixture as openStore } from "./web-materials.test-helper.js";
 
 const authority = (sessionId: string, threadId?: string, runId?: string): RetrievalReceiptAuthority => ({
   owningWorkspaceId: "ws",
@@ -202,6 +130,46 @@ describe("web material snapshots", () => {
     expect(refreshed.snapshotId).not.toBe(first.snapshotId);
     expect((await opened.materials.read("ws", first.snapshotId))?.body.toString()).toBe("v1");
     expect((await opened.materials.read("ws", refreshed.snapshotId))?.body.toString()).toBe("v2 changed");
+  });
+
+  it("keeps native Thread reads scoped and checks fixed revisions before reading bytes", async () => {
+    let reads = 0;
+    const opened = openStore({ beforeObjectRead: async () => { reads++; } });
+    const ref = await opened.materials.put("ws", draft("https://example.com/thread"), Buffer.from("fixed body"), authority("pi", "thread-a"));
+    const native = { kind: "thread" as const, owningWorkspaceId: "ws", threadId: "thread-a" };
+    expect((await opened.materials.read("ws", ref.snapshotId, native, {
+      byteRange: { offset: 6, length: 4 }, expectedContentHash: ref.contentHash,
+    }))?.body.toString()).toBe("body");
+    expect(await opened.materials.read("ws", ref.snapshotId, { ...native, threadId: "foreign" })).toBeNull();
+    await expect(opened.materials.read("ws", ref.snapshotId, { ...native, owningWorkspaceId: "other" })).rejects.toThrow("authority");
+    await expect(opened.materials.read("ws", ref.snapshotId, native, {
+      expectedContentHash: `sha256-${"0".repeat(64)}`,
+    })).rejects.toMatchObject({ code: "conflict" });
+    await expect(opened.materials.read("ws", ref.snapshotId, native, {
+      byteRange: { offset: 11, length: 1 },
+    })).rejects.toMatchObject({ code: "invalid-range" });
+    expect(reads).toBe(1);
+
+    // Same length is insufficient evidence of the fixed content revision.
+    opened.objects.set(ref.contentHash, Buffer.from("other body"));
+    await expect(opened.materials.read("ws", ref.snapshotId, native)).rejects.toMatchObject({ code: "corrupt" });
+  });
+
+  it("passes exact ranges and cancellation to the existing kernel blob owner", async () => {
+    const controller = new AbortController();
+    const calls: Array<{ hash: string; source: { recordId: string; slot: string }; options: unknown }> = [];
+    const body = Buffer.from("a large fixed body");
+    const opened = openStore({ client: { getBlob: async (hash, source, options) => {
+      calls.push({ hash, source, options });
+      return { byteLength: body.length, bytesBase64: body.subarray(options!.offset!, options!.offset! + options!.length!).toString("base64") };
+    } } });
+    const ref = await opened.materials.put("ws", draft("https://example.com/range"), body, authority("pi", "thread"));
+    const found = await opened.materials.read("ws", ref.snapshotId, {
+      kind: "thread", owningWorkspaceId: "ws", threadId: "thread",
+    }, { byteRange: { offset: 8, length: 5 }, signal: controller.signal });
+    expect(found?.body.toString()).toBe("fixed");
+    expect(calls).toEqual([{ hash: ref.contentHash, source: { recordId: `web.snapshot:${ref.snapshotId}`, slot: "body" },
+      options: { offset: 8, length: 5, signal: controller.signal } }]);
   });
 
   it("keeps a snapshot whose body is cited by another run while releasing unreferenced ones", async () => {

@@ -1,11 +1,11 @@
 //! Independent counterexamples for durable child admission. Host/source authority is covered by
 //! the loopback suite; these tests use real Catalog transactions and committed tool origins.
-#[path="input_admission.rs"]
+#[path = "input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
 use serde_json::json;
 use varin_runtime::catalog::collaboration::{
-    ChildSourcePin, DISPATCH_TOOL, DispatchInput, WAIT_TOOL,
+    ChildSourcePin, DispatchInput, DISPATCH_TOOL, WAIT_TOOL,
 };
 use varin_runtime::catalog::launches::{LaunchSelection, SourceSelection};
 use varin_runtime::execution::*;
@@ -21,6 +21,9 @@ pub(crate) struct Fixture {
 }
 fn read_schema() -> ToolSchema {
     ToolSchema {
+        description: String::new(),
+        output_schema: None,
+        metadata: None,
         name: "file_read".into(),
         version: "1".into(),
         schema: json!({"type":"object"}),
@@ -33,6 +36,9 @@ impl Fixture {
             7,
             read_schema(),
             ToolSchema {
+                description: String::new(),
+                output_schema: None,
+                metadata: None,
                 name: DISPATCH_TOOL.into(),
                 version: "1".into(),
                 schema: json!({"type":"object"}),
@@ -42,15 +48,31 @@ impl Fixture {
     pub(crate) fn new_with_schemas(revision: i64, read: ToolSchema, dispatch: ToolSchema) -> Self {
         Self::new_parent(revision, read, dispatch, false)
     }
-    pub(crate) fn new_policy_parent_with_schemas(revision: i64, read: ToolSchema, dispatch: ToolSchema) -> Self {
+    pub(crate) fn new_policy_parent_with_schemas(
+        revision: i64,
+        read: ToolSchema,
+        dispatch: ToolSchema,
+    ) -> Self {
         Self::new_parent(revision, read, dispatch, true)
     }
     pub(crate) fn new_policy() -> Self {
-        let mut fixture = Self::new_parent(7, read_schema(), ToolSchema {
-            name: DISPATCH_TOOL.into(), version: "1".into(), schema: json!({"type":"object"}),
-        }, true);
+        let mut fixture = Self::new_parent(
+            7,
+            read_schema(),
+            ToolSchema {
+                description: String::new(),
+                output_schema: None,
+                metadata: None,
+                name: DISPATCH_TOOL.into(),
+                version: "1".into(),
+                schema: json!({"type":"object"}),
+            },
+            true,
+        );
         fixture.context = fixture.admit_policy_call(ToolCall {
-            call_id: "dispatch-call".into(), name: DISPATCH_TOOL.into(), schema_version: "1".into(),
+            call_id: "dispatch-call".into(),
+            name: DISPATCH_TOOL.into(),
+            schema_version: "1".into(),
             arguments: serde_json::to_value(&fixture.input).unwrap(),
         });
         fixture
@@ -61,8 +83,7 @@ impl Fixture {
             uuid::Uuid::new_v4()
         ));
         let mut db = Catalog::open(&root).unwrap();
-        db.create_thread("thread:parent", "branch:parent")
-            .unwrap();
+        db.create_thread("thread:parent", "branch:parent").unwrap();
         let input = DispatchInput {
             task: "Read the fixed file and report".into(),
             model: "parent".into(),
@@ -70,9 +91,9 @@ impl Fixture {
         };
         let source: SourceSelection = serde_json::from_value(json!({"mode":"fixed_branch","live_root":null,
             "workspace_id":"workspace-A","execution_workspace_id":"workspace-A","branch_id":"fixed-parent","revision":revision})).unwrap();
-        let launch: LaunchSelection = serde_json::from_value(json!({"connection_identity":"frozen-connection",
+        let launch: LaunchSelection = serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"frozen-connection",
             "provider_family":"fixture","model":"fixture-model","configuration_generation":2,"tool_schema_generation":1,
-            "tools":[read.clone(),dispatch,{"name":WAIT_TOOL,"version":"1","schema":{"type":"object"}}],"policy":{"name":"fixture","version":"1"},"source":source,
+            "tools":[read.clone(),dispatch,{"name":WAIT_TOOL,"version":"1","description":"Wait for fixture operation","output_schema":null,"metadata":null,"schema":{"type":"object"}}],"policy":{"name":"fixture","version":"1"},"source":source,
             "credential_scope":{"reference":"credential-ref","authority":"credential-owner","account":"account-A","generation":3}})).unwrap();
         let receipt = db.submit_with_launch(&SubmitInput { key: "parent-input".into(), thread_id: "thread:parent".into(),
             branch_id: "branch:parent".into(), expected_head: None, input: json!("Delegate a read"),
@@ -84,13 +105,29 @@ impl Fixture {
                 node_id: "dispatch-call".into(),
             };
             let context = ToolExecutionContext {
-                operation_id: origin.operation_id("dispatch-call"), origin, run_id: receipt.run_id,
+                operation_id: origin.operation_id("dispatch-call"),
+                origin,
+                run_id: receipt.run_id,
             };
-            let pin = ChildSourcePin { pin_id: "retained-pin".into(), root: "fixed-root".into(), source };
+            let pin = ChildSourcePin {
+                pin_id: "retained-pin".into(),
+                root: "fixed-root".into(),
+                source,
+            };
             let mut child_launch = launch;
             child_launch.tools = vec![read];
-            child_launch.policy = PolicyIdentity { name: "default".into(), version: "1".into() };
-            return Self { root, db, context, input, pin, launch: child_launch };
+            child_launch.policy = PolicyIdentity {
+                name: "default".into(),
+                version: "1".into(),
+            };
+            return Self {
+                root,
+                db,
+                context,
+                input,
+                pin,
+                launch: child_launch,
+            };
         }
         let range = HistoryRange {
             branch_id: receipt.branch_id.clone(),
@@ -168,26 +205,47 @@ impl Fixture {
             },
         )
         .unwrap();
-        db.commit_execution(
-            &run,
-            epoch,
-            &{let tool=AdmittedTool {
-                    call,
-                    contract: ToolContract {
-                        name: DISPATCH_TOOL.into(),
-                        schema_version: "1".into(),
-                        read_only: true,
-                        completion: CompletionKind::Job,
-                        lifetime: Lifetime::Thread,
-                        resources: vec![],
-                    },
-                };ExecutionRecord::ToolAdmitted{context:{let request_id:String="parent-request".into();let call_id:String=tool.call.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&run).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},tool}},
-        )
+        db.commit_execution(&run, epoch, &{
+            let tool = AdmittedTool {
+                call,
+                contract: ToolContract {
+                    name: DISPATCH_TOOL.into(),
+                    schema_version: "1".into(),
+                    read_only: true,
+                    completion: CompletionKind::Job,
+                    lifetime: Lifetime::Thread,
+                    resources: vec![],
+                },
+            };
+            ExecutionRecord::ToolAdmitted {
+                context: {
+                    let request_id: String = "parent-request".into();
+                    let call_id: String = tool.call.call_id.clone();
+                    varin_runtime::execution::ToolExecutionContext {
+                        run_id: (&run).to_string(),
+                        operation_id: format!("{request_id}:tool:{call_id}"),
+                        origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                    }
+                },
+                tool,
+            }
+        })
         .unwrap();
         db.commit_execution(
             &run,
             epoch,
-            &ExecutionRecord::ToolDispatched{context:{let request_id:String="parent-request".into();let call_id:String="dispatch-call".into();varin_runtime::execution::ToolExecutionContext{run_id:(&run).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}}},
+            &ExecutionRecord::ToolDispatched {
+                executor_owner: varin_runtime::ExecutorOwner::Kernel,
+                context: {
+                    let request_id: String = "parent-request".into();
+                    let call_id: String = "dispatch-call".into();
+                    varin_runtime::execution::ToolExecutionContext {
+                        run_id: (&run).to_string(),
+                        operation_id: format!("{request_id}:tool:{call_id}"),
+                        origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                    }
+                },
+            },
         )
         .unwrap();
         let context = ToolExecutionContext {
@@ -237,7 +295,13 @@ impl Fixture {
             ancestor_id: None,
             leaf_id: self.db.head(&branch).unwrap(),
         };
-        let tools = self.db.launch_intent(&self.context.run_id).unwrap().unwrap().selection.tools;
+        let tools = self
+            .db
+            .launch_intent(&self.context.run_id)
+            .unwrap()
+            .unwrap()
+            .selection
+            .tools;
         let snapshot = RequestSnapshot {
             view: RequestView {
                 request_id: request_id.clone(),
@@ -306,27 +370,48 @@ impl Fixture {
             )
             .unwrap();
         self.db
-            .commit_execution(
-                &self.context.run_id,
-                epoch,
-                &{let tool=AdmittedTool {
-                        call,
-                        contract: ToolContract {
-                            name: WAIT_TOOL.into(),
-                            schema_version: "1".into(),
-                            read_only: true,
-                            completion: CompletionKind::Job,
-                            lifetime: Lifetime::Thread,
-                            resources: vec![],
-                        },
-                    };ExecutionRecord::ToolAdmitted{context:{let request_id:String=request_id.clone();let call_id:String=tool.call.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&self.context.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},tool}},
-            )
+            .commit_execution(&self.context.run_id, epoch, &{
+                let tool = AdmittedTool {
+                    call,
+                    contract: ToolContract {
+                        name: WAIT_TOOL.into(),
+                        schema_version: "1".into(),
+                        read_only: true,
+                        completion: CompletionKind::Job,
+                        lifetime: Lifetime::Thread,
+                        resources: vec![],
+                    },
+                };
+                ExecutionRecord::ToolAdmitted {
+                    context: {
+                        let request_id: String = request_id.clone();
+                        let call_id: String = tool.call.call_id.clone();
+                        varin_runtime::execution::ToolExecutionContext {
+                            run_id: (&self.context.run_id).to_string(),
+                            operation_id: format!("{request_id}:tool:{call_id}"),
+                            origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                        }
+                    },
+                    tool,
+                }
+            })
             .unwrap();
         self.db
             .commit_execution(
                 &self.context.run_id,
                 epoch,
-                &ExecutionRecord::ToolDispatched{context:{let request_id:String=request_id.clone();let call_id:String=call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&self.context.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}}},
+                &ExecutionRecord::ToolDispatched {
+                    executor_owner: varin_runtime::ExecutorOwner::Kernel,
+                    context: {
+                        let request_id: String = request_id.clone();
+                        let call_id: String = call_id.clone();
+                        varin_runtime::execution::ToolExecutionContext {
+                            run_id: (&self.context.run_id).to_string(),
+                            operation_id: format!("{request_id}:tool:{call_id}"),
+                            origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                        }
+                    },
+                },
             )
             .unwrap();
         let context = ToolExecutionContext {
@@ -336,8 +421,12 @@ impl Fixture {
             },
             operation_id: format!("{request_id}:tool:{call_id}"),
         };
-        let prepared = self.db.prepare_child_wait_registration(&context, &self.context.operation_id)
-            .unwrap().load().unwrap();
+        let prepared = self
+            .db
+            .prepare_child_wait_registration(&context, &self.context.operation_id)
+            .unwrap()
+            .load()
+            .unwrap();
         let wait = self.db.register_child_wait(prepared).unwrap();
         let result = ToolResult {
             request_id: request_id.clone(),
@@ -350,11 +439,22 @@ impl Fixture {
             },
         };
         self.db
-            .commit_execution(
-                &self.context.run_id,
-                epoch,
-                &{let result=result.clone();ExecutionRecord::ToolSettled{context:{let request_id:String=result.request_id.clone();let call_id:String=result.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&self.context.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},completion:result.completion}},
-            )
+            .commit_execution(&self.context.run_id, epoch, &{
+                let result = result.clone();
+                ExecutionRecord::ToolSettled {
+                    executor_stopped: false,
+                    context: {
+                        let request_id: String = result.request_id.clone();
+                        let call_id: String = result.call_id.clone();
+                        varin_runtime::execution::ToolExecutionContext {
+                            run_id: (&self.context.run_id).to_string(),
+                            operation_id: format!("{request_id}:tool:{call_id}"),
+                            origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                        }
+                    },
+                    completion: result.completion,
+                }
+            })
             .unwrap();
         self.db
             .commit_execution(
@@ -381,38 +481,111 @@ impl Fixture {
     pub(crate) fn admit_policy_call(&mut self, call: ToolCall) -> ToolExecutionContext {
         let run_id = self.context.run_id.clone();
         let epoch = self.db.epoch();
-        self.db.commit_execution(&run_id, epoch, &ExecutionRecord::StateChanged { state: RunState::Runnable, waiting_on: None }).unwrap();
+        self.db
+            .commit_execution(
+                &run_id,
+                epoch,
+                &ExecutionRecord::StateChanged {
+                    state: RunState::Runnable,
+                    waiting_on: None,
+                },
+            )
+            .unwrap();
         let launch = self.db.launch_intent(&run_id).unwrap().unwrap().selection;
         let boundary = self.db.policy_boundary(&run_id, epoch).unwrap();
         let action_id = format!("{run_id}:policy:{}", boundary.id);
-        let origin = ToolOrigin::PolicyAction { action_id: action_id.clone(), node_id: call.call_id.clone() };
-        let context = ToolExecutionContext { operation_id: origin.operation_id(&call.call_id), origin: origin.clone(), run_id: run_id.clone() };
+        let origin = ToolOrigin::PolicyAction {
+            action_id: action_id.clone(),
+            node_id: call.call_id.clone(),
+        };
+        let context = ToolExecutionContext {
+            operation_id: origin.operation_id(&call.call_id),
+            origin: origin.clone(),
+            run_id: run_id.clone(),
+        };
         let intent = PolicyGraphIntent::PolicyToolGraphV1 {
-            action_id, boundary, identity: launch.policy, state: json!({"stage": 1}),
+            action_id,
+            boundary,
+            identity: launch.policy,
+            state: json!({"stage": 1}),
             nodes: vec![PolicyAdmittedNode {
-                context: FrozenToolContext { run_id: run_id.clone(), origin, tool_schema_generation: launch.tool_schema_generation,
-                    tools: std::sync::Arc::new(launch.tools), source: launch.source },
-                node: PolicyToolNode { id: call.call_id.clone(), depends_on: vec![], call: call.clone() },
+                context: FrozenToolContext {
+                    run_id: run_id.clone(),
+                    origin,
+                    tool_schema_generation: launch.tool_schema_generation,
+                    tools: std::sync::Arc::new(launch.tools),
+                    source: launch.source,
+                },
+                node: PolicyToolNode {
+                    id: call.call_id.clone(),
+                    depends_on: vec![],
+                    call: call.clone(),
+                },
             }],
         };
         self.db.admit_policy_graph(&run_id, epoch, &intent).unwrap();
-        self.db.commit_execution(&run_id, epoch, &ExecutionRecord::ToolAdmitted {
-            context: context.clone(), tool: AdmittedTool {
-                contract: ToolContract { name: call.name.clone(), schema_version: "1".into(), read_only: true,
-                    completion: CompletionKind::Job, lifetime: Lifetime::Thread, resources: vec![] }, call,
-            },
-        }).unwrap();
-        self.db.commit_execution(&run_id, epoch, &ExecutionRecord::ToolDispatched { context: context.clone() }).unwrap();
+        self.db
+            .commit_execution(
+                &run_id,
+                epoch,
+                &ExecutionRecord::ToolAdmitted {
+                    context: context.clone(),
+                    tool: AdmittedTool {
+                        contract: ToolContract {
+                            name: call.name.clone(),
+                            schema_version: "1".into(),
+                            read_only: true,
+                            completion: CompletionKind::Job,
+                            lifetime: Lifetime::Thread,
+                            resources: vec![],
+                        },
+                        call,
+                    },
+                },
+            )
+            .unwrap();
+        self.db
+            .commit_execution(
+                &run_id,
+                epoch,
+                &ExecutionRecord::ToolDispatched {
+                    executor_owner: varin_runtime::ExecutorOwner::Kernel,
+                    context: context.clone(),
+                },
+            )
+            .unwrap();
         context
     }
     pub(crate) fn settle_policy_call(&mut self, context: &ToolExecutionContext, phase: &str) {
-        let ToolOrigin::PolicyAction { action_id, node_id } = &context.origin else { panic!("policy call required") };
-        let completion = ToolCompletion::JobAccepted { operation_id: context.operation_id.clone(), phase: phase.into(),
-            effect: Effect::None, lifetime: Lifetime::Thread };
-        self.db.commit_execution(&context.run_id, self.db.epoch(), &ExecutionRecord::ToolSettled {
-            context: context.clone(), completion: completion.clone(),
-        }).unwrap();
-        self.db.settle_policy_node(&context.run_id, self.db.epoch(), action_id, node_id, &completion).unwrap();
+        let ToolOrigin::PolicyAction { action_id, node_id } = &context.origin else {
+            panic!("policy call required")
+        };
+        let completion = ToolCompletion::JobAccepted {
+            operation_id: context.operation_id.clone(),
+            phase: phase.into(),
+            effect: Effect::None,
+            lifetime: Lifetime::Thread,
+        };
+        self.db
+            .commit_execution(
+                &context.run_id,
+                self.db.epoch(),
+                &ExecutionRecord::ToolSettled {
+                    executor_stopped: false,
+                    context: context.clone(),
+                    completion: completion.clone(),
+                },
+            )
+            .unwrap();
+        self.db
+            .settle_policy_node(
+                &context.run_id,
+                self.db.epoch(),
+                action_id,
+                node_id,
+                &completion,
+            )
+            .unwrap();
     }
     pub(crate) fn settle_exchange(&mut self) {
         let result = ToolResult {
@@ -426,11 +599,22 @@ impl Fixture {
             },
         };
         self.db
-            .commit_execution(
-                &self.context.run_id,
-                self.db.epoch(),
-                &{let result=result.clone();ExecutionRecord::ToolSettled{context:{let request_id:String=result.request_id.clone();let call_id:String=result.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&self.context.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},completion:result.completion}},
-            )
+            .commit_execution(&self.context.run_id, self.db.epoch(), &{
+                let result = result.clone();
+                ExecutionRecord::ToolSettled {
+                    executor_stopped: false,
+                    context: {
+                        let request_id: String = result.request_id.clone();
+                        let call_id: String = result.call_id.clone();
+                        varin_runtime::execution::ToolExecutionContext {
+                            run_id: (&self.context.run_id).to_string(),
+                            operation_id: format!("{request_id}:tool:{call_id}"),
+                            origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                        }
+                    },
+                    completion: result.completion,
+                }
+            })
             .unwrap();
         self.db
             .commit_execution(

@@ -28,9 +28,26 @@ impl RunState {
         )
     }
 }
+/// Physical execution ownership is distinct from the tool/adapter name. External workers may
+/// survive a kernel restart; their original epoch must authenticate any late receipt.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ExecutorOwner {
+    Kernel,
+    External { identity: String, epoch: String },
+}
+impl ExecutorOwner {
+    pub fn validate(&self) -> bool {
+        match self {
+            Self::Kernel => true,
+            Self::External { identity, epoch } => !identity.is_empty() && !epoch.is_empty(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Operation<E = ExternalReceipt, R = Value, C = crate::execution::ToolCompletion> {
-    pub external_receipt:Option<E>,
+    pub external_receipt: Option<E>,
     pub call_completion: Option<C>,
     pub id: String,
     pub run_id: String,
@@ -43,12 +60,17 @@ pub struct Operation<E = ExternalReceipt, R = Value, C = crate::execution::ToolC
     pub lifetime: Lifetime,
     pub handed_off: bool,
     pub executor: Option<String>,
+    pub execution_owner: Option<ExecutorOwner>,
     pub waiting_on: Option<String>,
     pub intent: Value,
     pub result: Option<R>,
 }
 /// Catalog representation. Public reads hydrate immutable bodies into Operation.
-pub type OperationMetadata = Operation<ExternalReceiptMetadata, OperationResultMetadata, crate::catalog::result_content::ToolCompletionMetadata>;
+pub type OperationMetadata = Operation<
+    ExternalReceiptMetadata,
+    OperationResultMetadata,
+    crate::catalog::result_content::ToolCompletionMetadata,
+>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -111,7 +133,7 @@ pub struct HistoryItem {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProviderOriginal {
     #[serde(default)]
-    pub connection_identity:String,
+    pub connection_identity: String,
     pub adapter: String,
     pub version: String,
     pub item: Value,
@@ -119,7 +141,7 @@ pub struct ProviderOriginal {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModelStep {
     #[serde(default)]
-    pub superseded_by_input:Option<String>,
+    pub superseded_by_input: Option<String>,
     pub id: String,
     pub run_id: String,
     pub epoch: u64,
@@ -147,12 +169,12 @@ pub struct Wait {
     pub cancelled: bool,
 }
 
-#[derive(Debug,Clone,Serialize,Deserialize,PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ExternalReceipt {
-    pub executor:String,
-    pub identity:String,
-    pub epoch:String,
-    pub outcome:Outcome,
-    pub effect:Effect,
-    pub result:Value,
+    pub executor: String,
+    pub identity: String,
+    pub epoch: String,
+    pub outcome: Outcome,
+    pub effect: Effect,
+    pub result: Value,
 }

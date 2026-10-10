@@ -32,6 +32,10 @@
       "import": "./dist/credential-authority.js"
     },
     "./host": "./dist/host-bootstrap.js",
+    "./tool-schema": {
+      "types": "./dist/tool-schema.d.ts",
+      "import": "./dist/tool-schema.js"
+    },
     "./mcp-authority": {
       "types": "./dist/mcp-authority.d.ts",
       "import": "./dist/mcp-authority.js"

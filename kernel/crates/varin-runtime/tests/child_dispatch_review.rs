@@ -1,6 +1,6 @@
 //! Independent counterexamples for durable child admission. Host/source authority is covered by
 //! the loopback suite; these tests use real Catalog transactions and committed tool origins.
-#[path="fixtures/input_admission.rs"]
+#[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
 use serde_json::json;
@@ -20,10 +20,10 @@ fn same_committed_origin_is_one_child_before_and_after_reopen_and_changed_task_c
     assert_eq!(f.db.child_tasks().unwrap().len(), 1);
     let mut changed = f.input.clone();
     changed.task.push_str(" changed");
-    assert!(
-        f.db.accept_child(&f.context, changed, f.pin.clone(), f.launch.clone())
-            .is_err()
-    );
+    assert!(f
+        .db
+        .accept_child(&f.context, changed, f.pin.clone(), f.launch.clone())
+        .is_err());
     let root = f.root.clone();
     drop(f.db);
     f.db = Catalog::open(&root).unwrap();
@@ -43,32 +43,31 @@ fn authority_cannot_be_forged_by_another_run_policy_origin_or_expanded_child_too
     let mut f = Fixture::new();
     let mut wrong = f.context.clone();
     wrong.run_id = "other-run".into();
-    assert!(
-        f.db.accept_child(&wrong, f.input.clone(), f.pin.clone(), f.launch.clone())
-            .is_err()
-    );
+    assert!(f
+        .db
+        .accept_child(&wrong, f.input.clone(), f.pin.clone(), f.launch.clone())
+        .is_err());
     let mut wrong = f.context.clone();
     wrong.origin = ToolOrigin::PolicyAction {
         action_id: "pretend-model".into(),
         node_id: "node".into(),
     };
-    assert!(
-        f.db.accept_child(&wrong, f.input.clone(), f.pin.clone(), f.launch.clone())
-            .is_err()
-    );
+    assert!(f
+        .db
+        .accept_child(&wrong, f.input.clone(), f.pin.clone(), f.launch.clone())
+        .is_err());
     let mut wrong = f.pin.clone();
     wrong.source.workspace_id = "workspace-B".into();
-    assert!(
-        f.db.accept_child(&f.context, f.input.clone(), wrong, f.launch.clone())
-            .is_err()
-    );
-    for name in [
-        "file_write",
-        "file_list",
-        "process_spawn",
-    ] {
+    assert!(f
+        .db
+        .accept_child(&f.context, f.input.clone(), wrong, f.launch.clone())
+        .is_err());
+    for name in ["file_write", "file_list", "process_spawn"] {
         let mut expanded = f.launch.clone();
         expanded.tools.push(ToolSchema {
+            description: String::new(),
+            output_schema: None,
+            metadata: None,
             name: name.into(),
             version: "1".into(),
             schema: json!({"type":"object"}),
@@ -91,23 +90,48 @@ fn authority_cannot_be_forged_by_another_run_policy_origin_or_expanded_child_too
 fn child_body_roots_survive_collection_and_broken_task_text_does_not_block_controls() {
     let mut f = Fixture::new();
     let child = f.accept();
-    let (source,proposal,basis) = child_context(&child);
-    let child = f.db.prepare_child(&child.operation_id,source,proposal,basis).unwrap();
+    let (source, proposal, basis) = child_context(&child);
+    let child =
+        f.db.prepare_child(&child.operation_id, source, proposal, basis)
+            .unwrap();
     f.db.collect_content_objects().unwrap();
     let view = f.db.capture_child_read(child.clone()).load().unwrap();
-    assert_eq!(view.input,f.input);
-    assert_eq!(view.launch.tools,f.launch.tools);
+    assert_eq!(view.input, f.input);
+    assert_eq!(view.launch.tools, f.launch.tools);
     assert!(serde_json::to_value(&child).unwrap().get("input").is_none());
-    let hash=child.input_ref["content_object"].as_str().unwrap().strip_prefix("sha256-").unwrap();
-    std::fs::write(f.root.join("content/objects").join(&hash[..2]).join(&hash[2..]),b"damaged task body").unwrap();
+    let hash = child.input_ref["content_object"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("sha256-")
+        .unwrap();
+    std::fs::write(
+        f.root
+            .join("content/objects")
+            .join(&hash[..2])
+            .join(&hash[2..]),
+        b"damaged task body",
+    )
+    .unwrap();
     assert!(f.db.capture_child_read(child.clone()).load().is_err());
-    let receipt=child.receipt.as_ref().unwrap();
-    assert_eq!(f.db.task_family(&receipt.run_id,f.db.epoch()).unwrap(),child.parent_thread_id);
-    assert_eq!(f.db.require_child_parent(&f.context.run_id,&child.operation_id).unwrap().child_thread_id,child.child_thread_id);
+    let receipt = child.receipt.as_ref().unwrap();
+    assert_eq!(
+        f.db.task_family(&receipt.run_id, f.db.epoch()).unwrap(),
+        child.parent_thread_id
+    );
+    assert_eq!(
+        f.db.require_child_parent(&f.context.run_id, &child.operation_id)
+            .unwrap()
+            .child_thread_id,
+        child.child_thread_id
+    );
     f.db.cancel_child(&child.operation_id).unwrap();
     assert!(f.db.run(&receipt.run_id).unwrap().cancel_requested);
-    assert!(f.db.mark_child_resources_released(&child.operation_id).unwrap().resources_released);
-    let root=f.root.clone();
+    assert!(
+        f.db.mark_child_resources_released(&child.operation_id)
+            .unwrap()
+            .resources_released
+    );
+    let root = f.root.clone();
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -127,9 +151,15 @@ fn preparation_failure_before_dispatch_exchange_commit_preserves_the_real_receip
     );
     let original_completion = f.db.operation(&child.operation_id).unwrap().call_completion;
     f.db.settle_child_receipts().unwrap();
-    assert_eq!(f.db.operation(&child.operation_id).unwrap().outcome, Some(Outcome::Failed));
+    assert_eq!(
+        f.db.operation(&child.operation_id).unwrap().outcome,
+        Some(Outcome::Failed)
+    );
     f.settle_exchange();
-    assert_eq!(f.db.operation(&child.operation_id).unwrap().call_completion, original_completion);
+    assert_eq!(
+        f.db.operation(&child.operation_id).unwrap().call_completion,
+        original_completion
+    );
     assert_eq!(
         f.db.operation(&child.operation_id).unwrap().outcome,
         Some(Outcome::Failed)
@@ -229,20 +259,18 @@ fn report_and_wait_registration_in_either_order_deliver_once_with_real_child_pro
                 thread_id: child.child_thread_id
             }
         );
-        assert!(
-            serde_json::to_string(&item)
-                .unwrap()
-                .contains("distinct preparation failure")
-        );
+        assert!(serde_json::to_string(&item)
+            .unwrap()
+            .contains("distinct preparation failure"));
         assert_eq!(
             f.db.run(&f.context.run_id).unwrap().state,
             RunState::Runnable
         );
-        assert!(
-            f.db.pending_child_wait(&f.context.run_id)
-                .unwrap()
-                .is_none()
-        );
+        assert!(f
+            .db
+            .pending_child_wait(&f.context.run_id)
+            .unwrap()
+            .is_none());
         let root = f.root.clone();
         drop(f.db);
         f.db = Catalog::open(&root).unwrap();
@@ -298,11 +326,9 @@ fn cancelling_observation_then_waiting_again_never_cancels_child_or_consumes_its
         1,
         "cancelled observation is a Host fact, not a message sent by the child"
     );
-    assert!(
-        serde_json::to_string(&reports[0].content)
-            .unwrap()
-            .contains("REPORT_AFTER_CANCELLED_OBSERVATION")
-    );
+    assert!(serde_json::to_string(&reports[0].content)
+        .unwrap()
+        .contains("REPORT_AFTER_CANCELLED_OBSERVATION"));
     assert!(
         f.db.deliver_child_waits()
             .unwrap()
@@ -317,25 +343,45 @@ fn cancelling_observation_then_waiting_again_never_cancels_child_or_consumes_its
 
 #[test]
 fn cancelled_wait_rejects_a_prepared_report_append_and_a_new_observer_can_receive_it() {
-    let mut f=Fixture::new();
-    let child=f.accept();
+    let mut f = Fixture::new();
+    let child = f.accept();
     f.settle_exchange();
-    f.db.fail_child_preparation(&child.operation_id,"RETAINED_REPORT").unwrap();
-    let wait=f.admit_wait("cancel-during-body-preparation");
-    let prepared=f.db.capture_child_waits().unwrap().pop().unwrap().load().unwrap();
-    assert_eq!(f.db.collect_content_objects().unwrap(),0);
+    f.db.fail_child_preparation(&child.operation_id, "RETAINED_REPORT")
+        .unwrap();
+    let wait = f.admit_wait("cancel-during-body-preparation");
+    let prepared =
+        f.db.capture_child_waits()
+            .unwrap()
+            .pop()
+            .unwrap()
+            .load()
+            .unwrap();
+    assert_eq!(f.db.collect_content_objects().unwrap(), 0);
     f.db.request_cancel_child_wait(&wait.id).unwrap();
     assert!(f.db.admit_child_wait(prepared).unwrap().is_none());
-    assert!(f.db.history("branch:parent").unwrap().iter().all(|item|item.source!=HistorySource::Agent));
+    assert!(f
+        .db
+        .history("branch:parent")
+        .unwrap()
+        .iter()
+        .all(|item| item.source != HistorySource::Agent));
     f.db.deliver_child_waits().unwrap();
-    assert_eq!(f.db.run(&f.context.run_id).unwrap().state,RunState::Runnable);
+    assert_eq!(
+        f.db.run(&f.context.run_id).unwrap().state,
+        RunState::Runnable
+    );
     f.admit_wait("new-observer");
     f.db.deliver_child_waits().unwrap();
-    let history=f.db.history("branch:parent").unwrap();
-    let reports:Vec<_>=history.iter().filter(|item|item.source==HistorySource::Agent).collect();
-    assert_eq!(reports.len(),1);
-    assert!(serde_json::to_string(&reports[0].content).unwrap().contains("RETAINED_REPORT"));
-    let root=f.root.clone();
+    let history = f.db.history("branch:parent").unwrap();
+    let reports: Vec<_> = history
+        .iter()
+        .filter(|item| item.source == HistorySource::Agent)
+        .collect();
+    assert_eq!(reports.len(), 1);
+    assert!(serde_json::to_string(&reports[0].content)
+        .unwrap()
+        .contains("RETAINED_REPORT"));
+    let root = f.root.clone();
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -390,12 +436,12 @@ fn child_prepare_rejects_late_cancelled_work_and_untrusted_parent_scope_without_
             .is_err(),
             "reject forged {field}"
         );
-        assert!(
-            f.db.child_task(&child.operation_id)
-                .unwrap()
-                .receipt
-                .is_none()
-        );
+        assert!(f
+            .db
+            .child_task(&child.operation_id)
+            .unwrap()
+            .receipt
+            .is_none());
         let prepared =
             f.db.prepare_child(&child.operation_id, source, proposal, basis)
                 .unwrap();
@@ -505,11 +551,9 @@ fn report_delivery_respects_fork_ancestry_instead_of_global_or_current_branch_on
             1,
             "fork_after_report={fork_after_report}: a visible report is never duplicated, but an earlier fork may receive it"
         );
-        assert!(
-            serde_json::to_string(&reports[0])
-                .unwrap()
-                .contains("ONE_REPORT_PER_VISIBLE_ANCESTRY")
-        );
+        assert!(serde_json::to_string(&reports[0])
+            .unwrap()
+            .contains("ONE_REPORT_PER_VISIBLE_ANCESTRY"));
         let root = f.root.clone();
         drop(f);
         std::fs::remove_dir_all(root).unwrap();
@@ -566,7 +610,11 @@ fn incompatible_collaboration_domain_is_rejected_without_rewriting_existing_asse
             let mut body = serde_json::to_value(&child).unwrap();
             body["report"] = json!({"outcome":"failed","sender_thread_id":child.child_thread_id,"run_id":null,
                 "history_ids":[],"detail":"failed","code_result":"no_changes","text":"legacy duplicated payload"});
-            raw.execute("UPDATE child_tasks SET body=?1 WHERE id=?2", rusqlite::params![body.to_string(),child.operation_id]).unwrap();
+            raw.execute(
+                "UPDATE child_tasks SET body=?1 WHERE id=?2",
+                rusqlite::params![body.to_string(), child.operation_id],
+            )
+            .unwrap();
         } else {
             let definition = if defect == "missing_unique" {
                 "CREATE TABLE child_tasks(id TEXT PRIMARY KEY REFERENCES operations(id),child_thread_id TEXT NOT NULL REFERENCES threads(id),body TEXT NOT NULL);"
@@ -575,11 +623,16 @@ fn incompatible_collaboration_domain_is_rejected_without_rewriting_existing_asse
             };
             raw.execute_batch(&format!("PRAGMA foreign_keys=OFF; ALTER TABLE child_tasks RENAME TO saved_children; {definition} INSERT INTO child_tasks SELECT * FROM saved_children; DROP TABLE saved_children;")).unwrap();
         }
-        raw.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+        raw.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+            .unwrap();
         drop(raw);
         let before = std::fs::read(&database).unwrap();
         assert!(Catalog::open(&root).is_err(), "must refuse {defect}");
-        assert_eq!(std::fs::read(&database).unwrap(), before, "preflight rewrote {defect}");
+        assert_eq!(
+            std::fs::read(&database).unwrap(),
+            before,
+            "preflight rewrote {defect}"
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 }

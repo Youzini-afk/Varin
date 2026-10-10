@@ -144,10 +144,48 @@ export interface LaunchSource {
   live_root: LiveRoot | null;
 }
 
+export interface ToolMetadata { service_id: string; service_version: number; completion: 'result'; operation: 'read' | 'effect'; examples?: unknown[]; source?: {path: string; line?: number}; }
+
+export interface HostToolCall {
+  runId: string;
+  operationId: string;
+  origin: ToolOrigin;
+  callId: string;
+  name: string;
+  schemaVersion: string;
+  arguments: unknown;
+}
+
+export interface ExtensionToolBinding {
+  providerKey: string;
+  extensionId: string;
+  extensionVersion: string;
+  serviceId: string;
+  serviceVersion: number;
+  artifactIntegrity: string;
+  declarationHash: string;
+  configurationIdentity: string | null;
+  tool: LaunchTool;
+}
+
+export interface LiveExtensionToolBinding {
+  ownerId: string;
+  generation: number;
+  binding: ExtensionToolBinding;
+}
+
+export interface ExtensionPrepareParams {
+  runId: string;
+  bindings: ExtensionToolBinding[];
+}
+
 export interface LaunchTool {
   name: string;
   version: string;
+  description: string;
   schema: unknown;
+  output_schema: unknown;
+  metadata: ToolMetadata | null;
 }
 
 export interface LaunchPolicy {
@@ -203,12 +241,14 @@ export interface ToolSelectParams {
 }
 
 export interface ToolReadyParams {
+  extensionBindings?: LiveExtensionToolBinding[];
   runId: string;
   selectionId: string;
   binding?: LiveMcpBinding;
 }
 
 export interface LaunchSelection {
+  extension_bindings: ExtensionToolBinding[];
   policy_models: PolicyModelCapability[];
   mcp_binding: McpBinding | null;
   credential_scope: CredentialScope | null;
@@ -279,6 +319,10 @@ export interface QueuedInput {
   content: unknown;
   cursor: number;
 }
+
+export type ToolOrigin = {kind: 'model_step'; request_id: string} | {kind: 'policy_action'; action_id: string; node_id: string};
+
+export type ExecutorOwner = {kind: 'kernel'} | {kind: 'external'; identity: string; epoch: string};
 
 export interface ExternalReceipt {
   executor: string;
@@ -361,6 +405,7 @@ export interface RunModelSelections {
 }
 
 export interface RunStartParams {
+  extensionBindings?: LiveExtensionToolBinding[];
   policyBinding?: AgentPolicyBinding;
   mcpBinding?: LiveMcpBinding;
   runId: string;
@@ -489,6 +534,13 @@ export interface InputSubmitParams {
   configuration: unknown;
 }
 
+export interface RunContextScope {
+  mode: string;
+  threadRole: string;
+  sessionId: string;
+  projectId: string | null;
+}
+
 export interface RunParams {
   runId: string;
 }
@@ -514,7 +566,7 @@ export interface PolicyPauseInfo {
 export interface PermissionOpenParams {
   operationId: string;
   permissionId: string;
-  call: unknown;
+  call: HostToolCall;
   scope: unknown;
 }
 
@@ -620,6 +672,7 @@ export type OperationCallCompletion =
   | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime };
 
 export interface Operation {
+  execution_owner: ExecutorOwner | null;
   external_receipt: ExternalReceipt | null;
   call_completion: OperationCallCompletion | null;
   id: string;

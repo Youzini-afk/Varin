@@ -1,5 +1,5 @@
-use crate::test_submission::InputAdmission;
 use super::*;
+use crate::test_submission::InputAdmission;
 use crate::{Catalog, SubmitInput};
 use serde_json::json;
 use std::sync::{
@@ -49,6 +49,9 @@ fn input(db: &Arc<Mutex<Catalog>>) -> ExecutionInput {
             configuration_generation: 1,
             tool_schema_generation: 1,
             tools: vec![ToolSchema {
+                description: String::new(),
+                output_schema: None,
+                metadata: None,
                 name: "read".into(),
                 version: "1".into(),
                 schema: json!({"type":"object"}),
@@ -73,9 +76,14 @@ struct Tools {
     calls: AtomicUsize,
 }
 impl ToolExecutor for Tools {
-    fn plan(&self, call: &crate::execution::ToolCall, context: &crate::execution::FrozenToolContext,
-        cancel: &crate::execution::CancellationToken) -> Result<crate::execution::ToolPreparation, crate::execution::ExecutionError> {
-        self.prepare(call, context, cancel).map(crate::execution::ToolPreparation::Ready)
+    fn plan(
+        &self,
+        call: &crate::execution::ToolCall,
+        context: &crate::execution::FrozenToolContext,
+        cancel: &crate::execution::CancellationToken,
+    ) -> Result<crate::execution::ToolPreparation, crate::execution::ExecutionError> {
+        self.prepare(call, context, cancel)
+            .map(crate::execution::ToolPreparation::Ready)
     }
 
     fn prepare(
@@ -398,48 +406,84 @@ fn cold_run_assembly_is_independent_and_cancellation_prevents_model_dispatch() {
     let second = {
         let mut owner = db.lock().unwrap();
         owner.create_thread("independent", "independent").unwrap();
-        owner.submit(&SubmitInput {
-            key: "independent".into(), thread_id: "independent".into(), branch_id: "independent".into(),
-            expected_head: None, input: json!({"text":"answer"}), configuration: json!({"provider":"test"}),
-        }).unwrap()
+        owner
+            .submit(&SubmitInput {
+                key: "independent".into(),
+                thread_id: "independent".into(),
+                branch_id: "independent".into(),
+                expected_head: None,
+                input: json!({"text":"answer"}),
+                configuration: json!({"provider":"test"}),
+            })
+            .unwrap()
     };
     let catalog = Arc::try_unwrap(db).ok().unwrap().into_inner().unwrap();
     let supervisor = RunSupervisor::new(catalog);
-    let make_start = |binding|RunStart {
-        binding, context_preparation: Arc::new(NoopContextPreparation), policy_state: Value::Null,
-        provider: Arc::new(Provider {calls: AtomicUsize::new(0),mode:Mode::ToolThenAnswer,cancel:CancellationToken::default()}),
-        tools: Arc::new(Tools::default()),policy:Arc::new(DefaultAgentPolicy),progress:ProgressSink::default(),
+    let make_start = |binding| RunStart {
+        binding,
+        context_preparation: Arc::new(NoopContextPreparation),
+        policy_state: Value::Null,
+        provider: Arc::new(Provider {
+            calls: AtomicUsize::new(0),
+            mode: Mode::ToolThenAnswer,
+            cancel: CancellationToken::default(),
+        }),
+        tools: Arc::new(Tools::default()),
+        policy: Arc::new(DefaultAgentPolicy),
+        progress: ProgressSink::default(),
     };
     let mut first_start = make_start(first.binding.clone());
-    let first_provider = Arc::new(Provider {calls: AtomicUsize::new(0),mode:Mode::ToolThenAnswer,cancel:CancellationToken::default()});
+    let first_provider = Arc::new(Provider {
+        calls: AtomicUsize::new(0),
+        mode: Mode::ToolThenAnswer,
+        cancel: CancellationToken::default(),
+    });
     first_start.provider = first_provider.clone();
     let (started, entered) = std::sync::mpsc::channel();
     let (release, gate) = std::sync::mpsc::channel();
     let (observed, cancellation) = std::sync::mpsc::channel();
-    let handle = supervisor.prepare_start(&first.run_id, move|cancel| {
-        started.send(()).unwrap();
-        gate.recv().unwrap();
-        observed.send(cancel.is_cancelled()).unwrap();
-        Ok(first_start)
-    }).unwrap();
-    entered.recv_timeout(std::time::Duration::from_secs(3)).unwrap();
+    let handle = supervisor
+        .prepare_start(&first.run_id, move |cancel| {
+            started.send(()).unwrap();
+            gate.recv().unwrap();
+            observed.send(cancel.is_cancelled()).unwrap();
+            Ok(first_start)
+        })
+        .unwrap();
+    entered
+        .recv_timeout(std::time::Duration::from_secs(3))
+        .unwrap();
     let mut binding = first.binding;
-    binding.history_range = HistoryRange {branch_id:"independent".into(),ancestor_id:None,leaf_id:Some(second.input_id)};
-    let independent = supervisor.start(&second.run_id,make_start(binding)).unwrap();
+    binding.history_range = HistoryRange {
+        branch_id: "independent".into(),
+        ancestor_id: None,
+        leaf_id: Some(second.input_id),
+    };
+    let independent = supervisor
+        .start(&second.run_id, make_start(binding))
+        .unwrap();
     let (done, completion) = std::sync::mpsc::channel();
-    let waiter = std::thread::spawn(move||done.send(independent.wait()).unwrap());
+    let waiter = std::thread::spawn(move || done.send(independent.wait()).unwrap());
     let independent_result = completion.recv_timeout(std::time::Duration::from_secs(3));
     let cancelled = supervisor.cancel(&first.run_id);
     release.send(()).unwrap();
-    let observed = cancellation.recv_timeout(std::time::Duration::from_secs(3)).unwrap();
+    let observed = cancellation
+        .recv_timeout(std::time::Duration::from_secs(3))
+        .unwrap();
     let report = handle.wait().unwrap();
     waiter.join().unwrap();
-    assert!(independent_result.is_ok(),"cold assembly blocked an independent Run");
-    assert_eq!(independent_result.unwrap().unwrap().state,RunState::Completed);
-    assert_eq!(cancelled.unwrap().state,RunState::Cancelled);
+    assert!(
+        independent_result.is_ok(),
+        "cold assembly blocked an independent Run"
+    );
+    assert_eq!(
+        independent_result.unwrap().unwrap().state,
+        RunState::Completed
+    );
+    assert_eq!(cancelled.unwrap().state, RunState::Cancelled);
     assert!(observed);
-    assert_eq!(report.state,RunState::Cancelled);
-    assert_eq!(first_provider.calls.load(Ordering::SeqCst),0);
+    assert_eq!(report.state, RunState::Cancelled);
+    assert_eq!(first_provider.calls.load(Ordering::SeqCst), 0);
     supervisor.shutdown().unwrap();
 }
 
@@ -610,9 +654,14 @@ fn independent_fast_tool_finishes_while_another_tool_is_still_running() {
         fast_done: std::sync::mpsc::Sender<()>,
     }
     impl ToolExecutor for IndependentTools {
-        fn plan(&self, call: &crate::execution::ToolCall, context: &crate::execution::FrozenToolContext,
-            cancel: &crate::execution::CancellationToken) -> Result<crate::execution::ToolPreparation, crate::execution::ExecutionError> {
-            self.prepare(call, context, cancel).map(crate::execution::ToolPreparation::Ready)
+        fn plan(
+            &self,
+            call: &crate::execution::ToolCall,
+            context: &crate::execution::FrozenToolContext,
+            cancel: &crate::execution::CancellationToken,
+        ) -> Result<crate::execution::ToolPreparation, crate::execution::ExecutionError> {
+            self.prepare(call, context, cancel)
+                .map(crate::execution::ToolPreparation::Ready)
         }
 
         fn prepare(
@@ -668,6 +717,9 @@ fn independent_fast_tool_finishes_while_another_tool_is_still_running() {
     input.binding.tools = ["slow", "fast"]
         .into_iter()
         .map(|name| ToolSchema {
+            description: String::new(),
+            output_schema: None,
+            metadata: None,
             name: name.into(),
             version: "1".into(),
             schema: json!({"type":"object"}),
@@ -754,9 +806,14 @@ fn cancelling_one_queued_operation_does_not_fail_its_run_or_execute_it() {
         queued_calls: AtomicUsize,
     }
     impl ToolExecutor for Writes {
-        fn plan(&self, call: &crate::execution::ToolCall, context: &crate::execution::FrozenToolContext,
-            cancel: &crate::execution::CancellationToken) -> Result<crate::execution::ToolPreparation, crate::execution::ExecutionError> {
-            self.prepare(call, context, cancel).map(crate::execution::ToolPreparation::Ready)
+        fn plan(
+            &self,
+            call: &crate::execution::ToolCall,
+            context: &crate::execution::FrozenToolContext,
+            cancel: &crate::execution::CancellationToken,
+        ) -> Result<crate::execution::ToolPreparation, crate::execution::ExecutionError> {
+            self.prepare(call, context, cancel)
+                .map(crate::execution::ToolPreparation::Ready)
         }
 
         fn prepare(
@@ -812,6 +869,9 @@ fn cancelling_one_queued_operation_does_not_fail_its_run_or_execute_it() {
     input.binding.tools = ["first", "queued"]
         .into_iter()
         .map(|name| ToolSchema {
+            description: String::new(),
+            output_schema: None,
+            metadata: None,
             name: name.into(),
             version: "1".into(),
             schema: json!({"type":"object"}),
@@ -848,9 +908,18 @@ fn cancelling_one_queued_operation_does_not_fail_its_run_or_execute_it() {
         .recv_timeout(std::time::Duration::from_secs(3))
         .unwrap();
     // First executor entry does not imply the independent successor has finished admission.
-    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(3);
-    while supervisor.catalog().lock().unwrap().operation(&queued_id).is_err() {
-        assert!(std::time::Instant::now()<deadline,"queued intent was not admitted");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while supervisor
+        .catalog()
+        .lock()
+        .unwrap()
+        .operation(&queued_id)
+        .is_err()
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "queued intent was not admitted"
+        );
         std::thread::yield_now();
     }
     let cancelled = supervisor.cancel_operation(&queued_id).unwrap();
@@ -1146,7 +1215,10 @@ fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts(
             view: RequestView {
                 request_id: "saved-first".into(),
                 run_id: run_id.clone(),
-                origin: RequestOrigin::Conversation { step: 1, history_range: original_input.binding.history_range.clone() },
+                origin: RequestOrigin::Conversation {
+                    step: 1,
+                    history_range: original_input.binding.history_range.clone(),
+                },
                 binding: original_input.binding.clone(),
                 history: original_input.history.clone(),
             },
@@ -1205,14 +1277,40 @@ fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts(
                 lifetime: Lifetime::Run,
                 resources: vec![],
             };
-            commit({let tool=AdmittedTool {
+            commit({
+                let tool = AdmittedTool {
                     call: calls[0].clone(),
                     contract,
-                };ExecutionRecord::ToolAdmitted{context:{let request_id:String="saved-first".into();let call_id:String=tool.call.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},tool}});
-            commit(ExecutionRecord::ToolDispatched{context:{let request_id:String="saved-first".into();let call_id:String="call-1".into();varin_runtime::execution::ToolExecutionContext{run_id:(&run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}}});
+                };
+                ExecutionRecord::ToolAdmitted {
+                    context: {
+                        let request_id: String = "saved-first".into();
+                        let call_id: String = tool.call.call_id.clone();
+                        varin_runtime::execution::ToolExecutionContext {
+                            run_id: (&run_id).to_string(),
+                            operation_id: format!("{request_id}:tool:{call_id}"),
+                            origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                        }
+                    },
+                    tool,
+                }
+            });
+            commit(ExecutionRecord::ToolDispatched {
+                executor_owner: varin_runtime::ExecutorOwner::Kernel,
+                context: {
+                    let request_id: String = "saved-first".into();
+                    let call_id: String = "call-1".into();
+                    varin_runtime::execution::ToolExecutionContext {
+                        run_id: (&run_id).to_string(),
+                        operation_id: format!("{request_id}:tool:{call_id}"),
+                        origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                    }
+                },
+            });
         }
         if cut == 1 {
-            commit({let result=ToolResult {
+            commit({
+                let result = ToolResult {
                     request_id: "saved-first".into(),
                     call_id: "call-1".into(),
                     completion: ToolCompletion::Result {
@@ -1220,7 +1318,21 @@ fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts(
                         effect: Effect::Confirmed,
                         content: json!("cached first result"),
                     },
-                };ExecutionRecord::ToolSettled{context:{let request_id:String=result.request_id.clone();let call_id:String=result.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},completion:result.completion}});
+                };
+                ExecutionRecord::ToolSettled {
+                    executor_stopped: true,
+                    context: {
+                        let request_id: String = result.request_id.clone();
+                        let call_id: String = result.call_id.clone();
+                        varin_runtime::execution::ToolExecutionContext {
+                            run_id: (&run_id).to_string(),
+                            operation_id: format!("{request_id}:tool:{call_id}"),
+                            origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                        }
+                    },
+                    completion: result.completion,
+                }
+            });
         }
         drop(db);
         let db = fixture.catalog();

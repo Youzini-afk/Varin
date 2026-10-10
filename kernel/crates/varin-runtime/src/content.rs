@@ -5,15 +5,18 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+#[cfg(unix)]
+use std::fs::File;
 use std::{
     collections::HashSet,
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, atomic::{AtomicUsize, Ordering}},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
-#[cfg(unix)]
-use std::fs::File;
 
 type Result<T> = std::result::Result<T, RuntimeError>;
 
@@ -82,27 +85,41 @@ pub(crate) struct ContentStore {
 /// Collection defers while a publication is in flight; it never waits with Catalog locked.
 pub(crate) struct ContentPublication(Arc<AtomicUsize>);
 impl Drop for ContentPublication {
-    fn drop(&mut self) { self.0.fetch_sub(1, Ordering::Release); }
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Release);
+    }
 }
 pub struct ContentChunk {
-    pub content_ref:String,
-    pub chunk_index:usize,
-    pub chunk_count:usize,
-    pub total_bytes:u64,
-    pub bytes:Vec<u8>,
+    pub content_ref: String,
+    pub chunk_index: usize,
+    pub chunk_count: usize,
+    pub total_bytes: u64,
+    pub bytes: Vec<u8>,
 }
 impl ContentStore {
     pub(crate) fn begin_publication(&self) -> ContentPublication {
         self.publications.fetch_add(1, Ordering::Acquire);
         ContentPublication(self.publications.clone())
     }
-    pub(crate) fn load_chunk(&self, reference:&Value, index:usize)->Result<ContentChunk>{
-        let reference:Reference=serde_json::from_value(reference.clone())?;
-        let manifest:Manifest=serde_json::from_slice(&self.read_bytes(&reference.content_object)?)?;
-        if manifest.version!=1{return Err(RuntimeError::Invalid("unsupported content manifest".into()));}
-        let hash=manifest.chunks.get(index).ok_or_else(||RuntimeError::Invalid("content chunk index out of range".into()))?;
-        let bytes=self.read_bytes(hash)?;
-        Ok(ContentChunk{content_ref:reference.content_object,chunk_index:index,chunk_count:manifest.chunks.len(),total_bytes:manifest.bytes,bytes})
+    pub(crate) fn load_chunk(&self, reference: &Value, index: usize) -> Result<ContentChunk> {
+        let reference: Reference = serde_json::from_value(reference.clone())?;
+        let manifest: Manifest =
+            serde_json::from_slice(&self.read_bytes(&reference.content_object)?)?;
+        if manifest.version != 1 {
+            return Err(RuntimeError::Invalid("unsupported content manifest".into()));
+        }
+        let hash = manifest
+            .chunks
+            .get(index)
+            .ok_or_else(|| RuntimeError::Invalid("content chunk index out of range".into()))?;
+        let bytes = self.read_bytes(hash)?;
+        Ok(ContentChunk {
+            content_ref: reference.content_object,
+            chunk_index: index,
+            chunk_count: manifest.chunks.len(),
+            total_bytes: manifest.bytes,
+            bytes,
+        })
     }
 
     pub(crate) fn open(root: PathBuf) -> Result<Self> {
@@ -112,7 +129,10 @@ impl ContentStore {
         if let Some(parent) = root.parent() {
             sync_directory(parent)?;
         }
-        Ok(Self { root, publications: Arc::new(AtomicUsize::new(0)) })
+        Ok(Self {
+            root,
+            publications: Arc::new(AtomicUsize::new(0)),
+        })
     }
     fn put_bytes(&self, bytes: &[u8]) -> Result<String> {
         let hash = identity(bytes);
@@ -263,7 +283,9 @@ impl ContentStore {
     pub(crate) fn collect(&self, db: &Connection) -> Result<u64> {
         // Admission of a publication and collection are serialized by Catalog. An in-flight
         // writer can be waiting to commit its references: waiting here would deadlock it.
-        if self.publications.load(Ordering::Acquire) != 0 { return Ok(0); }
+        if self.publications.load(Ordering::Acquire) != 0 {
+            return Ok(0);
+        }
         let mut live = HashSet::new();
         let contexts:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='context_checkpoints')",[],|row|row.get(0))?;
         let mut roots = "SELECT json_extract(body,'$.request') FROM model_steps
@@ -272,11 +294,14 @@ impl ContentStore {
              UNION ALL SELECT body FROM model_outputs
              UNION ALL SELECT body FROM input_history_content
              UNION ALL SELECT intent FROM commands".to_string();
-        if contexts {roots.push_str(" UNION ALL SELECT body FROM context_checkpoints UNION ALL SELECT body FROM memory_states");}
+        if contexts {
+            roots.push_str(" UNION ALL SELECT body FROM context_checkpoints UNION ALL SELECT body FROM memory_states");
+        }
         roots.push_str(" UNION ALL SELECT recipe FROM context_jobs UNION ALL SELECT body FROM context_job_parts");
         roots.push_str(" UNION ALL SELECT json_extract(data,'$.composition') FROM events WHERE kind='run.tools_activated'");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.selection.tools_ref') FROM run_launches
             UNION ALL SELECT json_extract(body,'$.selection.base_tools_ref') FROM run_launches
+            UNION ALL SELECT json_extract(body,'$.selection.extension_bindings_ref') FROM run_launches
             UNION ALL SELECT json_extract(body,'$.selection.mcp_binding_ref') FROM run_launches WHERE json_extract(body,'$.selection.mcp_binding_ref') IS NOT NULL
             UNION ALL SELECT json_extract(p.value,'$.body') FROM run_launches l,json_each(l.body,'$.selection.policy_models') p");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.value.answer_ref') FROM operations WHERE json_extract(body,'$.executor')='ask_user' AND json_extract(body,'$.result.value.answer_ref') IS NOT NULL");
@@ -287,10 +312,12 @@ impl ContentStore {
             UNION ALL SELECT json_extract(body,'$.result.value.permission.scope_ref') FROM operations WHERE json_extract(body,'$.result.value.permission.scope_ref') IS NOT NULL
             UNION ALL SELECT json_extract(data,'$.result.value.permission.call_ref') FROM events WHERE kind='permission.opened'
             UNION ALL SELECT json_extract(data,'$.result.value.permission.scope_ref') FROM events WHERE kind='permission.opened'");
-        roots.push_str(" UNION ALL SELECT json_extract(body,'$.input_ref') FROM child_tasks
+        roots.push_str(
+            " UNION ALL SELECT json_extract(body,'$.input_ref') FROM child_tasks
             UNION ALL SELECT json_extract(body,'$.configuration_ref') FROM child_tasks
             UNION ALL SELECT json_extract(body,'$.launch.tools_ref') FROM child_tasks
-            UNION ALL SELECT json_extract(body,'$.launch.base_tools_ref') FROM child_tasks");
+            UNION ALL SELECT json_extract(body,'$.launch.base_tools_ref') FROM child_tasks",
+        );
         roots.push_str(&format!(" UNION ALL SELECT json_extract(body,'$.intent.body_ref') FROM operations WHERE json_extract(body,'$.intent.kind') IN ({})", crate::catalog::policy_body::ACTION_KINDS));
         roots.push_str("
             UNION ALL SELECT json_extract(receipt,'$.completion.content_ref') FROM policy_graph_nodes WHERE json_extract(receipt,'$.completion.kind')='result'
@@ -306,22 +333,33 @@ impl ContentStore {
             UNION ALL SELECT json_extract(body,'$.call_completion.reason_ref') FROM operations WHERE json_extract(body,'$.call_completion.kind')='not_dispatched'
             UNION ALL SELECT json_extract(data,'$.call_completion.content_ref') FROM events WHERE json_extract(data,'$.call_completion.kind')='result'
             UNION ALL SELECT json_extract(data,'$.call_completion.reason_ref') FROM events WHERE json_extract(data,'$.call_completion.kind')='not_dispatched'");
-        let mut references=Vec::new();
-        let mut stmt=db.prepare(&roots)?;
+        let mut references = Vec::new();
+        let mut stmt = db.prepare(&roots)?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-        for row in rows { references.push(serde_json::from_str::<Reference>(&row?)?); }
+        for row in rows {
+            references.push(serde_json::from_str::<Reference>(&row?)?);
+        }
         let mut jobs=db.prepare("SELECT body FROM operations WHERE json_extract(body,'$.intent.kind')='policy_model_job_v1'")?;
-        for row in jobs.query_map([],|r|r.get::<_,String>(0))? {
-            let op:crate::types::OperationMetadata=serde_json::from_str(&row?)?;
-            crate::catalog::policy_model::model_metadata(&op)?.ok_or_else(||RuntimeError::Invalid("planning intent missing".into()))?;
-            let result=crate::catalog::policy_model::model_result(&op)?;
+        for row in jobs.query_map([], |r| r.get::<_, String>(0))? {
+            let op: crate::types::OperationMetadata = serde_json::from_str(&row?)?;
+            crate::catalog::policy_model::model_metadata(&op)?
+                .ok_or_else(|| RuntimeError::Invalid("planning intent missing".into()))?;
+            let result = crate::catalog::policy_model::model_result(&op)?;
             references.push(serde_json::from_value(result.request_ref)?);
-            if let Some(original)=result.original_ref{references.push(serde_json::from_value(original)?);}
-            if let Some(output)=result.receipt.and_then(|r|r.output){references.push(Reference{content_object:output.content_ref});}
+            if let Some(original) = result.original_ref {
+                references.push(serde_json::from_value(original)?);
+            }
+            if let Some(output) = result.receipt.and_then(|r| r.output) {
+                references.push(Reference {
+                    content_object: output.content_ref,
+                });
+            }
         }
         let mut verified = HashSet::new();
         for reference in references {
-            if !verified.insert(reference.content_object.clone()) { continue; }
+            if !verified.insert(reference.content_object.clone()) {
+                continue;
+            }
             let manifest: Manifest =
                 serde_json::from_slice(&self.read_bytes(&reference.content_object)?)?;
             if manifest.version != 1 {
@@ -383,9 +421,17 @@ impl ContentStore {
 
 /// Internal representations are not migrated. Unknown formats and all original files remain intact.
 pub(crate) fn initialize(db: &Connection, _content: &ContentStore) -> Result<()> {
-    let version:i64=db.pragma_query_value(None,"user_version",|r|r.get(0))?;
-    let format:i64=db.query_row("SELECT version FROM runtime_content_format WHERE id=1",[],|r|r.get(0))?;
-    if version!=crate::catalog::FORMAT||format!=3 {return Err(RuntimeError::Invalid("unsupported content format; data was preserved".into()));}
+    let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    let format: i64 = db.query_row(
+        "SELECT version FROM runtime_content_format WHERE id=1",
+        [],
+        |r| r.get(0),
+    )?;
+    if version != crate::catalog::FORMAT || format != 3 {
+        return Err(RuntimeError::Invalid(
+            "unsupported content format; data was preserved".into(),
+        ));
+    }
     db.prepare("SELECT input_id,body FROM input_history_content")?;
     Ok(())
 }

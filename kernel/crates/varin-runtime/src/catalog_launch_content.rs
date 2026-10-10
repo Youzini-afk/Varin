@@ -2,7 +2,9 @@
 //! Capture while holding Catalog, then validate, hash, write and hydrate on the caller's worker.
 use super::*;
 use crate::execution::{policy_model::PolicyModelCapability, PolicyIdentity, ToolSchema};
-use launches::{HostToolBinding, LaunchIntent, LaunchSelection, SourceSelection};
+use launches::{
+    ExtensionToolBinding, HostToolBinding, LaunchIntent, LaunchSelection, SourceSelection,
+};
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -24,6 +26,7 @@ pub struct LaunchSelectionMetadata {
     pub tools_ref: Value,
     pub base_tools_ref: Value,
     pub mcp_binding_ref: Option<Value>,
+    pub extension_bindings_ref: Value,
     pub policy_models: Vec<PolicyModelReference>,
 }
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
@@ -43,7 +46,7 @@ impl LaunchSelectionMetadata {
     ) -> Result<Self> {
         selection.validate()?;
         let tools_ref = content.save(&serde_json::to_value(&selection.tools)?)?;
-        let mcp_names = selection
+        let mut mcp_names = selection
             .mcp_binding
             .as_ref()
             .map(|binding| {
@@ -54,6 +57,14 @@ impl LaunchSelectionMetadata {
                     .collect::<std::collections::BTreeSet<_>>()
             })
             .unwrap_or_default();
+        mcp_names.extend(
+            selection
+                .extension_bindings
+                .iter()
+                .map(|b| b.tool.name.as_str()),
+        );
+        let extension_bindings_ref =
+            content.save(&serde_json::to_value(&selection.extension_bindings)?)?;
         let mut base = selection
             .tools
             .iter()
@@ -79,11 +90,15 @@ impl LaunchSelectionMetadata {
             tools_ref,
             base_tools_ref,
             mcp_binding_ref,
+            extension_bindings_ref,
             policy_models,
         })
     }
     pub(super) fn load(self, content: &crate::content::ContentStore) -> Result<LaunchSelection> {
         let selection = LaunchSelection {
+            extension_bindings: serde_json::from_value(
+                content.load(&self.extension_bindings_ref)?,
+            )?,
             tools: serde_json::from_value(content.load(&self.tools_ref)?)?,
             mcp_binding: self
                 .mcp_binding_ref
@@ -150,7 +165,10 @@ impl LaunchRead {
     pub fn load(self) -> Result<LaunchIntent> {
         Ok(LaunchIntent {
             startable: self.startable,
-            pause: self.pause.map(|pause| pause.load(&self.content)).transpose()?,
+            pause: self
+                .pause
+                .map(|pause| pause.load(&self.content))
+                .transpose()?,
             run_id: self.metadata.run_id,
             revision: self.metadata.revision,
             selection: self.metadata.selection.load(&self.content)?,
@@ -208,6 +226,7 @@ impl ChildLaunchPreparation {
             return Err(RuntimeError::Conflict("child exceeds parent tools".into()));
         }
         self.child.mcp_binding = None;
+        self.child.extension_bindings.clear();
         self.child.policy_models.clear();
         Ok(PreparedChildLaunch {
             selection: self.child,
@@ -218,6 +237,7 @@ impl ChildLaunchPreparation {
 }
 enum LaunchChange {
     Mcp(HostToolBinding),
+    Extensions(Vec<ExtensionToolBinding>),
     Policy {
         baseline: PolicyIdentity,
         identity: PolicyIdentity,
@@ -255,6 +275,9 @@ impl LaunchChangePreparation {
                 }
                 let mut tools: Vec<ToolSchema> =
                     serde_json::from_value(content.load(&selection.base_tools_ref)?)?;
+                let extensions: Vec<ExtensionToolBinding> =
+                    serde_json::from_value(content.load(&selection.extension_bindings_ref)?)?;
+                tools.extend(extensions.into_iter().map(|b| b.tool));
                 tools.extend(binding.tools);
                 tools.sort_by(|left, right| left.name.cmp(&right.name));
                 let mut names = std::collections::BTreeSet::new();
@@ -266,6 +289,23 @@ impl LaunchChangePreparation {
                 selection.tools_ref = content.save(&serde_json::to_value(tools)?)?;
                 selection.mcp_binding_ref = Some(reference);
                 "run.mcp_prepared"
+            }
+            LaunchChange::Extensions(bindings) => {
+                let mut full = metadata.selection.clone().load(&content)?;
+                if !full.extension_bindings.is_empty() && full.extension_bindings != bindings {
+                    return Err(RuntimeError::Conflict(
+                        "extension service generation changed".into(),
+                    ));
+                }
+                full.tools = serde_json::from_value(content.load(&selection.base_tools_ref)?)?;
+                if let Some(mcp) = &full.mcp_binding {
+                    full.tools.extend(mcp.tools.iter().cloned());
+                }
+                full.tools.extend(bindings.iter().map(|b| b.tool.clone()));
+                full.tools.sort_by(|a, b| a.name.cmp(&b.name));
+                full.extension_bindings = bindings;
+                selection = LaunchSelectionMetadata::stage(&content, full)?;
+                "run.extensions_prepared"
             }
             LaunchChange::Policy {
                 baseline,
@@ -316,7 +356,9 @@ impl Catalog {
         })
     }
     pub fn capture_launch(&self, run_id: &str) -> Result<Option<LaunchRead>> {
-        self.launch_metadata(run_id)?.map(|metadata| self.launch_read(metadata)).transpose()
+        self.launch_metadata(run_id)?
+            .map(|metadata| self.launch_read(metadata))
+            .transpose()
     }
     pub fn capture_pending_launches(&self) -> Result<Vec<LaunchRead>> {
         let mut query = self.db.prepare("SELECT l.body FROM run_launches l JOIN runs r ON r.id=l.id WHERE json_extract(r.body,'$.state') NOT IN ('completed','failed','cancelled') ORDER BY l.rowid")?;
@@ -349,6 +391,19 @@ impl Catalog {
                 .capture_launch(run_id)?
                 .ok_or_else(|| RuntimeError::NotFound(run_id.into()))?,
             change: LaunchChange::Mcp(binding),
+            epoch: self.epoch,
+        })
+    }
+    pub fn prepare_extensions_change(
+        &self,
+        run_id: &str,
+        bindings: Vec<ExtensionToolBinding>,
+    ) -> Result<LaunchChangePreparation> {
+        Ok(LaunchChangePreparation {
+            read: self
+                .capture_launch(run_id)?
+                .ok_or_else(|| RuntimeError::NotFound(run_id.into()))?,
+            change: LaunchChange::Extensions(bindings),
             epoch: self.epoch,
         })
     }

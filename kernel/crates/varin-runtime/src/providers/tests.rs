@@ -45,27 +45,66 @@ fn connection(events: Vec<Value>, chunk: usize) -> Connection {
 }
 #[test]
 fn pi_messages_fragmented_signed_thinking_and_tool_exchange_roundtrip() {
-    let provider = pi_messages::PiMessagesProvider { connection: connection(vec![
-        json!({"type":"start"}),
-        json!({"type":"thinking_start","contentIndex":0}),
-        json!({"type":"thinking_delta","contentIndex":0,"delta":"内部推理"}),
-        json!({"type":"thinking_end","contentIndex":0,"content":"内部推理","contentSignature":"signed-thinking"}),
-        json!({"type":"toolcall_start","contentIndex":1,"id":"call-1","toolName":"read"}),
-        json!({"type":"toolcall_delta","contentIndex":1,"delta":"{\"path\":\"文件.rs\"}"}),
-        json!({"type":"toolcall_end","contentIndex":1,"toolCall":{"type":"toolCall","id":"call-1","name":"read","arguments":{"path":"文件.rs"}}}),
-        json!({"type":"done","reason":"toolUse","usage":{"input":20,"output":3,"cacheRead":10,"cacheWrite":0},"rewrite":{"policyId":"fixture","changed":false}}),
-    ], 1), max_output_tokens: Some(100), reasoning:Some("low".into()),cache_retention:None };
+    let provider = pi_messages::PiMessagesProvider {
+        connection: connection(
+            vec![
+                json!({"type":"start"}),
+                json!({"type":"thinking_start","contentIndex":0}),
+                json!({"type":"thinking_delta","contentIndex":0,"delta":"内部推理"}),
+                json!({"type":"thinking_end","contentIndex":0,"content":"内部推理","contentSignature":"signed-thinking"}),
+                json!({"type":"toolcall_start","contentIndex":1,"id":"call-1","toolName":"read"}),
+                json!({"type":"toolcall_delta","contentIndex":1,"delta":"{\"path\":\"文件.rs\"}"}),
+                json!({"type":"toolcall_end","contentIndex":1,"toolCall":{"type":"toolCall","id":"call-1","name":"read","arguments":{"path":"文件.rs"}}}),
+                json!({"type":"done","reason":"toolUse","usage":{"input":20,"output":3,"cacheRead":10,"cacheWrite":0},"rewrite":{"policyId":"fixture","changed":false}}),
+            ],
+            1,
+        ),
+        max_output_tokens: Some(100),
+        reasoning: Some("low".into()),
+        cache_retention: None,
+    };
     let (result, events) = generate(&provider, pi_messages::FAMILY);
     assert_eq!(result.unwrap(), FinishReason::ToolCalls);
     let mut replay = view(pi_messages::FAMILY);
-    replay.history = events.into_iter().filter_map(|event| match event {
-        ProviderEvent::ItemCompleted { item } => Some(ConversationItem { id:item.id,provenance:Provenance::Assistant,content:item.content,opaque:item.opaque }), _=>None,
-    }).collect();
-    replay.history.push(ConversationItem { id:"result".into(),provenance:Provenance::ToolData {call_id:"call-1".into()},
-        content:Content::ToolResult {result:ToolResult {request_id:"request".into(),call_id:"call-1".into(),completion:ToolCompletion::Result {outcome:crate::Outcome::Succeeded,effect:crate::Effect::None,content:json!({"text":"source"})}}},opaque:None });
+    replay.history = events
+        .into_iter()
+        .filter_map(|event| match event {
+            ProviderEvent::ItemCompleted { item } => Some(ConversationItem {
+                id: item.id,
+                provenance: Provenance::Assistant,
+                content: item.content,
+                opaque: item.opaque,
+            }),
+            _ => None,
+        })
+        .collect();
+    replay.history.push(ConversationItem {
+        id: "result".into(),
+        provenance: Provenance::ToolData {
+            call_id: "call-1".into(),
+        },
+        content: Content::ToolResult {
+            result: ToolResult {
+                request_id: "request".into(),
+                call_id: "call-1".into(),
+                completion: ToolCompletion::Result {
+                    outcome: crate::Outcome::Succeeded,
+                    effect: crate::Effect::None,
+                    content: json!({"text":"source"}),
+                },
+            },
+        },
+        opaque: None,
+    });
     let wire = provider.serialize(&replay).unwrap();
-    assert_eq!(wire["context"]["messages"][0]["toolsAdded"][0]["name"], "read");
-    assert_eq!(wire["context"]["messages"][1]["content"][0]["thinkingSignature"], "signed-thinking");
+    assert_eq!(
+        wire["context"]["messages"][0]["toolsAdded"][0]["name"],
+        "read"
+    );
+    assert_eq!(
+        wire["context"]["messages"][1]["content"][0]["thinkingSignature"],
+        "signed-thinking"
+    );
     assert_eq!(wire["context"]["messages"][2]["toolCallId"], "call-1");
     assert_eq!(wire["context"]["messages"][2]["toolName"], "read");
     assert_eq!(wire["options"]["reasoning"], "low");
@@ -74,7 +113,14 @@ fn view(family: &str) -> RequestView {
     RequestView {
         request_id: "request".into(),
         run_id: "run".into(),
-        origin: RequestOrigin::Conversation { step: 1, history_range: HistoryRange { branch_id: "branch".into(), ancestor_id: None, leaf_id: None } },
+        origin: RequestOrigin::Conversation {
+            step: 1,
+            history_range: HistoryRange {
+                branch_id: "branch".into(),
+                ancestor_id: None,
+                leaf_id: None,
+            },
+        },
         binding: RequestBinding {
             connection_identity: "fixture-connection".into(),
             provider_family: family.into(),
@@ -83,6 +129,9 @@ fn view(family: &str) -> RequestView {
             configuration_generation: 1,
             tool_schema_generation: 1,
             tools: vec![ToolSchema {
+                description: String::new(),
+                output_schema: None,
+                metadata: None,
                 name: "read".into(),
                 version: "1".into(),
                 schema: json!({"type":"object"}),
@@ -1258,25 +1307,45 @@ fn actual_binary_http_reaches_bedrock_adapter_through_clean_eof() {
 fn planning_call_original_is_retained_without_weakening_main_schema_authority() {
     let raw = json!({"id":"unoffered-item","type":"function_call","call_id":"unoffered-call","name":"unoffered","arguments":"{\"sentinel\":\"original\"}","provider_private":{"keep":true}});
     for planning in [false, true] {
-        let provider = responses::ResponsesProvider::new(connection(vec![
-            json!({"type":"response.output_item.done","item":raw}),
-            json!({"type":"response.completed","response":{"output":[raw]}}),
-        ], 5));
+        let provider = responses::ResponsesProvider::new(connection(
+            vec![
+                json!({"type":"response.output_item.done","item":raw}),
+                json!({"type":"response.completed","response":{"output":[raw]}}),
+            ],
+            5,
+        ));
         let mut view = view(responses::FAMILY);
         view.binding.tools.clear();
-        if planning { view.origin = RequestOrigin::PolicyModelJob { action_id:"planning-action".into(),purpose:"planning".into(),boundary_id:"boundary".into() }; }
+        if planning {
+            view.origin = RequestOrigin::PolicyModelJob {
+                action_id: "planning-action".into(),
+                purpose: "planning".into(),
+                boundary_id: "boundary".into(),
+            };
+        }
         let serialized = provider.serialize(&view).unwrap();
         let snapshot = RequestSnapshot { view, serialized };
         let mut events = Vec::new();
-        let result = provider.generate(&snapshot, &CancellationToken::default(), &mut |event| { events.push(event); Ok(()) });
+        let result = provider.generate(&snapshot, &CancellationToken::default(), &mut |event| {
+            events.push(event);
+            Ok(())
+        });
         if planning {
             assert_eq!(result.unwrap(), FinishReason::ToolCalls);
-            let items:Vec<_> = events.into_iter().filter_map(|event|match event {ProviderEvent::ItemCompleted{item}=>Some(item),_=>None}).collect();
-            assert_eq!(items.len(),1);
-            assert_eq!(items[0].opaque.as_ref().unwrap().value,raw);
-            assert!(matches!(&items[0].content,Content::ToolCall{call} if call.schema_version.is_empty() && call.name=="unoffered"));
+            let items: Vec<_> = events
+                .into_iter()
+                .filter_map(|event| match event {
+                    ProviderEvent::ItemCompleted { item } => Some(item),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].opaque.as_ref().unwrap().value, raw);
+            assert!(
+                matches!(&items[0].content,Content::ToolCall{call} if call.schema_version.is_empty() && call.name=="unoffered")
+            );
         } else {
-            assert_eq!(result.unwrap_err().code,"unknown_tool_schema");
+            assert_eq!(result.unwrap_err().code, "unknown_tool_schema");
             assert!(!events.iter().any(|e|matches!(e,ProviderEvent::ItemCompleted{item} if matches!(item.content,Content::ToolCall{..}))));
         }
     }
@@ -1285,22 +1354,95 @@ fn planning_call_original_is_retained_without_weakening_main_schema_authority() 
 #[test]
 fn policy_output_is_assistant_history_in_every_provider_family() {
     let providers: Vec<(&str, Box<dyn ModelProvider>, &[&str], &str)> = vec![
-        (chat::FAMILY, Box::new(chat::ChatProvider::new(connection(vec![], 1))), &["messages"], "assistant"),
-        (responses::FAMILY, Box::new(responses::ResponsesProvider::new(connection(vec![], 1))), &["input"], "assistant"),
-        (codex::FAMILY, Box::new(codex::CodexProvider::new(connection(vec![], 1))), &["input"], "assistant"),
-        (anthropic::FAMILY, Box::new(anthropic::AnthropicProvider::new(connection(vec![], 1), 128)), &["messages"], "assistant"),
-        (bedrock::FAMILY, Box::new(bedrock::BedrockProvider::new(connection(vec![], 1))), &["messages"], "assistant"),
-        (google::FAMILY, Box::new(google::GoogleProvider::new(connection(vec![], 1)).unwrap()), &["contents"], "model"),
-        (google::VERTEX_FAMILY, Box::new(google::GoogleProvider::vertex(connection(vec![], 1)).unwrap()), &["contents"], "model"),
-        (pi_messages::FAMILY, Box::new(pi_messages::PiMessagesProvider { connection: connection(vec![], 1), max_output_tokens: None, reasoning: None, cache_retention: None }), &["context", "messages"], "assistant"),
+        (
+            chat::FAMILY,
+            Box::new(chat::ChatProvider::new(connection(vec![], 1))),
+            &["messages"],
+            "assistant",
+        ),
+        (
+            responses::FAMILY,
+            Box::new(responses::ResponsesProvider::new(connection(vec![], 1))),
+            &["input"],
+            "assistant",
+        ),
+        (
+            codex::FAMILY,
+            Box::new(codex::CodexProvider::new(connection(vec![], 1))),
+            &["input"],
+            "assistant",
+        ),
+        (
+            anthropic::FAMILY,
+            Box::new(anthropic::AnthropicProvider::new(
+                connection(vec![], 1),
+                128,
+            )),
+            &["messages"],
+            "assistant",
+        ),
+        (
+            bedrock::FAMILY,
+            Box::new(bedrock::BedrockProvider::new(connection(vec![], 1))),
+            &["messages"],
+            "assistant",
+        ),
+        (
+            google::FAMILY,
+            Box::new(google::GoogleProvider::new(connection(vec![], 1)).unwrap()),
+            &["contents"],
+            "model",
+        ),
+        (
+            google::VERTEX_FAMILY,
+            Box::new(google::GoogleProvider::vertex(connection(vec![], 1)).unwrap()),
+            &["contents"],
+            "model",
+        ),
+        (
+            pi_messages::FAMILY,
+            Box::new(pi_messages::PiMessagesProvider {
+                connection: connection(vec![], 1),
+                max_output_tokens: None,
+                reasoning: None,
+                cache_retention: None,
+            }),
+            &["context", "messages"],
+            "assistant",
+        ),
     ];
     for (family, provider, path, role) in providers {
         let mut request = view(family);
-        request.history.push(ConversationItem { id: "delivered".into(), provenance: Provenance::PolicyOutput { action_id: "action".into(), identity: PolicyIdentity { name: "strategy".into(), version: "1".into() } }, content: Content::Text { text: "独立交付 🧭".into() }, opaque: None });
-        let wire = provider.serialize(&request).unwrap_or_else(|error| panic!("{family}: {error}"));
+        request.history.push(ConversationItem {
+            id: "delivered".into(),
+            provenance: Provenance::PolicyOutput {
+                action_id: "action".into(),
+                identity: PolicyIdentity {
+                    name: "strategy".into(),
+                    version: "1".into(),
+                },
+            },
+            content: Content::Text {
+                text: "独立交付 🧭".into(),
+            },
+            opaque: None,
+        });
+        let wire = provider
+            .serialize(&request)
+            .unwrap_or_else(|error| panic!("{family}: {error}"));
         let mut messages = &wire;
-        for key in path { messages = &messages[*key]; }
-        let output = messages.as_array().unwrap().iter().find(|message| message.to_string().contains("独立交付 🧭")).unwrap_or_else(|| panic!("missing policy output in {family}: {wire}"));
-        assert_eq!(output["role"], role, "policy output must remain the same agent's output for {family}");
+        for key in path {
+            messages = &messages[*key];
+        }
+        let output = messages
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|message| message.to_string().contains("独立交付 🧭"))
+            .unwrap_or_else(|| panic!("missing policy output in {family}: {wire}"));
+        assert_eq!(
+            output["role"], role,
+            "policy output must remain the same agent's output for {family}"
+        );
     }
 }

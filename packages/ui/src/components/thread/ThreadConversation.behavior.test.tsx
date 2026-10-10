@@ -45,7 +45,7 @@ function fixture(active = false) {
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
   const api: ThreadsAPI = { listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
-    selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, retryPreparation: unused, events: async () => [],
+    inspectTools: unused, selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, retryPreparation: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
   };
   return { api, view, submit, enqueue, editInput, cancelInput, cancelRun, emit: (event: Parameters<ThreadsAPI['observe']>[1] extends (value: infer T) => void ? T : never) => listener?.(event) };
@@ -375,7 +375,7 @@ it('does not silently discard a prepared workspace when a live run appears befor
 
 it('requires an explicit answer send, keeps the draft on failure and disables a stale question', async () => {
   const f = fixture(true);
-  const operation: ThreadSnapshot['operations'][number] = { id: 'question-op', run_id: 'ui-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'ask_user', waiting_on: 'question:question-op', intent: { call: { arguments: { question: 'Which approach?', options: ['Option A', 'Option B'] } } }, result: null, external_receipt: null, call_completion: null };
+  const operation: ThreadSnapshot['operations'][number] = { id: 'question-op', run_id: 'ui-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'ask_user', waiting_on: 'question:question-op', intent: { call: { arguments: { question: 'Which approach?', options: ['Option A', 'Option B'] } } }, result: null, external_receipt: null, call_completion: null, execution_owner: null };
   f.view.activeRun!.state = 'waiting'; f.view.activeRun!.waiting_on = operation.waiting_on;
   f.view.operations = [operation];
   const answer = vi.fn<ThreadsAPI['answerQuestion']>().mockRejectedValueOnce(new Error('uncertain answer acceptance')).mockImplementation(async () => {
@@ -406,7 +406,7 @@ it('keeps a sibling branch question non-actionable while viewing an earlier conv
   const fork = { ...identity, branchId: 'earlier-fork-branch' };
   f.view.identity = fork;
   f.view.thread.branches.push({ branch_id: fork.branchId, head: 'earlier-user', active_run_id: null, latest_run: null });
-  f.view.operations = [{ id: 'source-question-op', run_id: 'source-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'ask_user', waiting_on: 'question:source-question-op', intent: { call: { arguments: { question: 'Original branch clarification', options: ['Proceed'] } } }, result: null, external_receipt: null, call_completion: null }];
+  f.view.operations = [{ id: 'source-question-op', run_id: 'source-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'ask_user', waiting_on: 'question:source-question-op', intent: { call: { arguments: { question: 'Original branch clarification', options: ['Proceed'] } } }, result: null, external_receipt: null, call_completion: null, execution_owner: null }];
   const answer = vi.fn<ThreadsAPI['answerQuestion']>();
   const cancel = vi.fn<ThreadsAPI['cancelOperation']>();
   f.api.answerQuestion = answer; f.api.cancelOperation = cancel;
@@ -422,8 +422,8 @@ it('keeps a sibling branch question non-actionable while viewing an earlier conv
 it('permission UI sends only an explicit one-action decision and cannot approve a sibling Run', async () => {
   const f = fixture(true);
   f.view.activeRun!.state = 'executing';
-  const permission = { id: 'permission-1', call: { runId: 'ui-run', requestId: 'request-1', operationId: 'request-1:tool:call-1', callId: 'call-1', name: 'mcp_send', schemaVersion: 'schema-1', arguments: { recipient: 'chosen-target', body: 'exact content' } }, scope: { ownerReference: 'mcp-owner', ownerGeneration: 4, toolSchemaVersion: 'schema-1', policyGeneration: 'policy-generation', reason: 'External effect' }, actor: { account: 'selected-account', authority: 'fixture-authority' }, decision: null, consumed: false };
-  const operation: ThreadSnapshot['operations'][number] = { id: permission.call.operationId, run_id: 'ui-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'run', handed_off: false, executor: 'mcp_send', waiting_on: 'permission:permission-1', intent: {}, result: { permission }, external_receipt: null, call_completion: null };
+  const permission = { id: 'permission-1', call: { runId: 'ui-run', origin: { kind: 'model_step', request_id: 'request-1' }, operationId: 'request-1:tool:call-1', callId: 'call-1', name: 'mcp_send', schemaVersion: 'schema-1', arguments: { recipient: 'chosen-target', body: 'exact content' } }, scope: { ownerReference: 'mcp-owner', ownerGeneration: 4, toolSchemaVersion: 'schema-1', policyGeneration: 'policy-generation', reason: 'External effect' }, actor: { account: 'selected-account', authority: 'fixture-authority' }, decision: null, consumed: false };
+  const operation: ThreadSnapshot['operations'][number] = { id: permission.call.operationId, run_id: 'ui-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'run', handed_off: false, executor: 'mcp_send', waiting_on: 'permission:permission-1', intent: {}, result: { permission }, external_receipt: null, call_completion: null, execution_owner: null };
   f.view.operations = [operation];
   const answer = vi.fn<ThreadsAPI['answerQuestion']>(); f.api.answerQuestion = answer;
   const decide = vi.fn<ThreadsAPI['decidePermission']>().mockRejectedValueOnce(new Error('decision transport unavailable')).mockImplementation(async () => {
@@ -491,11 +491,11 @@ function pauseView(view: ThreadSnapshot, waitId = 'wait:policy-one') {
   view.activeRun!.state = 'waiting'; view.activeRun!.waiting_on = waitId;
   view.launch = { run_id: view.activeRun!.id, revision: 1, startable: false, requires_rebind: true, bound_epoch: null, preparation_failure: null,
     pause: { action_id: `action:${waitId}`, wait_id: waitId, reason: 'Review the first delivered result.' },
-    selection: { policy_models: [], mcp_binding: null, credential_scope: null, connection_identity: 'fixture', provider_family: 'fixture', model: 'fixture',
+    selection: { extension_bindings: [], policy_models: [], mcp_binding: null, credential_scope: null, connection_identity: 'fixture', provider_family: 'fixture', model: 'fixture',
       configuration_generation: 1, tool_schema_generation: 1, tools: [], policy: { name: 'fixture', version: '1' }, source: null } };
   view.operations = [{ id: view.launch.pause!.action_id, run_id: view.activeRun!.id, epoch: 1, revision: 1,
     phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'run', handed_off: false,
-    executor: 'policy.pause', waiting_on: waitId, intent: {}, result: null, external_receipt: null, call_completion: null }];
+    executor: 'policy.pause', waiting_on: waitId, intent: {}, result: null, external_receipt: null, call_completion: null, execution_owner: null }];
 }
 
 it('shows the core Pause reason and exact resume control while input remains queued', async () => {

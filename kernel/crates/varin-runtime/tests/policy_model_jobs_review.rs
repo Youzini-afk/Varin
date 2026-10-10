@@ -1,5 +1,5 @@
 //! Independently authored adversarial checks for auxiliary planning Operations.
-#[path="fixtures/input_admission.rs"]
+#[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
 use serde_json::{json, Value};
@@ -40,6 +40,9 @@ impl Fixture {
             configuration_generation: 7,
             tool_schema_generation: 1,
             tools: vec![ToolSchema {
+                description: String::new(),
+                output_schema: None,
+                metadata: None,
                 name: "read".into(),
                 version: "1".into(),
                 schema: json!({"type":"object"}),
@@ -198,12 +201,23 @@ impl ModelProvider for Provider {
 }
 struct NoTools;
 impl ToolExecutor for NoTools {
-    fn plan(&self, call: &varin_runtime::execution::ToolCall, context: &varin_runtime::execution::FrozenToolContext,
-        cancel: &varin_runtime::execution::CancellationToken) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError> {
-        self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+    fn plan(
+        &self,
+        call: &varin_runtime::execution::ToolCall,
+        context: &varin_runtime::execution::FrozenToolContext,
+        cancel: &varin_runtime::execution::CancellationToken,
+    ) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError>
+    {
+        self.prepare(call, context, cancel)
+            .map(varin_runtime::execution::ToolPreparation::Ready)
     }
 
-    fn prepare(&self, _: &ToolCall, _: &FrozenToolContext, _cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
+    fn prepare(
+        &self,
+        _: &ToolCall,
+        _: &FrozenToolContext,
+        _cancel: &CancellationToken,
+    ) -> Result<ToolContract, ExecutionError> {
         panic!("planning tool output must not prepare tools")
     }
     fn authorize(
@@ -299,7 +313,9 @@ fn capability(f: &Fixture) -> PolicyModelCapability {
 }
 
 fn frozen_job(f: &Fixture, serialized: Value) -> (PolicyModelIntent, RequestSnapshot) {
-    let boundary = f.db.policy_boundary(&f.input.run_id, f.input.owner_generation).unwrap();
+    let boundary =
+        f.db.policy_boundary(&f.input.run_id, f.input.owner_generation)
+            .unwrap();
     let action_id = format!("{}:policy:{}", f.input.run_id, boundary.id);
     let cap = capability(f);
     let instructions = vec!["choose from the frozen source data".to_string()];
@@ -309,15 +325,25 @@ fn frozen_job(f: &Fixture, serialized: Value) -> (PolicyModelIntent, RequestSnap
         run_id: f.input.run_id.clone(),
         request_id: action_id.clone(),
         origin: RequestOrigin::PolicyModelJob {
-            action_id: action_id.clone(), purpose: "planning".into(), boundary_id: boundary.id.clone(),
+            action_id: action_id.clone(),
+            purpose: "planning".into(),
+            boundary_id: boundary.id.clone(),
         },
         binding,
         history: vec![],
     };
-    (PolicyModelIntent::PolicyModelJobV1 {
-        action_id, boundary, identity: identity(), state: json!({"proposed":true}),
-        capability: cap, instructions, evidence: vec![],
-    }, RequestSnapshot { view, serialized })
+    (
+        PolicyModelIntent::PolicyModelJobV1 {
+            action_id,
+            boundary,
+            identity: identity(),
+            state: json!({"proposed":true}),
+            capability: cap,
+            instructions,
+            evidence: vec![],
+        },
+        RequestSnapshot { view, serialized },
+    )
 }
 
 #[test]
@@ -329,29 +355,66 @@ fn body_publication_rechecks_model_admission_after_input_or_head_changes() {
         let run = f.input.run_id.clone();
         let epoch = f.input.owner_generation;
         let head = f.input.binding.history_range.leaf_id.clone();
-        let result = content_window::during_write(&f.root, &f.db,
+        let result = content_window::during_write(
+            &f.root,
+            &f.db,
             move |db| db.admit_policy_model(&run, epoch, &intent, &snapshot),
             |catalog| {
-                assert!(catalog.operation(&action).is_err(), "body must precede metadata admission");
+                assert!(
+                    catalog.operation(&action).is_err(),
+                    "body must precede metadata admission"
+                );
                 assert_eq!(catalog.collect_content_objects().unwrap(), 0);
-                catalog.create_thread("independent", "independent-main").unwrap();
+                catalog
+                    .create_thread("independent", "independent-main")
+                    .unwrap();
                 if boundary_input {
-                    catalog.enqueue_input(&varin_runtime::catalog::inputs::EnqueueInput {
-                        key: "during-body".into(), thread_id: "thread".into(), branch_id: "main".into(),
-                        mode: InputMode::Boundary, input: json!("new input"), configuration: None,
-                    }).unwrap();
+                    catalog
+                        .enqueue_input(&varin_runtime::catalog::inputs::EnqueueInput {
+                            key: "during-body".into(),
+                            thread_id: "thread".into(),
+                            branch_id: "main".into(),
+                            mode: InputMode::Boundary,
+                            input: json!("new input"),
+                            configuration: None,
+                        })
+                        .unwrap();
                 } else {
-                    catalog.append_history(&f.input.run_id, epoch, head.as_deref(),
-                        HistorySource::User, json!("new head"), None).unwrap();
+                    catalog
+                        .append_history(
+                            &f.input.run_id,
+                            epoch,
+                            head.as_deref(),
+                            HistorySource::User,
+                            json!("new head"),
+                            None,
+                        )
+                        .unwrap();
                 }
-            });
+            },
+        );
         let error = result.unwrap_err();
-        assert_eq!(error.code, if boundary_input { "input_pending" } else { "policy_graph" });
+        assert_eq!(
+            error.code,
+            if boundary_input {
+                "input_pending"
+            } else {
+                "policy_graph"
+            }
+        );
         assert!(f.db.lock().unwrap().operation(&action).is_err());
-        assert!(f.db.lock().unwrap().events_after(0, 1000).unwrap().iter()
+        assert!(f
+            .db
+            .lock()
+            .unwrap()
+            .events_after(0, 1000)
+            .unwrap()
+            .iter()
             .all(|event| event.kind != "policy.model_admitted"));
-        assert!(f.db.lock().unwrap().collect_content_objects().unwrap() > 0,
-            "failed publication must release the GC guard and leave only collectible bodies");
+        assert!(
+            f.db.lock().unwrap().collect_content_objects().unwrap() > 0,
+            "failed publication must release the GC guard and leave only collectible bodies"
+        );
     }
 }
 
@@ -362,48 +425,109 @@ fn body_publication_preserves_model_output_usage_and_evidence_through_gc() {
     let action = intent.action_id().to_string();
     let run = f.input.run_id.clone();
     let epoch = f.input.owner_generation;
-    f.db.admit_policy_model(&run, epoch, &intent, &snapshot).unwrap();
+    f.db.admit_policy_model(&run, epoch, &intent, &snapshot)
+        .unwrap();
     f.db.dispatch_policy_model(&run, epoch, &action).unwrap();
     let output = PolicyModelOutput {
         events: vec![],
         items: vec![ProviderItem {
-            id: "large-plan".into(), content: Content::Text { text: content_window::large_text() },
+            id: "large-plan".into(),
+            content: Content::Text {
+                text: content_window::large_text(),
+            },
             opaque: Some(OpaqueProviderItem {
-                family: "test".into(), connection_identity: "planning-account".into(),
-                adapter_version: "1".into(), value: json!({"signed":[null,"保留",true]}),
+                family: "test".into(),
+                connection_identity: "planning-account".into(),
+                adapter_version: "1".into(),
+                value: json!({"signed":[null,"保留",true]}),
             }),
         }],
         usage: UsageReceipt {
-            measurement: UsageMeasurement::Actual, input_tokens: Some(31), output_tokens: Some(40),
-            raw: Some(json!({"provider_usage":{"not_lost":73}})), ..UsageReceipt::default()
+            measurement: UsageMeasurement::Actual,
+            input_tokens: Some(31),
+            output_tokens: Some(40),
+            raw: Some(json!({"provider_usage":{"not_lost":73}})),
+            ..UsageReceipt::default()
         },
     };
     let receipt = PolicyModelReceipt {
-        dispatch: PolicyModelDispatch::Completed, outcome: Outcome::Succeeded, output: None,
-        usage: output.usage.clone(), finish_reason: Some(FinishReason::Stop), failure: None, usable: true,
+        dispatch: PolicyModelDispatch::Completed,
+        outcome: Outcome::Succeeded,
+        output: None,
+        usage: output.usage.clone(),
+        finish_reason: Some(FinishReason::Stop),
+        failure: None,
+        usable: true,
     };
     let worker_run = run.clone();
     let worker_action = action.clone();
     let worker_output = output.clone();
-    content_window::during_write(&f.root, &f.db,
-        move |db| db.record_policy_model(&worker_run, epoch, &worker_action, &worker_output, Some(&receipt)),
+    content_window::during_write(
+        &f.root,
+        &f.db,
+        move |db| {
+            db.record_policy_model(
+                &worker_run,
+                epoch,
+                &worker_action,
+                &worker_output,
+                Some(&receipt),
+            )
+        },
         |catalog| {
-            let result: PolicyModelResult = serde_json::from_value(control_result(catalog.operation(&action).unwrap().result.unwrap())).unwrap();
-            assert!(result.original_ref.is_none(), "body must precede output reference publication");
+            let result: PolicyModelResult = serde_json::from_value(control_result(
+                catalog.operation(&action).unwrap().result.unwrap(),
+            ))
+            .unwrap();
+            assert!(
+                result.original_ref.is_none(),
+                "body must precede output reference publication"
+            );
             assert_eq!(catalog.collect_content_objects().unwrap(), 0);
-            catalog.create_thread("independent", "independent-main").unwrap();
-            catalog.append_history(&run, epoch, snapshot.view.binding.history_range.leaf_id.as_deref(),
-                HistorySource::User, json!("correction after actual dispatch"), None).unwrap();
-        }).unwrap();
+            catalog
+                .create_thread("independent", "independent-main")
+                .unwrap();
+            catalog
+                .append_history(
+                    &run,
+                    epoch,
+                    snapshot.view.binding.history_range.leaf_id.as_deref(),
+                    HistorySource::User,
+                    json!("correction after actual dispatch"),
+                    None,
+                )
+                .unwrap();
+        },
+    )
+    .unwrap();
     f.db.lock().unwrap().collect_content_objects().unwrap();
     let saved = f.db.policy_model_job(&run, epoch).unwrap().unwrap();
     assert_eq!(saved.output, output);
     assert_eq!(saved.result.receipt.as_ref().unwrap().usage, output.usage);
-    let evidence = f.db.policy_evidence(&run, epoch,
-        saved.result.receipt.as_ref().unwrap().output.as_ref().unwrap()).unwrap();
-    let Content::Text { text } = &output.items[0].content else { unreachable!() };
-    assert!(serde_json::to_string(&evidence.item.content).unwrap().contains(text));
-    assert!(f.db.dispatch_policy_model(&run, epoch, &action).is_err(), "settled paid work cannot redispatch");
+    let evidence =
+        f.db.policy_evidence(
+            &run,
+            epoch,
+            saved
+                .result
+                .receipt
+                .as_ref()
+                .unwrap()
+                .output
+                .as_ref()
+                .unwrap(),
+        )
+        .unwrap();
+    let Content::Text { text } = &output.items[0].content else {
+        unreachable!()
+    };
+    assert!(serde_json::to_string(&evidence.item.content)
+        .unwrap()
+        .contains(text));
+    assert!(
+        f.db.dispatch_policy_model(&run, epoch, &action).is_err(),
+        "settled paid work cannot redispatch"
+    );
 }
 
 #[test]
@@ -412,12 +536,24 @@ fn planning_dispatch_rejects_a_head_changed_since_admission() {
     let (intent, snapshot) = frozen_job(&f, json!({"frozen":true}));
     let run = &f.input.run_id;
     let epoch = f.input.owner_generation;
-    f.db.admit_policy_model(run, epoch, &intent, &snapshot).unwrap();
-    f.db.lock().unwrap().append_history(run, epoch,
-        snapshot.view.binding.history_range.leaf_id.as_deref(), HistorySource::User,
-        json!("correction after model admission"), None).unwrap();
-    assert!(f.db.dispatch_policy_model(run, epoch, intent.action_id()).is_err(),
-        "a request frozen before the current head must not start after the correction");
+    f.db.admit_policy_model(run, epoch, &intent, &snapshot)
+        .unwrap();
+    f.db.lock()
+        .unwrap()
+        .append_history(
+            run,
+            epoch,
+            snapshot.view.binding.history_range.leaf_id.as_deref(),
+            HistorySource::User,
+            json!("correction after model admission"),
+            None,
+        )
+        .unwrap();
+    assert!(
+        f.db.dispatch_policy_model(run, epoch, intent.action_id())
+            .is_err(),
+        "a request frozen before the current head must not start after the correction"
+    );
 }
 
 #[test]
@@ -429,17 +565,35 @@ fn quoted_history_catalog_wait_diagnostic() {
         let f = Fixture::new();
         let (intent, mut snapshot) = frozen_job(&f, json!({"request":true}));
         let quoted = vec![ConversationItem {
-            id: "source".into(), provenance: Provenance::UserInstruction { input_id: "source".into() },
-            content: Content::Text { text: "a".repeat(mib * 1024 * 1024) }, opaque: None,
+            id: "source".into(),
+            provenance: Provenance::UserInstruction {
+                input_id: "source".into(),
+            },
+            content: Content::Text {
+                text: "a".repeat(mib * 1024 * 1024),
+            },
+            opaque: None,
         }];
         snapshot.view.history.push(ConversationItem {
-            id: "quoted-context".into(), provenance: Provenance::ExternalData {
+            id: "quoted-context".into(),
+            provenance: Provenance::ExternalData {
                 source: "committed-conversation-context".into(),
             },
-            content: Content::Text { text: format!("Frozen source context\n{}", serde_json::to_string(&quoted).unwrap()) },
+            content: Content::Text {
+                text: format!(
+                    "Frozen source context\n{}",
+                    serde_json::to_string(&quoted).unwrap()
+                ),
+            },
             opaque: None,
         });
-        f.db.admit_policy_model(&f.input.run_id, f.input.owner_generation, &intent, &snapshot).unwrap();
+        f.db.admit_policy_model(
+            &f.input.run_id,
+            f.input.owner_generation,
+            &intent,
+            &snapshot,
+        )
+        .unwrap();
         let stop = Arc::new(AtomicBool::new(false));
         let reader_db = f.db.clone();
         let reader_stop = stop.clone();
@@ -461,7 +615,12 @@ fn quoted_history_catalog_wait_diagnostic() {
         });
         start.wait();
         let t = Instant::now();
-        f.db.dispatch_policy_model(&f.input.run_id, f.input.owner_generation, intent.action_id()).unwrap();
+        f.db.dispatch_policy_model(
+            &f.input.run_id,
+            f.input.owner_generation,
+            intent.action_id(),
+        )
+        .unwrap();
         let total = t.elapsed();
         stop.store(true, Ordering::Release);
         let (max, count) = reader.join().unwrap();
@@ -648,7 +807,13 @@ impl BoundaryPersistence {
     }
 }
 impl Persistence for BoundaryPersistence {
-    fn resume_tool(&self,context:&ToolExecutionContext,epoch:u64)->Result<ToolResume,ExecutionError>{self.db.resume_tool(context,epoch)}
+    fn resume_tool(
+        &self,
+        context: &ToolExecutionContext,
+        epoch: u64,
+    ) -> Result<ToolResume, ExecutionError> {
+        self.db.resume_tool(context, epoch)
+    }
     fn resource_admission(&self) -> Arc<varin_runtime::resource_admission::ResourceAdmission> {
         self.db.resource_admission()
     }
@@ -685,8 +850,14 @@ impl Persistence for BoundaryPersistence {
     fn policy_boundary(&self, r: &str, e: u64) -> Result<PolicyBoundary, ExecutionError> {
         self.db.policy_boundary(r, e)
     }
-    fn policy_action(&self, run: &str, epoch: u64) -> Result<Option<PolicyActionState>, ExecutionError> {
-        Ok(self.policy_model_job(run, epoch)?.map(PolicyActionState::Model))
+    fn policy_action(
+        &self,
+        run: &str,
+        epoch: u64,
+    ) -> Result<Option<PolicyActionState>, ExecutionError> {
+        Ok(self
+            .policy_model_job(run, epoch)?
+            .map(PolicyActionState::Model))
     }
     fn policy_model_job(
         &self,
@@ -989,15 +1160,26 @@ struct Reads {
     calls: Mutex<Vec<String>>,
 }
 impl ToolExecutor for Reads {
-    fn plan(&self, call: &varin_runtime::execution::ToolCall, context: &varin_runtime::execution::FrozenToolContext,
-        cancel: &varin_runtime::execution::CancellationToken) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError> {
-        self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+    fn plan(
+        &self,
+        call: &varin_runtime::execution::ToolCall,
+        context: &varin_runtime::execution::FrozenToolContext,
+        cancel: &varin_runtime::execution::CancellationToken,
+    ) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError>
+    {
+        self.prepare(call, context, cancel)
+            .map(varin_runtime::execution::ToolPreparation::Ready)
     }
 
     fn supports_policy_read(&self, _: &FrozenToolContext, _: &ToolCall, _: &ToolContract) -> bool {
         true
     }
-    fn prepare(&self, c: &ToolCall, _: &FrozenToolContext, _cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
+    fn prepare(
+        &self,
+        c: &ToolCall,
+        _: &FrozenToolContext,
+        _cancel: &CancellationToken,
+    ) -> Result<ToolContract, ExecutionError> {
         Ok(ToolContract {
             name: c.name.clone(),
             schema_version: c.schema_version.clone(),
@@ -1291,7 +1473,8 @@ fn durable_cancel_between_job_load_and_control_registration_is_not_lost() {
             .operation(events.last().unwrap()["action_id"].as_str().unwrap())
             .unwrap();
     assert_eq!(operation.phase, OperationPhase::Terminal);
-    let result: PolicyModelResult = serde_json::from_value(control_result(operation.result.unwrap())).unwrap();
+    let result: PolicyModelResult =
+        serde_json::from_value(control_result(operation.result.unwrap())).unwrap();
     assert_eq!(result.dispatch, PolicyModelDispatch::Prepared);
     assert_eq!(result.receipt.as_ref().unwrap().dispatch, result.dispatch);
     assert_eq!(f.counts(), (1, 0));
@@ -1376,7 +1559,8 @@ fn local_dispatch_failure_preserves_actual_marker_and_settled_receipt_on_reopen(
     assert_eq!(event["receipt"]["outcome"], "failed");
     assert_eq!(event["receipt"]["failure"]["code"], "storage_reply_lost");
     let op = f.db.lock().unwrap().operation(&action).unwrap();
-    let result: PolicyModelResult = serde_json::from_value(control_result(op.result.clone().unwrap())).unwrap();
+    let result: PolicyModelResult =
+        serde_json::from_value(control_result(op.result.clone().unwrap())).unwrap();
     assert_eq!(result.dispatch, PolicyModelDispatch::Dispatched);
     assert_eq!(result.receipt.as_ref().unwrap().dispatch, result.dispatch);
     drop(events);
@@ -1394,6 +1578,8 @@ fn local_dispatch_failure_preserves_actual_marker_and_settled_receipt_on_reopen(
 fn control_result(result: varin_runtime::OperationResultMetadata) -> Value {
     match result {
         varin_runtime::OperationResultMetadata::Control { value } => value,
-        varin_runtime::OperationResultMetadata::Content { .. } => panic!("policy result is domain control state"),
+        varin_runtime::OperationResultMetadata::Content { .. } => {
+            panic!("policy result is domain control state")
+        }
     }
 }

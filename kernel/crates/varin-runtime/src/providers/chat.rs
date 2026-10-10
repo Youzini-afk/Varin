@@ -84,7 +84,7 @@ impl ModelProvider for ChatProvider {
                 Content::ProviderOnly=>return Err(ExecutionError::new("missing_opaque","provider-only item lacks its original")),
             }
         }
-        let tools:Vec<_>=view.binding.tools.iter().map(|tool|json!({"type":"function","function":{"name":tool.name,"parameters":tool.schema}})).collect();
+        let tools:Vec<_>=view.binding.tools.iter().map(|tool|json!({"type":"function","function":{"name":tool.name,"description":tool.description,"parameters":tool.schema}})).collect();
         let mut body = json!({"model":view.binding.model,"messages":messages,"stream":true,"n":1});
         if !tools.is_empty() {
             body["tools"] = json!(tools);

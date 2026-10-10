@@ -101,7 +101,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n')
   const compositions=selectedServers==='composed'?new McpCompositions(mcp,code=>compositionErrors.push(code)):undefined;
   const scopes=new Map<string,Promise<McpCompositionScope>>();
   if(compositions) cleanups.push(async()=>{compositions.close();});
-  kernel.onMcpReleased(runId=>{const owner=scopes.get(runId);scopes.delete(runId);if(owner)void owner.then(scope=>scope.release(),()=>undefined);});
+  kernel.onToolReleased(runId=>{const owner=scopes.get(runId);scopes.delete(runId);if(owner)void owner.then(scope=>scope.release(),()=>undefined);});
   const transportTrace: Array<Record<string, unknown>> = [];
   const runtime = new AgentRuntimeClient(kernel, async (input, signal) => {
     let lease:McpAuthorityLease;
@@ -428,7 +428,7 @@ it('a real oversized UTF-8 MCP result keeps its remote-effect receipt, preserves
     const selected = (body.tools as Array<{ name: string }>).find(tool => !['ask_user', 'mcp_discover', 'mcp_call'].includes(tool.name))!;
     const output = !independent && !result
       ? { id: 'large-mcp-item', type: 'function_call', call_id: 'large-mcp-call', name: selected.name, arguments: JSON.stringify({ text: 'large unicode response' }) }
-      : { id: `final-${crypto.randomUUID()}`, type: 'message', content: [{ type: 'output_text', text: independent ? 'independent run completed' : 'oversized output unavailable; do not replay' }] };
+      : { id: `final-${crypto.randomUUID()}`, type: 'message', content: [{ type: 'output_text', text: independent ? 'independent run completed' : 'full large output received' }] };
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [output] } })}\n\n`);
   }, undefined, undefined, ['fixture'], 32 * 1024 * 1024);
@@ -448,13 +448,14 @@ it('a real oversized UTF-8 MCP result keeps its remote-effect receipt, preserves
   expect((await f.api.run(otherReceipt.run_id)).state).toBe('completed');
   expect((await f.api.run(receipt.run_id)).state).toBe('completed');
   const settled = await f.api.operation(op.id);
-  expect(settled).toMatchObject({ phase: 'terminal', outcome: 'failed', effect: 'confirmed', result: { error: 'mcp_output_exceeds_transport_frame', remoteOutcome: 'succeeded' } });
+  expect(settled).toMatchObject({ phase: 'terminal', outcome: 'succeeded', effect: 'confirmed' });
+  expect((settled.result as {content:Array<{text:string}>}).content[0]!.text).toBe('界'.repeat(6*1024*1024));
   const records = (await fs.readFile(f.effectsPath, 'utf8')).trim().split('\n').map(value => JSON.parse(value));
   expect(records.filter(value => value.name === 'send')).toHaveLength(1);
   const sizes = records.find(value => value.outputBytes);
   expect(sizes.outputBytes).toBeGreaterThan(16 * 1024 * 1024);
   expect(sizes.outputUnits).toBeLessThan(16 * 1024 * 1024);
-  expect(JSON.stringify(f.requests)).toContain('mcp_output_exceeds_transport_frame');
+  expect(JSON.stringify(f.requests)).toContain('界'.repeat(1024));
 }, 45_000);
 it('the default MCP framing limit cannot invent a receipt or break the kernel when a remote result is oversized', async () => {
   let turn = 0;

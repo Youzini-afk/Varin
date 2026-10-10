@@ -28,12 +28,8 @@ fn error(value: impl ToString) -> ExecutionError {
 }
 pub(crate) fn schemas(mut tools: Vec<ToolSchema>) -> Vec<ToolSchema> {
     tools.retain(|tool| tool.name != WAIT_TOOL);
-    if tools
-        .iter()
-        .any(|tool| tool.name == "process_inspect")
-    {
-        tools.push(ToolSchema { name: WAIT_TOOL.into(), version: "1".into(), schema: json!({
-            "type":"object", "description":"Wait durably for a process started by this Run. Use the processId from process_spawn. This parks model execution until an observed terminal fact; cancelling this observation does not stop the process. Read output separately with process_read.",
+    if tools.iter().any(|tool| tool.name == "process_inspect") {
+        tools.push(ToolSchema { description: "Wait durably for a process started by this Run. Use the processId from process_spawn. This parks model execution until an observed terminal fact; cancelling this observation does not stop the process. Read output separately with process_read.".into(), output_schema: None, metadata: None, name: WAIT_TOOL.into(), version: "1".into(), schema: json!({"type":"object",
             "properties":{"processId":{"type":"string","minLength":1}}, "required":["processId"], "additionalProperties":false
         }) });
     }
@@ -55,12 +51,24 @@ pub(crate) fn configure(mut start: RunStart, catalog: Arc<Mutex<Catalog>>) -> Ru
     });
     start
 }
-pub(crate) fn declarations(catalog: Arc<Mutex<Catalog>>, binding: ToolBinding, resources: KernelResourceClient)
-    -> Vec<varin_runtime::composition::tools::ToolDeclaration> {
+pub(crate) fn declarations(
+    catalog: Arc<Mutex<Catalog>>,
+    binding: ToolBinding,
+    resources: KernelResourceClient,
+) -> Vec<varin_runtime::composition::tools::ToolDeclaration> {
     let selected = crate::tools::KernelToolExecutor::selected_schemas(&binding.enabled_tools);
-    let endpoint = Arc::new(ProcessWaitTools { catalog, binding, resources });
-    schemas(selected).into_iter().filter(|schema| schema.name == WAIT_TOOL || observes(&schema.name))
-        .map(|schema| varin_runtime::composition::tools::ToolDeclaration::new(schema, endpoint.clone())).collect()
+    let endpoint = Arc::new(ProcessWaitTools {
+        catalog,
+        binding,
+        resources,
+    });
+    schemas(selected)
+        .into_iter()
+        .filter(|schema| schema.name == WAIT_TOOL || observes(&schema.name))
+        .map(|schema| {
+            varin_runtime::composition::tools::ToolDeclaration::new(schema, endpoint.clone())
+        })
+        .collect()
 }
 struct ProcessWaitTools {
     catalog: Arc<Mutex<Catalog>>,
@@ -111,11 +119,8 @@ impl ProcessWaitTools {
         contract: &ToolContract,
     ) -> Result<(), ExecutionError> {
         let expected = if observes(&call.name) {
-            crate::tools::KernelToolExecutor::new(
-                self.binding.clone(),
-                self.resources.clone(),
-            )?
-            .process_observation_contract(c, call)?
+            crate::tools::KernelToolExecutor::new(self.binding.clone(), self.resources.clone())?
+                .process_observation_contract(c, call)?
         } else {
             ToolContract {
                 name: WAIT_TOOL.into(),
@@ -159,8 +164,14 @@ impl ProcessWaitTools {
     }
 }
 impl ToolExecutor for ProcessWaitTools {
-    fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken) -> Result<ToolPreparation, ExecutionError> {
-        self.prepare(call, context, cancel).map(ToolPreparation::Ready)
+    fn plan(
+        &self,
+        call: &ToolCall,
+        context: &FrozenToolContext,
+        cancel: &CancellationToken,
+    ) -> Result<ToolPreparation, ExecutionError> {
+        self.prepare(call, context, cancel)
+            .map(ToolPreparation::Ready)
     }
     fn prepare(
         &self,
@@ -169,7 +180,11 @@ impl ToolExecutor for ProcessWaitTools {
         _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
         if observes(&call.name) {
-            return crate::tools::KernelToolExecutor::new(self.binding.clone(), self.resources.clone())?.prepare(call, frozen, _cancel);
+            return crate::tools::KernelToolExecutor::new(
+                self.binding.clone(),
+                self.resources.clone(),
+            )?
+            .prepare(call, frozen, _cancel);
         }
         let schema = schemas(crate::tools::KernelToolExecutor::selected_schemas(
             &self.binding.enabled_tools,

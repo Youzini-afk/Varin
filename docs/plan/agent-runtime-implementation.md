@@ -6,6 +6,18 @@
 
 目标是完整实现[完整运行时设计](../design/agent-runtime-design.md)和[能力组合设计](../design/runtime-extensibility-design.md)共同定义的长期运行底座：及时交互、低开销执行、按真实资源调度、深层能力组合和可替换策略。完成聊天循环、迁移已有工具或删除 Pi 都不是单独的完成标准；Pi 退出是这套设计落地后的一个结果。当前生产仍使用 Pi session worker、TypeScript Host 协调和 Rust 资源内核；现有权威见[架构](../architecture.md)。
 
+## 2026-10-10 增量：普通工具目录、执行回执与材料入口
+
+- 已安装普通 service 的单份 `tool` 声明进入与 ModelStep、PolicyAction 共用的 ToolDirectory。说明、输入/输出 schema、示例和 source 元数据沿同一声明保存；共享既有 Ajv 编译器，不新增 schema 引擎。公开协议由原 schema 生成，内部执行类型仍归 Rust。原 MCP 权威作为专用 adapter 接入通用 Host tool bridge，不用伪 MCP 服务包装普通扩展。
+- Launch 保留精确 package/artifact/service/declaration 绑定；各贡献独立准备，同一 Run owner 合并 MCP 与普通扩展的 ready snapshot，闭合请求/动作边界才激活。初次 Run 不等待全部冷服务。真实并发反例修复了 A 已 ready、B 随后失败时错误回滚 A，以及旧 candidate 被清除后只恢复 Host map、没有重新发布可激活目录的问题。启动 ACK 前完成的后台贡献等待原启动唤醒取得真实 publication 结果，不能提前成功或吞掉失败；临时 Rust holder 变化也不提前释放 Host candidate 的实际 pin。
+- 普通路由替换保留被冻结 owner，明确 disable/revoke 立即撤权；重新启用同一 artifact 取得新世代，不复活旧调用。独立真实安装探针发现并修复了恢复误用当前路由的问题：保存的 A 仍启用且原 artifact 可用时，当前路由已选 B 也能精确恢复 A；下一候选才按 B 准备。当前路由文件损坏不阻碍仍有效 A 的精确恢复，但不能产生新选择或候选；原 artifact 缺失、禁用或完整 binding 不符仍明确失败，不添加旧版本 loader 或静默改用最新实现。
+- ToolDispatched 持久记录实际 Kernel/External 执行 owner；调用完成与执行者停止分开。取消观察可以返回 unknown，但原 callback、资源 occupancy 与未确认回执继续归原 owner。重启不把外部 Result 当成本进程已停止；迟到回执按原 invocation/执行 epoch 鉴权，worker 先保存完整正文，再由 Catalog 提交及 ACK。换传输 epoch 只重投原事实，不重执行工具；已确认回执不改原模型配对/调用 completion，不复活终态 Run。输出 schema 不符也保留收到的原 JSON 证据。Catalog 现为格式 18，旧内部格式拒绝。
+- 权限使用真实 ModelStep 或 PolicyAction origin，不制造 requestId。Host 从原 Operation、Run 与不可变 source 派生调用域，只把按原 broker owner/generation 核对的 opaque token 送入扩展；调用结束后能力句柄失效。路由读取原 Run 准入 scope 的短元数据查询，null 保持无项目，不读取当前 branch 的 checkpoint 正文；这是 owner 对齐，不宣称已发现正常非终态 Run 的跨项目执行。Source 启动、重绑与后继 Run 统一从原目录投影 source-owned tools，普通扩展不会被误当作原生文件工具。
+- `materials.snapshot` 复用原 WebMaterialStore、snapshot grant、持久 collection 和 Rust blob range owner。普通 SDK 示例位于 `examples/extensions/material-snapshot-tool`，保留 UTF-8 范围/哈希、空值、缺失/拒绝、冲突与损坏语义；不造 Pi session 或另一份材料库。真实 native Storage 范围入口已经接线，首次哈希校验仍可能读取完整对象，不声称所有底层 I/O 都受输出页预算限制。
+- 认证的 `POST /api/threads/tools/inspect` 与 `ThreadsAPI.inspectTools` 返回实际激活目录、持久绑定和独立准备状态；撤权/未重绑不可调用，正常退休的原 pin 保留可用性。准备完成不等于激活，目录可见不等于已授权。这是当前工具查询出口，完整 service/event/UI slot 查询和 codemode 尚未完成。
+- 验证按真实范围分别记录：runtime 库及全部集成目标分段合并覆盖 **246 passed、2 个既有 ignored**，不是单次 full-suite 全绿；旧 JobAccepted fixture 的停止证据修正后相关 39 项通过。实际 Rust bridge/Catalog/RunTools 两项、其余 kernel lib 23 项及 Run scope 查询一项通过，runtime doctest 目标完成但没有用例。最终 portable core 16 项及既有 continuation 8 项、材料域六文件 76 项、application-client 5 项通过；schema 编译器及既有 MCP 消费验证通过。Host 测试类型、UI 类型和协议一致性已核对。真实安装组合使用明确的 Catalog 管理查询 fixture，不能冒称实际 Host/kernel IPC。
+- **真实 Host/kernel 端到端仍未验收**：本环境 Unix socket `EPERM` 及官方提升入口初始化失败的既有阻塞未解除，相关 native fixtures 只做类型检查。实际 Linux 开发内核构建为 `0.9.25`，SHA-256 `ea5283e91eb0a46d426a016f4163e0786b33594923abd17293fb37cfe9590950`；这不是正式发行或跨平台验收。默认 Pi 产品路线未切换，完整策略换绑、可写协作/条件集成、其余领域出口及 GC 控制隔离继续推进。
+
 ## 2026-10-10 增量：普通工具 SDK 与调用域边界
 
 - 普通 Host service provision 可携带单份 `tool` 声明；`provideTool` 从同一 manifest descriptor 注册 `inspect`/`execute`，保留真实 JSON null/空值，缺失与非 JSON 结果明确失败。工具声明的输入/输出 schema、说明、完成种类和 operation 提示不是权限或可重放证据。本增量只开放 Result 作者合同，没有伪造 Job 接口。

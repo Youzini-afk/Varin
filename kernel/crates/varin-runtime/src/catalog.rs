@@ -1,5 +1,5 @@
-use crate::types::*;
 use crate::types::OperationMetadata as Operation;
+use crate::types::*;
 use fs2::FileExt;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{de::DeserializeOwned, Serialize};
@@ -32,7 +32,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 17;
+pub(crate) const FORMAT: i64 = 18;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -122,15 +122,27 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
         launches::check_format(db)?;
         collaboration::check_format(db)?;
         context::check_format(db)?;
-        let content_format:i64=db.query_row("SELECT version FROM runtime_content_format WHERE id=1",[],|r|r.get(0))?;
-        if content_format!=3 {return Err(RuntimeError::Invalid("unsupported content format; data was preserved".into()));}
+        let content_format: i64 = db.query_row(
+            "SELECT version FROM runtime_content_format WHERE id=1",
+            [],
+            |r| r.get(0),
+        )?;
+        if content_format != 3 {
+            return Err(RuntimeError::Invalid(
+                "unsupported content format; data was preserved".into(),
+            ));
+        }
     }
     Ok(version)
 }
 
 /// Installing the catalog is one commit. A failed first open must leave a new, empty
 /// database rather than a collection of independently committed domain fragments.
-fn initialize_metadata(db: &mut Connection, version: i64, content: &crate::content::ContentStore) -> Result<u64> {
+fn initialize_metadata(
+    db: &mut Connection,
+    version: i64,
+    content: &crate::content::ContentStore,
+) -> Result<u64> {
     let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     if version == 0 {
         tx.execute_batch(SCHEMA)?;
@@ -169,9 +181,15 @@ pub struct Catalog {
 }
 impl Catalog {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
-        Self::open_with_resource_admission(root, std::sync::Arc::new(crate::resource_admission::ResourceAdmission::default()))
+        Self::open_with_resource_admission(
+            root,
+            std::sync::Arc::new(crate::resource_admission::ResourceAdmission::default()),
+        )
     }
-    pub fn open_with_resource_admission(root:impl AsRef<Path>,resource_admission:std::sync::Arc<crate::resource_admission::ResourceAdmission>)->Result<Self> {
+    pub fn open_with_resource_admission(
+        root: impl AsRef<Path>,
+        resource_admission: std::sync::Arc<crate::resource_admission::ResourceAdmission>,
+    ) -> Result<Self> {
         std::fs::create_dir_all(root.as_ref())?;
         let owner = OpenOptions::new()
             .create(true)
@@ -184,10 +202,15 @@ impl Catalog {
             .map_err(|e| RuntimeError::Conflict(format!("runtime already owned: {e}")))?;
         let database_path = root.as_ref().join("conversation.sqlite");
         let version = if database_path.try_exists()? {
-            let preflight = Connection::open_with_flags(&database_path,
-                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+            let preflight = Connection::open_with_flags(
+                &database_path,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                    | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )?;
             inspect_catalog_format(&preflight)?
-        } else { 0 };
+        } else {
+            0
+        };
         let mut db = Connection::open(&database_path)?;
         db.pragma_update(None, "foreign_keys", true)?;
         db.pragma_update(None, "journal_mode", "WAL")?;
@@ -198,17 +221,29 @@ impl Catalog {
             db,
             content,
             resource_admission,
-            context_compositions: std::sync::Arc::new(crate::composition::context::ContextCompositions::default()),
+            context_compositions: std::sync::Arc::new(
+                crate::composition::context::ContextCompositions::default(),
+            ),
             _owner: owner,
             epoch,
-            plan_cursor_key: { let mut key = [0; 32]; key[..16].copy_from_slice(Uuid::new_v4().as_bytes()); key[16..].copy_from_slice(Uuid::new_v4().as_bytes()); key },
+            plan_cursor_key: {
+                let mut key = [0; 32];
+                key[..16].copy_from_slice(Uuid::new_v4().as_bytes());
+                key[16..].copy_from_slice(Uuid::new_v4().as_bytes());
+                key
+            },
         };
         this.recover()?;
         {
-            let mut rows = this.db.prepare("SELECT operation_id,claims FROM resource_occupancy")?;
-            for row in rows.query_map([], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?)))? {
+            let mut rows = this
+                .db
+                .prepare("SELECT operation_id,claims FROM resource_occupancy")?;
+            for row in
+                rows.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            {
                 let (owner, claims) = row?;
-                this.resource_admission.restore(owner, serde_json::from_str(&claims)?);
+                this.resource_admission
+                    .restore(owner, serde_json::from_str(&claims)?);
             }
         }
         this.reconcile_waits()?;
@@ -220,9 +255,13 @@ impl Catalog {
     pub fn create_thread(&mut self, thread_id: &str, branch_id: &str) -> Result<()> {
         let tx = self.db.transaction()?;
         let initial:Option<String>=tx.query_row("SELECT json_extract(data,'$.branch_id') FROM events WHERE subject=?1 AND kind='thread.created' ORDER BY cursor LIMIT 1",[thread_id],|r|r.get(0)).optional()?;
-        if let Some(initial)=initial {
-            if initial==branch_id {return Ok(());}
-            return Err(RuntimeError::Conflict("thread was created with another initial branch".into()));
+        if let Some(initial) = initial {
+            if initial == branch_id {
+                return Ok(());
+            }
+            return Err(RuntimeError::Conflict(
+                "thread was created with another initial branch".into(),
+            ));
         }
 
         tx.execute("INSERT INTO threads(id) VALUES(?1)", [thread_id])?;
@@ -358,7 +397,9 @@ impl Catalog {
                     selection.base_tools_ref = previous.selection.base_tools_ref;
                     selection.tool_schema_generation = selection.configuration_generation;
                 }
-                if let Some(source) = &selection.source { source.validate()?; }
+                if let Some(source) = &selection.source {
+                    source.validate()?;
+                }
             }
         }
         let input_id = child_operation
@@ -406,7 +447,8 @@ impl Catalog {
             if let Some(source) = selection.source.as_ref() {
                 if let Some(origin_id) = source.environment_run_id.as_ref() {
                     let origin_run: Run = record(&tx, "runs", origin_id)?;
-                    let origin: launch_content::LaunchMetadata = record(&tx, "run_launches", origin_id)?;
+                    let origin: launch_content::LaunchMetadata =
+                        record(&tx, "run_launches", origin_id)?;
                     let mut same_source = source.clone();
                     same_source.environment_run_id = None;
                     if origin_run.thread_id != run.thread_id
@@ -477,12 +519,24 @@ impl Catalog {
         if run.revision != expected_revision || !run.state.permits(next) {
             return Err(RuntimeError::Conflict("run revision/state changed".into()));
         }
-        if run.state == RunState::Waiting && next == RunState::Runnable && !policy_control::run_startable(&tx, &run)? {
-            return Err(RuntimeError::Conflict("Run is waiting on another durable condition".into()));
+        if run.state == RunState::Waiting
+            && next == RunState::Runnable
+            && !policy_control::run_startable(&tx, &run)?
+        {
+            return Err(RuntimeError::Conflict(
+                "Run is waiting on another durable condition".into(),
+            ));
         }
         if next.terminal() {
-            if matches!(next, RunState::Cancelled | RunState::Failed) { questions::cancel_run_questions(&tx, id)?; policy_control::cancel_run_pause(&tx, &run)?; }
-            if matches!(next,RunState::Completed|RunState::Failed)&&inputs::has_boundary_inputs(&tx,id)?{return Err(RuntimeError::InputPending);}
+            if matches!(next, RunState::Cancelled | RunState::Failed) {
+                questions::cancel_run_questions(&tx, id)?;
+                policy_control::cancel_run_pause(&tx, &run)?;
+            }
+            if matches!(next, RunState::Completed | RunState::Failed)
+                && inputs::has_boundary_inputs(&tx, id)?
+            {
+                return Err(RuntimeError::InputPending);
+            }
 
             let mut stmt = tx.prepare("SELECT body FROM operations WHERE run_id=?1")?;
             for raw in stmt.query_map([id], |r| r.get::<_, String>(0))? {
@@ -498,11 +552,19 @@ impl Catalog {
                 return Err(RuntimeError::Invalid("unsettled model exchange".into()));
             }
             let unpaired:i64=tx.query_row("SELECT count(*) FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0",[id],|r|r.get(0))?;
-            if unpaired>0{return Err(RuntimeError::Invalid("unsettled tool exchange".into()));}
+            if unpaired > 0 {
+                return Err(RuntimeError::Invalid("unsettled tool exchange".into()));
+            }
         }
-        if next==RunState::Waiting && run.waiting_on.is_none(){return Err(RuntimeError::Invalid("waiting requires a durable wait".into()));}
+        if next == RunState::Waiting && run.waiting_on.is_none() {
+            return Err(RuntimeError::Invalid(
+                "waiting requires a durable wait".into(),
+            ));
+        }
         run.state = next;
-        if next!=RunState::Waiting {run.waiting_on=None;}
+        if next != RunState::Waiting {
+            run.waiting_on = None;
+        }
         run.revision += 1;
         put(&tx, "runs", id, &run)?;
         if next.terminal() {
@@ -510,8 +572,10 @@ impl Catalog {
                 "UPDATE branches SET active_run=NULL WHERE active_run=?1",
                 [id],
             )?;
-            if next==RunState::Cancelled{inputs::cancel_current(&tx,id)?;}
-            inputs::promote_next(&tx,&run.branch_id)?;
+            if next == RunState::Cancelled {
+                inputs::cancel_current(&tx, id)?;
+            }
+            inputs::promote_next(&tx, &run.branch_id)?;
         }
         event(
             &tx,
@@ -530,7 +594,10 @@ impl Catalog {
             return Ok(run);
         }
         run.cancel_requested = true;
-        if run.state == RunState::Waiting { questions::cancel_run_questions(&tx, id)?; policy_control::cancel_run_pause(&tx, &run)?; }
+        if run.state == RunState::Waiting {
+            questions::cancel_run_questions(&tx, id)?;
+            policy_control::cancel_run_pause(&tx, &run)?;
+        }
         run.revision += 1;
         put(&tx, "runs", id, &run)?;
         event(&tx, id, run.revision, "run.cancel_requested", Value::Null)?;
@@ -591,7 +658,9 @@ impl Catalog {
         let mut head = self.head(branch)?;
         let mut result = Vec::new();
         while let Some(key) = head {
-            let item = self.content.hydrate_history(record(&self.db, "history", &key)?)?;
+            let item = self
+                .content
+                .hydrate_history(record(&self.db, "history", &key)?)?;
             head = item.parent.clone();
             result.push(item);
         }
@@ -599,11 +668,14 @@ impl Catalog {
         Ok(result)
     }
     pub fn branch_thread_id(&self, branch_id: &str) -> Result<String> {
-        self.db.query_row(
-            "SELECT thread_id FROM branches WHERE id=?1",
-            [branch_id],
-            |row| row.get(0),
-        ).optional()?.ok_or_else(|| RuntimeError::NotFound(branch_id.into()))
+        self.db
+            .query_row(
+                "SELECT thread_id FROM branches WHERE id=?1",
+                [branch_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or_else(|| RuntimeError::NotFound(branch_id.into()))
     }
     pub fn admit_operation(
         &mut self,
@@ -613,10 +685,29 @@ impl Catalog {
         lifetime: Lifetime,
         intent: Value,
     ) -> Result<Operation> {
-        if intent.get("kind").and_then(Value::as_str).is_some_and(|kind|kind=="tool"||kind.starts_with("policy_tool_graph")||kind.starts_with("policy_model_job")) {return Err(RuntimeError::Invalid("typed operations require their admission owner".into()));}
-        self.admit_operation_metadata(key,run_id,epoch,lifetime,intent)
+        if intent
+            .get("kind")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| {
+                kind == "tool"
+                    || kind.starts_with("policy_tool_graph")
+                    || kind.starts_with("policy_model_job")
+            })
+        {
+            return Err(RuntimeError::Invalid(
+                "typed operations require their admission owner".into(),
+            ));
+        }
+        self.admit_operation_metadata(key, run_id, epoch, lifetime, intent)
     }
-    pub(super) fn admit_operation_metadata(&mut self,key:&str,run_id:&str,epoch:u64,lifetime:Lifetime,intent:Value) -> Result<Operation> {
+    pub(super) fn admit_operation_metadata(
+        &mut self,
+        key: &str,
+        run_id: &str,
+        epoch: u64,
+        lifetime: Lifetime,
+        intent: Value,
+    ) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let run: Run = record(&tx, "runs", run_id)?;
         fence(&run, epoch)?;
@@ -630,8 +721,8 @@ impl Catalog {
             return Err(RuntimeError::Invalid("run cancellation pending".into()));
         }
         let op = Operation {
-            external_receipt:None,
-            call_completion:None,
+            external_receipt: None,
+            call_completion: None,
             id: key.into(),
             run_id: run_id.into(),
             epoch,
@@ -643,6 +734,7 @@ impl Catalog {
             lifetime,
             handed_off: false,
             executor: None,
+            execution_owner: None,
             waiting_on: None,
             intent,
             result: None,
@@ -673,7 +765,11 @@ impl Catalog {
     ) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let mut op: Operation = record(&tx, "operations", key)?;
-        if policy_body::PolicyActionMetadata::from_operation(&op)?.is_some(){return Err(RuntimeError::Invalid("policy actions require their typed dispatch owner".into()));}
+        if policy_body::PolicyActionMetadata::from_operation(&op)?.is_some() {
+            return Err(RuntimeError::Invalid(
+                "policy actions require their typed dispatch owner".into(),
+            ));
+        }
         let run: Run = record(&tx, "runs", &op.run_id)?;
         if !op.handed_off {
             fence(&run, epoch)?;
@@ -715,10 +811,16 @@ impl Catalog {
         effect: Effect,
         prepared: result_content::PreparedOperationResult,
     ) -> Result<Operation> {
-        let result = OperationResultMetadata::Content { reference: prepared.reference };
+        let result = OperationResultMetadata::Content {
+            reference: prepared.reference,
+        };
         let tx = self.db.transaction()?;
         let mut op: Operation = record(&tx, "operations", key)?;
-        if policy_body::PolicyActionMetadata::from_operation(&op)?.is_some() {return Err(RuntimeError::Invalid("policy actions settle through their typed owner".into()));}
+        if policy_body::PolicyActionMetadata::from_operation(&op)?.is_some() {
+            return Err(RuntimeError::Invalid(
+                "policy actions settle through their typed owner".into(),
+            ));
+        }
         if op.epoch != epoch {
             return Err(RuntimeError::Conflict("stale operation executor".into()));
         }
@@ -759,19 +861,31 @@ impl Catalog {
             serde_json::to_value(&op)?,
         )?;
         if outcome != Outcome::Indeterminate {
-            tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1", [key])?;
+            tx.execute(
+                "DELETE FROM resource_occupancy WHERE operation_id=?1",
+                [key],
+            )?;
         }
         tx.commit()?;
-        if outcome != Outcome::Indeterminate { self.resource_admission.release(key); }
+        if outcome != Outcome::Indeterminate {
+            self.resource_admission.release(key);
+        }
         Ok(op)
     }
     pub fn request_cancel_operation(&mut self, key: &str) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let mut op: Operation = record(&tx, "operations", key)?;
-        if matches!(policy_body::PolicyActionMetadata::from_operation(&op)?, Some(policy_body::PolicyActionMetadata::PolicyPauseV1 { .. })) {
-            return Err(RuntimeError::Invalid("policy pause requires explicit Run resume or Run cancellation".into()));
+        if matches!(
+            policy_body::PolicyActionMetadata::from_operation(&op)?,
+            Some(policy_body::PolicyActionMetadata::PolicyPauseV1 { .. })
+        ) {
+            return Err(RuntimeError::Invalid(
+                "policy pause requires explicit Run resume or Run cancellation".into(),
+            ));
         }
-        if (op.phase == OperationPhase::Terminal && op.outcome!=Some(Outcome::Indeterminate)) || op.cancel_requested {
+        if (op.phase == OperationPhase::Terminal && op.outcome != Some(Outcome::Indeterminate))
+            || op.cancel_requested
+        {
             return Ok(op);
         }
         op.cancel_requested = true;
@@ -795,12 +909,22 @@ impl Catalog {
                 "operation lifetime does not permit handoff".into(),
             ));
         }
-        if op.handed_off {drop(tx);self.reconcile_waits()?;return Ok(op);}
+        if op.handed_off {
+            drop(tx);
+            self.reconcile_waits()?;
+            return Ok(op);
+        }
         op.handed_off = true;
         op.revision += 1;
-        if let Some(receipt)=op.external_receipt.clone(){
-            execution_persistence::apply_external_terminal(&mut op,&receipt);
-            event(&tx,key,op.revision,"operation.settled",serde_json::to_value(&op)?)?;
+        if let Some(receipt) = op.external_receipt.clone() {
+            execution_persistence::apply_external_terminal(&mut op, &receipt);
+            event(
+                &tx,
+                key,
+                op.revision,
+                "operation.settled",
+                serde_json::to_value(&op)?,
+            )?;
         }
         put(&tx, "operations", key, &op)?;
         event(&tx, key, op.revision, "operation.handed_off", Value::Null)?;
@@ -818,7 +942,9 @@ impl Catalog {
         let request_ref = self.content.save(&request)?;
         let tx = self.db.transaction()?;
         let graph_pending = policy_body::has_pending_action(&tx, run_id)?;
-        if graph_pending {return Err(RuntimeError::Conflict("policy action is unsettled".into()));}
+        if graph_pending {
+            return Err(RuntimeError::Conflict("policy action is unsettled".into()));
+        }
         let run: Run = record(&tx, "runs", run_id)?;
         fence(&run, epoch)?;
         if run.cancel_requested {
@@ -834,7 +960,7 @@ impl Catalog {
             return Err(RuntimeError::Conflict("model step identity reused".into()));
         }
         let mut step = ModelStep {
-                    superseded_by_input:None,
+            superseded_by_input: None,
             id: key.into(),
             run_id: run_id.into(),
             epoch,
@@ -1038,11 +1164,27 @@ impl Catalog {
         let wait: Wait = record(&tx, "waits", key)?;
         let mut run: Run = record(&tx, "runs", &wait.run_id)?;
         fence(&run, epoch)?;
-        if wait.cancelled || run.cancel_requested || run.state != RunState::Waiting || run.waiting_on.as_deref() != Some(key) || wait.trigger_cursor.is_none() || wait.kind == "policy.resumed" {
-            return Err(RuntimeError::Conflict("wait no longer owns this Run continuation".into()));
+        if wait.cancelled
+            || run.cancel_requested
+            || run.state != RunState::Waiting
+            || run.waiting_on.as_deref() != Some(key)
+            || wait.trigger_cursor.is_none()
+            || wait.kind == "policy.resumed"
+        {
+            return Err(RuntimeError::Conflict(
+                "wait no longer owns this Run continuation".into(),
+            ));
         }
-        let active: Option<String> = tx.query_row("SELECT active_run FROM branches WHERE id=?1", [&run.branch_id], |row| row.get(0))?;
-        if active.as_deref() != Some(&run.id) { return Err(RuntimeError::Conflict("resumption branch owner changed".into())); }
+        let active: Option<String> = tx.query_row(
+            "SELECT active_run FROM branches WHERE id=?1",
+            [&run.branch_id],
+            |row| row.get(0),
+        )?;
+        if active.as_deref() != Some(&run.id) {
+            return Err(RuntimeError::Conflict(
+                "resumption branch owner changed".into(),
+            ));
+        }
         let claimed: i64 = tx.query_row(
             "SELECT claimed FROM resumptions WHERE wait_id=?1 AND acknowledged=0",
             [key],
@@ -1056,7 +1198,7 @@ impl Catalog {
                 return Err(RuntimeError::Invalid("run cannot resume".into()));
             }
             run.state = RunState::Runnable;
-            run.waiting_on=None;
+            run.waiting_on = None;
             run.revision += 1;
             put(&tx, "runs", &run.id, &run)?;
             event(
@@ -1140,7 +1282,9 @@ impl Catalog {
     }
     fn recover(&mut self) -> Result<()> {
         let interrupted_read: bool = self.db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM operations WHERE json_extract(body,'$.phase')='running' AND json_extract(body,'$.effect')='none' AND coalesce(json_extract(body,'$.intent.kind'),'') NOT IN ({}))", policy_body::ACTION_KINDS), [], |row|row.get(0))?;
-        let interrupted_result = interrupted_read.then(|| self.content.save(&json!({"reason":"executor interrupted"}))).transpose()?;
+        let interrupted_result = interrupted_read
+            .then(|| self.content.save(&json!({"reason":"executor interrupted"})))
+            .transpose()?;
         let tx = self.db.transaction()?;
         tx.execute("UPDATE resumptions SET claimed=0 WHERE acknowledged=0", [])?;
         let runs: Vec<Run> = read_all(&tx, "runs")?;
@@ -1150,11 +1294,25 @@ impl Catalog {
                 run.revision += 1;
                 if matches!(run.state, RunState::Generating | RunState::Executing) {
                     run.state = RunState::Waiting;
-                    let key=format!("recovery:{}:{}",run.id,self.epoch);
-                    let after_cursor:u64=tx.query_row("SELECT coalesce(max(cursor),0) FROM events",[],|r|read_number(r,0))?;
-                    let wait=Wait{id:key.clone(),run_id:run.id.clone(),subject:run.id.clone(),kind:"recovery.reconciled".into(),after_cursor,trigger_cursor:None,cancelled:false};
-                    tx.execute("INSERT INTO waits(id,run_id,body) VALUES(?1,?2,?3)",params![key,run.id,encode(&wait)?])?;
-                    run.waiting_on=Some(key);
+                    let key = format!("recovery:{}:{}", run.id, self.epoch);
+                    let after_cursor: u64 =
+                        tx.query_row("SELECT coalesce(max(cursor),0) FROM events", [], |r| {
+                            read_number(r, 0)
+                        })?;
+                    let wait = Wait {
+                        id: key.clone(),
+                        run_id: run.id.clone(),
+                        subject: run.id.clone(),
+                        kind: "recovery.reconciled".into(),
+                        after_cursor,
+                        trigger_cursor: None,
+                        cancelled: false,
+                    };
+                    tx.execute(
+                        "INSERT INTO waits(id,run_id,body) VALUES(?1,?2,?3)",
+                        params![key, run.id, encode(&wait)?],
+                    )?;
+                    run.waiting_on = Some(key);
                 }
                 put(&tx, "runs", &run.id, &run)?;
                 event(
@@ -1184,35 +1342,69 @@ impl Catalog {
         let operations: Vec<Operation> = read_all(&tx, "operations")?;
         for mut op in operations {
             if policy_model::model_metadata(&op)?.is_some() {
-                let mut result=policy_model::model_result(&op)?;
-                if result.dispatch==crate::execution::PolicyModelDispatch::Dispatched && result.receipt.is_none() {
-                    let output:crate::execution::PolicyModelOutput=result.original_ref.as_ref().map(|r|self.content.load(r).and_then(|v|Ok(serde_json::from_value(v)?))).transpose()?.unwrap_or_default();
-                    result.dispatch=crate::execution::PolicyModelDispatch::Interrupted;
+                let mut result = policy_model::model_result(&op)?;
+                if result.dispatch == crate::execution::PolicyModelDispatch::Dispatched
+                    && result.receipt.is_none()
+                {
+                    let output: crate::execution::PolicyModelOutput = result
+                        .original_ref
+                        .as_ref()
+                        .map(|r| {
+                            self.content
+                                .load(r)
+                                .and_then(|v| Ok(serde_json::from_value(v)?))
+                        })
+                        .transpose()?
+                        .unwrap_or_default();
+                    result.dispatch = crate::execution::PolicyModelDispatch::Interrupted;
                     result.receipt=Some(crate::execution::PolicyModelReceipt{dispatch:crate::execution::PolicyModelDispatch::Interrupted,outcome:Outcome::Indeterminate,output:None,usage:output.usage,finish_reason:None,failure:Some(crate::execution::ModelFailure{code:"planning_interrupted".into(),message:"dispatch intent was durable; completion is unknown and request will not replay".into(),retry_after_ms:None,provider_request_id:None}),usable:false});
-                    op.phase=OperationPhase::Terminal;op.outcome=Some(Outcome::Indeterminate);op.revision+=1;
-                    op.result=Some(OperationResultMetadata::Control { value: serde_json::to_value(result)? });
-                    event(&tx,&op.id,op.revision,"policy.model_interrupted",Value::Null)?;
+                    op.phase = OperationPhase::Terminal;
+                    op.outcome = Some(Outcome::Indeterminate);
+                    op.revision += 1;
+                    op.result = Some(OperationResultMetadata::Control {
+                        value: serde_json::to_value(result)?,
+                    });
+                    event(
+                        &tx,
+                        &op.id,
+                        op.revision,
+                        "policy.model_interrupted",
+                        Value::Null,
+                    )?;
                 }
-                op.epoch=self.epoch;put(&tx,"operations",&op.id,&op)?;continue;
+                op.epoch = self.epoch;
+                put(&tx, "operations", &op.id, &op)?;
+                continue;
             }
-            if let Some(intent)=policy::graph_metadata(&op)? {
-                policy_body::PolicyGraphProgress::read(&op,&intent)?;
+            if let Some(intent) = policy::graph_metadata(&op)? {
+                policy_body::PolicyGraphProgress::read(&op, &intent)?;
                 // The graph owns orchestration only. Each durable node retains its own invocation/dispatch evidence; only trusted light reads can replay.
-                op.epoch=self.epoch;
-                put(&tx,"operations",&op.id,&op)?;
+                op.epoch = self.epoch;
+                put(&tx, "operations", &op.id, &op)?;
                 continue;
             }
             if policy_body::PolicyActionMetadata::from_operation(&op)?.is_some() {
-                op.epoch = self.epoch; put(&tx, "operations", &op.id, &op)?; continue;
+                op.epoch = self.epoch;
+                put(&tx, "operations", &op.id, &op)?;
+                continue;
             }
-            // A Result contract owns a local dispatch window, whose executor died with the
-            // previous Catalog process. This proves occupancy ended, not that its effect is known.
-            // Job owners can outlive that process and require independent stop evidence.
-            let occupied: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM resource_occupancy WHERE operation_id=?1)", [&op.id], |r| r.get(0))?;
+            // Only an explicitly kernel-owned Result ends with this process. Host/broker and
+            // remote calls may survive it, even when their caller contract returns a Result.
+            // This is stop evidence only; it never resolves an unknown business effect.
+            let occupied: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM resource_occupancy WHERE operation_id=?1)",
+                [&op.id],
+                |r| r.get(0),
+            )?;
             if occupied {
                 let tool = tool_content::ToolIntent::from_operation(&op)?;
-                if tool.contract().completion == crate::execution::CompletionKind::Result {
-                    tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1", [&op.id])?;
+                if tool.contract().completion == crate::execution::CompletionKind::Result
+                    && op.execution_owner == Some(ExecutorOwner::Kernel)
+                {
+                    tx.execute(
+                        "DELETE FROM resource_occupancy WHERE operation_id=?1",
+                        [&op.id],
+                    )?;
                 }
             }
             if op.phase != OperationPhase::Terminal {
@@ -1237,14 +1429,27 @@ impl Catalog {
                 } else if op.phase == OperationPhase::Running {
                     op.phase = OperationPhase::Terminal;
                     if op.intent.get("kind").and_then(Value::as_str) == Some("tool")
-                        && tool_content::ToolIntent::from_operation(&op)?.contract().completion == crate::execution::CompletionKind::Job
+                        && (tool_content::ToolIntent::from_operation(&op)?
+                            .contract()
+                            .completion
+                            == crate::execution::CompletionKind::Job
+                            || matches!(op.execution_owner, Some(ExecutorOwner::External { .. })))
                     {
                         // A background executor may still run without business side effects.
                         // Keep its original call receipt and occupancy until that owner reports.
                         op.outcome = Some(Outcome::Indeterminate);
                     } else {
                         op.outcome = Some(Outcome::Failed);
-                        op.result = Some(OperationResultMetadata::Content { reference: interrupted_result.as_ref().ok_or_else(|| RuntimeError::Invalid("interrupted result was not prepared".into()))?.clone() });
+                        op.result = Some(OperationResultMetadata::Content {
+                            reference: interrupted_result
+                                .as_ref()
+                                .ok_or_else(|| {
+                                    RuntimeError::Invalid(
+                                        "interrupted result was not prepared".into(),
+                                    )
+                                })?
+                                .clone(),
+                        });
                     }
                 }
                 op.epoch = self.epoch;
@@ -1304,53 +1509,53 @@ CREATE TABLE deliveries(observer TEXT NOT NULL,fact_cursor INTEGER NOT NULL REFE
 #[path = "catalog_tests.rs"]
 mod tests;
 
-#[path="catalog_execution.rs"]
+#[path = "catalog_execution.rs"]
 mod execution_persistence;
 
-#[path="catalog_inputs.rs"]
+#[path = "catalog_inputs.rs"]
 pub mod inputs;
 
-#[path="catalog_submission.rs"]
+#[path = "catalog_submission.rs"]
 pub mod submissions;
 
-#[path="catalog_launch.rs"]
+#[path = "catalog_launch.rs"]
 pub mod launches;
 
-#[path="catalog_launch_content.rs"]
+#[path = "catalog_launch_content.rs"]
 pub mod launch_content;
 
-#[path="catalog_policy_checkpoint.rs"]
-pub(crate) mod policy_checkpoint;
-#[path="catalog_policy_body.rs"]
-pub(crate) mod policy_body;
-#[path="catalog_child_content.rs"]
+#[path = "catalog_child_content.rs"]
 pub mod child_content;
-#[path="catalog_child_delivery.rs"]
+#[path = "catalog_child_delivery.rs"]
 pub mod child_delivery;
-#[path="catalog_tool_content.rs"]
-pub mod tool_content;
-#[path="catalog_permission_content.rs"]
+#[path = "catalog_permission_content.rs"]
 pub mod permission_content;
+#[path = "catalog_policy_body.rs"]
+pub(crate) mod policy_body;
+#[path = "catalog_policy_checkpoint.rs"]
+pub(crate) mod policy_checkpoint;
+#[path = "catalog_tool_content.rs"]
+pub mod tool_content;
 
-#[path="catalog_tools.rs"]
+#[path = "catalog_tools.rs"]
 pub mod tools;
 
-#[path="catalog_recovery.rs"]
+#[path = "catalog_recovery.rs"]
 pub mod recovery;
 
-#[path="catalog_observe.rs"]
+#[path = "catalog_observe.rs"]
 mod observe;
 
-#[path="catalog_context.rs"]
+#[path = "catalog_context.rs"]
 pub mod context;
 
-#[path="catalog_history.rs"]
+#[path = "catalog_history.rs"]
 pub mod history_views;
 
-#[path="catalog_fork.rs"]
+#[path = "catalog_fork.rs"]
 pub mod forks;
 
-#[path="catalog_context_jobs.rs"]
+#[path = "catalog_context_jobs.rs"]
 pub mod context_jobs;
 
 #[path = "catalog_questions.rs"]
@@ -1362,18 +1567,18 @@ pub mod personalization;
 #[path = "catalog_permissions.rs"]
 pub mod permissions;
 
-#[path="catalog_policy.rs"]
+#[path = "catalog_policy.rs"]
 pub(crate) mod policy;
 
-#[path="catalog_policy_model.rs"]
+#[path = "catalog_policy_model.rs"]
 pub(crate) mod policy_model;
 
+#[path = "catalog_collaboration.rs"]
+pub mod collaboration;
 #[path = "catalog_memory.rs"]
 pub mod memory;
 #[path = "catalog_memory_state.rs"]
 pub mod memory_state;
-#[path = "catalog_collaboration.rs"]
-pub mod collaboration;
 
 #[path = "catalog_scheduling.rs"]
 mod scheduling;
@@ -1393,5 +1598,5 @@ pub mod result_content;
 #[path = "catalog_process_delivery.rs"]
 pub mod process_delivery;
 
-#[path="catalog_policy_control.rs"]
+#[path = "catalog_policy_control.rs"]
 pub mod policy_control;

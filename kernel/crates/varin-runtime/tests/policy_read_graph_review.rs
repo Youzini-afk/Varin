@@ -1,5 +1,5 @@
 //! Independent adversarial tests: graph evidence is not a synthetic model tool exchange.
-#[path="fixtures/input_admission.rs"]
+#[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
 use serde_json::{json, Value};
@@ -22,55 +22,138 @@ fn body_publication_keeps_policy_node_alive_and_receipt_idempotent() {
     f.db.admit_policy_graph(&run, epoch, &intent).unwrap();
     let value = json!({"evidence":content_window::large_text()});
     let completion = ToolCompletion::Result {
-        outcome: Outcome::Succeeded, effect: Effect::None, content: value.clone(),
+        outcome: Outcome::Succeeded,
+        effect: Effect::None,
+        content: value.clone(),
     };
     let worker_run = run.clone();
     let worker_action = action.clone();
     let worker_completion = completion.clone();
-    let receipt = content_window::during_write(&f.root, &f.db,
-        move |db| db.settle_policy_node(&worker_run, epoch, &worker_action, "large", &worker_completion),
+    let receipt = content_window::during_write(
+        &f.root,
+        &f.db,
+        move |db| {
+            db.settle_policy_node(
+                &worker_run,
+                epoch,
+                &worker_action,
+                "large",
+                &worker_completion,
+            )
+        },
         |catalog| {
             let graph = catalog.policy_graph(&run, epoch).unwrap().unwrap();
-            assert!(graph.result.receipts.is_empty(), "body must precede receipt publication");
+            assert!(
+                graph.result.receipts.is_empty(),
+                "body must precede receipt publication"
+            );
             assert_eq!(catalog.collect_content_objects().unwrap(), 0);
-            catalog.create_thread("independent", "independent-main").unwrap();
-        }).unwrap();
+            catalog
+                .create_thread("independent", "independent-main")
+                .unwrap();
+        },
+    )
+    .unwrap();
     let before = f.db.lock().unwrap().operation(&action).unwrap().revision;
-    assert_eq!(f.db.settle_policy_node(&run, epoch, &action, "large", &completion).unwrap(), receipt);
-    assert_eq!(f.db.lock().unwrap().operation(&action).unwrap().revision, before);
-    assert!(f.db.settle_policy_node(&run, epoch, &action, "large", &ToolCompletion::Result {
-        outcome: Outcome::Succeeded, effect: Effect::None, content: json!("different body"),
-    }).is_err());
+    assert_eq!(
+        f.db.settle_policy_node(&run, epoch, &action, "large", &completion)
+            .unwrap(),
+        receipt
+    );
+    assert_eq!(
+        f.db.lock().unwrap().operation(&action).unwrap().revision,
+        before
+    );
+    assert!(f
+        .db
+        .settle_policy_node(
+            &run,
+            epoch,
+            &action,
+            "large",
+            &ToolCompletion::Result {
+                outcome: Outcome::Succeeded,
+                effect: Effect::None,
+                content: json!("different body"),
+            }
+        )
+        .is_err());
     f.db.lock().unwrap().collect_content_objects().unwrap();
-    let evidence = f.db.policy_evidence(&run, epoch, receipt.output().unwrap()).unwrap();
-    assert!(serde_json::to_string(&evidence.item.content).unwrap().contains(value["evidence"].as_str().unwrap()));
+    let evidence =
+        f.db.policy_evidence(&run, epoch, receipt.output().unwrap())
+            .unwrap();
+    assert!(serde_json::to_string(&evidence.item.content)
+        .unwrap()
+        .contains(value["evidence"].as_str().unwrap()));
 }
 
 #[test]
 fn graph_cancellation_and_node_settlement_do_not_hydrate_the_definition() {
     let f = Fixture::new();
-    let intent = admitted(&f,vec![node("a",&[]),node("b",&["a"])]);
+    let intent = admitted(&f, vec![node("a", &[]), node("b", &["a"])]);
     let run = &f.input.run_id;
     let epoch = f.input.owner_generation;
-    f.db.admit_policy_graph(run,epoch,&intent).unwrap();
+    f.db.admit_policy_graph(run, epoch, &intent).unwrap();
     let action = intent.action_id();
     let operation = f.db.lock().unwrap().operation(action).unwrap();
     assert!(operation.intent.get("nodes").is_none());
-    let hash = operation.intent["body_ref"]["content_object"].as_str().unwrap().strip_prefix("sha256-").unwrap();
-    std::fs::write(f.root.join("content/objects").join(&hash[..2]).join(&hash[2..]),b"damaged definition").unwrap();
-    assert!(f.db.policy_graph(run,epoch).is_err());
-    let origin = ToolOrigin::PolicyAction {action_id:action.into(),node_id:"a".into()};
-    assert_eq!(f.db.lock().unwrap().inspect_admission(run,epoch,&origin,"a").unwrap()["state"],"not_active");
-    f.db.lock().unwrap().request_cancel_operation(action).unwrap();
-    for node in ["a","b"] {
-        let receipt = f.db.settle_policy_node(run,epoch,action,node,&ToolCompletion::NotDispatched {reason:"cancelled".into()}).unwrap();
-        assert_eq!(receipt.outcome(),Outcome::Cancelled);
+    let hash = operation.intent["body_ref"]["content_object"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("sha256-")
+        .unwrap();
+    std::fs::write(
+        f.root
+            .join("content/objects")
+            .join(&hash[..2])
+            .join(&hash[2..]),
+        b"damaged definition",
+    )
+    .unwrap();
+    assert!(f.db.policy_graph(run, epoch).is_err());
+    let origin = ToolOrigin::PolicyAction {
+        action_id: action.into(),
+        node_id: "a".into(),
+    };
+    assert_eq!(
+        f.db.lock()
+            .unwrap()
+            .inspect_admission(run, epoch, &origin, "a")
+            .unwrap()["state"],
+        "not_active"
+    );
+    f.db.lock()
+        .unwrap()
+        .request_cancel_operation(action)
+        .unwrap();
+    for node in ["a", "b"] {
+        let receipt =
+            f.db.settle_policy_node(
+                run,
+                epoch,
+                action,
+                node,
+                &ToolCompletion::NotDispatched {
+                    reason: "cancelled".into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(receipt.outcome(), Outcome::Cancelled);
     }
     let operation = f.db.lock().unwrap().operation(action).unwrap();
-    assert_eq!(operation.phase,OperationPhase::Terminal);
-    assert_eq!(operation.outcome,Some(Outcome::Cancelled));
-    assert_eq!(f.db.lock().unwrap().inspect_admission(run,epoch,&origin,"a").unwrap()["state"],"settled");
-    f.db.lock().unwrap().create_thread("independent","independent-main").unwrap();
+    assert_eq!(operation.phase, OperationPhase::Terminal);
+    assert_eq!(operation.outcome, Some(Outcome::Cancelled));
+    assert_eq!(
+        f.db.lock()
+            .unwrap()
+            .inspect_admission(run, epoch, &origin, "a")
+            .unwrap()["state"],
+        "settled"
+    );
+    f.db.lock()
+        .unwrap()
+        .create_thread("independent", "independent-main")
+        .unwrap();
 }
 
 struct Fixture {
@@ -104,6 +187,9 @@ impl Fixture {
             configuration_generation: 1,
             tool_schema_generation: 1,
             tools: vec![ToolSchema {
+                description: String::new(),
+                output_schema: None,
+                metadata: None,
                 name: "read".into(),
                 version: "1".into(),
                 schema: json!({"type":"object"}),
@@ -207,9 +293,15 @@ impl Tools {
     }
 }
 impl ToolExecutor for Tools {
-    fn plan(&self, call: &varin_runtime::execution::ToolCall, context: &varin_runtime::execution::FrozenToolContext,
-        cancel: &varin_runtime::execution::CancellationToken) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError> {
-        self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+    fn plan(
+        &self,
+        call: &varin_runtime::execution::ToolCall,
+        context: &varin_runtime::execution::FrozenToolContext,
+        cancel: &varin_runtime::execution::CancellationToken,
+    ) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError>
+    {
+        self.prepare(call, context, cancel)
+            .map(varin_runtime::execution::ToolPreparation::Ready)
     }
 
     fn supports_policy_read(&self, _: &FrozenToolContext, _: &ToolCall, _: &ToolContract) -> bool {
@@ -326,7 +418,12 @@ impl AgentPolicy for Policy {
                     .as_array()
                     .unwrap()
                     .iter()
-                    .filter_map(|r| r["completion"].get("output").filter(|r| !r.is_null()).cloned())
+                    .filter_map(|r| {
+                        r["completion"]
+                            .get("output")
+                            .filter(|r| !r.is_null())
+                            .cloned()
+                    })
                     .collect();
                 if self.content_gate {
                     (
@@ -436,19 +533,38 @@ fn invalid_dags_and_stale_schema_fail_before_any_execution() {
 
 #[test]
 fn trusted_read_opt_in_controls_replay_cost_without_replacing_dispatch_authority() {
-    for (readonly,trusted,revoked) in [(false,true,false),(true,false,false),(true,true,true)] {
-        let f=Fixture::new();
-        let mut tools=Tools::new("ordinary invocation");
-        tools.readonly=readonly;tools.trusted=trusted;tools.revoked.store(revoked,Ordering::SeqCst);
-        let tools=Arc::new(tools);
-        let e=engine(&f,tools.clone(),Arc::new(Policy::new(vec![node("x",&[])])));
-        e.run(f.input.clone(),CancellationToken::default()).unwrap();
-        assert_eq!(tools.calls.lock().unwrap().len(),usize::from(!revoked));
-        let events=e.policy.events.lock().unwrap();
-        let completion=&events.iter().find(|event|event["kind"]=="tool_graph_completed").unwrap()["receipts"][0]["completion"];
-        if revoked {assert_eq!(completion["kind"],"not_dispatched");}
-        else if readonly {assert_eq!(completion["effect"],"none");}
-        else {assert_eq!(completion["effect"],"unknown");assert_eq!(completion["outcome"],"indeterminate");}
+    for (readonly, trusted, revoked) in [
+        (false, true, false),
+        (true, false, false),
+        (true, true, true),
+    ] {
+        let f = Fixture::new();
+        let mut tools = Tools::new("ordinary invocation");
+        tools.readonly = readonly;
+        tools.trusted = trusted;
+        tools.revoked.store(revoked, Ordering::SeqCst);
+        let tools = Arc::new(tools);
+        let e = engine(
+            &f,
+            tools.clone(),
+            Arc::new(Policy::new(vec![node("x", &[])])),
+        );
+        e.run(f.input.clone(), CancellationToken::default())
+            .unwrap();
+        assert_eq!(tools.calls.lock().unwrap().len(), usize::from(!revoked));
+        let events = e.policy.events.lock().unwrap();
+        let completion = &events
+            .iter()
+            .find(|event| event["kind"] == "tool_graph_completed")
+            .unwrap()["receipts"][0]["completion"];
+        if revoked {
+            assert_eq!(completion["kind"], "not_dispatched");
+        } else if readonly {
+            assert_eq!(completion["effect"], "none");
+        } else {
+            assert_eq!(completion["effect"], "unknown");
+            assert_eq!(completion["outcome"], "indeterminate");
+        }
         assert!(e.provider.requests.lock().unwrap().is_empty());
     }
 }
@@ -607,10 +723,7 @@ fn admitted(f: &Fixture, nodes: Vec<Value>) -> PolicyGraphIntent {
                 source: boundary.source.clone(),
             };
 
-            PolicyAdmittedNode {
-                node,
-                context,
-            }
+            PolicyAdmittedNode { node, context }
         })
         .collect();
     PolicyGraphIntent::PolicyToolGraphV1 {
@@ -871,7 +984,8 @@ fn newer_decision_checkpoint_after_graph_results_is_not_rolled_back_on_restart()
             )
             .unwrap()
             .output()
-            .unwrap().clone();
+            .unwrap()
+            .clone();
         let next = match kind {
             "read_result" => json!({"kind":kind,"reference":reference,"index":0}),
             "request_model_with_evidence" => json!({"kind":kind,"evidence":[reference]}),
@@ -1033,16 +1147,22 @@ fn durable_operation_cancellation_before_worker_exists_prevents_recovered_reads(
     f.db.lock().unwrap().collect_content_objects().unwrap();
     let operation = f.db.lock().unwrap().operation(&action_id).unwrap();
     assert_eq!(operation.phase, OperationPhase::Terminal);
-    let events=e.policy.events.lock().unwrap();
-    let completed=events.iter().find(|event|event["kind"]=="tool_graph_completed").unwrap();
-    let receipts:Vec<PolicyNodeReceipt>=serde_json::from_value(completed["receipts"].clone()).unwrap();
+    let events = e.policy.events.lock().unwrap();
+    let completed = events
+        .iter()
+        .find(|event| event["kind"] == "tool_graph_completed")
+        .unwrap();
+    let receipts: Vec<PolicyNodeReceipt> =
+        serde_json::from_value(completed["receipts"].clone()).unwrap();
     assert_eq!(receipts.len(), 2);
-    assert!(receipts.iter().all(|receipt| receipt.outcome() == Outcome::Cancelled && receipt.output().is_none()));
+    assert!(receipts
+        .iter()
+        .all(|receipt| receipt.outcome() == Outcome::Cancelled && receipt.output().is_none()));
 }
 
 // Inject real durable commands at exact worker interleavings. No fabricated Catalog errors.
 enum Interleaving {
-    CancelBeforeNodeDispatch {run:bool,token:CancellationToken},
+    CancelBeforeNodeDispatch { run: bool, token: CancellationToken },
     CancelAfterGraphLoad(String),
     InputBeforeGraphAdmission,
 }
@@ -1053,10 +1173,14 @@ struct InterleavingPersistence {
     observed_input_pending: AtomicBool,
 }
 impl Persistence for InterleavingPersistence {
-    fn resume_tool(&self,context:&ToolExecutionContext,epoch:u64)->Result<ToolResume,ExecutionError>{self.db.resume_tool(context,epoch)}
-    fn resource_admission(
+    fn resume_tool(
         &self,
-    ) -> Arc<varin_runtime::resource_admission::ResourceAdmission> {
+        context: &ToolExecutionContext,
+        epoch: u64,
+    ) -> Result<ToolResume, ExecutionError> {
+        self.db.resume_tool(context, epoch)
+    }
+    fn resource_admission(&self) -> Arc<varin_runtime::resource_admission::ResourceAdmission> {
         self.db.resource_admission()
     }
     fn compile_context(
@@ -1081,10 +1205,25 @@ impl Persistence for InterleavingPersistence {
         epoch: u64,
         record: &ExecutionRecord,
     ) -> Result<(), ExecutionError> {
-        if let (Interleaving::CancelBeforeNodeDispatch{run:cancel_run,token},ExecutionRecord::ToolDispatched{context})=(&self.interleaving,record) {
-            if self.armed.swap(false,Ordering::SeqCst) {
-                if *cancel_run {self.db.lock().unwrap().request_cancel_run(run).unwrap();token.cancel();}
-                else {self.db.lock().unwrap().request_cancel_operation(&context.operation_id).unwrap();}
+        if let (
+            Interleaving::CancelBeforeNodeDispatch {
+                run: cancel_run,
+                token,
+            },
+            ExecutionRecord::ToolDispatched { context, .. },
+        ) = (&self.interleaving, record)
+        {
+            if self.armed.swap(false, Ordering::SeqCst) {
+                if *cancel_run {
+                    self.db.lock().unwrap().request_cancel_run(run).unwrap();
+                    token.cancel();
+                } else {
+                    self.db
+                        .lock()
+                        .unwrap()
+                        .request_cancel_operation(&context.operation_id)
+                        .unwrap();
+                }
             }
         }
         self.db.commit(run, epoch, record)
@@ -1092,7 +1231,11 @@ impl Persistence for InterleavingPersistence {
     fn policy_boundary(&self, run: &str, epoch: u64) -> Result<PolicyBoundary, ExecutionError> {
         self.db.policy_boundary(run, epoch)
     }
-    fn policy_action(&self, run: &str, epoch: u64) -> Result<Option<PolicyActionState>, ExecutionError> {
+    fn policy_action(
+        &self,
+        run: &str,
+        epoch: u64,
+    ) -> Result<Option<PolicyActionState>, ExecutionError> {
         Ok(self.policy_graph(run, epoch)?.map(PolicyActionState::Graph))
     }
     fn policy_graph(
@@ -1549,6 +1692,7 @@ fn effect_graph_recovery_uses_original_executor_at_every_dispatch_cut() {
                 &f.input.run_id,
                 f.input.owner_generation,
                 &ExecutionRecord::ToolDispatched {
+                    executor_owner: varin_runtime::ExecutorOwner::Kernel,
                     context: context.clone(),
                 },
             )
@@ -1573,6 +1717,7 @@ fn effect_graph_recovery_uses_original_executor_at_every_dispatch_cut() {
                     &f.input.run_id,
                     f.input.owner_generation,
                     &ExecutionRecord::ToolSettled {
+                        executor_stopped: true,
                         context: context.clone(),
                         completion,
                     },
@@ -1857,6 +2002,7 @@ fn read_only_job_recovery_waits_for_original_executor_at_both_completion_cuts() 
             &f.input.run_id,
             f.input.owner_generation,
             &ExecutionRecord::ToolDispatched {
+                executor_owner: varin_runtime::ExecutorOwner::Kernel,
                 context: context.clone(),
             },
         )
@@ -1872,6 +2018,7 @@ fn read_only_job_recovery_waits_for_original_executor_at_both_completion_cuts() 
                 &f.input.run_id,
                 f.input.owner_generation,
                 &ExecutionRecord::ToolSettled {
+                    executor_stopped: false,
                     context: context.clone(),
                     completion: original.clone(),
                 },

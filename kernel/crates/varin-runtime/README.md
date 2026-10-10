@@ -37,7 +37,7 @@ writing Pi session files or the Host harness's existing execution records.
   preparation, resource admission, authorization and execution; revocation cancellation is registered
   at binding. Ordinary replacement preserves old pins. The frozen batch schema is shared by `Arc`.
   Ready directory candidates do not retire the active plan; unchanged endpoints reuse their binding.
-  The private MCP bridge retains concrete generations and scope holders. Retired generations drain
+  The private Host tool bridge retains concrete MCP/ordinary-extension generations and scope holders. Retired generations drain
   their calls; a waiting Run retains its active owner. Cancellation wakes the call and settles from
   the actual Host receipt. Rechecking an approved action does not open another permission wait.
   Active MCP scopes subscribe to configuration and leased-schema changes. A ready replacement
@@ -45,6 +45,10 @@ writing Pi session files or the Host harness's existing execution records.
   current directory selected. The activation records an immutable composition reference, retained
   by content collection and checked on recovery. Explicit dependency revocation also ends its
   outstanding authorization wait without requiring a user answer.
+  Ordinary installed tool declarations retain their description, input/output schema and service
+  metadata in that same directory. Contributions prepare independently; one Run composition owner
+  merges ready MCP and extension bindings before a closed-boundary publication. Exact artifact and
+  declaration identities survive reopening; an unavailable original implementation fails explicitly.
 - `providers::registry` selects typed model adapters through the same composition leases. Factories
   run outside the registry lock; replacement preserves retained implementations and explicit revocation
   cancels active generation. Builtin protocol options are validated by family. The `pi-messages` HTTP
@@ -126,7 +130,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 17, input domain 2 and collaboration domain 2 store input intents/queue bodies and context-job ownership,
+Catalog version 18, input domain 2 and collaboration domain 2 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. `Catalog::collect_content_objects` marks requests, provider originals,
@@ -187,6 +191,15 @@ continuation state in the same transaction.
 An original executor receipt may already be durable before tool settlement or handoff. Reconciliation
 applies that same receipt to a recovered unresolved Operation instead of mistaking receipt identity
 for completed settlement. Once applied, repeated receipt delivery leaves revisions and events unchanged.
+
+Each dispatched tool records its physical `ExecutorOwner` separately from its tool name. A kernel
+restart proves local Result execution ended; it does not prove an external Host callback stopped.
+The trusted executor returns completion and stop evidence separately. A cancelled observer can receive
+an indeterminate completion while the original callback, resource occupancy and eventual receipt remain
+owned. The private bridge authenticates late evidence against the original invocation and external
+execution epoch, independently of the replacement transport epoch. Receipt bodies are staged through
+ContentStore before Catalog commits or acknowledges them. A later effect receipt never rewrites the
+caller's original completion or revives a cancelled Run.
 
 Transient provider progress uses a bounded, nonblocking sink. Durable tool results and model output
 remain available independently of whether a viewer consumed progress.
@@ -343,8 +356,8 @@ complete migration of the existing Pi memory workflow.
 ## Remaining integration
 
 The provider adapters and control boundary are foundations for the full cutover, not evidence
-of provider/platform parity. Production configuration/credential routing, all existing tools and
-MCP/extension capabilities, automatic context/compaction and memory workflow, running-input queues, UI projections, import and
+of provider/platform parity. Remaining domain and MCP capabilities, safe running-policy replacement,
+provider capacity-error recovery and replaceable context strategies, broader UI/product coverage and
 single-writer ownership transfer remain tracked in
 [`docs/plan/agent-runtime-implementation.md`](../../../docs/plan/agent-runtime-implementation.md).
 That matrix owns actual validation and incomplete capabilities. No measured speedup or platform
@@ -352,13 +365,13 @@ acceptance follows from this implementation alone.
 
 ## Explicit source identity and launch format
 
-Launch domain 2 replaces the old source `materialized` boolean with `fixed_branch`, `materialized`,
+The source contract replaces the old `materialized` boolean with `fixed_branch`, `materialized`,
 and `live_root`. Fixed sources require a branch/revision; only materialized copies carry an originating
 Run. A live source instead requires its Host/canonical-root/Rust-root identity and cannot claim a fixed
 revision. Exact source comparison covers rebinding and inherited launches; live identity is not a grant.
 
-This intentionally breaks the earlier experimental launch encoding without changing catalog/content
-format 3. An existing database is opened read-only first, including its committed WAL, and launch
+The current launch domain is 3; current Catalog/content versions are recorded above. An existing
+database is opened read-only first, including its committed WAL, and launch
 metadata/table shape is validated before a writable connection, epoch update or recovery. Domain 1,
 missing and malformed metadata fail preserving assets; no conversion or fallback reader is provided.
 The launch preflight checks the real table, columns and runs foreign key including referential actions.

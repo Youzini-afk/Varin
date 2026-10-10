@@ -406,6 +406,7 @@ impl Catalog {
             lifetime: Lifetime::Run,
             handed_off: false,
             executor: Some(metadata.executor().into()),
+            execution_owner: None,
             waiting_on: None,
             intent: serde_json::to_value(&metadata)?,
             result: None,

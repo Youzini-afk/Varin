@@ -2,10 +2,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { Ajv, type ValidateFunction } from 'ajv';
-import { Ajv2020 } from 'ajv/dist/2020.js';
-import { Ajv2019 } from 'ajv/dist/2019.js';
-import addFormats from 'ajv-formats';
+import type { ValidateFunction } from 'ajv';
+import { compileToolJsonSchema } from './tool-schema.js';
 import { applyEdits, modify } from 'jsonc-parser';
 import {
   FileAuthStorageBackend, McpOAuthCredentialStore, createMcpToolName, getMcpToolExposure,
@@ -173,14 +171,8 @@ function scopeKey(scope: McpAuthorityScope): string {
   return stable([scope.agentDir, scope.configCwd, scope.executionCwd, scope.environmentId, scope.executionScope, scope.projectTrusted]);
 }
 function compile(tool: McpTool): ValidateFunction {
-  const schema = structuredClone(tool.inputSchema);
-  if (schema.$async === true) fail('mcp-schema-unsupported');
-  const dialect = typeof schema.$schema === 'string' ? schema.$schema : undefined;
-  const options = { allErrors: false, strictSchema: true, strictTypes: false, allowUnionTypes: true, ownProperties: true, logger: false, coerceTypes: false, useDefaults: false, removeAdditional: false } as const;
-  const ajv = dialect?.includes('draft-07') ? new Ajv(options) : dialect?.includes('2019-09') ? new Ajv2019(options) : new Ajv2020(options);
-  // ajv-formats is CommonJS and publishes its callable on the explicit default export.
-  addFormats.default(ajv);
-  try { return ajv.compile(schema); } catch { return fail('mcp-schema-unsupported'); }
+  try { return compileToolJsonSchema(tool.inputSchema); }
+  catch { return fail('mcp-schema-unsupported'); }
 }
 
 export class McpAuthority {

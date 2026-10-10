@@ -30,10 +30,10 @@ fn validate(call: &ToolCall) -> Result<(), ExecutionError> {
     Ok(())
 }
 pub fn schema() -> ToolSchema {
-    ToolSchema {
+    ToolSchema { description: "Ask the user a clarification and wait for their real answer. Answers do not grant tool permissions.".into(), output_schema: None, metadata: None,
         name: QUESTION_TOOL.into(),
         version: "1".into(),
-        schema: json!({"type":"object","description":"Ask the user a clarification and wait for their real answer. Answers do not grant tool permissions.","properties":{"question":{"type":"string","minLength":1},"options":{"type":"array","items":{"type":"string","minLength":1}}},"required":["question"],"additionalProperties":false}),
+        schema: json!({"type":"object","properties":{"question":{"type":"string","minLength":1},"options":{"type":"array","items":{"type":"string","minLength":1}}},"required":["question"],"additionalProperties":false}),
     }
 }
 pub fn configure(mut start: RunStart, catalog: Arc<Mutex<Catalog>>) -> RunStart {
@@ -50,9 +50,14 @@ fn error(e: impl ToString) -> ExecutionError {
     ExecutionError::new("question", e.to_string())
 }
 impl ToolExecutor for Questions {
-    fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken)
-        -> Result<varin_runtime::execution::ToolPreparation, ExecutionError> {
-        self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+    fn plan(
+        &self,
+        call: &ToolCall,
+        context: &FrozenToolContext,
+        cancel: &CancellationToken,
+    ) -> Result<varin_runtime::execution::ToolPreparation, ExecutionError> {
+        self.prepare(call, context, cancel)
+            .map(varin_runtime::execution::ToolPreparation::Ready)
     }
 
     fn prepare(
@@ -61,8 +66,7 @@ impl ToolExecutor for Questions {
         request: &FrozenToolContext,
         _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
-        if call.schema_version != "1" || !request.tools.iter().any(|s| s == &schema())
-        {
+        if call.schema_version != "1" || !request.tools.iter().any(|s| s == &schema()) {
             return Err(error("question schema is not bound"));
         }
         validate(call)?;
@@ -163,11 +167,19 @@ pub fn default_policy_identity() -> PolicyIdentity {
         version: "1+1".into(),
     }
 }
-pub fn declaration(catalog: Arc<Mutex<Catalog>>) -> varin_runtime::composition::tools::ToolDeclaration {
-    varin_runtime::composition::tools::ToolDeclaration::new(schema(), Arc::new(Questions { catalog }))
+pub fn declaration(
+    catalog: Arc<Mutex<Catalog>>,
+) -> varin_runtime::composition::tools::ToolDeclaration {
+    varin_runtime::composition::tools::ToolDeclaration::new(
+        schema(),
+        Arc::new(Questions { catalog }),
+    )
 }
 
 /// Effective launch/checkpoint identity includes the core clarification behavior.
 pub(crate) fn policy_identity(inner: PolicyIdentity) -> PolicyIdentity {
-    PolicyIdentity { name: format!("{}+questions", inner.name), version: format!("{}+1", inner.version) }
+    PolicyIdentity {
+        name: format!("{}+questions", inner.name),
+        version: format!("{}+1", inner.version),
+    }
 }

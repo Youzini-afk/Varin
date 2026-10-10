@@ -210,6 +210,9 @@ describe("material collections", () => {
       owningWorkspaceId: "ws", sessionId: "s2", threadId: "t2",
     });
     expect(read?.body.toString()).toBe("persisted body");
+    expect((await opened.materials.read("ws", snap.snapshotId, {
+      kind: "thread", owningWorkspaceId: "ws", threadId: "native-reader",
+    }))?.body.toString()).toBe("persisted body");
     const searched = await call(service, { action: "search", collectionId: created.collection!.collectionId, query: "persisted" }, "s2");
     expect(searched.hits).toHaveLength(1);
   });
@@ -262,6 +265,9 @@ describe("material grants (L4)", () => {
       owningWorkspaceId: "ws", sessionId: "s2", threadId: "t2",
     });
     expect(read?.body.toString()).toBe("grant body");
+    expect((await opened.materials.read("ws", snap.snapshotId, {
+      kind: "thread", owningWorkspaceId: "ws", threadId: "t2",
+    }))?.body.toString()).toBe("grant body");
     // A thread outside the grant still cannot read it.
     expect(await opened.materials.read("ws", snap.snapshotId, {
       owningWorkspaceId: "ws", sessionId: "s3", threadId: "t3",

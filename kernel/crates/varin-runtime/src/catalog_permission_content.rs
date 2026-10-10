@@ -7,7 +7,7 @@ use serde::Deserialize;
 pub(super) struct PermissionCallIdentity {
     pub run_id: String,
     pub operation_id: String,
-    pub request_id: String,
+    pub origin: crate::execution::ToolOrigin,
     pub call_id: String,
     pub name: String,
     pub schema_version: String,
@@ -27,6 +27,24 @@ pub struct PreparedPermission {
 }
 impl PermissionPreparation {
     pub fn load(self) -> Result<PreparedPermission> {
+        if self.call.as_object().is_none_or(|call| {
+            call.keys().any(|key| {
+                !matches!(
+                    key.as_str(),
+                    "runId"
+                        | "operationId"
+                        | "origin"
+                        | "callId"
+                        | "name"
+                        | "schemaVersion"
+                        | "arguments"
+                )
+            })
+        }) {
+            return Err(RuntimeError::Invalid(
+                "permission call contains unknown fields".into(),
+            ));
+        }
         if ![
             "ownerReference",
             "toolSchemaVersion",

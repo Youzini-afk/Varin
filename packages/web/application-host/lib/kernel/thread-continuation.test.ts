@@ -19,7 +19,7 @@ function fixture(prepareContext?: ContextPreparer) {
   const launch: LaunchIntent = { run_id: run.id, revision: 1, startable: false, requires_rebind: true, bound_epoch: null,
     pause: { action_id: 'pause:one', wait_id: 'wait:one', reason: 'Review before proceeding' }, preparation_failure: null,
     selection: { credential_scope: { reference: 'scope', authority: 'fixture', account: 'account', generation: 1 },
-      policy_models: [], mcp_binding: null, connection_identity: 'fixture', provider_family: 'fixture', model: 'fixture',
+      policy_models: [], mcp_binding: null, extension_bindings:[], connection_identity: 'fixture', provider_family: 'fixture', model: 'fixture',
       configuration_generation: 1, tool_schema_generation: 1, tools: [], policy: { name: 'fixture', version: '1' }, source: null } };
   const receipt = { run_id: run.id, action_id: 'pause:one', wait_id: 'wait:one', cursor: 7 };
   let preparation = new AbortController();

@@ -20,16 +20,42 @@ impl AnthropicProvider {
 }
 // Locked Pi Messages adapter's Claude subscription tool naming contract.
 fn oauth_tool_name(name: &str) -> &str {
-    const NAMES: &[&str] = &["Read", "Write", "Edit", "Bash", "Grep", "Glob", "AskUserQuestion",
-        "EnterPlanMode", "ExitPlanMode", "KillShell", "NotebookEdit", "Skill", "Task", "TaskOutput",
-        "TodoWrite", "WebFetch", "WebSearch"];
-    NAMES.iter().copied().find(|candidate| candidate.eq_ignore_ascii_case(name)).unwrap_or(name)
+    const NAMES: &[&str] = &[
+        "Read",
+        "Write",
+        "Edit",
+        "Bash",
+        "Grep",
+        "Glob",
+        "AskUserQuestion",
+        "EnterPlanMode",
+        "ExitPlanMode",
+        "KillShell",
+        "NotebookEdit",
+        "Skill",
+        "Task",
+        "TaskOutput",
+        "TodoWrite",
+        "WebFetch",
+        "WebSearch",
+    ];
+    NAMES
+        .iter()
+        .copied()
+        .find(|candidate| candidate.eq_ignore_ascii_case(name))
+        .unwrap_or(name)
 }
 fn registered_tool_name<'a>(name: &'a str, view: &'a RequestView, oauth: bool) -> &'a str {
     if oauth {
-        view.binding.tools.iter().find(|tool| tool.name.eq_ignore_ascii_case(name))
-            .map(|tool| tool.name.as_str()).unwrap_or(name)
-    } else { name }
+        view.binding
+            .tools
+            .iter()
+            .find(|tool| tool.name.eq_ignore_ascii_case(name))
+            .map(|tool| tool.name.as_str())
+            .unwrap_or(name)
+    } else {
+        name
+    }
 }
 fn push_block(messages: &mut Vec<Value>, role: &str, block: Value) {
     if let Some(last) = messages.last_mut().filter(|m| m["role"] == role) {
@@ -67,7 +93,10 @@ impl ModelProvider for AnthropicProvider {
                 push_block(&mut messages, "assistant", original.value);
                 continue;
             }
-            let role = if matches!(item.provenance, Provenance::Assistant | Provenance::PolicyOutput { .. }) {
+            let role = if matches!(
+                item.provenance,
+                Provenance::Assistant | Provenance::PolicyOutput { .. }
+            ) {
                 "assistant"
             } else {
                 "user"
@@ -129,7 +158,7 @@ impl ModelProvider for AnthropicProvider {
             .binding
             .tools
             .iter()
-            .map(|t| json!({"name":if self.oauth { oauth_tool_name(&t.name) } else { &t.name },"input_schema":t.schema}))
+            .map(|t| json!({"name":if self.oauth { oauth_tool_name(&t.name) } else { &t.name },"description":t.description,"input_schema":t.schema}))
             .collect();
         let mut result = json!({"model":view.binding.model,"messages":messages,"system":system,"tools":tools,"max_tokens":self.max_tokens,"stream":true});
         if let Some(thinking) = &self.thinking {
@@ -146,7 +175,10 @@ impl ModelProvider for AnthropicProvider {
         if request.view.binding.provider_family != FAMILY {
             return Err(failure("provider_family_mismatch", "wrong adapter family"));
         }
-        let mut state = StreamState { oauth: self.oauth, ..Default::default() };
+        let mut state = StreamState {
+            oauth: self.oauth,
+            ..Default::default()
+        };
         self.connection.run(
             request,
             cancel,
@@ -349,7 +381,8 @@ impl StreamState {
                 }
                 let content = match required(&block.value, "type")? {
                     "tool_use" => {
-                        let name = registered_tool_name(required(&block.value, "name")?, view, self.oauth);
+                        let name =
+                            registered_tool_name(required(&block.value, "name")?, view, self.oauth);
                         if !block.value["input"].is_object() {
                             return Err(failure(
                                 "invalid_tool_arguments",

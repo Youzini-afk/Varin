@@ -1,4 +1,4 @@
-#[path="fixtures/input_admission.rs"]
+#[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
 use serde_json::{json, Value};
@@ -24,12 +24,23 @@ impl Drop for Fixture {
 }
 struct NoTools;
 impl ToolExecutor for NoTools {
-    fn plan(&self, call: &varin_runtime::execution::ToolCall, context: &varin_runtime::execution::FrozenToolContext,
-        cancel: &varin_runtime::execution::CancellationToken) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError> {
-        self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+    fn plan(
+        &self,
+        call: &varin_runtime::execution::ToolCall,
+        context: &varin_runtime::execution::FrozenToolContext,
+        cancel: &varin_runtime::execution::CancellationToken,
+    ) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError>
+    {
+        self.prepare(call, context, cancel)
+            .map(varin_runtime::execution::ToolPreparation::Ready)
     }
 
-    fn prepare(&self, _: &ToolCall, _: &FrozenToolContext, _cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
+    fn prepare(
+        &self,
+        _: &ToolCall,
+        _: &FrozenToolContext,
+        _cancel: &CancellationToken,
+    ) -> Result<ToolContract, ExecutionError> {
         panic!("summary dispatched tool")
     }
     fn authorize(
@@ -126,6 +137,9 @@ fn binding() -> RequestBinding {
         configuration_generation: 1,
         tool_schema_generation: 1,
         tools: vec![ToolSchema {
+            description: String::new(),
+            output_schema: None,
+            metadata: None,
             name: "write".into(),
             version: "1".into(),
             schema: json!({}),
@@ -183,7 +197,8 @@ fn exercise(mode: Mode) {
             memory_checkpoint: None,
         })
         .unwrap();
-    let request = ContextJobRequest { owner_run_id: None,
+    let request = ContextJobRequest {
+        owner_run_id: None,
         personalization: None,
         key: "compact".into(),
         branch_id: "main".into(),
@@ -197,9 +212,12 @@ fn exercise(mode: Mode) {
     let job = db
         .create_context_job(request.clone(), launch.clone(), json!({}))
         .unwrap();
-    assert_eq!(db.run(&job.receipt.run_id).unwrap().configuration,json!({}));
+    assert_eq!(
+        db.run(&job.receipt.run_id).unwrap().configuration,
+        json!({})
+    );
     db.collect_content_objects().unwrap();
-    assert_eq!(db.context_job(&job.receipt.run_id).unwrap(),job);
+    assert_eq!(db.context_job(&job.receipt.run_id).unwrap(), job);
     assert_eq!(
         db.create_context_job(request.clone(), launch, json!({}))
             .unwrap(),
@@ -234,19 +252,22 @@ fn exercise(mode: Mode) {
     let seen = Arc::new(Mutex::new(vec![]));
     let (tx, rx) = mpsc::channel();
     let supervisor = RunSupervisor::new(db);
-    let start = configure_compaction_start(RunStart {
-        context_preparation: Arc::new(NoopContextPreparation),
-        binding: binding(),
-        policy_state: Value::Null,
-        provider: Arc::new(Provider {
-            mode,
-            seen: seen.clone(),
-            entered: tx,
-        }),
-        tools: Arc::new(NoTools),
-        policy: Arc::new(DefaultAgentPolicy),
-        progress: ProgressSink::default(),
-    },1);
+    let start = configure_compaction_start(
+        RunStart {
+            context_preparation: Arc::new(NoopContextPreparation),
+            binding: binding(),
+            policy_state: Value::Null,
+            provider: Arc::new(Provider {
+                mode,
+                seen: seen.clone(),
+                entered: tx,
+            }),
+            tools: Arc::new(NoTools),
+            policy: Arc::new(DefaultAgentPolicy),
+            progress: ProgressSink::default(),
+        },
+        1,
+    );
     let next_start = start.clone();
     let handle = supervisor.start(&job.receipt.run_id, start).unwrap();
     rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
@@ -308,14 +329,49 @@ fn exercise(mode: Mode) {
         next_request.key = "compact-again".into();
         next_request.expected_revision = 2;
         next_request.through_id = boundary.clone();
-        let next = db.create_context_job(next_request, LaunchSelection::from_binding(&binding(), DefaultAgentPolicy.identity(), None), json!({})).unwrap();
+        let next = db
+            .create_context_job(
+                next_request,
+                LaunchSelection::from_binding(&binding(), DefaultAgentPolicy.identity(), None),
+                json!({}),
+            )
+            .unwrap();
         let tail_run = db.run(&tail.run_id).unwrap();
-        let tail_run = db.transition_run(&tail_run.id, tail_run.epoch, tail_run.revision, RunState::Runnable).unwrap();
-        db.transition_run(&tail_run.id, tail_run.epoch, tail_run.revision, RunState::Completed).unwrap();
-        let new_tail = db.submit(&SubmitInput { key:"new-tail".into(),thread_id:"thread".into(),branch_id:"main".into(),
-            expected_head:Some(boundary),input:json!({"text":"NEW TAIL DURING SECOND SUMMARY"}),configuration:json!({}) }).unwrap();
+        let tail_run = db
+            .transition_run(
+                &tail_run.id,
+                tail_run.epoch,
+                tail_run.revision,
+                RunState::Runnable,
+            )
+            .unwrap();
+        db.transition_run(
+            &tail_run.id,
+            tail_run.epoch,
+            tail_run.revision,
+            RunState::Completed,
+        )
+        .unwrap();
+        let new_tail = db
+            .submit(&SubmitInput {
+                key: "new-tail".into(),
+                thread_id: "thread".into(),
+                branch_id: "main".into(),
+                expected_head: Some(boundary),
+                input: json!({"text":"NEW TAIL DURING SECOND SUMMARY"}),
+                configuration: json!({}),
+            })
+            .unwrap();
         drop(db);
-        assert_eq!(supervisor.start(&next.receipt.run_id, next_start).unwrap().wait().unwrap().state, RunState::Completed);
+        assert_eq!(
+            supervisor
+                .start(&next.receipt.run_id, next_start)
+                .unwrap()
+                .wait()
+                .unwrap()
+                .state,
+            RunState::Completed
+        );
         let next_view = seen.lock().unwrap().last().unwrap().clone();
         assert!(next_view.history.iter().any(|item| matches!(&item.content,Content::Text{text} if text=="The original goal remains unfinished.")));
         let serialized = serde_json::to_string(&next_view).unwrap();
@@ -326,7 +382,10 @@ fn exercise(mode: Mode) {
         let checkpoint = db.publish_context_job(&next.receipt.run_id).unwrap();
         assert_eq!(checkpoint.revision, 3);
         let run = db.run(&new_tail.run_id).unwrap();
-        let captured = db.prepare_context_read(&run.id,run.epoch,Some(&new_tail.input_id)).unwrap().unwrap();
+        let captured = db
+            .prepare_context_read(&run.id, run.epoch, Some(&new_tail.input_id))
+            .unwrap()
+            .unwrap();
         drop(db);
         let projection = captured.load().unwrap();
         assert!(projection.history.iter().any(|item| matches!(&item.content,Content::Text{text} if text=="NEW TAIL DURING SECOND SUMMARY")));

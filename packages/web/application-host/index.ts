@@ -19,6 +19,8 @@ import { createAgentPolicy } from './lib/kernel/agent-policy.js';
 import { RunObservers } from './lib/kernel/run-observers.js';
 import { McpAuthority, McpCompositions, type McpCompositionScope, mcpHostAgentDir, mcpHostProjectTrusted, readMcpHostPermissionPolicy } from '@varin/pi-host/mcp-authority';
 import { createMcpLease } from './lib/kernel/mcp-owner.js';
+import { createExtensionTools } from './lib/kernel/extension-tool-owner.js';
+import { createMaterialToolOwner, MATERIAL_SNAPSHOT_CAPABILITY } from './lib/kernel/material-tool-owner.js';
 import { createMcpHarnessServices } from './lib/harness/mcp-service.js';
 import { sharedHostCredentialAuthority } from '@varin/runtime-broker';
 import { AgentRuntimeClient } from './lib/kernel/agent-runtime-client.js';
@@ -2888,7 +2890,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const entry = agentMcpScopes.get(runId); agentMcpScopes.delete(runId);
     if (entry) void entry.ready.then(scope => scope.release(), () => undefined);
   };
-  kernelClient.onMcpReleased(releaseAgentMcpScope);
+  kernelClient.onToolReleased(releaseAgentMcpScope);
   kernelClient.subscribeExit(() => { for (const runId of agentMcpScopes.keys()) releaseAgentMcpScope(runId); });
   const prepareAgentPolicy = createAgentPolicy(extensionRuntime);
   const modelAuthority = createModelAuthority(hostCredentialAuthority);
@@ -2946,7 +2948,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }, createPolicyModelPreparer({ models: modelAuthority,
     // This is a user-scoped role. Native Threads do not impersonate Pi sessions.
     settings: () => piRuntimeBroker.requestCatalog('settings.get', {}),
-  }), liveSources.validate);
+  }), liveSources.validate, createExtensionTools({runtime:extensionRuntime,kernel:kernelClient,currentPolicy:async runId=>{
+    const launch=await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent|null,'runtime.launch.inspect'>('runtime.launch.inspect',{runId});
+    const workspace=launch?.selection.source?await documentsAuthority.inspectWorkspace(launch.selection.source.workspace_id):undefined;
+    const cwd=workspace?.root??mcpAgentDir;
+    return readMcpHostPermissionPolicy(mcpAgentDir,cwd,Boolean(workspace)&&mcpHostProjectTrusted(mcpAgentDir,cwd));
+  }}));
   const runObservers = new RunObservers(agentRuntime, extensionRuntime, (threadId, _error) => {
     console.error('[RunObserver] Activity projection requires attention:', threadId ?? 'selection');
   });
@@ -4094,6 +4101,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }
     },
   });
+  const unregisterMaterialToolCapability=extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY,createMaterialToolOwner(webMaterials));
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(
     'workspace.documents',
     createDocumentsCapabilityHandler(documentsAuthority),
@@ -4623,6 +4631,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await unregisterWorkbenchLayoutService();
       if (ownsExtensionRuntime) await extensionRuntime.stop();
       unregisterPiRuntimeCapability();
+      unregisterMaterialToolCapability();
       unregisterDocumentsCapability();
       unregisterWorkspaceRecoveryCapability();
       unregisterSearchCapability();

@@ -69,7 +69,10 @@ impl ModelProvider for BedrockProvider {
                     continue;
                 }
             }
-            let role = if matches!(item.provenance, Provenance::Assistant | Provenance::PolicyOutput { .. }) {
+            let role = if matches!(
+                item.provenance,
+                Provenance::Assistant | Provenance::PolicyOutput { .. }
+            ) {
                 "assistant"
             } else {
                 "user"
@@ -149,7 +152,7 @@ impl ModelProvider for BedrockProvider {
             body["inferenceConfig"] = json!({"maxTokens":max});
         }
         if !view.binding.tools.is_empty() {
-            body["toolConfig"] = json!({"tools":view.binding.tools.iter().map(|t|json!({"toolSpec":{"name":t.name,"inputSchema":{"json":t.schema}}})).collect::<Vec<_>>()});
+            body["toolConfig"] = json!({"tools":view.binding.tools.iter().map(|t|json!({"toolSpec":{"name":t.name,"description":t.description,"inputSchema":{"json":t.schema}}})).collect::<Vec<_>>()});
         }
         Ok(body)
     }
@@ -163,17 +166,22 @@ impl ModelProvider for BedrockProvider {
             return Err(failure("cancelled", "generation cancelled"));
         }
         let dispatch = CredentialDispatch {
-            method: "POST".into(), endpoint: self.connection.endpoint.clone(),
+            method: "POST".into(),
+            endpoint: self.connection.endpoint.clone(),
             payload_sha256: hex::encode(Sha256::digest(request_body(&request.serialized)?)),
         };
         let headers = self.connection.credentials.request_headers(
-            request.view.binding.credential_ref.as_deref(), &dispatch, cancel)?;
+            request.view.binding.credential_ref.as_deref(),
+            &dispatch,
+            cancel,
+        )?;
         if !headers
             .get("authorization")
             .and_then(|v| v.to_str().ok())
             .is_some_and(|v| {
                 v.split_once(' ').is_some_and(|(scheme, token)| {
-                    (scheme.eq_ignore_ascii_case("bearer") || scheme == "AWS4-HMAC-SHA256") && !token.trim().is_empty()
+                    (scheme.eq_ignore_ascii_case("bearer") || scheme == "AWS4-HMAC-SHA256")
+                        && !token.trim().is_empty()
                 })
             })
         {
