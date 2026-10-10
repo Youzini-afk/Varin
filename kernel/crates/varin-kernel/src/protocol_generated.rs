@@ -2034,6 +2034,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.status" => serde_json::from_value::<KernelEmptyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.content.collect" => serde_json::from_value::<KernelEmptyParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.admission.inspect" => {
             serde_json::from_value::<AdmissionInspectParams>(params.clone())
                 .map(|_| ())

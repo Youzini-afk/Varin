@@ -59,6 +59,7 @@ export type KernelMethod =
   | "runtime.model.select"
   | "runtime.model.inspect"
   | "runtime.status"
+  | "runtime.content.collect"
   | "runtime.admission.inspect"
   | "runtime.thread.create"
   | "runtime.input.submit"
@@ -983,6 +984,19 @@ export interface AdmissionInspection {
   admissionId: string;
   state: 'queued' | 'active' | 'settled' | 'not_active';
   queue: AdmissionStatus | null;
+}
+
+export type ContentCollectionStatus = "completed" | "deferred" | "cancelled" | "failed";
+
+export type ContentCollectionPhase = "admission" | "roots" | "verify" | "sweep" | "staging";
+
+export interface ContentCollectionReport {
+  status: ContentCollectionStatus;
+  phase: ContentCollectionPhase;
+  removedObjects: number;
+  removedBytes: number;
+  removedStagingFiles: number;
+  reason: string | null;
 }
 
 export interface RuntimeStatus {
@@ -2427,6 +2441,7 @@ export type KernelMethodParams = {
   "runtime.model.select": ModelSelectParams;
   "runtime.model.inspect": RunParams;
   "runtime.status": KernelEmptyParams;
+  "runtime.content.collect": KernelEmptyParams;
   "runtime.admission.inspect": AdmissionInspectParams;
   "runtime.thread.create": ThreadCreateParams;
   "runtime.input.submit": InputSubmitParams;
@@ -2942,6 +2957,15 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.status";
+      params: KernelEmptyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.content.collect";
       params: KernelEmptyParams;
       epoch?: string;
       grantId?: string;

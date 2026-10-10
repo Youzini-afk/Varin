@@ -3,6 +3,25 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum ContentCollectionStatus {
+    Completed,
+    Deferred,
+    Cancelled,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentCollectionPhase {
+    Admission,
+    Roots,
+    Verify,
+    Sweep,
+    Staging,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum SourceMode {
     FixedBranch,
     Materialized,
@@ -107,6 +126,17 @@ pub enum InputState {
     Queued,
     Delivered,
     Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContentCollectionReport {
+    pub status: ContentCollectionStatus,
+    pub phase: ContentCollectionPhase,
+    pub removed_objects: u64,
+    pub removed_bytes: u64,
+    pub removed_staging_files: u64,
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

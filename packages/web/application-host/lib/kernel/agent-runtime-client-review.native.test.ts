@@ -61,6 +61,10 @@ it('client submits, inspects, cancels, replays events and preserves receipt on r
   expect(events.some(event => event.kind === 'run.accepted' && event.subject === receipt.run_id)).toBe(true);
   expect(events.every((event, index) => index === 0 || event.cursor > events[index - 1]!.cursor)).toBe(true);
   expect(await f.runtimeClient.events(events.at(-1)!.cursor, 100)).toEqual([]);
+  const collection = await f.runtimeClient.collectContent();
+  expect(collection.status).toBe('completed');
+  expect(collection.removedObjects).toBeGreaterThanOrEqual(0);
+  expect((await f.runtimeClient.history('branch')).map(item => item.content)).toEqual([input.input]);
   await f.host.close();
   const reopened = createKernelClient(f.options);
   try {
@@ -77,6 +81,9 @@ it('framed IPC rejects malformed parameters and stale or grant-scoped authority'
     { method: 'runtime.status', epoch: 'stale', params: {} },
     { method: 'runtime.status', grantId: 'tool-grant', params: {} },
     { method: 'runtime.status', params: { unexpected: true } },
+    { method: 'runtime.content.collect', epoch: 'stale', params: {} },
+    { method: 'runtime.content.collect', grantId: 'tool-grant', params: {} },
+    { method: 'runtime.content.collect', params: { path: '/different-owner' } },
     { method: 'runtime.thread.create', params: { threadId: '', branchId: 'branch' } },
     { method: 'runtime.events.read', params: { cursor: -1, limit: 1 } },
     { method: 'runtime.events.read', params: { cursor: 0, limit: 1.5 } },

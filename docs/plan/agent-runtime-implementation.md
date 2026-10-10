@@ -6,6 +6,15 @@
 
 目标是完整实现[完整运行时设计](../design/agent-runtime-design.md)和[能力组合设计](../design/runtime-extensibility-design.md)共同定义的长期运行底座：及时交互、低开销执行、按真实资源调度、深层能力组合和可替换策略。完成聊天循环、迁移已有工具或删除 Pi 都不是单独的完成标准；Pi 退出是这套设计落地后的一个结果。当前生产仍使用 Pi session worker、TypeScript Host 协调和 Rust 资源内核；现有权威见[架构](../architecture.md)。
 
+## 2026-10-10 增量：ContentStore 显式回收与控制隔离
+
+- Catalog 只准入一轮有归属的 collection，原 conversation.sqlite 的一致只读根扫描、正文校验、目录枚举、删除与 fsync 全部在独立 worker。只读事务在根捕获完成后结束，不用第二数据库、持久 root mirror 或 GC 操作日志。所有既有 history、原始调用/审计回执、policy/context/child 正文根沿原 owner 保留。
+- publication/retained-read 的短登记不等内容 I/O gate；单调序号让扫描后的新 publication 即使已完成也使旧 mark 失效。worker 的正文 I/O 与 sweep 使用同一 ContentStore gate，覆盖已有 orphan hash 复用和实际 UUID staging。新 publication 使 sweep 在下一安全点退让；控制状态、取消与元数据提交不等待这个 gate。仅服务 fixture/启动的同步正文便利入口遇 collection 明确冲突，生产仍走 capture → worker → commit。
+- collection 持有原 `runtime.owner` 文件的真实寿命。Catalog/Agent 关闭只请求取消，未停止的旧 worker 仍阻止同目录新 owner；完成、错误、取消与 unwind 释放同一临时 collector。mark 失败不删除内容；中途删除/清理失败保留实际阶段及已删计数，未知文件不删。没有恢复旧内存删除列表、无限重试或每个 Run 的清理屏障。
+- 当前 Host 的认证 `POST /api/runtime/content/collect` 只接受空对象，经原 AgentRuntimeClient 和生成协议进入 `runtime.content.collect` 独立 maintenance worker。请求保持普通成本类别，不混入 Storage 或 history/receipt 队列，也不成为模型工具。报告明确 completed/deferred/cancelled/failed、实际 phase、对象/字节/staging 删除计数及 nullable reason；HTTP 关闭只取消本次维护，不取消 Run。
+- 冻结后的完整 runtime **259 passed、0 failed、2 个既有 ignored**，kernel lib **39/39**。其中 8 组新确定性交错在实际 SQL 行、manifest 校验及已 unlink 后暂停，确认 Catalog status/Run cancel 仍可推进；同时覆盖后发 publication 计数回零、旧 orphan 复用与取消后原回执、实际在途 staging、替换根后的旧 reader、部分删除取消/失败、真实 owner 重开排他和 unwind 释放。原 retention suite 继续验证历史/permission/policy/child 等根，没有靠新增快照数代替正确性。Host 管理入口 **2/2**、完整声明/测试类型、定点 lint、生成一致性、文档链接及实际 Host bundle 通过。Linux 开发内核 identity `0.9.25` 构建并 stage，SHA-256 `9933e9db6ab990d4259d5a350d98016f439f7d8392f75c06ab451142c446a612`。
+- 独立审查从设计先形成验收，再核实际锁/SQL/正文/owner/取消链与 42 个同步便利入口的生产调用关系，并独立执行冻结二进制的 8 项 race；本阶段无已知代码阻断。主动 AbortSignal 可先拒绝客户端 Promise，不能由此推断 worker 已停或保证断开的调用方收到 partial report；内核仍按原请求身份收尾和释放 credit。更新的 native Host 维护/授权场景仅通过类型检查，实际 IPC 证据留待可用环境补齐。控制隔离不声明固定延迟或物理 I/O 倍率；Goal、事件/日历续接、完整指令/skills、其他领域及产品迁移继续推进。
+
 ## 2026-10-10 增量：隔离可写子任务与原结果集成
 
 - 显式 `isolated_write` 与既有 `read_only` 共用原 dispatch/ChildTask/JobAccepted。父来源 whole-root 读取授权形成有界 handoff 后，Catalog 先持久受理独立 Thread/branch，再进行来源捕获、上下文准备和物化。私有子目录的受控文本写入不要求父原来源已有写工具；父方集成是另一个显式授权动作。仍只接受已实现的 `model: parent`，不默开进程、递归派发或任意扩展工具。

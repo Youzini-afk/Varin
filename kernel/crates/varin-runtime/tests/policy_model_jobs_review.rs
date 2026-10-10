@@ -1,4 +1,6 @@
 //! Independently authored adversarial checks for auxiliary planning Operations.
+#[path = "fixtures/content_collection.rs"]
+mod content_collection;
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
@@ -364,7 +366,7 @@ fn body_publication_rechecks_model_admission_after_input_or_head_changes() {
                     catalog.operation(&action).is_err(),
                     "body must precede metadata admission"
                 );
-                assert_eq!(catalog.collect_content_objects().unwrap(), 0);
+                assert_eq!(content_collection::collect(|| catalog.prepare_content_collection(Default::default())).unwrap(), 0);
                 catalog
                     .create_thread("independent", "independent-main")
                     .unwrap();
@@ -412,7 +414,7 @@ fn body_publication_rechecks_model_admission_after_input_or_head_changes() {
             .iter()
             .all(|event| event.kind != "policy.model_admitted"));
         assert!(
-            f.db.lock().unwrap().collect_content_objects().unwrap() > 0,
+            content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap() > 0,
             "failed publication must release the GC guard and leave only collectible bodies"
         );
     }
@@ -483,7 +485,7 @@ fn body_publication_preserves_model_output_usage_and_evidence_through_gc() {
                 result.original_ref.is_none(),
                 "body must precede output reference publication"
             );
-            assert_eq!(catalog.collect_content_objects().unwrap(), 0);
+            assert_eq!(content_collection::collect(|| catalog.prepare_content_collection(Default::default())).unwrap(), 0);
             catalog
                 .create_thread("independent", "independent-main")
                 .unwrap();
@@ -500,7 +502,7 @@ fn body_publication_preserves_model_output_usage_and_evidence_through_gc() {
         },
     )
     .unwrap();
-    f.db.lock().unwrap().collect_content_objects().unwrap();
+    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
     let saved = f.db.policy_model_job(&run, epoch).unwrap().unwrap();
     assert_eq!(saved.output, output);
     assert_eq!(saved.result.receipt.as_ref().unwrap().usage, output.usage);
@@ -1001,7 +1003,7 @@ fn crashes_redeliver_completed_results_and_never_replay_ambiguous_dispatch() {
         drop(ordinary);
         reopen(&mut f);
         if point == StopAt::Completed {
-            f.db.lock().unwrap().collect_content_objects().unwrap();
+            content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
             let epoch = f.db.lock().unwrap().epoch();
             let saved =
                 f.db.policy_model_job(&f.input.run_id, epoch)
@@ -1034,7 +1036,7 @@ fn crashes_redeliver_completed_results_and_never_replay_ambiguous_dispatch() {
         );
         assert!(main.requests.lock().unwrap().is_empty());
         assert_eq!(f.counts(), (1, 0));
-        f.db.lock().unwrap().collect_content_objects().unwrap();
+        content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
         if point == StopAt::Completed {
             assert_eq!(
                 e.policy.events.lock().unwrap()[0]["kind"],
@@ -1053,7 +1055,7 @@ fn owned_result_chunks_reject_forged_references_and_survive_gc() {
     let reference: PolicyEvidenceRef =
         serde_json::from_value(events[1]["receipt"]["output"].clone()).unwrap();
     drop(events);
-    f.db.lock().unwrap().collect_content_objects().unwrap();
+    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
     let chunk =
         f.db.lock()
             .unwrap()
@@ -1379,7 +1381,7 @@ fn partial_failed_provider_is_indeterminate_retains_usage_and_never_replays() {
     drop(ordinary);
     reopen(&mut f);
     let epoch = f.db.lock().unwrap().epoch();
-    f.db.lock().unwrap().collect_content_objects().unwrap();
+    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
     let saved =
         f.db.policy_model_job(&f.input.run_id, epoch)
             .unwrap()

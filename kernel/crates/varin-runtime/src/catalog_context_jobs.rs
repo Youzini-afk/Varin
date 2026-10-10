@@ -52,12 +52,14 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
 }
 
 impl Catalog {
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn create_context_job(
         &mut self,
         request: ContextJobRequest,
         launch: launches::LaunchSelection,
         configuration: Value,
     ) -> Result<ContextJob> {
+        let _synchronous = self.content.begin_synchronous()?;
         let prepared = self
             .prepare_context_job(request, launch, configuration)?
             .load()?;
@@ -187,7 +189,9 @@ impl Catalog {
         Ok(ContextJob { request, receipt })
     }
 
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn context_jobs(&self, branch_id: &str) -> Result<Vec<ContextJob>> {
+        let _synchronous = self.content.begin_synchronous()?;
         self.capture_context_jobs(branch_id)?
             .into_iter()
             .map(ContextJobRead::load)
@@ -206,7 +210,9 @@ impl Catalog {
             .collect()
     }
 
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn context_job(&self, run_id: &str) -> Result<ContextJob> {
+        let _synchronous = self.content.begin_synchronous()?;
         self.capture_context_job(run_id)?.load()
     }
     pub fn is_context_job(&self, run_id: &str) -> Result<bool> {
@@ -409,7 +415,9 @@ impl Catalog {
         })
     }
 
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn publish_context_job(&mut self, run_id: &str) -> Result<context::ContextCheckpoint> {
+        let _synchronous = self.content.begin_synchronous()?;
         let prepared = self.prepare_context_job_publication(run_id)?.load()?;
         self.publish_prepared_context_job(prepared)
     }

@@ -51,6 +51,18 @@ fn collection_db(fixture: &Fixture) -> Connection {
     drop(catalog);
     Connection::open(fixture.0.join("conversation.sqlite")).unwrap()
 }
+fn collect(store: &ContentStore, db: &Connection) -> Result<u64> {
+    // These primitive fixtures hold no live Catalog; acquire its real owner lock for the pass.
+    let database = PathBuf::from(db.path().unwrap());
+    let owner = OpenOptions::new().read(true).write(true)
+        .open(database.parent().unwrap().join("runtime.owner"))?;
+    fs2::FileExt::try_lock_exclusive(&owner)?;
+    let report = store.prepare_collection(database, Arc::new(owner), Arc::new(AtomicBool::new(false))).run();
+    match report.status {
+        crate::ContentCollectionStatus::Completed => Ok(report.removed_objects),
+        _ => Err(RuntimeError::Invalid(report.reason.unwrap_or_else(|| "collection interrupted".into()))),
+    }
+}
 fn chunks(store: &ContentStore, reference: &Value) -> Vec<String> {
     let manifest: Manifest = serde_json::from_slice(
         &store
@@ -106,10 +118,10 @@ fn garbage_collection_keeps_all_live_chunks_and_removes_only_orphans() {
         [json!({"request":live}).to_string()],
     )
     .unwrap();
-    assert!(store.collect(&db).unwrap() > 0);
+    assert!(collect(&store, &db).unwrap() > 0);
     assert_eq!(store.load(&live).unwrap(), large_request());
     assert!(store.load(&orphan).is_err());
-    assert_eq!(store.collect(&db).unwrap(), 0);
+    assert_eq!(collect(&store, &db).unwrap(), 0);
 }
 #[test]
 fn corrupt_or_missing_live_object_aborts_sweep_before_deleting_other_objects() {
@@ -128,13 +140,13 @@ fn corrupt_or_missing_live_object_aborts_sweep_before_deleting_other_objects() {
     let path = object_path(&store.root, &chunks(&store, &live)[0]).unwrap();
     fs::write(&path, b"corrupt").unwrap();
     assert!(store.load(&live).is_err());
-    assert!(store.collect(&db).is_err());
+    assert!(collect(&store, &db).is_err());
     assert_eq!(
         store.load(&orphan).unwrap(),
         json!({"uncommitted":"keep on failed mark"})
     );
     fs::remove_file(path).unwrap();
-    assert!(store.collect(&db).is_err());
+    assert!(collect(&store, &db).is_err());
     assert!(store.load(&orphan).is_ok());
 }
 #[test]
@@ -220,10 +232,10 @@ fn gc_removes_abandoned_staging_only_after_successful_mark() {
     let manifest = object_path(&store.root, live["content_object"].as_str().unwrap()).unwrap();
     let intact = fs::read(&manifest).unwrap();
     fs::write(&manifest, b"corrupt").unwrap();
-    assert!(store.collect(&db).is_err());
+    assert!(collect(&store, &db).is_err());
     assert!(abandoned.exists());
     fs::write(&manifest, intact).unwrap();
-    store.collect(&db).unwrap();
+    collect(&store, &db).unwrap();
     assert!(!abandoned.exists());
     assert!(unknown.exists());
     assert_eq!(store.load(&live).unwrap(), json!({"opaque":"preserve"}));
@@ -267,7 +279,7 @@ fn current_format_gc_preserves_request_original_history_output_and_input_referen
     );
     initialize(&mut db, &store).unwrap();
     store.save(&json!({"orphan":"remove only this"})).unwrap();
-    assert!(store.collect(&db).unwrap() > 0);
+    assert!(collect(&store, &db).unwrap() > 0);
     for (reference, value) in [
         (request_ref, request),
         (original_ref, original),
@@ -278,5 +290,5 @@ fn current_format_gc_preserves_request_original_history_output_and_input_referen
         assert_eq!(store.load(&reference).unwrap(), value);
     }
     initialize(&mut db, &store).unwrap();
-    assert_eq!(store.collect(&db).unwrap(), 0);
+    assert_eq!(collect(&store, &db).unwrap(), 0);
 }

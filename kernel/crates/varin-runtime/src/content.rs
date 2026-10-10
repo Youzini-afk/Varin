@@ -8,13 +8,12 @@ use sha2::{Digest, Sha256};
 #[cfg(unix)]
 use std::fs::File;
 use std::{
-    collections::HashSet,
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex, RwLock,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
@@ -79,16 +78,37 @@ struct Reference {
 #[derive(Clone)]
 pub(crate) struct ContentStore {
     root: PathBuf,
-    publications: Arc<AtomicUsize>,
+    coordination: Arc<ContentCoordination>,
 }
-/// Acquired under Catalog ownership, then retained across body I/O and reference commit.
-/// Collection defers while a publication is in flight; it never waits with Catalog locked.
-pub(crate) struct ContentPublication(Arc<AtomicUsize>);
+#[derive(Default)]
+struct PublicationState {
+    active: usize,
+    sequence: u64,
+    collector: Option<Arc<AtomicBool>>,
+}
+#[derive(Default)]
+struct ContentCoordination {
+    // Never held during content I/O or while waiting for the I/O gate.
+    state: Mutex<PublicationState>,
+    io: RwLock<()>,
+    #[cfg(test)]
+    write_hook: Mutex<Option<Arc<dyn Fn(&Path) + Send + Sync>>>,
+}
+/// Registered under Catalog ownership, retained across worker I/O and reference commit.
+/// Registration never waits for sweep; its sequence invalidates any older mark.
+pub(crate) struct ContentPublication(Arc<ContentCoordination>);
 impl Drop for ContentPublication {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::Release);
+        self.0
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .active -= 1;
     }
 }
+#[path = "content_collection.rs"]
+pub(crate) mod collection;
+pub use collection::{ContentCollection, ContentCollectionAdmission};
 pub struct ContentChunk {
     pub content_ref: String,
     pub chunk_index: usize,
@@ -97,11 +117,60 @@ pub struct ContentChunk {
     pub bytes: Vec<u8>,
 }
 impl ContentStore {
+    #[cfg(test)]
+    pub(crate) fn set_write_hook(&self, hook: Option<Arc<dyn Fn(&Path) + Send + Sync>>) {
+        *self.coordination.write_hook.lock().unwrap() = hook;
+    }
     pub(crate) fn begin_publication(&self) -> ContentPublication {
-        self.publications.fetch_add(1, Ordering::Acquire);
-        ContentPublication(self.publications.clone())
+        let mut state = self
+            .coordination
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        state.sequence = state
+            .sequence
+            .checked_add(1)
+            .expect("content publication sequence exhausted");
+        state.active += 1;
+        ContentPublication(self.coordination.clone())
+    }
+    /// Synchronous fixture conveniences must never wait for a collector while holding Catalog.
+    /// Real execution captures an owned preparation/read and performs I/O after unlocking Catalog.
+    pub(crate) fn begin_synchronous(&self) -> Result<ContentPublication> {
+        let mut state = self
+            .coordination
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if state.collector.is_some() {
+            return Err(RuntimeError::Conflict(
+                "synchronous content access during collection; use the prepared worker API".into(),
+            ));
+        }
+        state.sequence = state
+            .sequence
+            .checked_add(1)
+            .expect("content publication sequence exhausted");
+        state.active += 1;
+        Ok(ContentPublication(self.coordination.clone()))
+    }
+    pub(crate) fn cancel_collection(&self) {
+        let state = self
+            .coordination
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(cancel) = &state.collector {
+            cancel.store(true, Ordering::Release);
+        }
     }
     pub(crate) fn load_chunk(&self, reference: &Value, index: usize) -> Result<ContentChunk> {
+        let _publication = self.begin_publication();
+        let _io = self
+            .coordination
+            .io
+            .read()
+            .unwrap_or_else(|error| error.into_inner());
         let reference: Reference = serde_json::from_value(reference.clone())?;
         let manifest: Manifest =
             serde_json::from_slice(&self.read_bytes(&reference.content_object)?)?;
@@ -131,7 +200,7 @@ impl ContentStore {
         }
         Ok(Self {
             root,
-            publications: Arc::new(AtomicUsize::new(0)),
+            coordination: Arc::new(ContentCoordination::default()),
         })
     }
     fn put_bytes(&self, bytes: &[u8]) -> Result<String> {
@@ -156,6 +225,13 @@ impl ContentStore {
             file.write_all(bytes)?;
             file.sync_all()?;
             drop(file);
+            #[cfg(test)]
+            {
+                let hook = self.coordination.write_hook.lock().unwrap().clone();
+                if let Some(hook) = hook {
+                    hook(&staging);
+                }
+            }
             // A hard link installs without replacing an existing immutable object. Both paths
             // are inside one filesystem; unlike rename this never clobbers concurrent content.
             match fs::hard_link(&staging, &target) {
@@ -188,6 +264,12 @@ impl ContentStore {
     /// Content-defined chunks preserve unchanged history across newly appended request snapshots.
     /// Serialization still visits the full provider request; only changed chunks need durable writes.
     pub(crate) fn save(&self, value: &Value) -> Result<Value> {
+        let _publication = self.begin_publication();
+        let _io = self
+            .coordination
+            .io
+            .read()
+            .unwrap_or_else(|error| error.into_inner());
         let bytes = serde_json::to_vec(value)?;
         let chunks = content_chunks(&bytes)
             .into_iter()
@@ -216,6 +298,12 @@ impl ContentStore {
         })?)
     }
     pub(crate) fn load(&self, reference: &Value) -> Result<Value> {
+        let _publication = self.begin_publication();
+        let _io = self
+            .coordination
+            .io
+            .read()
+            .unwrap_or_else(|error| error.into_inner());
         let reference: Reference = serde_json::from_value(reference.clone())?;
         let manifest: Manifest =
             serde_json::from_slice(&self.read_bytes(&reference.content_object)?)?;
@@ -276,151 +364,6 @@ impl ContentStore {
             original.item = self.load(&original.item)?;
         }
         Ok(())
-    }
-
-    /// Called under the catalog's exclusive owner lock. Every retained content domain is a GC root;
-    /// failures during mark abort sweep, and objects saved by a rolled-back commit are collectible.
-    pub(crate) fn collect(&self, db: &Connection) -> Result<u64> {
-        // Admission of a publication and collection are serialized by Catalog. An in-flight
-        // writer can be waiting to commit its references: waiting here would deadlock it.
-        if self.publications.load(Ordering::Acquire) != 0 {
-            return Ok(0);
-        }
-        let mut live = HashSet::new();
-        let contexts:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='context_checkpoints')",[],|row|row.get(0))?;
-        let mut roots = "SELECT json_extract(body,'$.request') FROM model_steps
-             UNION ALL SELECT json_extract(o.value,'$.item') FROM model_steps m, json_each(m.body,'$.original') o
-             UNION ALL SELECT json_extract(body,'$.content') FROM history
-             UNION ALL SELECT body FROM model_outputs
-             UNION ALL SELECT body FROM input_history_content
-             UNION ALL SELECT intent FROM commands".to_string();
-        if contexts {
-            roots.push_str(" UNION ALL SELECT body FROM context_checkpoints UNION ALL SELECT body FROM memory_states");
-        }
-        roots.push_str(" UNION ALL SELECT recipe FROM context_jobs UNION ALL SELECT body FROM context_job_parts");
-        roots.push_str(" UNION ALL SELECT json_extract(data,'$.composition') FROM events WHERE kind='run.tools_activated'");
-        roots.push_str(" UNION ALL SELECT json_extract(body,'$.selection.tools_ref') FROM run_launches
-            UNION ALL SELECT json_extract(body,'$.selection.base_tools_ref') FROM run_launches
-            UNION ALL SELECT json_extract(body,'$.selection.extension_bindings_ref') FROM run_launches
-            UNION ALL SELECT json_extract(body,'$.selection.mcp_binding_ref') FROM run_launches WHERE json_extract(body,'$.selection.mcp_binding_ref') IS NOT NULL
-            UNION ALL SELECT json_extract(p.value,'$.body') FROM run_launches l,json_each(l.body,'$.selection.policy_models') p");
-        roots.push_str(" UNION ALL SELECT json_extract(m.value,'$.body') FROM policy_selections p,json_each(p.body,'$.models') m");
-        roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.value.answer_ref') FROM operations WHERE json_extract(body,'$.executor')='ask_user' AND json_extract(body,'$.result.value.answer_ref') IS NOT NULL");
-        roots.push_str(" UNION ALL SELECT state_ref FROM policy_checkpoints UNION ALL SELECT pending_state_ref FROM policy_checkpoints WHERE pending_state_ref IS NOT NULL UNION ALL SELECT action_ref FROM policy_checkpoints WHERE action_ref IS NOT NULL UNION ALL SELECT continuation_ref FROM policy_checkpoints WHERE continuation_ref IS NOT NULL");
-        roots.push_str(" UNION ALL SELECT json_extract(body,'$.arguments_ref') FROM tool_calls
-            UNION ALL SELECT json_extract(body,'$.intent.call.arguments_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='tool'");
-        roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.value.permission.call_ref') FROM operations WHERE json_extract(body,'$.result.value.permission.call_ref') IS NOT NULL
-            UNION ALL SELECT json_extract(body,'$.result.value.permission.scope_ref') FROM operations WHERE json_extract(body,'$.result.value.permission.scope_ref') IS NOT NULL
-            UNION ALL SELECT json_extract(data,'$.result.value.permission.call_ref') FROM events WHERE kind='permission.opened'
-            UNION ALL SELECT json_extract(data,'$.result.value.permission.scope_ref') FROM events WHERE kind='permission.opened'");
-        roots.push_str(
-            " UNION ALL SELECT json_extract(body,'$.input_ref') FROM child_tasks
-            UNION ALL SELECT json_extract(body,'$.configuration_ref') FROM child_tasks
-            UNION ALL SELECT json_extract(body,'$.launch.tools_ref') FROM child_tasks
-            UNION ALL SELECT json_extract(body,'$.launch.base_tools_ref') FROM child_tasks
-            UNION ALL SELECT json_extract(body,'$.launch.extension_bindings_ref') FROM child_tasks
-            UNION ALL SELECT json_extract(body,'$.launch.mcp_binding_ref') FROM child_tasks WHERE json_extract(body,'$.launch.mcp_binding_ref') IS NOT NULL
-            UNION ALL SELECT json_extract(p.value,'$.body') FROM child_tasks c,json_each(c.body,'$.launch.policy_models') p
-            UNION ALL SELECT json_extract(body,'$.source.provenance_ref') FROM child_tasks WHERE json_extract(body,'$.source.kind')='ready'",
-        );
-        roots.push_str(&format!(" UNION ALL SELECT json_extract(body,'$.intent.body_ref') FROM operations WHERE json_extract(body,'$.intent.kind') IN ({})", crate::catalog::policy_body::ACTION_KINDS));
-        roots.push_str("
-            UNION ALL SELECT json_extract(receipt,'$.completion.content_ref') FROM policy_graph_nodes WHERE json_extract(receipt,'$.completion.kind')='result'
-            UNION ALL SELECT json_extract(receipt,'$.completion.reason_ref') FROM policy_graph_nodes WHERE json_extract(receipt,'$.completion.kind')='not_dispatched'
-            UNION ALL SELECT json_extract(call,'$.arguments_ref') FROM policy_graph_nodes");
-        roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.reference') FROM operations WHERE json_extract(body,'$.result.kind')='content'
-            UNION ALL SELECT json_extract(body,'$.external_receipt.result_ref') FROM operations WHERE json_extract(body,'$.external_receipt') IS NOT NULL
-            UNION ALL SELECT json_extract(data,'$.result.reference') FROM events WHERE json_extract(data,'$.result.kind')='content'
-            UNION ALL SELECT json_extract(data,'$.external_receipt.result_ref') FROM events WHERE json_extract(data,'$.external_receipt') IS NOT NULL
-            UNION ALL SELECT json_extract(receipt,'$.completion.content_ref') FROM tool_calls WHERE json_extract(receipt,'$.completion.kind')='result'
-            UNION ALL SELECT json_extract(receipt,'$.completion.reason_ref') FROM tool_calls WHERE json_extract(receipt,'$.completion.kind')='not_dispatched'");
-        roots.push_str(" UNION ALL SELECT json_extract(body,'$.call_completion.content_ref') FROM operations WHERE json_extract(body,'$.call_completion.kind')='result'
-            UNION ALL SELECT json_extract(body,'$.call_completion.reason_ref') FROM operations WHERE json_extract(body,'$.call_completion.kind')='not_dispatched'
-            UNION ALL SELECT json_extract(data,'$.call_completion.content_ref') FROM events WHERE json_extract(data,'$.call_completion.kind')='result'
-            UNION ALL SELECT json_extract(data,'$.call_completion.reason_ref') FROM events WHERE json_extract(data,'$.call_completion.kind')='not_dispatched'");
-        let mut references = Vec::new();
-        let mut stmt = db.prepare(&roots)?;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-        for row in rows {
-            references.push(serde_json::from_str::<Reference>(&row?)?);
-        }
-        let mut jobs=db.prepare("SELECT body FROM operations WHERE json_extract(body,'$.intent.kind')='policy_model_job_v1'")?;
-        for row in jobs.query_map([], |r| r.get::<_, String>(0))? {
-            let op: crate::types::OperationMetadata = serde_json::from_str(&row?)?;
-            crate::catalog::policy_model::model_metadata(&op)?
-                .ok_or_else(|| RuntimeError::Invalid("planning intent missing".into()))?;
-            let result = crate::catalog::policy_model::model_result(&op)?;
-            references.push(serde_json::from_value(result.request_ref)?);
-            if let Some(original) = result.original_ref {
-                references.push(serde_json::from_value(original)?);
-            }
-            if let Some(output) = result.receipt.and_then(|r| r.output) {
-                references.push(Reference {
-                    content_object: output.content_ref,
-                });
-            }
-        }
-        let mut verified = HashSet::new();
-        for reference in references {
-            if !verified.insert(reference.content_object.clone()) {
-                continue;
-            }
-            let manifest: Manifest =
-                serde_json::from_slice(&self.read_bytes(&reference.content_object)?)?;
-            if manifest.version != 1 {
-                return Err(RuntimeError::Invalid("unsupported content manifest".into()));
-            }
-            live.insert(reference.content_object);
-            let mut length = 0u64;
-            for hash in manifest.chunks {
-                length += self.read_bytes(&hash)?.len() as u64;
-                live.insert(hash);
-            }
-            if length != manifest.bytes {
-                return Err(RuntimeError::Invalid(
-                    "content manifest length mismatch".into(),
-                ));
-            }
-        }
-        let mut removed = 0;
-        for shard in fs::read_dir(self.root.join("objects"))? {
-            let shard = shard?;
-            if !shard.file_type()?.is_dir() {
-                continue;
-            }
-            for entry in fs::read_dir(shard.path())? {
-                let entry = entry?;
-                if !entry.file_type()?.is_file() {
-                    continue;
-                }
-                let hash = format!(
-                    "sha256-{}{}",
-                    shard.file_name().to_string_lossy(),
-                    entry.file_name().to_string_lossy()
-                );
-                // Unknown files are not ours to delete.
-                if object_path(&self.root, &hash).ok().as_ref() != Some(&entry.path()) {
-                    continue;
-                }
-                if !live.contains(&hash) {
-                    fs::remove_file(entry.path())?;
-                    removed += 1;
-                }
-            }
-            sync_directory(&shard.path())?;
-        }
-        // No save can be in flight while the Catalog owner invokes collection. Staging files
-        // from a process crash are never authoritative; preserve anything outside our UUID names.
-        for entry in fs::read_dir(self.root.join("staging"))? {
-            let entry = entry?;
-            if entry.file_type()?.is_file()
-                && uuid::Uuid::parse_str(&entry.file_name().to_string_lossy()).is_ok()
-            {
-                fs::remove_file(entry.path())?;
-            }
-        }
-        sync_directory(&self.root.join("staging"))?;
-        Ok(removed)
     }
 }
 

@@ -1,3 +1,5 @@
+#[path = "../tests/fixtures/content_collection.rs"]
+mod content_collection;
 use super::*;
 use crate::test_submission::InputAdmission;
 use crate::{Catalog, SubmitInput};
@@ -567,7 +569,7 @@ fn worker_commit_conflict_cannot_leave_a_workerless_run_generating() {
     );
     assert!(supervisor.execution_failure(&run_id).unwrap().is_some());
     assert!(run.waiting_on.is_some());
-    db.lock().unwrap().collect_content_objects().unwrap();
+    content_collection::collect(|| db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
     let retained = db
         .lock()
         .unwrap()
@@ -586,7 +588,7 @@ fn worker_commit_conflict_cannot_leave_a_workerless_run_generating() {
     drop(db);
     drop(supervisor);
     let reopened = f.catalog();
-    reopened.lock().unwrap().collect_content_objects().unwrap();
+    content_collection::collect(|| reopened.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
     assert_eq!(
         reopened.lock().unwrap().run(&run_id).unwrap().state,
         RunState::Waiting
@@ -1469,8 +1471,9 @@ fn active_context_compiles_summary_and_tail_without_destroying_original_history(
     catalog.publish_context(proposal.clone()).unwrap();
     prepared.history = catalog.execution_history("main").unwrap();
     prepared.binding.history_range.leaf_id = catalog.head("main").unwrap();
-    catalog.collect_content_objects().unwrap();
+    let collection = catalog.prepare_content_collection(Default::default());
     drop(catalog);
+    content_collection::collect(|| collection).unwrap();
     let (progress, _receiver) = ProgressSink::channel(1);
     let engine = ExecutionEngine {
         context_preparation: Arc::new(NoopContextPreparation),
@@ -1490,8 +1493,8 @@ fn active_context_compiles_summary_and_tail_without_destroying_original_history(
     drop(engine);
     drop(db);
     let reopened = fixture.catalog();
-    let mut catalog = reopened.lock().unwrap();
-    catalog.collect_content_objects().unwrap();
+    content_collection::collect(|| reopened.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+    let catalog = reopened.lock().unwrap();
     assert_eq!(
         catalog.active_context("main").unwrap().unwrap().proposal,
         proposal

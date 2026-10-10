@@ -230,6 +230,7 @@ impl Catalog {
             publication: self.content.begin_publication(),
         }
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn admit_tool_operation(
         &mut self,
         key: &str,
@@ -238,6 +239,7 @@ impl Catalog {
         origin: &ToolOrigin,
         tool: &AdmittedTool,
     ) -> Result<Operation> {
+        let _synchronous = self.content.begin_synchronous()?;
         let prepared = self.prepare_tool_intent().load(origin, tool)?;
         self.admit_tool_operation_prepared(key, run_id, epoch, prepared)
     }

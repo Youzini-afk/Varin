@@ -172,7 +172,9 @@ impl PolicyModelOutputReferences {
     }
 }
 impl Catalog {
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn policy_model_job(&self, run_id: &str, epoch: u64) -> Result<Option<PolicyModelState>> {
+        let _synchronous = self.content.begin_synchronous()?;
         self.prepare_policy_model_read(run_id, epoch)?
             .map(PolicyModelRead::load)
             .transpose()
@@ -227,6 +229,7 @@ impl Catalog {
             cancel_requested: op.cancel_requested,
         }))
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn admit_policy_model(
         &mut self,
         run_id: &str,
@@ -234,6 +237,7 @@ impl Catalog {
         intent: &PolicyModelIntent,
         snapshot: &RequestSnapshot,
     ) -> Result<PolicyModelState> {
+        let _synchronous = self.content.begin_synchronous()?;
         let _publication = self.content.begin_publication();
         let deliveries = super::memory::PreparedMemoryDeliveries::prepare(snapshot)?;
         let references = PolicyModelAdmissionReferences::write(&self.content, intent, snapshot)?;
@@ -384,7 +388,9 @@ impl Catalog {
         self.prepare_policy_model_read(run_id, epoch)?
             .ok_or_else(|| RuntimeError::Invalid("admitted model missing".into()))
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn dispatch_policy_model(&mut self, run_id: &str, epoch: u64, action: &str) -> Result<()> {
+        let _synchronous = self.content.begin_synchronous()?;
         let _publication = self.content.begin_publication();
         let reference = self.policy_model_request_reference(run_id, epoch, action)?;
         let snapshot = serde_json::from_value(self.content.load(&reference)?)?;
@@ -475,6 +481,7 @@ impl Catalog {
         tx.commit()?;
         Ok(())
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn record_policy_model(
         &mut self,
         run_id: &str,
@@ -483,6 +490,7 @@ impl Catalog {
         output: &PolicyModelOutput,
         receipt: Option<&PolicyModelReceipt>,
     ) -> Result<()> {
+        let _synchronous = self.content.begin_synchronous()?;
         let _publication = self.content.begin_publication();
         let reference = self.policy_model_request_reference(run_id, epoch, action)?;
         let snapshot = serde_json::from_value(self.content.load(&reference)?)?;

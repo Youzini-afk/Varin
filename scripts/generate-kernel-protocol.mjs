@@ -12,6 +12,7 @@ const runtimeTypesTarget = path.join(root, 'kernel', 'crates', 'varin-runtime', 
 const structs = Object.entries(schema.runtimeStructs ?? {}).map(([name, spec]) => {
   const fields = Object.entries(spec.fields).map(([key, value]) => {
     let type = ({string:"String", number:"u64", boolean:"bool", unknown:"serde_json::Value", "string | null":"Option<String>", "number | null":"Option<u64>"})[value.type];
+    if (!type && schema.runtimeEnums?.[value.type]) type = value.type;
     if (value.optional && type && !type.startsWith("Option<")) type = `Option<${type}>`;
     if (!type) throw new Error(`Unsupported runtime field type ${value.type}`);
     const field = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();

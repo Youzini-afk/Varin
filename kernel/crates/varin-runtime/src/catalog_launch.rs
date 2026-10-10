@@ -472,11 +472,13 @@ impl Catalog {
 
     /// Preparation can append one concrete MCP generation only before the launch is bound or used.
     /// It cannot revise a source, model, base capability, or an already frozen tool description.
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn prepare_mcp_launch(
         &mut self,
         run_id: &str,
         binding: HostToolBinding,
     ) -> Result<LaunchIntent> {
+        let _synchronous = self.content.begin_synchronous()?;
         let prepared = self.prepare_mcp_change(run_id, binding)?.load()?;
         self.admit_launch_change(prepared)?.load()
     }
@@ -484,20 +486,24 @@ impl Catalog {
     /// Standalone Catalog convenience; concurrent owners use prepare_launch_selection/admit_launch.
     /// Store the selected plan before starting a worker. Retries can only rebind the same plan.
     /// Durable intent is not proof of authorization or worker liveness.
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn bind_launch(
         &mut self,
         run_id: &str,
         selection: LaunchSelection,
     ) -> Result<LaunchIntent> {
+        let _synchronous = self.content.begin_synchronous()?;
         let prepared = self.prepare_launch_selection(selection).load()?;
         self.admit_launch(run_id, prepared, true)?.load()
     }
     /// Durable selection precedes expensive preparation. It conveys no live execution permit.
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn select_launch(
         &mut self,
         run_id: &str,
         selection: LaunchSelection,
     ) -> Result<LaunchIntent> {
+        let _synchronous = self.content.begin_synchronous()?;
         let prepared = self.prepare_launch_selection(selection).load()?;
         self.admit_launch(run_id, prepared, false)?.load()
     }
@@ -606,7 +612,9 @@ impl Catalog {
         tx.commit()?;
         self.launch_read(intent)
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn fail_launch(&mut self, run_id: &str, code: &str) -> Result<LaunchIntent> {
+        let _synchronous = self.content.begin_synchronous()?;
         let metadata = self.fail_launch_metadata(run_id, code)?;
         self.launch_read(metadata)?.load()
     }
@@ -675,13 +683,17 @@ impl Catalog {
         tx.commit()?;
         Ok(intent)
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn launch_intent(&self, run_id: &str) -> Result<Option<LaunchIntent>> {
+        let _synchronous = self.content.begin_synchronous()?;
         self.capture_launch(run_id)?
             .map(LaunchRead::load)
             .transpose()
     }
     /// Includes queued launches; recovery never silently executes a saved grant or model request.
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn pending_launches(&self) -> Result<Vec<LaunchIntent>> {
+        let _synchronous = self.content.begin_synchronous()?;
         self.capture_pending_launches()?
             .into_iter()
             .map(LaunchRead::load)

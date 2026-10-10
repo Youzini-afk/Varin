@@ -1,4 +1,6 @@
 //! Actual Engine/Catalog continuation boundaries for independently delivered output and explicit pause.
+#[path = "fixtures/content_collection.rs"]
+mod content_collection;
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
@@ -324,7 +326,7 @@ fn delivery_lost_reply_reopens_once_with_honest_assistant_history() {
         "lost_response"
     );
     drop(engine);
-    f.db.lock().unwrap().collect_content_objects().unwrap();
+    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
     f.reopen();
     let history = f.db.lock().unwrap().history("main").unwrap();
     assert_eq!(history.len(), 2);
@@ -459,7 +461,7 @@ fn pause_reopen_blocks_worker_admission_and_old_resume_cannot_release_new_pause(
             .waiting_on,
         Some(second.clone())
     );
-    f.db.lock().unwrap().collect_content_objects().unwrap();
+    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
     f.reopen();
     let db = f.db.lock().unwrap();
     assert_eq!(

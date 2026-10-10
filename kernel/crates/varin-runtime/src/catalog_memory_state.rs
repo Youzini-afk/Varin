@@ -61,7 +61,9 @@ impl Catalog {
             })
             .transpose()
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn memory_state(&self, branch: &str) -> Result<Option<MemoryState>> {
+        let _synchronous = self.content.begin_synchronous()?;
         self.capture_memory_state(branch)?
             .map(MemoryStateRead::load)
             .transpose()

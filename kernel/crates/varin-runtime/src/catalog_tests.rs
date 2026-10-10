@@ -1,3 +1,5 @@
+#[path = "../tests/fixtures/content_collection.rs"]
+mod content_collection;
 use super::*;
 use crate::test_submission::InputAdmission;
 use std::path::PathBuf;
@@ -783,7 +785,7 @@ fn external_receipts_are_idempotent_and_only_same_epoch_unknown_can_refine() {
     wrong.identity = "job".into();
     wrong.executor = "other-executor".into();
     assert!(db.record_external_receipt("job", wrong).is_err());
-    db.collect_content_objects().unwrap();
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
     let metadata = db.operation("job").unwrap();
     assert!(serde_json::to_vec(&metadata).unwrap().len() < 2048);
     assert_eq!(
@@ -798,8 +800,8 @@ fn external_receipts_are_idempotent_and_only_same_epoch_unknown_can_refine() {
         "refinement must retain the original uncertain executor evidence"
     );
     drop(db);
-    let mut db = f.open();
-    db.collect_content_objects().unwrap();
+    let db = f.open();
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
     assert_eq!(
         db.capture_operation_read(db.operation("job").unwrap())
             .load()
@@ -1138,7 +1140,7 @@ fn prepared_inputs_preserve_original_intents_and_only_retry_changed_queue_materi
         .unwrap();
     db.cancel_input(&later.input_id, 1).unwrap();
     assert!(db.admit_input_edit(edit).is_err());
-    db.collect_content_objects().unwrap();
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
     assert_eq!(
         db.content
             .load(&serde_json::from_str(&intent).unwrap())
@@ -1286,12 +1288,12 @@ fn queued_input_is_durable_editable_and_only_enters_a_closed_model_boundary() {
         db.queued_input(&queued.input_id).unwrap().content,
         json!({"text":"actual correction"})
     );
-    db.collect_content_objects().unwrap();
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
     let delivered = db
         .consume_inputs(&r.run_id, epoch, Some(&r.input_id))
         .unwrap();
     assert_eq!(delivered.len(), 1);
-    db.collect_content_objects().unwrap();
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
     assert_eq!(
         db.history("main").unwrap().last().unwrap().content,
         json!({"text":"actual correction"})
@@ -1434,12 +1436,12 @@ fn content_backed_request_stays_compact_across_phases_and_reopens_exactly() {
         .unwrap();
     assert_eq!(step.request, request);
     assert_eq!(compact_body(&db)["request"], original_ref);
-    assert_eq!(db.collect_content_objects().unwrap(), 0);
+    assert_eq!(content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap(), 0);
     drop(db);
-    let mut db = f.open();
+    let db = f.open();
     assert_eq!(db.model_step("content-step").unwrap().request, request);
     assert_eq!(compact_body(&db)["request"], original_ref);
-    assert_eq!(db.collect_content_objects().unwrap(), 0);
+    assert_eq!(content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap(), 0);
 }
 
 #[test]
@@ -1611,7 +1613,7 @@ fn missing_launch_tool_content_does_not_break_source_or_cancellation_control() {
     })).unwrap();
     db.select_launch(&receipt.run_id, selection.clone())
         .unwrap();
-    db.collect_content_objects().unwrap();
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
     assert_eq!(
         db.launch_intent(&receipt.run_id)
             .unwrap()
@@ -2052,7 +2054,7 @@ fn tool_activation_retains_its_exact_composition_through_collection_and_reopen()
     );
     assert!(db.activate_tool_update(&prepared).unwrap());
     drop(prepared);
-    db.collect_content_objects().unwrap();
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
     let launch = db
         .launch_intent(&receipt.run_id)
         .unwrap()
@@ -2594,7 +2596,7 @@ fn recovery_preparation_hydrates_without_catalog_and_rechecks_its_actual_boundar
             .content
             .save(&json!({"orphan":"protected until preparation ends"}))
             .unwrap();
-        assert_eq!(catalog.collect_content_objects().unwrap(), 0);
+        assert_eq!(content_collection::collect(|| catalog.prepare_content_collection(Default::default())).unwrap(), 0);
         let (send, receive) = mpsc::channel();
         let worker = std::thread::spawn(move || {
             send.send(preparation.load(&CancellationToken::default()))
@@ -2642,10 +2644,10 @@ fn recovery_preparation_hydrates_without_catalog_and_rechecks_its_actual_boundar
                 "a stale {change} boundary must be recaptured"
             );
         }
-        assert!(
-            catalog.collect_content_objects().unwrap() > 0,
-            "publication pin must release"
-        );
+        let collection = catalog.prepare_content_collection(Default::default());
+        drop(catalog);
+        assert!(content_collection::collect(|| collection).unwrap() > 0, "publication pin must release");
+        let mut catalog = owner.lock().unwrap();
         if change == "cancel" {
             assert_eq!(
                 catalog
@@ -2854,7 +2856,7 @@ fn result_publication_stages_without_catalog_and_gc_protects_until_commit() {
         .is_none());
     drop(catalog);
     worker.join().unwrap();
-    assert_eq!(owner.lock().unwrap().collect_content_objects().unwrap(), 0);
+    assert_eq!(content_collection::collect(|| owner.lock().unwrap().prepare_content_collection(Default::default())).unwrap(), 0);
     let operation = owner
         .lock()
         .unwrap()
@@ -2866,7 +2868,7 @@ fn result_publication_stages_without_catalog_and_gc_protects_until_commit() {
             prepared,
         )
         .unwrap();
-    owner.lock().unwrap().collect_content_objects().unwrap();
+    content_collection::collect(|| owner.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
     let read = owner.lock().unwrap().capture_operation_read(operation);
     assert_eq!(read.load().unwrap().result, Some(expected));
 }

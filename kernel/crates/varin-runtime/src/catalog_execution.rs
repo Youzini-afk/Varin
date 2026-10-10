@@ -856,12 +856,14 @@ impl Catalog {
         }
         Ok(result)
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn commit_execution(
         &mut self,
         run_id: &str,
         epoch: u64,
         record: &ExecutionRecord,
     ) -> Result<()> {
+        let _synchronous = self.content.begin_synchronous()?;
         let prepared = self.prepare_execution_bodies(record)?.write(record)?;
         self.commit_prepared_execution(run_id, epoch, record, prepared)
     }
@@ -1761,6 +1763,7 @@ fn record_value(tx: &Transaction<'_>, id: &str) -> Result<Run> {
 
 impl Catalog {
     /// Freezes admission from durable state. Recovery never restarts a paid/ambiguous exchange.
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn prepare_execution(
         &self,
         run_id: &str,
@@ -1768,6 +1771,7 @@ impl Catalog {
         policy: PolicyIdentity,
         initial_policy_state: Value,
     ) -> Result<ExecutionInput> {
+        let _synchronous = self.content.begin_synchronous()?;
         self.capture_execution_preparation(
             run_id,
             binding,
@@ -1994,7 +1998,9 @@ impl Catalog {
         tx.commit()?;
         Ok(())
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn model_output(&self, request_id: &str) -> Result<Option<Value>> {
+        let _synchronous = self.content.begin_synchronous()?;
         let raw: Option<String> = self
             .db
             .query_row(

@@ -720,6 +720,19 @@ export interface AdmissionInspection {
   queue: AdmissionStatus | null;
 }
 
+export type ContentCollectionStatus = "completed" | "deferred" | "cancelled" | "failed";
+
+export type ContentCollectionPhase = "admission" | "roots" | "verify" | "sweep" | "staging";
+
+export interface ContentCollectionReport {
+  status: ContentCollectionStatus;
+  phase: ContentCollectionPhase;
+  removedObjects: number;
+  removedBytes: number;
+  removedStagingFiles: number;
+  reason: string | null;
+}
+
 export interface RuntimeStatus {
   epoch: number;
   eventCursor: number;

@@ -1,5 +1,7 @@
 //! Independent counterexamples for durable child admission. Host/source authority is covered by
 //! the loopback suite; these tests use real Catalog transactions and committed tool origins.
+#[path = "fixtures/content_collection.rs"]
+mod content_collection;
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
@@ -92,13 +94,13 @@ fn child_body_roots_survive_collection_and_broken_task_text_does_not_block_contr
     let child = f.accept();
     assert!(child.receipt.is_none());
     assert_ne!(child.launch.extension_bindings_ref,f.db.launch_metadata(&f.context.run_id).unwrap().unwrap().selection.extension_bindings_ref);
-    f.db.collect_content_objects().unwrap();
+    content_collection::collect(|| f.db.prepare_content_collection(Default::default())).unwrap();
     assert!(f.db.capture_child_read(child.clone()).load().unwrap().launch.extension_bindings.is_empty());
     let (source, proposal, basis) = child_context(&child);
     let child =
         f.db.prepare_child(&child.operation_id, source, proposal, basis)
             .unwrap();
-    f.db.collect_content_objects().unwrap();
+    content_collection::collect(|| f.db.prepare_content_collection(Default::default())).unwrap();
     let view = f.db.capture_child_read(child.clone()).load().unwrap();
     assert_eq!(view.input, f.input);
     assert_eq!(view.launch.tools, f.launch.tools);
@@ -360,7 +362,7 @@ fn cancelled_wait_rejects_a_prepared_report_append_and_a_new_observer_can_receiv
             .unwrap()
             .load()
             .unwrap();
-    assert_eq!(f.db.collect_content_objects().unwrap(), 0);
+    assert_eq!(content_collection::collect(|| f.db.prepare_content_collection(Default::default())).unwrap(), 0);
     f.db.request_cancel_child_wait(&wait.id).unwrap();
     assert!(f.db.admit_child_wait(prepared).unwrap().is_none());
     assert!(f

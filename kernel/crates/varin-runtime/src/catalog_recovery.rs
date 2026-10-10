@@ -954,6 +954,7 @@ impl Catalog {
         }))
     }
 
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn prepare_recovered_execution(
         &mut self,
         run_id: &str,
@@ -961,6 +962,7 @@ impl Catalog {
         policy: PolicyIdentity,
         initial_policy_state: Value,
     ) -> Result<(ExecutionInput, Option<ExecutionRecovery>)> {
+        let _synchronous = self.content.begin_synchronous()?;
         let preparation =
             self.capture_recovered_execution(run_id, binding, policy, initial_policy_state, false)?;
         let prepared = preparation

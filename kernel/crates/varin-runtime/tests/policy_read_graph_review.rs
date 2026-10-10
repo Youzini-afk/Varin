@@ -1,4 +1,6 @@
 //! Independent adversarial tests: graph evidence is not a synthetic model tool exchange.
+#[path = "fixtures/content_collection.rs"]
+mod content_collection;
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
@@ -47,7 +49,7 @@ fn body_publication_keeps_policy_node_alive_and_receipt_idempotent() {
                 graph.result.receipts.is_empty(),
                 "body must precede receipt publication"
             );
-            assert_eq!(catalog.collect_content_objects().unwrap(), 0);
+            assert_eq!(content_collection::collect(|| catalog.prepare_content_collection(Default::default())).unwrap(), 0);
             catalog
                 .create_thread("independent", "independent-main")
                 .unwrap();
@@ -78,7 +80,7 @@ fn body_publication_keeps_policy_node_alive_and_receipt_idempotent() {
             }
         )
         .is_err());
-    f.db.lock().unwrap().collect_content_objects().unwrap();
+    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
     let evidence =
         f.db.policy_evidence(&run, epoch, receipt.output().unwrap())
             .unwrap();
@@ -900,10 +902,10 @@ fn output_chunks_are_owned_bounded_and_survive_content_collection() {
         )
         .unwrap();
     let reference = receipt.output().unwrap().clone();
-    f.db.lock().unwrap().collect_content_objects().unwrap();
+    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
     reopen(&mut f);
     let epoch = f.db.lock().unwrap().epoch();
-    f.db.lock().unwrap().collect_content_objects().unwrap();
+    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
     let first =
         f.db.policy_chunk(&f.input.run_id, epoch, &reference, 0)
             .unwrap();
@@ -1008,7 +1010,7 @@ fn newer_decision_checkpoint_after_graph_results_is_not_rolled_back_on_restart()
             }).unwrap();
         }
         reopen(&mut f);
-        f.db.lock().unwrap().collect_content_objects().unwrap();
+        content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
         let (input, recovery) =
             f.db.lock()
                 .unwrap()
@@ -1151,7 +1153,7 @@ fn durable_operation_cancellation_before_worker_exists_prevents_recovered_reads(
         "durable graph cancellation was forgotten when the worker restarted"
     );
     assert!(e.provider.requests.lock().unwrap().is_empty());
-    f.db.lock().unwrap().collect_content_objects().unwrap();
+    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
     let operation = f.db.lock().unwrap().operation(&action_id).unwrap();
     assert_eq!(operation.phase, OperationPhase::Terminal);
     let events = e.policy.events.lock().unwrap();
@@ -1367,7 +1369,7 @@ fn operation_cancel_between_graph_load_and_child_registration_is_not_lost() {
             .unwrap()
             .cancel_requested
     );
-    f.db.lock().unwrap().collect_content_objects().unwrap();
+    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
 }
 
 #[test]
@@ -1387,7 +1389,7 @@ fn concurrent_small_receipt_publication_and_gc_preserve_every_committed_output()
         gc_start.wait();
         let mut errors = vec![];
         while !gc_stop.load(Ordering::SeqCst) {
-            if let Err(error) = gc_db.lock().unwrap().collect_content_objects() {
+            if let Err(error) = content_collection::collect(|| gc_db.lock().unwrap().prepare_content_collection(Default::default())) {
                 errors.push(error.to_string());
             }
             std::thread::yield_now();
@@ -1430,7 +1432,7 @@ fn concurrent_small_receipt_publication_and_gc_preserve_every_committed_output()
         gc_errors.is_empty(),
         "GC observed a dangling committed graph output: {gc_errors:?}"
     );
-    f.db.lock().unwrap().collect_content_objects().unwrap();
+    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
     for (value, receipt) in results {
         let reference = receipt.unwrap().output().unwrap().clone();
         let chunk =
