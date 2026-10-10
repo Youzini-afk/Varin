@@ -1,7 +1,7 @@
 //! Durable observation of an existing process Operation. No process state is owned here.
 use super::*;
 use crate::execution::{
-    AdmittedTool, CompletionKind, Content, ConversationItem, Provenance, ToolCompletion,
+    CompletionKind, Content, ConversationItem, Provenance, ToolCompletion,
     ToolExecutionContext, ToolOrigin, ToolResult,
 };
 
@@ -54,22 +54,22 @@ impl Catalog {
                 "process observation is not an active admitted call".into(),
             ));
         }
-        let admitted: AdmittedTool = serde_json::from_value(op.intent.clone())?;
+        let admitted=super::tool_content::ToolIntent::from_operation(&op)?;
         let step: ModelStep = record(&tx, "model_steps", request_id)?;
         let expected: String = tx.query_row(
             "SELECT body FROM tool_calls WHERE request_id=?1 AND call_id=?2",
-            params![request_id, admitted.call.call_id],
+            params![request_id, admitted.call().call_id],
             |row| row.get(0),
         )?;
         if step.run_id != run.id
             || step.epoch != run.epoch
-            || context.operation_id != format!("{request_id}:tool:{}", admitted.call.call_id)
-            || expected != encode(&admitted.call)?
-            || admitted.call.name != WAIT_TOOL
-            || admitted.contract.name != WAIT_TOOL
-            || admitted.contract.completion != CompletionKind::Job
-            || !admitted.contract.read_only
-            || admitted.call.arguments != json!({"processId":process_id})
+            || context.operation_id != format!("{request_id}:tool:{}", admitted.call().call_id)
+            || serde_json::from_str::<super::tool_content::ToolCallMetadata>(&expected)? != *admitted.call()
+            || admitted.call().name != WAIT_TOOL
+            || admitted.contract().name != WAIT_TOOL
+            || admitted.contract().completion != CompletionKind::Job
+            || !admitted.contract().read_only
+            || admitted.call().arguments_ref != crate::content::ContentStore::reference(&json!({"processId":process_id}))?
         {
             return Err(RuntimeError::Conflict(
                 "process wait origin or target changed".into(),
@@ -123,7 +123,7 @@ impl Catalog {
         put(&tx, "operations", &op.id, &op)?;
         let receipt = ToolResult {
             request_id: request_id.clone(),
-            call_id: admitted.call.call_id,
+            call_id: admitted.call().call_id.clone(),
             completion: ToolCompletion::JobAccepted {
                 operation_id: op.id.clone(),
                 phase: "awaiting_process".into(),

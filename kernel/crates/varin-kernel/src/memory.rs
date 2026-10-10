@@ -284,11 +284,13 @@ pub(crate) fn reconcile(
             let operations = {
                 let owner = runtime.catalog(); let catalog = owner.lock().map_err(error)?;
                 let operations = catalog.pending_external_operations(TOOL).map_err(error)?.into_iter()
-                    .map(|id| catalog.operation(&id).map_err(error)).collect::<Result<Vec<_>, _>>()?.into_iter().filter(|op| op.run_id == run_id).collect::<Vec<_>>();
+                    .map(|id| catalog.operation(&id).map_err(error)).collect::<Result<Vec<_>, _>>()?.into_iter().filter(|op| op.run_id == run_id)
+                    .map(|operation|catalog.capture_operation_read(operation)).collect::<Vec<_>>();
                 operations
             };
             let mut reconciled = Vec::new(); let mut unresolved = Vec::new();
-            for operation in operations {
+            for read in operations {
+                let operation=read.load().map_err(error)?;
                 let tool: AdmittedTool = serde_json::from_value(operation.intent.clone()).map_err(error)?;
                 let origin = format!("run:{run_id}:{}", operation.id);
                 let response = bridge.query(json!({"action":"receipt","runId":run_id,"scope":scope(&admitted),"origin":origin,"arguments":tool.call.arguments}), &CancellationToken::default())?;

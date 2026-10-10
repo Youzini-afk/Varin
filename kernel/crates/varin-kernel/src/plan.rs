@@ -70,22 +70,25 @@ pub(crate) fn schema() -> ToolSchema {
 /// Both schema exposure and execution revalidate the real ordinary main Thread admission.
 pub(crate) fn eligible(catalog: &Catalog, run_id: &str) -> Result<bool, ExecutionError> {
     let run = catalog.run(run_id).map_err(error)?;
-    if catalog.is_context_job(run_id).map_err(error)? {return Ok(false);}
+    if catalog.is_context_job(run_id).map_err(error)? {
+        return Ok(false);
+    }
     let basis = catalog.run_context_scope(run_id).map_err(error)?;
-    Ok(
-        basis.is_some_and(|basis| {
-            basis.mode == "agent"
-                && basis.thread_role == "main"
-                && basis.session_id == run.thread_id
-        })
-        && catalog
-            .child_task_for_thread(&run.thread_id)
-            .map_err(error)?
-            .is_none())
+    Ok(basis.is_some_and(|basis| {
+        basis.mode == "agent" && basis.thread_role == "main" && basis.session_id == run.thread_id
+    }) && catalog
+        .child_task_for_thread(&run.thread_id)
+        .map_err(error)?
+        .is_none())
 }
-pub(crate) fn declaration(catalog: Arc<Mutex<Catalog>>, bridge: PlanBridge)
-    -> varin_runtime::composition::tools::ToolDeclaration {
-    varin_runtime::composition::tools::ToolDeclaration::new(schema(), Arc::new(PlanTools { catalog, bridge }))
+pub(crate) fn declaration(
+    catalog: Arc<Mutex<Catalog>>,
+    bridge: PlanBridge,
+) -> varin_runtime::composition::tools::ToolDeclaration {
+    varin_runtime::composition::tools::ToolDeclaration::new(
+        schema(),
+        Arc::new(PlanTools { catalog, bridge }),
+    )
 }
 struct PlanTools {
     catalog: Arc<Mutex<Catalog>>,
@@ -95,15 +98,12 @@ struct PlanTools {
 /// The original Operation epoch is mutation intent. Catalog/transport epochs independently
 /// authenticate today's caller; recovery must never rewrite that original intent.
 fn query(
-    catalog: &Catalog,
+    owner: &Mutex<Catalog>,
     context: &ToolExecutionContext,
     call: &ToolCall,
     contract: &ToolContract,
     receipt: bool,
 ) -> Result<Value, ExecutionError> {
-    if !eligible(catalog, &context.run_id)? {
-        return Err(error("plan requires an ordinary main Thread"));
-    }
     let ToolOrigin::ModelStep { request_id } = &context.origin else {
         return Err(error("plan requires a conversation model call"));
     };
@@ -121,9 +121,22 @@ fn query(
     {
         return Err(error("plan call does not match its admitted contract"));
     }
-    let run = catalog.run(&context.run_id).map_err(error)?;
-    let step = catalog.model_step(request_id).map_err(error)?;
-    let snapshot: RequestSnapshot = serde_json::from_value(step.request).map_err(error)?;
+    let intent = varin_runtime::catalog::tool_content::ToolIntent::fingerprint(call, contract)
+        .map_err(error)?;
+    let (epoch, run, read) = {
+        let catalog = owner.lock().map_err(error)?;
+        if !eligible(&catalog, &context.run_id)? {
+            return Err(error("plan requires an ordinary main Thread"));
+        }
+        (
+            catalog.epoch(),
+            catalog.run(&context.run_id).map_err(error)?,
+            catalog.capture_model_step_read(request_id).map_err(error)?,
+        )
+    };
+    let step = read.metadata.clone();
+    let snapshot: RequestSnapshot =
+        serde_json::from_value(read.load_request().map_err(error)?).map_err(error)?;
     if step.run_id != run.id
         || snapshot.view.run_id != run.id
         || snapshot.view.request_id != *request_id
@@ -135,45 +148,59 @@ fn query(
             "plan request is not the admitted conversation snapshot",
         ));
     }
-    if !receipt
-        && (run.epoch != catalog.epoch()
-            || run.cancel_requested
-            || run.state.terminal()
-            || step.superseded_by_input.is_some())
-    {
-        return Err(error("plan execution generation is no longer active"));
-    }
-    if !receipt {
-        catalog
-            .inspect_admission(&run.id, catalog.epoch(), &context.origin, &call.call_id)
-            .map_err(error)?;
-    }
-    let epoch = if read_only {
-        step.epoch
-    } else {
-        let operation = catalog.operation(&context.operation_id).map_err(error)?;
-        let admitted: AdmittedTool = serde_json::from_value(operation.intent).map_err(error)?;
-        if operation.run_id != run.id
-            || admitted.call != *call
-            || admitted.contract != *contract
-            || (!receipt && (operation.epoch != catalog.epoch() || operation.cancel_requested))
+    let (operation_epoch, view) = {
+        let catalog = owner.lock().map_err(error)?;
+        let current = catalog.run(&context.run_id).map_err(error)?;
+        let current_step = catalog.model_step_metadata(request_id).map_err(error)?;
+        if catalog.epoch() != epoch
+            || current_step.request != step.request
+            || current_step.run_id != run.id
         {
-            return Err(error(
-                "plan operation does not match its original admission",
-            ));
+            return Err(error("plan request owner changed during preparation"));
         }
-        operation.epoch
-    };
-    let view = catalog
-        .plan_view(
-            &run.branch_id,
-            snapshot.view.binding.history_range.leaf_id.as_deref(),
+        if !receipt
+            && (current.epoch != epoch
+                || current.cancel_requested
+                || current.state.terminal()
+                || current_step.superseded_by_input.is_some())
+        {
+            return Err(error("plan execution generation is no longer active"));
+        }
+        if !receipt {
+            catalog
+                .inspect_admission(&run.id, epoch, &context.origin, &call.call_id)
+                .map_err(error)?;
+        }
+        let operation_epoch = if read_only {
+            step.epoch
+        } else {
+            let operation = catalog.operation(&context.operation_id).map_err(error)?;
+            if operation.run_id != run.id
+                || varin_runtime::catalog::tool_content::ToolIntent::from_operation(&operation)
+                    .map_err(error)?
+                    != intent
+                || (!receipt && (operation.epoch != epoch || operation.cancel_requested))
+            {
+                return Err(error(
+                    "plan operation does not match its original admission",
+                ));
+            }
+            operation.epoch
+        };
+        (
+            operation_epoch,
+            catalog
+                .plan_view(
+                    &run.branch_id,
+                    snapshot.view.binding.history_range.leaf_id.as_deref(),
+                )
+                .map_err(error)?,
         )
-        .map_err(error)?;
+    };
     Ok(
         json!({"action":if receipt { "receipt" } else if read_only { "read" } else { "mutate" },
         "view":view,
-        "origin":{"kind":"tool","operationId":context.operation_id,"runId":run.id,"requestId":request_id,"callId":call.call_id,"epoch":epoch},
+        "origin":{"kind":"tool","operationId":context.operation_id,"runId":run.id,"requestId":request_id,"callId":call.call_id,"epoch":operation_epoch},
         "arguments":call.arguments}),
     )
 }
@@ -202,8 +229,14 @@ fn mutation_result(query: &Value, value: &Value) -> Option<(Outcome, Effect)> {
     }
 }
 impl ToolExecutor for PlanTools {
-    fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken) -> Result<ToolPreparation, ExecutionError> {
-        self.prepare(call, context, cancel).map(ToolPreparation::Ready)
+    fn plan(
+        &self,
+        call: &ToolCall,
+        context: &FrozenToolContext,
+        cancel: &CancellationToken,
+    ) -> Result<ToolPreparation, ExecutionError> {
+        self.prepare(call, context, cancel)
+            .map(ToolPreparation::Ready)
     }
     fn prepare(
         &self,
@@ -236,13 +269,7 @@ impl ToolExecutor for PlanTools {
         if cancel.is_cancelled() {
             return Err(error("plan action cancelled"));
         }
-        query(
-            &*self.catalog.lock().map_err(error)?,
-            context,
-            call,
-            contract,
-            false,
-        )?;
+        query(&self.catalog, context, call, contract, false)?;
         Ok(())
     }
     fn execute(
@@ -257,13 +284,7 @@ impl ToolExecutor for PlanTools {
             if cancel.is_cancelled() {
                 return Err(error("plan action cancelled"));
             }
-            query(
-                &*self.catalog.lock().map_err(error)?,
-                context,
-                call,
-                contract,
-                false,
-            )
+            query(&self.catalog, context, call, contract, false)
         })() {
             Ok(query) => query,
             Err(failure) => {
@@ -297,16 +318,19 @@ impl ToolExecutor for PlanTools {
             // A real CAS rejection is not "not dispatched". Retain the domain's
             // exact receipt before allowing the dispatched Operation to settle None.
             let recorded = (|| -> Result<(), ExecutionError> {
+                let intent =
+                    varin_runtime::catalog::tool_content::ToolIntent::fingerprint(call, contract)
+                        .map_err(error)?;
                 let mut catalog = self.catalog.lock().map_err(error)?;
                 let run = catalog.run(&context.run_id).map_err(error)?;
                 let operation = catalog.operation(&context.operation_id).map_err(error)?;
-                let admitted: AdmittedTool =
-                    serde_json::from_value(operation.intent).map_err(error)?;
+                let admitted =
+                    varin_runtime::catalog::tool_content::ToolIntent::from_operation(&operation)
+                        .map_err(error)?;
                 if run.epoch != catalog.epoch()
                     || operation.run_id != run.id
                     || Some(operation.epoch) != query["origin"]["epoch"].as_u64()
-                    || admitted.call != *call
-                    || admitted.contract != *contract
+                    || admitted != intent
                 {
                     return Err(error(
                         "plan receipt no longer matches the admitted execution",
@@ -373,6 +397,12 @@ pub(crate) fn reconcile(
                 let mut reconciled = Vec::new();
                 let mut unresolved = Vec::new();
                 for operation in operations {
+                    let read = runtime
+                        .catalog()
+                        .lock()
+                        .map_err(error)?
+                        .capture_operation_read(operation);
+                    let operation = read.load().map_err(error)?;
                     let admitted: AdmittedTool =
                         serde_json::from_value(operation.intent.clone()).map_err(error)?;
                     let original_request = operation
@@ -386,14 +416,13 @@ pub(crate) fn reconcile(
                             request_id: original_request.into(),
                         },
                     };
-                    let query = {
-                        let owner = runtime.catalog();
-                        let catalog = owner.lock().map_err(error)?;
-                        if catalog.epoch() != epoch {
-                            return Err(error("plan reconciliation generation changed"));
-                        }
-                        query(&catalog, &context, &admitted.call, &admitted.contract, true)?
-                    };
+                    let query = query(
+                        &runtime.catalog(),
+                        &context,
+                        &admitted.call,
+                        &admitted.contract,
+                        true,
+                    )?;
                     let response = bridge.query(query.clone(), &CancellationToken::default())?;
                     let Some((outcome, effect)) = mutation_result(&query, &response) else {
                         unresolved.push(operation.id);

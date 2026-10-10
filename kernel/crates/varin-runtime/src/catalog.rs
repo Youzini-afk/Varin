@@ -29,7 +29,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 13;
+pub(crate) const FORMAT: i64 = 14;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -607,7 +607,10 @@ impl Catalog {
         lifetime: Lifetime,
         intent: Value,
     ) -> Result<Operation> {
-        if intent.get("kind").and_then(Value::as_str).is_some_and(|kind|kind.starts_with("policy_read_graph")||kind.starts_with("policy_model_job")) {return Err(RuntimeError::Invalid("policy graph requires atomic typed admission".into()));}
+        if intent.get("kind").and_then(Value::as_str).is_some_and(|kind|kind=="tool"||kind.starts_with("policy_read_graph")||kind.starts_with("policy_model_job")) {return Err(RuntimeError::Invalid("typed operations require their admission owner".into()));}
+        self.admit_operation_metadata(key,run_id,epoch,lifetime,intent)
+    }
+    pub(super) fn admit_operation_metadata(&mut self,key:&str,run_id:&str,epoch:u64,lifetime:Lifetime,intent:Value) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let run: Run = record(&tx, "runs", run_id)?;
         fence(&run, epoch)?;
@@ -838,17 +841,12 @@ impl Catalog {
         step.request = request;
         Ok(step)
     }
-    fn hydrate_model_step(&self, mut step: ModelStep) -> Result<ModelStep> {
-        step.request = self.content.load(&step.request)?;
-        self.content.hydrate_originals(&mut step.original)?;
-        Ok(step)
-    }
     /// Collect only unreferenced immutable bodies under this catalog owner lock.
     pub fn collect_content_objects(&mut self) -> Result<u64> {
         self.content.collect(&self.db)
     }
     pub fn model_step(&self, key: &str) -> Result<ModelStep> {
-        self.hydrate_model_step(record(&self.db, "model_steps", key)?)
+        self.capture_model_step_read(key)?.load()
     }
     pub fn dispatch_model_step(&mut self, key: &str, epoch: u64) -> Result<ModelStep> {
         let hydrated = self.model_step(key)?;
@@ -1194,8 +1192,8 @@ impl Catalog {
             // Job owners can outlive that process and require independent stop evidence.
             let occupied: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM resource_occupancy WHERE operation_id=?1)", [&op.id], |r| r.get(0))?;
             if occupied {
-                let tool: crate::execution::AdmittedTool = serde_json::from_value(op.intent.clone())?;
-                if tool.contract.completion == crate::execution::CompletionKind::Result {
+                let tool = tool_content::ToolIntent::from_operation(&op)?;
+                if tool.contract().completion == crate::execution::CompletionKind::Result {
                     tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1", [&op.id])?;
                 }
             }
@@ -1303,6 +1301,10 @@ pub(crate) mod policy_body;
 pub mod child_content;
 #[path="catalog_child_delivery.rs"]
 pub mod child_delivery;
+#[path="catalog_tool_content.rs"]
+pub mod tool_content;
+#[path="catalog_permission_content.rs"]
+pub mod permission_content;
 
 #[path="catalog_tools.rs"]
 pub mod tools;
