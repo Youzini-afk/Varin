@@ -967,7 +967,8 @@ impl Catalog {
         let mut run: Run = record_value(&tx, run_id)?;
         fence(&run, epoch)?;
         let referenced_request = match record {
-            ExecutionRecord::ModelDispatched { request_id }
+            ExecutionRecord::RequestNotDispatched { request_id, .. }
+            | ExecutionRecord::ModelDispatched { request_id }
             | ExecutionRecord::ModelFinished { request_id, .. }
             | ExecutionRecord::ToolBatchCommitted { request_id, .. } => Some(request_id.as_str()),
             ExecutionRecord::ToolAdmitted { context, .. }
@@ -1177,6 +1178,9 @@ impl Catalog {
                     "INSERT INTO model_steps(id,run_id,state,body) VALUES(?1,?2,'prepared',?3)",
                     params![step.id, run_id, encode(&step)?],
                 )?;
+            }
+            ExecutionRecord::RequestNotDispatched { request_id, reason } => {
+                close_prepared_request(&tx, &run, request_id, *reason)?;
             }
             ExecutionRecord::ModelDispatched { request_id } => {
                 if let Some(parent_id) = super::context_jobs::context_job_parent(&tx, run_id)? {
@@ -1733,7 +1737,7 @@ impl Catalog {
         }
         if matches!(
             record,
-            ExecutionRecord::RequestPrepared { .. } | ExecutionRecord::ToolBatchCommitted { .. }
+            ExecutionRecord::ModelDispatched { .. } | ExecutionRecord::ToolBatchCommitted { .. }
         ) {
             super::policy_checkpoint::consume(&tx, run_id)?;
         }
@@ -1755,6 +1759,7 @@ impl Catalog {
                 ExecutionRecord::StateChanged { .. } => "state_changed",
                 ExecutionRecord::ContextPreparationFailed { .. } => "context_preparation_failed",
                 ExecutionRecord::RequestPrepared { .. } => "request_prepared",
+                ExecutionRecord::RequestNotDispatched { .. } => "request_not_dispatched",
                 ExecutionRecord::ModelDispatched { .. } => "model_dispatched",
                 ExecutionRecord::ModelFinished { .. } => "model_finished",
                 ExecutionRecord::ToolAdmitted { .. } => "tool_admitted",
@@ -1781,6 +1786,63 @@ impl Catalog {
         Ok(())
     }
 }
+/// Close only an existing never-dispatched candidate. This metadata-only fact is neither a
+/// provider completion nor an inferred zero-usage receipt; the frozen request remains retained.
+pub(super) fn close_prepared_request(
+    tx: &Transaction<'_>,
+    run: &Run,
+    request_id: &str,
+    reason: NonDispatchReason,
+) -> Result<()> {
+    let mut step: ModelStep = super::record(tx, "model_steps", request_id)?;
+    if step.run_id != run.id || step.epoch != run.epoch {
+        return Err(RuntimeError::Conflict("nonexecution owner changed".into()));
+    }
+    let indexed: String = tx.query_row(
+        "SELECT state FROM model_steps WHERE id=?1",
+        [request_id],
+        |row| row.get(0),
+    )?;
+    if encode(&step.state)?.trim_matches('"') != indexed {
+        return Err(RuntimeError::Invalid(
+            "model step state differs from its row".into(),
+        ));
+    }
+    if step.state == ModelStepState::NotDispatched {
+        return Ok(());
+    }
+    if step.state != ModelStepState::Prepared {
+        return Err(RuntimeError::Conflict(
+            "only a prepared request can close without dispatch".into(),
+        ));
+    }
+    let output: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM model_outputs WHERE request_id=?1)
+         OR EXISTS(SELECT 1 FROM tool_calls WHERE request_id=?1)",
+        [request_id],
+        |row| row.get(0),
+    )?;
+    if output {
+        return Err(RuntimeError::Conflict(
+            "prepared request already has execution evidence".into(),
+        ));
+    }
+    step.state = ModelStepState::NotDispatched;
+    put(tx, "model_steps", request_id, &step)?;
+    tx.execute(
+        "UPDATE model_steps SET state='not_dispatched' WHERE id=?1",
+        [request_id],
+    )?;
+    event(
+        tx,
+        request_id,
+        0,
+        "model.not_dispatched",
+        json!({"run_id":run.id,"reason":reason}),
+    )?;
+    Ok(())
+}
+
 fn record_value(tx: &Transaction<'_>, id: &str) -> Result<Run> {
     super::record(tx, "runs", id)
 }
@@ -1804,6 +1866,7 @@ impl Catalog {
             false,
             false,
             false,
+            None,
         )?
         .load()
     }
@@ -1964,11 +2027,11 @@ impl Catalog {
                 super::goals::measured(&tx, step.goal.as_ref(), &usage)?;
                 step.usage = Some(serde_json::to_value(usage)?);
             }
-            step.state = if step.state == ModelStepState::Dispatched {
-                ModelStepState::Interrupted
-            } else {
-                ModelStepState::Cancelled
-            };
+            if step.state == ModelStepState::Prepared {
+                close_prepared_request(&tx, &run, &step.id, NonDispatchReason::WorkerStopped)?;
+                continue;
+            }
+            step.state = ModelStepState::Interrupted;
             put(&tx, "model_steps", &step.id, &step)?;
             tx.execute(
                 "UPDATE model_steps SET state=?2 WHERE id=?1",

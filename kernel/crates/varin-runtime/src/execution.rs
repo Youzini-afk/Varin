@@ -922,6 +922,16 @@ pub enum ModelOutcome {
     Cancelled,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NonDispatchReason {
+    Cancelled,
+    InputPending,
+    GoalChanged,
+    Recovery,
+    WorkerStopped,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExecutionRecord {
@@ -934,6 +944,11 @@ pub enum ExecutionRecord {
     },
     RequestPrepared {
         snapshot: RequestSnapshot,
+    },
+    /// Positive nonexecution evidence, committed only from the original Prepared state.
+    RequestNotDispatched {
+        request_id: String,
+        reason: NonDispatchReason,
     },
     ModelDispatched {
         request_id: String,
@@ -2082,9 +2097,7 @@ impl<
                             snapshot: snapshot.clone(),
                         },
                     ) {
-                        Ok(()) => {
-                            control_state = None;
-                        }
+                        Ok(()) => {}
                         Err(error)
                             if matches!(error.code.as_str(),"input_pending"|"goal_changed") || model_cancel.is_cancelled() =>
                         {
@@ -2098,20 +2111,12 @@ impl<
                         interrupted_generation = !cancel.is_cancelled();
                         self.commit(
                             &input,
-                            ExecutionRecord::ModelFinished {
+                            ExecutionRecord::RequestNotDispatched {
                                 request_id: snapshot.view.request_id.clone(),
-                                outcome: if interrupted_generation {
-                                    ModelOutcome::Interrupted
-                                } else {
-                                    ModelOutcome::Cancelled
-                                },
-                                finish_reason: None,
-                                items: vec![],
-                                interrupted_deltas: vec![],
-                                usage: UsageReceipt::default(),
-                                failure: None,
+                                reason: NonDispatchReason::Cancelled,
                             },
                         )?;
+                        policy_state = previous_policy_state;
                         continue;
                     }
                     state = RunState::Generating;
@@ -2128,27 +2133,29 @@ impl<
                             request_id: snapshot.view.request_id.clone(),
                         },
                     ) {
-                        Ok(()) => {}
+                        Ok(()) => {
+                            // The durable checkpoint and its in-memory continuation are consumed
+                            // together. Preparation alone can still lose to input or Goal changes.
+                            control_state = None;
+                        }
                         Err(error)
                             if matches!(error.code.as_str(),"input_pending"|"goal_changed") || model_cancel.is_cancelled() =>
                         {
                             interrupted_generation = error.code != "goal_changed" && !cancel.is_cancelled();
                             self.commit(
                                 &input,
-                                ExecutionRecord::ModelFinished {
+                                ExecutionRecord::RequestNotDispatched {
                                     request_id: snapshot.view.request_id.clone(),
-                                    outcome: if interrupted_generation {
-                                        ModelOutcome::Interrupted
+                                    reason: if error.code == "goal_changed" {
+                                        NonDispatchReason::GoalChanged
+                                    } else if error.code == "input_pending" {
+                                        NonDispatchReason::InputPending
                                     } else {
-                                        ModelOutcome::Cancelled
+                                        NonDispatchReason::Cancelled
                                     },
-                                    finish_reason: None,
-                                    items: vec![],
-                                    interrupted_deltas: vec![],
-                                    usage: UsageReceipt::default(),
-                                    failure: None,
                                 },
                             )?;
+                            policy_state = previous_policy_state;
                             continue 'agent;
                         }
                         Err(error) => return Err(error),

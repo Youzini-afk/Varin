@@ -661,7 +661,7 @@ fn policy_cut_closed(db: &Connection, run: &Run) -> Result<bool> {
         return Ok(false);
     }
     let unresolved: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state!='completed'
+        "SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state NOT IN ('completed','not_dispatched')
              AND json_extract(body,'$.superseded_by_input') IS NULL)
          OR EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id
              WHERE m.run_id=?1 AND c.committed=0)",

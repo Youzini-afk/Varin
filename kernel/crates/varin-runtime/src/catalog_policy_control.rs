@@ -390,7 +390,7 @@ impl Catalog {
         if super::inputs::has_boundary_inputs(&tx, run_id)? {
             return Err(RuntimeError::InputPending);
         }
-        let unsettled: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0) OR EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state!='completed' AND json_extract(body,'$.superseded_by_input') IS NULL)", [run_id], |row| row.get(0))?;
+        let unsettled: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0) OR EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state NOT IN ('completed','not_dispatched') AND json_extract(body,'$.superseded_by_input') IS NULL)", [run_id], |row| row.get(0))?;
         if unsettled || super::policy_body::has_pending_action(&tx, run_id)? {
             return Err(RuntimeError::Conflict(
                 "policy action cannot bypass unsettled work".into(),

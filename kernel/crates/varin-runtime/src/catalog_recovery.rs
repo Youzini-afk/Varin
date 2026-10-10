@@ -149,6 +149,10 @@ enum RecoveryKind {
     None,
     Policy,
     Checkpoint(super::policy_checkpoint::PolicyCheckpointMetadata),
+    Undispatched {
+        step: ModelStep,
+        checkpoint: Option<super::policy_checkpoint::PolicyCheckpointMetadata>,
+    },
     Model {
         step: ModelStep,
         policy: PolicyIdentity,
@@ -159,6 +163,8 @@ pub(crate) struct RecoveryPreparation {
     cursor: u64,
     kind: RecoveryKind,
     cancellation_requires_recovery: bool,
+    goal: Option<goals::FrozenGoal>,
+    launch: Option<super::launch_content::LaunchMetadata>,
 }
 pub(crate) struct PreparedRecovery {
     preparation: RecoveryPreparation,
@@ -174,6 +180,8 @@ pub(crate) struct PreparationIdentity {
     run: Run,
     head: Option<String>,
     cursor: u64,
+    goal: Option<goals::FrozenGoal>,
+    launch: Option<super::launch_content::LaunchMetadata>,
 }
 
 impl RecoveryPreparation {
@@ -182,6 +190,8 @@ impl RecoveryPreparation {
             run: self.execution.run.clone(),
             head: self.execution.binding.history_range.leaf_id.clone(),
             cursor: self.cursor,
+            goal: self.goal.clone(),
+            launch: self.launch.clone(),
         }
     }
     pub(crate) fn cancel_requested(&self) -> bool {
@@ -196,6 +206,137 @@ impl RecoveryPreparation {
         };
         let recovery = match &self.kind {
             RecoveryKind::None | RecoveryKind::Policy => None,
+            RecoveryKind::Undispatched { step, checkpoint } => {
+                let snapshot: RequestSnapshot =
+                    serde_json::from_value(self.execution.content.load(&step.request)?)?;
+                let frozen = &snapshot.view.binding;
+                if snapshot.view.request_id != step.id
+                    || snapshot.view.run_id != self.execution.run.id
+                    || frozen.history_range.branch_id != self.execution.run.branch_id
+                    || !matches!(&snapshot.view.origin, RequestOrigin::Conversation { history_range, .. }
+                        if history_range == &frozen.history_range)
+                    || frozen
+                        .history_range
+                        .leaf_id
+                        .as_ref()
+                        .is_some_and(|anchor| !history.iter().any(|item| &item.id == anchor))
+                {
+                    return Err(RuntimeError::Conflict(
+                        "undispatched request ownership changed".into(),
+                    ));
+                }
+                // Only an open candidate requires its original generation. Once positively
+                // closed, explicit selections may activate through their normal boundary.
+                let binding = &self.execution.binding;
+                if let Some(launch) = &self.launch {
+                    let selected = &launch.selection;
+                    let tools: Vec<ToolSchema> =
+                        serde_json::from_value(self.execution.content.load(&selected.tools_ref)?)?;
+                    let credential = selected
+                        .credential_scope
+                        .as_ref()
+                        .map(|scope| scope.reference.clone())
+                        .or_else(|| {
+                            self.execution
+                                .run
+                                .configuration
+                                .get("credentialEnvironment")
+                                .and_then(Value::as_str)
+                                .map(|variable| format!("environment:{variable}"))
+                        });
+                    if selected.connection_identity != binding.connection_identity
+                        || selected.provider_family != binding.provider_family
+                        || selected.model != binding.model
+                        || selected.configuration_generation != binding.configuration_generation
+                        || selected.tool_schema_generation != binding.tool_schema_generation
+                        || selected.policy != self.execution.policy
+                        || credential != binding.credential_ref
+                        || tools != binding.tools
+                    {
+                        return Err(RuntimeError::Conflict(
+                            "recovery binding differs from the admitted launch".into(),
+                        ));
+                    }
+                }
+                if step.state == ModelStepState::Prepared
+                    && (frozen.connection_identity != binding.connection_identity
+                        || frozen.provider_family != binding.provider_family
+                        || frozen.model != binding.model
+                        || frozen.credential_ref != binding.credential_ref
+                        || frozen.configuration_generation != binding.configuration_generation
+                        || frozen.tool_schema_generation != binding.tool_schema_generation
+                        || frozen.tools != binding.tools
+                        || frozen.history_range.leaf_id != binding.history_range.leaf_id)
+                {
+                    return Err(RuntimeError::Conflict(
+                        "undispatched request differs from its frozen launch".into(),
+                    ));
+                }
+                let database = Connection::open_with_flags(
+                    &self.execution.database,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                        | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                )?;
+                let (event, decision) = if let Some(checkpoint) = checkpoint {
+                    let mut event: PolicyEvent =
+                        serde_json::from_value(self.execution.content.load(
+                            checkpoint.continuation.as_ref().ok_or_else(|| {
+                                RuntimeError::Invalid(
+                                    "undispatched policy continuation missing".into(),
+                                )
+                            })?,
+                        )?)?;
+                    let inputs =
+                        checkpoint.invalidating_inputs(&database, &self.execution.run.id)?;
+                    if !inputs.is_empty()
+                        && !matches!(
+                            event,
+                            PolicyEvent::Delivered { .. } | PolicyEvent::Resumed { .. }
+                        )
+                    {
+                        event = PolicyEvent::InputDelivered { input_ids: inputs };
+                    }
+                    let decision = if checkpoint.pending(&database, &self.execution.run.id)?
+                        && frozen.goal == self.goal
+                    {
+                        let action = serde_json::from_value(self.execution.content.load(
+                            checkpoint.action.as_ref().ok_or_else(|| {
+                                RuntimeError::Invalid("undispatched policy action missing".into())
+                            })?,
+                        )?)?;
+                        if !matches!(
+                            action,
+                            PolicyAction::RequestModel
+                                | PolicyAction::RequestModelWithEvidence { .. }
+                        ) {
+                            return Err(RuntimeError::Conflict(
+                                "undispatched checkpoint is not a model proposal".into(),
+                            ));
+                        }
+                        Some(PolicyDecision {
+                            state: self.execution.content.load(
+                                checkpoint.pending_state.as_ref().ok_or_else(|| {
+                                    RuntimeError::Invalid(
+                                        "undispatched policy state missing".into(),
+                                    )
+                                })?,
+                            )?,
+                            action,
+                        })
+                    } else {
+                        None
+                    };
+                    (event, decision)
+                } else {
+                    (PolicyEvent::Started, None)
+                };
+                Some(ExecutionRecovery {
+                    event,
+                    pending: None,
+                    receipts: BTreeMap::new(),
+                    decision,
+                })
+            }
             RecoveryKind::Checkpoint(checkpoint) => {
                 let database = Connection::open_with_flags(
                     &self.execution.database,
@@ -492,6 +633,7 @@ impl Catalog {
         completed_tools: bool,
         recovering_wait: bool,
         allow_cancelled: bool,
+        prepared_request: Option<&str>,
     ) -> Result<ExecutionPreparation> {
         let run = self.run(run_id)?;
         if run.epoch != self.epoch
@@ -513,7 +655,7 @@ impl Catalog {
         {
             return Err(RuntimeError::Conflict("branch owner changed".into()));
         }
-        let unresolved: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state!='completed' AND json_extract(body,'$.superseded_by_input') IS NULL)", [run_id], |r| r.get(0))?;
+        let unresolved: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state NOT IN ('completed','not_dispatched') AND json_extract(body,'$.superseded_by_input') IS NULL AND (?2 IS NULL OR id!=?2 OR state!='prepared'))", params![run_id,prepared_request], |r| r.get(0))?;
         let unpaired: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0)", [run_id], |r| r.get(0))?;
         if unresolved || (unpaired && !completed_tools) {
             return Err(RuntimeError::Conflict(
@@ -594,7 +736,7 @@ impl Catalog {
             .map(|read| read.identity().clone());
         let checkpoint = super::policy_checkpoint::metadata(&self.db, run_id)?;
         let unresolved: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state!='completed'
+            "SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state NOT IN ('completed','not_dispatched')
                  AND json_extract(body,'$.superseded_by_input') IS NULL)
              OR EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id
                  WHERE m.run_id=?1 AND c.committed=0)",
@@ -623,7 +765,61 @@ impl Catalog {
         } else {
             false
         };
-        let kind = if checkpoint_boundary {
+        let latest: Option<ModelStep> = self
+            .db
+            .query_row(
+                "SELECT id,state,body FROM model_steps WHERE run_id=?1 ORDER BY rowid DESC LIMIT 1",
+                [run_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+            .map(|(id, state, raw)| {
+                let step: ModelStep = serde_json::from_str(&raw)?;
+                if step.id != id
+                    || step.run_id != run_id
+                    || encode(&step.state)?.trim_matches('"') != state
+                {
+                    return Err(RuntimeError::Invalid(
+                        "model step metadata differs from its row".into(),
+                    ));
+                }
+                Ok(step)
+            })
+            .transpose()?;
+        let proposal_precedes_request: bool = self.db.query_row(
+            "SELECT (SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND kind='execution.committed'
+                AND json_extract(data,'$.kind')='policy_checkpoint') <=
+                (SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND kind='execution.committed'
+                AND json_extract(data,'$.kind')='request_prepared')",
+            [run_id], |row| row.get(0),
+        )?;
+        let undispatched = latest.filter(|step| {
+            (step.state == ModelStepState::Prepared
+                || (step.state == ModelStepState::NotDispatched
+                    && proposal_precedes_request
+                    && checkpoint.as_ref().is_none_or(|saved| {
+                        saved.kind == super::policy_checkpoint::PolicyCheckpointKind::Decision
+                    })))
+                && step.superseded_by_input.is_none()
+        });
+        let kind = if let Some(step) = undispatched {
+            if step.run_id != run.id || (step.state == ModelStepState::Prepared && step.epoch != self.epoch) {
+                return Err(RuntimeError::Conflict("undispatched request owner changed".into()));
+            }
+            if let Some(saved) = &checkpoint {
+                if saved.identity != policy || saved.kind != super::policy_checkpoint::PolicyCheckpointKind::Decision {
+                    return Err(RuntimeError::Conflict("undispatched policy checkpoint changed".into()));
+                }
+            }
+            self.recovery_wait(&run)?;
+            RecoveryKind::Undispatched { step, checkpoint }
+        } else if checkpoint_boundary {
             let saved = checkpoint.expect("captured checkpoint boundary");
             if saved.identity != policy {
                 return Err(RuntimeError::Conflict(
@@ -685,6 +881,7 @@ impl Catalog {
             completed_tools,
             recovering_wait,
             allow_cancelled,
+            match &kind { RecoveryKind::Undispatched { step, .. } if step.state == ModelStepState::Prepared => Some(step.id.as_str()), _ => None },
         )?;
         let cancellation_requires_recovery: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.phase')!='terminal' AND json_extract(body,'$.handed_off')=0) OR EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0)", [run_id], |row| row.get(0))?;
         Ok(RecoveryPreparation {
@@ -692,6 +889,8 @@ impl Catalog {
             execution,
             kind,
             cancellation_requires_recovery,
+            goal: self.goal_binding(run_id)?,
+            launch: self.launch_metadata(run_id)?,
         })
     }
 
@@ -904,7 +1103,9 @@ impl Catalog {
         }
         Ok(run == *captured
             && self.head(&run.branch_id)? == identity.head
-            && self.preparation_cursor(&run)? == identity.cursor)
+            && self.preparation_cursor(&run)? == identity.cursor
+            && self.goal_binding(&run.id)? == identity.goal
+            && self.launch_metadata(&run.id)? == identity.launch)
     }
 
     pub(crate) fn publish_recovered_execution(
@@ -930,6 +1131,13 @@ impl Catalog {
             run.state = RunState::Runnable;
             run.revision += 1;
             put(&tx, "runs", &run.id, &run)?;
+            if let RecoveryKind::Undispatched { step, .. } = &preparation.kind {
+                let current: ModelStep = record(&tx, "model_steps", &step.id)?;
+                if current != *step { return Ok(None); }
+                if step.state == ModelStepState::Prepared {
+                    super::execution_persistence::close_prepared_request(&tx, &run, &step.id, NonDispatchReason::Recovery)?;
+                }
+            }
             if let RecoveryKind::Model { mut step, .. } = preparation.kind {
                 step.epoch = self.epoch;
                 put(&tx, "model_steps", &step.id, &step)?;
@@ -991,6 +1199,16 @@ impl Catalog {
             return Ok(Some(run));
         }
         let run = self.request_cancel_run(run_id)?;
+        {
+            let tx = self.db.transaction()?;
+            let prepared: Option<String> = tx.query_row(
+                "SELECT id FROM model_steps WHERE run_id=?1 AND state='prepared'", [run_id], |row| row.get(0),
+            ).optional()?;
+            if let Some(request) = prepared {
+                super::execution_persistence::close_prepared_request(&tx, &run, &request, NonDispatchReason::Cancelled)?;
+            }
+            tx.commit()?;
+        }
         let unresolved: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.phase')!='terminal' AND json_extract(body,'$.handed_off')=0) OR EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state IN ('prepared','dispatched')) OR EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0)", [run_id], |row| row.get(0))?;
         if unresolved {
             return Ok(None);

@@ -171,7 +171,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 22, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
+Catalog version 23, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -247,9 +247,25 @@ Catalog methods do no provider, tool, extension or network I/O. A mutex around C
 for a local commit or read. The cancellation token is independent of catalog and progress delivery;
 requesting cancellation does not invent a stopped executor or erase an external effect.
 
-A dispatched model request is interrupted on restart and is not automatically sent again. An
-unconfirmed external effect becomes indeterminate and requires reconciliation. Wait resumption uses
-a durable identity: a crashed claimant can reacquire it, and acknowledgment commits the runnable
+A dispatched model request is interrupted on restart and is not automatically sent again. A
+persisted `Prepared` request with no dispatch evidence can instead close as `NotDispatched`: the
+original frozen request stays retained, without fabricated provider output, usage or input
+supersession. Recovery uses the existing capture, unlocked content read and fenced publication path,
+then the ordinary engine admits a new request for the same Run and real input. It does not send the
+old serialized candidate through a second provider path. A changed or unavailable original launch
+binding is rejected; a later explicitly activated selection takes effect only after that old candidate
+has closed through its normal boundary.
+
+The pending policy proposal and its committed private-state baseline remain separate until real
+`ModelDispatched` commits. Reopen reuses an unchanged unexecuted proposal without deciding twice;
+actual new input or a changed Goal invalidates it while preserving the original continuation.
+Cancelling a proven-unsent request needs only metadata, even when its body cannot be read. Goal
+pause survives reopen and still requires its actual resume. See
+[`prepared_request_recovery.rs`](tests/prepared_request_recovery.rs) for the Engine-to-Supervisor
+crash boundaries, second reopen, real dispatch exclusion and selection/cancellation behavior.
+
+An unconfirmed external effect becomes indeterminate and requires reconciliation. Wait resumption
+uses a durable identity: a crashed claimant can reacquire it, and acknowledgment commits the runnable
 continuation state in the same transaction.
 An original executor receipt may already be durable before tool settlement or handoff. Reconciliation
 applies that same receipt to a recovered unresolved Operation instead of mistaking receipt identity
@@ -394,7 +410,7 @@ The recovery reader selects the latest real policy action across graphs, model j
 actions. An unconsumed `Delivered`/`Resumed` event remains the continuation boundary if queued input
 is appended to history. A decision whose admission loses to that input does not advance private
 state. Recovery distinguishes the original executed checkpoint from a later pending decision using
-the existing action, checkpoint and input facts; an admitted model request consumes that boundary.
+the existing action, checkpoint and input facts; actual model dispatch consumes that boundary.
 
 Launch inspection exposes derived `startable` and `pause` views; the kernel combines Catalog
 eligibility with the actual worker/quiescence owner. Host submission, recovery and domain continuations
@@ -481,10 +497,10 @@ its own Run; later user work under the same blocked Goal stays parked instead of
 completed without consumption. A paused, blocked or budget-limited live Run parks on `goal.ready`; the supervisor quiesces its old worker before durable `goal.run_ready` release.
 Question and policy Pause identities remain distinct and require their own valid resolution.
 
-The existing recovery path still holds a persisted but never-dispatched main ModelStep at an explicit
-recovery Wait after reopen. It safely refuses provider replay and reports no dispatched usage, but
-automatic recovery of this proven-unsent candidate is not yet implemented. This predates Goals and
-remains a tracked recovery capability gap; in-process stale Goal candidates do recompile normally.
+A proven-unsent main ModelStep follows the same recovery boundary described above. A newer Goal
+invalidates its old proposal without losing the real input or continuation; manual pause prevents new
+provider work until explicitly resumed. Already dispatched inference keeps its original attribution
+and is never reclassified as unsent to restart the Goal.
 
 Calendar recurrence and generic event conditions are separate remaining domains; these Goals do not
 install another timer loop, scheduler, task tree or execution ledger. See
