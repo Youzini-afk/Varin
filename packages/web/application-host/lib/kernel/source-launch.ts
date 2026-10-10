@@ -117,8 +117,8 @@ export async function admitRunSourceAuthority(
   }
   const resultOnly = options.purpose === 'result';
   if (resultOnly) {
-    const child = await runtime.childForThread(run.thread_id, signal);
-    if (!child || child.receipt?.run_id !== run.id || child.source.kind !== 'ready'
+    const child = await runtime.childExecutionForRun(run.id, signal);
+    if (!child || child.receipt?.run_id !== run.id || child.source?.kind !== 'ready'
       || !['settling', 'candidate', 'published'].includes(child.code_result.kind)
       || !['completed', 'failed', 'cancelled'].includes(run.state)) throw new Error('Fixed result authority requires the original stopped child settlement');
   }

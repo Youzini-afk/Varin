@@ -7,7 +7,7 @@ import type {
 } from './extension-tool-owner.js';
 import type { McpToolLease } from './tool-bridge.js';
 import type {
-  LiveExtensionToolBinding, LiveMcpBinding, ChildTask,
+  LiveExtensionToolBinding, LiveMcpBinding, DelegatedExecution,
   LaunchIntent,
   Run,
   RunContextScope,
@@ -145,7 +145,7 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     failReadyNumber: number | undefined,
     mcp: LiveMcpBinding | undefined;
   let admittedScope: RunContextScope | null = null;
-  let child: ChildTask | null = null;
+  let child: DelegatedExecution | null = null;
   let currentProject: string | null = null;
   const preparedScopes: Array<Parameters<ExtensionToolPreparer>[0]> = [];
   const preparer: ExtensionToolPreparer = async (input) => {
@@ -227,7 +227,7 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
           return structuredClone(launch);
         case 'runtime.run.scope':
           return structuredClone(admittedScope);
-        case 'runtime.child.for_thread':
+        case 'runtime.child.execution.for_run':
           return child;
         case 'runtime.context.inspect':
           return currentProject
@@ -291,7 +291,7 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     launch,
     releaseChildHandoff: kernel.releaseChildToolHandoff,
     preparedScopes,
-    child: (value: ChildTask) => { child = value; },
+    child: (value: DelegatedExecution) => { child = value; },
     admittedScope: (scope: RunContextScope | null) => {
       admittedScope = scope;
     },
@@ -324,14 +324,15 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     },
   };
 }
-it('a child binds only its admitted service set and derives MCP once before restoring its own binding', async () => {
+it.each(['dispatch', 'user_continuation'] as const)('%s binds only its admitted services and derives MCP once before exact same-Run restore', async trigger => {
   const released: string[] = [], extension = contribution('chosen', '1', released), f = setup([extension]);
   const base = contribution('mcp_read', '1', released).lease;
   const original: McpToolLease = { ...base, slot: 'mcp', binding: { ...base.binding,
     provenance: { execution_scope: 'global', configuration: { agent_dir: '/fixture', config_cwd: '/fixture', project_trusted: false }, servers: {} } } };
   f.launch.selection.extension_bindings = [extension.binding];
   f.launch.selection.mcp_binding = original.binding;
-  f.child({ operation_id: 'parent-dispatch', parent_run_id: 'parent-run', launch: structuredClone(f.launch.selection) } as ChildTask); // Committed child response fixture; Catalog fences are tested by its owner.
+  f.child({ execution_id: trigger === 'dispatch' ? 'parent-dispatch' : 'next-execution', child_operation_id: 'parent-dispatch',
+    parent_run_id: 'parent-run', trigger: { kind: trigger }, launch: structuredClone(f.launch.selection) } as DelegatedExecution); // Committed child response fixture; Catalog fences are tested by its owner.
   const derived: McpToolLease = { ...original, binding: { ...original.binding, reference: 'child-execution-owner' } };
   f.mcpLeases.push(derived);
   await f.runtime.prepareMcp('run', null);
@@ -346,7 +347,9 @@ it('a child binds only its admitted service set and derives MCP once before rest
   await expect.poll(() => f.requests.some(request => request.method === 'runtime.run.start')).toBe(true);
   expect(f.releaseChildHandoff).not.toHaveBeenCalled();
   started.resolve(); await starting;
-  expect(f.releaseChildHandoff).toHaveBeenCalledExactlyOnceWith('parent-run', 'parent-dispatch');
+  if (trigger === 'dispatch') expect(f.releaseChildHandoff).toHaveBeenCalledExactlyOnceWith('parent-run', 'parent-dispatch');
+  else expect(f.releaseChildHandoff).not.toHaveBeenCalled();
+  expect(f.requests.filter(request => request.method === 'runtime.child.execution.for_run').every(request => (request.params as { runId: string }).runId === 'run')).toBe(true);
   expect(f.preparedScopes).toEqual([{ runId: 'run', threadId: 'thread', fixed: true }]);
   const start = f.requests.find(request => request.method === 'runtime.run.start')!;
   expect((start.params.extensionBindings as LiveExtensionToolBinding[]).map(value => value.binding)).toEqual([extension.binding]);

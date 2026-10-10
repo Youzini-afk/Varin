@@ -11,13 +11,13 @@ import { retainExtensionTool } from './extension-tool-owner.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { ToolBridge, type HostToolCall, type PrivateToolFrame } from './tool-bridge.js';
 import type { KernelClient } from './kernel-client.js';
-import type { ChildTask, ExecutorOwner, LaunchIntent, LaunchSource, Run } from './protocol.generated.js';
+import type { DelegatedExecution, ExecutorOwner, LaunchIntent, LaunchSource, Run } from './protocol.generated.js';
 import type { IntegrationOperationReceipt, IntegrationPlanInput } from '../harness/working-state/integration-coordinator.js';
 import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
 import { UnconfirmedIntegrationCommitError } from '../recovery/durable-file-operation.js';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
-const input = { childOperationId: 'dispatch-request:tool:child', publicationId: 'fixed-publication' };
+const input = { childOperationId: 'dispatch-request:tool:child', executionId: 'continued-child-execution', publicationId: 'fixed-publication' };
 const forged = { status: 'applied', effect: 'confirmed', executorStopped: true };
 const observationCapability = 'test.integration-observation';
 const deferred = <T>() => {
@@ -78,11 +78,11 @@ async function openHarness(options: { callback?: 'mask' | 'early' | 'tamper'; re
       state: 'executing', revision: 1, epoch: 1, configuration: {}, cancel_requested: false, waiting_on: null };
     // These narrow records intentionally implement only the management/runtime fields the owner reads.
     const launch = { run_id: run.id, selection: { source: sourceBinding } } as LaunchIntent;
-    const child = { operation_id: input.childOperationId, parent_run_id: 'original-dispatch-run',
+    const child = { child_operation_id: input.childOperationId, execution_id: input.executionId, parent_run_id: 'original-dispatch-run',
       parent_thread_id: run.thread_id, parent_branch_id: run.branch_id, child_thread_id: 'child-thread',
       code_result: { kind: 'published', effect: 'confirmed', result: { publication_id: input.publicationId,
         workspace_id: 'workspace', branch_id: 'child-source', result_revision: 7, root: 'fixed-result-root',
-        base_root: 'fixed-base-root', record_id: 'original-result-record' } } } as ChildTask;
+        base_root: 'fixed-base-root', record_id: 'original-result-record' } } } as DelegatedExecution;
     const entered = deferred<void>();
     const targetRelease = vi.fn(async () => {});
     const onCleanupError = vi.fn();
@@ -96,8 +96,8 @@ async function openHarness(options: { callback?: 'mask' | 'early' | 'tamper'; re
       return domainReceipt(request.operationId!);
     });
     const inspectIntegration = vi.fn(async (_request: IntegrationPlanInput): Promise<IntegrationOperationReceipt | null> => null);
-    const runtimePort = { run: vi.fn(async () => run), launch: vi.fn(async () => launch), child: vi.fn(async (id: string) => {
-      if (id !== child.operation_id) throw new Error('Child does not exist');
+    const runtimePort = { run: vi.fn(async () => run), launch: vi.fn(async () => launch), childExecution: vi.fn(async (id: string) => {
+      if (id !== child.execution_id) throw new Error('Child does not exist');
       return child;
     }) };
     runtime = await ApplicationExtensionRuntime.create({ dataDir: path.join(root, 'extensions'), varinVersion: '0.9.25',
@@ -177,7 +177,7 @@ it('the installed example integrates a fixed publication from a later Run of the
       expect(admitted).toMatchObject({ workspaceId: 'workspace', threadId: 'child-thread', branchId: 'child-source', resultRevision: 7,
         parentAuthority: { kind: 'directory', directory: '/fixture/parent-source', workspaceId: 'documents-workspace' },
         operationBinding: { kind: 'runtime_operation', parentRunId: 'later-parent-run', parentThreadId: 'parent-thread',
-          parentBranchId: 'parent-history-branch', childOperationId: input.childOperationId, childThreadId: 'child-thread',
+          parentBranchId: 'parent-history-branch', childOperationId: input.childOperationId, childExecutionId: input.executionId, childThreadId: 'child-thread',
           result: { workspaceId: 'workspace', branchId: 'child-source', resultRevision: 7,
             root: 'fixed-result-root', publicationId: input.publicationId }, target: h.sourceBinding } });
       const binding = admitted.operationBinding!;
@@ -332,7 +332,7 @@ it('altered capability arguments and read-declared tools never enter the integra
       expect(h.callbackReplies).toEqual([forged]);
       expect(h.mergeResult).not.toHaveBeenCalled();
       expect(h.openTarget).not.toHaveBeenCalled();
-      expect(h.runtimePort.child).not.toHaveBeenCalled();
+      expect(h.runtimePort.childExecution).not.toHaveBeenCalled();
     } finally { await h.close(); }
   }
 }, 20_000);

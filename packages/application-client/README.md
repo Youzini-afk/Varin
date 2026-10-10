@@ -97,7 +97,23 @@ views separately report the actual history delivery Run and cursor; neither prom
 Read calls accept AbortSignal and all calls keep the existing runtime endpoint-generation checks.
 A lost send response must be retried with the same original key and intent. Aborting the transport or
 closing a UI does not retract a message already accepted by the Catalog. This version does not expose
-active requests, reply Waits or terminal-child continuation.
+active requests or reply Waits.
+
+## Delegated execution continuation
+
+`ThreadsAPI.collaboration.continueChild` submits an explicit User continuation on the original child
+Thread/branch with a stable key, exact previous Run and expected head. It returns durable execution
+acceptance, which may precede source preparation and Run creation. Retry an uncertain response with
+the original intent; do not select a later Run or new key automatically. Configuration and source are
+derived by the owning runtime, not supplied by this API.
+
+`ThreadSnapshot.delegatedExecutions` and `collaboration.executions` expose each execution separately.
+`readExecutionReport` reads the specified execution's original report item; the returned execution
+and item identities must match the request. Parent access retains the existing same-Thread historical-fork read scope, while the
+child snapshot lists only its own original execution branch; reading does not grant continuation or control. All reads accept AbortSignal and preserve endpoint-generation
+checks. The original ChildTask and `readReport` remain the dispatch-round view; they never silently
+switch to the latest continuation. Active child boundary/interrupt input uses the ordinary queue;
+its next Run must use the dedicated continuation admission.
 
 ## History
 

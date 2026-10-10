@@ -604,7 +604,7 @@ describe("IntegrationCoordinator", () => {
     const operationBinding: import('../../recovery/durable-file-operation.js').IntegrationOperationBinding = {
       kind: "runtime_operation", operationId: "parent-tool", parentRunId: "parent-run", parentThreadId: "parent-thread",
       parentBranchId: "parent-conversation", origin: { kind: "model_step", request_id: "request" }, callId: "call",
-      childOperationId: "child-task", childThreadId: "thread-1",
+      childOperationId: "child-task", childExecutionId: "child-execution", childThreadId: "thread-1",
       result: { workspaceId: "ws", branchId: "thread-1", resultRevision: result.resultRevision, root, publicationId: "published-result" },
       target: { mode, workspace_id: "ws", execution_workspace_id: mode === "materialized" ? "original-storage-workspace" : "execution",
         branch_id: mode === "materialized" ? "parent-files" : null, revision: mode === "materialized" ? 0 : null,
@@ -1765,7 +1765,7 @@ describe("IntegrationCoordinator", () => {
     const operationBinding: import('../../recovery/durable-file-operation.js').IntegrationOperationBinding = {
       kind: "runtime_operation", operationId: "cancel-mixed", parentRunId: "parent-run", parentThreadId: "parent-thread",
       parentBranchId: "parent-conversation", origin: { kind: "model_step", request_id: "request" }, callId: "call",
-      childOperationId: "child-task", childThreadId: "thread-1",
+      childOperationId: "child-task", childExecutionId: "child-execution", childThreadId: "thread-1",
       result: { workspaceId: "ws", branchId: "thread-1", resultRevision: result.resultRevision, root, publicationId: "published-result" },
       target: { mode: "live_root", workspace_id: "ws", execution_workspace_id: "ws", branch_id: null, revision: null,
         environment_run_id: null, live_root: { hostId: "host", rootId: "root", canonicalRoot: h.workspace } },
@@ -1833,7 +1833,7 @@ describe("IntegrationCoordinator", () => {
     const operationBinding: import('../../recovery/durable-file-operation.js').IntegrationOperationBinding = {
       kind: "runtime_operation", operationId: "cancel-surface-owners", parentRunId: "parent-run", parentThreadId: "parent-thread",
       parentBranchId: "parent-conversation", origin: { kind: "model_step", request_id: "request" }, callId: "call",
-      childOperationId: "child-task", childThreadId: "thread-1",
+      childOperationId: "child-task", childExecutionId: "child-execution", childThreadId: "thread-1",
       result: { workspaceId: "ws", branchId: "thread-1", resultRevision: result.resultRevision, root, publicationId: "published-result" },
       target: { mode: "live_root", workspace_id: "ws", execution_workspace_id: "ws", branch_id: null, revision: null,
         environment_run_id: null, live_root: { hostId: "host", rootId: "root", canonicalRoot: h.workspace } },

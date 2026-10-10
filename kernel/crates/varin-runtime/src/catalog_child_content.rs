@@ -198,6 +198,7 @@ impl ChildInputPreparation {
 }
 
 pub struct ChildReportRead {
+    execution_id: String,
     operation_id: String,
     item_id: String,
     offset: usize,
@@ -209,6 +210,7 @@ pub struct ChildReportRead {
 impl ChildReportRead {
     pub(super) fn new(
         catalog: &Catalog,
+        execution_id: &str,
         operation_id: &str,
         item_id: &str,
         offset: usize,
@@ -216,6 +218,7 @@ impl ChildReportRead {
         item: HistoryItem,
     ) -> Self {
         Self {
+            execution_id: execution_id.into(),
             operation_id: operation_id.into(),
             item_id: item_id.into(),
             offset,
@@ -249,6 +252,7 @@ impl ChildReportRead {
             ));
         }
         Ok(collaboration::ChildTextPage {
+            execution_id: self.execution_id,
             operation_id: self.operation_id,
             item_id: self.item_id,
             offset,

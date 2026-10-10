@@ -114,7 +114,7 @@ pub(super) fn thread_family(db: &Connection, thread_id: &str) -> Result<String> 
         if !visited.insert(thread.clone()) { return Err(RuntimeError::Invalid("cyclic task lineage".into())); }
         let raw: Option<String> = db.query_row("SELECT body FROM child_tasks WHERE child_thread_id=?1", [&thread], |row| row.get(0)).optional()?;
         let Some(raw) = raw else { return Ok(thread); };
-        let child: collaboration::ChildTask = serde_json::from_str(&raw)?;
+        let child: delegated::ChildRelation = serde_json::from_str(&raw)?;
         let parent: Run = record(db, "runs", &child.parent_run_id)?;
         if child.child_thread_id != thread || parent.thread_id != child.parent_thread_id {
             return Err(RuntimeError::Invalid("task lineage does not match parent Run".into()));

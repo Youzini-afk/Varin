@@ -34,6 +34,7 @@ pub(super) enum SubmissionOrigin {
         parent_thread_id: String,
         checkpoint: Option<String>,
     },
+    ChildContinuation { execution_id: String, checkpoint: Option<String> },
     Continuation {
         occurrence_id: String,
         checkpoint: Option<String>,
@@ -90,7 +91,7 @@ impl Catalog {
         )?;
         if delegated {
             return Err(RuntimeError::Invalid(
-                "read-only delegated Threads accept only their admitted child task".into(),
+                "delegated Threads require their admitted execution or an explicit continuation".into(),
             ));
         }
         let existing: Option<(String,String)> = self.db.query_row("SELECT intent,receipt FROM commands WHERE id=?1", [&command.key], |row| Ok((row.get(0)?,row.get(1)?))).optional()?;
@@ -258,7 +259,7 @@ impl PreparedSubmission {
         resources::validate_raw_input(&command.input)?;
         let checkpoint = match &origin {
             SubmissionOrigin::User { checkpoint } | SubmissionOrigin::Child { checkpoint, .. }
-            | SubmissionOrigin::Continuation { checkpoint, .. } => {
+            | SubmissionOrigin::ChildContinuation { checkpoint, .. } | SubmissionOrigin::Continuation { checkpoint, .. } => {
                 checkpoint
             }
             SubmissionOrigin::Summary => &None,
@@ -314,7 +315,7 @@ impl PreparedSubmission {
             }
             let body = context::ContextCheckpoint { id:proposal.key.clone(),revision,proposal,personalization,resources,
                 resource_activations: active.as_ref().map(|active| active.resource_activations.clone()).unwrap_or_default() };
-            if matches!(origin, SubmissionOrigin::User { .. }) {
+            if matches!(origin, SubmissionOrigin::User { .. } | SubmissionOrigin::ChildContinuation { .. }) {
                 input_material = Some(resources::bind_input(&command.input, 1, input_preparation.as_ref(), Some(&body))?);
             }
             let reference = content.save(&serde_json::to_value(&body)?)?;
@@ -322,7 +323,7 @@ impl PreparedSubmission {
         }).transpose()?.flatten();
         let input_material = match input_material {
             Some(value) => value,
-            None if matches!(origin, SubmissionOrigin::User { .. }) => resources::bind_input(&command.input, 1, input_preparation.as_ref(), active.as_ref())?,
+            None if matches!(origin, SubmissionOrigin::User { .. } | SubmissionOrigin::ChildContinuation { .. }) => resources::bind_input(&command.input, 1, input_preparation.as_ref(), active.as_ref())?,
             None => command.input.clone(),
         };
         let history = match &origin {

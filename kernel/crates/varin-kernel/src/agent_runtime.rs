@@ -76,15 +76,16 @@ impl AgentControl {
                 "child source handoff was already released".into(),
             ));
         }
+        let handoff=child.source.handoff().ok_or_else(||KernelError::Authorization("execution has no parent source handoff".into()))?;
         if child.child_thread_id != p.child_thread_id
             || child.child_branch_id != p.child_branch_id
-            || child.source.handoff().operation_id != p.handoff_operation_id
+            || handoff.operation_id != p.handoff_operation_id
         {
             return Err(KernelError::Authorization(
                 "source claim does not identify an accepted child".into(),
             ));
         }
-        Ok(child.source.handoff().clone())
+        Ok(handoff.clone())
     }
 
     pub(crate) fn reserve_input(
@@ -593,6 +594,7 @@ pub(crate) fn spawn(
                                 | "runtime.input.enqueue"
                                 | "runtime.input.edit"
                                 | "runtime.messages.send"
+                                | "runtime.child.continuation.accept"
                                 | "runtime.child.prepare"
                                 | "runtime.child.source.ready"
                                 | "runtime.tools.ready"
@@ -807,6 +809,11 @@ pub(crate) fn spawn(
                         if matches!(
                             method,
                             "runtime.child.list"
+                                | "runtime.child.continuation.accept"
+                                | "runtime.child.execution.list"
+                                | "runtime.child.execution.inspect"
+                                | "runtime.child.execution.for_run"
+                                | "runtime.child.execution.report.read"
                                 | "runtime.child.for_thread"
                                 | "runtime.child.inspect"
                                 | "runtime.child.release"

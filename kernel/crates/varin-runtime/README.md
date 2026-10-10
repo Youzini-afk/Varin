@@ -229,7 +229,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 28, input domain 3 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
+Catalog version 29, input domain 3 and collaboration domain 4 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -713,7 +713,7 @@ authority and ordinary permission gates. A process cwd is not an OS sandbox. Sel
 extension and MCP tools retain the actual parent request's exact bindings; the child does not discover
 new capabilities from later routing or configuration. Ordinary AgentPolicy and its declared planning
 roles use the child Run's own policy generations and credentials; the policy cannot expand this frozen
-tool directory. Memory/plan/Goal, LSP, Computer and remote child bindings remain separate work. Explicit parent Integration is a separate
+tool directory. Primary Goal, LSP, Computer and remote child bindings remain separate work. Explicit parent Integration is a separate
 authorized action.
 
 The frozen dispatch body retains original tool declarations, schema generation, MCP provenance and
@@ -752,6 +752,43 @@ outside Catalog. The existing input writer commits prepared context, child Run, 
 receipt together after rechecking cancellation and source/credential authority. Late cancelled
 preparation cannot launch a child.
 
+`child_tasks` retains the stable dispatch relationship; `delegated_executions` owns preparation,
+source, Run association, report and fixed result for both the original dispatch and later explicit
+User continuations. Run/Launch/Operation remain the execution and effect authorities. Original
+ChildTask and `wait_child` always reference the dispatch execution, never whichever round is newest.
+Schema-2 `child_status` and `child_report` select exact execution identities. A report reads only
+history produced by that execution's actual Run at its terminal head; inherited assistant text is
+not a new report. Parent integration schema 2 requires child operation, execution and publication IDs.
+
+A terminal child's `runtime.child.continuation.accept` binds a User key, exact previous actual Run,
+expected branch head and original input. Its accepted intent precedes cold source/context work and
+is discovered by the same Host collaboration consumer after restart. Identical retries return the
+original execution even after configuration changes. Failed or cancelled preparation without a Run
+does not permanently prevent a later explicit User intent. Active child boundary/interrupt inputs
+still use the original queue; `next_run` cannot bypass delegated source and execution admission.
+
+A new Run retains the predecessor's actual configuration, credential scope, policy artifact/planning
+models and frozen tools, with fresh policy generations and no copied private state. A writable round
+starts from its predecessor's exact published WorkingResult; a read-only or proved no-effect round
+uses its exact immutable baseline. Unstopped writers remain blocking facts. Once Storage has fixed an exact result after writer stop,
+its old effect may remain unknown while a new explicit Run uses that root; this never replays or
+settles the old effect. An unavailable result without a fixed root requires proved no-effect before
+reusing the immutable baseline. Fresh source branch, retained pin and result publication
+are keyed by execution ID. Continuation has no original-parent handoff to reclaim. New MCP scope is
+re-admitted from the exact prior definitions once; restoration of that same Run requires the actual
+committed binding. Current trust, permissions and revocations still apply.
+
+Source replacement preserves the existing context summary/history anchor, role and memory snapshot.
+The old checkpoint ID is the outer replacement CAS; explicit skill input binds the same prepared new
+context. Original User text and images retain their input provenance. Cancellation fences all
+currently accepted executions, including preparation before Run creation, and late source/context
+work cannot publish a cancelled command. A later explicit User command is a new intent, not a reset
+of cancelled history. A completed/cancelled inherited Goal does not cancel or charge that
+new User Run; an admitted still-active Goal keeps its pause and budget. Goal association is bound
+after the exact execution trigger in the same submission transaction, and later parent adoption
+cannot cross that User boundary. Old execution usage and Goal membership remain unchanged. Relation/execution content references and in-flight publication participate in
+the original GC; fixed files remain under Storage's original roots.
+
 The child has an independent Run and grant. Parent final, cancelling only the parent's current Run,
 normal extension retirement, or revoking the old parent grant after handoff does not kill the child.
 Child/tree cancellation remains explicit; actual higher-level workspace or credential revocation
@@ -761,8 +798,8 @@ Catalog computes the specified subtree from retained Thread/ChildTask lineage wi
 transaction cancels preparing children, descendant Runs, live process Operations and original active
 followup/Goal continuations, including terminal source Runs. Parent and sibling subtrees stay outside
 a child target. A short TreeCancellationReceipt acknowledges cancellation intent, not executor stop.
-A parent-Thread scope fence is checked in that same transaction. Arbitrary sibling exchange, remote
-environments and the complete collaboration product migration remain separate work.
+A parent-Thread scope fence is checked in that same transaction. Active requests and correlated
+Wait/deadline, remote environments and the complete collaboration product migration remain separate work.
 
 A report, execution outcome and file result are separate facts. Report outcome follows the original
 terminal Run and the presence of a textual report; an earlier failed tool does not permanently turn
@@ -812,7 +849,7 @@ original cancelled fact is delivered once, and the child remains independent. Wa
 their original tool origin are loaded on a worker; registration rechecks the same operation and graph
 admission before committing only metadata.
 
-Collaboration domain version 3 is required by the read-only existing-catalog preflight. An older,
+Collaboration domain version 4 is required by the read-only existing-catalog preflight. An older,
 missing or malformed domain is rejected before writable SQLite access or epoch advancement;
 there is no schema upgrade, fallback registry, or asset reset. New empty catalogs create the domain
 explicitly. Context scope uses the separate context domain version 4 contract.

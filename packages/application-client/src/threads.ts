@@ -1,6 +1,6 @@
 import type { MessageSendParams, MessageListParams, MessageReceipt, MessagePage, MessageView } from '@varin/protocol';
 import type { FamilyList, FamilyRuns, FamilyRead, FamilyItem, FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
-import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildWait, TreeCancellationReceipt, Followup, LiveRoot, ContextPersonalization, ContextResources, ResourceActivation, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
+import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, DelegatedExecution, ChildWait, TreeCancellationReceipt, Followup, LiveRoot, ContextPersonalization, ContextResources, ResourceActivation, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
 
 import type { RunModelSelection, RunModelSelections } from '@varin/protocol';
 import type { FollowupControlAction } from '@varin/protocol';
@@ -83,7 +83,18 @@ export interface ThreadMessagesAPI {
   list(identity: ThreadIdentity, request: Omit<MessageListParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MessagePage>;
   get(identity: ThreadIdentity, messageId: string, signal?: AbortSignal): Promise<MessageView>;
 }
+export interface ThreadChildContinuation extends ThreadIdentity {
+  key: string;
+  previousRunId: string;
+  expectedHead: string | null;
+  text: string;
+  images?: ImageAttachment[];
+}
 export interface ThreadCollaborationAPI {
+  /** Explicit User input, retaining this child's exact previous execution configuration. */
+  continueChild(input: ThreadChildContinuation, signal?: AbortSignal): Promise<DelegatedExecution>;
+  executions(identity: ThreadIdentity, operationId?: string, signal?: AbortSignal): Promise<DelegatedExecution[]>;
+  readExecutionReport(identity: ThreadIdentity, executionId: string, itemId: string, offset?: number, maxBytes?: number, signal?: AbortSignal): Promise<ChildTextPage>;
   readReport(identity: ThreadIdentity, operationId: string, itemId: string, offset?: number, maxBytes?: number): Promise<ChildTextPage>;
   children(identity: ThreadIdentity): Promise<ChildTask[]>;
   cancelChild(identity: ThreadIdentity, operationId: string): Promise<TreeCancellationReceipt>;
@@ -131,6 +142,8 @@ export interface ThreadSnapshot {
   policySelection: ThreadPolicyInspection | null;
   context: ThreadContextState;
   children?: ChildTask[];
+  /** This Thread branch's own initial and subsequent delegated executions. */
+  delegatedExecutions?: DelegatedExecution[];
 }
 export interface ThreadPlanState {
   identity: ThreadIdentity;

@@ -15,6 +15,7 @@ export interface IntegrationOperationBinding {
   origin: ToolOrigin;
   callId: string;
   childOperationId: string;
+  childExecutionId: string;
   childThreadId: string;
   result: { workspaceId: string; branchId: string; resultRevision: number; root: string; publicationId: string };
   target: LaunchSource;

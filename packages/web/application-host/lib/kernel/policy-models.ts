@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { parseHarnessModelSlots, resolveHarnessModelSlot } from '@varin/protocol';
 import { waitWithSignal } from '../cancellation.js';
 import type { ThreadModelAuthority } from './thread-adapter.js';
-import type { PolicyModelCapability } from './protocol.generated.js';
+import type { PolicyModelCapability, ModelSessionConfiguration, CredentialScope } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 export interface PreparedPolicyModel {
   capability: PolicyModelCapability;
@@ -18,6 +18,18 @@ const record = (value: unknown): value is Record<string, unknown> => value !== n
 // Configuration object order is not identity; array order and every value remain significant.
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
   : record(value) ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
+// These typed Option fields are omitted by Host selection and serialized as null by Rust.
+// Only their outer absence is equivalent; false, zero and nested modelOptions nulls retain identity.
+const optionalConfigurationFields = new Set<keyof ModelSessionConfiguration>([
+  'providerId', 'credentialEnvironment', 'acceptsImages', 'maxOutputTokens', 'azureDeployment',
+  'azureApiVersion', 'legacyMaxTokens', 'includeStreamUsage', 'reasoningEffort', 'anthropicOauth',
+  'adapterId', 'adapterVersion', 'contextWindowTokens', 'thinkingLevel', 'modelOptions',
+]);
+function configurationIdentity(configuration: ModelSessionConfiguration, scope: CredentialScope): string {
+  const normalized = Object.fromEntries(Object.entries(configuration).filter(([key, value]) =>
+    !(optionalConfigurationFields.has(key as keyof ModelSessionConfiguration) && value == null)));
+  return createHash('sha256').update(JSON.stringify(canonical({ configuration: normalized, scope }))).digest('hex');
+}
 export function createPolicyModelPreparer(options: {
   settings: (threadId: string) => Promise<unknown>; models: ThreadModelAuthority;
 }): PolicyModelPreparer {
@@ -37,9 +49,9 @@ export function createPolicyModelPreparer(options: {
         || previous.purpose !== 'planning' || previous.supported_operation !== 'tool_free_text') throw new Error('policy-model-requirements-changed');
       if (previous.status !== 'available') return [{ capability: structuredClone(previous) }];
       if (!previous.configuration || !previous.credential_scope) throw new Error('policy-model-selection-changed');
-      const configurationIdentity = createHash('sha256').update(JSON.stringify(canonical({ configuration: previous.configuration, scope: previous.credential_scope }))).digest('hex');
-      if (previous.configuration_identity !== configurationIdentity
-        || previous.binding_id !== `policy:${input.generation}:agentPlanning:${configurationIdentity}`) throw new Error('policy-model-selection-changed');
+      const identity = configurationIdentity(previous.configuration, previous.credential_scope);
+      if (previous.configuration_identity !== identity
+        || previous.binding_id !== `policy:${input.generation}:agentPlanning:${identity}`) throw new Error('policy-model-selection-changed');
       // Restore the committed model directly. Current settings and routing are unrelated intent.
       const credentialOwner = await waitWithSignal(options.models.rebindModel(previous.configuration, previous.credential_scope), signal);
       return [{ capability: structuredClone(previous), credentialOwner }];
@@ -64,10 +76,10 @@ export function createPolicyModelPreparer(options: {
     let scope;
     try { scope = await waitWithSignal(resolved.credentialOwner.scope(), signal); }
     catch { signal?.throwIfAborted(); return unavailable('unavailable'); }
-    const configurationIdentity = createHash('sha256').update(JSON.stringify(canonical({ configuration: resolved.configuration, scope }))).digest('hex');
-    const bindingId = `policy:${input.generation}:agentPlanning:${configurationIdentity}`;
+    const identity = configurationIdentity(resolved.configuration, scope);
+    const bindingId = `policy:${input.generation}:agentPlanning:${identity}`;
     const capability: PolicyModelCapability = { ...base, status: 'available', binding_id: bindingId,
-      configuration_identity: configurationIdentity, configuration: resolved.configuration, credential_scope: scope };
+      configuration_identity: identity, configuration: resolved.configuration, credential_scope: scope };
     return [{ capability, credentialOwner: resolved.credentialOwner }];
   };
 }

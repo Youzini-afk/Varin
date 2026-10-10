@@ -602,7 +602,7 @@ impl FamilyRead {
                 )
                 .optional()?;
             let child = child
-                .map(|raw| serde_json::from_str::<collaboration::ChildTask>(&raw))
+                .map(|raw| {let relation:delegated::ChildRelation=serde_json::from_str(&raw)?;delegated::execution_task(&db,&relation.operation_id)})
                 .transpose()?;
             let mut statement = db.prepare(
                 "SELECT id,head,active_run FROM branches WHERE thread_id=?1 ORDER BY rowid",
@@ -654,7 +654,9 @@ impl FamilyRead {
                     "active".into()
                 }
             } else if let Some(child) = &child {
-                child.state.clone()
+                let body:String=db.query_row("SELECT body FROM delegated_executions WHERE child_operation_id=?1 ORDER BY rowid DESC LIMIT 1",[&child.operation_id],|row|row.get(0))?;
+                let execution:delegated::DelegatedExecution=serde_json::from_str(&body)?;
+                execution.state().to_owned()
             } else {
                 db.query_row(
                     "SELECT json_extract(r.body,'$.state') FROM runs r JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=?1 ORDER BY r.rowid DESC LIMIT 1",

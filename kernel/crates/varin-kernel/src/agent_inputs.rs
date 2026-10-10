@@ -392,8 +392,9 @@ fn prepare_child_input(
     let child = catalog
         .lock()
         .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-        .child_task(&p.operation_id)
+        .delegated_execution(&p.execution_id)
         .map_err(domain)?;
+    let relation=catalog.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?.child_task(&child.child_operation_id).map_err(domain)?;
     let source = varin_runtime::catalog::launches::SourceSelection {
         environment_run_id: p.source.environment_run_id,
         mode: p.source.mode,
@@ -420,8 +421,8 @@ fn prepare_child_input(
             KernelError::Protocol("child context requires admitted scope".into())
         })?)?;
     let proposal = varin_runtime::catalog::context::ContextProposal {
-        key: format!("initial-child-context:{}", p.operation_id),
-        branch_id: child.child_branch_id,
+        key: format!("initial-child-context:{}", p.execution_id),
+        branch_id: relation.child_branch_id,
         through_id: None,
         expected_revision: 0,
         summary: String::new(),
@@ -432,9 +433,11 @@ fn prepare_child_input(
     let preparation = catalog
         .lock()
         .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-        .capture_child_preparation(&p.operation_id, source, proposal, basis)
+        .capture_child_preparation(&p.execution_id, source, proposal, basis)
         .map_err(domain)?
-        .with_resources(p.context.resources);
+        .with_resources(p.context.resources)
+        .with_input_preparation(p.input_preparation)
+        .with_expected_checkpoint(p.expected_context_checkpoint.0);
     let prepared = preparation.load().map_err(domain)?;
     let result = {
         let mut owner = catalog
@@ -444,7 +447,8 @@ fn prepare_child_input(
             return Err(KernelError::Cancelled);
         }
         let child = owner.admit_child(prepared).map_err(domain)?;
-        owner.capture_child_read(child)
+        let execution=owner.delegated_execution(&child.execution_id).map_err(domain)?;
+        owner.capture_delegated_execution(execution).map_err(domain)?
     };
     Ok(serde_json::to_value(result.load().map_err(domain)?)?)
 }

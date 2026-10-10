@@ -15,7 +15,7 @@ import type { VarinAgentPolicyInput } from '@varin/extension-contract';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { createAgentPolicy } from './agent-policy.js';
 import { afterEach, expect, it } from 'vitest';
-import { configureRuntimeUrlResolver, createThreadsHttpAPI, setRuntimeExtraHeaders } from '@varin/application-client';
+import { configureRuntimeUrlResolver, createThreadsHttpAPI, setRuntimeExtraHeaders, type ThreadIdentity } from '@varin/application-client';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
 import { openUserKnowledgeStore } from '../harness/recall-tool.js';
@@ -63,7 +63,7 @@ function gate() {
 type RecordedRequest = { body: Record<string, unknown>; response: ServerResponse };
 const model = { providerId: 'child-review-provider', modelId: 'child-review-model' };
 function originalSourcePin(child: import('./protocol.generated.js').ChildTask) {
-  if (child.source.handoff.root.kind !== 'fixed') throw new Error('Fixture expects its original fixed source');
+  if (!child.source.handoff || child.source.handoff.root.kind !== 'fixed') throw new Error('Fixture expects its original fixed source');
   return child.source.handoff.root.pin;
 }
 function complete(response: ServerResponse, output: unknown[]) {
@@ -1468,3 +1468,64 @@ it('cancelling a policy child observation resumes from the real cancellation fac
     expect(parentSteps).toBe(1); expect(childSteps).toBe(1); expect(h.errors.map(String)).toEqual([]);
   } finally { release.release(); }
 }, 30_000);
+
+it('continues a completed writable child after Host restart with a new Run, exact previous fixed files and independent reports/results', async () => {
+  let parentSteps = 0; let childSteps = 0; let operationId = '';
+  const f = await fixture(({ body, response }) => {
+    assertPairing(body);
+    if (isParent(body)) {
+      if (++parentSteps === 1) complete(response, [tool('dispatch', { task: 'Read source.txt, write FIRST_RUN_FILES, then report', workMode: 'isolated_write' }, 'initial-dispatch')]);
+      else if (parentSteps === 2) { operationId = job(body); complete(response, [tool('wait_child', { operationId }, 'initial-wait')]); }
+      else complete(response, [answer('Initial child result received', 'initial-parent-report')]);
+      return;
+    }
+    const step = ++childSteps;
+    const receipt = result(body) as { content?: { readVersion?: string; content?: { text?: string } } } | undefined;
+    if (step === 1 || step === 4) {
+      if (step === 4) expect(JSON.stringify(body.input)).toContain('SECOND_RUN_REQUEST');
+      complete(response, [tool('file_read', { path: 'source.txt' }, `read-${step}`)]);
+    } else if (step === 2 || step === 5) {
+      expect(receipt?.content?.content?.text).toBe(step === 2 ? 'fixed child source before parent changes' : 'FIRST_RUN_FILES');
+      complete(response, [tool('file_write', { path: 'source.txt', readVersion: receipt!.content!.readVersion!, content: step === 2 ? 'FIRST_RUN_FILES' : 'SECOND_RUN_FILES' }, `write-${step}`)]);
+    } else if (step === 3 || step === 6) complete(response, [answer(step === 3 ? 'FIRST_RUN_REPORT' : 'SECOND_RUN_REPORT', `child-report-${step}`)]);
+    else throw new Error('An original child Run was unexpectedly replayed');
+  });
+  const h = await f.openHost();
+  const parentIdentity = await h.api.create('continued-writable-child');
+  const prepared = await h.api.prepareSource({ ...parentIdentity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  prepared.source.tools = ['file_read'];
+  const parent = await h.api.submit({ ...parentIdentity, key: 'parent', expectedHead: null, text: 'Delegate isolated work and observe its result', model, source: prepared.source });
+  await expect.poll(async () => (await h.runtime.run(parent.run_id)).state, { timeout: 15_000 }).toBe('completed');
+  const original = await h.runtime.child(operationId);
+  if (!original.receipt || original.code_result.kind !== 'published' || !original.report) throw new Error('Original execution did not fix its report and result');
+  const childIdentity: ThreadIdentity = { runtime: 'agent', threadId: original.child_thread_id, branchId: original.child_branch_id };
+  const before = await h.api.snapshot(childIdentity);
+  const input = { ...childIdentity, key: 'explicit-second-run', previousRunId: original.receipt.run_id,
+    expectedHead: before.thread.branches.find(branch => branch.branch_id === childIdentity.branchId)!.head, text: 'SECOND_RUN_REQUEST: continue from your exact first file result' };
+  // Persist the command without a live preparation consumer; startup must discover that same intent.
+  h.collaboration!.stop();
+  const accepted = await h.api.collaboration!.continueChild(input);
+  expect(accepted.receipt).toBeNull(); expect(accepted.execution_id).not.toBe(original.operation_id);
+  expect(await h.api.collaboration!.continueChild(input)).toEqual(accepted);
+  expect((await h.runtime.child(operationId)).report).toEqual(original.report);
+  await h.close();
+  await fs.writeFile(path.join(f.workspace, 'source.txt'), 'CHANGED_PARENT_SOURCE_MUST_NOT_REPLACE_FIXED_CHILD_RESULT');
+  const reopened = await f.openHost();
+  await reopened.collaboration!.recover();
+  await expect.poll(async () => (await reopened.runtime.childExecution(accepted.execution_id)).code_result.kind, { timeout: 15_000 }).toBe('published');
+  const finished = await reopened.runtime.childExecution(accepted.execution_id);
+  if (!finished.receipt || finished.code_result.kind !== 'published' || !finished.report) throw new Error('Continuation did not fix its result');
+  expect(finished.receipt.run_id).not.toBe(original.receipt.run_id);
+  expect(finished.source).toMatchObject({ kind: 'ready', handoff: null, pin: { root: original.code_result.result.root } });
+  expect(finished.code_result.result.publication_id).not.toBe(original.code_result.result.publication_id);
+  expect(finished.code_result.result.base_root).toBe(original.code_result.result.root);
+  expect(finished.report.history_ids.some(id => original.report!.history_ids.includes(id))).toBe(false);
+  const report = await reopened.api.collaboration!.readExecutionReport(childIdentity, finished.execution_id, finished.report.history_ids.at(-1)!);
+  expect(report.text).toBe('SECOND_RUN_REPORT'); expect(report.execution_id).toBe(finished.execution_id);
+  expect((await reopened.runtime.child(operationId)).report).toEqual(original.report);
+  expect((await reopened.runtime.child(operationId)).code_result).toEqual(original.code_result);
+  const retry = await reopened.api.collaboration!.continueChild(input);
+  expect(retry.receipt).toEqual(finished.receipt);
+  expect((await reopened.api.snapshot(childIdentity)).history.filter(item => item.run_id === finished.receipt!.run_id && item.source === 'user').map(item => JSON.stringify(item.content)).join('\n')).toContain('SECOND_RUN_REQUEST');
+  expect(parentSteps).toBe(3); expect(childSteps).toBe(6); expect(reopened.errors.map(String)).toEqual([]);
+}, 45_000);

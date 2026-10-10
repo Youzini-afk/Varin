@@ -54,6 +54,7 @@ pub(crate) fn reconcile(
     let operation = read.load().map_err(error)?;
     let invocation: ToolInvocation = serde_json::from_value(operation.intent.clone())?;
     if invocation.call.name != "integrate_child"
+        || invocation.call.schema_version != "2"
         || invocation.origin.operation_id(&invocation.call.call_id) != operation.id
     {
         return Err(KernelError::Authorization(
@@ -63,20 +64,24 @@ pub(crate) fn reconcile(
     let child_id = invocation.call.arguments["childOperationId"]
         .as_str()
         .ok_or_else(|| error("Integration child identity missing"))?;
+    let execution_id = invocation.call.arguments["executionId"]
+        .as_str()
+        .ok_or_else(|| error("Integration execution identity missing"))?;
     let publication = invocation.call.arguments["publicationId"]
         .as_str()
         .ok_or_else(|| error("Integration publication missing"))?;
     let child = owner
         .lock()
         .map_err(error)?
-        .child_task(child_id)
+        .execution_task(execution_id)
         .map_err(error)?;
     let varin_runtime::catalog::collaboration::ChildCodeResult::Published { result, .. } =
         child.code_result
     else {
         return Err(error("Integration child result is not fixed"));
     };
-    if child.parent_thread_id != run.thread_id
+    if child.operation_id != child_id
+        || child.parent_thread_id != run.thread_id
         || child.parent_branch_id != run.branch_id
         || result.publication_id != publication
         || result.workspace_id != source.workspace_id
@@ -86,7 +91,7 @@ pub(crate) fn reconcile(
         ));
     }
     let expected = json!({"kind":"runtime_operation","operationId":operation.id,"parentRunId":run.id,"parentThreadId":run.thread_id,"parentBranchId":run.branch_id,
-        "origin":invocation.origin,"callId":invocation.call.call_id,"childOperationId":child_id,"childThreadId":child.child_thread_id,
+        "origin":invocation.origin,"callId":invocation.call.call_id,"childOperationId":child_id,"childExecutionId":execution_id,"childThreadId":child.child_thread_id,
         "result":{"workspaceId":result.workspace_id,"branchId":result.branch_id,"resultRevision":result.result_revision,"root":result.root,"publicationId":publication},"target":source});
     let id = format!("integration:{}", operation.id);
     let journal = resources.integration_receipt(

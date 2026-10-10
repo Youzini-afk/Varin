@@ -26,6 +26,139 @@ pub(super) fn execute(
         );
     }
 
+    if method == "runtime.child.continuation.accept" {
+        let p: ChildContinuationAcceptParams = serde_json::from_value(params)?;
+        let preparation = owner
+            .lock()
+            .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+            .capture_child_continuation(
+                varin_runtime::catalog::delegated::ChildContinuationCommand {
+                    key: p.key,
+                    child_operation_id: p.child_operation_id,
+                    previous_run_id: p.previous_run_id,
+                    expected_head: p.expected_head.0,
+                    input: p.input,
+                },
+            )
+            .map_err(domain)?;
+        let prepared = preparation.load().map_err(domain)?;
+        if cancelled.load(Ordering::Acquire) {
+            return Err(KernelError::Cancelled);
+        }
+        let read = {
+            let mut catalog = owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            let execution = catalog
+                .accept_child_continuation(prepared)
+                .map_err(domain)?;
+            catalog
+                .capture_delegated_execution(execution)
+                .map_err(domain)?
+        };
+        return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
+    }
+    if method == "runtime.child.execution.list" {
+        let p: ChildExecutionListParams = serde_json::from_value(params)?;
+        let reads = {
+            let catalog = owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            catalog
+                .delegated_executions(p.child_operation_id.as_deref())
+                .map_err(domain)?
+                .into_iter()
+                .map(|execution| {
+                    catalog
+                        .capture_delegated_execution(execution)
+                        .map_err(domain)
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        return Ok(serde_json::to_value(
+            reads
+                .into_iter()
+                .map(|read| read.load().map_err(domain))
+                .collect::<Result<Vec<_>, _>>()?,
+        )?);
+    }
+    if method == "runtime.child.execution.for_run" {
+        let p: RunParams = serde_json::from_value(params)?;
+        let read = {
+            let catalog = owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            catalog
+                .delegated_execution_for_run(&p.run_id)
+                .map_err(domain)?
+                .map(|execution| {
+                    catalog
+                        .capture_delegated_execution(execution)
+                        .map_err(domain)
+                })
+                .transpose()?
+        };
+        return Ok(serde_json::to_value(
+            read.map(|read| read.load().map_err(domain)).transpose()?,
+        )?);
+    }
+    if matches!(
+        method,
+        "runtime.child.execution.inspect" | "runtime.child.release" | "runtime.child.fail"
+    ) {
+        let (execution_id, failure) = if method == "runtime.child.fail" {
+            let p: ChildFailParams = serde_json::from_value(params)?;
+            if ![
+                "preparation_failed",
+                "source_unavailable",
+                "credentials_unavailable",
+                "binding_changed",
+            ]
+            .contains(&p.code.as_str())
+            {
+                return Err(KernelError::Protocol(
+                    "unknown child preparation failure".into(),
+                ));
+            }
+            (p.execution_id, Some(p.code))
+        } else {
+            let p: ChildExecutionParams = serde_json::from_value(params)?;
+            (p.execution_id, None)
+        };
+        let read = {
+            let mut catalog = owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            let execution = if let Some(code) = failure {
+                catalog.fail_delegated_preparation(&execution_id, &code)
+            } else if method == "runtime.child.release" {
+                catalog.release_delegated_resources(&execution_id)
+            } else {
+                catalog.delegated_execution(&execution_id)
+            }
+            .map_err(domain)?;
+            catalog
+                .capture_delegated_execution(execution)
+                .map_err(domain)?
+        };
+        if method == "runtime.child.fail" {
+            varin_runtime::catalog::child_delivery::reconcile_reports(&owner).map_err(domain)?;
+        }
+        return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
+    }
+    if method == "runtime.child.execution.report.read" {
+        let p: ChildExecutionReportReadParams = serde_json::from_value(params)?;
+        let offset = usize::try_from(p.offset.unwrap_or(0))
+            .map_err(|_| KernelError::Protocol("invalid offset".into()))?;
+        let max = usize::try_from(p.max_bytes.unwrap_or(65536))
+            .map_err(|_| KernelError::Protocol("invalid maxBytes".into()))?;
+        let read = owner
+            .lock()
+            .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+            .capture_delegated_report(&p.execution_id, &p.item_id, offset, max)
+            .map_err(domain)?;
+        return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
+    }
     if method == "runtime.child.source.ready" {
         let p: ChildSourceReadyParams = serde_json::from_value(params)?;
         let source = varin_runtime::catalog::launches::SourceSelection {
@@ -52,7 +185,7 @@ pub(super) fn execute(
         let preparation = owner
             .lock()
             .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-            .prepare_child_source(&p.operation_id, p.pin, source, p.provenance)
+            .prepare_child_source(&p.execution_id, p.pin, source, p.provenance)
             .map_err(domain)?;
         let prepared = preparation.load().map_err(domain)?;
         if cancelled.load(Ordering::Acquire) {
@@ -63,7 +196,13 @@ pub(super) fn execute(
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
             let child = catalog.attach_child_source(prepared).map_err(domain)?;
-            catalog.capture_child_read(child)
+            catalog
+                .capture_delegated_execution(
+                    catalog
+                        .delegated_execution(&child.execution_id)
+                        .map_err(domain)?,
+                )
+                .map_err(domain)?
         };
         return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
     }
@@ -76,19 +215,19 @@ pub(super) fn execute(
         let (operation_id, binding, receipt_id) = match method {
             "runtime.child.settle" => {
                 let p: ChildSettleParams = serde_json::from_value(params)?;
-                (p.operation_id, p.tool_binding, None)
+                (p.execution_id, p.tool_binding, None)
             }
             "runtime.child.result.candidate" => {
                 let p: ChildResultCandidateParams = serde_json::from_value(params)?;
                 (
-                    p.operation_id,
+                    p.execution_id,
                     p.tool_binding,
                     Some(p.candidate_operation_id),
                 )
             }
             _ => {
                 let p: ChildResultPublishedParams = serde_json::from_value(params)?;
-                (p.operation_id, p.tool_binding, Some(p.publication_id))
+                (p.execution_id, p.tool_binding, Some(p.publication_id))
             }
         };
         let binding: crate::tools::ToolBinding = serde_json::from_value(binding)?;
@@ -96,7 +235,7 @@ pub(super) fn execute(
             let catalog = owner
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-            let child = catalog.child_task(&operation_id).map_err(domain)?;
+            let child = catalog.execution_task(&operation_id).map_err(domain)?;
             let receipt = child
                 .receipt
                 .as_ref()
@@ -125,16 +264,18 @@ pub(super) fn execute(
         let context = varin_runtime::execution::ToolExecutionContext {
             run_id: binding.run_id.clone(),
             origin: child.origin.clone(),
-            operation_id: child.operation_id.clone(),
+            operation_id: child.execution_id.clone(),
         };
         let cancel = varin_runtime::execution::CancellationToken::default();
         // A directory capture still needs the original physical writers/leases to stop.
         // Once Storage has fixed a candidate, recovery uses its durable receipt and
         // may deliberately have no execution root (including after cwd removal).
         let captures_directory = method == "runtime.child.settle"
-            && matches!(child.code_result,
+            && matches!(
+                child.code_result,
                 varin_runtime::catalog::collaboration::ChildCodeResult::Pending
-                | varin_runtime::catalog::collaboration::ChildCodeResult::Settling { .. });
+                    | varin_runtime::catalog::collaboration::ChildCodeResult::Settling { .. }
+            );
         {
             let directory_idle = if captures_directory {
                 resources
@@ -148,8 +289,11 @@ pub(super) fn execute(
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
             if !directory_idle || !catalog.child_writers_stopped(&writers).map_err(domain)? {
-                let read =
-                    catalog.capture_child_read(catalog.child_task(&operation_id).map_err(domain)?);
+                let read = catalog
+                    .capture_delegated_execution(
+                        catalog.delegated_execution(&operation_id).map_err(domain)?,
+                    )
+                    .map_err(domain)?;
                 drop(catalog);
                 return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
             }
@@ -244,7 +388,13 @@ pub(super) fn execute(
                     .attach_child_result_bound(&operation_id, result, effect, &writers)
                     .map_err(domain)?
             };
-            catalog.capture_child_read(child)
+            catalog
+                .capture_delegated_execution(
+                    catalog
+                        .delegated_execution(&child.execution_id)
+                        .map_err(domain)?,
+                )
+                .map_err(domain)?
         };
         varin_runtime::catalog::child_delivery::reconcile_reports(&owner).map_err(domain)?;
         return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
@@ -295,44 +445,21 @@ pub(super) fn execute(
             read.map(|read| read.load().map_err(domain)).transpose()?,
         )?);
     }
+    let p: OperationParams = serde_json::from_value(params)?;
+    if method != "runtime.child.inspect" {
+        return Err(KernelError::Protocol(
+            "unknown child projection command".into(),
+        ));
+    }
     let read = {
-        let mut catalog = owner
+        let catalog = owner
             .lock()
             .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-        let child = if method == "runtime.child.fail" {
-            let p: ChildFailParams = serde_json::from_value(params)?;
-            if ![
-                "preparation_failed",
-                "source_unavailable",
-                "credentials_unavailable",
-                "binding_changed",
-            ]
-            .contains(&p.code.as_str())
-            {
-                return Err(KernelError::Protocol(
-                    "unknown child preparation failure".into(),
-                ));
-            }
-            catalog
-                .fail_child_preparation(&p.operation_id, &p.code)
-                .map_err(domain)?
-        } else {
-            let p: OperationParams = serde_json::from_value(params)?;
-            match method {
-                "runtime.child.inspect" => catalog.child_task(&p.operation_id),
-                "runtime.child.release" => catalog.mark_child_resources_released(&p.operation_id),
-                _ => {
-                    return Err(KernelError::Protocol(
-                        "unknown child projection command".into(),
-                    ))
-                }
-            }
-            .map_err(domain)?
-        };
-        catalog.capture_child_read(child)
+        catalog.capture_child_read(catalog.child_task(&p.operation_id).map_err(domain)?)
     };
-    if method == "runtime.child.fail" {
-        varin_runtime::catalog::child_delivery::reconcile_reports(&owner).map_err(domain)?;
-    }
     Ok(serde_json::to_value(read.load().map_err(domain)?)?)
 }
+
+#[cfg(test)]
+#[path = "delegated_commands_review.rs"]
+mod tests;

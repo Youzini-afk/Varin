@@ -20,20 +20,21 @@ export interface IntegrationTargetScope {
   release(): Promise<void>;
 }
 export interface IntegrationToolOwnerOptions {
-  runtime: Pick<AgentRuntimeClient, 'run' | 'launch' | 'child'>;
+  runtime: Pick<AgentRuntimeClient, 'run' | 'launch' | 'childExecution'>;
   coordinator: Pick<IntegrationCoordinator, 'mergeResult' | 'inspectIntegration'>;
   onCleanupError(operationId: string, error: unknown): void;
   /** Re-admit the original physical source and bind actual file/journal ports to its fresh grant. */
   openTarget(authority: ToolInvocationAuthority, launch: LaunchIntent, signal: AbortSignal): Promise<IntegrationTargetScope>;
 }
-function readInput(value: JsonValue): { childOperationId: string; publicationId: string } {
+function readInput(value: JsonValue): { childOperationId: string; executionId: string; publicationId: string } {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).some(key => !['childOperationId', 'publicationId'].includes(key))
+    || Object.keys(value).some(key => !['childOperationId', 'executionId', 'publicationId'].includes(key))
     || typeof value.childOperationId !== 'string' || !value.childOperationId.trim()
+    || typeof value.executionId !== 'string' || !value.executionId.trim()
     || typeof value.publicationId !== 'string' || !value.publicationId.trim()) {
     throw new Error('Child integration requires its original child and fixed publication identities');
   }
-  return { childOperationId: value.childOperationId, publicationId: value.publicationId };
+  return { childOperationId: value.childOperationId, executionId: value.executionId, publicationId: value.publicationId };
 }
 const completion = (result: IntegrationOperationReceipt): ToolExecutionReceipt => {
   if (!result.receipt || !result.effect || typeof result.executorStopped !== 'boolean' || result.recoveryCoverage !== 'files-only') {
@@ -55,10 +56,11 @@ export function createIntegrationToolOwner(options: IntegrationToolOwnerOptions)
         const [run, launch, child] = await Promise.all([
           options.runtime.run(authority.runId, context.signal),
           options.runtime.launch(authority.runId, context.signal),
-          options.runtime.child(input.childOperationId, context.signal),
+          options.runtime.childExecution(input.executionId, context.signal),
         ]);
         if (run.thread_id !== authority.threadId || !launch || !authority.source
           || !launch.selection.source || authority.source.mode === 'fixed_branch'
+          || child.child_operation_id !== input.childOperationId || child.execution_id !== input.executionId
           || child.parent_thread_id !== authority.threadId || child.parent_branch_id !== run.branch_id
           || child.code_result.kind !== 'published' || child.code_result.result.publication_id !== input.publicationId
           || child.code_result.result.workspace_id !== authority.source.workspace_id) {
@@ -70,7 +72,7 @@ export function createIntegrationToolOwner(options: IntegrationToolOwnerOptions)
         const operationBinding = { kind: 'runtime_operation' as const, operationId: authority.operationId,
           parentRunId: authority.runId, parentThreadId: authority.threadId, parentBranchId: run.branch_id,
           origin: authority.origin, callId: authority.origin.kind === 'policy_action' ? authority.origin.node_id : authority.operationId.slice(`${authority.origin.request_id}:tool:`.length),
-          childOperationId: child.operation_id, childThreadId: child.child_thread_id,
+          childOperationId: child.child_operation_id, childExecutionId: child.execution_id, childThreadId: child.child_thread_id,
           result: { workspaceId: result.workspace_id, branchId: result.branch_id, resultRevision: result.result_revision,
             root: result.root, publicationId: result.publication_id }, target: authority.source as LaunchSource };
         admitted = { operationId: `integration:${authority.operationId}`, workspaceId: result.workspace_id,

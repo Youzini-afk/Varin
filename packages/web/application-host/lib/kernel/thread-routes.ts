@@ -66,6 +66,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'family/runs': ['runtime', 'threadId', 'branchId', 'request'],
     'family/read': ['runtime', 'threadId', 'branchId', 'request'],
     'family/item': ['runtime', 'threadId', 'branchId', 'request'],
+    'child/continue': ['runtime', 'threadId', 'branchId', 'key', 'previousRunId', 'expectedHead', 'text', 'images'],
+    'child/executions': ['runtime', 'threadId', 'branchId', 'operationId'],
+    'child/execution/report': ['runtime', 'threadId', 'branchId', 'executionId', 'itemId', 'offset', 'maxBytes'],
     'child/report': ['runtime', 'threadId', 'branchId', 'operationId', 'itemId', 'offset', 'maxBytes'],
     'child/list': ['runtime', 'threadId', 'branchId'], 'child/cancel': ['runtime', 'threadId', 'branchId', 'operationId'],
     'child/wait/cancel': ['runtime', 'threadId', 'branchId', 'waitId'], 'tree/cancel': ['runtime', 'threadId', 'branchId'],
@@ -145,6 +148,16 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('family/runs', (body, signal) => adapter.familyRuns(identity(body), familyRequest<FamilyRunsParams>(body.request), signal));
   post('family/read', (body, signal) => adapter.familyRead(identity(body), familyRequest<FamilyReadParams>(body.request), signal));
   post('family/item', (body, signal) => adapter.familyItem(identity(body), familyRequest<FamilyItemParams>(body.request), signal));
+  post('child/continue', (body, signal) => {
+    if (typeof body.text !== 'string') throw new Error('Input text is required');
+    const images = parseThreadImages(body.images);
+    return adapter.continueChild({ ...identity(body), key: text(body.key), previousRunId: text(body.previousRunId),
+      expectedHead: body.expectedHead === null ? null : text(body.expectedHead), text: body.text,
+      ...(images === undefined ? {} : { images }) }, signal);
+  });
+  post('child/executions', (body, signal) => adapter.childExecutions(identity(body), body.operationId === undefined ? undefined : text(body.operationId), signal));
+  post('child/execution/report', (body, signal) => adapter.readChildExecutionReport(identity(body), text(body.executionId), text(body.itemId),
+    body.offset === undefined ? 0 : revision(body.offset), body.maxBytes === undefined ? 65536 : revision(body.maxBytes), signal));
   post('child/report', body => adapter.readChildReport(identity(body), text(body.operationId), text(body.itemId), body.offset === undefined ? 0 : revision(body.offset), body.maxBytes === undefined ? 65536 : revision(body.maxBytes)));
   post('child/list', body => adapter.children(identity(body)));
   post('child/cancel', body => adapter.cancelChild(identity(body), text(body.operationId)));

@@ -8,7 +8,7 @@ import { threadInput } from './thread-images.js';
 import { listThreadFollowups } from './thread-followups.js';
 import { listThreadGoals } from './thread-goals.js';
 import { createHash } from 'node:crypto';
-import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadSubmit, ThreadSource, ThreadSnapshot, ThreadHistoryPage, ThreadCompact, ThreadContextState, ThreadPrepareSource, ThreadPreparedSource, ThreadResourceRefresh } from '@varin/application-client';
+import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadSubmit, ThreadSource, ThreadSnapshot, ThreadHistoryPage, ThreadCompact, ThreadContextState, ThreadPrepareSource, ThreadPreparedSource, ThreadResourceRefresh, ThreadChildContinuation } from '@varin/application-client';
 import type { InputMode, InitialContext, InputSubmitParams, InputEnqueueParams, InputResourcePreparation, ContextResources, PreparedExplicitSkill, ModelSessionConfiguration, CredentialScope, AgentRuntimeStreamEvent, PolicyResumeReceipt } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import { isAbortError, waitWithSignal } from '../cancellation.js';
@@ -27,7 +27,7 @@ export interface ThreadModelAuthority {
 /** Projection and admission only: Rust owns all conversation, queue and execution facts. */
 export class ThreadAdapter {
   constructor(readonly runtime: AgentRuntimeClient, private readonly models: ThreadModelAuthority,
-    private readonly admitSource: (source: ThreadSource, identity: ThreadIdentity) => Promise<void>,
+    private readonly admitSource: (source: ThreadSource, identity: ThreadIdentity, runId?: string) => Promise<void>,
     private readonly onLaunchError: (runId: string, error: unknown) => void,
     private readonly prepareWorkspace?: (input: ThreadPrepareSource) => Promise<ThreadPreparedSource>,
     private readonly prepareContext?: ContextPreparer, private readonly plans?: PlanService,
@@ -191,6 +191,33 @@ export class ThreadAdapter {
   async familyItem(identity: ThreadIdentity, request: Omit<FamilyItemParams, 'callerThreadId'>, signal?: AbortSignal) {
     await this.requireIdentity(identity, signal);
     return this.runtime.familyItem({ ...request, callerThreadId: identity.threadId }, signal);
+  }
+  async continueChild(input: ThreadChildContinuation, signal?: AbortSignal) {
+    await this.requireIdentity(input, signal);
+    const child = await this.runtime.childForThread(input.threadId, signal);
+    if (!child || child.child_branch_id !== input.branchId) throw new Error('Continuation requires the original child branch');
+    // This call is the durable input acceptance. Cold source/configuration preparation belongs
+    // to the existing event-driven collaboration owner, including after Host restart.
+    return this.runtime.acceptChildContinuation({ key: input.key, childOperationId: child.operation_id,
+      previousRunId: input.previousRunId, expectedHead: input.expectedHead, input: threadInput(input.text, input.images) }, signal);
+  }
+  async childExecutions(identity: ThreadIdentity, operationId?: string, signal?: AbortSignal) {
+    await this.requireIdentity(identity, signal);
+    const child = operationId ? await this.runtime.child(operationId, signal) : await this.runtime.childForThread(identity.threadId, signal);
+    if (!child) return [];
+    // A historical fork remains readable without acquiring the original branch's executions.
+    if (operationId === undefined && child.child_thread_id === identity.threadId && child.child_branch_id !== identity.branchId) return [];
+    const own = child.child_thread_id === identity.threadId && child.child_branch_id === identity.branchId;
+    const parent = child.parent_thread_id === identity.threadId;
+    if (!own && !parent) throw new Error('Delegated executions belong to another Thread branch');
+    return this.runtime.childExecutions(child.operation_id, signal);
+  }
+  async readChildExecutionReport(identity: ThreadIdentity, executionId: string, itemId: string, offset = 0, maxBytes = 65536, signal?: AbortSignal) {
+    await this.requireIdentity(identity, signal);
+    const execution = await this.runtime.childExecution(executionId, signal);
+    if (!(execution.child_thread_id === identity.threadId && execution.child_branch_id === identity.branchId)
+      && execution.parent_thread_id !== identity.threadId) throw new Error('Report belongs to another Thread branch');
+    return this.runtime.readChildExecutionReport(executionId, itemId, offset, maxBytes, signal);
   }
   async readChildReport(identity: ThreadIdentity, operationId: string, itemId: string, offset = 0, maxBytes = 65536) {
     await this.requireIdentity(identity);
@@ -557,7 +584,7 @@ export class ThreadAdapter {
     const modelSelection = shownRun ? await this.runtime.modelSelections(shownRun.id) : {desired:null,active:null};
     const policySelection = shownRun && launch ? await this.runtime.inspectPolicy(shownRun.id) : null;
     return { identity, eventCursor, thread, activeRun, history, historyPage: { head: page.head, previous: page.previous }, inputs,
-      operations: [...operations.values()], followups, goals, launch, modelSelection, policySelection, context, children: await this.children(identity) };
+      operations: [...operations.values()], followups, goals, launch, modelSelection, policySelection, context, children: await this.children(identity), delegatedExecutions: await this.childExecutions(identity) };
   }
 
   private async recordLaunchFailure(runId: string, error: unknown): Promise<void> {
@@ -631,7 +658,7 @@ export class ThreadAdapter {
       const source = launch.selection.source;
       if (source && source.mode !== 'live_root' && source.branch_id !== null && source.revision !== null) {
         const admission = this.admitSource({ mode: source.mode, workspaceId: source.workspace_id,
-          executionWorkspaceId: source.execution_workspace_id, branchId: source.branch_id, revision: source.revision, tools: [] }, identity);
+          executionWorkspaceId: source.execution_workspace_id, branchId: source.branch_id, revision: source.revision, tools: [] }, identity, run.id);
         await waitWithSignal(admission, signal);
       }
       // live_root is validated by rebindLaunch's existing LiveSource owner.

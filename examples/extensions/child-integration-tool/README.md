@@ -5,7 +5,7 @@ contract. Its single service declaration owns discovery, model metadata and invo
 Build `host.ts` as bundled CommonJS `host.cjs` with the SDK, then install the directory through the
 normal extension catalog and review its `collaboration.integrations` Host capability grant.
 
-The caller supplies `childOperationId` and the exact `publicationId` from a published child code
+The caller supplies `childOperationId`, the exact `executionId`, and its `publicationId` from a published child code
 result. The Host derives the real parent Run, Thread, branch and source from the permission-admitted
 invocation. A later Run of the same parent Thread/branch can consume that fixed publication.
 A fixed read-only parent source has no implicit workspace writeback target.

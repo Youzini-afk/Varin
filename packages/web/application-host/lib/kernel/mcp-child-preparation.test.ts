@@ -148,6 +148,24 @@ else return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,res
     );
     leases.push(restored);
     expect(restored.binding).toEqual(saved);
+    // A subsequent delegated Run starts from the saved definitions under its own cwd.
+    // Neither the old child transport nor the parent's handoff is reused as authority.
+    const nextCwd = path.join(root, 'continued-child');
+    await fs.mkdir(nextCwd); await fs.writeFile(path.join(nextCwd, 'marker'), 'continued');
+    const nextInput = { ...input, runId: 'continued-run', executionCwd: nextCwd,
+      source: { ...input.source, runId: 'continued-run', branchId: 'continued-source' } };
+    const next = await prepare({ ...nextInput, delegatedBinding: saved }, signal);
+    leases.push(next);
+    expect(next.binding.tools).toEqual(saved.tools);
+    expect(next.binding.provenance.servers.fixture!.definition_version).toBe(saved.provenance.servers.fixture!.definition_version);
+    expect(next.binding.reference).not.toBe(saved.reference);
+    const nextCall = { ...call, runId: nextInput.runId, operationId: 'continued-effect', callId: 'continued-call' };
+    await next.authorize(nextCall, signal);
+    await next.execute(nextCall, signal, { kind: 'external', identity: 'continued-effect', epoch: 'continued-epoch' });
+    expect(JSON.parse((await fs.readFile(calls, 'utf8')).trim().split('\n').at(-1)!)).toEqual({ cwd: nextCwd, marker: 'continued' });
+    const nextSaved = structuredClone(next.binding); next.release();
+    const nextRestored = await prepare({ ...nextInput, requiredBinding: nextSaved }, signal);
+    leases.push(nextRestored); expect(nextRestored.binding).toEqual(nextSaved);
     await expect(
       restored.authorize(
         {
@@ -212,6 +230,7 @@ else return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,res
         .map((line) => JSON.parse(line)),
     ).toEqual([
       { cwd: childCwd, marker: 'child' },
+      { cwd: nextCwd, marker: 'continued' },
       { cwd: root, marker: 'neutral' },
     ]);
     config.mcpServers.fixture.args = [script, 'new-configuration'];
@@ -238,6 +257,7 @@ else return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,res
         .map((line) => JSON.parse(line)),
     ).toEqual([
       { cwd: childCwd, marker: 'child' },
+      { cwd: nextCwd, marker: 'continued' },
       { cwd: root, marker: 'neutral' },
       { cwd: childCwd, marker: 'child' },
     ]);
