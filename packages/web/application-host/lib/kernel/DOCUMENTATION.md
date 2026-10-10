@@ -58,7 +58,19 @@ grant, owner pin and finally release/revoke, with no physical root or file-effec
 execution workspace need not equal the resource's original source. User configuration and installed assets
 are captured through their existing owners; unknown capture-only paths require a new candidate.
 
-Explicit user `/skill` activation and older Pi consumers remain a subsequent convergence step.
+Explicit user `/skill:name args` runs through `ThreadAdapter` submit/enqueue/edit and the same Host
+resource owner. Private prepared material accompanies unchanged user text/media into the original
+Catalog input transaction. The Host never accepts renderer-provided snapshots or expanded bodies.
+Read-only submit/enqueue receipt queries reuse the original command identity before preparing a new
+candidate; accepted retries do not depend on later resource configuration. Queue revision CAS publishes
+text, attachments and skill selection together, preserving the old selection for unchanged raw text.
+The Thread UI inserts commands into the draft and presents accepted resource metadata separately.
+
+The `resource_read` activation selector is part of its actual persisted call. The bridge derives the
+snapshot query selector from that request rather than accepting a second independently supplied value.
+Catalog checks the frozen invocation and original input ancestry before choosing its original checkpoint;
+current scope/trust and cancellation still apply. Older Pi resource/catalog/command consumers remain a
+subsequent convergence step and retain their existing native session authority.
 
 ## Explicit one-time process follow-ups
 

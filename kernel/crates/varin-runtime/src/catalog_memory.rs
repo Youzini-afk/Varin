@@ -137,6 +137,7 @@ pub(super) fn project(
             .unwrap_or_else(|| format!("agent.personalization:{revision}"));
         let receipt = json!({"origin":origin,"revision":revision,"changes":[{"id":id,"scope":known["scope"],"note":note}]});
         result.push(ConversationItem {
+            resource_activation: None,
             id: fact.clone(),
             provenance: Provenance::EnvironmentFact { event_id: fact },
             content: Content::Text {

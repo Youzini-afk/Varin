@@ -5,7 +5,7 @@ import type { AgentResourceRequest, ResourceSnapshotParams } from './protocol.ge
 import { resourceThreadSource } from './thread-context.js';
 import { ResourceScopeError, type ThreadResourceScope } from './thread-resource-scope.js';
 
-export interface ResourceQuery extends ResourceSnapshotParams { request: AgentResourceRequest }
+export interface ResourceQuery extends Omit<ResourceSnapshotParams, 'activationId'> { request: AgentResourceRequest }
 export type ResourceToolResult = AgentResourceRead & { snapshotId?: string; resourceCheckpointId?: string };
 export type ResourceOwner = (query: ResourceQuery, signal: AbortSignal) => Promise<ResourceToolResult>;
 export function resourceQueryFailure(status: ResourceFailureStatus, reason: string, query?: ResourceQuery, snapshotId?: string): ResourceToolResult {
@@ -24,7 +24,9 @@ export function createResourceOwner(options: {
     let snapshotId: string | undefined;
     try {
       signal.throwIfAborted();
-      const frozen = { runId: query.runId, origin: query.origin, callId: query.callId, resourceCheckpointId: query.resourceCheckpointId };
+      const activationId = query.request.kind === 'instruction-scope' ? undefined : query.request.activationId;
+      const frozen = { runId: query.runId, origin: query.origin, callId: query.callId, resourceCheckpointId: query.resourceCheckpointId,
+        ...(activationId ? { activationId } : {}) };
       const resources = await options.runtime.resourceSnapshot(frozen, signal);
       const snapshot = resources.snapshot; snapshotId = snapshot.id;
       const run = await options.runtime.run(query.runId, signal);

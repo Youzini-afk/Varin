@@ -20,7 +20,7 @@ afterEach(async () => { for (const root of cleanup.splice(0)) await fs.rm(root, 
 const identity = { runtime: 'agent' as const, threadId: 'thread:resources', branchId: 'branch:resources' };
 const request = (id: string): ResourceQuery => ({ runId: 'run', origin: { kind: 'model_step', request_id: 'model-step' }, callId: 'call',
   resourceCheckpointId: 'checkpoint', request: { kind: 'skill', resourceId: id } });
-const checkpoint = (context: InitialContext): ContextCheckpoint => ({ id: 'checkpoint', revision: 1,
+const checkpoint = (context: InitialContext): ContextCheckpoint => ({ id: 'checkpoint', revision: 1, resource_activations: [],
   ...(context.personalization ? { personalization: context.personalization } : {}), ...(context.resources ? { resources: context.resources } : {}),
   proposal: { key: 'context', branch_id: identity.branchId, through_id: 'history', expected_revision: 0, summary: 'SAVED SUMMARY',
     effective_system_prompt: context.effectiveSystemPrompt, instruction_sources: context.instructionSources, memory_checkpoint: context.memoryCheckpoint } });

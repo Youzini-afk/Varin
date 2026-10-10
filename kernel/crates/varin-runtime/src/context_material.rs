@@ -12,6 +12,7 @@ struct Capacity {
 }
 fn data(key: &str, item: &ConversationItem, suffix: &str, text: String) -> ConversationItem {
     ConversationItem {
+        resource_activation: None,
         id: format!("context-job:{key}:source:{}:{suffix}", item.id),
         provenance: Provenance::ExternalData {
             source: format!("history:{}", item.id),
@@ -36,6 +37,7 @@ fn excerpts(
     // selected adapter's multimodal input. Its token cost is unknown, not assigned a fake price.
     if matches!(item.content, Content::Attachment { .. }) {
         return Ok(vec![ConversationItem {
+            resource_activation: None,
             id: format!("context-job:{key}:source:{}", item.id),
             provenance: Provenance::ExternalData {
                 source: format!("history:{}", item.id),
@@ -189,6 +191,7 @@ mod tests {
     #[test]
     fn partitioned_unicode_source_keeps_exact_ranges_and_media() {
         let source = ConversationItem {
+            resource_activation: None,
             id: "real-input".into(),
             provenance: Provenance::UserInstruction {
                 input_id: "original-input".into(),
@@ -199,6 +202,7 @@ mod tests {
             opaque: None,
         };
         let image = ConversationItem {
+            resource_activation: None,
             id: "real-image".into(),
             provenance: Provenance::UserInstruction {
                 input_id: "original-input".into(),

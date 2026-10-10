@@ -38,6 +38,7 @@ impl ContextJobAdmission {
 }
 #[derive(Serialize, serde::Deserialize)]
 struct ContextJobRecipe {
+    resource_activations: Vec<resources::ResourceActivation>,
     request: ContextJobRequest,
     source: SummarySource,
 }
@@ -619,6 +620,7 @@ impl ContextJobPreparation {
             &self.database,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
+        let mut resource_activations = Vec::new();
         let parts = if let Some(reference) = &self.duplicate {
             let original: ContextJobRecipe = serde_json::from_value(self.content.load(reference)?)?;
             if original.request != self.request {
@@ -627,6 +629,7 @@ impl ContextJobPreparation {
                 ));
             }
             self.source = original.source;
+            resource_activations = original.resource_activations;
             let mut statement=database.prepare("SELECT p.body FROM context_jobs j JOIN context_job_parts p ON p.run_id=j.run_id WHERE j.job_key=?1 ORDER BY p.part_index")?;
             let references = statement
                 .query_map([&self.request.key], |row| row.get::<_, String>(0))?
@@ -690,11 +693,16 @@ impl ContextJobPreparation {
                 self.source.through_id.as_deref(),
             )?;
             let history = hydrate_source(&self.content, source)?;
+            if self.source.through_id.is_some() {
+                resource_activations = active_checkpoint.as_ref().map(|checkpoint| checkpoint.resource_activations.clone()).unwrap_or_default();
+            }
+            resource_activations.extend(resources::retained_activations(&history));
             crate::execution::validate_history_pairs(&history)
                 .map_err(|error| RuntimeError::Conflict(error.to_string()))?;
             let prior = active_checkpoint
                 .filter(|_| self.source.through_id.is_some())
                 .map(|checkpoint| ConversationItem {
+                    resource_activation: None,
                     id: format!("context-job:{}:prior-summary", self.request.key),
                     provenance: Provenance::ExternalData {
                         source: format!("conversation-summary:{}", checkpoint.id),
@@ -715,6 +723,7 @@ impl ContextJobPreparation {
             .collect::<Result<Vec<_>>>()?
         };
         let recipe = self.content.save(&serde_json::to_value(ContextJobRecipe {
+            resource_activations,
             request: self.request.clone(),
             source: self.source,
         })?)?;
@@ -728,6 +737,7 @@ impl ContextJobPreparation {
             parts: parts.len() as u64,
         };
         let submission = submissions::PreparedSubmission::stage(submissions::SubmissionBody {
+            input_preparation: None,
                 command:SubmitInput {key:format!("context-job:{}",self.request.key),
                     thread_id:format!("context-job-thread:{}",self.request.key),
                     branch_id:format!("context-job-branch:{}",self.request.key),expected_head:None,
@@ -764,7 +774,8 @@ pub struct PreparedContextCheckpoint {
 }
 impl ContextJobPublication {
     pub fn load(self) -> Result<PreparedContextCheckpoint> {
-        let resource_checkpoint = self.job.recipe()?.source.checkpoint;
+        let recipe = self.job.recipe()?;
+        let resource_checkpoint = recipe.source.checkpoint;
         let resources = resource_checkpoint.map(|reference| -> Result<_> {
             let checkpoint: context::ContextCheckpoint = serde_json::from_value(self.content.load(&reference)?)?;
             Ok(checkpoint.resources)
@@ -781,6 +792,7 @@ impl ContextJobPublication {
         }
         let request = &job.request;
         let checkpoint = context::ContextCheckpoint {
+            resource_activations: recipe.resource_activations,
             id: request.key.clone(),
             revision: request
                 .expected_revision

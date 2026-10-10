@@ -43,6 +43,7 @@ pub(crate) fn execute_rpc(
                     &p.origin,
                     &p.call_id,
                     &p.resource_checkpoint_id,
+                    p.activation_id.as_deref(),
                 )
                 .map_err(read_error)?
         };
@@ -94,12 +95,12 @@ fn failed(value: impl ToString) -> ExecutionError {
     ExecutionError::new("agent_resources", value.to_string())
 }
 pub(crate) fn schema() -> ToolSchema {
-    ToolSchema { name:"resource_read".into(),version:"1".into(),
-        description:"Read a selected skill, a file within its bundle, or the instructions applying to a target in the admitted source. Resource IDs come from the frozen skill catalog; returned text retains its original source and scope.".into(),
+    ToolSchema { name:"resource_read".into(),version:"2".into(),
+        description:"Read a selected skill, a file within its bundle, or the instructions applying to a target in the admitted source. Pass a retained explicit skill input's activationId and matching resourceId to select its original version. Without activationId, read from this invocation's current frozen catalog. Returned text retains its original source and scope.".into(),
         output_schema:None,metadata:None,
         schema:json!({"type":"object","oneOf":[
-            {"type":"object","properties":{"kind":{"const":"skill"},"resourceId":{"type":"string","minLength":1}},"required":["kind","resourceId"],"additionalProperties":false},
-            {"type":"object","properties":{"kind":{"const":"skill-resource"},"resourceId":{"type":"string","minLength":1},"relativePath":{"type":"string"}},"required":["kind","resourceId","relativePath"],"additionalProperties":false},
+            {"type":"object","properties":{"kind":{"const":"skill"},"resourceId":{"type":"string","minLength":1},"activationId":{"type":"string","minLength":1,"description":"Use the activationId from a retained explicit skill input to read that original resource version."}},"required":["kind","resourceId"],"additionalProperties":false},
+            {"type":"object","properties":{"kind":{"const":"skill-resource"},"resourceId":{"type":"string","minLength":1},"activationId":{"type":"string","minLength":1,"description":"Use the activationId from a retained explicit skill input to read that original resource version."},"relativePath":{"type":"string"}},"required":["kind","resourceId","relativePath"],"additionalProperties":false},
             {"type":"object","properties":{"kind":{"const":"instruction-scope"},"targetPath":{"type":"string"},"targetType":{"type":"string","enum":["file","directory"]}},"required":["kind","targetPath"],"additionalProperties":false}
         ]}),
     }
@@ -107,7 +108,7 @@ pub(crate) fn schema() -> ToolSchema {
 fn contract() -> ToolContract {
     ToolContract {
         name: "resource_read".into(),
-        schema_version: "1".into(),
+        schema_version: "2".into(),
         read_only: true,
         completion: CompletionKind::Result,
         lifetime: Lifetime::Run,
@@ -119,25 +120,32 @@ fn request(
     context: &FrozenToolContext,
 ) -> Result<ResourceRequest, ExecutionError> {
     if call.name != "resource_read"
-        || call.schema_version != "1"
+        || call.schema_version != "2"
         || !context.tools.contains(&schema())
     {
         return Err(failed("resource schema is not bound"));
     }
-    if context
-        .resource_checkpoint_id
-        .as_ref()
-        .is_none_or(String::is_empty)
-    {
-        return Err(failed("resource checkpoint is not bound"));
-    }
     let request: ResourceRequest =
         serde_json::from_value(call.arguments.clone()).map_err(failed)?;
-    if matches!(&request,ResourceRequest::Skill{resource_id}|ResourceRequest::SkillResource{resource_id,..} if resource_id.is_empty())
+    if matches!(&request,ResourceRequest::Skill{resource_id,..}|ResourceRequest::SkillResource{resource_id,..} if resource_id.is_empty())
     {
         return Err(failed("resource ID is required"));
     }
+    checkpoint(&request, context)?;
     Ok(request)
+}
+fn checkpoint<'a>(request: &ResourceRequest, context: &'a FrozenToolContext) -> Result<&'a str, ExecutionError> {
+    if let Some(activation_id) = request.activation_id() {
+        let binding = context.resource_activations.iter().find(|binding| binding.activation_id == activation_id)
+            .ok_or_else(|| failed("resource activation is not retained by this invocation"))?;
+        if activation_id.is_empty() || Some(binding.resource_id.as_str()) != request.resource_id()
+            || context.resource_activations.iter().filter(|binding| binding.activation_id == activation_id).count() != 1 {
+            return Err(failed("resource activation differs from the selected resource"));
+        }
+        return Ok(&binding.resource_checkpoint_id);
+    }
+    context.resource_checkpoint_id.as_deref().filter(|id| !id.is_empty())
+        .ok_or_else(|| failed("resource checkpoint is not bound"))
 }
 pub(crate) fn declaration(
     catalog: Arc<Mutex<Catalog>>,
@@ -296,7 +304,7 @@ impl PreparedToolCall for ResourceCall {
             self.authorize(context, contract, cancel)?;
             let result = self.owner.bridge.query(
                 json!({"runId":context.run_id,"origin":context.origin,"callId":self.call_id,
-                "resourceCheckpointId":self.frozen.resource_checkpoint_id,"request":self.request}),
+                "resourceCheckpointId":checkpoint(&self.request, &self.frozen)?,"request":self.request}),
                 cancel,
             )?;
             // Checkpoint content remains bound to this live call. New source reads are

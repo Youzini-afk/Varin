@@ -69,6 +69,7 @@ fn subscription_tool_names_roundtrip_without_rewriting_signed_thinking_or_api_ke
             },
         },
         binding: RequestBinding {
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "fixture".into(),
             provider_family: "anthropic-messages".into(),
@@ -95,6 +96,7 @@ fn subscription_tool_names_roundtrip_without_rewriting_signed_thinking_or_api_ke
             },
         },
         history: vec![ConversationItem {
+            resource_activation: None,
             id: "input".into(),
             provenance: Provenance::UserInstruction {
                 input_id: "input".into(),
@@ -134,6 +136,7 @@ fn subscription_tool_names_roundtrip_without_rewriting_signed_thinking_or_api_ke
     assert!(output.iter().any(|item|matches!(&item.content,Content::ToolCall{call} if call.name=="read"&&call.arguments==json!({"path":"fixture.txt"}))));
     for item in output {
         view.history.push(ConversationItem {
+            resource_activation: None,
             id: item.id,
             provenance: Provenance::Assistant,
             content: item.content,

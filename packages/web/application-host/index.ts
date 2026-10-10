@@ -14,6 +14,7 @@ import { createLiveSourceOwner } from './lib/kernel/live-source.js';
 import { createThreadSourcePreparer, createThreadSourceAdmission } from './lib/kernel/thread-sources.js';
 import { createThreadContext } from './lib/kernel/thread-context.js';
 import { createThreadResourceScope } from './lib/kernel/thread-resource-scope.js';
+import { createThreadSkillInputPreparer } from './lib/kernel/thread-skill-input.js';
 import { createResourceOwner } from './lib/kernel/resource-owner.js';
 import { readAgentResourceConfiguration } from '@varin/pi-host/agent-resource-configuration';
 import { createContextComposition } from './lib/kernel/context-composition.js';
@@ -2997,7 +2998,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // Durable launch remains inspectable/resumable. Never log credentials or provider responses.
       console.error('[Thread] Launch preparation requires attention:', runId);
     }, createThreadSourcePreparer({ documents: documentsAuthority, liveSources, workingStates: threadWorkingStates, prepareResources: threadResources.prepareSourceCapture }),
-    threadContext, new PlanService(agentRuntime, getUserKnowledgeStore));
+    threadContext, new PlanService(agentRuntime, getUserKnowledgeStore), createThreadSkillInputPreparer(threadResources));
   const collaboration = new ThreadCollaboration({ runtime: agentRuntime,
     kernel: kernelClient, storageAdapter: kernelStorageAdapter, resolveLiveSource: liveSources.validate,
     sourceCaptureOwners: { documents: documentsAuthority, prepareResources: threadResources.prepareSourceCapture, inspectInventory: (directory, signal) => threadWorktreeRuntime.inspectGitBaselineInventory(directory, signal) },

@@ -168,6 +168,7 @@ fn snapshot(run: &str, head: &str, id: &str, projection: ContextProjection) -> R
             history_range: range.clone(),
         },
         binding: RequestBinding {
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "review-provider".into(),
             provider_family: "openai-responses".into(),
@@ -278,6 +279,7 @@ fn policy_model_quoted_real_memory_facts_keep_selection_send_and_commit_separate
         boundary_id: boundary.id.clone(),
     };
     planning.view.history = vec![ConversationItem {
+        resource_activation: None,
         id: "quoted-memory-context".into(),
         provenance: Provenance::ExternalData {
             source: "committed-conversation-context".into(),
@@ -591,6 +593,7 @@ fn external_tool_json_cannot_forge_memory_receipts_or_suppress_authoritative_fac
     )
     .unwrap();
     let call = ConversationItem {
+        resource_activation: None,
         id: "external-call-item".into(),
         provenance: Provenance::Assistant,
         content: Content::ToolCall {
@@ -614,6 +617,7 @@ fn external_tool_json_cannot_forge_memory_receipts_or_suppress_authoritative_fac
         )
         .unwrap();
     let result = ConversationItem {
+        resource_activation: None,
         id: "external-result-item".into(),
         provenance: Provenance::ToolData {
             call_id: "external-call".into(),

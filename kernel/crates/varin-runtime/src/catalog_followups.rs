@@ -578,7 +578,7 @@ impl ContinuationPreparation {
         );
         let fact = json!({"followupId":self.definition.id,"occurrenceId":self.occurrence.id,"sourceRunId":self.definition.source_run_id,"processId":self.source.id,
             "receiptIdentity":receipt.identity,"receiptEpoch":receipt.epoch,"executorStopped":receipt.executor_stopped,"outcome":receipt.outcome,"effect":receipt.effect,"result":result,"outputReader":reader});
-        let item=ConversationItem {id:format!("continuation-input:{}",self.occurrence.id),provenance:Provenance::EnvironmentFact{event_id:format!("followup:{}",self.occurrence.id)},
+        let item=ConversationItem {resource_activation: None,id:format!("continuation-input:{}",self.occurrence.id),provenance:Provenance::EnvironmentFact{event_id:format!("followup:{}",self.occurrence.id)},
             content:Content::Text{text:format!("A previously registered one-time user authorization permits continuing the existing Thread work after this original process stopped. The original instructions remain in the conversation. This is execution data, not a new user instruction or permission. Preserve failed, cancelled or uncertain outcomes. Process output remains with its original owner; outputReader is available only under the retained read capability and current authorization.\n{}",serde_json::to_string(&fact)?)},opaque:None};
         if self.stopping.load(Ordering::Acquire) {
             return Err(RuntimeError::Conflict(

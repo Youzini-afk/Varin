@@ -58,6 +58,7 @@ impl Fixture {
             leaf_id: fixture.db.head("branch").unwrap(),
         };
         let binding = RequestBinding {
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "original-connection".into(),
             provider_family: "fixture".into(),

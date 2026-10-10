@@ -322,14 +322,13 @@ it('does not navigate to a late fork result after the user selects another branc
   expect(open).not.toHaveBeenCalled();
 });
 
-it('keeps frozen resource metadata on conflict and refreshes once with the current checkpoint revision', async () => {
-  const f = fixture(true);
+function resourceCheckpoint(): ContextCheckpoint {
   const instruction = { origin: 'project' as const, kind: 'project-instruction' as const, appliesTo: '.',
     reference: { domainId: 'project:fixture', viewId: 'source:fixed', path: 'AGENTS.md', canonicalId: 'resource:instructions', version: 'instructions:one' } };
   const skill = { id: 'skill:review', name: 'review-code', description: 'Review code', disableModelInvocation: false, requiresProjectTrust: true,
     origin: 'project' as const, basePath: '.pi/skills/review', baseCanonicalId: 'resource:review', priority: 1,
     reference: { ...instruction.reference, path: '.pi/skills/review/SKILL.md', canonicalId: 'resource:review:skill', version: 'skill:one' } };
-  const checkpoint: ContextCheckpoint = { id: 'context:original', revision: 3,
+  return { id: 'context:original', revision: 3, resource_activations: [],
     proposal: { key: 'context:original', branch_id: identity.branchId, through_id: null, expected_revision: 2,
       summary: '', effective_system_prompt: 'Private composed prompt', instruction_sources: [], memory_checkpoint: null },
     resources: {
@@ -343,6 +342,126 @@ it('keeps frozen resource metadata on conflict and refreshes once with the curre
         capturedFiles: [{ reference: instruction.reference, content: 'Private instruction body' }, { reference: skill.reference, content: 'Private skill body' }], observations: [] },
     },
   };
+}
+
+it('adds a hidden skill command and retains the draft and image through a resource conflict and retry', async () => {
+  const f = fixture();
+  const failure = new ThreadRequestError(409, 'resource-stale');
+  failure.message = 'Private skill body at /not-for-ui/secret.md';
+  f.submit.mockRejectedValueOnce(failure);
+  const refresh = vi.fn<ThreadsAPI['resources']['refresh']>(async input => {
+    const next = structuredClone(f.view.context.checkpoint!);
+    next.id = 'context:retry'; next.revision = input.expectedRevision + 1; next.resources!.snapshot.id = 'resources:retry';
+    f.view.context.checkpoint = next; return next;
+  });
+  f.api.resources.refresh = refresh;
+  const checkpoint = resourceCheckpoint();
+  checkpoint.resources!.snapshot.skills[0]!.disableModelInvocation = true;
+  const skill = checkpoint.resources!.snapshot.skills[0]!;
+  checkpoint.resources!.snapshot.skills.push({ ...skill, id: 'skill:spaced-name', name: `${skill.name} extra`,
+    reference: { ...skill.reference, canonicalId: 'resource:spaced-name', path: '.pi/skills/spaced/SKILL.md' } });
+  f.view.context.checkpoint = checkpoint;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
+  expect(container.textContent).toContain('Hidden from automatic model discovery');
+  expect(button('Add /skill:review-code extra to draft').disabled).toBe(true);
+  await act(async () => button('Add /skill:review-code extra to draft').click());
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')?.value).toBe('');
+  await act(async () => button('Add /skill:review-code to draft').click());
+  const composer = () => container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!;
+  expect(composer().value).toBe('/skill:review-code ');
+  expect(f.submit).not.toHaveBeenCalled();
+  expect(f.enqueue).not.toHaveBeenCalled();
+
+  const draft = 'Review this exact draft.\nKeep  its spacing.  ';
+  await edit('[aria-label="Message thread"]', draft);
+  const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhC0AAAAASUVORK5CYII=';
+  const file = new File([Uint8Array.from(Buffer.from(data, 'base64'))], 'fixture.png', { type: 'image/png' });
+  const picker = container.querySelector<HTMLInputElement>('[aria-label="Choose image attachments"]')!;
+  await act(async () => {
+    Object.defineProperty(picker, 'files', { configurable: true, value: [file] });
+    picker.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  await act(async () => { button('Add /skill:review-code to draft').click(); button('Add /skill:review-code to draft').click(); });
+  const text = `/skill:review-code ${draft}`;
+  expect(composer().value).toBe(text);
+  expect(composer().closest('form')?.querySelector('img')?.getAttribute('src')).toBe(`data:image/png;base64,${data}`);
+  expect(f.submit).not.toHaveBeenCalled();
+  expect(container.textContent).not.toContain('Private skill body');
+  await submitForm(composer().closest('form')!);
+  expect(f.submit).toHaveBeenCalledOnce();
+  expect(f.submit.mock.calls[0]![0]).toMatchObject({ ...identity, text, images: [{ mimeType: 'image/png', data }] });
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('has changed. Refresh instructions and skills');
+  expect(container.textContent).not.toContain('/not-for-ui/secret.md');
+  expect(composer().value).toBe(text);
+  expect(composer().closest('form')?.querySelector('img')?.getAttribute('src')).toBe(`data:image/png;base64,${data}`);
+  expect(button('Send').disabled).toBe(false);
+  expect(button('Add /skill:review-code to draft').disabled).toBe(false);
+  await act(async () => button('Refresh instructions and skills').click());
+  expect(refresh).toHaveBeenCalledExactlyOnceWith({ ...identity, expectedRevision: 3 });
+  expect(composer().value).toBe(text);
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+  await submitForm(composer().closest('form')!);
+  expect(f.submit).toHaveBeenCalledTimes(2);
+  const [first, second] = f.submit.mock.calls.map(([input]) => input);
+  expect(second!.key).not.toBe(first!.key);
+  expect(second).toEqual({ ...first, key: second!.key });
+  expect(composer().value).toBe('');
+  expect(composer().closest('form')?.querySelector('img')).toBeNull();
+});
+
+it('projects frozen skill metadata separately from original history and editable queued input', async () => {
+  const f = fixture(true);
+  const checkpoint = resourceCheckpoint();
+  const skill = checkpoint.resources!.snapshot.skills[0]!;
+  const text = '/skill:review-code  Keep the original\nuser text.  ';
+  const invocation = { ordinal: 0, contentRevision: 1, resourceCheckpointId: checkpoint.id,
+    snapshotId: checkpoint.resources!.snapshot.id, resourceId: skill.id, reference: { ...skill.reference },
+    name: skill.name, arguments: 'Keep the original\nuser text.', body: 'Private admitted skill body' };
+  const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhC0AAAAASUVORK5CYII=';
+  const attachments = [{ media_type: 'image/png', content_ref: `data:image/png;base64,${data}`, source: 'user-upload' }];
+  const content = { text, attachments, skillInvocations: [invocation] };
+  f.view.history = [{ id: 'skill-history', thread_id: identity.threadId, parent: null, source: 'user', provider: null, content }];
+  f.view.inputs = [{ id: 'skill-queued', thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'ui-run',
+    mode: 'boundary', state: 'queued', revision: 1, content, cursor: 1 }];
+  // Resource refresh does not rewrite the material already accepted with each input.
+  skill.name = 'review-revised-code'; skill.reference.version = 'skill:latest';
+  f.view.context.checkpoint = checkpoint;
+  f.editInput.mockImplementationOnce(async (id, revision, edited) => {
+    const input = f.view.inputs.find(value => value.id === id)!;
+    input.revision = revision + 1; input.content = { text: edited, attachments }; return input;
+  });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  const history = container.querySelector('article')!;
+  const queued = () => container.querySelector<HTMLTextAreaElement>('[aria-label="Edit queued input"]')!;
+  for (const metadata of container.querySelectorAll('[aria-label="Skill materials"]')) {
+    expect(metadata.textContent).toContain(invocation.name);
+    expect(metadata.textContent).toContain(invocation.reference.version);
+    expect(metadata.textContent).toContain(invocation.reference.path);
+    expect(metadata.textContent).not.toContain('skill:latest');
+  }
+  expect(container.querySelectorAll('[aria-label="Skill materials"]')).toHaveLength(2);
+  expect(history.textContent).toContain(text);
+  expect(queued().defaultValue).toBe(text);
+  expect(history.querySelector('img')?.getAttribute('src')).toBe(`data:image/png;base64,${data}`);
+  expect(container.textContent).not.toContain(invocation.body);
+  expect(container.textContent).not.toContain('Private skill body');
+
+  const edited = 'Ordinary queued instructions\nwith exact spacing.  ';
+  await edit('[aria-label="Edit queued input"]', edited);
+  await submitForm(queued().closest('form')!);
+  expect(f.editInput).toHaveBeenCalledExactlyOnceWith('skill-queued', 1, edited);
+  expect(queued().defaultValue).toBe(edited);
+  expect(queued().closest('form')?.querySelector('[aria-label="Skill materials"]')).toBeNull();
+  expect(queued().closest('form')?.querySelector('img')?.getAttribute('src')).toBe(`data:image/png;base64,${data}`);
+  expect(history.querySelector('[aria-label="Skill materials"]')).not.toBeNull();
+  expect(history.textContent).toContain(text);
+});
+
+it('keeps frozen resource metadata on conflict and refreshes once with the current checkpoint revision', async () => {
+  const f = fixture(true);
+  const checkpoint = resourceCheckpoint();
   f.view.context.checkpoint = checkpoint;
   let completeRefresh!: (checkpoint: ContextCheckpoint) => void;
   const refresh = vi.fn<ThreadsAPI['resources']['refresh']>()
@@ -373,6 +492,7 @@ it('keeps frozen resource metadata on conflict and refreshes once with the curre
   expect(refresh).toHaveBeenCalledTimes(2);
   expect(refresh).toHaveBeenLastCalledWith({ ...identity, expectedRevision: 4 });
   expect(button('Refresh instructions and skills').disabled).toBe(true);
+  expect(button('Add /skill:review-code to draft').disabled).toBe(true);
   expect(resources().textContent).toContain('resources:original');
   await act(async () => {
     const next = structuredClone(f.view.context.checkpoint!);
@@ -403,7 +523,7 @@ it('retries summary generation without duplicating the job and applies its compl
   f.api.compact = compact;
   const publish = vi.fn<ThreadsAPI['publishContext']>(async () => {
     const request = f.view.context.jobs[0]!.job.request;
-    const checkpoint = { id: request.key, revision: 1, proposal: { ...request, summary: 'continuation summary' } };
+    const checkpoint: ContextCheckpoint = { id: request.key, revision: 1, resource_activations: [], proposal: { ...request, summary: 'continuation summary' } };
     f.view.context.checkpoint = checkpoint;
     return checkpoint;
   });

@@ -3,10 +3,11 @@ import type { AgentResourceInstruction, AgentResourceReference } from '@varin/pr
 import { Button } from '@/components/ui/button';
 
 /** Metadata only. Captured bodies stay with the frozen runtime checkpoint. */
-export function ThreadResources({ checkpoint, pending, onRefresh }: {
+export function ThreadResources({ checkpoint, pending, onRefresh, onAddSkill }: {
   checkpoint: ContextCheckpoint;
   pending: boolean;
   onRefresh(): void;
+  onAddSkill(name: string): void;
 }) {
   const resources = checkpoint.resources;
   if (!resources) return null;
@@ -42,10 +43,13 @@ export function ThreadResources({ checkpoint, pending, onRefresh }: {
       </div>
       <div>
         <p className="font-medium text-foreground">Skills · {snapshot.skills.length}</p>
+        {snapshot.skills.length > 0 && <p>Add a skill command before your draft. Your text and images stay in the composer until you send.</p>}
         {snapshot.skills.length ? <ul className="space-y-2">
           {snapshot.skills.map(skill => <li key={skill.id}>
             <p>{skill.name} · {skill.origin}{skill.disableModelInvocation ? ' · Hidden from automatic model discovery' : ''}</p>
             <ReferenceMetadata reference={skill.reference} />
+            <Button type="button" variant="ghost" size="sm" disabled={pending || skill.name.includes(' ')} onClick={() => onAddSkill(skill.name)}>Add /skill:{skill.name} to draft</Button>
+            {skill.name.includes(' ') && <p>Skill commands need a name without spaces. Rename this skill to use its command.</p>}
           </li>)}
         </ul> : <p>No skills captured.</p>}
       </div>

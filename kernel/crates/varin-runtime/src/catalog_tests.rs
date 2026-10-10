@@ -377,6 +377,7 @@ fn request_snapshot(receipt: &Receipt) -> crate::execution::RequestSnapshot {
                 },
             },
             binding: RequestBinding {
+                resource_activations: Vec::new(),
                 resource_checkpoint_id: None,
                 connection_identity: "fixture-connection".into(),
                 provider_family: "test".into(),
@@ -1071,8 +1072,8 @@ fn prepared_inputs_preserve_original_intents_and_only_retry_changed_queue_materi
         input: json!({"text":"original 中文🎉".repeat(10000)}),
         configuration: None,
     };
-    let prepared = db.prepare_enqueue(command.clone()).load().unwrap();
-    let queued = db.admit_queued_input(prepared).unwrap();
+    let prepared = db.prepare_enqueue(command.clone()).unwrap().load().unwrap();
+    let queued = db.admit_queued_input(prepared).unwrap().receipt;
     let stored: String = db
         .db
         .query_row(
@@ -2270,6 +2271,7 @@ fn independent_recovery_rejects_corrupted_branch_anchor_and_foreign_suffix_owner
                         db.head("main").unwrap().as_deref(),
                         HistorySource::Environment,
                         serde_json::to_value(ConversationItem {
+                            resource_activation: None,
                             id: "later-environment".into(),
                             provenance: Provenance::EnvironmentFact {
                                 event_id: "later-event".into(),

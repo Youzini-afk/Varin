@@ -2,6 +2,9 @@
 use super::*;
 
 pub struct QueuePreparation {
+    existing: Option<(Value, InputReceipt)>,
+    current: Option<context::CheckpointRead>,
+    input_preparation: Option<resources::InputResourcePreparation>,
     command: EnqueueInput,
     epoch: u64,
     content: crate::content::ContentStore,
@@ -15,6 +18,7 @@ pub(super) struct QueueIdentity {
     pub configuration: Option<Value>,
 }
 pub struct PreparedQueueInput {
+    pub(super) checkpoint: Option<Option<String>>,
     pub(super) identity: QueueIdentity,
     pub(super) epoch: u64,
     pub(super) history: Value,
@@ -22,21 +26,78 @@ pub struct PreparedQueueInput {
     pub(super) _publication: crate::content::ContentPublication,
 }
 impl QueuePreparation {
+    pub fn with_input_preparation(
+        mut self,
+        preparation: Option<resources::InputResourcePreparation>,
+    ) -> Self {
+        self.input_preparation = preparation;
+        self
+    }
+    pub fn existing_receipt(&self) -> Result<Option<InputReceipt>> {
+        let Some((intent, receipt)) = &self.existing else {
+            return Ok(None);
+        };
+        if crate::content::ContentStore::reference(&serde_json::to_value(&self.command)?)?
+            != *intent
+        {
+            return Err(RuntimeError::Conflict(
+                "input key has different content or mode".into(),
+            ));
+        }
+        Ok(Some(receipt.clone()))
+    }
     pub fn load(self) -> Result<PreparedQueueInput> {
+        let duplicate = self.existing_receipt()?.is_some();
         let Self {
             command,
             epoch,
             content,
             publication,
+            current,
+            input_preparation,
+            existing,
         } = self;
         if command.key.trim().is_empty() {
             return Err(RuntimeError::Invalid(
                 "input idempotency key cannot be empty".into(),
             ));
         }
-        execution_persistence::user_input_items("admission", &command.input)?;
-        let history = content.save_history(&command.input, &None)?;
-        let intent = content.save(&serde_json::to_value(&command)?)?;
+        let (history, intent, checkpoint) = if duplicate {
+            (
+                Value::Null,
+                existing.expect("validated queued receipt").0,
+                None,
+            )
+        } else {
+            let current_id = current.as_ref().map(|checkpoint| checkpoint.id.clone());
+            if input_preparation
+                .as_ref()
+                .is_some_and(|prepared| prepared.expected_context_checkpoint != current_id)
+            {
+                return Err(RuntimeError::Conflict(
+                    "prepared skill context is based on a different checkpoint".into(),
+                ));
+            }
+            let current = if input_preparation
+                .as_ref()
+                .is_some_and(|prepared| prepared.skill.is_some())
+            {
+                current.map(context::CheckpointRead::load).transpose()?
+            } else {
+                None
+            };
+            let material = resources::bind_input(
+                &command.input,
+                1,
+                input_preparation.as_ref(),
+                current.as_ref(),
+            )?;
+            (
+                content.save_history(&material, &None)?,
+                content.save(&serde_json::to_value(&command)?)?,
+                input_preparation.as_ref().map(|_| current_id),
+            )
+        };
         Ok(PreparedQueueInput {
             identity: QueueIdentity {
                 key: command.key,
@@ -48,6 +109,7 @@ impl QueuePreparation {
             epoch,
             history,
             intent,
+            checkpoint,
             _publication: publication,
         })
     }
@@ -78,6 +140,9 @@ impl QueuedInputRead {
     }
 }
 pub struct InputEditPreparation {
+    previous: QueuedInputRead,
+    current: Option<context::CheckpointRead>,
+    input_preparation: Option<resources::InputResourcePreparation>,
     id: String,
     revision: u64,
     epoch: u64,
@@ -86,6 +151,7 @@ pub struct InputEditPreparation {
     publication: crate::content::ContentPublication,
 }
 pub struct PreparedInputEdit {
+    pub(super) checkpoint: Option<Option<String>>,
     pub(super) id: String,
     pub(super) revision: u64,
     pub(super) epoch: u64,
@@ -93,26 +159,100 @@ pub struct PreparedInputEdit {
     pub(super) _publication: crate::content::ContentPublication,
 }
 impl InputEditPreparation {
+    pub fn with_input_preparation(
+        mut self,
+        preparation: Option<resources::InputResourcePreparation>,
+    ) -> Self {
+        self.input_preparation = preparation;
+        self
+    }
     pub fn load(self) -> Result<PreparedInputEdit> {
-        execution_persistence::user_input_items(&self.id, &self.value)?;
-        let reference = self.content.save_history(&self.value, &None)?;
+        resources::validate_raw_input(&self.value)?;
+        let revision = self
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| RuntimeError::Invalid("input revision exhausted".into()))?;
+        let previous = self.previous.load()?;
+        let (material, checkpoint) =
+            if resources::input_text(&self.value) == resources::input_text(&previous.content) {
+                (
+                    resources::preserve(&self.value, &previous.content, revision)?,
+                    None,
+                )
+            } else {
+                let current_id = self
+                    .current
+                    .as_ref()
+                    .map(|checkpoint| checkpoint.id.clone());
+                if self
+                    .input_preparation
+                    .as_ref()
+                    .is_some_and(|prepared| prepared.expected_context_checkpoint != current_id)
+                {
+                    return Err(RuntimeError::Conflict(
+                        "prepared skill context is based on a different checkpoint".into(),
+                    ));
+                }
+                let current = if self
+                    .input_preparation
+                    .as_ref()
+                    .is_some_and(|prepared| prepared.skill.is_some())
+                {
+                    self.current
+                        .map(context::CheckpointRead::load)
+                        .transpose()?
+                } else {
+                    None
+                };
+                (
+                    resources::bind_input(
+                        &self.value,
+                        revision,
+                        self.input_preparation.as_ref(),
+                        current.as_ref(),
+                    )?,
+                    self.input_preparation.as_ref().map(|_| current_id),
+                )
+            };
+        let reference = self.content.save_history(&material, &None)?;
         Ok(PreparedInputEdit {
             id: self.id,
             revision: self.revision,
             epoch: self.epoch,
             reference,
+            checkpoint,
             _publication: self.publication,
         })
     }
 }
+
 impl Catalog {
-    pub fn prepare_enqueue(&self, command: EnqueueInput) -> QueuePreparation {
-        QueuePreparation {
+    pub fn prepare_enqueue(&self, command: EnqueueInput) -> Result<QueuePreparation> {
+        let existing: Option<(String, String)> = self
+            .db
+            .query_row(
+                "SELECT intent,receipt FROM commands WHERE id=?1",
+                [&command.key],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let existing = existing
+            .map(|(intent, receipt)| -> Result<_> {
+                Ok((
+                    serde_json::from_str(&intent)?,
+                    serde_json::from_str(&receipt)?,
+                ))
+            })
+            .transpose()?;
+        Ok(QueuePreparation {
+            current: self.capture_active_checkpoint(&command.branch_id)?,
+            existing,
+            input_preparation: None,
             command,
             epoch: self.epoch,
             content: self.content.clone(),
             publication: self.content.begin_publication(),
-        }
+        })
     }
     pub fn queued_input_metadata(&self, id: &str) -> Result<QueuedInputMetadata> {
         record(&self.db, "input_queue", id)
@@ -156,6 +296,9 @@ impl Catalog {
         }
         context_jobs::require_regular_branch(&self.db, &metadata.branch_id)?;
         Ok(InputEditPreparation {
+            previous: self.capture_queued_input(id)?,
+            current: self.capture_active_checkpoint(&metadata.branch_id)?,
+            input_preparation: None,
             id: id.into(),
             revision,
             epoch: self.epoch,
@@ -170,6 +313,7 @@ impl Catalog {
             revision,
             epoch,
             reference,
+            checkpoint,
             _publication,
         } = prepared;
         if epoch != self.epoch {
@@ -183,6 +327,20 @@ impl Catalog {
             return Err(RuntimeError::Conflict(
                 "input has changed or was already delivered".into(),
             ));
+        }
+        if let Some(expected) = checkpoint {
+            let active: Option<String> = tx
+                .query_row(
+                    "SELECT checkpoint_id FROM active_contexts WHERE branch_id=?1",
+                    [&input.branch_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if active != expected {
+                return Err(RuntimeError::Conflict(
+                    "input resource context changed during preparation".into(),
+                ));
+            }
         }
         input.revision += 1;
         write_input(&tx, &input)?;

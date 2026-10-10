@@ -45,6 +45,7 @@ fn collection_db(fixture: &Fixture) -> Connection {
             input: json!("Queued GC fixture"),
             configuration: None,
         })
+        .unwrap()
         .load()
         .unwrap();
     catalog.admit_queued_input(queued).unwrap();

@@ -59,6 +59,7 @@ import type {
   LaunchIntent,
   LaunchSelectParams,
   InputSubmitParams,
+  InputEditParams,
   InputSubmitReceipt,
   Run,
   RunContextScope,
@@ -775,6 +776,9 @@ export class AgentRuntimeClient {
       signal,
     );
   }
+  enqueueReceipt(input: InputEnqueueParams, signal?: AbortSignal): Promise<InputReceipt | null> {
+    return this.kernel.agentRuntimeRequest('runtime.input.enqueueReceipt', input, signal);
+  }
   enqueue(
     input: InputEnqueueParams,
     signal?: AbortSignal,
@@ -785,17 +789,8 @@ export class AgentRuntimeClient {
       signal,
     );
   }
-  editInput(
-    inputId: string,
-    expectedRevision: number,
-    content: unknown,
-    signal?: AbortSignal,
-  ): Promise<QueuedInput> {
-    return this.kernel.agentRuntimeRequest(
-      'runtime.input.edit',
-      { inputId, expectedRevision, content },
-      signal,
-    );
+  editInput(input: InputEditParams, signal?: AbortSignal): Promise<QueuedInput> {
+    return this.kernel.agentRuntimeRequest('runtime.input.edit', input, signal);
   }
   cancelInput(
     inputId: string,

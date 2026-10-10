@@ -67,6 +67,7 @@ impl PolicyNodeReceiptMetadata {
 }
 
 pub struct PolicyGraphSchemaPreparation {
+    context: Option<context::ContextRead>,
     content: crate::content::ContentStore,
     publication: crate::content::ContentPublication,
 }
@@ -89,6 +90,11 @@ struct PreparedGraphNode {
 impl PolicyGraphSchemaPreparation {
     pub fn load(self, intent: &PolicyGraphIntent) -> Result<PreparedPolicyGraphSchemas> {
         let (body, run_id) = PolicyGraphBody::prepare(intent)?;
+        let projection = self.context.map(context::ContextRead::load).transpose()?;
+        let resource_activations = projection.as_ref().map(|projection| resources::retained_activations(&projection.history)).unwrap_or_default();
+        if body.nodes.iter().any(|node| node.resource_activations != resource_activations) {
+            return Err(RuntimeError::Conflict("policy skill bindings differ from retained input material".into()));
+        }
         let tools_ref = self.content.save(&serde_json::to_value(&body.tools)?)?;
         let metadata = PolicyActionMetadata::PolicyToolGraphV1 {
             action_id: body.action_id.clone(),
@@ -349,15 +355,17 @@ impl Catalog {
         intent: &PolicyGraphIntent,
     ) -> Result<PolicyGraphState> {
         let _synchronous = self.content.begin_synchronous()?;
-        let schemas = self.prepare_policy_graph_schemas().load(intent)?;
+        let schemas = self.prepare_policy_graph_schemas(run_id, epoch)?.load(intent)?;
         self.admit_policy_graph_prepared(run_id, epoch, schemas)?
             .load()
     }
-    pub fn prepare_policy_graph_schemas(&self) -> PolicyGraphSchemaPreparation {
-        PolicyGraphSchemaPreparation {
-            content: self.content.clone(),
-            publication: self.content.begin_publication(),
-        }
+    pub fn prepare_policy_graph_schemas(&self, run_id: &str, epoch: u64) -> Result<PolicyGraphSchemaPreparation> {
+        let run = self.run(run_id)?;
+        let head = self.head(&run.branch_id)?;
+        Ok(PolicyGraphSchemaPreparation {
+            context: self.prepare_context_read(run_id, epoch, head.as_deref())?,
+            content: self.content.clone(), publication: self.content.begin_publication(),
+        })
     }
     pub fn admit_policy_graph_prepared(
         &mut self,

@@ -11,8 +11,8 @@ The native Thread path uses this owner through `kernel/thread-resource-scope.ts`
 ContentStore-backed ContextCheckpoint. ModelStep and policy calls retain the exact checkpoint they
 selected; a resource refresh publishes by revision without changing an in-flight call.
 
-Explicit `/skill` input activation and convergence of the older Pi resource catalog/commands and editors
-remain separate work. This slice does not activate Pi loaders/extensions, resolve/install packages,
+Native explicit `/skill` input activation uses this same owner. Convergence of the older Pi resource
+catalog/commands and editors remains separate work. This slice does not activate Pi loaders/extensions, resolve/install packages,
 invoke a model, or replace the existing settings and trust authorities.
 
 ## Two operations
@@ -173,16 +173,41 @@ inherit file/process execution grants merely because its context references the 
 
 `resource_read` is an ordinary read-only Result tool in the existing registry. The private bridge carries
 actual Run, ModelStep/policy origin, call and checkpoint identity, which Catalog verifies before worker
-hydration. The model supplies only a selected resource ID or relative target. Captured reads need no
+hydration. The model supplies a selected resource ID or relative target, optionally selecting a retained
+explicit-input activation. That selector is checked against the actual invocation and original input;
+it is not permission to name an arbitrary checkpoint. Captured reads need no
 source reopening. An uncaptured immutable dependency reopens its original branch/revision with a narrow
 `storage.read` grant and temporary owner pin; it has no physical file root, recovery or write capability.
 Cancellation and epoch checks fence the original call. A missing original reader remains unavailable;
 later live content cannot substitute for the frozen body. Capture-only additions require explicit refresh.
 
 The authenticated resource refresh route and Thread UI use the displayed checkpoint revision. Stale,
-failed or cancelled preparation leaves the old generation visible. Explicit `/skill:name args` activation,
-older Pi catalog/command convergence and full resource editing UI remain to be connected before claiming
-one complete product consumer. Bot knowledge/persona remains separate from ordinary memory.
+failed or cancelled preparation leaves the old generation visible. Older Pi catalog/command convergence
+and full resource editing UI remain to be connected before claiming one complete product consumer.
+Bot knowledge/persona remains separate from ordinary memory.
+
+### Explicit input material
+
+`activation.ts` recognizes the locked SDK's leading `/skill:` syntax and first ASCII-space delimiter;
+only arguments are trimmed. Name diagnostics remain warnings. `thread-skill-input.ts` selects from the
+full published snapshot, rechecks its existing resource admission and parses the captured SKILL.md
+without reopening live files or settings. Unknown, malformed, unavailable and denied selections retain
+distinct failures instead of silently becoming successful ordinary prompts.
+
+The Thread adapter passes this private preparation alongside unchanged text/media. Catalog binds it to
+the same initial/source-replacement checkpoint or compares the existing checkpoint ID, and stores the
+body with the original input. Submit/enqueue retry uses the original command receipt before resource
+preparation. Queue edits share the existing revision CAS: unchanged text preserves the old selection,
+changed text prepares a new one, ordinary text removes it, and failure changes neither media nor material.
+The UI inserts a command into the draft without sending it and displays accepted resource metadata
+separately from raw user history. Names containing ASCII spaces remain visible but cannot use this
+command syntax; their resource-read availability is unchanged.
+
+Typed activations travel with the real compiled ModelStep/policy history. Compaction retains small source
+references; fork/recovery uses actual inherited input ancestry. A support-file read selecting an activation
+uses that original snapshot/version even after refresh. Omitting the selector reads the invocation's
+current catalog; it does not infer which historical input the caller means. An accepted body is immutable input history;
+later trust revocation does not rewrite it, but every new resource read still checks current trust.
 
 There is no watcher, second persistence/CAS database, settings writer or package installer in this directory.
 Native Host IPC acceptance remains separate; focused tests are not a substitute for it.

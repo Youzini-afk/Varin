@@ -5,11 +5,14 @@ import { threadInput } from './thread-images.js';
 import { listThreadFollowups } from './thread-followups.js';
 import { createHash } from 'node:crypto';
 import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadSubmit, ThreadSource, ThreadSnapshot, ThreadHistoryPage, ThreadCompact, ThreadContextState, ThreadPrepareSource, ThreadPreparedSource, ThreadResourceRefresh } from '@varin/application-client';
-import type { InputMode, InitialContext, InputSubmitParams, ModelSessionConfiguration, CredentialScope, AgentRuntimeStreamEvent, PolicyResumeReceipt } from './protocol.generated.js';
+import type { InputMode, InitialContext, InputSubmitParams, InputEnqueueParams, InputResourcePreparation, ContextResources, PreparedExplicitSkill, ModelSessionConfiguration, CredentialScope, AgentRuntimeStreamEvent, PolicyResumeReceipt } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import { isAbortError, waitWithSignal } from '../cancellation.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { ContextPreparer } from './thread-context.js';
+import type { ThreadSkillInputPreparer } from './thread-skill-input.js';
+import { parseExplicitSkillCommand } from '../agent-resources/activation.js';
+import { ResourceScopeError } from './thread-resource-scope.js';
 
 export interface ThreadModelAuthority {
   listModels?(): Promise<ThreadModelInfo[]>;
@@ -23,7 +26,16 @@ export class ThreadAdapter {
     private readonly admitSource: (source: ThreadSource, identity: ThreadIdentity) => Promise<void>,
     private readonly onLaunchError: (runId: string, error: unknown) => void,
     private readonly prepareWorkspace?: (input: ThreadPrepareSource) => Promise<ThreadPreparedSource>,
-    private readonly prepareContext?: ContextPreparer, private readonly plans?: PlanService) {}
+    private readonly prepareContext?: ContextPreparer, private readonly plans?: PlanService,
+    private readonly prepareSkillInput?: ThreadSkillInputPreparer) {}
+
+  private async skillInput(identity: ThreadIdentity, resources: ContextResources | undefined, text: string, signal?: AbortSignal): Promise<PreparedExplicitSkill | null> {
+    if (!parseExplicitSkillCommand(text)) return null;
+    if (!this.prepareSkillInput) throw Object.assign(new Error('Skill input preparation is unavailable'), { code: 'resource-unavailable' });
+    const prepared = await this.prepareSkillInput(identity, resources, text, signal);
+    if (prepared.status !== 'ready') throw new ResourceScopeError(prepared);
+    return prepared.skill;
+  }
 
   private readonly contextRefreshes = new Map<string, Promise<void>>();
   private readonly admittedLaunches = new Map<string, {
@@ -297,9 +309,11 @@ export class ThreadAdapter {
       } : null, enabledTools: input.source?.tools ?? [], credentialScope: await model.credentialOwner.scope() },
     };
     let initialContext: InitialContext | undefined;
-    const checkpoint = this.prepareContext ? await this.runtime.context(input.branchId) : null;
+    const explicitSkill = parseExplicitSkillCommand(input.text) !== null;
+    const checkpoint = this.prepareContext || explicitSkill ? await this.runtime.context(input.branchId) : null;
     const preparesResources = this.prepareContext && (input.source !== undefined || !checkpoint);
-    if (preparesResources) {
+    let inputPreparation: InputResourcePreparation | undefined;
+    if (preparesResources || explicitSkill) {
       // An accepted command owns its original receipt. A later malformed settings file must not
       // make an uncertain reply depend on re-preparing a replacement resource generation.
       const existing = await this.runtime.inputReceipt(command);
@@ -308,11 +322,11 @@ export class ThreadAdapter {
         return existing;
       }
       try {
-        if (checkpoint && input.source) {
+        if (this.prepareContext && checkpoint && input.source) {
           if (!this.prepareContext!.forSource) throw new Error('Resource source preparation is unavailable');
           initialContext = await this.prepareContext!.forSource(checkpoint, input.source);
           command.expectedContextCheckpoint = checkpoint.id;
-        } else if (!checkpoint) {
+        } else if (this.prepareContext && !checkpoint) {
           let source = input.source ?? null;
           if (!source) {
             const latest = thread.branches.find(branch => branch.branch_id === input.branchId)?.latest_run;
@@ -326,8 +340,10 @@ export class ThreadAdapter {
               };
             }
           }
-          initialContext = await this.prepareContext!.main(input, source);
+          initialContext = await this.prepareContext.main(input, source);
         }
+        const skill = await this.skillInput(input, initialContext ? initialContext.resources : checkpoint?.resources, input.text);
+        if (skill) inputPreparation = { expectedContextCheckpoint: initialContext ? null : checkpoint?.id ?? null, skill };
       } catch (error) {
         // Another identical request can finish after the first read. Only its authoritative,
         // matching receipt recovers this failure; a miss leaves the preparation error visible.
@@ -339,7 +355,7 @@ export class ThreadAdapter {
     }
     // The same Rust transaction accepts input, a new or replaced resource context, and the
     // explicit source/credential/tool selection. A competing checkpoint leaves all of them unchanged.
-    const receipt = await this.runtime.submit({ ...command, ...(initialContext ? { initialContext } : {}) });
+    const receipt = await this.runtime.submit({ ...command, ...(initialContext ? { initialContext } : {}), ...(inputPreparation ? { inputPreparation } : {}) });
     // The shared launch owner closes the initial context-refresh gap before preparation.
     void this.continueLaunch(receipt.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
     return receipt;
@@ -352,12 +368,56 @@ export class ThreadAdapter {
     if (!previous) throw new Error('An initial model selection is required');
     const selected = await this.runtime.modelSelections(previous.id);
     this.assertImagesSupported(input.images, selected.desired?.configuration ?? previous.configuration);
-    const receipt = await this.runtime.enqueue({ key: input.key, threadId: input.threadId, branchId: input.branchId,
-      mode: input.mode, input: threadInput(input.text, input.images) });
+    const command: InputEnqueueParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
+      mode: input.mode, input: threadInput(input.text, input.images) };
+    let inputPreparation: InputResourcePreparation | undefined;
+    if (parseExplicitSkillCommand(input.text)) {
+      const existing = await this.runtime.enqueueReceipt(command);
+      if (existing) {
+        void this.continueLaunch(existing.run_id).catch(() => undefined);
+        return existing;
+      }
+      try {
+        const checkpoint = await this.runtime.context(input.branchId);
+        const skill = await this.skillInput(input, checkpoint?.resources, input.text);
+        if (skill) inputPreparation = { expectedContextCheckpoint: checkpoint?.id ?? null, skill };
+      } catch (error) {
+        const accepted = await this.runtime.enqueueReceipt(command);
+        if (!accepted) throw error;
+        void this.continueLaunch(accepted.run_id).catch(() => undefined);
+        return accepted;
+      }
+    }
+    const receipt = await this.runtime.enqueue({ ...command, ...(inputPreparation ? { inputPreparation } : {}) });
     // Context is synchronized by the Run's request preparation. An accepted input receipt
     // must not wait for extension/MCP startup, source materialization or credential rebinding.
     void this.continueLaunch(receipt.run_id).catch(() => undefined);
     return receipt;
+  }
+
+  async editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[], signal?: AbortSignal) {
+    const queued = await this.requireInput(inputId);
+    if (queued.state !== 'queued' || queued.revision !== expectedRevision) {
+      throw Object.assign(new Error('Queued input changed'), { code: 'thread-conflict' });
+    }
+    if (images?.length) this.assertImagesSupported(images, (await this.requireRun(queued.run_id)).configuration);
+    const existing = typeof queued.content === 'string' ? { text: queued.content }
+      : queued.content as { text?: string; attachments?: unknown[] };
+    // Text-only edits preserve accepted media; an explicit images array replaces/removes it.
+    const content = images === undefined
+      ? { ...(text.length || !existing.attachments?.length ? { text } : {}), ...(existing.attachments ? { attachments: existing.attachments } : {}) }
+      : threadInput(text, images);
+    if (!text.length && !('attachments' in content && content.attachments?.length)) throw new Error('Text or images are required');
+    let inputPreparation: InputResourcePreparation | undefined;
+    if (text !== (existing.text ?? '') && parseExplicitSkillCommand(text)) {
+      const checkpoint = await this.runtime.context(queued.branch_id, signal);
+      const skill = await this.skillInput({ runtime: 'agent', threadId: queued.thread_id, branchId: queued.branch_id }, checkpoint?.resources, text, signal);
+      if (skill) inputPreparation = { expectedContextCheckpoint: checkpoint?.id ?? null, skill };
+    }
+    signal?.throwIfAborted();
+    // The input owner preserves old activation when raw text is unchanged and removes it when
+    // the replacement is ordinary text. Body, media and activation share the same revision CAS.
+    return this.runtime.editInput({ inputId, expectedRevision, content, ...(inputPreparation ? { inputPreparation } : {}) }, signal);
   }
 
   async inspectTools(identity:ThreadIdentity,runId:string,signal?:AbortSignal):Promise<ThreadToolInspection>{

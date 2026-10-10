@@ -234,6 +234,8 @@ pub enum Content {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ConversationItem {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_activation: Option<crate::catalog::resources::ResourceActivation>,
     pub id: String,
     pub provenance: Provenance,
     pub content: Content,
@@ -290,6 +292,7 @@ pub struct HistoryRange {
 /// No keys, tokens, or authorization headers belong in a request snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RequestBinding {
+    pub resource_activations: Vec<crate::catalog::resources::ResourceActivation>,
     pub resource_checkpoint_id: Option<String>,
     #[serde(default)]
     pub connection_identity: String,
@@ -405,6 +408,7 @@ pub(crate) fn model_history_id(request_id: &str, item_id: &str) -> String {
 }
 pub(crate) fn model_history_item(request_id: &str, item: &ProviderItem) -> ConversationItem {
     ConversationItem {
+        resource_activation: None,
         id: model_history_id(request_id, &item.id),
         provenance: Provenance::Assistant,
         content: item.content.clone(),
@@ -679,6 +683,7 @@ impl ToolOrigin {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FrozenToolContext {
+    pub resource_activations: Vec<crate::catalog::resources::ResourceActivation>,
     pub resource_checkpoint_id: Option<String>,
     pub run_id: String,
     pub origin: ToolOrigin,
@@ -1852,7 +1857,7 @@ impl<
                         None => self.tools.freeze(&input.binding.tools)?,
                     };
                     let graph =
-                        match self.admit_tool_graph(&input, nodes, policy_state.clone(), &cancel) {
+                        match self.admit_tool_graph(&input, nodes, policy_state.clone(), &history, history_cursor.as_deref(), &cancel) {
                             Ok(graph) => graph,
                             Err(error)
                                 if error.code == "input_pending" || cancel.is_cancelled() =>
@@ -2000,6 +2005,7 @@ impl<
                         request_history.retain(|previous| !matches!(&previous.provenance,Provenance::EnvironmentFact{event_id} if item.memory_facts.contains(event_id)));
                         request_history.push(item.item);
                     }
+                    binding.resource_activations = crate::catalog::resources::retained_activations(&request_history);
                     let view = RequestView {
                         request_id: format!(
                             "{}:{}:{}",
@@ -2250,6 +2256,7 @@ impl<
                         .or(history_cursor);
                     for result in &results {
                         history.push(ConversationItem {
+                            resource_activation: None,
                             id: format!("{}:result:{}", result.request_id, result.call_id),
                             provenance: Provenance::ToolData {
                                 call_id: result.call_id.clone(),
@@ -2315,6 +2322,7 @@ impl<
         )?;
         for result in results {
             history.push(ConversationItem {
+                resource_activation: None,
                 id: format!("{}:result:{}", result.request_id, result.call_id),
                 provenance: Provenance::ToolData {
                     call_id: result.call_id.clone(),
@@ -2385,6 +2393,7 @@ impl<
         tools: Option<Arc<dyn ToolExecutor>>,
     ) -> Result<Vec<ToolResult>, ExecutionError> {
         let frozen = FrozenToolContext {
+            resource_activations: snapshot.view.binding.resource_activations.clone(),
             resource_checkpoint_id: snapshot.view.binding.resource_checkpoint_id.clone(),
             run_id: input.run_id.clone(),
             origin: ToolOrigin::ModelStep {

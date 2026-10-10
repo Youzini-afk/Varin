@@ -304,7 +304,7 @@ impl Persistence for Mutex<Catalog> {
         let preparation = self
             .lock()
             .map_err(catalog_lock_error)?
-            .prepare_policy_graph_schemas();
+            .prepare_policy_graph_schemas(run, epoch).map_err(policy_error)?;
         let schemas = preparation.load(intent).map_err(policy_error)?;
         let read = self
             .lock()
@@ -617,6 +617,7 @@ fn history_items(record: &ExecutionRecord) -> Vec<ConversationItem> {
         } => results
             .iter()
             .map(|result| ConversationItem {
+                resource_activation: None,
                 id: format!("{}:result:{}", request_id, result.call_id),
                 provenance: Provenance::ToolData {
                     call_id: result.call_id.clone(),
@@ -660,6 +661,9 @@ impl ExecutionBodyPreparation {
     fn write(self, record: &ExecutionRecord) -> Result<PreparedExecutionBodies> {
         let request = match record {
             ExecutionRecord::RequestPrepared { snapshot } => {
+                if snapshot.view.binding.resource_activations != resources::retained_activations(&snapshot.view.history) {
+                    return Err(RuntimeError::Conflict("request skill bindings differ from retained input material".into()));
+                }
                 Some(self.content.save(&serde_json::to_value(snapshot)?)?)
             }
             _ => None,
@@ -1802,7 +1806,7 @@ pub(super) fn user_input_items(id: &str, input: &Value) -> Result<Vec<Conversati
         })?;
         if object
             .keys()
-            .any(|key| key != "text" && key != "attachments")
+            .any(|key| key != "text" && key != "attachments" && key != "skillInvocations")
         {
             return Err(RuntimeError::Invalid(
                 "unsupported user input field; content was not accepted".into(),
@@ -1852,10 +1856,12 @@ pub(super) fn user_input_items(id: &str, input: &Value) -> Result<Vec<Conversati
         return Err(RuntimeError::Invalid("user input has no content".into()));
     }
     let last = parts.len() - 1;
-    Ok(parts
+    let mut items: Vec<ConversationItem> = resources::invocations(input)?.iter().map(|entry| entry.project(id)).collect();
+    items.extend(parts
         .into_iter()
         .enumerate()
         .map(|(index, content)| ConversationItem {
+            resource_activation: None,
             id: if index == last {
                 id.into()
             } else {
@@ -1866,8 +1872,8 @@ pub(super) fn user_input_items(id: &str, input: &Value) -> Result<Vec<Conversati
             },
             content,
             opaque: None,
-        })
-        .collect())
+        }));
+    Ok(items)
 }
 
 impl Catalog {

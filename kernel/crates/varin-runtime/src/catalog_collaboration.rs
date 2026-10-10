@@ -727,6 +727,7 @@ impl ChildPreparation {
         launch.source = Some(source);
         let operation_id = child.operation_id;
         let submission = submissions::PreparedSubmission::stage(submissions::SubmissionBody {
+            input_preparation: None,
             command: SubmitInput {
                 key: format!("child:{operation_id}"),
                 thread_id: child.child_thread_id,

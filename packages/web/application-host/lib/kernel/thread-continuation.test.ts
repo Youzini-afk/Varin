@@ -244,7 +244,7 @@ it('cancelled launch context refresh cannot publish its late proposal or bind th
   const refresh = vi.fn(() => new Promise<{ effectiveSystemPrompt: string; instructionSources: string[]; memoryCheckpoint: null }>(done => { resolve = done; }));
   const prepare = Object.assign(async () => { throw new Error('Initial context is already present'); }, { refresh }) as unknown as ContextPreparer;
   const f = fixture(prepare); f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable';
-  f.runtime.context.mockResolvedValue({ id: 'context:old', revision: 1, proposal: { key: 'context:old', branch_id: identity.branchId,
+  f.runtime.context.mockResolvedValue({ id: 'context:old', revision: 1, resource_activations: [], proposal: { key: 'context:old', branch_id: identity.branchId,
     through_id: null, expected_revision: 0, summary: '', effective_system_prompt: 'Original context', instruction_sources: [], memory_checkpoint: null } });
   const work = f.adapter.continueLaunch(f.run.id);
   const rejected = expect(work).rejects.toMatchObject({ name: 'AbortError' });

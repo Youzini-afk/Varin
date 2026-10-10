@@ -98,6 +98,28 @@ Fork and compaction retain the original resources; source provenance is not an i
 The Host remains the only parser/selection owner. The kernel builtin uses its private resource channel,
 normal read-only tool lifecycle and cancellation/epoch fences; it does not expose arbitrary source selection.
 
+Explicit `/skill:name args` is input material, not a fabricated model/tool exchange. The Host selects
+the published descriptor (including skills hidden from automatic model metadata), parses its captured
+body, and prepares an adjunct alongside the untouched text and media. Submit, enqueue and edit stage
+that material in the existing input ContentStore object and publish through their original transaction
+and revision fences. An initial/replaced source uses its same prepared context; existing-context input
+uses the exact checkpoint the Host read. Accepted submit/enqueue keys return their original receipt
+before interpreting a later resource candidate. Media-only edits retain the original selection; any raw
+text change selects anew, or removes the material when changed to ordinary text.
+
+Canonical history projects an independently labelled `ExternalData` item before the original
+`UserInstruction` parts. Its typed activation derives from the real input ID, content revision and
+ordinal. ModelStep and policy-node contexts retain only activations actually present in their compiled
+history. `resource_read` schema 2 accepts an optional activation selector for skill/support-file reads;
+Catalog verifies the original call, retained binding, real input ancestry and exact resource version
+before opening that checkpoint. Omitting the selector explicitly reads the invocation's current catalog;
+the material label tells callers to use its activation for its original supporting files. Refresh never
+silently substitutes newer files for a selected activation. Compaction
+recipes/checkpoints retain small typed source references without reinserting the full skill body;
+fork/recovery derives them from inherited input history. Accepted bodies remain historical material
+after trust changes, while a new resource read still requires current authorization. No activation
+registry, duplicate queue, JSONL mirror or execution grant is created.
+
 ## Run activity scope
 
 Each Run pins the context checkpoint present in its admission transaction, including queued
@@ -149,7 +171,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 20, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
+Catalog version 21, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,

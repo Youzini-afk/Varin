@@ -53,6 +53,7 @@ export type KernelMethod =
   | "runtime.launch.inspect"
   | "runtime.launch.list"
   | "runtime.input.enqueue"
+  | "runtime.input.enqueueReceipt"
   | "runtime.input.edit"
   | "runtime.input.cancel"
   | "runtime.input.inspect"
@@ -376,7 +377,32 @@ export interface ContextResources {
   snapshot: AgentResourceSnapshot;
 }
 
-export type AgentResourceRequest = { kind: 'skill'; resourceId: string } | { kind: 'skill-resource'; resourceId: string; relativePath: string } | { kind: 'instruction-scope'; targetPath: string; targetType?: 'file' | 'directory' };
+export interface ResourceActivation {
+  activationId: string;
+  inputId: string;
+  inputRevision: number;
+  ordinal: number;
+  resourceCheckpointId: string;
+  snapshotId: string;
+  resourceId: string;
+  reference: AgentResourceReference;
+}
+
+export interface PreparedExplicitSkill {
+  snapshotId: string;
+  resourceId: string;
+  reference: AgentResourceReference;
+  name: string;
+  arguments: string;
+  body: string;
+}
+
+export interface InputResourcePreparation {
+  expectedContextCheckpoint: string | null;
+  skill: PreparedExplicitSkill | null;
+}
+
+export type AgentResourceRequest = { kind: 'skill'; resourceId: string; activationId?: string } | { kind: 'skill-resource'; resourceId: string; relativePath: string; activationId?: string } | { kind: 'instruction-scope'; targetPath: string; targetType?: 'file' | 'directory' };
 
 export interface ResourceRefreshParams {
   branchId: string;
@@ -385,6 +411,7 @@ export interface ResourceRefreshParams {
 }
 
 export interface ResourceSnapshotParams {
+  activationId?: string;
   runId: string;
   origin: ToolOrigin;
   callId: string;
@@ -820,6 +847,7 @@ export type InputMode = "boundary" | "interrupt" | "next_run";
 export type InputState = "queued" | "delivered" | "cancelled";
 
 export interface InputEnqueueParams {
+  inputPreparation?: InputResourcePreparation;
   key: string;
   threadId: string;
   branchId: string;
@@ -829,6 +857,7 @@ export interface InputEnqueueParams {
 }
 
 export interface InputEditParams {
+  inputPreparation?: InputResourcePreparation;
   inputId: string;
   expectedRevision: number;
   content: unknown;
@@ -1067,6 +1096,7 @@ export interface InitialContext {
 }
 
 export interface InputSubmitParams {
+  inputPreparation?: InputResourcePreparation;
   expectedContextCheckpoint?: string;
   initialContext?: InitialContext;
   launch?: SubmitLaunch;
@@ -2669,6 +2699,7 @@ export type KernelMethodParams = {
   "runtime.thread.inspect": ThreadParams;
   "runtime.thread.list": KernelEmptyParams;
   "runtime.input.enqueue": InputEnqueueParams;
+  "runtime.input.enqueueReceipt": InputEnqueueParams;
   "runtime.input.edit": InputEditParams;
   "runtime.input.cancel": InputCancelParams;
   "runtime.input.inspect": InputHandleParams;
@@ -3063,6 +3094,15 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.input.enqueue";
+      params: InputEnqueueParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.input.enqueueReceipt";
       params: InputEnqueueParams;
       epoch?: string;
       grantId?: string;

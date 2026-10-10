@@ -161,7 +161,7 @@ impl PersonalizationRefresh {
             expected_revision, summary: current.proposal.summary,
             effective_system_prompt, instruction_sources, memory_checkpoint,
         };
-        let checkpoint = context::ContextCheckpoint {id:proposal.key.clone(),revision:current.revision+1,proposal,personalization:Some(personalization),resources:current.resources};
+        let checkpoint = context::ContextCheckpoint {resource_activations: current.resource_activations, id:proposal.key.clone(),revision:current.revision+1,proposal,personalization:Some(personalization),resources:current.resources};
         let reference = content.save(&serde_json::to_value(&checkpoint)?)?;
         Ok(PreparedPersonalizationRefresh {previous_id:current.id,checkpoint,reference,unchanged:false,_publication})
     }

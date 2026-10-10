@@ -16,6 +16,7 @@ pub struct ContextProposal {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ContextCheckpoint {
+    pub resource_activations: Vec<super::resources::ResourceActivation>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resources: Option<super::resources::ContextResources>,
     pub id: String,
@@ -376,9 +377,11 @@ impl Catalog {
                 ))
             };
         }
+        let mut resource_activations = Vec::new();
         if let Some(through_id) = proposal.through_id.as_deref() {
             let metadata = self.context_source_metadata(&proposal.branch_id, through_id)?;
             let history = super::context_jobs::hydrate_source(&self.content, metadata)?;
+            resource_activations = resources::retained_activations(&history);
             crate::execution::validate_history_pairs(&history)
                 .map_err(|error| RuntimeError::Conflict(error.to_string()))?;
             if proposal.summary.trim().is_empty() {
@@ -406,6 +409,7 @@ impl Catalog {
                 .and_then(|context| context.personalization),
         };
         let checkpoint = ContextCheckpoint {
+            resource_activations,
             id: proposal.key.clone(),
             revision,
             proposal,
@@ -650,6 +654,7 @@ impl ContextRead {
             } => {
                 let request = job.request()?;
                 let mut history = vec![ConversationItem {
+                    resource_activation: None,
                     id: format!("context-job:{}:system", request.key),
                     provenance: Provenance::SystemInstruction {
                         source: "context_compaction:v2".into(),
@@ -662,6 +667,7 @@ impl ContextRead {
                 if let Some((request_id, reference)) = previous {
                     let summary = crate::context_material::summary_text(&content, &reference)?;
                     history.push(ConversationItem {
+                        resource_activation: None,
                         id: format!("context-job:{}:summary-so-far:{request_id}", request.key),
                         provenance: Provenance::ExternalData {
                             source: format!("model-output:{request_id}"),
@@ -673,6 +679,7 @@ impl ContextRead {
                 let material: Vec<ConversationItem> = serde_json::from_value(content.load(&part)?)?;
                 history.extend(material);
                 history.push(ConversationItem {
+                    resource_activation: None,
                     id: format!("context-job:{}:request", request.key),
                     provenance: Provenance::UserInstruction {
                         input_id: request.key.clone(),
@@ -713,6 +720,7 @@ impl ContextRead {
         }
         if !checkpoint.proposal.effective_system_prompt.is_empty() {
             history.push(ConversationItem {
+                resource_activation: None,
                 id: format!("context:{}:system", checkpoint.id),
                 provenance: Provenance::SystemInstruction {
                     source: checkpoint.id.clone(),
@@ -732,6 +740,7 @@ impl ContextRead {
         }
         if checkpoint.proposal.through_id.is_some() {
             history.push(ConversationItem {
+                resource_activation: None,
                 id: format!("context:{}:summary", checkpoint.id),
                 provenance: Provenance::ExternalData {
                     source: format!("conversation-summary:{}", checkpoint.id),
@@ -742,6 +751,7 @@ impl ContextRead {
                 opaque: None,
             });
         }
+        history.extend(checkpoint.resource_activations.iter().map(resources::ResourceActivation::summary_reference));
         for metadata in suffix {
             let item = content.hydrate_history(metadata)?;
             if item.source == HistorySource::User {

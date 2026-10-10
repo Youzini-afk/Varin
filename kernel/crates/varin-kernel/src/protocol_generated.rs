@@ -81,6 +81,7 @@ pub(crate) struct ResourceRefreshParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ResourceSnapshotParams {
+    pub(crate) activation_id: Option<String>,
     pub(crate) run_id: String,
     pub(crate) origin: varin_runtime::execution::ToolOrigin,
     pub(crate) call_id: String,
@@ -222,6 +223,8 @@ pub(crate) struct KernelEmptyParams {}
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct InputEnqueueParams {
+    pub(crate) input_preparation:
+        Option<varin_runtime::catalog::resources::InputResourcePreparation>,
     pub(crate) key: String,
     pub(crate) thread_id: String,
     pub(crate) branch_id: String,
@@ -233,6 +236,8 @@ pub(crate) struct InputEnqueueParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct InputEditParams {
+    pub(crate) input_preparation:
+        Option<varin_runtime::catalog::resources::InputResourcePreparation>,
     pub(crate) input_id: String,
     pub(crate) expected_revision: i64,
     pub(crate) content: Value,
@@ -376,6 +381,8 @@ pub(crate) struct ThreadCreateParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct InputSubmitParams {
+    pub(crate) input_preparation:
+        Option<varin_runtime::catalog::resources::InputResourcePreparation>,
     pub(crate) expected_context_checkpoint: Option<String>,
     pub(crate) initial_context: Option<InitialContext>,
     pub(crate) launch: Option<SubmitLaunch>,
@@ -2027,6 +2034,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.input.enqueue" => serde_json::from_value::<InputEnqueueParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.input.enqueueReceipt" => {
+            serde_json::from_value::<InputEnqueueParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.input.edit" => serde_json::from_value::<InputEditParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

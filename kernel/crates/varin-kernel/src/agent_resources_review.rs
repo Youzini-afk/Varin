@@ -154,12 +154,12 @@ fn basis(text: &str) -> PersonalizationBasis {
 fn resources(text: &str) -> ContextResources {
     let reference = json!({"domainId":"user","viewId":"fixed","path":"SKILL.md","canonicalId":"user/SKILL.md","version":text});
     serde_json::from_value(json!({"source":null,"snapshot":{"id":text,"scope":{"threadId":"thread","branchId":"branch","mode":"agent","threadRole":"main","projectId":null,"sourceIdentity":null,"cwd":"","projectTrusted":false},
-        "readers":[{"domainId":"user","viewId":"fixed","consistency":"capture-only"}],"project":null,"configurationDigest":"resources","shadowedContextCanonicalIds":[],"system":null,"appendSystem":null,"instructions":[],"instructionScopes":[],"skills":[],"diagnostics":[],"capturedFiles":[{"reference":reference,"content":text}],"observations":[]}})).unwrap()
+        "readers":[{"domainId":"user","viewId":"fixed","consistency":"capture-only"}],"project":null,"configurationDigest":"resources","shadowedContextCanonicalIds":[],"system":null,"appendSystem":null,"instructions":[],"instructionScopes":[],"skills":[{"id":"skill","name":"skill","description":"resource fixture","disableModelInvocation":true,"requiresProjectTrust":false,"origin":"user","reference":reference,"basePath":"","baseCanonicalId":"user","priority":0}],"diagnostics":[],"capturedFiles":[{"reference":reference,"content":text}],"observations":[]}})).unwrap()
 }
 #[test]
 fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_operations() {
-    for (policy_call, cancel_before_reply) in
-        [(false, false), (false, true), (true, false), (true, true)]
+    for (policy_call, cancel_before_reply, explicit) in
+        [(false, false, false), (false, true, false), (true, false, false), (true, true, false), (false, false, true), (true, true, true)]
     {
         let root =
             std::env::temp_dir().join(format!("varin-resource-builtin-{}", uuid::Uuid::new_v4()));
@@ -172,7 +172,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
                     thread_id: "thread".into(),
                     branch_id: "branch".into(),
                     expected_head: None,
-                    input: json!("read skill"),
+                    input: json!(if explicit {"/skill:skill"} else {"read skill"}),
                     configuration: json!({}),
                 },
                 Some(ContextProposal {
@@ -189,14 +189,29 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
             )
             .unwrap()
             .with_resources(Some(resources("old")))
+            .with_input_preparation(explicit.then(|| {
+                let resources=resources("old"); let skill=&resources.snapshot.skills[0];
+                varin_runtime::catalog::resources::InputResourcePreparation { expected_context_checkpoint:None,
+                    skill:Some(varin_runtime::catalog::resources::PreparedExplicitSkill { snapshot_id:resources.snapshot.id.clone(), resource_id:skill.id.clone(),
+                        reference:skill.reference.clone(), name:skill.name.clone(), arguments:String::new(), body:"old".into() }) }
+            }))
             .load(None, false)
             .unwrap();
         let receipt = catalog.admit_submission(prepared).unwrap();
+        if explicit {
+            let prepared=catalog.prepare_resource_refresh("branch",1,"new default".into(),vec![],None,basis("new default"),resources("new default")).unwrap().load().unwrap();
+            catalog.publish_resource_refresh(prepared).unwrap();
+        }
+        let projected=catalog.prepare_context_read(&receipt.run_id,catalog.epoch(),Some(&receipt.input_id)).unwrap().unwrap().load().unwrap();
+        let activations=varin_runtime::catalog::resources::retained_activations(&projected.history);
+        let checkpoint_id=projected.resource_checkpoint_id.clone();
+        let mut arguments=json!({"kind":"skill","resourceId":"skill"});
+        if explicit { arguments["activationId"]=json!(activations[0].activation_id); }
         let call = ToolCall {
             call_id: "read".into(),
             name: "resource_read".into(),
-            schema_version: "1".into(),
-            arguments: json!({"kind":"skill","resourceId":"skill"}),
+            schema_version: "2".into(),
+            arguments,
         };
         let range = HistoryRange {
             branch_id: "branch".into(),
@@ -204,7 +219,8 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
             leaf_id: Some(receipt.input_id.clone()),
         };
         let binding = RequestBinding {
-            resource_checkpoint_id: Some("old-context".into()),
+            resource_activations: activations.clone(),
+            resource_checkpoint_id: checkpoint_id.clone(),
             connection_identity: "fixture".into(),
             provider_family: "fixture".into(),
             model: "fixture".into(),
@@ -227,7 +243,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
                     history_range: range,
                 },
                 binding,
-                history: vec![],
+                history: projected.history,
             },
             serialized: json!({}),
         };
@@ -279,7 +295,8 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
                         call: call.clone(),
                     },
                     context: FrozenToolContext {
-                        resource_checkpoint_id: Some("old-context".into()),
+                        resource_activations: activations.clone(),
+                        resource_checkpoint_id: checkpoint_id.clone(),
                         run_id: receipt.run_id.clone(),
                         origin: origin.clone(),
                         tool_schema_generation: 1,
@@ -305,7 +322,8 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
             ToolDirectory::assemble(vec![declaration(db.clone(), bridge.clone())]).unwrap(),
         );
         let frozen = FrozenToolContext {
-            resource_checkpoint_id: Some("old-context".into()),
+            resource_activations: activations.clone(),
+            resource_checkpoint_id: checkpoint_id.clone(),
             run_id: receipt.run_id.clone(),
             origin,
             tool_schema_generation: 1,
@@ -322,7 +340,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
             .unwrap()
             .prepare_resource_refresh(
                 "branch",
-                1,
+                if explicit {2} else {1},
                 "new".into(),
                 vec![],
                 None,
@@ -353,7 +371,8 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
                 assert_eq!(frame["query"]["callId"], "read");
                 assert_eq!(frame["query"]["resourceCheckpointId"], "old-context");
                 let mut query = frame["query"].clone();
-                query.as_object_mut().unwrap().remove("request");
+                let request=query.as_object_mut().unwrap().remove("request").unwrap();
+                if let Some(activation)=request.get("activationId") { query["activationId"]=activation.clone(); }
                 let snapshot = execute_rpc(
                     db.clone(),
                     "runtime.resources.snapshot",

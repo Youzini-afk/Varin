@@ -198,6 +198,7 @@ impl ChildWaitPreparation {
             }
         };
         let item = crate::execution::ConversationItem {
+            resource_activation: None,
             id: self.item_id.clone(),
             provenance: if self.wait.cancelled {
                 crate::execution::Provenance::EnvironmentFact {

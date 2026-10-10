@@ -6,6 +6,17 @@
 
 目标是完整实现[完整运行时设计](../design/agent-runtime-design.md)和[能力组合设计](../design/runtime-extensibility-design.md)共同定义的长期运行底座：及时交互、低开销执行、按真实资源调度、深层能力组合和可替换策略。完成聊天循环、迁移已有工具或删除 Pi 都不是单独的完成标准；Pi 退出是这套设计落地后的一个结果。当前生产仍使用 Pi session worker、TypeScript Host 协调和 Rust 资源内核；现有权威见[架构](../architecture.md)。
 
+## 2026-10-10 增量：原生显式 skill 输入与原版本消费
+
+- `/skill:name args` 从既有 Host 资源 owner 的完整已选列表选择，hidden skill 可由用户显式选择。语法沿锁定 SDK 的起始命令和首个 ASCII 空格，只对参数元数据 trim；原始 text/images 原样保存。Host 解析原 checkpoint 中已捕获的 SKILL.md，材料独立进入原 input-history ContentStore 对象，不伪造模型调用、ToolResult、system 或用户原文，不建立 activation registry/第二队列。
+- submit、boundary/interrupt/next-run enqueue 与 edit 共用既有 Catalog 输入事务及 revision。初次或显式切源时材料绑定同次新 context；已有 context 使用 Host 实际读到的 ID。整合发现并修复了已有 A 切源 B 时内层 null（新候选）与外层 A.id（替换 CAS）的混淆。图片-only 编辑保留原选择，任意原文字变化重新选择或清除材料；失败、取消和交付竞争不能半更新。原 submit/enqueue receipt 先于后来派生候选解码/准备，重复 interrupt 不再次中断后续 generation。
+- canonical history 把材料投成独立 `ExternalData`，原用户 parts 仍是 `UserInstruction`。正式 activation 从真实 input ID、正文 revision 和 ordinal 派生，ModelStep 与 policy node 只冻结实际保留的类型化材料引用。`resource_read` schema **2** 的 activation selector 由原调用核验，追真实输入祖先、原 checkpoint、descriptor 和 version；当前默认资源刷新到 B 后，旧 A 材料的支持文件仍读取 A，不回退到最新或 live 文件。
+- compaction 的既有 recipe/checkpoint 保存小型类型化来源引用，不重复注入全文或从摘要文字恢复授权；fork/reopen 沿真实继承历史恢复，非祖先同 Thread 输入不能借 selector 读取。原 checkpoint/input roots 与 publication 继续承担 GC。已受理正文作为历史保留，后续新资源读取仍检查当前项目 trust、Run/调用取消及 epoch；正文不授予文件/进程权限。Catalog 内部格式升为 **21**，旧格式拒绝，无迁移或双读。
+- 实际 Host index、私有生成协议、认证 submit/enqueue/edit 路径与 Thread UI 已接通。UI 插入命令不直接发送，保留草稿/图片；历史和队列分开展示冻结名称、来源和版本。typed resource 失败有安全文案，stale 后保留原草稿并可刷新重试。含 ASCII 空格的名称仍可见且可由资源工具读取，只禁用无法精确表达的命令按钮，不增加 owner 名称硬限制。
+- 冻结完整 runtime **281 passed / 0 failed / 2 既有 ignored**，kernel lib **42 passed / 0 failed / 1 既有 ignored**。覆盖原始 RPC receipt 在后来候选 malformed 时复用、首次 interrupt 身份、实际 Engine/ToolDirectory/OwnerChannel 绑定、原子切源、compaction job recipe、fork/reopen、队列修订与 GC；最终三处选择语义文案修改后，资源 owning runtime **11/11**、kernel **2/2** 复跑通过，不重复累计。Linux x64 开发内核按 identity `0.9.25` 编译并 stage，manifest/ELF 核验 SHA-256 `3440e47f1ad61f3d18f6e4938748b76051b774db4fe0818c4fd2d4274809b4f6`。
+- Portable Host 组合 **8 文件 65/65**、UI/投影 **3 文件 40/40**，Host 生产声明/测试类型、UI 类型、实际 Host bundle、生成协议一致性、变更 lint 和文档链接检查通过。旧 Pi catalog/command/editor 收敛、Goal/通用日历、后续领域和默认产品迁移仍未完成；实际 Host IPC 验证缺口继续保留，不将独立组件通过拼接为完整端到端通过。
+- 独立审查先形成原文/来源/版本/取消/恢复条件，再审完整消费者。仓库外 Host 探针验证实际 bridge → owner → 原 snapshot 参数 → 窄原 A reader，当前 B 下读取 A 的未预捕获支持文件、撤 trust 拒绝与 epoch 变更 stale；其底层 Storage/RPC fixture 范围明确。另一原生探针在真实 Catalog/ContentStore 上执行 next-run A 入队、刷新 B、同文图片编辑、重开、拒旧 epoch 候选、复用原回执与 promotion，仍为 A 的同一正文修订；Responses/Chat/Anthropic/Google 四个真实 serializer 保留原命令、图片与材料来源，不产生 system/tool 假事实。本 H2 范围未发现剩余已知行为阻断。
+
 ## 2026-10-10 增量：原生指令与 skills 冻结资源纵切
 
 - Host 新 `agent-resources` owner 统一解释已准入的 SYSTEM/APPEND、目录指令、skill 元数据、包过滤与版本。配置、ProjectTrustStore、安装包和编辑器仍是原有 owner；不执行扩展、不安装包、不创建第二资源库。用户配置与受信项目配置分开，空值、缺失、损坏、无权限、不可用和取消保留各自结果。

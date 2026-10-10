@@ -3,6 +3,7 @@ use super::*;
 
 pub struct SubmissionPreparation {
     existing: Option<(Value, Receipt)>,
+    input_preparation: Option<resources::InputResourcePreparation>,
     expected_context_checkpoint: Option<String>,
     current: Option<context::CheckpointRead>,
     scope: Option<context::ContextScope>,
@@ -52,6 +53,7 @@ pub struct PreparedSubmission {
     pub(super) _publication: crate::content::ContentPublication,
 }
 pub(super) struct SubmissionBody {
+    pub input_preparation: Option<resources::InputResourcePreparation>,
     pub command: SubmitInput,
     pub launch: Option<launches::LaunchSelection>,
     pub inherit_source: bool,
@@ -101,6 +103,7 @@ impl Catalog {
             });
         Ok(SubmissionPreparation {
             existing,
+            input_preparation: None,
             expected_context_checkpoint: None,
             scope,
             checkpoint: checkpoint.as_ref().map(|checkpoint| checkpoint.id.clone()),
@@ -120,6 +123,10 @@ impl Catalog {
 }
 
 impl SubmissionPreparation {
+    pub fn with_input_preparation(mut self, preparation: Option<resources::InputResourcePreparation>) -> Self {
+        self.input_preparation = preparation;
+        self
+    }
     pub fn with_expected_context_checkpoint(mut self, checkpoint: Option<String>) -> Self {
         self.expected_context_checkpoint = checkpoint;
         self
@@ -161,7 +168,16 @@ impl SubmissionPreparation {
                 return Err(RuntimeError::Conflict("prepared resource context is based on a different checkpoint".into()));
             }
         }
+        if let Some(prepared) = &self.input_preparation {
+            // A null inner checkpoint selects this submission's prepared initial context.
+            // The outer H1 checkpoint still fences replacement of an existing source.
+            let expected = if self.initial.is_some() && self.resources.is_some() { None } else { self.checkpoint.clone() };
+            if prepared.expected_context_checkpoint != expected {
+                return Err(RuntimeError::Conflict("prepared skill context is based on a different checkpoint".into()));
+            }
+        }
         PreparedSubmission::stage(SubmissionBody {
+            input_preparation: self.input_preparation,
             command: self.command,
             launch,
             inherit_source,
@@ -182,6 +198,7 @@ impl SubmissionPreparation {
 impl PreparedSubmission {
     pub(super) fn stage(body: SubmissionBody) -> Result<Self> {
         let SubmissionBody {
+            input_preparation,
             command,
             launch,
             inherit_source,
@@ -234,7 +251,7 @@ impl PreparedSubmission {
                 ));
             }
         }
-        execution_persistence::user_input_items("admission", &command.input)?;
+        resources::validate_raw_input(&command.input)?;
         let checkpoint = match &origin {
             SubmissionOrigin::User { checkpoint } | SubmissionOrigin::Child { checkpoint, .. }
             | SubmissionOrigin::Continuation { checkpoint, .. } => {
@@ -252,6 +269,7 @@ impl PreparedSubmission {
                 }
             }
         }
+        let mut input_material = None;
         let initial = initial.map(|mut proposal| -> Result<_> {
             if proposal.branch_id != command.branch_id || proposal.through_id.is_some()
                 || proposal.expected_revision != 0 || !proposal.summary.is_empty() {
@@ -290,10 +308,19 @@ impl PreparedSubmission {
             if let Some(resources) = resources.as_mut() {
                 resources.source = super::followups::normalized_source(resources.source.take(), &run_id);
             }
-            let body = context::ContextCheckpoint { id:proposal.key.clone(),revision,proposal,personalization,resources };
+            let body = context::ContextCheckpoint { id:proposal.key.clone(),revision,proposal,personalization,resources,
+                resource_activations: active.as_ref().map(|active| active.resource_activations.clone()).unwrap_or_default() };
+            if matches!(origin, SubmissionOrigin::User { .. }) {
+                input_material = Some(resources::bind_input(&command.input, 1, input_preparation.as_ref(), Some(&body))?);
+            }
             let reference = content.save(&serde_json::to_value(&body)?)?;
             Ok(Some((context::CheckpointMetadata::from(&body), reference)))
         }).transpose()?.flatten();
+        let input_material = match input_material {
+            Some(value) => value,
+            None if matches!(origin, SubmissionOrigin::User { .. }) => resources::bind_input(&command.input, 1, input_preparation.as_ref(), active.as_ref())?,
+            None => command.input.clone(),
+        };
         let history = match &origin {
             SubmissionOrigin::Child {
                 operation_id,
@@ -306,6 +333,7 @@ impl PreparedSubmission {
                     .ok_or_else(|| RuntimeError::Invalid("child task must be text".into()))?;
                 content.save_history(
                     &serde_json::to_value(crate::execution::ConversationItem {
+                        resource_activation: None,
                         id: format!("child-input:{operation_id}"),
                         provenance: crate::execution::Provenance::AgentMessage {
                             thread_id: parent_thread_id.clone(),
@@ -316,7 +344,7 @@ impl PreparedSubmission {
                     &None,
                 )?
             }
-            _ => content.save_history(&command.input, &None)?,
+            _ => content.save_history(&input_material, &None)?,
         };
         // The intent retains the original content and requested selection. Inherited source and
         // the initial prompt are separately frozen by the atomic admission, never by a retry.

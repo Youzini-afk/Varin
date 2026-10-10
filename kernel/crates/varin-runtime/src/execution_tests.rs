@@ -44,6 +44,7 @@ fn input(db: &Arc<Mutex<Catalog>>) -> ExecutionInput {
         run_id: receipt.run_id,
         owner_generation: db.epoch(),
         binding: RequestBinding {
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "fixture-connection".into(),
             provider_family: "test".into(),
@@ -1438,6 +1439,7 @@ fn active_context_compiles_summary_and_tail_without_destroying_original_history(
     let mut prepared = input(&db);
     let ancestor = prepared.binding.history_range.leaf_id.clone().unwrap();
     let tail = ConversationItem {
+        resource_activation: None,
         id: "context-tail".into(),
         provenance: Provenance::Assistant,
         content: Content::ProviderOnly,

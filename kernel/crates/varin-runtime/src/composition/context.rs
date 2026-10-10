@@ -50,6 +50,7 @@ impl FragmentTransform {
             let source = format!("{}:{}:{}:{}", CAPABILITY, self.declaration.provider_id,
                 self.declaration.content_version, section.name);
             ConversationItem {
+                resource_activation: None,
                 id: format!("context:{checkpoint}:fragment:{}", section.name),
                 provenance: match section.kind {
                     FragmentKind::Instruction => Provenance::SystemInstruction { source },
