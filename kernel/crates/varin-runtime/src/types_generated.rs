@@ -105,6 +105,7 @@ pub enum HistorySource {
 #[serde(rename_all = "snake_case")]
 pub enum ModelStepState {
     Prepared,
+    NotDispatched,
     Dispatched,
     Completed,
     Interrupted,

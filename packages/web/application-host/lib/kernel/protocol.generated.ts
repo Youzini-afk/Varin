@@ -1128,7 +1128,7 @@ export type Lifetime = "call" | "run" | "thread" | "environment";
 
 export type HistorySource = "user" | "assistant" | "tool" | "agent" | "environment" | "compaction";
 
-export type ModelStepState = "prepared" | "dispatched" | "completed" | "interrupted" | "failed" | "cancelled";
+export type ModelStepState = "prepared" | "not_dispatched" | "dispatched" | "completed" | "interrupted" | "failed" | "cancelled";
 
 export type DeliveryState = "selected" | "sent" | "committed";
 

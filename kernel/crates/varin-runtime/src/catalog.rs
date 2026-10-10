@@ -34,7 +34,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 22;
+pub(crate) const FORMAT: i64 = 23;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -1076,7 +1076,7 @@ impl Catalog {
                 step.state,
                 ModelStepState::Prepared | ModelStepState::Dispatched
             )
-            || matches!(state, ModelStepState::Prepared | ModelStepState::Dispatched)
+            || matches!(state, ModelStepState::Prepared | ModelStepState::Dispatched | ModelStepState::NotDispatched)
         {
             return Err(RuntimeError::Conflict("model step cannot settle".into()));
         }

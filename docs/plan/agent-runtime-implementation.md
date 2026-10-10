@@ -8,6 +8,15 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-10 增量：已持久但未派发模型候选的原生恢复
+
+- 闭合前一 Goal 阶段独立探针确认的原生恢复缺口：真实 Engine 提交 `RequestPrepared` 后、`ModelDispatched` 前崩溃，现经原 Catalog→RunSupervisor 路径恢复同一 Run 和真实输入。原候选明确终结为 `NotDispatched`，完整冻结请求继续保留；没有合成 `ModelFinished`、provider 正文、零用量或输入 supersession，也不直接重发旧序列化 transport。
+- 策略的 pending proposal 与已提交私有状态基线一直分开，直到实际 `ModelDispatched` 同事务消费。未变候选重开复用原未执行决策，不重复推进私有状态；真实 boundary/interrupt 输入或 Goal 世代变化使旧提案失效，但保留已交付正文、opaque originals 和真实 continuation。第二次崩溃发生在旧候选已闭合、新 engine 尚未进入时也可恢复。
+- 复用既有 capture、worker 锁外读取和 publish 核对，不新增恢复队列、执行账本或 provider 路径。原 Run/epoch、head、policy checkpoint、Goal 绑定与 launch 身份共同阻止迟到准备覆盖新事实；仍活动的原候选不能借恢复换 model/credential/tools。旧候选明确闭合后，显式新选择通过原 select/prepare/activate 接口生效。
+- Supervisor 无 worker 的取消也沿 metadata-only 关闭未派发候选，损坏请求正文不阻碍取消。准备期 worker 失败保留真实非派发事实；手动 Goal pause 跨重开保持，仅显式 resume 后才允许当前世代推理。真正已派发请求仍是 Interrupted/明确 Missing 用量，不会被重分类后重复发送；既有外部效果和模型工具配对恢复门控未放宽。
+- Catalog 内部格式为 **23**，旧消费时点格式在 owner epoch/恢复写入前拒绝。生成协议与公共 `ModelStepState` 增加 `not_dispatched`，实际 Host 生产声明和完整测试类型检查通过。
+- 初次冻结完整 runtime **309 passed / 0 failed / 2 既有 ignored**，kernel lib **44 passed / 0 failed / 1 既有 ignored**。新增十二项真实 Engine/Catalog/Supervisor 场景覆盖原失败边界、再次重开、真实输入、Goal 变化/暂停、原策略基线、损坏正文取消、重复错误绑定拒绝和正常显式模型选择。独立审查随后发现一个真实 continuation 窗口：恢复重准入的 Prepared 后、dispatch 前新 interrupt，使内存状态过早消费原 Delivered。已把这一内存消费点同步推迟到实际 dispatch 成功；强化原二次重开用例由红转绿，同一仓库外独立探针也确认原 Delivered/committed state、一次 provider 调用和原无用量候选均保留。最终修后完整 runtime **309/0/2 既有 ignored**、kernel lib **44/0/1 既有 ignored** 再次通过。Linux x64 开发内核按 identity `0.9.25` 编译并 stage，manifest/ELF 验证 SHA-256 `566ed04aa086f4bc71c00f620187db32cb9add60d9fce311b4be0b5b64501786`。独立审查确认原失败探针修后闭合，本恢复范围没有剩余已证实的行为阻断；不据此宣称实际 Host IPC、真实模型或完整设计已验收。
+
 ## 2026-10-10 增量：显式持续 Goal 与真实用量续接
 
 - 显式 Goal 与单次 Run 分离，保存用户目标、控制状态、可选 output-token 预算和原始推理用量。普通输入和 fork 不自动创建持续授权；一个 branch 同时只有一个未结束 Goal。目标、报告原因和创建意图进入既有 ContentStore，worker 准备正文，Catalog 短事务核对实际 Thread/branch、revision/generation 并提交引用；控制 FIFO 直接返回当次短受理回执，不用后来状态冒充原命令结果。Catalog 内部格式为 **22**，旧格式明确拒绝。
@@ -19,7 +28,7 @@
 - 公开 protocol/application-client/认证 HTTP/ThreadAdapter/snapshot 与共享 Goal 面板已接线。UI 保留编辑 revision 和草稿，冲突显式重读；不确定 start 重投原 key/objective/budget/Run，已受理但刷新失败不重新创建。分支/Host 晚响应不覆盖当前视图，Goal-owned followup 不提供绕开 Goal pause 的独立控制。
 - 最终完整 runtime **297 passed / 0 failed / 2 既有 ignored**，kernel lib **44 passed / 0 failed / 1 既有 ignored**；覆盖原 Engine、Goal tool、child/summary/辅助推理、用量重放、输入/Wait、fork/reopen/过程续接。首次完整回归暴露一个旧测试仍期待恢复 usage 为 absent，已按新明确 Missing 合同改为 typed 未知断言后完整重跑。Portable Host **3 文件 25/25**、UI **4 文件 49/49**，最后已结束目标提示修整后 Goal **8/8** 重跑通过（重叠不累加）。生成协议、Host 生产/测试类型、UI 类型、变更 lint、实际 Host bundle 与文档链接检查通过。Linux x64 开发内核 identity `0.9.25` 已 build/stage，SHA-256 `fd34e8f13b130f32649e861e0f8cb147479a6ed0ae3fbfec4ba1776a8b9d5cee`。
 - 独立审查先于实现形成六闭环标准，冻结后跟踪实际消费者。仓库外真实 Catalog/ContentStore 探针验证旧 epoch 候选拒绝、手动暂停跨重开保留、旧历史 fork 不继承授权、实际 GC 删除 orphan 后目标/用量仍可读，以及显式 resume 原子准入后重开仍是同一 Accepted Run、没有第二发生项。本 Goal 增量未发现剩余已证实的新行为阻断；独立恢复探针暴露的既有能力缺口如下保留。
-- **明确保留的既有恢复缺口**：RequestPrepared 已持久但 ModelDispatched 尚未提交时崩溃，原 Catalog→Supervisor 重开入口会因 unresolved gate 安全停在 Waiting，不发生 provider 请求，也不伪造用量/完成。独立探针对 Goal 有/无均复现，基线已有同门控；这不是本次 Goal 新回归，但未满足完整“已准入未派发”恢复能力。紧接本阶段先闭合该原生恢复边界，再推进一般策略的提问/计划/进程观察。通用日历/事件和剩余领域仍未完成，实际 Host IPC、真实模型及平台证据仍按原边界保留，默认迁移交用户验收后执行。
+- **本次 Goal 交付时保留、后由上方未派发恢复增量闭合的缺口**：RequestPrepared 已持久但 ModelDispatched 尚未提交时崩溃，原 Catalog→Supervisor 重开入口会因 unresolved gate 安全停在 Waiting，不发生 provider 请求，也不伪造用量/完成。独立探针对 Goal 有/无均复现，基线已有同门控；这不是本次 Goal 新回归，但未满足完整“已准入未派发”恢复能力。后续已先闭合该原生恢复边界，再推进一般策略的提问/计划/进程观察。通用日历/事件和剩余领域仍未完成，实际 Host IPC、真实模型及平台证据仍按原边界保留，默认迁移交用户验收后执行。
 
 ## 2026-10-10 增量：原生显式 skill 输入与原版本消费
 

@@ -438,7 +438,7 @@ impl Catalog {
         if super::inputs::has_boundary_inputs(&tx, run_id)? {
             return Err(RuntimeError::InputPending);
         }
-        let unresolved = super::policy_body::has_pending_action(&tx, run_id)? || tx.query_row("SELECT EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0) OR EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state!='completed' AND json_extract(body,'$.superseded_by_input') IS NULL)",[run_id],|r|r.get::<_, bool>(0))?;
+        let unresolved = super::policy_body::has_pending_action(&tx, run_id)? || tx.query_row("SELECT EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0) OR EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state NOT IN ('completed','not_dispatched') AND json_extract(body,'$.superseded_by_input') IS NULL)",[run_id],|r|r.get::<_, bool>(0))?;
         if unresolved {
             return Err(RuntimeError::Conflict(
                 "policy graph cannot bypass unsettled work".into(),
