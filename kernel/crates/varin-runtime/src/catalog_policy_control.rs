@@ -274,6 +274,22 @@ impl Catalog {
         else {
             return Ok(None);
         };
+        if super::policy_switch::action_precedes_activation(&self.db, run_id, &op.id)? {
+            return Ok(None);
+        }
+        if op.phase == OperationPhase::Terminal {
+            // ReadResult consumes the completion event without opening a model exchange. Its
+            // durable ResultChunk continuation must not be replaced by the earlier action.
+            let consumed: u64 = self.db.query_row("SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND kind='execution.committed' AND json_extract(data,'$.kind')='policy_decision_consumed'", [run_id], |row| read_number(row, 0))?;
+            let completed: u64 = self.db.query_row(
+                "SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1",
+                [&op.id],
+                |row| read_number(row, 0),
+            )?;
+            if consumed > completed {
+                return Ok(None);
+            }
+        }
         if metadata.graph_nodes().is_some() {
             return Ok(self
                 .capture_graph_action(op, metadata)?

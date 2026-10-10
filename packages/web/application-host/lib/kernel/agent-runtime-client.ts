@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { LiveSourceResolver } from './live-source.js';
 import type { PolicyModelPreparer } from './policy-models.js';
 import { waitWithSignal } from '../cancellation.js';
-import type { AgentPolicyLease, AgentPolicyBinding } from './agent-policy.js';
+import type { AgentPolicyLease, AgentPolicyBinding, AgentPolicyArtifactBinding } from './agent-policy.js';
 import type {
   HostToolLease,
   HostToolBinding,
@@ -21,7 +21,7 @@ import { permissionService } from './permission-service.js';
 import type {
   ContextJob,
   ContextCheckpoint,
-  ThreadToolInspection,
+  ThreadToolInspection, ThreadPolicyPreparation, ThreadPolicyInspection,
 } from '@varin/application-client';
 import {
   startRunFromSource,
@@ -63,6 +63,7 @@ import type {
   RuntimeStatus,
   RunStartReceipt,
   PolicyResumeReceipt,
+  PolicyModelCapability, PolicySelections, PolicySelection, PolicyTarget, PolicyStateMode,
   InputEnqueueParams,
   InputReceipt,
   QueuedInput,
@@ -77,10 +78,13 @@ export interface McpPreparation {
   executionCwd?: string;
   requiredBinding?: McpCompositionSelection;
 }
-export type RunPolicyPreparer = (
-  input: { runId: string; threadId: string },
-  signal?: AbortSignal,
-) => Promise<AgentPolicyLease | undefined>;
+export interface RunPolicyScope { runId: string; threadId: string; projectId?: string }
+export interface RunPolicyPreparer {
+  prepare(input: RunPolicyScope & { requiredBinding?: AgentPolicyArtifactBinding }, signal?: AbortSignal): Promise<AgentPolicyLease | undefined>;
+  observe(input: RunPolicyScope, changed: () => void, signal: AbortSignal): () => void;
+}
+interface PolicyPreparationAttempt { controller: AbortController; selectionId: string | null }
+interface PolicyObservation { scope: RunPolicyScope; controller: AbortController; revision: number; pending?: PolicyPreparationAttempt | undefined; unobserve?: () => void; preparation: ThreadPolicyPreparation | null }
 export type McpPreparer = (
   input: McpPreparation,
   signal?: AbortSignal,
@@ -110,6 +114,7 @@ export class AgentRuntimeClient {
     private readonly prepareExtensionOwner?: ExtensionToolPreparer,
   ) {
     kernel.subscribeExit(() => {
+      for (const runId of this.policyObservations.keys()) this.closePolicyObservation(runId);
       for (const run of this.toolCompositions.keys())
         this.releaseToolComposition(run);
       this.sourceGrants.clear();
@@ -118,6 +123,7 @@ export class AgentRuntimeClient {
       this.mcpUpdates.clear();
     });
     kernel.onToolReleased((runId) => {
+      this.closePolicyObservation(runId);
       this.releaseToolComposition(runId);
       this.mcpPreparations.delete(runId);
       this.mcpUpdates.get(runId)?.abort();
@@ -125,6 +131,7 @@ export class AgentRuntimeClient {
     });
   }
 
+  private readonly policyObservations = new Map<string, PolicyObservation>();
   private readonly toolCompositions = new Map<string, ToolCompositionState>();
   private toolComposition(runId: string): ToolCompositionState {
     let state = this.toolCompositions.get(runId);
@@ -1176,129 +1183,254 @@ export class AgentRuntimeClient {
   pendingLaunches(signal?: AbortSignal): Promise<LaunchIntent[]> {
     return this.kernel.agentRuntimeRequest('runtime.launch.list', {}, signal);
   }
-  /** Pin a selected implementation before any executable launch; retries never change its identity. */
-  async preparePolicy(
-    runId: string,
-    signal?: AbortSignal,
-    credentialScope?: Awaited<ReturnType<ExistingHostCredentialOwner['scope']>>,
-  ): Promise<AgentPolicyBinding | undefined> {
-    const preparation = this.kernel.beginRunPreparation(runId);
-    signal = signal
-      ? AbortSignal.any([signal, preparation.signal])
-      : preparation.signal;
+  async inspectPolicy(runId: string, signal?: AbortSignal): Promise<ThreadPolicyInspection> {
+    return { ...await this.policySelections(runId, signal), preparation: structuredClone(this.policyObservations.get(runId)?.preparation ?? null) };
+  }
+  policySelections(runId: string, signal?: AbortSignal): Promise<PolicySelections> {
+    return this.kernel.agentRuntimeRequest('runtime.policy.inspect', { runId }, signal);
+  }
+  private closePolicyObservation(runId: string): void {
+    const state = this.policyObservations.get(runId);
+    if (!state) return;
+    this.policyObservations.delete(runId);
+    state.controller.abort(); state.pending?.controller.abort(); state.unobserve?.();
+  }
+  private async policyScope(runId: string, threadId: string, signal?: AbortSignal): Promise<RunPolicyScope> {
+    const admitted = await this.kernel.agentRuntimeRequest<RunContextScope | null, 'runtime.run.scope'>('runtime.run.scope', { runId }, signal);
+    return { runId, threadId, ...(admitted?.projectId ? { projectId: admitted.projectId } : {}) };
+  }
+  private observePolicy(scope: RunPolicyScope): void {
+    if (!this.preparePolicyOwner) return;
+    const state = this.policyObservations.get(scope.runId) ?? { controller: new AbortController(), scope, revision: 0, preparation: null };
+    if (state.unobserve) return;
+    this.policyObservations.set(scope.runId, state);
+    let initial = true;
+    state.unobserve = this.preparePolicyOwner.observe(scope, () => {
+      const first = initial; initial = false;
+      void this.refreshPolicy(scope.runId, first).catch(() => undefined);
+    }, state.controller.signal);
+  }
+  private async preparePolicyCredentials(runId: string, threadId: string, generation: number, lease: AgentPolicyLease,
+    signal: AbortSignal, savedCapabilities?: readonly PolicyModelCapability[]): Promise<{ lease: AgentPolicyLease; models: PolicyModelCapability[] }> {
+    const roles = lease.binding.artifact.modelRoles;
+    if (roles.length && !this.preparePolicyModels) throw new Error('Planning model preparation is unavailable');
+    const prepared = this.preparePolicyModels ? await waitWithSignal(this.preparePolicyModels({ threadId, generation,
+      requestedModelRoles: roles, ...(savedCapabilities === undefined ? {} : { savedCapabilities }) }, signal), signal) : [];
+    const registered: Array<{ bindingId: string; epoch: string | null }> = [];
+    const releaseCredentials = () => {
+      for (const entry of registered) if (this.kernel.kernelEpoch === entry.epoch) this.kernel.unregisterCredentialOwner(runId, entry.bindingId);
+    };
     try {
-      const existing = this.kernel.policyBinding(runId);
-      if (existing) return existing;
-      const run = await this.run(runId, signal);
-      signal.throwIfAborted();
-      if (
-        run.cancel_requested ||
-        ['completed', 'failed', 'cancelled'].includes(run.state)
-      )
-        throw new Error('Run is no longer eligible for policy preparation');
-      const saved = await this.launch(runId, signal);
-      if (saved?.selection.policy.name === 'context_compaction')
-        return undefined;
-      if (await this.childForThread(run.thread_id, signal)) return undefined;
-      const expectsPolicy =
-        saved &&
-        saved.selection.policy.name !==
-          'default+questions+collaboration+process-wait';
-      if (!this.preparePolicyOwner) {
-        if (expectsPolicy)
-          throw new Error(
-            'Saved policy requires its exact original artifact and configuration',
-          );
-        return undefined;
+      for (const entry of prepared) {
+        if (entry.capability.status !== 'available') continue;
+        const bindingId = entry.capability.binding_id;
+        if (!entry.credentialOwner || !bindingId) throw new Error('Planning credential owner is missing');
+        const scope = await this.kernel.registerCredentialOwner(runId, entry.credentialOwner, signal, bindingId);
+        registered.push({ bindingId, epoch: this.kernel.kernelEpoch });
+        if (!isDeepStrictEqual(scope, entry.capability.credential_scope)) throw new Error('Planning credential scope changed');
       }
-      const pendingLease = this.preparePolicyOwner(
-        { runId, threadId: run.thread_id },
-        signal,
-      );
-      void pendingLease.then(
-        (lease) => {
-          if (signal.aborted) lease?.release();
-        },
-        () => undefined,
-      );
-      const lease = await waitWithSignal(pendingLease, signal);
-      if (!lease) {
-        if (expectsPolicy) throw new Error('Saved policy is unavailable');
-        return undefined;
-      }
-      const registered: string[] = [];
-      try {
-        signal?.throwIfAborted();
-        if (!saved)
-          await this.selectLaunch(
-            {
-              runId,
-              source: null,
-              enabledTools: [],
-              ...(credentialScope ? { credentialScope } : {}),
-            },
-            signal,
-          );
-        const roles = lease.requestedModelRoles ?? [];
-        if (roles.length && !this.preparePolicyModels)
-          throw new Error('Planning model preparation is unavailable');
-        const prepared = this.preparePolicyModels
-          ? await this.preparePolicyModels(
-              {
-                threadId: run.thread_id,
-                requestedModelRoles: roles,
-                ...(expectsPolicy
-                  ? { savedCapabilities: saved.selection.policy_models }
-                  : {}),
-              },
-              signal,
-            )
-          : [];
-        for (const entry of prepared) {
-          if (entry.capability.status !== 'available') continue;
-          if (!entry.credentialOwner || !entry.capability.binding_id)
-            throw new Error('Planning credential owner is missing');
-          const scope = await this.kernel.registerCredentialOwner(
-            runId,
-            entry.credentialOwner,
-            signal,
-            entry.capability.binding_id,
-          );
-          registered.push(entry.capability.binding_id);
-          const expected = entry.capability.credential_scope;
-          if (
-            !expected ||
-            scope.reference !== expected.reference ||
-            scope.authority !== expected.authority ||
-            scope.account !== expected.account ||
-            scope.generation !== expected.generation
-          )
-            throw new Error('Planning credential scope changed');
+      let released = false;
+      return { models: prepared.map(entry => ({ ...entry.capability, binding: null })), lease: { ...lease,
+        release: () => {
+          if (released) return;
+          released = true;
+          releaseCredentials();
+          lease.release();
+        } } };
+    } catch (error) {
+      releaseCredentials();
+      throw error;
+    }
+  }
+  /** Routing updates prepare independently. Only Catalog's closed-boundary commit activates them. */
+  async refreshPolicy(runId: string, initialObservation = false): Promise<PolicySelections> {
+    const state = this.policyObservations.get(runId);
+    if (!state || !this.preparePolicyOwner) return this.policySelections(runId);
+    const revision = ++state.revision;
+    state.pending?.controller.abort();
+    const controller = new AbortController(), attempt: PolicyPreparationAttempt = { controller, selectionId: null }; state.pending = attempt;
+    const signal = AbortSignal.any([state.controller.signal, controller.signal]);
+    let lease: AgentPolicyLease | undefined;
+    state.preparation = { status: 'preparing', code: null };
+    try {
+      lease = await this.preparePolicyLease(state.scope, signal);
+      const target: PolicyTarget = lease ? { kind: 'extension', artifact: lease.binding.artifact } : { kind: 'default' };
+      const selected = await this.policySelections(runId, signal);
+      if (isDeepStrictEqual(target, selected.active.target)) {
+        // A route returning to the active owner withdraws the older unactivated candidate.
+        if (selected.desired && ['preparing', 'ready'].includes(selected.desired.status)
+          && !isDeepStrictEqual(selected.desired.target, target)) {
+          const cancelled = await this.kernel.agentRuntimeRequest<PolicySelection, 'runtime.policy.cancel'>('runtime.policy.cancel',
+            { runId, selectionId: selected.desired.selection_id }, signal, { settleCancellation: true });
+          if (cancelled.status === 'cancelled') this.kernel.unregisterPolicyOwner(runId, cancelled.generation);
+          return this.policySelections(runId, signal);
         }
-        // Rust constructs and checks the tool-free binding; the Host never supplies one.
-        await this.kernel.agentRuntimeRequest(
-          'runtime.launch.policy.prepare',
-          {
-            runId,
-            identity: lease.binding.identity,
-            policyModels: prepared.map((entry) => ({
-              ...entry.capability,
-              binding: null,
-            })),
-          },
-          signal,
-        );
-        signal.throwIfAborted();
-        return await this.kernel.registerPolicyOwner(runId, lease);
-      } catch (error) {
-        for (const bindingId of registered)
-          this.kernel.unregisterCredentialOwner(runId, bindingId);
-        lease.release();
-        throw error;
+        return selected;
       }
+      const desired = selected.desired;
+      if (desired && isDeepStrictEqual(target, desired.target)) {
+        if (['preparing', 'ready'].includes(desired.status)) return selected;
+        if (initialObservation && (desired.status === 'cancelled' || desired.failure === 'policy_state_incompatible')) return selected;
+      }
+      if (state.revision !== revision) throw new Error('policy_preparation_superseded');
+      const transferred = lease; lease = undefined;
+      await this.publishPolicyCandidate(state.scope, selected.active.generation, selected.desired?.selection_id ?? null, target, 'preserve', transferred, signal, attempt);
+      return this.policySelections(runId, signal);
+    } catch (error) {
+      if (state.revision === revision && !state.controller.signal.aborted && !controller.signal.aborted) {
+        const code = error && typeof error === 'object' && 'code' in error && error.code === 'selected_unavailable' ? 'policy_route_unavailable' : 'policy_preparation_failed';
+        state.preparation = { status: 'failed', code };
+      }
+      throw error;
+    } finally {
+      lease?.release();
+      if (state.pending === attempt) {
+        state.pending = undefined;
+        if (state.preparation?.status === 'preparing') state.preparation = null;
+      }
+    }
+  }
+  private async preparePolicyLease(scope: RunPolicyScope & { requiredBinding?: AgentPolicyArtifactBinding }, signal: AbortSignal): Promise<AgentPolicyLease | undefined> {
+    if (!this.preparePolicyOwner) {
+      if (scope.requiredBinding) throw new Error('Saved policy requires its exact original artifact and configuration');
+      return undefined;
+    }
+    const pending = this.preparePolicyOwner.prepare(scope, signal);
+    void pending.then(lease => { if (signal.aborted) lease?.release(); }, () => undefined);
+    return waitWithSignal(pending, signal);
+  }
+  private async publishPolicyCandidate(scope: RunPolicyScope, expectedGeneration: number, expectedSelectionId: string | null, target: PolicyTarget,
+    stateMode: PolicyStateMode, preparedLease: AgentPolicyLease | undefined, signal: AbortSignal, attempt: PolicyPreparationAttempt): Promise<PolicySelection> {
+    const runId = scope.runId, selectionId = randomUUID();
+    let lease = preparedLease, registered = false, selected: PolicySelection | undefined;
+    try {
+      selected = await this.kernel.agentRuntimeRequest<PolicySelection, 'runtime.policy.select'>('runtime.policy.select',
+        { runId, selectionId, expectedGeneration, expectedSelectionId, target, stateMode }, signal, { settleCancellation: true });
+      attempt.selectionId = selected.selection_id;
+      signal.throwIfAborted();
+      if (target.kind === 'extension' && !lease) lease = await this.preparePolicyLease({ ...scope, requiredBinding: target.artifact }, signal);
+      if (target.kind === 'extension' && (!lease || !isDeepStrictEqual(lease.binding.artifact, target.artifact))) throw new Error('policy_exact_binding_unavailable');
+      let binding: AgentPolicyBinding | null = null, models: PolicyModelCapability[] = [];
+      if (lease) {
+        const prepared = await this.preparePolicyCredentials(runId, scope.threadId, selected.generation, lease, signal);
+        lease = prepared.lease; models = prepared.models;
+        signal.throwIfAborted();
+        const retained = lease;
+        const revoked = () => {
+          // The bridge first rejects this generation's pending callbacks and drops its holder.
+          // Notify Catalog afterward; a synchronous control reply must not suppress that rejection.
+          void Promise.resolve().then(() => this.kernel.agentRuntimeRequest('runtime.policy.fail',
+            { runId, selectionId, code: 'policy_binding_revoked' })).catch(() => undefined);
+        };
+        lease = { ...retained, release: () => { retained.revocationSignal.removeEventListener('abort', revoked); retained.release(); } };
+        retained.revocationSignal.addEventListener('abort', revoked, { once: true });
+        if (retained.revocationSignal.aborted) throw new Error('policy_binding_revoked');
+        binding = await this.kernel.registerPolicyOwner(runId, selected.generation, lease);
+        registered = true; lease = undefined;
+      }
+      signal.throwIfAborted();
+      return await this.kernel.agentRuntimeRequest<PolicySelection, 'runtime.policy.ready'>('runtime.policy.ready',
+        { runId, selectionId, generation: selected.generation, binding, policyModels: models }, signal, { settleCancellation: true });
+    } catch (error) {
+      if (selected) {
+        // A lost ready reply may follow committed activation. Inspect before disposing its live owner.
+        const current = await this.policySelections(runId).catch(() => undefined);
+        const retained = current?.active.generation === selected.generation
+          || current?.desired?.selection_id === selectionId && current.desired.status === 'ready';
+        if (retained && current) {
+          if (current.desired?.selection_id === selectionId) return current.desired;
+          // An even newer desired selection does not erase this command's committed receipt.
+          return await this.kernel.agentRuntimeRequest<PolicySelection, 'runtime.policy.select'>('runtime.policy.select',
+            { runId, selectionId, expectedGeneration, expectedSelectionId, target, stateMode });
+        }
+        if (current) {
+          await this.kernel.agentRuntimeRequest('runtime.policy.fail', { runId, selectionId,
+            code: signal.aborted ? 'policy_preparation_cancelled' : 'policy_preparation_failed' }).catch(() => undefined);
+          if (registered) this.kernel.unregisterPolicyOwner(runId, selected.generation);
+        }
+      }
+      throw error;
+    } finally { lease?.release(); }
+  }
+  async restartPolicy(runId: string, selectionId: string, signal?: AbortSignal): Promise<PolicySelection> {
+    const run = await this.run(runId, signal), selected = await this.policySelections(runId, signal);
+    if (!selected.desired || selected.desired.selection_id !== selectionId || selected.desired.status === 'active'
+      || selected.desired.status === 'cancelled' || selected.desired.status === 'superseded') throw new Error('policy_selection_changed');
+    const scope = await this.policyScope(runId, run.thread_id, signal);
+    const state: PolicyObservation = this.policyObservations.get(runId) ?? { controller: new AbortController(), scope, revision: 0, preparation: null };
+    this.policyObservations.set(runId, state);
+    state.pending?.controller.abort();
+    const controller = new AbortController(), attempt: PolicyPreparationAttempt = { controller, selectionId: null }; state.pending = attempt;
+    const revision = ++state.revision;
+    state.preparation = { status: 'preparing', code: null };
+    const preparation = this.kernel.beginRunPreparation(runId);
+    const combined = AbortSignal.any([preparation.signal, controller.signal, state.controller.signal, ...(signal ? [signal] : [])]);
+    try {
+      // The displayed exact target is retained even if current routing changed in the meantime.
+      const check = await this.policySelections(runId, combined);
+      if (check.desired?.selection_id !== selectionId || check.active.generation !== selected.active.generation) throw new Error('policy_selection_changed');
+      return await this.publishPolicyCandidate(scope, selected.active.generation, selectionId, selected.desired.target, 'restart_state', undefined, combined, attempt);
+    } catch (error) {
+      if (state.revision === revision && !combined.aborted) state.preparation = { status: 'failed', code: 'policy_preparation_failed' };
+      throw error;
     } finally {
       preparation.release();
+      if (state.pending === attempt) { state.pending = undefined; if (state.preparation?.status === 'preparing') state.preparation = null; }
     }
+  }
+  async cancelPolicyUpdate(runId: string, selectionId: string, signal?: AbortSignal): Promise<PolicySelection> {
+    const pending = this.policyObservations.get(runId)?.pending;
+    const original = pending?.selectionId === selectionId ? pending : undefined;
+    const current = await this.policySelections(runId, signal);
+    if (current.desired?.selection_id !== selectionId) throw new Error('policy_selection_changed');
+    const selection = await this.kernel.agentRuntimeRequest<PolicySelection, 'runtime.policy.cancel'>('runtime.policy.cancel', { runId, selectionId }, signal, { settleCancellation: true });
+    if (selection.status === 'cancelled') {
+      original?.controller.abort();
+      this.kernel.unregisterPolicyOwner(runId, selection.generation);
+    }
+    return selection;
+  }
+  /** Restore committed identity first; current routing only prepares a later candidate. */
+  async preparePolicy(runId: string, signal?: AbortSignal,
+    credentialScope?: Awaited<ReturnType<ExistingHostCredentialOwner['scope']>>): Promise<AgentPolicyBinding | undefined> {
+    const preparation = this.kernel.beginRunPreparation(runId);
+    signal = signal ? AbortSignal.any([signal, preparation.signal]) : preparation.signal;
+    let lease: AgentPolicyLease | undefined;
+    try {
+      const run = await this.run(runId, signal);
+      if (run.cancel_requested || ['completed', 'failed', 'cancelled'].includes(run.state)) throw new Error('Run is no longer eligible for policy preparation');
+      let saved = await this.launch(runId, signal);
+      if (saved?.selection.policy.name === 'context_compaction' || await this.childForThread(run.thread_id, signal)) return undefined;
+      const generation = saved?.policy_generation ?? 0;
+      const existing = this.kernel.policyBinding(runId, generation);
+      if (existing) return existing;
+      const required = saved?.policy_target.kind === 'extension' ? saved.policy_target.artifact : undefined;
+      if (!this.preparePolicyOwner) {
+        if (required) throw new Error('Saved policy requires its exact original artifact and configuration');
+        return undefined;
+      }
+      const scope = await this.policyScope(runId, run.thread_id, signal);
+      // Catalog projects the exact first-preparation admission predicate. Used defaults stay
+      // defaults until the same replacement protocol commits a new generation.
+      const first = !saved || saved.policy_preparable;
+      if (!required && !first) { this.observePolicy(scope); return undefined; }
+      lease = await this.preparePolicyLease({ ...scope, ...(required ? { requiredBinding: required } : {}) }, signal);
+      if (!lease) {
+        if (required) throw new Error('Saved policy is unavailable');
+        this.observePolicy(scope); return undefined;
+      }
+      if (!saved) saved = await this.selectLaunch({ runId, source: null, enabledTools: [], ...(credentialScope ? { credentialScope } : {}) }, signal);
+      const prepared = await this.preparePolicyCredentials(runId, run.thread_id, generation, lease, signal,
+        required ? saved.selection.policy_models : undefined);
+      lease = prepared.lease;
+      await this.kernel.agentRuntimeRequest('runtime.launch.policy.prepare', { runId, identity: lease.binding.artifact.identity,
+        target: { kind: 'extension', artifact: lease.binding.artifact }, policyModels: prepared.models }, signal);
+      signal.throwIfAborted();
+      const binding = await this.kernel.registerPolicyOwner(runId, generation, lease);
+      lease = undefined;
+      this.observePolicy(scope);
+      return binding;
+    } finally { lease?.release(); preparation.release(); }
   }
 
   async startRun(
@@ -1331,8 +1463,6 @@ export class AgentRuntimeClient {
         return receipt;
       } catch (error) {
         this.releaseToolComposition(runId);
-        this.kernel.unregisterCredentialOwner(runId);
-        this.kernel.unregisterPolicyOwner(runId);
         throw error;
       }
     });
@@ -1352,6 +1482,7 @@ export class AgentRuntimeClient {
         signal,
         selected.active?.binding_id,
       );
+      const credentialEpoch = this.kernel.kernelEpoch;
       try {
         const policyBinding = await this.preparePolicy(
           runId,
@@ -1381,16 +1512,15 @@ export class AgentRuntimeClient {
         return receipt;
       } catch (error) {
         this.releaseToolComposition(runId);
-        this.kernel.unregisterCredentialOwner(runId);
-        this.kernel.unregisterPolicyOwner(runId);
+        if (this.kernel.kernelEpoch === credentialEpoch) this.kernel.unregisterCredentialOwner(runId, selected.active?.binding_id ?? null);
         throw error;
       }
     });
   }
-  releaseRunCredentialOwner(runId: string): void {
-    this.kernel.unregisterCredentialOwner(runId);
-    // A parked Run resumes with every frozen planning credential owner freshly rebound.
-    this.kernel.unregisterPolicyOwner(runId);
+  releaseMainModelCredentials(runId: string, selected: RunModelSelections): void {
+    // Main model rebind must not discard a retired-but-pinned policy or its planning credentials.
+    this.kernel.unregisterCredentialOwner(runId, null);
+    for (const binding of [selected.active, selected.desired]) if (binding) this.kernel.unregisterCredentialOwner(runId, binding.binding_id);
   }
   modelSelections(
     runId: string,
@@ -1434,10 +1564,11 @@ export class AgentRuntimeClient {
       'runtime.run.inspect'
     >('runtime.run.inspect', { runId }, signal);
     if (['completed', 'failed', 'cancelled'].includes(run.state)) {
+      this.closePolicyObservation(runId);
       this.kernel.cancelRunPreparation(runId);
       this.kernel.unregisterCredentialOwner(runId);
       this.kernel.unregisterToolOwners(runId);
-      this.kernel.unregisterPolicyOwner(runId);
+      this.kernel.releaseRunPolicyOwners(runId);
     }
     return run;
   }
@@ -1457,15 +1588,17 @@ export class AgentRuntimeClient {
     signal?: AbortSignal,
   ): Promise<RunCancellationReceipt> {
     this.kernel.cancelRunPreparation(runId);
+    this.closePolicyObservation(runId);
     const run = await this.kernel.agentRuntimeRequest<
       RunCancellationReceipt,
       'runtime.run.cancel'
     >('runtime.run.cancel', { runId }, signal);
     if (['completed', 'failed', 'cancelled'].includes(run.state)) {
+      this.closePolicyObservation(runId);
       this.kernel.cancelRunPreparation(runId);
       this.kernel.unregisterCredentialOwner(runId);
       this.kernel.unregisterToolOwners(runId);
-      this.kernel.unregisterPolicyOwner(runId);
+      this.kernel.releaseRunPolicyOwners(runId);
     }
     return run;
   }

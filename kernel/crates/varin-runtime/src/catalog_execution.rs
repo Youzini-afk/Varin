@@ -644,6 +644,7 @@ struct PreparedExecutionBodies {
     request: Option<Value>,
     tools_ref: Option<Value>,
     policy_checkpoint: Option<super::policy_checkpoint::PolicyCheckpointReferences>,
+    policy_continuation: Option<Value>,
     calls: std::collections::HashMap<String, ToolCallMetadata>,
     admitted: std::collections::HashMap<String, ToolIntent>,
     frozen_history_range: Option<HistoryRange>,
@@ -671,14 +672,28 @@ impl ExecutionBodyPreparation {
             _ => None,
         };
         let policy_checkpoint = match record {
-            ExecutionRecord::PolicyCheckpoint { state, action, .. } => {
-                Some(super::policy_checkpoint::PolicyCheckpointReferences::write(
+            ExecutionRecord::PolicyCheckpoint {
+                state,
+                previous_state,
+                action,
+                event,
+                ..
+            } => Some(
+                super::policy_checkpoint::PolicyCheckpointReferences::write(
                     &self.content,
                     state,
                     action,
-                )?)
-            }
+                )?
+                .with_previous_state(&self.content, previous_state)?
+                .with_continuation(&self.content, event)?,
+            ),
             _ => None,
+        };
+        let policy_continuation = if let ExecutionRecord::PolicyDecisionConsumed { event } = record
+        {
+            Some(self.content.save(&serde_json::to_value(event)?)?)
+        } else {
+            None
         };
         let mut calls = std::collections::HashMap::new();
         let mut admitted = std::collections::HashMap::new();
@@ -815,6 +830,7 @@ impl ExecutionBodyPreparation {
             request,
             tools_ref,
             policy_checkpoint,
+            policy_continuation,
             calls,
             admitted,
             frozen_history_range,
@@ -878,6 +894,7 @@ impl Catalog {
             request: prepared_request,
             tools_ref,
             policy_checkpoint,
+            policy_continuation,
             calls: prepared_calls,
             admitted: prepared_admitted,
             frozen_history_range,
@@ -1027,6 +1044,7 @@ impl Catalog {
                     }
                 }
                 if state.terminal() {
+                    super::policy_switch::close_run_candidate(&tx, run_id, run.revision + 1)?;
                     if matches!(state, RunState::Cancelled | RunState::Failed) {
                         super::questions::cancel_run_questions(&tx, run_id)?;
                         super::policy_control::cancel_run_pause(&tx, &run)?;
@@ -1062,6 +1080,14 @@ impl Catalog {
                         super::inputs::cancel_current(&tx, run_id)?;
                     }
                     super::inputs::promote_next(&tx, &run.branch_id)?;
+                }
+                if matches!(record, ExecutionRecord::StateChanged { .. })
+                    && matches!(
+                        state,
+                        RunState::Waiting | RunState::Completed | RunState::Failed
+                    )
+                {
+                    super::policy_checkpoint::consume(&tx, run_id)?;
                 }
                 run.state = *state;
                 run.waiting_on = waiting_on.clone();
@@ -1625,6 +1651,16 @@ impl Catalog {
                     )?;
                 }
             }
+            ExecutionRecord::PolicyDecisionConsumed { .. } => {
+                let continuation = policy_continuation.as_ref().ok_or_else(|| {
+                    RuntimeError::Invalid("prepared policy continuation missing".into())
+                })?;
+                super::policy_checkpoint::consume(&tx, run_id)?;
+                tx.execute(
+                    "UPDATE policy_checkpoints SET continuation_ref=?2 WHERE run_id=?1",
+                    params![run_id, encode(continuation)?],
+                )?;
+            }
             ExecutionRecord::PolicyCheckpoint {
                 identity, action, ..
             } => {
@@ -1669,8 +1705,14 @@ impl Catalog {
                     .ok_or_else(|| {
                         RuntimeError::Invalid("prepared policy checkpoint is missing".into())
                     })?
-                    .publish(&tx, run_id, identity)?;
+                    .publish_pending(&tx, run_id, identity)?;
             }
+        }
+        if matches!(
+            record,
+            ExecutionRecord::RequestPrepared { .. } | ExecutionRecord::ToolBatchCommitted { .. }
+        ) {
+            super::policy_checkpoint::consume(&tx, run_id)?;
         }
         if let ExecutionRecord::ContextPreparationFailed { failure } = record {
             event(
@@ -1697,6 +1739,7 @@ impl Catalog {
                 ExecutionRecord::ToolSettled { .. } => "tool_settled",
                 ExecutionRecord::ToolBatchCommitted { .. } => "tool_batch_committed",
                 ExecutionRecord::PolicyCheckpoint { .. } => "policy_checkpoint",
+                ExecutionRecord::PolicyDecisionConsumed { .. } => "policy_decision_consumed",
             }}),
         )?;
         tx.commit()?;

@@ -173,17 +173,56 @@ impl RunAssembly {
         if let Some(parts) = summary_parts {
             start = varin_runtime::context_job::configure_compaction_start(start, parts);
         }
+        let policy_launch = runtime
+            .catalog()
+            .lock()
+            .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+            .launch_metadata(&p.run_id)
+            .map_err(domain)?;
+        let policy_generation = policy_launch.as_ref().map_or(0, |l| l.policy_generation);
+        let policy_target = policy_launch
+            .as_ref()
+            .map(|l| l.policy_target.clone())
+            .unwrap_or(varin_runtime::catalog::policy_switch::PolicyTarget::Default);
         if let Some(binding) = p.policy_binding {
+            if binding.generation < 0
+                || binding.generation as u64 != policy_generation
+                || policy_target
+                    != (varin_runtime::catalog::policy_switch::PolicyTarget::Extension {
+                        artifact: binding.artifact.clone(),
+                    })
+            {
+                return Err(KernelError::Authorization(
+                    "policy rebind differs from committed artifact or generation".into(),
+                ));
+            }
             start.policy = policy_bridge
                 .policy(
                     p.run_id.clone(),
                     binding.reference,
-                    varin_runtime::execution::PolicyIdentity {
-                        name: binding.identity.name,
-                        version: binding.identity.version,
-                    },
+                    policy_generation,
+                    binding.artifact,
                 )
-                .map_err(|error| KernelError::Authorization(error.to_string()))?;
+                .map_err(|e| KernelError::Authorization(e.to_string()))?;
+        } else if matches!(
+            policy_target,
+            varin_runtime::catalog::policy_switch::PolicyTarget::Extension { .. }
+        ) {
+            return Err(KernelError::Authorization(
+                "committed policy artifact requires its exact live binding".into(),
+            ));
+        }
+        if !is_context_job && !is_child {
+            start.policy = policy_bridge
+                .install(
+                    &p.run_id,
+                    policy_generation,
+                    policy_target,
+                    start.policy,
+                    Vec::new(),
+                    std::collections::BTreeMap::new(),
+                )
+                .map_err(|e| KernelError::Operation(e.to_string()))?;
         }
         if !is_context_job {
             // Context ownership is independent of the selected tool profile.
@@ -356,13 +395,10 @@ impl RunAssembly {
                 "context jobs cannot acquire planning capabilities".into(),
             ));
         }
-        if !policy_models.is_empty() {
-            use varin_runtime::execution::policy_model::{
-                BoundPolicyModel, PolicyModelStatus, WithPolicyModels,
-            };
+        if !is_context_job && !is_child {
             let mut models = std::collections::BTreeMap::new();
             for capability in &policy_models {
-                if capability.status != PolicyModelStatus::Available {
+                if capability.status != varin_runtime::execution::PolicyModelStatus::Available {
                     continue;
                 }
                 let bound = bind_policy_model(&p.run_id, capability, &credential_bridge)?;
@@ -374,7 +410,7 @@ impl RunAssembly {
                 if models
                     .insert(
                         capability.capability_id.clone(),
-                        BoundPolicyModel {
+                        varin_runtime::execution::BoundPolicyModel {
                             capability: capability.clone(),
                             provider: bound.provider,
                         },
@@ -386,11 +422,12 @@ impl RunAssembly {
                     ));
                 }
             }
-            start.provider = Arc::new(WithPolicyModels {
-                primary: start.provider,
-                capabilities: policy_models.clone(),
-                models,
-            });
+            policy_bridge
+                .install_models(&p.run_id, policy_generation, policy_models.clone(), models)
+                .map_err(|e| KernelError::Operation(e.to_string()))?;
+            start.provider = policy_bridge
+                .wrap_models(&p.run_id, start.provider)
+                .map_err(|e| KernelError::Operation(e.to_string()))?;
         }
         {
             let mut selection = varin_runtime::catalog::launches::LaunchSelection::from_binding(
@@ -453,6 +490,7 @@ impl RunAssembly {
         let catalog = self.runtime.catalog();
         let models = self.models.clone();
         let tools = self.tools.clone();
+        let policy = self.policy.clone();
         thread::spawn(move || {
             let _ = handle.wait();
             let terminal = catalog
@@ -463,9 +501,7 @@ impl RunAssembly {
             if terminal {
                 models.release(&run_id);
                 tools.release(&run_id);
-                let _ = responses.send(
-                    json!({"v":1,"kind":"agent-policy-release","kernelEpoch":epoch,"runId":run_id}),
-                );
+                policy.release(&run_id);
                 let _ = responses.send(
                     json!({"v":1,"kind":"host-tool-owner-release","kernelEpoch":epoch,"runId":run_id}),
                 );

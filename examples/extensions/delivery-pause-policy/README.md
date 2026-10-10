@@ -1,7 +1,7 @@
 # Delivery and explicit pause policy
 
 This ordinary SDK extension demonstrates `deliver` → `pause` → explicit Run resume → `deliver` →
-`complete` through `varin.agent.policy@2`. It requests no provider inference and owns no conversation
+`complete` through `varin.agent.policy@3`. It requests no provider inference and owns no conversation
 history, Wait database, timer or resume transport.
 
 ## Build, install and select
@@ -20,8 +20,8 @@ Select the provider through existing service routing, using the document's curre
 ```json
 {
   "serviceId": "varin.agent.policy",
-  "version": 2,
-  "providerKey": "example.delivery-pause-policy:host:varin.agent.policy@2",
+  "version": 3,
+  "providerKey": "example.delivery-pause-policy:host:varin.agent.policy@3",
   "scope": { "sessionId": "YOUR_NATIVE_THREAD_ID" },
   "allowFallback": false
 }
@@ -32,6 +32,16 @@ A new native Thread run shows its first delivery and pause reason. Queueing anot
 Run paused. Choose **Resume run** to submit the exact `runId` and `waitId` shown by the current snapshot.
 The second delivery appears before the Run completes. A failed subsequent launch preparation has its
 own **Retry preparation** action; it does not repeat or implicitly authorize the Pause command.
+
+## Updating the policy
+
+The explicit `transitionState` hook accepts only this example's version 1 private states at their
+matching delivery or resume event. It does not infer compatibility from arbitrary JSON or copy
+another policy's state. Reloading an implementation with this same state contract can activate at
+the next real closed boundary. A paused Run stays paused; its update can activate after explicit
+resume, without replacing the original Wait or fabricating input. An unsupported private-state
+version keeps the former active policy. The user can explicitly choose **Restart policy state** for
+the displayed candidate, preserving the Run and its history while clearing only policy state.
 
 ## Evidence boundaries
 

@@ -2939,12 +2939,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         return readMcpHostPermissionPolicy(mcpAgentDir, configCwd, trusted);
       },
     });
-  }, async (input, signal) => {
-    const run = await agentRuntime.run(input.runId, signal);
-    if (run.thread_id !== input.threadId) throw new Error('Native policy scope changed');
-    const checkpoint = await agentRuntime.context(run.branch_id, signal);
-    const projectId = checkpoint?.personalization?.projectId;
-    return prepareAgentPolicy({ sessionId: input.threadId, ...(projectId ? { projectId } : {}) }, signal);
+  }, {
+    prepare: (input, signal) => prepareAgentPolicy({ sessionId: input.threadId,
+      ...(input.projectId ? { projectId: input.projectId } : {}),
+      ...(input.requiredBinding ? { requiredBinding: input.requiredBinding } : {}) }, signal),
+    observe: (input, changed, signal) => prepareAgentPolicy.observe({ sessionId: input.threadId,
+      ...(input.projectId ? { projectId: input.projectId } : {}) }, changed, signal),
   }, createPolicyModelPreparer({ models: modelAuthority,
     // This is a user-scoped role. Native Threads do not impersonate Pi sessions.
     settings: () => piRuntimeBroker.requestCatalog('settings.get', {}),

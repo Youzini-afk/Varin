@@ -45,6 +45,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'plan/update': ['runtime', 'threadId', 'branchId', 'key', 'expectedHeadId', 'expectedRef', 'content'],
     fork: ['runtime', 'threadId', 'branchId', 'key', 'headId'],
     'tools/inspect':['runtime','threadId','branchId','runId'],
+    'policy/inspect': ['runtime','threadId','branchId','runId'],
+    'policy/restart': ['runtime','threadId','branchId','runId','selectionId'],
+    'policy/cancel': ['runtime','threadId','branchId','runId','selectionId'],
     create: ['key'], list: [], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'expectedHead', 'model', 'source'],
     snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'mode'],
     'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
@@ -86,6 +89,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('child/wait/cancel', body => adapter.cancelChildWait(identity(body), text(body.waitId)));
   post('tree/cancel', async body => { await adapter.cancelTree(identity(body)); return {}; });
   post('tools/inspect',(body,signal)=>adapter.inspectTools(identity(body),text(body.runId),signal));
+  post('policy/inspect', body => adapter.inspectPolicy(identity(body), text(body.runId)));
+  post('policy/restart', (body, signal) => adapter.restartPolicy(identity(body), text(body.runId), text(body.selectionId), signal));
+  post('policy/cancel', (body, signal) => adapter.cancelPolicyUpdate(identity(body), text(body.runId), text(body.selectionId), signal));
   post('models', () => adapter.listModels());
   post('model/select',body=>adapter.selectModel({...identity(body),runId:text(body.runId),key:text(body.key),model:modelSelection(body.model)}));
   post('list', async () => (await adapter.runtime.threads()).filter(thread => thread.thread_id.startsWith('thread:')));

@@ -148,6 +148,7 @@ struct ModelRecoveryPreparation {
 enum RecoveryKind {
     None,
     Policy,
+    Checkpoint(super::policy_checkpoint::PolicyCheckpointMetadata),
     Model {
         step: ModelStep,
         policy: PolicyIdentity,
@@ -195,6 +196,50 @@ impl RecoveryPreparation {
         };
         let recovery = match &self.kind {
             RecoveryKind::None | RecoveryKind::Policy => None,
+            RecoveryKind::Checkpoint(checkpoint) => {
+                let database = Connection::open_with_flags(
+                    &self.execution.database,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                        | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                )?;
+                let mut event: PolicyEvent = serde_json::from_value(self.execution.content.load(
+                    checkpoint.continuation.as_ref().ok_or_else(|| {
+                        RuntimeError::Invalid("policy continuation missing".into())
+                    })?,
+                )?)?;
+                let input_ids =
+                    checkpoint.invalidating_inputs(&database, &self.execution.run.id)?;
+                if !input_ids.is_empty()
+                    && !matches!(
+                        event,
+                        PolicyEvent::Delivered { .. } | PolicyEvent::Resumed { .. }
+                    )
+                {
+                    event = PolicyEvent::InputDelivered { input_ids };
+                }
+                let decision = if checkpoint.pending(&database, &self.execution.run.id)? {
+                    Some(PolicyDecision {
+                        state: self.execution.content.load(
+                            checkpoint.pending_state.as_ref().ok_or_else(|| {
+                                RuntimeError::Invalid("pending decision state missing".into())
+                            })?,
+                        )?,
+                        action: serde_json::from_value(self.execution.content.load(
+                            checkpoint.action.as_ref().ok_or_else(|| {
+                                RuntimeError::Invalid("pending decision missing".into())
+                            })?,
+                        )?)?,
+                    })
+                } else {
+                    None
+                };
+                Some(ExecutionRecovery {
+                    event,
+                    pending: None,
+                    receipts: BTreeMap::new(),
+                    decision,
+                })
+            }
             RecoveryKind::Model { step, policy } => {
                 let mut database = Connection::open_with_flags(
                     &self.execution.database,
@@ -213,29 +258,50 @@ impl RecoveryPreparation {
                 let snapshot: RequestSnapshot =
                     serde_json::from_value(self.execution.content.load(&model.step.request)?)?;
                 let binding = &self.execution.binding;
-                let model_changed = snapshot.view.binding.connection_identity != binding.connection_identity
+                let model_changed = snapshot.view.binding.connection_identity
+                    != binding.connection_identity
                     || snapshot.view.binding.provider_family != binding.provider_family
                     || snapshot.view.binding.model != binding.model
                     || snapshot.view.binding.configuration_generation
                         != binding.configuration_generation;
-                let activated_model = model.active_model.as_ref().map(|active| {
-                    Ok::<_,RuntimeError>(serde_json::to_value(&active.configuration)? == self.execution.run.configuration
-                        && active.configuration.provider_family == binding.provider_family
-                        && active.configuration.model == binding.model
-                        && active.configuration.configuration_generation == binding.configuration_generation
-                        && binding.connection_identity == if let Some(scope) = &active.credential_scope {
-                            crate::model_session::connection_identity_with_scope(&active.configuration,scope)
-                        } else {crate::model_session::connection_identity(&active.configuration)}
-                            .map_err(|error|RuntimeError::Invalid(error.to_string()))?)
-                }).transpose()?.unwrap_or(false);
+                let activated_model = model
+                    .active_model
+                    .as_ref()
+                    .map(|active| {
+                        Ok::<_, RuntimeError>(
+                            serde_json::to_value(&active.configuration)?
+                                == self.execution.run.configuration
+                                && active.configuration.provider_family == binding.provider_family
+                                && active.configuration.model == binding.model
+                                && active.configuration.configuration_generation
+                                    == binding.configuration_generation
+                                && binding.connection_identity
+                                    == if let Some(scope) = &active.credential_scope {
+                                        crate::model_session::connection_identity_with_scope(
+                                            &active.configuration,
+                                            scope,
+                                        )
+                                    } else {
+                                        crate::model_session::connection_identity(
+                                            &active.configuration,
+                                        )
+                                    }
+                                    .map_err(|error| RuntimeError::Invalid(error.to_string()))?,
+                        )
+                    })
+                    .transpose()?
+                    .unwrap_or(false);
                 let tools_changed = snapshot.view.binding.tools != binding.tools
-                    || snapshot.view.binding.tool_schema_generation != binding.tool_schema_generation;
+                    || snapshot.view.binding.tool_schema_generation
+                        != binding.tool_schema_generation;
                 let activated_tools = match &model.active_tool_composition {
                     Some(reference) => {
-                        let selected:super::tools::ToolComposition=serde_json::from_value(self.execution.content.load(reference)?)?;
-                        selected.generation==binding.tool_schema_generation && selected.tools==binding.tools
-                    },
-                    None=>false,
+                        let selected: super::tools::ToolComposition =
+                            serde_json::from_value(self.execution.content.load(reference)?)?;
+                        selected.generation == binding.tool_schema_generation
+                            && selected.tools == binding.tools
+                    }
+                    None => false,
                 };
                 if (tools_changed && (model.committed != model.calls.len() || !activated_tools))
                     || (model_changed && (model.committed != model.calls.len() || !activated_model))
@@ -480,7 +546,7 @@ impl Catalog {
 
     /// Tracks only this Run and its durable conditions. Unrelated Runs cannot invalidate its read.
     fn preparation_cursor(&self, run: &Run) -> Result<u64> {
-        Ok(self.db.query_row("SELECT coalesce(max(cursor),0) FROM events WHERE (subject=?1 AND kind IN ('execution.committed','execution.interrupted','run.execution_recovered')) OR subject IN (SELECT id FROM operations WHERE run_id=?1) OR subject IN (SELECT id FROM waits WHERE run_id=?1)",
+        Ok(self.db.query_row("SELECT coalesce(max(cursor),0) FROM events WHERE (subject=?1 AND kind IN ('execution.committed','execution.interrupted','run.execution_recovered','policy.activated')) OR subject IN (SELECT id FROM operations WHERE run_id=?1) OR subject IN (SELECT id FROM waits WHERE run_id=?1)",
             [&run.id], |row| read_number(row, 0))?)
     }
 
@@ -523,8 +589,50 @@ impl Catalog {
         }
         // The policy reader captures references only. Its potentially large request and original
         // output are restored by the engine's policy Persistence call after releasing Catalog.
-        let policy_identity = self.prepare_policy_action_read(run_id, self.epoch)?.map(|read| read.identity().clone());
-        let kind = if let Some(identity) = policy_identity {
+        let policy_identity = self
+            .prepare_policy_action_read(run_id, self.epoch)?
+            .map(|read| read.identity().clone());
+        let checkpoint = super::policy_checkpoint::metadata(&self.db, run_id)?;
+        let unresolved: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state!='completed'
+                 AND json_extract(body,'$.superseded_by_input') IS NULL)
+             OR EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id
+                 WHERE m.run_id=?1 AND c.committed=0)",
+            [run_id],
+            |row| row.get(0),
+        )?;
+        let checkpoint_boundary = if let Some(saved) = &checkpoint {
+            let consumed: u64 = self.db.query_row(
+                "SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND kind='execution.committed'
+                 AND json_extract(data,'$.kind')='policy_decision_consumed'",
+                [run_id], |row| read_number(row, 0),
+            )?;
+            let work: u64 = self.db.query_row(
+                "SELECT coalesce(max(cursor),0) FROM events WHERE (subject=?1 AND kind='execution.committed'
+                 AND json_extract(data,'$.kind') IN ('request_prepared','model_finished','tool_batch_committed'))
+                 OR subject IN (SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind')
+                     IN ('policy_tool_graph_v1','policy_model_job_v1','policy_deliver_v1','policy_pause_v1'))",
+                [run_id], |row| read_number(row, 0),
+            )?;
+            saved.continuation.is_some()
+                && !unresolved
+                && !super::policy_body::has_pending_action(&self.db, run_id)?
+                && (saved.kind == super::policy_checkpoint::PolicyCheckpointKind::Activation
+                    || saved.decision_pending
+                    || consumed > work)
+        } else {
+            false
+        };
+        let kind = if checkpoint_boundary {
+            let saved = checkpoint.expect("captured checkpoint boundary");
+            if saved.identity != policy {
+                return Err(RuntimeError::Conflict(
+                    "policy checkpoint belongs to another implementation version".into(),
+                ));
+            }
+            self.recovery_wait(&run)?;
+            RecoveryKind::Checkpoint(saved)
+        } else if let Some(identity) = policy_identity {
             if identity != policy {
                 return Err(RuntimeError::Conflict(
                     "policy recovery version changed".into(),
@@ -619,11 +727,13 @@ impl Catalog {
             ))
         })? {
             let (body, receipt, done) = row?;
-            let call = serde_json::from_str::<super::tool_content::ToolCallMetadata>(&body)?.load(content)?;
+            let call = serde_json::from_str::<super::tool_content::ToolCallMetadata>(&body)?
+                .load(content)?;
             if let Some(receipt) = receipt {
                 receipts.insert(
                     call.call_id.clone(),
-                    serde_json::from_str::<super::result_content::ToolReceiptMetadata>(&receipt)?.load(content)?,
+                    serde_json::from_str::<super::result_content::ToolReceiptMetadata>(&receipt)?
+                        .load(content)?,
                 );
             }
             if done != 0 {
@@ -648,10 +758,26 @@ impl Catalog {
             }
             let key = format!("{}:tool:{}", request_id, call.call_id);
             if let Some(op) = optional_record::<Operation>(database, "operations", &key)? {
-                let intent=super::tool_content::ToolIntent::from_operation(&op)?;
-                if intent.origin()!=&(ToolOrigin::ModelStep{request_id:request_id.clone()}) || op.run_id!=run_id {return Err(RuntimeError::Conflict("model invocation origin changed".into()));}
-                if let Some(completion)=op.call_completion.clone() {
-                    receipts.insert(call.call_id.clone(),ToolResult{request_id:request_id.clone(),call_id:call.call_id.clone(),completion:completion.load(content)?});
+                let intent = super::tool_content::ToolIntent::from_operation(&op)?;
+                if intent.origin()
+                    != &(ToolOrigin::ModelStep {
+                        request_id: request_id.clone(),
+                    })
+                    || op.run_id != run_id
+                {
+                    return Err(RuntimeError::Conflict(
+                        "model invocation origin changed".into(),
+                    ));
+                }
+                if let Some(completion) = op.call_completion.clone() {
+                    receipts.insert(
+                        call.call_id.clone(),
+                        ToolResult {
+                            request_id: request_id.clone(),
+                            call_id: call.call_id.clone(),
+                            completion: completion.load(content)?,
+                        },
+                    );
                     continue;
                 }
                 if op.cancel_requested
@@ -693,54 +819,47 @@ impl Catalog {
                                     )
                                 })?,
                                 effect: op.effect,
-                                content: op.result.ok_or_else(|| RuntimeError::Invalid("terminal tool operation has no result".into()))?.load(content)?,
+                                content: op
+                                    .result
+                                    .ok_or_else(|| {
+                                        RuntimeError::Invalid(
+                                            "terminal tool operation has no result".into(),
+                                        )
+                                    })?
+                                    .load(content)?,
                             },
                         },
                     );
                 }
             }
         }
-        let saved: Option<(String, String, String)> = database
-            .query_row(
-                "SELECT identity,state_ref,action_ref FROM policy_checkpoints WHERE run_id=?1",
-                [run_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()?;
-        if let Some((identity, _, _)) = &saved {
-            if serde_json::from_str::<PolicyIdentity>(identity)? != *policy {
-                return Err(RuntimeError::Conflict(
-                    "policy recovery version changed".into(),
-                ));
-            }
+        let saved = super::policy_checkpoint::metadata(database, run_id)?;
+        if saved
+            .as_ref()
+            .is_some_and(|saved| saved.identity != *policy)
+        {
+            return Err(RuntimeError::Conflict(
+                "policy recovery version changed".into(),
+            ));
         }
-        let checkpoint_cursor: u64 = database.query_row("SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND kind='execution.committed' AND json_extract(data,'$.kind')='policy_checkpoint'", [run_id], |r| read_number(r, 0))?;
-        let outcome_cursor: u64 = database.query_row("SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND kind='execution.committed' AND json_extract(data,'$.kind') IN ('model_finished','tool_batch_committed')", [run_id], |r| read_number(r, 0))?;
-        let mut decision = if checkpoint_cursor > outcome_cursor {
-            saved
-                .map(|(_, state, action)| {
-                    Ok::<_, RuntimeError>(PolicyDecision {
-                        state: content.load(&serde_json::from_str(&state)?)?,
-                        action: serde_json::from_value(content.load(&serde_json::from_str(&action)?)?)?,
-                    })
+        let decision = if let Some(saved) = saved {
+            if saved.pending(database, run_id)? {
+                Some(PolicyDecision {
+                    state: content.load(saved.pending_state.as_ref().ok_or_else(|| {
+                        RuntimeError::Invalid("pending decision state missing".into())
+                    })?)?,
+                    action: serde_json::from_value(content.load(
+                        saved.action.as_ref().ok_or_else(|| {
+                            RuntimeError::Invalid("pending policy decision missing".into())
+                        })?,
+                    )?)?,
                 })
-                .transpose()?
+            } else {
+                None
+            }
         } else {
             None
         };
-        if let Some(PolicyDecision {
-            action: PolicyAction::Wait { wait_id },
-            ..
-        }) = &decision
-        {
-            let wait: Wait = record(database, "waits", wait_id)?;
-            if wait.run_id != run_id {
-                return Err(RuntimeError::Invalid("policy wait owner differs from its checkpoint".into()));
-            }
-            if wait.trigger_cursor.is_some() || wait.cancelled {
-                decision = None;
-            }
-        }
         Ok(ModelRecoveryPreparation {
             active_tool_composition: database.query_row("SELECT json_extract(data,'$.composition') FROM events WHERE subject=?1 AND kind='run.tools_activated' ORDER BY cursor DESC LIMIT 1",
                 [run_id],|row|row.get::<_,String>(0)).optional()?.map(|value|serde_json::from_str(&value)).transpose()?,

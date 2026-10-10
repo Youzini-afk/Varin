@@ -11,7 +11,7 @@ export interface PreparedPolicyModel {
   credentialOwner?: ExistingHostCredentialOwner;
 }
 export type PolicyModelPreparer = (input: {
-  threadId: string; requestedModelRoles: readonly 'agentPlanning'[];
+  threadId: string; generation: number; requestedModelRoles: readonly 'agentPlanning'[];
   savedCapabilities?: readonly PolicyModelCapability[];
 }, signal?: AbortSignal) => Promise<PreparedPolicyModel[]>;
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -29,12 +29,22 @@ export function createPolicyModelPreparer(options: {
     const base: PolicyModelCapability = { capability_id: 'agentPlanning', purpose: 'planning', status: 'unconfigured',
       supported_operation: 'tool_free_text', binding_id: null, configuration_identity: null,
       binding: null, configuration: null, credential_scope: null };
-    const unavailable = (status: PolicyModelCapability['status']): PreparedPolicyModel[] => {
-      if (input.savedCapabilities?.length && (input.savedCapabilities.length !== 1 || input.savedCapabilities[0]?.status !== status)) {
-        throw new Error('policy-model-selection-changed');
-      }
-      return [{ capability: { ...base, status } }];
-    };
+    if (!Number.isSafeInteger(input.generation) || input.generation < 0) throw new Error('policy-model-generation-invalid');
+    const saved = input.savedCapabilities;
+    if (saved !== undefined) {
+      const previous = saved[0];
+      if (saved.length !== 1 || !previous || previous.capability_id !== 'agentPlanning'
+        || previous.purpose !== 'planning' || previous.supported_operation !== 'tool_free_text') throw new Error('policy-model-requirements-changed');
+      if (previous.status !== 'available') return [{ capability: structuredClone(previous) }];
+      if (!previous.configuration || !previous.credential_scope) throw new Error('policy-model-selection-changed');
+      const configurationIdentity = createHash('sha256').update(JSON.stringify(canonical({ configuration: previous.configuration, scope: previous.credential_scope }))).digest('hex');
+      if (previous.configuration_identity !== configurationIdentity
+        || previous.binding_id !== `policy:${input.generation}:agentPlanning:${configurationIdentity}`) throw new Error('policy-model-selection-changed');
+      // Restore the committed model directly. Current settings and routing are unrelated intent.
+      const credentialOwner = await waitWithSignal(options.models.rebindModel(previous.configuration, previous.credential_scope), signal);
+      return [{ capability: structuredClone(previous), credentialOwner }];
+    }
+    const unavailable = (status: PolicyModelCapability['status']): PreparedPolicyModel[] => [{ capability: { ...base, status } }];
     let snapshot: unknown;
     try { snapshot = await waitWithSignal(options.settings(input.threadId), signal); }
     catch { signal?.throwIfAborted(); return unavailable('unavailable'); }
@@ -55,18 +65,9 @@ export function createPolicyModelPreparer(options: {
     try { scope = await waitWithSignal(resolved.credentialOwner.scope(), signal); }
     catch { signal?.throwIfAborted(); return unavailable('unavailable'); }
     const configurationIdentity = createHash('sha256').update(JSON.stringify(canonical({ configuration: resolved.configuration, scope }))).digest('hex');
-    const bindingId = `agentPlanning:${configurationIdentity}`;
+    const bindingId = `policy:${input.generation}:agentPlanning:${configurationIdentity}`;
     const capability: PolicyModelCapability = { ...base, status: 'available', binding_id: bindingId,
       configuration_identity: configurationIdentity, configuration: resolved.configuration, credential_scope: scope };
-    const saved = input.savedCapabilities;
-    if (saved?.length) {
-      const previous = saved[0];
-      if (saved.length !== 1 || !previous || previous.capability_id !== capability.capability_id || previous.status !== capability.status
-        || previous.binding_id !== bindingId || previous.configuration_identity !== configurationIdentity
-        || !previous.configuration || !previous.credential_scope) throw new Error('policy-model-selection-changed');
-      const credentialOwner = await waitWithSignal(options.models.rebindModel(previous.configuration, previous.credential_scope), signal);
-      return [{ capability: structuredClone(previous), credentialOwner }];
-    }
     return [{ capability, credentialOwner: resolved.credentialOwner }];
   };
 }

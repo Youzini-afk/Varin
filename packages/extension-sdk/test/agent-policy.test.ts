@@ -10,7 +10,7 @@ const input = (completion: JsonValue): JsonValue => ({
   event: { kind: 'tool_graph_completed', action_id: 'graph', receipts: [{ node_id: 'save', completion }] }, state: null,
 });
 
-test('registered v2 policy gets immutable typed completions and passes only result references to inference', async () => {
+test('registered v3 policy gets immutable typed completions and passes only result references to inference', async () => {
   let calls = 0;
   const result = await runHostExtensionConformance({ extensionId: 'review.policy-contract', activation: async context => {
     let handler!: VarinHostServiceHandler;
@@ -41,9 +41,9 @@ test('registered v2 policy gets immutable typed completions and passes only resu
     await assert.rejects(async () => handler.decide!([input({ ...completion, output: null })], call), /Invalid policy graph receipts/);
     assert.equal(calls, 2);
     const inspection = await handler.inspect!([], call) as { version: number };
-    assert.equal(inspection.version, 2);
+    assert.equal(inspection.version, 3);
   } });
-  assert.deepEqual(result.providedServiceIds, ['varin.agent.policy@2']);
+  assert.deepEqual(result.providedServiceIds, ['varin.agent.policy@3']);
 });
 
 test('cancellation after an awaited policy decision discards its returned graph', async () => {
@@ -56,5 +56,48 @@ test('cancellation after an awaited policy decision discards its returned graph'
       async decide() { await Promise.resolve(); abort.abort(); return { action: { kind: 'tool_graph', nodes: [] }, state: null }; },
     });
     await assert.rejects(async () => handler.decide!([input({ kind: 'not_dispatched', reason: 'Denied' })], { signal: abort.signal, callId: 'decision', capabilities: context.capabilities }), { name: 'AbortError' });
+  } });
+});
+
+test('state transition is explicit, immutable and independently cancellable', async () => {
+  await runHostExtensionConformance({ extensionId: 'review.policy-transition', activation: async context => {
+    let handler!: VarinHostServiceHandler;
+    const provide = context.services.provide;
+    context.services.provide = (descriptor, implementation) => { handler = implementation; provide(descriptor, implementation); };
+    let calls = 0;
+    provideAgentPolicy(context, { identity: { name: 'new', version: '2' }, configuration: { stateVersion: 2 },
+      transitionState(value, _signal, config) {
+        calls++;
+        assert.equal(Object.isFrozen(value.from.identity), true);
+        assert.equal(Object.isFrozen(value.state), true);
+        assert.equal(Object.isFrozen(config), true);
+        return value.from.declaredIdentity?.version === '1'
+          ? { kind: 'compatible', state: { migrated: value.state } }
+          : { kind: 'incompatible', reason: 'Unrecognized implementation state' };
+      }, decide() { throw new Error('Transition must not decide'); },
+    });
+    const raw = { ...(input({ kind: 'not_dispatched', reason: 'Denied' }) as object),
+      from: { identity: { name: 'old-exact', version: 'hash' }, declaredIdentity: { name: 'old', version: '1' } }, state: { stage: 1 } };
+    const call = { signal: new AbortController().signal, callId: 'transition', capabilities: context.capabilities };
+    assert.deepEqual(await handler.transitionState!([raw], call), { kind: 'compatible', state: { migrated: { stage: 1 } } });
+    assert.equal(calls, 1);
+    const abort = new AbortController(); abort.abort();
+    await assert.rejects(async () => handler.transitionState!([raw], { ...call, signal: abort.signal }), { name: 'AbortError' });
+    assert.equal(calls, 1);
+  } });
+});
+
+test('missing compatibility hook rejects even null source state', async () => {
+  await runHostExtensionConformance({ extensionId: 'review.policy-no-transition', activation: async context => {
+    let handler!: VarinHostServiceHandler;
+    const provide = context.services.provide;
+    context.services.provide = (descriptor, implementation) => { handler = implementation; provide(descriptor, implementation); };
+    provideAgentPolicy(context, { identity: { name: 'new', version: '1' }, configuration: null, decide() { throw new Error('Must not decide'); } });
+    const call = { signal: new AbortController().signal, callId: 'transition', capabilities: context.capabilities };
+    const description = await handler.describe!([], call) as { stateTransition: string; modelRoles: unknown[] };
+    assert.equal(description.stateTransition, 'unsupported'); assert.deepEqual(description.modelRoles, []);
+    const result = await handler.transitionState!([{ ...(input({ kind: 'not_dispatched', reason: 'Denied' }) as object),
+      from: { identity: { name: 'default', version: '1' }, declaredIdentity: null } }], call) as { kind: string };
+    assert.equal(result.kind, 'incompatible');
   } });
 });

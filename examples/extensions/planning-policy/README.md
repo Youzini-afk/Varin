@@ -1,6 +1,6 @@
 # Bounded planning policy
 
-An ordinary installed `varin.agent.policy@2` extension that requests one auxiliary planning model
+An ordinary installed `varin.agent.policy@3` extension that requests one auxiliary planning model
 job, reads its committed plan, and chooses a real evidence graph from the plan's content. The main
 model answers using core-validated evidence. The existing evidence-policy v2 remains independent.
 
@@ -24,8 +24,8 @@ Select the provider through existing service routing, with the routing document'
 ```json
 {
   "serviceId": "varin.agent.policy",
-  "version": 2,
-  "providerKey": "example.planning-policy:host:varin.agent.policy@2",
+  "version": 3,
+  "providerKey": "example.planning-policy:host:varin.agent.policy@3",
   "scope": { "projectId": "YOUR_PROJECT_ID" },
   "allowFallback": false
 }
@@ -56,7 +56,7 @@ role. Its global settings shape is:
 Use a provider/model already configured through the normal model and credential settings. These
 placeholders are not a runnable paid-service configuration. Installation never writes settings or
 auto-enables this role; it has no fallback to the main model. The policy declares
-`capabilities: ['agentPlanning']`, so only a selected policy requesting this duty prepares it.
+`modelRoles: ['agentPlanning']`, so only a selected policy requesting this duty prepares it.
 Capability status distinguishes `available`, `disabled`, `unconfigured`, `invalid`, and
 `unavailable`. The policy sees a capability ID and public status, never endpoints, provider
 configuration, tokens or credential handles. A non-available role stops this example explicitly.

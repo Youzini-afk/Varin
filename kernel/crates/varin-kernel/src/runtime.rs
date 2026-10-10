@@ -1216,7 +1216,10 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         // Private secret-bearing replies must never enter method validation, durable queues,
         // public tool grants, or diagnostic formatting. Malformed/old replies are discarded.
-        if request.get("kind").and_then(Value::as_str) == Some("agent-policy-response") {
+        if matches!(
+            request.get("kind").and_then(Value::as_str),
+            Some("agent-policy-response" | "agent-policy-transition-response")
+        ) {
             policy_bridge.receive(request);
             continue;
         }

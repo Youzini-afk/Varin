@@ -130,7 +130,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 18, input domain 2 and collaboration domain 2 store input intents/queue bodies and context-job ownership,
+Catalog version 19, input domain 2 and collaboration domain 2 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. `Catalog::collect_content_objects` marks requests, provider originals,
@@ -222,7 +222,7 @@ Explicit context-job capture and publication also stage bodies outside the Catal
 ## Policy-originated tool graphs
 
 A pinned AgentPolicy may return `ToolGraph` before any model request. The public Decision contract is
-`varin.agent.policy@2`; the old read-graph contract is replaced, not translated. Nodes have unique identities,
+`varin.agent.policy@3`; the old read-graph contract is replaced, not translated. Nodes have unique identities,
 frozen schemas/source contexts and explicit acyclic prerequisites. Tool preparation, authorization,
 atomic resource/capacity admission, dispatch reauthorization and settlement use the same single-call
 execution path as model tools. Untrusted read-only annotations confer no permission.
@@ -266,10 +266,48 @@ restore the exact definition and receipts; cancellation and admission queries re
 Private policy state and actions are immutable references, loaded outside Catalog when continuing.
 Memory mutations and fixed-source child dispatch/observation use their existing domain writers and
 receipt recovery. A policy can dispatch a child, continue independent work and later observe it through
-`wait_child`, using ordinary graph nodes rather than a second child-action API. MCP permissions, plan
+`wait_child`, using ordinary graph nodes rather than a second child-action API. Plan
 tools, process observation and questions retain their explicit origin restrictions until their own
 policy-origin consumers are connected. Independent delivery and explicit pause use the control actions
-below. Safe policy replacement, ordinary extension tools and other design domains remain unfinished.
+below. Ordinary extension tools and MCP permissions now carry actual policy origins. Other remaining
+design domains are tracked in the implementation plan.
+
+## Safe policy activation
+
+`policy_selections` records immutable selection intents, candidate status and their activation receipt
+in the same Catalog. Selection checks both the active generation and the previous desired selection;
+repeating the original command returns its original receipt. Preparation retains the exact installed
+artifact, declared/configured identity, explicit planning roles and state-transition contract.
+Callbacks, provider construction and content staging run outside Catalog. Ready is not active.
+
+The existing Run worker selects a candidate only before a genuinely new decision. Its current
+decision, model/tool exchange, policy action and registered observation complete under their original
+binding. Independent accepted jobs do not form a global completion barrier. Activation commits the
+new launch generation, private state, original unconsumed continuation and event together, then
+replaces policy and planning providers in the same live slot. Main-model, source and tool selections
+retain their own authorities. Pending decisions and activation checkpoints have distinct tags;
+recovery executes an already stored action or delivers its actual continuation, never a fabricated
+`Started` event. Within that same checkpoint, committed private state is distinct from a pending
+decision's proposed state. Input that defeats action admission invalidates the proposal without
+advancing its private state, including after input delivery, a crash and GC. Successful action
+admission/consumption promotes the proposal; a registered Wait promotes only when actually parked.
+Their content references and prepared publication leases participate in normal GC.
+
+`varin.agent.policy@3` exposes explicit `transitionState` compatibility. An unchanged complete target
+can retain state; a different target must accept the original private state explicitly. Incompatibility
+leaves the active generation intact. The user's `restart_state` command resets only strategy-private
+state, retaining history and independent jobs. Preparing, cancelling or restarting a strategy update
+does not resume a paused Run. Fixed child/context policies retain their admitted profile.
+
+Private policy requests, replies, cancellation and release identify their actual generation and
+transport epoch. Planning credentials are likewise generation-scoped and exact saved configuration
+is rebound on restart, rather than read from current settings. Retired callbacks retain their real
+service pin until callback completion; an abort request is not stop evidence. A true Catalog reopen
+marks unactivated candidates interrupted while preserving the committed active selection. Existing
+terminal writers close outstanding candidates in their original transaction. Public inspection
+separates active selection, durable candidate and transient Host preparation failure. The latter is
+visible on inspect/snapshot refresh, without a separate push while a paused Run has no other events. UI restart and
+cancel controls target the displayed original selection.
 
 ## Independent policy delivery and explicit pause
 
@@ -356,7 +394,7 @@ complete migration of the existing Pi memory workflow.
 ## Remaining integration
 
 The provider adapters and control boundary are foundations for the full cutover, not evidence
-of provider/platform parity. Remaining domain and MCP capabilities, safe running-policy replacement,
+of provider/platform parity. Remaining domain and MCP capabilities,
 provider capacity-error recovery and replaceable context strategies, broader UI/product coverage and
 single-writer ownership transfer remain tracked in
 [`docs/plan/agent-runtime-implementation.md`](../../../docs/plan/agent-runtime-implementation.md).

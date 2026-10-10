@@ -1,6 +1,7 @@
 import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildWait, LiveRoot, ContextPersonalization, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
 
 import type { RunModelSelection, RunModelSelections } from '@varin/protocol';
+import type { PolicySelection, PolicySelections } from '@varin/protocol';
 import type { ExtensionToolBinding, LaunchTool, McpBinding } from '@varin/protocol';
 import type { VarinExtensionServiceProvision } from '@varin/extension-contract';
 
@@ -82,6 +83,7 @@ export interface ThreadSnapshot {
   operations: Operation[];
   launch: LaunchIntent | null;
   modelSelection: RunModelSelections;
+  policySelection: ThreadPolicyInspection | null;
   context: ThreadContextState;
   children?: ChildTask[];
 }
@@ -113,6 +115,14 @@ export interface ThreadToolInspection {
   bindings: { mcp: McpBinding | null; extensions: ExtensionToolBinding[] };
   preparations: ThreadToolPreparation[];
 }
+/** Current Host preparation only; committed choices remain in the Catalog projection. */
+export interface ThreadPolicyPreparation {
+  status: 'preparing' | 'failed';
+  code: string | null;
+}
+export interface ThreadPolicyInspection extends PolicySelections {
+  preparation: ThreadPolicyPreparation | null;
+}
 export interface ThreadsAPI {
   plan?: ThreadPlanAPI;
   collaboration?: ThreadCollaborationAPI;
@@ -134,6 +144,11 @@ export interface ThreadsAPI {
   historyPage(identity: ThreadIdentity, cursor: { headId: string; beforeId: string }): Promise<ThreadHistoryPage>;
   snapshot(identity: ThreadIdentity): Promise<ThreadSnapshot>;
   inspectTools(identity: ThreadIdentity, runId: string): Promise<ThreadToolInspection>;
+  inspectPolicy(identity: ThreadIdentity, runId: string): Promise<ThreadPolicyInspection>;
+  /** Explicitly restart only the displayed candidate's private strategy state at a safe boundary. */
+  restartPolicy(identity: ThreadIdentity, runId: string, selectionId: string): Promise<PolicySelection>;
+  /** Cancel this unpublished update without cancelling the Run or its independent work. */
+  cancelPolicyUpdate(identity: ThreadIdentity, runId: string, selectionId: string): Promise<PolicySelection>;
   run(runId: string): Promise<Run>;
   cancelRun(runId: string): Promise<RunCancellationReceipt>;
   operation(operationId: string): Promise<Operation>;

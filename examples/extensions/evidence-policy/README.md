@@ -1,6 +1,6 @@
 # Bounded evidence policy
 
-An ordinary brokered Host extension implementing `varin.agent.policy@2` through
+An ordinary brokered Host extension implementing `varin.agent.policy@3` through
 `provideAgentPolicy`. It gathers evidence before the first model request, inspects a committed
 result, chooses a subsequent read from that content, and asks the normal selected model to answer.
 
@@ -23,8 +23,8 @@ Select its provider in existing service routing, with a real project ID:
 ```json
 {
   "serviceId": "varin.agent.policy",
-  "version": 2,
-  "providerKey": "example.evidence-policy:host:varin.agent.policy@2",
+  "version": 3,
+  "providerKey": "example.evidence-policy:host:varin.agent.policy@3",
   "scope": { "projectId": "YOUR_PROJECT_ID" },
   "allowFallback": false
 }

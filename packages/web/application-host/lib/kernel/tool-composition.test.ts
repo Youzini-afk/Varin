@@ -93,7 +93,7 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     cancel_requested: false,
     waiting_on: null,
   };
-  const launch: LaunchIntent = {
+  const launch: LaunchIntent = { policy_preparable: false, policy_generation: 0, policy_target: { kind: 'default' },
     run_id: 'run',
     revision: 1,
     startable: true,
@@ -185,7 +185,7 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     mcpLiveBinding: () => mcp,
     mcpImplementationIdentity: () => undefined,
     unregisterCredentialOwner() {},
-    unregisterPolicyOwner() {},
+    releaseRunPolicyOwners() {},
     cancelRunPreparation() {},
     unregisterToolOwners() {},
     registerExtensionTool: async (

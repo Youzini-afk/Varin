@@ -32,7 +32,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 18;
+pub(crate) const FORMAT: i64 = 19;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -114,10 +114,11 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
     }
     if version == FORMAT {
         inputs::check_format(db)?;
-        db.prepare("SELECT run_id,identity,state_ref,action_ref FROM policy_checkpoints")?;
+        db.prepare("SELECT run_id,identity,kind,state_ref,pending_state_ref,action_ref,continuation_ref,activation_cursor,pending,wait_id FROM policy_checkpoints")?;
         db.prepare("SELECT action_id,node_id,call_id,position,call,receipt,outcome FROM policy_graph_nodes")?;
         db.prepare("SELECT action_id,node_id,dependency_id FROM policy_graph_dependencies")?;
         db.prepare("SELECT id,run_id,revision,status,active,body FROM model_selections")?;
+        db.prepare("SELECT id,run_id,generation,status,body FROM policy_selections")?;
         context_jobs::check_format(db)?;
         launches::check_format(db)?;
         collaboration::check_format(db)?;
@@ -463,6 +464,8 @@ impl Catalog {
                 }
             }
             let intent = launch_content::LaunchMetadata {
+                policy_generation: 0,
+                policy_target: policy_switch::PolicyTarget::Default,
                 run_id: run_id.clone(),
                 revision: 1,
                 selection,
@@ -560,6 +563,9 @@ impl Catalog {
             return Err(RuntimeError::Invalid(
                 "waiting requires a durable wait".into(),
             ));
+        }
+        if next.terminal() {
+            policy_switch::close_run_candidate(&tx, id, run.revision + 1)?;
         }
         run.state = next;
         if next != RunState::Waiting {
@@ -1286,6 +1292,7 @@ impl Catalog {
             .then(|| self.content.save(&json!({"reason":"executor interrupted"})))
             .transpose()?;
         let tx = self.db.transaction()?;
+        policy_switch::interrupt_candidates(&tx)?;
         tx.execute("UPDATE resumptions SET claimed=0 WHERE acknowledged=0", [])?;
         let runs: Vec<Run> = read_all(&tx, "runs")?;
         for mut run in runs {
@@ -1496,7 +1503,8 @@ CREATE UNIQUE INDEX model_selections_active ON model_selections(run_id) WHERE ac
 CREATE UNIQUE INDEX model_steps_active ON model_steps(run_id) WHERE state IN ('prepared','dispatched');
 CREATE TABLE model_outputs(request_id TEXT PRIMARY KEY REFERENCES model_steps(id),body TEXT NOT NULL);
 CREATE TABLE tool_calls(request_id TEXT NOT NULL REFERENCES model_steps(id),call_id TEXT NOT NULL,body TEXT NOT NULL,receipt TEXT,committed INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(request_id,call_id));
-CREATE TABLE policy_checkpoints(run_id TEXT PRIMARY KEY REFERENCES runs(id),identity TEXT NOT NULL,state_ref TEXT NOT NULL,action_ref TEXT NOT NULL);
+CREATE TABLE policy_checkpoints(run_id TEXT PRIMARY KEY REFERENCES runs(id),identity TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN ('decision','activation')),state_ref TEXT NOT NULL,pending_state_ref TEXT,action_ref TEXT,continuation_ref TEXT,activation_cursor INTEGER,pending INTEGER NOT NULL,wait_id TEXT,CHECK((pending=1 AND pending_state_ref IS NOT NULL) OR (pending=0 AND pending_state_ref IS NULL)),CHECK((kind='decision' AND action_ref IS NOT NULL) OR (kind='activation' AND action_ref IS NULL AND pending=0)));
+CREATE TABLE policy_selections(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),generation INTEGER NOT NULL,status TEXT NOT NULL,body TEXT NOT NULL,UNIQUE(run_id,generation));
 CREATE TABLE policy_graph_nodes(action_id TEXT NOT NULL REFERENCES operations(id),node_id TEXT NOT NULL,call_id TEXT NOT NULL,position INTEGER NOT NULL,call TEXT NOT NULL,receipt TEXT,outcome TEXT,PRIMARY KEY(action_id,node_id),UNIQUE(action_id,call_id),UNIQUE(action_id,position));
 CREATE TABLE policy_graph_dependencies(action_id TEXT NOT NULL,node_id TEXT NOT NULL,dependency_id TEXT NOT NULL,PRIMARY KEY(action_id,node_id,dependency_id),FOREIGN KEY(action_id,node_id) REFERENCES policy_graph_nodes(action_id,node_id),FOREIGN KEY(action_id,dependency_id) REFERENCES policy_graph_nodes(action_id,node_id));
 CREATE TABLE events(cursor INTEGER PRIMARY KEY AUTOINCREMENT,subject TEXT NOT NULL,revision INTEGER NOT NULL,kind TEXT NOT NULL,data TEXT NOT NULL);
@@ -1600,3 +1608,6 @@ pub mod process_delivery;
 
 #[path = "catalog_policy_control.rs"]
 pub mod policy_control;
+
+#[path = "catalog_policy_switch.rs"]
+pub mod policy_switch;

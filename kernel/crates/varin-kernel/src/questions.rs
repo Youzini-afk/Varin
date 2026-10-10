@@ -127,6 +127,27 @@ impl AgentPolicy for QuestionPolicy {
         let inner = self.inner.identity();
         policy_identity(inner)
     }
+    fn select_for_decision(
+        &self,
+        view: &PolicyView<'_>,
+        event: &PolicyEvent,
+        state: &Value,
+        epoch: u64,
+        cancel: &CancellationToken,
+    ) -> Result<Option<Value>, ExecutionError> {
+        if self
+            .catalog
+            .lock()
+            .map_err(error)?
+            .pending_question_wait(view.run_id)
+            .map_err(error)?
+            .is_some()
+        {
+            return Ok(None);
+        }
+        self.inner
+            .select_for_decision(view, event, state, epoch, cancel)
+    }
     fn decide(
         &self,
         view: &PolicyView<'_>,

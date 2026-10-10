@@ -40,3 +40,6 @@ mod reconcile;
 
 #[cfg(test)]
 mod host_tool_review;
+
+#[cfg(test)]
+mod policy_activation_planning_review;

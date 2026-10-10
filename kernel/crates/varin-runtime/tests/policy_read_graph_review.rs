@@ -968,13 +968,13 @@ impl AgentPolicy for CheckpointPolicy {
 }
 #[test]
 fn newer_decision_checkpoint_after_graph_results_is_not_rolled_back_on_restart() {
-    for kind in ["read_result", "request_model_with_evidence", "complete"] {
+    for kind in ["read_result", "read_result_consumed", "request_model_with_evidence", "complete"] {
         let mut f = Fixture::new();
         let intent = admitted(&f, vec![node("a", &[])]);
         let action_id = intent.action_id().to_string();
         f.db.admit_policy_graph(&f.input.run_id, f.input.owner_generation, &intent)
             .unwrap();
-        let reference =
+        let receipt =
             f.db.settle_policy_node(
                 &f.input.run_id,
                 f.input.owner_generation,
@@ -982,12 +982,10 @@ fn newer_decision_checkpoint_after_graph_results_is_not_rolled_back_on_restart()
                 "a",
                 &settled(),
             )
-            .unwrap()
-            .output()
-            .unwrap()
-            .clone();
+            .unwrap();
+        let reference = receipt.output().unwrap().clone();
         let next = match kind {
-            "read_result" => json!({"kind":kind,"reference":reference,"index":0}),
+            "read_result" | "read_result_consumed" => json!({"kind":"read_result","reference":reference,"index":0}),
             "request_model_with_evidence" => json!({"kind":kind,"evidence":[reference]}),
             _ => json!({"kind":kind}),
         };
@@ -995,13 +993,22 @@ fn newer_decision_checkpoint_after_graph_results_is_not_rolled_back_on_restart()
             &f.input.run_id,
             f.input.owner_generation,
             &ExecutionRecord::PolicyCheckpoint {
+                previous_state: json!({"stage":"admitted"}),
+                event: PolicyEvent::ToolGraphCompleted { action_id: action_id.clone(), receipts: vec![receipt] },
                 identity: identity(),
                 state: json!({"marker":"committed-after-results"}),
                 action: action(next),
             },
         )
         .unwrap();
+        if kind == "read_result_consumed" {
+            let chunk = f.db.policy_chunk(&f.input.run_id, f.input.owner_generation, &reference, 0).unwrap();
+            f.db.commit(&f.input.run_id, f.input.owner_generation, &ExecutionRecord::PolicyDecisionConsumed {
+                event: PolicyEvent::ResultChunk { reference, index: 0, total_chunks: chunk.chunk_count, total_bytes: chunk.total_bytes, bytes: chunk.bytes },
+            }).unwrap();
+        }
         reopen(&mut f);
+        f.db.lock().unwrap().collect_content_objects().unwrap();
         let (input, recovery) =
             f.db.lock()
                 .unwrap()
@@ -1014,7 +1021,7 @@ fn newer_decision_checkpoint_after_graph_results_is_not_rolled_back_on_restart()
                 .unwrap();
         let policy = Arc::new(CheckpointPolicy {
             seen: Mutex::new(vec![]),
-            expected: if kind == "read_result" {
+            expected: if kind.starts_with("read_result") {
                 "result_chunk".into()
             } else {
                 "model_completed".into()

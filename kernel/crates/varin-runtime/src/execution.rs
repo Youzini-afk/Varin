@@ -959,8 +959,13 @@ pub enum ExecutionRecord {
     },
     PolicyCheckpoint {
         identity: PolicyIdentity,
+        previous_state: Value,
         state: Value,
         action: PolicyAction,
+        event: PolicyEvent,
+    },
+    PolicyDecisionConsumed {
+        event: PolicyEvent,
     },
 }
 
@@ -1254,7 +1259,7 @@ pub struct PolicyDecision {
     pub state: Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PolicyEvent {
     InputDelivered {
@@ -1305,6 +1310,18 @@ pub struct PolicyView<'a> {
 /// Its versioned private checkpoint never replaces the core's history or provider originals.
 pub trait AgentPolicy: Send + Sync {
     fn identity(&self) -> PolicyIdentity;
+    /// Only the Run worker calls this at a closed decision boundary. A candidate failure leaves
+    /// the active binding untouched. Implementations publish through the same durable Catalog.
+    fn select_for_decision(
+        &self,
+        _view: &PolicyView<'_>,
+        _event: &PolicyEvent,
+        _state: &Value,
+        _owner_generation: u64,
+        _cancel: &CancellationToken,
+    ) -> Result<Option<Value>, ExecutionError> {
+        Ok(None)
+    }
     fn decide(
         &self,
         view: &PolicyView<'_>,
@@ -1476,7 +1493,11 @@ impl<
             .transpose()?
             .flatten();
         let mut pending_model: Option<Arc<dyn ModelProvider>> = None;
-        let mut control_state = None;
+        let mut control_state = matches!(
+            event,
+            PolicyEvent::Delivered { .. } | PolicyEvent::Resumed { .. }
+        )
+        .then(|| policy_state.clone());
         if let Some(action) = self
             .persistence
             .policy_action(&input.run_id, input.owner_generation)?
@@ -1507,10 +1528,10 @@ impl<
         let mut steps = input.completed_model_steps;
         let mut interrupted_generation = false;
         macro_rules! finish {
-            ($label:lifetime,$next:expr,$waiting:expr,$failure:expr)=>{{
+            ($label:lifetime,$next:expr,$waiting:expr,$failure:expr $(,$rollback:expr)?)=>{{
                 let next:RunState=$next;let waiting_on:Option<String>=$waiting;let failure:Option<ExecutionError>=$failure;
                 match self.commit(&input,ExecutionRecord::StateChanged{state:next,waiting_on:waiting_on.clone()}) {
-                    Err(error) if error.code=="input_pending"=>continue $label,
+                    Err(error) if error.code=="input_pending"=>{ $(policy_state=$rollback;)? continue $label },
                     Err(error)=>return Err(error),
                     Ok(())=>return Ok(ExecutionReport{state:next,history,policy_state,model_steps:steps,waiting_on,failure}),
                 }
@@ -1583,6 +1604,32 @@ impl<
                                 waiting_on: None,
                             },
                         )?;
+                    }
+                }
+            }
+            if pending.is_none() && recovered_decision.is_none() {
+                let view = PolicyView {
+                    run_id: &input.run_id,
+                    state,
+                    history: &history,
+                    pending_tool_calls: 0,
+                    model_capabilities: self
+                        .provider
+                        .policy_model_capabilities()
+                        .iter()
+                        .map(PolicyModelAvailability::from)
+                        .collect(),
+                };
+                if let Some(selected_state) = self.policy.select_for_decision(
+                    &view,
+                    &event,
+                    &policy_state,
+                    input.owner_generation,
+                    &cancel,
+                )? {
+                    policy_state = selected_state;
+                    if control_state.is_some() {
+                        control_state = Some(policy_state.clone());
                     }
                 }
             }
@@ -1669,22 +1716,26 @@ impl<
                     &input,
                     ExecutionRecord::PolicyCheckpoint {
                         identity: self.policy.identity(),
+                        previous_state: policy_state.clone(),
                         state: decision.state.clone(),
                         action: decision.action.clone(),
+                        event: event.clone(),
                     },
                 )?;
             }
             let previous_policy_state = std::mem::replace(&mut policy_state, decision.state);
             match decision.action {
-                PolicyAction::Complete => finish!('agent, RunState::Completed, None, None),
+                PolicyAction::Complete => {
+                    finish!('agent, RunState::Completed, None, None, previous_policy_state)
+                }
                 PolicyAction::Fail { reason } => finish!('agent, RunState::Failed, None,
-                    Some(ExecutionError::new("policy_failed", reason))),
+                    Some(ExecutionError::new("policy_failed", reason)), previous_policy_state),
                 PolicyAction::Wait { wait_id } => {
                     if wait_id.is_empty() {
                         finish!('agent, RunState::Failed, None,
                             Some(ExecutionError::new("invalid_wait", "a wait needs a registered identity")));
                     }
-                    finish!('agent, RunState::Waiting, Some(wait_id), None);
+                    finish!('agent, RunState::Waiting, Some(wait_id), None, previous_policy_state);
                 }
                 action @ (PolicyAction::Deliver { .. } | PolicyAction::Pause { .. }) => {
                     let boundary = self
@@ -1832,6 +1883,12 @@ impl<
                         total_bytes: chunk.total_bytes,
                         bytes: chunk.bytes,
                     };
+                    self.commit(
+                        &input,
+                        ExecutionRecord::PolicyDecisionConsumed {
+                            event: event.clone(),
+                        },
+                    )?;
                 }
                 action @ (PolicyAction::RequestModel
                 | PolicyAction::RequestModelWithEvidence { .. }) => {

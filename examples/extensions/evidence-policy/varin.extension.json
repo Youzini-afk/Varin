@@ -19,7 +19,7 @@
     "services": [
       {
         "id": "varin.agent.policy",
-        "version": 2,
+        "version": 3,
         "multiple": true
       }
     ]

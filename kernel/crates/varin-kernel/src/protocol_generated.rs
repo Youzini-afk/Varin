@@ -9,6 +9,10 @@ pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 1;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
+    "runtime.policy.select",
+    "runtime.policy.cancel",
+    "runtime.policy.fail",
+    "runtime.policy.inspect",
     "kernel.handshake",
     "kernel.ping",
     "kernel.shutdown",
@@ -32,6 +36,10 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "process.subscription.unsubscribe",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "runtime.policy.select",
+    "runtime.policy.cancel",
+    "runtime.policy.fail",
+    "runtime.policy.inspect",
     "kernel.handshake",
     "kernel.ping",
     "kernel.shutdown",
@@ -245,7 +253,44 @@ pub(crate) struct ToolReadyParams {
 pub(crate) struct PolicyPrepareParams {
     pub(crate) run_id: String,
     pub(crate) identity: LaunchPolicy,
-    pub(crate) policy_models: Option<Value>,
+    pub(crate) target: varin_runtime::catalog::policy_switch::PolicyTarget,
+    pub(crate) policy_models: Vec<varin_runtime::execution::PolicyModelCapability>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PolicySelectParams {
+    pub(crate) expected_selection_id: RequiredNullable<String>,
+    pub(crate) run_id: String,
+    pub(crate) selection_id: String,
+    pub(crate) expected_generation: i64,
+    pub(crate) target: varin_runtime::catalog::policy_switch::PolicyTarget,
+    pub(crate) state_mode: varin_runtime::catalog::policy_switch::PolicyStateMode,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PolicyReadyParams {
+    pub(crate) run_id: String,
+    pub(crate) selection_id: String,
+    pub(crate) generation: i64,
+    pub(crate) binding: RequiredNullable<AgentPolicyBinding>,
+    pub(crate) policy_models: Vec<varin_runtime::execution::PolicyModelCapability>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PolicyCancelParams {
+    pub(crate) run_id: String,
+    pub(crate) selection_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PolicyFailParams {
+    pub(crate) run_id: String,
+    pub(crate) selection_id: String,
+    pub(crate) code: varin_runtime::catalog::policy_switch::PolicyPreparationFailure,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1462,7 +1507,8 @@ pub(crate) struct LaunchPolicy {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentPolicyBinding {
     pub(crate) reference: String,
-    pub(crate) identity: LaunchPolicy,
+    pub(crate) generation: i64,
+    pub(crate) artifact: varin_runtime::catalog::policy_switch::AgentPolicyArtifactBinding,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1858,6 +1904,21 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "runtime.policy.select" => serde_json::from_value::<PolicySelectParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.policy.ready" => serde_json::from_value::<PolicyReadyParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.policy.cancel" => serde_json::from_value::<PolicyCancelParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.policy.fail" => serde_json::from_value::<PolicyFailParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.policy.inspect" => serde_json::from_value::<RunParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.launch.inspect" => serde_json::from_value::<RunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

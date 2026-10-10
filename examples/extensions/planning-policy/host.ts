@@ -47,7 +47,7 @@ export default defineHostExtension({
   activate(context) {
     provideAgentPolicy(context, {
       identity: { name: 'bounded-planning', version: '1' },
-      capabilities: ['agentPlanning'],
+      modelRoles: ['agentPlanning'],
       configuration,
       decide(input, signal, declaredConfiguration) {
         signal.throwIfAborted();

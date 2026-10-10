@@ -16,6 +16,9 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 use varin_runtime::{model_session, supervisor::RunSupervisor, Catalog, SubmitInput};
 
+#[path = "agent_policy.rs"]
+mod policy_commands;
+
 #[path = "agent_inputs.rs"]
 mod input_commands;
 
@@ -371,6 +374,7 @@ pub(crate) fn spawn(
                                 runtime: owner.clone(),
                                 resources: resources.clone(),
                             });
+                        policy_bridge.set_catalog(owner.catalog());
                         runtime = Some(owner.clone());
                         run_models = Some(crate::run_models::RunModels::new(
                             owner.catalog(),
@@ -471,6 +475,7 @@ pub(crate) fn spawn(
                                 | "runtime.tools.ready"
                                 | "runtime.launch.mcp.prepare"
                                 | "runtime.launch.policy.prepare"
+                                | "runtime.policy.ready"
                                 | "runtime.question.answer"
                                 | "runtime.permission.open"
                                 | "runtime.permission.consume"
@@ -488,6 +493,53 @@ pub(crate) fn spawn(
                         runtime
                             .reap()
                             .map_err(|e| KernelError::Operation(e.to_string()))?;
+                        if matches!(
+                            method,
+                            "runtime.policy.select"
+                                | "runtime.policy.inspect"
+                                | "runtime.policy.cancel"
+                                | "runtime.policy.fail"
+                        ) {
+                            return policy_commands::execute(
+                                runtime,
+                                &policy_bridge,
+                                &credential_bridge,
+                                method,
+                                params,
+                                &cancellation,
+                            );
+                        }
+                        if matches!(
+                            method,
+                            "runtime.policy.ready" | "runtime.launch.policy.prepare"
+                        ) {
+                            let runtime = runtime.clone();
+                            let bridge = policy_bridge.clone();
+                            let credentials = credential_bridge.clone();
+                            let method = method.to_owned();
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            thread::spawn(move || {
+                                let result = policy_commands::execute(
+                                    &runtime,
+                                    &bridge,
+                                    &credentials,
+                                    &method,
+                                    params,
+                                    &cancelled,
+                                );
+                                let response = match result {
+                                    Ok(v) => response_ok(&response_id, v),
+                                    Err(e) => response_error(&response_id, &e),
+                                };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
+                            });
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
                         if matches!(
                             method,
                             "runtime.question.answer"
@@ -781,82 +833,6 @@ pub(crate) fn spawn(
                                 .prepare(selection.clone())
                                 .map_err(|error| KernelError::Operation(error.to_string()))?;
                             return Ok(serde_json::to_value(selection)?);
-                        }
-                        if method == "runtime.launch.policy.prepare" {
-                            let p: PolicyPrepareParams = serde_json::from_value(params)?;
-                            let runtime = runtime.clone();
-                            let credentials = credential_bridge.clone();
-                            let response_id = id.clone();
-                            let response_sender = responses.clone();
-                            let done = finished.clone();
-                            let cancelled = cancellation.clone();
-                            thread::spawn(move || {
-                                let result = (|| -> Result<Value, KernelError> {
-                                    if cancelled.load(Ordering::Acquire) {
-                                        return Err(KernelError::Cancelled);
-                                    }
-                                    let identity = crate::process_wait::policy_identity(
-                                        crate::collaboration::policy_identity(
-                                            crate::questions::policy_identity(
-                                                varin_runtime::execution::PolicyIdentity {
-                                                    name: p.identity.name,
-                                                    version: p.identity.version,
-                                                },
-                                            ),
-                                        ),
-                                    );
-                                    let mut models: Vec<varin_runtime::execution::policy_model::PolicyModelCapability> =
-                                p.policy_models.map(serde_json::from_value).transpose()?.unwrap_or_default();
-                                    // The Host selects registered models; only the kernel constructs their
-                                    // executable binding. Preparation performs no credential/network I/O.
-                                    for capability in &mut models {
-                                        if capability.binding.is_some() {
-                                            return Err(KernelError::Protocol(
-                                                "policy model binding is constructed by the owner"
-                                                    .into(),
-                                            ));
-                                        }
-                                        if capability.status == varin_runtime::execution::policy_model::PolicyModelStatus::Available {
-                                    capability.binding = Some(bind_policy_model(&p.run_id, capability, &credentials)?.binding);
-                                }
-                                    }
-                                    if cancelled.load(Ordering::Acquire) {
-                                        return Err(KernelError::Cancelled);
-                                    }
-                                    let owner = runtime.catalog();
-                                    let preparation = owner
-                                        .lock()
-                                        .map_err(|_| {
-                                            KernelError::Storage("catalog owner failed".into())
-                                        })?
-                                        .prepare_policy_change(
-                                            &p.run_id,
-                                            crate::process_wait::default_policy_identity(),
-                                            identity,
-                                            models,
-                                        )
-                                        .map_err(domain)?;
-                                    let prepared = preparation.load().map_err(domain)?;
-                                    let read = {
-                                        let mut catalog = owner.lock().map_err(|_| {
-                                            KernelError::Storage("catalog owner failed".into())
-                                        })?;
-                                        if cancelled.load(Ordering::Acquire) {
-                                            return Err(KernelError::Cancelled);
-                                        }
-                                        catalog.admit_launch_change(prepared).map_err(domain)?
-                                    };
-                                    Ok(serde_json::to_value(read.load().map_err(domain)?)?)
-                                })();
-                                let response = match result {
-                                    Ok(value) => response_ok(&response_id, value),
-                                    Err(error) => response_error(&response_id, &error),
-                                };
-                                done(&response_id);
-                                let _ = response_sender.send(response);
-                            });
-                            deferred = true;
-                            return Ok(Value::Null);
                         }
                         if matches!(
                             method,

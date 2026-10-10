@@ -95,7 +95,7 @@ for (let changed = true; changed;) {
     if (!spec?.fields) continue;
     for (const descriptor of Object.values(spec.fields)) {
       const bare = descriptor.type.replace(/\[\]$/u, '').replace(/ \| null$/u, '');
-      if (schema.dto?.[bare] && !schema.dto[bare].raw && !rustDtoNames.has(bare)) {
+      if (schema.dto?.[bare] && !schema.dto[bare].raw && !schema.dto[bare].rustType && !rustDtoNames.has(bare)) {
         rustDtoNames.add(bare);
         changed = true;
       }

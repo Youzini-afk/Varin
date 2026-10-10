@@ -32,6 +32,8 @@ pub struct LaunchSelectionMetadata {
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchMetadata {
+    pub policy_generation: u64,
+    pub policy_target: super::policy_switch::PolicyTarget,
     pub preparation_failure: Option<String>,
     pub run_id: String,
     pub revision: u64,
@@ -156,6 +158,7 @@ pub(super) fn stage_policy_models(
 }
 pub struct LaunchRead {
     startable: bool,
+    policy_preparable: bool,
     pause: Option<super::policy_control::PolicyPauseRead>,
     pub metadata: LaunchMetadata,
     content: crate::content::ContentStore,
@@ -164,7 +167,10 @@ pub struct LaunchRead {
 impl LaunchRead {
     pub fn load(self) -> Result<LaunchIntent> {
         Ok(LaunchIntent {
+            policy_generation: self.metadata.policy_generation,
+            policy_target: self.metadata.policy_target,
             startable: self.startable,
+            policy_preparable: self.policy_preparable,
             pause: self
                 .pause
                 .map(|pause| pause.load(&self.content))
@@ -242,11 +248,13 @@ enum LaunchChange {
         baseline: PolicyIdentity,
         identity: PolicyIdentity,
         models: Vec<PolicyModelCapability>,
+        target: super::policy_switch::PolicyTarget,
     },
 }
 pub struct PreparedLaunchChange {
     pub(super) expected: LaunchMetadata,
     pub(super) selection: LaunchSelectionMetadata,
+    pub(super) policy_target: super::policy_switch::PolicyTarget,
     pub(super) epoch: u64,
     pub(super) kind: &'static str,
     _publication: crate::content::ContentPublication,
@@ -260,6 +268,7 @@ impl LaunchChangePreparation {
             ..
         } = self.read;
         let mut selection = metadata.selection.clone();
+        let mut policy_target = metadata.policy_target.clone();
         let kind = match self.change {
             LaunchChange::Mcp(binding) => {
                 binding.validate()?;
@@ -311,7 +320,10 @@ impl LaunchChangePreparation {
                 baseline,
                 identity,
                 models,
+                target,
             } => {
+                target.validate()?;
+                policy_target = target;
                 if identity.name.is_empty() || identity.version.is_empty() {
                     return Err(RuntimeError::Invalid("policy identity is empty".into()));
                 }
@@ -331,6 +343,7 @@ impl LaunchChangePreparation {
         Ok(PreparedLaunchChange {
             expected: metadata,
             selection,
+            policy_target,
             epoch: self.epoch,
             kind,
             _publication,
@@ -349,6 +362,11 @@ impl Catalog {
     pub(super) fn launch_read(&self, metadata: LaunchMetadata) -> Result<LaunchRead> {
         Ok(LaunchRead {
             startable: self.run_startable(&metadata.run_id)?,
+            policy_preparable: super::launches::policy_preparable(
+                &self.db,
+                &self.run(&metadata.run_id)?,
+                &metadata,
+            )?,
             pause: self.capture_policy_pause(&metadata.run_id)?,
             metadata,
             content: self.content.clone(),
@@ -413,6 +431,7 @@ impl Catalog {
         baseline: PolicyIdentity,
         identity: PolicyIdentity,
         models: Vec<PolicyModelCapability>,
+        target: super::policy_switch::PolicyTarget,
     ) -> Result<LaunchChangePreparation> {
         Ok(LaunchChangePreparation {
             read: self
@@ -422,6 +441,7 @@ impl Catalog {
                 baseline,
                 identity,
                 models,
+                target,
             },
             epoch: self.epoch,
         })

@@ -461,6 +461,8 @@ fn cancelled_observation_can_park_for_delivery_but_generic_cancelled_wait_cannot
             .selection
             .policy;
     let checkpoint = ExecutionRecord::PolicyCheckpoint {
+        previous_state: Value::Null,
+                event: PolicyEvent::Started,
         identity: identity.clone(),
         state: json!({"stage":1}),
         action: PolicyAction::Wait {
@@ -499,6 +501,8 @@ fn cancelled_observation_can_park_for_delivery_but_generic_cancelled_wait_cannot
             &context.run_id,
             f.db.epoch(),
             &ExecutionRecord::PolicyCheckpoint {
+                previous_state: Value::Null,
+                event: PolicyEvent::Started,
                 identity,
                 state: json!({"stage":2}),
                 action: PolicyAction::Wait {

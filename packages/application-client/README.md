@@ -27,6 +27,13 @@ preparing is not callable. Revoked providers are unavailable immediately; a norm
 can remain callable through its original Run pin. Listing a callable tool does not grant permission:
 each actual invocation is authorized against its original operation and current permission policy.
 
+`ThreadsAPI.inspectPolicy` and `ThreadSnapshot.policySelection` separate the committed strategy
+generation and desired update from the current Host's preparation status. Preparation is not activation.
+`restartPolicy(identity, runId, selectionId)` explicitly restarts only that displayed candidate's private
+checkpoint at a closed decision boundary; the candidate ID and active generation are rechecked by
+Catalog. Conversation history and independent tasks remain intact. `cancelPolicyUpdate` cancels that
+unpublished candidate, not the Run. Neither operation resumes an explicit Pause.
+
 The desktop contract defines:
 
 - `VarinDesktopCommandMap` — typed `{ args, result }` for all 58 `desktop_*` commands

@@ -62,6 +62,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const active = Boolean(branch?.active_run_id);
   const launch = snapshot?.launch?.run_id === run?.id ? snapshot?.launch : null;
   const pause = run?.state === 'waiting' && launch?.pause?.wait_id === run.waiting_on ? launch.pause : null;
+  const policy = snapshot?.policySelection;
+  const policyUpdate = policy?.desired && policy.desired.run_id === run?.id ? policy.desired : null;
+  const policyUpdatePending = policyUpdate?.status === 'preparing' || policyUpdate?.status === 'ready';
+  const policyIncompatible = policyUpdate?.status === 'failed' && policyUpdate.failure === 'policy_state_incompatible';
   const acceptsImages = active ? (run?.configuration as { acceptsImages?: boolean } | undefined)?.acceptsImages
     : models.find(model => model.providerId === providerId && model.modelId === modelId)?.acceptsImages;
   React.useEffect(() => {
@@ -233,6 +237,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     }}>
       {sourceCannotBeApplied && <p role="status" className="text-sm text-muted-foreground">The prepared workspace needs a new run. Keep the current workspace to queue this message, or wait for this run to finish.</p>}
       {pause && <p role="status" aria-label="Policy pause" className="text-sm text-muted-foreground">Paused: {pause.reason || 'Waiting for your explicit resume.'} Messages can be queued while paused.</p>}
+      {policy && <p className="text-xs text-muted-foreground">Strategy: {policy.active.target.kind === 'extension' ? policy.active.target.artifact.declaredIdentity.name : 'Default'} · generation {policy.active.generation}</p>}
+      {policy?.preparation && <p role="status" aria-label="Strategy preparation" className="text-sm text-muted-foreground">{policy.preparation.status === 'preparing' ? 'The Host is preparing a strategy candidate.' : `The Host could not prepare the strategy candidate: ${policy.preparation.code ?? 'preparation failed'}`}</p>}
+      {policyUpdatePending && <p role="status" aria-label="Policy update" className="text-sm text-muted-foreground">{policyUpdate?.status === 'preparing' ? 'Preparing the selected strategy. The current strategy remains active.' : 'Strategy prepared for the next closed decision boundary.'}{pause ? ' This run remains paused until you resume it.' : ''}</p>}
+      {policyUpdate?.status === 'failed' && <p role="status" aria-label="Policy update failed" className="text-sm text-muted-foreground">{policyIncompatible ? 'The selected strategy cannot preserve this private checkpoint. The current strategy remains active. Restarting strategy state keeps conversation history and independent tasks.' : `Strategy update was not applied: ${policyUpdate.failure ?? 'preparation failed'}`}</p>}
       {snapshot?.launch?.preparation_failure && <p role="alert" className="text-sm text-destructive">Preparation needs attention: {snapshot.launch.preparation_failure}</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {snapshot?.modelSelection.desired?.status === 'failed' && <p role="alert" className="text-sm text-destructive">Model preparation failed: {snapshot.modelSelection.desired.failure}</p>}
@@ -267,6 +275,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         <Button type="submit" disabled={pending || preparingSource || sourceCannotBeApplied || readingFiles || (images.length > 0 && acceptsImages === false) || (!text.trim() && !images.length) || (!active && (!providerId || !modelId))}>{active ? 'Queue message' : 'Send'}</Button>
         {active && branch?.active_run_id && <Button type="button" variant="outline" onClick={() => void act(() => api.cancelRun(branch.active_run_id!), true)}>Stop run</Button>}
         {run && pause && <Button type="button" variant="outline" disabled={pending || run.cancel_requested} onClick={() => void act(() => api.resume(run.id, pause.wait_id))}>Resume run</Button>}
+        {active && run && policyUpdate && policyIncompatible && <Button type="button" variant="outline" disabled={pending || run.cancel_requested} onClick={() => void act(() => api.restartPolicy(identity, run.id, policyUpdate.selection_id))}>Restart strategy state</Button>}
+        {active && run && policyUpdate && policyUpdatePending && <Button type="button" variant="ghost" disabled={pending || run.cancel_requested} onClick={() => void act(() => api.cancelPolicyUpdate(identity, run.id, policyUpdate.selection_id))}>Cancel strategy update</Button>}
         {run && launch?.startable && launch.requires_rebind && !pause && <Button type="button" variant="ghost" disabled={pending} onClick={() => void act(() => api.retryPreparation(run.id))}>Retry preparation</Button>}
       </div>
     </form>

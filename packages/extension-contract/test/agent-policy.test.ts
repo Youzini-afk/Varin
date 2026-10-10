@@ -44,7 +44,7 @@ test('policy graph boundary distinguishes non-dispatch, committed results and ac
   }
 });
 
-test('policy v2 rejects obsolete graphs and receipts without losing JSON-null tool arguments', () => {
+test('policy v3 rejects obsolete graphs and receipts without losing JSON-null tool arguments', () => {
   const decision = { action: { kind: 'tool_graph', nodes: [{ id: 'save', depends_on: [], call: { call_id: 'save', name: 'memory', schema_version: '1', arguments: null } }] }, state: null };
   assert.equal(validateDecision(decision), true, JSON.stringify(validateDecision.errors));
   assert.deepEqual(parseVarinAgentPolicyDecision(decision), decision);
@@ -82,4 +82,23 @@ test('policy delivery and pause preserve text while validating their distinct re
       assert.throws(() => parseVarinAgentPolicyInput({ ...raw, event: malformed }));
     }
   }
+});
+
+test('v3 transition schemas carry only private state and reject actions or inferred compatibility', async () => {
+  const { parseVarinAgentPolicyTransitionInput, parseVarinAgentPolicyTransition, parseVarinAgentPolicyDescription } = await import('../src/index.js');
+  const raw = { ...input({ kind: 'not_dispatched', reason: 'Denied' }), from: { identity: { name: 'old', version: '1' }, declaredIdentity: null } };
+  const validateTransitionInput = ajv.compile(VARIN_AGENT_POLICY_CONTRACT.transitionState.inputSchema);
+  const validateTransition = ajv.compile(VARIN_AGENT_POLICY_CONTRACT.transitionState.outputSchema);
+  assert.equal(validateTransitionInput([raw]), true);
+  assert.deepEqual(parseVarinAgentPolicyTransitionInput(raw), raw);
+  for (const result of [{ kind: 'compatible', state: null }, { kind: 'compatible', state: { stage: 2 } }, { kind: 'incompatible', reason: 'Unknown source format' }]) {
+    assert.equal(validateTransition(result), true);
+    assert.deepEqual(parseVarinAgentPolicyTransition(result), result);
+  }
+  for (const result of [{ state: null }, { kind: 'compatible', state: null, action: { kind: 'complete' } }, { kind: 'incompatible', reason: '' }]) {
+    assert.equal(validateTransition(result), false);
+    assert.throws(() => parseVarinAgentPolicyTransition(result));
+  }
+  assert.throws(() => parseVarinAgentPolicyDescription({ identity: { name: 'v2', version: '1' }, configuration: null }));
+  assert.throws(() => parseVarinAgentPolicyTransitionInput({ ...raw, from: { ...raw.from, checkpoint: 'plugin-claim' } }));
 });
