@@ -141,6 +141,7 @@ pub enum InputState {
 #[serde(rename_all = "snake_case")]
 pub enum MessageKind {
     Inform,
+    Request,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

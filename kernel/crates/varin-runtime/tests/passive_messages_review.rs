@@ -178,7 +178,6 @@ fn idle_receipt_reply_routing_pagination_and_user_queue_are_one_immutable_fact()
         .db
         .capture_message("foreign", "foreign-branch", &third.identity.message_id)
         .is_err());
-    assert!(serde_json::from_value::<MessageInput>(json!({"kind":"request","text":"not implemented","targetThreadId":"thread:parent","targetBranchId":"branch:parent"})).is_err());
     assert!(serde_json::from_value::<MessageInput>(
         json!({"kind":"inform","text":"x","wait":true})
     )

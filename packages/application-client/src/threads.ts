@@ -77,7 +77,7 @@ export interface ThreadFamilyAPI {
   read(identity: ThreadIdentity, request: Omit<FamilyReadParams, 'callerThreadId'>, signal?: AbortSignal): Promise<FamilyRead>;
   item(identity: ThreadIdentity, request: Omit<FamilyItemParams, 'callerThreadId'>, signal?: AbortSignal): Promise<FamilyItem>;
 }
-/** Immutable task-family information. Acceptance and history delivery do not imply execution. */
+/** Durable same-family messages. Acceptance, history delivery and request activation are distinct facts. */
 export interface ThreadMessagesAPI {
   send(identity: ThreadIdentity, request: Omit<MessageSendParams, 'senderThreadId' | 'senderBranchId'>, signal?: AbortSignal): Promise<MessageReceipt>;
   list(identity: ThreadIdentity, request: Omit<MessageListParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MessagePage>;

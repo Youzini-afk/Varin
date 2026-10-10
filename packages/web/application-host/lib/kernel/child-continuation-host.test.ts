@@ -85,8 +85,9 @@ it('public User continuation preserves exact predecessor and input without selec
   // Durable exactly-once acceptance remains the Rust owner's independently tested responsibility.
 });
 
-it('startup collaboration re-admits the exact fixed result, preserves context CAS and launches the new execution without an old parent handoff', async () => {
+it.each(['user_continuation', 'message_request'] as const)('startup %s re-admits the exact fixed result and context without claiming the old handoff or promoting Agent input', async kind => {
   const child = execution();
+  if (kind === 'message_request') child.trigger = { kind, message_id: 'message:original', previous_execution_id: 'original-dispatch', previous_run_id: 'old-run', previous_run_revision: 9, expected_head: 'old-head' };
   const errors: unknown[] = [];
   const checkpoint = { id: 'checkpoint:original', revision: 4, proposal: { through_id: 'compacted-head', summary: 'Original summary' } };
   const context = { effectiveSystemPrompt: 'Original child role', instructionSources: [], memoryCheckpoint: 'old-memory', resources: { snapshot: { id: 'new-fixed-resources' } } };
@@ -124,7 +125,11 @@ it('startup collaboration re-admits the exact fixed result, preserves context CA
     expect(store.pinBranch).toHaveBeenCalledWith('old-result', { revision: 7, signal: expect.any(AbortSignal) });
     expect(store.createBranchFromPin.mock.calls[0]![1]).toBe('child-source:execution:new');
     expect(runtime.prepareChild).toHaveBeenCalledWith(expect.objectContaining({ executionId: child.execution_id,
-      expectedContextCheckpoint: checkpoint.id, context, inputPreparation: { expectedContextCheckpoint: null, skill } }), expect.any(AbortSignal));
+      expectedContextCheckpoint: checkpoint.id, context, ...(kind === 'user_continuation' ? { inputPreparation: { expectedContextCheckpoint: null, skill } } : {}) }), expect.any(AbortSignal));
+    if (kind === 'message_request') {
+      expect(prepareSkillInput).not.toHaveBeenCalled();
+      expect(runtime.prepareChild.mock.calls[0]![0]).not.toHaveProperty('inputPreparation');
+    }
     expect(prepareContext.forSource).toHaveBeenCalledWith(checkpoint, expect.objectContaining({ branchId: 'child-source:execution:new', revision: 0 }), expect.any(AbortSignal));
     expect(continueRun).toHaveBeenCalledWith('new-run', expect.any(AbortSignal));
     expect(kernel.claimChildSource).not.toHaveBeenCalled(); expect(kernel.releaseChildToolHandoff).not.toHaveBeenCalled();

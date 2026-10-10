@@ -1,13 +1,26 @@
 import React from 'react';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, ThreadRequestError } from '@varin/application-client';
 import type { ThreadFamilyAPI, ThreadIdentity, ThreadMessagesAPI } from '@varin/application-client';
-import type { FamilyList, MessageDirection, MessagePage, MessageReceipt, MessageSummary, MessageView } from '@varin/protocol';
+import type { FamilyList, MessageActivation, MessageActivationHold, MessageDirection, MessageKind, MessagePage, MessageReceipt, MessageSummary, MessageView } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 
 type Props = { api: ThreadMessagesAPI; family?: ThreadFamilyAPI; identity: ThreadIdentity; eventCursor?: number };
 type Send = Parameters<ThreadMessagesAPI['send']>[1];
+const holdLabels: Record<MessageActivationHold, string> = {
+  manual_pause: 'manually paused', question: 'awaiting a user answer', goal_blocked: 'Goal control or budget is blocking work',
+  dependency_wait: 'ending the original dependency observation', preparing: 'preparing execution', source_unsettled: 'awaiting the original source result and writer stop',
+};
+function activationText(activation: MessageActivation): string {
+  switch (activation.state) {
+    case 'passive': return 'Notification · does not start work';
+    case 'pending': return `Request awaiting admission${activation.executionId ? ` · execution ${activation.executionId}` : ''}${activation.holdReason ? ` · ${holdLabels[activation.holdReason]}` : ''}`;
+    case 'bound': return `Request bound to ${activation.runId}${activation.executionId ? ` · execution ${activation.executionId}` : ''}${activation.holdReason ? ` · ${holdLabels[activation.holdReason]}` : ''}`;
+    case 'cancelled': return `Request activation cancelled${activation.runId ? ` · ${activation.runId}` : ''}`;
+    case 'failed': return `Request activation failed: ${activation.code}${activation.executionId ? ` · execution ${activation.executionId}` : ''}`;
+  }
+}
 /** Rebuildable original-message views and an unsent draft; no UI queue or execution owner. */
 export function ThreadMessages(props: Props) {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
@@ -33,6 +46,7 @@ function Messages({ api, family, identity, host, eventCursor, open }: Props & { 
   const [familyError, setFamilyError] = React.useState(false);
   const [target, setTarget] = React.useState('');
   const [text, setText] = React.useState('');
+  const [kind, setKind] = React.useState<MessageKind>('inform');
   const [reply, setReply] = React.useState<MessageSummary>();
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState('');
@@ -66,7 +80,7 @@ function Messages({ api, family, identity, host, eventCursor, open }: Props & { 
     if (!request) {
       if (!text.trim().length || (!reply && !target)) return;
       const [targetThreadId, targetBranchId] = target ? JSON.parse(target) as [string, string] : ['', ''];
-      request = { key: crypto.randomUUID(), kind: 'inform', text,
+      request = { key: crypto.randomUUID(), kind, text,
         ...(reply ? { replyTo: reply.messageId } : { targetThreadId, targetBranchId }) };
       intent.current = request;
     }
@@ -86,7 +100,7 @@ function Messages({ api, family, identity, host, eventCursor, open }: Props & { 
     } finally { if (current()) { inFlight.current = false; setPending(false); } }
   };
   return <div className="space-y-3">
-    <p>Notifications are saved for the next normal processing boundary. They do not start or wake work. Messages sent here keep your user identity.</p>
+    <p>Notifications are saved for the next normal boundary. Requests ask the recipient to work and can start a new execution when idle; manual pauses, questions and Goal limits remain in effect. Messages sent here keep your user identity.</p>
     <div className="flex flex-wrap gap-2">
       <Button variant="outline" size="sm" aria-pressed={direction === 'incoming'} onClick={() => { setDirection('incoming'); setCursor(undefined); setSelected(undefined); }}>Received messages</Button>
       <Button variant="outline" size="sm" aria-pressed={direction === 'outgoing'} onClick={() => { setDirection('outgoing'); setCursor(undefined); setSelected(undefined); }}>Sent messages</Button>
@@ -96,15 +110,16 @@ function Messages({ api, family, identity, host, eventCursor, open }: Props & { 
       {!page.messages.length && <p>No {direction === 'incoming' ? 'received' : 'sent'} messages.</p>}
       {page.messages.map(message => <article key={message.messageId} className="space-y-1 rounded border p-2">
         <p className="break-all">{message.actor.kind === 'user' ? 'User' : 'Agent'} · {message.senderThreadId} / {message.senderBranchId} → {message.targetThreadId} / {message.targetBranchId}</p>
-        <p className="text-xs break-all">{message.messageId} · {message.state === 'delivered' ? `Delivered to history in ${message.deliveredRunId}` : 'Accepted · awaiting a normal boundary'}{message.replyTo ? ` · reply to ${message.replyTo}` : ''}</p>
+        <p className="text-xs break-all">{message.messageId} · {message.state === 'delivered' ? `Delivered to history in ${message.deliveredRunId}` : message.state === 'cancelled' ? 'Delivery cancelled · original message retained' : message.activation.state === 'failed' ? 'Accepted · not delivered' : message.kind === 'inform' ? 'Accepted · awaiting a normal boundary' : 'Accepted · awaiting history delivery'}{message.replyTo ? ` · reply to ${message.replyTo}` : ''}</p>
+        <p className="text-xs break-all">{activationText(message.activation)}</p>
         <Button variant="ghost" size="sm" onClick={() => setSelected(message.messageId)}>Read message {message.messageId}</Button>
-        {direction === 'incoming' && <Button variant="ghost" size="sm" disabled={pending || uncertain} onClick={() => { setReply(message); setAccepted(undefined); }}>Reply to {message.messageId}</Button>}
+        {direction === 'incoming' && <Button variant="ghost" size="sm" disabled={pending || uncertain} onClick={() => { setReply(message); setKind('inform'); setAccepted(undefined); }}>Reply to {message.messageId}</Button>}
       </article>)}
       {page.nextCursor && <Button variant="outline" size="sm" onClick={() => { setCursor(page.nextCursor!); setSelected(undefined); }}>Next messages</Button>}
     </>)}
     {open && selected && <OriginalMessage key={selected} api={api} identity={identity} host={host} messageId={selected} revision={revision} eventCursor={eventCursor} />}
     <div className="space-y-2 border-t pt-2">
-      {reply ? <p className="break-all">Replying to {reply.messageId}, addressed to {reply.senderThreadId} / {reply.senderBranchId}. <Button variant="ghost" size="sm" disabled={pending || uncertain} onClick={() => setReply(undefined)}>Clear reply</Button></p> : <label className="block">Send notification to
+      {reply ? <p className="break-all">Replying to {reply.messageId}, addressed to {reply.senderThreadId} / {reply.senderBranchId}. <Button variant="ghost" size="sm" disabled={pending || uncertain} onClick={() => setReply(undefined)}>Clear reply</Button></p> : <label className="block">Send message to
         <select aria-label="Message recipient" value={target} disabled={pending || uncertain} onChange={event => setTarget(event.target.value)}>
           <option value="">Choose a conversation and branch</option>
           {members?.members.flatMap(member => member.branches.map(branch => <option key={branch.branchId} value={JSON.stringify([member.threadId, branch.branchId])}>{member.task || member.threadId} · {branch.branchId}</option>))}
@@ -112,11 +127,17 @@ function Messages({ api, family, identity, host, eventCursor, open }: Props & { 
       </label>}
       {familyError && <p role="alert">Could not read recipients. Refresh messages to try again.</p>}
       {!family && !reply && <p>Recipient discovery is unavailable. Existing received messages can still be replied to.</p>}
+      <label className="block">Message purpose
+        <select aria-label="Message purpose" value={kind} disabled={pending || uncertain} onChange={event => setKind(event.target.value as MessageKind)}>
+          <option value="inform">Notification · keep for normal processing</option>
+          <option value="request">Request · ask the recipient to work</option>
+        </select>
+      </label>
       <Textarea aria-label="Task message text" value={text} disabled={pending || uncertain} onInput={event => setText(event.currentTarget.value)} />
       {error && <p role="alert">{error}</p>}
       {accepted && <p role="status" className="break-all">Accepted message {accepted.messageId}. Delivery to history is shown separately; it does not confirm that work started or the message was handled.</p>}
-      {uncertain && <p>Starting a different draft does not withdraw a message that may already have been accepted. <Button variant="ghost" size="sm" disabled={pending} onClick={() => { intent.current = null; setUncertain(false); setError(''); setText(''); setReply(undefined); setTarget(''); }}>Start a different draft</Button></p>}
-      <Button size="sm" disabled={pending || (!uncertain && (!text.trim().length || (!reply && !target)))} onClick={() => void send()}>{pending ? 'Sending notification…' : uncertain ? 'Retry same notification' : 'Send notification'}</Button>
+      {uncertain && <p>Starting a different draft does not withdraw a message that may already have been accepted. <Button variant="ghost" size="sm" disabled={pending} onClick={() => { intent.current = null; setUncertain(false); setError(''); setText(''); setReply(undefined); setTarget(''); setKind('inform'); }}>Start a different draft</Button></p>}
+      <Button size="sm" disabled={pending || (!uncertain && (!text.trim().length || (!reply && !target)))} onClick={() => void send()}>{pending ? `Sending ${kind === 'request' ? 'request' : 'notification'}…` : uncertain ? `Retry same ${kind === 'request' ? 'request' : 'notification'}` : kind === 'request' ? 'Send request' : 'Send notification'}</Button>
     </div>
   </div>;
 }

@@ -44,6 +44,17 @@ pub struct LaunchMetadata {
     pub requires_rebind: bool,
 }
 impl LaunchSelectionMetadata {
+    pub(super) fn rebase_policy_models(&mut self, content: &crate::content::ContentStore) -> Result<()> {
+        let mut models=self.load_policy_models(content)?;
+        for model in &mut models {
+            if model.status==crate::execution::PolicyModelStatus::Available {
+                let identity=model.configuration_identity.as_deref().ok_or_else(||RuntimeError::Invalid("planning configuration identity is missing".into()))?;
+                model.binding_id=Some(format!("policy:0:{}:{identity}",model.capability_id));
+            }
+        }
+        self.policy_models=stage_policy_models(content,&models)?;
+        Ok(())
+    }
     pub(super) fn stage(
         content: &crate::content::ContentStore,
         selection: LaunchSelection,

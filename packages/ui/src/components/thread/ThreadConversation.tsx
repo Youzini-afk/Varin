@@ -229,7 +229,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         <ChildExecutions key={`${host}:${identity.threadId}:${identity.branchId}:${child.operation_id}`} api={api} identity={identity} operationId={child.operation_id} />
         {api.collaboration && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelChild(identity, child.operation_id))}>Stop child subtree</Button>}
       </div>)}
-      {(delegated || Boolean(snapshot?.children?.length)) && api.collaboration && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelTree(identity))}>Stop task and children</Button>}
+      {api.collaboration && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelTree(identity))}>Stop task and children</Button>}
       {snapshot && <ThreadFollowups key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.followups} identity={identity}
         operations={snapshot.operations} followups={snapshot.followups} pending={pending} act={act} />}
       {snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">

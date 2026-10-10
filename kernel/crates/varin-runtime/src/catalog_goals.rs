@@ -283,7 +283,7 @@ pub(super) fn for_run(db: &Connection, run_id: &str) -> Result<Option<Definition
     }
 }
 fn continuation_predecessor(db: &Connection, run_id: &str) -> Result<Option<String>> {
-    Ok(db.query_row("SELECT json_extract(body,'$.trigger.previous_run_id') FROM delegated_executions WHERE run_id=?1 AND json_extract(body,'$.trigger.kind')='user_continuation'",[run_id],|row|row.get(0)).optional()?)
+    Ok(db.query_row("SELECT json_extract(body,'$.trigger.previous_run_id') FROM delegated_executions WHERE run_id=?1 AND json_extract(body,'$.trigger.kind') IN ('user_continuation','message_request')",[run_id],|row|row.get(0)).optional()?)
 }
 pub(super) fn bind_admission(tx: &Transaction<'_>, run: &Run) -> Result<()> {
     if let Some(previous) = continuation_predecessor(tx, &run.id)? {
@@ -330,7 +330,7 @@ pub(super) fn bind_child(tx: &Transaction<'_>, operation: &str, parent: &str) ->
     Ok(())
 }
 fn adopt_descendants(tx: &Transaction<'_>, run: &str, goal: &str) -> Result<()> {
-    tx.execute("WITH RECURSIVE descendants(id) AS (SELECT ?1 UNION SELECT j.run_id FROM context_jobs j JOIN descendants d ON j.owner_run_id=d.id UNION SELECT r.id FROM child_tasks c JOIN descendants d ON json_extract(c.body,'$.parent_run_id')=d.id JOIN runs r ON r.branch_id=json_extract(c.body,'$.child_branch_id') WHERE NOT EXISTS(SELECT 1 FROM delegated_executions e WHERE e.run_id=r.id AND json_extract(e.body,'$.trigger.kind')='user_continuation')) INSERT INTO goal_runs(id,goal_id,primary_run) SELECT id,?2,0 FROM descendants WHERE id!=?1 ON CONFLICT(id) DO NOTHING",params![run,goal])?;
+    tx.execute("WITH RECURSIVE descendants(id) AS (SELECT ?1 UNION SELECT j.run_id FROM context_jobs j JOIN descendants d ON j.owner_run_id=d.id UNION SELECT r.id FROM child_tasks c JOIN descendants d ON json_extract(c.body,'$.parent_run_id')=d.id JOIN runs r ON r.branch_id=json_extract(c.body,'$.child_branch_id') WHERE NOT EXISTS(SELECT 1 FROM delegated_executions e WHERE e.run_id=r.id AND json_extract(e.body,'$.trigger.kind') IN ('user_continuation','message_request'))) INSERT INTO goal_runs(id,goal_id,primary_run) SELECT id,?2,0 FROM descendants WHERE id!=?1 ON CONFLICT(id) DO NOTHING",params![run,goal])?;
     tx.execute("INSERT INTO goal_children(id,goal_id) SELECT c.id,?1 FROM child_tasks c JOIN goal_runs g ON json_extract(c.body,'$.parent_run_id')=g.id WHERE g.goal_id=?1 ON CONFLICT(id) DO NOTHING",[goal])?;
     Ok(())
 }

@@ -163,13 +163,13 @@ with exact byte offsets and explicit truncation. A byte budget too small for the
 fails explicitly instead of exceeding the requested budget or returning a non-progressing cursor. ProviderOriginal and typed opaque continuation stay in
 the original store and are excluded from these shared reads and search; tool/user JSON remains data.
 
-Active requests, reply waits, terminal-child continuation and sharing undelivered policy/auxiliary outputs
-remain separate implementation work. Passive messages are described below. These readers neither synthesize those records nor revive a
+Reply waits and sharing undelivered policy/auxiliary outputs remain separate implementation work.
+Directed messages and terminal-child continuation are described below. These readers neither synthesize those records nor revive a
 completed child launch. See [the family read evidence](../../../docs/reviews/runtime-family-reads-2026-10-11.md).
 
-## Passive task-family messages
+## Task-family messages and request activation
 
-Ordinary `send` version 1 accepts `kind: inform`, an explicit target Thread/branch or a received
+Ordinary `send` version 2 accepts `kind: inform` or `kind: request`, an explicit target Thread/branch or a received
 `replyTo`, and text. ModelStep and PolicyAction/node use the same frozen declaration, original call
 and ordinary effectful Operation. The original message ID and confirmed tool completion are committed
 with the message, so recovery does not resend. A reply reverses the original peer/branch; a supplied
@@ -193,9 +193,26 @@ actual receiving Run; this does not claim that a model handled the message.
 `runtime.messages.send` is the trusted User ingress; list/get provide original incoming/outgoing
 metadata and one original body. List cursors fix the identity, direction and upper acceptance cursor.
 Body reads and list traversal run on workers with owner-epoch checks. Public reads cannot manufacture
-Agent sender identity or execution authority. Active `request`, `send(wait)` and completed-child new-Run
-admission are subsequent work and are rejected before effects by this version's strict schema.
-See [the passive-message evidence](../../../docs/reviews/runtime-passive-messages-2026-10-11.md).
+Agent sender identity or execution authority. `send(wait)` is still rejected before effects by this
+version's strict schema. Original inform behavior has [separate evidence](../../../docs/reviews/runtime-passive-messages-2026-10-11.md).
+
+A request carries a short tagged activation fact in the same ingress row. Acceptance binds an active
+receiver Run in that transaction; idle work stays pending. The existing event-driven continuation worker
+captures queue/Run/launch/head/context facts, stages content and planning bindings outside Catalog,
+and publishes a new root Run or delegated execution under the original CAS. Intervening User admission
+atomically claims pending requests; no Host preflight can create a second branch writer. Root launches
+retain the actual predecessor selection and ordinary hot-configuration owners. Child `message_request`
+uses the same source, context, report and WorkingResult owner as User continuation, with the original
+Message history rather than rewritten User input or implicit skill activation.
+
+Message views distinguish passive, pending, bound, cancelled and failed activation from history delivery.
+Hold reasons are projections of the real Run/Goal/source owner, not a second execution state machine.
+Manual policy pause, unanswered questions and Goal pause/budget remain effective. A new request may end
+all live child/process observations in its receiver Run; each original cancelled observation is delivered
+before that Run becomes runnable, without cancelling the observed child or process. Cancelling a Run
+or tree fences accepted unconsumed requests, including pending work before a Run exists. Original message
+identity/body remain readable; same-key retries cannot launch again. A later genuinely new intent remains
+independent. Preparation failures stay visible rather than retrying on every event.
 
 ## Immutable conversation and model bodies
 
@@ -229,7 +246,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 29, input domain 3 and collaboration domain 4 store input intents/queue bodies and context-job ownership,
+Catalog version 30, input domain 4 and collaboration domain 5 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -798,7 +815,7 @@ Catalog computes the specified subtree from retained Thread/ChildTask lineage wi
 transaction cancels preparing children, descendant Runs, live process Operations and original active
 followup/Goal continuations, including terminal source Runs. Parent and sibling subtrees stay outside
 a child target. A short TreeCancellationReceipt acknowledges cancellation intent, not executor stop.
-A parent-Thread scope fence is checked in that same transaction. Active requests and correlated
+A parent-Thread scope fence is checked in that same transaction. Correlated reply
 Wait/deadline, remote environments and the complete collaboration product migration remain separate work.
 
 A report, execution outcome and file result are separate facts. Report outcome follows the original

@@ -807,6 +807,7 @@ impl Catalog {
                 break;
             }
         }
+        for thread in &threads { super::messages::activation::cancel_thread(&tx,thread)?; }
         let children = children
             .into_iter()
             .filter(|child| threads.contains(&child.child_thread_id))

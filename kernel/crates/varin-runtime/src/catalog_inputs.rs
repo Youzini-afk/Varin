@@ -30,7 +30,7 @@ pub enum InputActivation { Activating, Passive }
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum InputOrigin {
     UserIngress,
-    Message { identity: super::messages::MessageIdentity, command_key: String },
+    Message { identity: super::messages::MessageIdentity, command_key: String, activation: super::messages::MessageActivationFact },
 }
 impl InputOrigin {
     pub fn is_user_ingress(&self) -> bool { matches!(self, Self::UserIngress) }
@@ -121,9 +121,9 @@ pub(super) fn initialize(tx: &Transaction<'_>) -> Result<()> {
                     "input queue exists without its schema identity".into(),
                 ));
             }
-            tx.execute_batch("CREATE TABLE input_queue(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),run_id TEXT REFERENCES runs(id),mode TEXT NOT NULL,state TEXT NOT NULL,cursor INTEGER NOT NULL,origin TEXT NOT NULL,activation TEXT NOT NULL,sender_thread_id TEXT,sender_branch_id TEXT,body TEXT NOT NULL); CREATE INDEX input_queue_pending ON input_queue(branch_id,state,activation,cursor); CREATE INDEX input_queue_outgoing ON input_queue(sender_thread_id,sender_branch_id,cursor); INSERT INTO runtime_domains(name,version) VALUES('input_queue',3);")?;
+            tx.execute_batch("CREATE TABLE input_queue(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),run_id TEXT REFERENCES runs(id),mode TEXT NOT NULL,state TEXT NOT NULL,cursor INTEGER NOT NULL,origin TEXT NOT NULL,activation TEXT NOT NULL,sender_thread_id TEXT,sender_branch_id TEXT,body TEXT NOT NULL); CREATE INDEX input_queue_pending ON input_queue(branch_id,state,activation,cursor); CREATE INDEX input_queue_outgoing ON input_queue(sender_thread_id,sender_branch_id,cursor); INSERT INTO runtime_domains(name,version) VALUES('input_queue',4);")?;
         }
-        Some(3) => check_format(tx)?,
+        Some(4) => check_format(tx)?,
         Some(version) => {
             return Err(RuntimeError::Invalid(format!(
                 "unsupported input queue domain version {version}; data was preserved"
@@ -140,7 +140,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             |row| row.get(0),
         )
         .optional()?;
-    if version != Some(3) {
+    if version != Some(4) {
         return Err(RuntimeError::Invalid(
             "unsupported input queue format; data was preserved".into(),
         ));
@@ -410,6 +410,7 @@ impl Catalog {
         )?;
         if immediate {
             let run: Run = record(&tx, "runs", &run_id)?;
+            super::messages::activation::bind_pending(&tx,&run)?;
             super::goals::bind_admission(&tx,&run)?;
             deliver(&tx, &run, &input)?;
             tx.execute(
@@ -588,6 +589,7 @@ pub(super) fn promote_next(tx: &Transaction<'_>, branch: &str) -> Result<Option<
             continue;
         }
         super::goals::bind_admission(tx,&run)?;
+        super::messages::activation::bind_pending(tx,&run)?;
         deliver(tx, &run, &input)?;
         run.revision += 1;
         put(tx, "runs", &run.id, &run)?;
@@ -610,6 +612,7 @@ pub(super) fn has_boundary_inputs(tx: &Connection, run_id: &str) -> Result<bool>
     Ok(tx.query_row("SELECT EXISTS(SELECT 1 FROM input_queue WHERE run_id=?1 AND state='queued' AND mode!='next_run' AND activation='activating')",[run_id],|row|row.get(0))?)
 }
 pub(super) fn cancel_current(tx: &Transaction<'_>, run_id: &str) -> Result<()> {
+    super::messages::activation::cancel_run(tx,run_id)?;
     let inputs: Vec<QueuedInputMetadata> = {
         let mut statement =
             tx.prepare("SELECT body FROM input_queue WHERE run_id=?1 AND state='queued' AND origin='user'")?;

@@ -82,6 +82,7 @@ pub struct MessageSummary {
     pub state: InputState,
     pub delivered_run_id: Option<String>,
     pub delivered_cursor: Option<u64>,
+    pub activation: MessageActivation,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -430,11 +431,12 @@ impl Catalog {
             identity: identity.clone(),
             accepted_cursor: cursor,
         };
+        let activation = activation::accept(&tx, identity)?;
         let input = QueuedInputMetadata {
             id: identity.message_id.clone(),
             thread_id: identity.target_thread_id.clone(),
             branch_id: identity.target_branch_id.clone(),
-            run_id: None,
+            run_id: activation.run_id().map(str::to_owned),
             mode: InputMode::Boundary,
             state: InputState::Queued,
             revision: 1,
@@ -442,11 +444,12 @@ impl Catalog {
             origin: InputOrigin::Message {
                 identity: identity.clone(),
                 command_key: prepared.key.clone(),
+                activation,
             },
-            activation: InputActivation::Passive,
+            activation: if identity.kind == MessageKind::Request { InputActivation::Activating } else { InputActivation::Passive },
             delivered_cursor: None,
         };
-        tx.execute("INSERT INTO input_queue(id,branch_id,run_id,mode,state,cursor,origin,activation,sender_thread_id,sender_branch_id,body) VALUES(?1,?2,NULL,'boundary','queued',?3,'message','passive',?4,?5,?6)", params![input.id,input.branch_id,sql_number(cursor)?,identity.sender_thread_id,identity.sender_branch_id,encode(&input)?])?;
+        tx.execute("INSERT INTO input_queue(id,branch_id,run_id,mode,state,cursor,origin,activation,sender_thread_id,sender_branch_id,body) VALUES(?1,?2,?7,'boundary','queued',?3,'message',?8,?4,?5,?6)", params![input.id,input.branch_id,sql_number(cursor)?,identity.sender_thread_id,identity.sender_branch_id,encode(&input)?,input.run_id,encode(&input.activation)?.trim_matches('"')])?;
         tx.execute(
             "INSERT INTO input_history_content(input_id,body) VALUES(?1,?2)",
             params![input.id, encode(&prepared.history)?],
@@ -554,9 +557,9 @@ impl MessagePreparation {
                 Ok(snapshot)
             })
             .transpose()?;
-        let envelope = format!("Task message {}\nSender: {} / {}\nTarget: {} / {}\nActor: {}\nKind: inform\nReply to: {}\n\n{}",
+        let envelope = format!("Task message {}\nSender: {} / {}\nTarget: {} / {}\nActor: {}\nKind: {}\nReply to: {}\n\n{}",
             self.identity.message_id, self.identity.sender_thread_id, self.identity.sender_branch_id, self.identity.target_thread_id, self.identity.target_branch_id,
-            serde_json::to_string(&self.identity.actor)?, self.identity.reply_to.as_deref().unwrap_or("none"), self.input.text);
+            serde_json::to_string(&self.identity.actor)?, if self.identity.kind == MessageKind::Request {"request"} else {"inform"}, self.identity.reply_to.as_deref().unwrap_or("none"), self.input.text);
         let body = match &self.identity.actor {
             MessageActor::User => json!(envelope),
             MessageActor::Agent { .. } => serde_json::to_value(ConversationItem {
@@ -597,20 +600,17 @@ impl MessagePreparation {
         })
     }
 }
-fn summary(row: QueuedInputMetadata) -> Result<MessageSummary> {
+fn summary(db: &Connection, row: QueuedInputMetadata) -> Result<MessageSummary> {
+    let activation = activation::project(db, &row)?;
     let identity = message_identity(&row)?.clone();
-    if !matches!(row.state, InputState::Queued | InputState::Delivered) {
-        return Err(RuntimeError::Invalid(
-            "message delivery state is invalid".into(),
-        ));
-    }
     Ok(MessageSummary {
         receipt: MessageReceipt {
             identity,
             accepted_cursor: row.cursor,
         },
         state: row.state,
-        delivered_run_id: row.run_id,
+        delivered_run_id: (row.state == InputState::Delivered).then_some(row.run_id).flatten(),
+        activation,
         delivered_cursor: row.delivered_cursor,
     })
 }
@@ -681,7 +681,7 @@ impl Catalog {
                 .ok_or_else(|| RuntimeError::Invalid("Catalog has no database".into()))?
                 .into(),
             epoch: self.epoch,
-            summary: summary(row)?,
+            summary: summary(&self.db, row)?,
             intent: serde_json::from_str(&intent)?,
             content: self.content.clone(),
             _publication: self.content.begin_publication(),
@@ -801,7 +801,7 @@ impl MessageListRead {
         let mut messages = Vec::new();
         while let Some(row) = rows.next()? {
             check()?;
-            messages.push(summary(serde_json::from_str(&row.get::<_, String>(0)?)?)?);
+            messages.push(summary(&db, serde_json::from_str(&row.get::<_, String>(0)?)?)?);
         }
         drop(rows);
         drop(statement);
@@ -845,3 +845,7 @@ impl MessageListRead {
         })
     }
 }
+
+#[path = "catalog_message_activation.rs"]
+pub mod activation;
+pub use activation::{MessageActivation, MessageActivationFact, MessageActivationHold};

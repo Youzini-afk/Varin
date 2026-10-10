@@ -360,7 +360,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             .collect::<std::result::Result<_, _>>()?;
         rows
     };
-    if version != Some(4)
+    if version != Some(5)
         || columns
             != vec![
                 ("id".into(), "TEXT".into(), 0, 1),
@@ -465,7 +465,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
     Ok(())
 }
 pub(super) fn initialize_new(db: &Connection) -> Result<()> {
-    db.execute_batch("CREATE TABLE child_tasks(id TEXT PRIMARY KEY REFERENCES operations(id),child_thread_id TEXT NOT NULL UNIQUE REFERENCES threads(id),body TEXT NOT NULL); CREATE TABLE delegated_executions(id TEXT PRIMARY KEY,child_operation_id TEXT NOT NULL REFERENCES child_tasks(id),command_key TEXT UNIQUE,run_id TEXT UNIQUE REFERENCES runs(id),body TEXT NOT NULL); CREATE INDEX delegated_executions_child ON delegated_executions(child_operation_id); INSERT INTO runtime_domains(name,version) VALUES('collaboration',4);")?;
+    db.execute_batch("CREATE TABLE child_tasks(id TEXT PRIMARY KEY REFERENCES operations(id),child_thread_id TEXT NOT NULL UNIQUE REFERENCES threads(id),body TEXT NOT NULL); CREATE TABLE delegated_executions(id TEXT PRIMARY KEY,child_operation_id TEXT NOT NULL REFERENCES child_tasks(id),command_key TEXT UNIQUE,run_id TEXT UNIQUE REFERENCES runs(id),body TEXT NOT NULL); CREATE INDEX delegated_executions_child ON delegated_executions(child_operation_id); INSERT INTO runtime_domains(name,version) VALUES('collaboration',5);")?;
     Ok(())
 }
 
@@ -489,7 +489,14 @@ impl Catalog {
         let checkpoint = self
             .capture_active_checkpoint(&child.child_branch_id)?
             .map(|checkpoint| checkpoint.id);
+        let execution=self.delegated_execution(operation_id)?;
+        let message=if let delegated::DelegatedTrigger::MessageRequest{message_id,..}=&execution.trigger {
+            let row:inputs::QueuedInputMetadata=record(&self.db,"input_queue",message_id)?;
+            let inputs::InputOrigin::Message{identity,..}=row.origin else{return Err(RuntimeError::Invalid("delegated request message missing".into()))};
+            Some((identity,execution.input_ref.clone()))
+        }else{None};
         Ok(ChildPreparation {
+            message,
             execution:self.delegated_execution(operation_id)?,
             current:self.capture_active_checkpoint(&child.child_branch_id)?,
             input_preparation:None,expected_checkpoint:checkpoint.clone(),
@@ -537,6 +544,7 @@ impl Catalog {
 }
 pub struct ChildPreparation {
     execution:delegated::DelegatedExecution,
+    message:Option<(messages::MessageIdentity,Value)>,
     current:Option<context::CheckpointRead>,
     input_preparation:Option<resources::InputResourcePreparation>,
     expected_checkpoint:Option<String>,
@@ -565,7 +573,7 @@ impl ChildPreparation {
     }
     pub fn load(self) -> Result<PreparedChild> {
         let Self {
-            execution,current,input_preparation,expected_checkpoint,
+            execution,message,current,input_preparation,expected_checkpoint,
             child,
             source,
             proposal,
@@ -578,7 +586,8 @@ impl ChildPreparation {
             publication,
         } = self;
         if child.receipt.is_none() && expected_checkpoint!=checkpoint {return Err(RuntimeError::Conflict("child context changed during preparation".into()));}
-        let continuing=matches!(execution.trigger,delegated::DelegatedTrigger::UserContinuation{..});
+        let continuing=!matches!(execution.trigger,delegated::DelegatedTrigger::Dispatch);
+        if message.is_some()&&input_preparation.is_some(){return Err(RuntimeError::Invalid("message requests cannot acquire User skill input".into()))}
         if let Some(input)=input_preparation.as_ref().filter(|_|child.receipt.is_none()) {let expected=if resources.is_some(){None}else{checkpoint.clone()};if input.expected_context_checkpoint!=expected {return Err(RuntimeError::Conflict("prepared skill context is based on another delegated checkpoint".into()));}}
         let scope = serde_json::to_value(&basis)?;
         if basis.session_id != child.child_thread_id
@@ -622,7 +631,7 @@ impl ChildPreparation {
                 submission: None,
             });
         }
-        let raw_input=content.load(&child.input_ref)?;
+        let raw_input=if message.is_some(){Value::Null}else{content.load(&child.input_ref)?};
         let input=if continuing {raw_input} else {let input:DispatchInput=serde_json::from_value(raw_input)?;Value::String(input.task)};
         let configuration = content.load(&child.configuration_ref)?;
         let mut launch = child.launch.load(&content)?;
@@ -634,7 +643,7 @@ impl ChildPreparation {
                 key: format!("child:{operation_id}"),
                 thread_id: child.child_thread_id,
                 branch_id: child.child_branch_id,
-                expected_head:match &execution.trigger {delegated::DelegatedTrigger::UserContinuation{expected_head,..}=>expected_head.clone(),_=>None},
+                expected_head:match &execution.trigger {delegated::DelegatedTrigger::UserContinuation{expected_head,..}|delegated::DelegatedTrigger::MessageRequest{expected_head,..}=>expected_head.clone(),_=>None},
                 input,
                 configuration,
             },
@@ -644,7 +653,7 @@ impl ChildPreparation {
             current:if continuing {current}else{None},
             personalization: Some(basis),
             resources,
-            origin: if continuing {submissions::SubmissionOrigin::ChildContinuation{execution_id:operation_id.clone(),checkpoint}} else {submissions::SubmissionOrigin::Child {
+            origin: if let Some((identity,history))=message {submissions::SubmissionOrigin::MessageRequest{identity,history,execution_id:Some(operation_id.clone()),checkpoint}} else if continuing {submissions::SubmissionOrigin::ChildContinuation{execution_id:operation_id.clone(),checkpoint}} else {submissions::SubmissionOrigin::Child {
                 operation_id: operation_id.clone(),checkpoint,parent_thread_id: child.parent_thread_id,
             }},
             epoch,

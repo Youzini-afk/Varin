@@ -16,13 +16,13 @@ vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ cont
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:child', branchId: 'branch:child' };
 const family: FamilyList = { rootThreadId: 'thread:root', members: [{ threadId: 'thread:peer', parentThreadId: 'thread:root', task: 'Peer task', state: 'waiting', branches: [{ branchId: 'branch:peer', headId: null, activeRunId: 'run:peer', latestRun: { runId: 'run:peer', state: 'waiting' } }] }] };
 const receipt: MessageReceipt = { messageId: 'message:original', senderThreadId: 'thread:peer', senderBranchId: 'branch:peer', targetThreadId: identity.threadId, targetBranchId: identity.branchId, actor: { kind: 'agent', runId: 'run:peer', operationId: 'original-send', origin: { kind: 'model_step', request_id: 'original-request' } }, kind: 'inform', replyTo: null, acceptedCursor: 19 };
-const summary: MessageSummary = { ...receipt, state: 'queued', deliveredRunId: null, deliveredCursor: null };
+const summary: MessageSummary = { ...receipt, state: 'queued', activation: { state: 'passive' }, deliveredRunId: null, deliveredCursor: null };
 function fixture() {
   return {
     api: {
       list: vi.fn<ThreadMessagesAPI['list']>(async (_identity, request) => ({ messages: request.direction === 'incoming' ? [summary] : [], nextCursor: null })),
       get: vi.fn<ThreadMessagesAPI['get']>(async () => ({ ...summary, text: 'Original message body' })),
-      send: vi.fn<ThreadMessagesAPI['send']>(async (_identity, request) => ({ ...receipt, messageId: 'message:sent', senderThreadId: identity.threadId, senderBranchId: identity.branchId, targetThreadId: 'thread:peer', targetBranchId: 'branch:peer', actor: { kind: 'user' }, replyTo: request.replyTo ?? null, acceptedCursor: 22 })),
+      send: vi.fn<ThreadMessagesAPI['send']>(async (_identity, request) => ({ ...receipt, messageId: 'message:sent', senderThreadId: identity.threadId, senderBranchId: identity.branchId, targetThreadId: 'thread:peer', targetBranchId: 'branch:peer', actor: { kind: 'user' }, kind: request.kind, replyTo: request.replyTo ?? null, acceptedCursor: 22 })),
     },
     family: { list: vi.fn(async () => family) } as unknown as ThreadFamilyAPI,
   };
@@ -55,15 +55,18 @@ it('reads accepted information on demand and replies with the original received 
   expect(f.api.list.mock.calls.at(-1)![1]).toMatchObject({ direction: 'outgoing' });
 });
 
-it('retries an uncertain Host response with exactly the same body, peer and key, including across collapse', async () => {
+it.each(['inform', 'request'] as const)('retries uncertain %s with exactly the same kind, body, peer and key, including across collapse', async kind => {
   const f = fixture(); f.api.send.mockRejectedValueOnce(new ThreadRequestError(400, 'kernel-response-discarded'));
-  await render(f); await click('Open task messages'); await target(); await enter('路径 C:\\work\\原文'); await click('Send notification');
+  await render(f); await click('Open task messages'); await target();
+  await act(async () => { const input = container.querySelector<HTMLSelectElement>('[aria-label="Message purpose"]')!; Object.defineProperty(input, 'value', { configurable: true, writable: true, value: kind }); input.dispatchEvent(new window.Event('change', { bubbles: true })); });
+  await enter('路径 C:\\work\\原文'); await click(kind === 'request' ? 'Send request' : 'Send notification');
   expect(container.textContent).toContain('Could not confirm acceptance');
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Task message text"]')!.disabled).toBe(true);
   const original = f.api.send.mock.calls[0]![1];
-  await click('Hide task messages'); await click('Open task messages'); await click('Retry same notification');
+  expect(container.querySelector<HTMLSelectElement>('[aria-label="Message purpose"]')!.disabled).toBe(true);
+  await click('Hide task messages'); await click('Open task messages'); await click(kind === 'request' ? 'Retry same request' : 'Retry same notification');
   expect(f.api.send.mock.calls[1]![1]).toEqual(original);
-  expect(original).toMatchObject({ kind: 'inform', targetThreadId: 'thread:peer', targetBranchId: 'branch:peer', text: '路径 C:\\work\\原文' });
+  expect(original).toMatchObject({ kind, targetThreadId: 'thread:peer', targetBranchId: 'branch:peer', text: '路径 C:\\work\\原文' });
   expect(container.textContent).toContain('Accepted message message:sent');
 });
 
@@ -80,4 +83,28 @@ it('refreshes real delivery metadata and drops old message bodies on close, iden
   expect(container.querySelector('[aria-label="Original task message"]')).toBeNull();
   await click('Open task messages'); await render(f, { ...identity, branchId: 'other-branch' });
   expect(container.textContent).not.toContain('actual-receiver-run'); expect(f.api.send).not.toHaveBeenCalled();
+});
+
+it('shows request admission separately from delivery and retains failed or cancelled original messages without resending them', async () => {
+  const f = fixture();
+  const request: MessageSummary = { ...summary, kind: 'request', activation: { state: 'pending', executionId: 'execution:new', holdReason: 'source_unsettled' } };
+  f.api.list.mockResolvedValue({ messages: [request], nextCursor: null });
+  f.api.get.mockResolvedValue({ ...request, text: 'Original request remains readable' });
+  await render(f); await click('Open task messages');
+  expect(container.textContent).toContain('Accepted · awaiting history delivery');
+  expect(container.textContent).toContain('awaiting the original source result and writer stop');
+  f.api.list.mockResolvedValue({ messages: [{ ...request, activation: { state: 'bound', runId: 'actual-request-run', executionId: 'execution:new', holdReason: 'manual_pause' } }], nextCursor: null });
+  await render(f, identity, 2);
+  expect(container.textContent).toContain('Request bound to actual-request-run');
+  expect(container.textContent).toContain('manually paused');
+  expect(container.textContent).not.toContain('Delivered to history');
+  f.api.list.mockResolvedValue({ messages: [{ ...request, state: 'cancelled', activation: { state: 'cancelled', runId: 'actual-request-run', executionId: 'execution:new' } }], nextCursor: null });
+  await render(f, identity, 3);
+  expect(container.textContent).toContain('Delivery cancelled · original message retained');
+  await click('Read message message:original'); expect(container.textContent).toContain('Original request remains readable');
+  f.api.list.mockResolvedValue({ messages: [{ ...request, activation: { state: 'failed', executionId: 'execution:new', code: 'source_unavailable' } }], nextCursor: null });
+  await render(f, identity, 4);
+  expect(container.textContent).toContain('Request activation failed: source_unavailable');
+  expect(container.textContent).toContain('Accepted · not delivered');
+  expect(f.api.send).not.toHaveBeenCalled();
 });

@@ -26,6 +26,10 @@ pub enum RuntimeError {
     Json(#[from] serde_json::Error),
     #[error("conflict: {0}")]
     Conflict(String),
+    #[error("request source is still settling")]
+    RequestActivationHeld,
+    #[error("request activation candidate changed")]
+    RequestActivationStale,
     #[error("not found: {0}")]
     NotFound(String),
     #[error("invalid transition: {0}")]
@@ -34,7 +38,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 29;
+pub(crate) const FORMAT: i64 = 30;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -335,6 +339,7 @@ impl Catalog {
             submissions::SubmissionOrigin::Child { operation_id, .. } | submissions::SubmissionOrigin::ChildContinuation { execution_id: operation_id, .. } => {
                 Some(operation_id.as_str())
             }
+            submissions::SubmissionOrigin::MessageRequest { execution_id, .. } => execution_id.as_deref(),
             _ => None,
         };
         let create_thread = matches!(origin, submissions::SubmissionOrigin::Summary);
@@ -360,7 +365,8 @@ impl Catalog {
         if let submissions::SubmissionOrigin::User { checkpoint }
         | submissions::SubmissionOrigin::Child { checkpoint, .. }
         | submissions::SubmissionOrigin::ChildContinuation { checkpoint, .. }
-        | submissions::SubmissionOrigin::Continuation { checkpoint, .. } = &origin
+        | submissions::SubmissionOrigin::Continuation { checkpoint, .. }
+        | submissions::SubmissionOrigin::MessageRequest { checkpoint, .. } = &origin
         {
             let active: Option<String> = tx
                 .query_row(
@@ -427,6 +433,7 @@ impl Catalog {
             }
         }
         let input_id = match &origin {
+            submissions::SubmissionOrigin::MessageRequest { identity, .. } => identity.message_id.clone(),
             submissions::SubmissionOrigin::Continuation { occurrence_id, .. } => format!("continuation-input:{occurrence_id}"),
             submissions::SubmissionOrigin::Child {operation_id,..} => format!("child-input:{operation_id}"),
             _ => id(),
@@ -437,7 +444,9 @@ impl Catalog {
             id: input_id.clone(),
             thread_id: thread.clone(),
             parent: head,
-            source: if matches!(&origin, submissions::SubmissionOrigin::Continuation { .. }) {
+            source: if let submissions::SubmissionOrigin::MessageRequest{identity,..}=origin {
+                if matches!(identity.actor,messages::MessageActor::User) {HistorySource::User}else{HistorySource::Agent}
+            } else if matches!(&origin, submissions::SubmissionOrigin::Continuation { .. }) {
                 HistorySource::Environment
             } else if matches!(origin,submissions::SubmissionOrigin::Child{..}) {
                 HistorySource::Agent
@@ -529,6 +538,10 @@ impl Catalog {
         if let Some(operation_id) = child_operation {
             collaboration::publish_submission(&tx, operation_id, &receipt)?;
         }
+        if let submissions::SubmissionOrigin::MessageRequest{identity,..}=origin {
+            messages::activation::delivered_submission(tx,identity,&run,cursor)?;
+        }
+        messages::activation::bind_pending(tx,&run)?;
         // The exact delegated trigger must be visible to Goal admission in this same
         // transaction. A new explicit User Run may outlive a completed parent Goal.
         goals::bind_admission(tx, &run)?;
@@ -1675,6 +1688,7 @@ pub(super) fn request_cancel_run_in(tx: &Transaction<'_>, id: &str) -> Result<Ru
             return Ok(run);
         }
         run.cancel_requested = true;
+        messages::activation::cancel_run(tx,id)?;
         followups::cancel_source_run(tx, id)?;
         goals::cancel_run(tx,id)?;
         if run.state == RunState::Waiting {
@@ -1728,4 +1742,10 @@ pub(super) fn request_cancel_operation_in(tx: &Transaction<'_>, key: &str) -> Re
         Value::Null,
     )?;
     Ok(op)
+}
+
+/// A superseding input ends each original observation. Keep the existing Run parked until
+/// their cancellation or completed-result facts have all reached the legal history boundary.
+pub(super) fn next_ready_dependency_wait(db:&Connection,run:&str)->Result<Option<String>> {
+    Ok(db.query_row("SELECT w.id FROM operations o JOIN waits w ON w.id=json_extract(o.body,'$.waiting_on') WHERE o.run_id=?1 AND json_extract(o.body,'$.phase')!='terminal' AND json_extract(o.body,'$.execution_owner.kind')='kernel' AND json_extract(o.body,'$.executor') IN ('wait_child','wait_process') AND (json_extract(w.body,'$.cancelled')=1 OR json_extract(w.body,'$.trigger_cursor') IS NOT NULL) ORDER BY o.rowid LIMIT 1",[run],|r|r.get(0)).optional()?)
 }

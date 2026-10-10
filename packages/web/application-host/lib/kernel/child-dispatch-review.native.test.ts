@@ -1469,7 +1469,7 @@ it('cancelling a policy child observation resumes from the real cancellation fac
   } finally { release.release(); }
 }, 30_000);
 
-it('continues a completed writable child after Host restart with a new Run, exact previous fixed files and independent reports/results', async () => {
+it.each(['user_continuation', 'message_request'] as const)('%s continues a completed writable child after Host restart from its exact fixed files with independent reports/results', async continuationKind => {
   let parentSteps = 0; let childSteps = 0; let operationId = '';
   const f = await fixture(({ body, response }) => {
     assertPairing(body);
@@ -1504,9 +1504,23 @@ it('continues a completed writable child after Host restart with a new Run, exac
     expectedHead: before.thread.branches.find(branch => branch.branch_id === childIdentity.branchId)!.head, text: 'SECOND_RUN_REQUEST: continue from your exact first file result' };
   // Persist the command without a live preparation consumer; startup must discover that same intent.
   h.collaboration!.stop();
-  const accepted = await h.api.collaboration!.continueChild(input);
+  const messageIntent = { key: 'request-second-run', targetThreadId: childIdentity.threadId, targetBranchId: childIdentity.branchId, kind: 'request' as const, text: input.text };
+  const message = continuationKind === 'message_request' ? await h.api.messages!.send(parentIdentity, messageIntent) : undefined;
+  const executionId = message ? await (async () => {
+    let executionId: string | undefined;
+    await expect.poll(async () => {
+      const queued = await h.api.messages!.get(parentIdentity, message.messageId);
+      if (queued.activation.state === 'pending' || queued.activation.state === 'bound') executionId = queued.activation.executionId ?? undefined;
+      return executionId;
+    }, { timeout: 15_000 }).toBeTruthy();
+    return executionId!;
+  })() : (await h.api.collaboration!.continueChild(input)).execution_id;
+  const accepted = await h.runtime.childExecution(executionId);
   expect(accepted.receipt).toBeNull(); expect(accepted.execution_id).not.toBe(original.operation_id);
-  expect(await h.api.collaboration!.continueChild(input)).toEqual(accepted);
+  if (message) {
+    expect(accepted.trigger).toMatchObject({ kind: 'message_request', message_id: message.messageId });
+    expect(await h.api.messages!.send(parentIdentity, messageIntent)).toEqual(message);
+  } else expect(await h.api.collaboration!.continueChild(input)).toEqual(accepted);
   expect((await h.runtime.child(operationId)).report).toEqual(original.report);
   await h.close();
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'CHANGED_PARENT_SOURCE_MUST_NOT_REPLACE_FIXED_CHILD_RESULT');
@@ -1524,8 +1538,14 @@ it('continues a completed writable child after Host restart with a new Run, exac
   expect(report.text).toBe('SECOND_RUN_REPORT'); expect(report.execution_id).toBe(finished.execution_id);
   expect((await reopened.runtime.child(operationId)).report).toEqual(original.report);
   expect((await reopened.runtime.child(operationId)).code_result).toEqual(original.code_result);
-  const retry = await reopened.api.collaboration!.continueChild(input);
-  expect(retry.receipt).toEqual(finished.receipt);
+  if (message) {
+    expect(await reopened.api.messages!.send(parentIdentity, messageIntent)).toEqual(message);
+    expect(await reopened.api.messages!.get(parentIdentity, message.messageId)).toMatchObject({ state: 'delivered', deliveredRunId: finished.receipt.run_id,
+      activation: { state: 'bound', runId: finished.receipt.run_id, executionId: finished.execution_id } });
+  } else {
+    const retry = await reopened.api.collaboration!.continueChild(input);
+    expect(retry.receipt).toEqual(finished.receipt);
+  }
   expect((await reopened.api.snapshot(childIdentity)).history.filter(item => item.run_id === finished.receipt!.run_id && item.source === 'user').map(item => JSON.stringify(item.content)).join('\n')).toContain('SECOND_RUN_REQUEST');
   expect(parentSteps).toBe(3); expect(childSteps).toBe(6); expect(reopened.errors.map(String)).toEqual([]);
 }, 45_000);

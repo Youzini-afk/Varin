@@ -152,9 +152,9 @@ it('slow startup launch cannot block the existing child/process pump or a later 
   } finally { release(); collaboration.stop(); await tick(); }
 });
 
-it.each(['followup.admitted', 'goal.run_ready'] as const)('%s uses the same cold launch owner, while unrelated and repeated durable events cannot relaunch it', async kind => {
+it.each(['followup.admitted', 'goal.run_ready', 'message.run_ready'] as const)('%s uses the same cold launch owner, while unrelated and repeated durable events cannot relaunch it', async kind => {
   const f = fixture();
-  const subject = kind === 'goal.run_ready' ? 'goal:one' : 'followup:process';
+  const subject = kind === 'goal.run_ready' ? 'goal:one' : kind === 'message.run_ready' ? 'message:original' : 'followup:process';
   const events: RuntimeEvent[] = [];
   let listener!: (event: AgentRuntimeStreamEvent) => void;
   const runtime = Object.assign(f.runtime, {
@@ -178,10 +178,10 @@ it.each(['followup.admitted', 'goal.run_ready'] as const)('%s uses the same cold
     // Only the exact continuation admission wakes cold preparation. Generic accepted Runs may be children.
     f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable'; f.run.waiting_on = null;
     events.push({ cursor: 2, subject: 'run:unprepared-child', revision: 1, kind: 'run.accepted', data: { run_id: 'run:unprepared-child' } });
-    events.push({ cursor: 3, subject, revision: 1, kind: kind === 'goal.run_ready' ? 'goal.started' : 'followup.registered', data: { run_id: f.run.id } });
+    events.push({ cursor: 3, subject, revision: 1, kind: kind === 'goal.run_ready' ? 'goal.started' : kind === 'message.run_ready' ? 'message.accepted' : 'followup.registered', data: { run_id: f.run.id } });
     notify(); await tick(); await tick(); expect(continues).toHaveBeenCalledOnce();
     events.push({ cursor: 4, subject, revision: 2, kind, data: {
-      run_id: f.run.id, ...(kind === 'goal.run_ready' ? { goal_id: subject } : {
+      run_id: f.run.id, ...(kind === 'goal.run_ready' ? { goal_id: subject } : kind === 'message.run_ready' ? { message_id: subject } : {
         followup_id: subject, occurrence_id: 'occurrence:process', source_run_id: 'run:source', operation_id: 'operation:process',
       }),
     } });
@@ -195,7 +195,7 @@ it.each(['followup.admitted', 'goal.run_ready'] as const)('%s uses the same cold
   } finally { collaboration.stop(); }
 });
 
-it.each(['followup.admitted', 'goal.run_ready'] as const)('startup discovery retains %s during the saved-launch scan and discovers saved work after an epoch change', async kind => {
+it.each(['followup.admitted', 'goal.run_ready', 'message.run_ready'] as const)('startup discovery retains %s during the saved-launch scan and discovers saved work after an epoch change', async kind => {
   const f = fixture(); f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable'; f.run.waiting_on = null;
   let release!: () => void; const scanned = new Promise<void>(resolve => { release = resolve; });
   f.runtime.pendingLaunches.mockImplementationOnce(async () => { await scanned; return []; });
@@ -215,7 +215,7 @@ it.each(['followup.admitted', 'goal.run_ready'] as const)('startup discovery ret
   try {
     const discovery = collaboration.recover();
     await vi.waitFor(() => expect(f.runtime.pendingLaunches).toHaveBeenCalledOnce());
-    events.push({ cursor: 1, subject: kind === 'goal.run_ready' ? 'goal:one' : 'followup:process', revision: 2, kind, data: { run_id: f.run.id } });
+    events.push({ cursor: 1, subject: kind === 'goal.run_ready' ? 'goal:one' : kind === 'message.run_ready' ? 'message:original' : 'followup:process', revision: 2, kind, data: { run_id: f.run.id } });
     listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 1 });
     release(); await discovery;
     await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());

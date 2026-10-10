@@ -154,7 +154,7 @@ export class ThreadCollaboration {
         }
         if (event.kind === 'run.cancel_requested') this.owners.kernel.cancelRunPreparation(event.subject);
         const data = event.data as { run_id?: unknown } | null;
-        if ((event.kind === 'policy.resumed' || event.kind === 'followup.admitted' || event.kind === 'goal.run_ready') && data && typeof data.run_id === 'string') {
+        if ((event.kind === 'policy.resumed' || event.kind === 'followup.admitted' || event.kind === 'goal.run_ready' || event.kind === 'message.run_ready') && data && typeof data.run_id === 'string') {
           void this.owners.continueRun(data.run_id, signal).catch(error => {
             if (!signal.aborted) this.owners.onError(undefined, error);
           });
@@ -174,7 +174,7 @@ export class ThreadCollaboration {
   }
   private async prepareSource(child: DelegatedExecution, signal: AbortSignal): Promise<DelegatedExecution> {
     if (child.source?.kind === 'ready') return child;
-    if (child.trigger.kind === 'user_continuation') return this.prepareContinuationSource(child, signal);
+    if (child.trigger.kind !== 'dispatch') return this.prepareContinuationSource(child, signal);
     if (!child.source || !child.source.handoff) throw new Error('Dispatch source handoff is unavailable');
     const { kernel, storageAdapter, runtime, sourceCaptureOwners } = this.owners;
     const handoff = child.source.handoff;
@@ -290,7 +290,7 @@ export class ThreadCollaboration {
   private async releaseHandoff(child: DelegatedExecution, signal: AbortSignal): Promise<void> {
     if (child.resources_released || (child.source?.kind !== 'ready' && !child.report)) return;
     const { kernel, runtime } = this.owners;
-    if (child.trigger.kind === 'user_continuation') {
+    if (child.trigger.kind !== 'dispatch') {
       if (!child.receipt && child.source_basis) {
         await this.owners.workingStates.withBranchStore(child.source_basis.source.workspace_id, 'child-unused-continuation-source', async store => {
           if (!store.releaseBranchHandoffPin) throw new Error('Durable source pin release is unavailable');
@@ -334,8 +334,8 @@ export class ThreadCollaboration {
         child = await this.prepareSource(child, signal);
         const source = this.childSource(child);
         const identity: ThreadIdentity = { runtime: 'agent', threadId: child.child_thread_id, branchId: child.child_branch_id };
-        const checkpoint = child.trigger.kind === 'user_continuation' ? await runtime.context(child.child_branch_id, signal) : null;
-        if (child.trigger.kind === 'user_continuation' && (!checkpoint || !prepareContext.forSource)) throw new Error('Continuation context provenance is unavailable');
+        const checkpoint = child.trigger.kind !== 'dispatch' ? await runtime.context(child.child_branch_id, signal) : null;
+        if (child.trigger.kind !== 'dispatch' && (!checkpoint || !prepareContext.forSource)) throw new Error('Continuation context provenance is unavailable');
         const context = await waitWithSignal(checkpoint
           ? prepareContext.forSource!(checkpoint, source, signal)
           : prepareContext(identity, source, { mode: 'agent', threadRole: 'worker', projectId: child.project_id, childProfile: child.selected_profile }), signal);
