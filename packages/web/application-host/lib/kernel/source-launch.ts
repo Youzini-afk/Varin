@@ -19,7 +19,7 @@ export type SourceLaunch = Omit<ThreadSource, 'mode' | 'branchId' | 'revision' |
 
 /** Project only source-owned declarations from the same frozen launch directory. */
 const sourceToolNames = new Set(['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect',
-  'process_read', 'process_spawn', 'language_definition', 'language_references', 'language_diagnostics', 'code_retrieval']);
+  'process_read', 'process_spawn', 'process_write', 'process_resize', 'language_definition', 'language_references', 'language_diagnostics', 'code_retrieval']);
 export function sourceToolSchemas(selection: LaunchIntent['selection']) {
   const external = new Set([
     ...(selection.mcp_binding?.tools.map(tool => tool.name) ?? []),
@@ -53,7 +53,7 @@ export async function startRunFromSource(
   if (tools.some(tool => !sourceToolNames.has(tool))) throw new Error('Source launch selected an unavailable tool');
   if (selection.mode !== 'live_root' && tools.some(tool => tool.startsWith('language_'))) throw new Error('Language tools require live_root; fixed dependency closure is unavailable');
   if (selection.mode !== 'live_root' && tools.includes('code_retrieval')) throw new Error('Code retrieval requires live_root; fixed retrieval inputs are unavailable');
-  if (selection.mode === 'fixed_branch' && tools.some(tool => ['process_spawn', 'file_write', 'file_edit'].includes(tool))) throw new Error('Mutating tools require an explicitly selected physical source');
+  if (selection.mode === 'fixed_branch' && tools.some(tool => ['process_spawn', 'process_write', 'process_resize', 'file_write', 'file_edit'].includes(tool))) throw new Error('Mutating tools require an explicitly selected physical source');
   const run = await runtime.run(selection.runId, signal);
   if (['completed', 'failed', 'cancelled'].includes(run.state) || run.cancel_requested) throw new Error('Run is closed to launch');
   const saved = await runtime.launch(run.id, signal);
@@ -197,4 +197,44 @@ export async function admitRunSourceAuthority(
     await runtime.releaseSourceGrant(run.id, grant.grantId).catch(() => undefined);
     throw error;
   }
+}
+
+export function savedSourceLaunch(
+  runId: string,
+  source: NonNullable<LaunchIntent['selection']['source']>,
+  tools: SourceLaunch['tools'],
+  previousRunId?: string,
+): SourceLaunch {
+  const base = {
+    runId,
+    workspaceId: source.workspace_id,
+    executionWorkspaceId: source.execution_workspace_id,
+    tools,
+  };
+  if (source.mode === 'live_root') {
+    if (
+      !source.live_root ||
+      source.branch_id !== null ||
+      source.revision !== null ||
+      source.environment_run_id
+    )
+      throw new Error('Saved live environment is incomplete');
+    return { ...base, mode: 'live_root', liveRoot: source.live_root };
+  }
+  if (
+    source.branch_id === null ||
+    source.revision === null ||
+    source.live_root
+  )
+    throw new Error('Saved fixed environment is incomplete');
+  const environmentRunId = source.environment_run_id ?? previousRunId;
+  return {
+    ...base,
+    mode: source.mode,
+    branchId: source.branch_id,
+    revision: source.revision,
+    ...(source.mode === 'materialized' && environmentRunId
+      ? { environmentRunId }
+      : {}),
+  };
 }

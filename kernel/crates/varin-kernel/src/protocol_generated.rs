@@ -27,6 +27,8 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.run.resume",
     "runtime.operation.inspect",
     "runtime.operation.cancel",
+    "runtime.process.access",
+    "process.interaction.inspect",
     "runtime.input.cancel",
     "runtime.input.inspect",
     "runtime.admission.inspect",
@@ -54,11 +56,15 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "runtime.run.cancel",
     "runtime.run.resume",
     "runtime.operation.cancel",
+    "runtime.process.access",
+    "process.interaction.inspect",
+    "process.kill",
     "process.resize",
     "process.release",
     "process.subscription.ack",
     "process.subscription.unsubscribe",
 ];
+pub(crate) const KERNEL_DEFERRED_RESPONSE_METHODS: &[&str] = &["process.write", "process.resize"];
 pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
     ("runtime.thread.create", "branchId"),
     ("runtime.branch.fork", "branchId"),
@@ -467,6 +473,15 @@ pub(crate) struct OperationParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RuntimeProcessAccessParams {
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) operation_id: String,
+    pub(crate) tool_binding: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct EventsParams {
     pub(crate) cursor: i64,
     pub(crate) limit: i64,
@@ -495,6 +510,7 @@ pub(crate) struct ObserverDeliveryParams {
 pub(crate) struct KernelProcessSubscribeParams {
     pub(crate) workspace_id: String,
     pub(crate) process_id: String,
+    pub(crate) root_id: Option<String>,
     pub(crate) subscription_id: String,
     pub(crate) cursor: i64,
 }
@@ -534,6 +550,7 @@ pub(crate) struct KernelProcessSpawnParams {
 pub(crate) struct KernelProcessReadParams {
     pub(crate) workspace_id: String,
     pub(crate) process_id: String,
+    pub(crate) root_id: Option<String>,
     pub(crate) cursor: i64,
     pub(crate) max_bytes: Option<i64>,
 }
@@ -543,7 +560,8 @@ pub(crate) struct KernelProcessReadParams {
 pub(crate) struct KernelProcessWriteParams {
     pub(crate) workspace_id: String,
     pub(crate) process_id: String,
-    pub(crate) sequence: i64,
+    pub(crate) root_id: Option<String>,
+    pub(crate) operation_id: String,
     pub(crate) bytes_base64: String,
     pub(crate) eof: Option<bool>,
 }
@@ -553,8 +571,19 @@ pub(crate) struct KernelProcessWriteParams {
 pub(crate) struct KernelProcessResizeParams {
     pub(crate) workspace_id: String,
     pub(crate) process_id: String,
+    pub(crate) root_id: Option<String>,
+    pub(crate) operation_id: String,
     pub(crate) cols: i64,
     pub(crate) rows: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelProcessInteractionInspectParams {
+    pub(crate) workspace_id: String,
+    pub(crate) process_id: String,
+    pub(crate) operation_id: String,
+    pub(crate) root_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -562,6 +591,7 @@ pub(crate) struct KernelProcessResizeParams {
 pub(crate) struct KernelProcessKillParams {
     pub(crate) workspace_id: String,
     pub(crate) process_id: String,
+    pub(crate) root_id: Option<String>,
     pub(crate) force: Option<bool>,
 }
 
@@ -570,6 +600,7 @@ pub(crate) struct KernelProcessKillParams {
 pub(crate) struct KernelProcessHandleParams {
     pub(crate) workspace_id: String,
     pub(crate) process_id: String,
+    pub(crate) root_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2203,6 +2234,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.operation.cancel" => serde_json::from_value::<OperationParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.process.access" => {
+            serde_json::from_value::<RuntimeProcessAccessParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.events.read" => serde_json::from_value::<EventsParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -2241,6 +2277,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "process.resize" => serde_json::from_value::<KernelProcessResizeParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "process.interaction.inspect" => {
+            serde_json::from_value::<KernelProcessInteractionInspectParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "process.kill" => serde_json::from_value::<KernelProcessKillParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

@@ -49,17 +49,40 @@ struct AgentOwner {
     resources: crate::tools::KernelResourceClient,
 }
 impl AgentControl {
-    pub(crate) fn child_handoff(&self,params:&Value)->Result<varin_runtime::catalog::collaboration::ChildSourceHandoff,KernelError> {
-        let p:KernelSourceHandoffClaimParams=serde_json::from_value(params.clone())?;
-        let id=p.handoff_operation_id.strip_prefix("child-source-handoff:").ok_or_else(||KernelError::Authorization("invalid child handoff identity".into()))?;
-        let owner=self.owner.lock().map_err(|_|KernelError::Storage("Agent owner failed".into()))?;
-        let runtime=&owner.as_ref().ok_or_else(||KernelError::Storage("Agent is not ready".into()))?.runtime;
-        let catalog=runtime.catalog();let catalog=catalog.lock().map_err(|_|KernelError::Storage("Catalog owner failed".into()))?;
-        let child=catalog.child_task(id).map_err(domain)?;
-        if child.resources_released {return Err(KernelError::Authorization("child source handoff was already released".into()));}
-        if child.child_thread_id!=p.child_thread_id || child.child_branch_id!=p.child_branch_id
-            || child.source.handoff().operation_id!=p.handoff_operation_id {
-            return Err(KernelError::Authorization("source claim does not identify an accepted child".into()));
+    pub(crate) fn child_handoff(
+        &self,
+        params: &Value,
+    ) -> Result<varin_runtime::catalog::collaboration::ChildSourceHandoff, KernelError> {
+        let p: KernelSourceHandoffClaimParams = serde_json::from_value(params.clone())?;
+        let id = p
+            .handoff_operation_id
+            .strip_prefix("child-source-handoff:")
+            .ok_or_else(|| KernelError::Authorization("invalid child handoff identity".into()))?;
+        let owner = self
+            .owner
+            .lock()
+            .map_err(|_| KernelError::Storage("Agent owner failed".into()))?;
+        let runtime = &owner
+            .as_ref()
+            .ok_or_else(|| KernelError::Storage("Agent is not ready".into()))?
+            .runtime;
+        let catalog = runtime.catalog();
+        let catalog = catalog
+            .lock()
+            .map_err(|_| KernelError::Storage("Catalog owner failed".into()))?;
+        let child = catalog.child_task(id).map_err(domain)?;
+        if child.resources_released {
+            return Err(KernelError::Authorization(
+                "child source handoff was already released".into(),
+            ));
+        }
+        if child.child_thread_id != p.child_thread_id
+            || child.child_branch_id != p.child_branch_id
+            || child.source.handoff().operation_id != p.handoff_operation_id
+        {
+            return Err(KernelError::Authorization(
+                "source claim does not identify an accepted child".into(),
+            ));
         }
         Ok(child.source.handoff().clone())
     }
@@ -146,6 +169,10 @@ pub(crate) enum Command {
     AdvanceRuns,
     Stop,
     ProcessTerminal(crate::process::ProcessTerminal),
+    ProcessInteraction {
+        intent: crate::storage::process_interactions::Intent,
+        receipt: crate::process::interaction::Receipt,
+    },
     ToolReceipt(crate::host_tools::LateReceipt),
     ProcessReplayFailed(String),
     Initialize {
@@ -248,7 +275,7 @@ pub(crate) fn spawn(
                         }
                     }
                     break;
-                },
+                }
                 Command::ToolReceipt(receipt) => {
                     if opening {
                         waiting.push_back(Command::ToolReceipt(receipt));
@@ -292,6 +319,27 @@ pub(crate) fn spawn(
                                 if let Ok(mut catalog) = runtime.catalog().lock() {
                                     let _ = catalog.record_recovery_failure(
                                         &fact.process_id,
+                                        &error.to_string(),
+                                    );
+                                }
+                            }
+                        });
+                    }
+                }
+                Command::ProcessInteraction { intent, receipt } => {
+                    if opening {
+                        waiting.push_back(Command::ProcessInteraction { intent, receipt });
+                        continue;
+                    }
+                    if let (Some(runtime), Some(native)) = (runtime.as_ref(), intent.native) {
+                        let catalog = runtime.catalog();
+                        thread::spawn(move || {
+                            if let Err(error) =
+                                record_process_interaction(&catalog, &native, &receipt, true)
+                            {
+                                if let Ok(mut catalog) = catalog.lock() {
+                                    let _ = catalog.record_recovery_failure(
+                                        &native.context.operation_id,
                                         &error.to_string(),
                                     );
                                 }
@@ -361,23 +409,39 @@ pub(crate) fn spawn(
                         let (notify, notifications) = mpsc::sync_channel(1);
                         let (continuation_notify, continuation_wakes) = mpsc::sync_channel(1);
                         let continuation_owner = Arc::downgrade(&owner);
-                        thread::Builder::new().name("thread-continuations".into()).spawn(move || {
-                            let mut failed = false;
-                            while continuation_wakes.recv().is_ok() {
-                                let Some(owner) = continuation_owner.upgrade() else { break; };
-                                let result = owner.reconcile_goal_waits().map_err(|_| ()).and_then(|_| varin_runtime::catalog::followups::reconcile(&owner.catalog()).map(|_| ()).map_err(|_| ()));
-                                match result {
-                                    Ok(_) => failed = false,
-                                    Err(_) if !failed => {
-                                        failed = true;
-                                        if let Ok(mut catalog) = owner.catalog().lock() {
-                                            let _ = catalog.record_recovery_failure("followups", "continuation_reconciliation_failed");
-                                        };
+                        thread::Builder::new()
+                            .name("thread-continuations".into())
+                            .spawn(move || {
+                                let mut failed = false;
+                                while continuation_wakes.recv().is_ok() {
+                                    let Some(owner) = continuation_owner.upgrade() else {
+                                        break;
+                                    };
+                                    let result = owner
+                                        .reconcile_goal_waits()
+                                        .map_err(|_| ())
+                                        .and_then(|_| {
+                                            varin_runtime::catalog::followups::reconcile(
+                                                &owner.catalog(),
+                                            )
+                                            .map(|_| ())
+                                            .map_err(|_| ())
+                                        });
+                                    match result {
+                                        Ok(_) => failed = false,
+                                        Err(_) if !failed => {
+                                            failed = true;
+                                            if let Ok(mut catalog) = owner.catalog().lock() {
+                                                let _ = catalog.record_recovery_failure(
+                                                    "followups",
+                                                    "continuation_reconciliation_failed",
+                                                );
+                                            };
+                                        }
+                                        Err(_) => (),
                                     }
-                                    Err(_) => (),
                                 }
-                            }
-                        })?;
+                            })?;
                         owner
                             .catalog()
                             .lock()
@@ -553,25 +617,34 @@ pub(crate) fn spawn(
                         if method == "runtime.content.collect" {
                             // This admission is metadata-only. Maintenance never enters Storage or
                             // the ordinary history/receipt content queue, and does not own a Run.
-                            let collection = runtime.catalog().lock()
+                            let collection = runtime
+                                .catalog()
+                                .lock()
                                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                                 .prepare_content_collection(cancellation.clone());
                             match collection {
-                                varin_runtime::content::ContentCollectionAdmission::Deferred(report) => {
+                                varin_runtime::content::ContentCollectionAdmission::Deferred(
+                                    report,
+                                ) => {
                                     return Ok(serde_json::to_value(report)?);
                                 }
-                                varin_runtime::content::ContentCollectionAdmission::Ready(collection) => {
+                                varin_runtime::content::ContentCollectionAdmission::Ready(
+                                    collection,
+                                ) => {
                                     let response_id = id.clone();
                                     let response_sender = responses.clone();
                                     let done = finished.clone();
-                                    thread::Builder::new().name("runtime-content-maintenance".into())
+                                    thread::Builder::new()
+                                        .name("runtime-content-maintenance".into())
                                         .spawn(move || {
                                             // Collection owns the original runtime.owner file until
                                             // the last unlink/fsync finishes, including after Stop.
                                             let report = collection.run();
                                             let response = match serde_json::to_value(report) {
                                                 Ok(value) => response_ok(&response_id, value),
-                                                Err(error) => response_error(&response_id, &error.into()),
+                                                Err(error) => {
+                                                    response_error(&response_id, &error.into())
+                                                }
                                             };
                                             done(&response_id);
                                             let _ = response_sender.send(response);
@@ -583,8 +656,12 @@ pub(crate) fn spawn(
                         }
                         if method == "runtime.followup.register" {
                             let p: FollowupRegisterParams = serde_json::from_value(params)?;
-                            let value = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                                .register_followup(&p.key, &p.run_id, &p.operation_id).map_err(domain)?;
+                            let value = runtime
+                                .catalog()
+                                .lock()
+                                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                                .register_followup(&p.key, &p.run_id, &p.operation_id)
+                                .map_err(domain)?;
                             // The original Storage receipt may already exist, including when the
                             // Catalog's metadata became terminal before real stop evidence arrived.
                             resources.replay_process_terminals(vec![p.operation_id])?;
@@ -592,8 +669,16 @@ pub(crate) fn spawn(
                         }
                         if method == "runtime.followup.list" {
                             let p: ThreadParams = serde_json::from_value(params)?;
-                            return Ok(serde_json::to_value(runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                                .followups(&p.thread_id).map_err(domain)?)?);
+                            return Ok(serde_json::to_value(
+                                runtime
+                                    .catalog()
+                                    .lock()
+                                    .map_err(|_| {
+                                        KernelError::Storage("catalog owner failed".into())
+                                    })?
+                                    .followups(&p.thread_id)
+                                    .map_err(domain)?,
+                            )?);
                         }
                         if matches!(
                             method,
@@ -667,7 +752,9 @@ pub(crate) fn spawn(
                                     .expect("initialized runtime tools")
                                     .clone(),
                             };
-                            if let Some(receipt)=commands.admit_control(method, &params)? {return Ok(receipt);}
+                            if let Some(receipt) = commands.admit_control(method, &params)? {
+                                return Ok(receipt);
+                            }
                             let method = method.to_owned();
                             let response_id = id.clone();
                             let response_sender = responses.clone();
@@ -736,8 +823,9 @@ pub(crate) fn spawn(
                             let done = finished.clone();
                             let cancelled = cancellation.clone();
                             thread::spawn(move || {
-                                let result =
-                                    child_commands::execute(runtime, resources, &method, params, &cancelled);
+                                let result = child_commands::execute(
+                                    runtime, resources, &method, params, &cancelled,
+                                );
                                 let response = match result {
                                     Ok(value) => response_ok(&response_id, value),
                                     Err(error) => response_error(&response_id, &error),
@@ -1200,12 +1288,36 @@ pub(crate) fn spawn(
                             assembly.observe_completion(handle);
                             return Ok(receipt);
                         }
-                        if matches!(method,"runtime.goal.start"|"runtime.goal.update"|"runtime.goal.list") {
-                            let catalog=runtime.catalog();let response_id=id.clone();let response_sender=responses.clone();let done=finished.clone();let cancelled=cancellation.clone();let goal_method=method.to_owned();
-                            thread::spawn(move ||{let result=crate::agent_goals::execute_rpc(catalog,&goal_method,params,cancelled);let response=match result{Ok(v)=>response_ok(&response_id,v),Err(e)=>response_error(&response_id,&e)};done(&response_id);let _=response_sender.send(response);});
-                            deferred=true;return Ok(Value::Null);
+                        if matches!(
+                            method,
+                            "runtime.goal.start" | "runtime.goal.update" | "runtime.goal.list"
+                        ) {
+                            let catalog = runtime.catalog();
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            let goal_method = method.to_owned();
+                            thread::spawn(move || {
+                                let result = crate::agent_goals::execute_rpc(
+                                    catalog,
+                                    &goal_method,
+                                    params,
+                                    cancelled,
+                                );
+                                let response = match result {
+                                    Ok(v) => response_ok(&response_id, v),
+                                    Err(e) => response_error(&response_id, &e),
+                                };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
+                            });
+                            deferred = true;
+                            return Ok(Value::Null);
                         }
-                        if method == "runtime.resources.refresh" || method == "runtime.resources.snapshot" {
+                        if method == "runtime.resources.refresh"
+                            || method == "runtime.resources.snapshot"
+                        {
                             let catalog = runtime.catalog();
                             let response_id = id.clone();
                             let response_sender = responses.clone();
@@ -1213,8 +1325,16 @@ pub(crate) fn spawn(
                             let cancelled = cancellation.clone();
                             let resource_method = method.to_owned();
                             thread::spawn(move || {
-                                let result = crate::agent_resources::execute_rpc(catalog, &resource_method, params, cancelled);
-                                let response = match result { Ok(value) => response_ok(&response_id,value), Err(error) => response_error(&response_id,&error) };
+                                let result = crate::agent_resources::execute_rpc(
+                                    catalog,
+                                    &resource_method,
+                                    params,
+                                    cancelled,
+                                );
+                                let response = match result {
+                                    Ok(value) => response_ok(&response_id, value),
+                                    Err(error) => response_error(&response_id, &error),
+                                };
                                 done(&response_id);
                                 let _ = response_sender.send(response);
                             });
@@ -1307,6 +1427,55 @@ pub(crate) fn spawn(
                                 };
                                 done(&response_id);
                                 let _ = response_sender.send(response);
+                            });
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
+                        if method == "runtime.process.access" {
+                            let p: RuntimeProcessAccessParams = serde_json::from_value(params)?;
+                            let binding: crate::tools::ToolBinding =
+                                serde_json::from_value(p.tool_binding)?;
+                            {
+                                let owner = runtime.catalog();
+                                let catalog = owner.lock().map_err(|_| {
+                                    KernelError::Storage("Catalog owner failed".into())
+                                })?;
+                                let operation = catalog
+                                    .require_process_observation(&binding.run_id, &p.operation_id)
+                                    .map_err(domain)?;
+                                let run = catalog.run(&operation.run_id).map_err(domain)?;
+                                let launch = catalog
+                                    .launch_metadata(&run.id)
+                                    .map_err(domain)?
+                                    .ok_or_else(|| {
+                                        KernelError::Authorization(
+                                            "process launch is missing".into(),
+                                        )
+                                    })?;
+                                if operation.run_id != binding.run_id
+                                    || run.thread_id != p.thread_id
+                                    || run.branch_id != p.branch_id
+                                    || binding.thread_id != p.thread_id
+                                    || launch.selection.source.as_ref()
+                                        != Some(&binding.source_selection()?)
+                                {
+                                    return Err(KernelError::Authorization("process access does not match the original Run/Thread/branch/source".into()));
+                                }
+                            }
+                            let client = resources.interactions.clone().ok_or_else(|| {
+                                KernelError::Storage("process interaction owner unavailable".into())
+                            })?;
+                            let responses = responses.clone();
+                            let finished = finished.clone();
+                            let id = id.clone();
+                            thread::spawn(move || {
+                                let result=client.access(binding.clone(),p.operation_id.clone()).map(|process|json!({"operationId":p.operation_id,"runId":binding.run_id,"threadId":p.thread_id,"branchId":p.branch_id,"workspaceId":binding.workspace_id,"rootId":binding.root_id,"process":process}));
+                                let response = match result {
+                                    Ok(value) => response_ok(&id, value),
+                                    Err(error) => response_error(&id, &error),
+                                };
+                                finished(&id);
+                                let _ = responses.send(response);
                             });
                             deferred = true;
                             return Ok(Value::Null);
@@ -1569,7 +1738,13 @@ pub(crate) fn spawn(
                                     .filter(|operation| {
                                         matches!(
                                             operation.executor.as_deref(),
-                                            Some("file_write" | "file_edit" | "integrate_child")
+                                            Some(
+                                                "file_write"
+                                                    | "file_edit"
+                                                    | "integrate_child"
+                                                    | "process_write"
+                                                    | "process_resize"
+                                            )
                                         )
                                     })
                                     .collect::<Vec<_>>()
@@ -1839,6 +2014,67 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         }
         _ => Err(KernelError::Protocol("unknown runtime method".into())),
     }
+}
+
+pub(crate) fn record_process_interaction(
+    catalog: &Arc<Mutex<Catalog>>,
+    native: &crate::storage::process_interactions::Native,
+    receipt: &crate::process::interaction::Receipt,
+    executor_stopped: bool,
+) -> Result<(), KernelError> {
+    {
+        let catalog = catalog
+            .lock()
+            .map_err(|_| KernelError::Storage("Catalog owner failed".into()))?;
+        let operation = catalog
+            .operation(&native.context.operation_id)
+            .map_err(domain)?;
+        let intent = varin_runtime::catalog::tool_content::ToolIntent::from_operation(&operation)
+            .map_err(domain)?;
+        let claim = intent.contract().resources.first().ok_or_else(|| {
+            KernelError::Authorization("process input resource identity missing".into())
+        })?;
+        let target: Vec<String> = serde_json::from_str(&claim.key)?;
+        let (expected_key, expected_method) = match native.executor.as_str() {
+            "process_write" => ("process-input", "process.write"),
+            "process_resize" => ("process-size", "process.resize"),
+            _ => {
+                return Err(KernelError::Authorization(
+                    "unknown process interaction executor".into(),
+                ))
+            }
+        };
+        if !receipt.valid()
+            || receipt.method() != expected_method
+            || target.len() != 3
+            || target[0] != expected_key
+            || target[2] != receipt.identity().process_id
+            || receipt.identity().operation_id != operation.id
+            || operation.run_id != native.context.run_id
+            || intent.origin() != &native.context.origin
+            || operation.executor.as_deref() != Some(native.executor.as_str())
+            || !matches!(native.executor.as_str(), "process_write" | "process_resize")
+        {
+            return Err(KernelError::Authorization(
+                "process input receipt does not match its original tool invocation".into(),
+            ));
+        }
+    }
+    varin_runtime::catalog::result_content::record_external_receipt(
+        catalog,
+        &native.context.operation_id,
+        varin_runtime::ExternalReceipt {
+            executor: native.executor.clone(),
+            identity: native.context.operation_id.clone(),
+            epoch: receipt.identity().kernel_epoch.clone(),
+            outcome: receipt.outcome(),
+            effect: receipt.effect(),
+            result: serde_json::to_value(receipt)?,
+        },
+        executor_stopped && receipt.identity().state != crate::process::interaction::State::Unknown,
+    )
+    .map_err(domain)?;
+    Ok(())
 }
 
 fn apply_process_terminal(

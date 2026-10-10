@@ -1,3 +1,4 @@
+import { attachProcessTerminal } from '@/lib/attachProcessTerminal';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
@@ -8,6 +9,7 @@ import { ThreadConversation } from './ThreadConversation';
 import { AgentWorkspaceShell } from '@/workbenches/agent/AgentWorkspaceShell';
 
 const runtimeState = vi.hoisted(() => ({ api: undefined as ThreadsAPI | undefined }));
+vi.mock('@/lib/attachProcessTerminal', () => ({ attachProcessTerminal: vi.fn() }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ threads: runtimeState.api }) }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: (selector: (state: { currentDirectory: string }) => unknown) => selector({ currentDirectory: '/workspace/project' }) }));
 vi.mock('@/stores/usePiSessionStore', () => ({ usePiSessionStore: { subscribe: () => () => {} } }));
@@ -53,7 +55,7 @@ function fixture(active = false) {
 let root: Root;
 let container: HTMLDivElement;
 beforeEach(() => {
-  runtimeState.api = undefined;
+  runtimeState.api = undefined; vi.mocked(attachProcessTerminal).mockClear();
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
   vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('FileReader', class {
@@ -874,4 +876,28 @@ it('starts an explicit goal from the latest finished Run and keeps Stop run avai
   expect(f.cancelRun).toHaveBeenCalledWith(next.id);
   await act(async () => finish({ id: start.mock.calls[0]![0].key, revision: 1, generation: 1, thread_id: identity.threadId, branch_id: identity.branchId, control: 'active' }));
   expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
+});
+
+
+it('opens the original accepted PTY in the shared terminal and fences a late response after changing branches', async () => {
+  const f = fixture(true);
+  const operation: ThreadSnapshot['operations'][number] = { id: 'process:interactive', run_id: 'ui-run', epoch: 1, revision: 1,
+    phase: 'running', outcome: null, effect: 'dispatched', cancel_requested: false,
+    lifetime: 'environment', handed_off: true, executor: 'process_spawn', waiting_on: null,
+    intent: { call: { arguments: { mode: 'pty' } } }, result: null, external_receipt: null,
+    call_completion: { kind: 'job_accepted', operation_id: 'process:interactive', phase: 'running', effect: 'dispatched', lifetime: 'environment' }, execution_owner: null };
+  f.view.operations = [operation];
+  const result = { sessionId: 'original-terminal', cwd: '/original-workspace', operationId: operation.id, processId: operation.id };
+  const open = vi.fn(async () => result); f.api.processes = { openTerminal: open };
+  await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  await act(async () => { button('Open process terminal').click(); });
+  expect(open).toHaveBeenCalledWith({ ...identity, operationId: operation.id });
+  expect(attachProcessTerminal).toHaveBeenCalledWith(result.cwd, result.sessionId, 'Agent process');
+  let resolve!: (value: typeof result) => void;
+  open.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  await act(async () => { button('Open process terminal').click(); });
+  const other = { ...identity, branchId: 'other-branch' };
+  await act(async () => { root.render(<ThreadConversation api={f.api} identity={other} />); });
+  await act(async () => { resolve(result); });
+  expect(attachProcessTerminal).toHaveBeenCalledTimes(1);
 });

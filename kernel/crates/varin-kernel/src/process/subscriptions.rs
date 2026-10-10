@@ -25,6 +25,7 @@ struct Subscription {
     id: String,
     process_id: String,
     grant_id: String,
+    original_grant_id: String,
     epoch: String,
     output: OutputHandle,
     snapshot: Value,
@@ -53,6 +54,7 @@ impl ProcessSubscriptions {
         epoch: &str,
         cursor: u64,
         snapshot: Value,
+        original_grant_id: String,
         output: OutputHandle,
         live: bool,
     ) -> Result<Value, KernelError> {
@@ -66,6 +68,7 @@ impl ProcessSubscriptions {
             id: id.into(),
             process_id: process_id.into(),
             grant_id: grant_id.into(),
+            original_grant_id,
             epoch: epoch.into(),
             output,
             snapshot,
@@ -193,7 +196,7 @@ impl ProcessSubscriptions {
     }
     pub(crate) fn close_grant(&self, grant_id: &str) {
         self.close_matching(
-            |sub| sub.grant_id == grant_id,
+            |sub| sub.grant_id == grant_id || sub.original_grant_id == grant_id,
             "process subscription permission was revoked",
         );
     }

@@ -24,7 +24,7 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
       if (!liveSources) throw new Error('Live workspace access is unavailable');
       const liveRoot = await liveSources.prepare(workspace.workspaceId, workspace.workspaceId, input.threadId);
       return { path: root, source: { workspaceId: workspace.workspaceId, executionWorkspaceId: workspace.workspaceId,
-        mode: 'live_root', liveRoot, tools: ['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn', 'language_definition', 'language_references', 'language_diagnostics', 'code_retrieval'] } };
+        mode: 'live_root', liveRoot, tools: ['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn', 'process_write', 'process_resize', 'language_definition', 'language_references', 'language_diagnostics', 'code_retrieval'] } };
     }
     const mode = input.mode;
     const key = createHash('sha256').update(JSON.stringify([input.threadId, input.branchId, workspace.workspaceId, input.key, input.mode])).digest('hex');
@@ -43,7 +43,7 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
       // do not recapture a changed directory or substitute the branch's mutable write root.
       return { path: root, source: { workspaceId: workspace.workspaceId, executionWorkspaceId: workspace.workspaceId,
         branchId: branch.branchId, revision: 0, mode,
-        tools: mode === 'fixed_branch' ? ['file_read', 'file_list', 'file_search'] : ['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn'],
+        tools: mode === 'fixed_branch' ? ['file_read', 'file_list', 'file_search'] : ['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn', 'process_write', 'process_resize'],
       } } satisfies ThreadPreparedSource;
     }, 'shared', { threadId: input.threadId });
     preparing.set(key, preparation);

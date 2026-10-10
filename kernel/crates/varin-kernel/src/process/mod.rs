@@ -1,12 +1,13 @@
 //! One native process service for PTYs and protocol pipes. Per-process guardians
 //! are private instances of this executable, not Host/Pi processes or authorities.
 //! The kernel owns grants, durable identities, admission and raw byte cursors.
+pub(crate) mod interaction;
 pub(crate) mod platform;
 pub(crate) mod subscriptions;
 pub(crate) mod worker;
 use crate::{
     error::KernelError,
-    protocol::{hash_json, read_frame, write_frame},
+    protocol::{read_frame, write_frame},
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde_json::{json, Value};
@@ -47,26 +48,37 @@ struct Buffer {
     pid: Option<u32>,
     receipt: Option<Value>,
     control_error: Option<String>,
+    interactions: interaction::Interactions,
     input_sequence: i64,
-    queued_sequence: i64,
-    input_hash: String,
     input_error: Option<String>,
 }
 struct Shared {
     buffer: Mutex<Buffer>,
     changed: Condvar,
     publication: Mutex<()>,
+    interaction_wakes: Mutex<HashMap<String, SyncSender<()>>>,
 }
 impl Shared {
     fn new() -> Self {
         Self {
             buffer: Mutex::new(Buffer {
                 input_sequence: -1,
-                queued_sequence: -1,
                 ..Buffer::default()
             }),
             changed: Condvar::new(),
             publication: Mutex::new(()),
+            interaction_wakes: Mutex::new(HashMap::new()),
+        }
+    }
+    fn notify(&self) {
+        self.changed.notify_all();
+        for wake in self
+            .interaction_wakes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+        {
+            let _ = wake.try_send(());
         }
     }
     fn lock(&self) -> std::sync::MutexGuard<'_, Buffer> {
@@ -306,6 +318,11 @@ impl ProcessManager {
     pub(crate) fn set_subscriptions(&mut self, subscriptions: subscriptions::ProcessSubscriptions) {
         self.subscriptions = Some(subscriptions);
     }
+    pub(crate) fn revoke_subscriptions(&self, grant_id: &str) {
+        if let Some(subscriptions) = &self.subscriptions {
+            subscriptions.close_grant(grant_id);
+        }
+    }
     pub(crate) fn subscribe(
         &self,
         id: &str,
@@ -314,6 +331,7 @@ impl ProcessManager {
         epoch: &str,
         cursor: u64,
         snapshot: Value,
+        original_grant_id: String,
     ) -> Result<Value, KernelError> {
         let output = self
             .outputs
@@ -330,6 +348,7 @@ impl ProcessManager {
                 epoch,
                 cursor,
                 snapshot,
+                original_grant_id,
                 output,
                 self.live.contains_key(process_id),
             )
@@ -549,7 +568,7 @@ impl ProcessManager {
             if result.is_err() {
                 writer_shared.lock().control_error =
                     Some("native process control pipe closed".into());
-                writer_shared.changed.notify_all();
+                writer_shared.notify();
             }
             // Dropping stdin triggers the guardian's EOF cleanup, even on Host loss.
         });
@@ -587,10 +606,43 @@ impl ProcessManager {
                                 terminal_sent = true;
                             }
                         }
-                        Some("input") => {
+                        Some("input-chunk" | "interaction") => {
+                            let receipt: interaction::Receipt =
+                                serde_json::from_value(value["receipt"].clone())?;
                             let mut buffer = reader_shared.lock();
-                            buffer.input_sequence = value["sequence"].as_i64().unwrap_or(-1);
-                            buffer.input_error = value["error"].as_str().map(str::to_string);
+                            if receipt.identity().process_id != process_id
+                                || receipt.identity().kernel_epoch != kernel_epoch
+                            {
+                                return Err(io::Error::other("foreign native interaction receipt"));
+                            }
+                            let Some(progress) = buffer
+                                .interactions
+                                .active
+                                .get_mut(&receipt.identity().operation_id)
+                            else {
+                                // Final local failure and guardian tree-drain can race. The original
+                                // reservation is already settled; a late final cannot reopen it.
+                                if value["type"] == "interaction" {
+                                    continue;
+                                }
+                                return Err(io::Error::other(
+                                    "unknown native interaction acknowledgement",
+                                ));
+                            };
+                            if !receipt.follows(&progress.receipt) {
+                                return Err(io::Error::other(
+                                    "invalid native interaction receipt identity",
+                                ));
+                            }
+                            progress.receipt = receipt.clone();
+                            progress.chunk = value["chunk"].as_u64().unwrap_or(progress.chunk);
+                            progress.final_receipt = value["type"] == "interaction";
+                            if progress.final_receipt {
+                                buffer.input_sequence = buffer
+                                    .input_sequence
+                                    .max(receipt.identity().sequence as i64);
+                                buffer.input_error = receipt.identity().reason.clone();
+                            }
                         }
                         Some("output-error") => {
                             reader_shared.lock().output_error =
@@ -602,7 +654,7 @@ impl ProcessManager {
                         }
                         _ => return Err(io::Error::other("invalid native control event")),
                     }
-                    reader_shared.changed.notify_all();
+                    reader_shared.notify();
                 }
                 Ok(())
             })();
@@ -613,7 +665,7 @@ impl ProcessManager {
                         Some("native control stream ended without a complete frame".into());
                 }
                 buffer.closed = true;
-                reader_shared.changed.notify_all();
+                reader_shared.notify();
             }
             if !terminal_sent {
                 if let Some(sender) = &terminal {
@@ -665,7 +717,7 @@ impl ProcessManager {
                         .checked_add(bytes.len() as u64)
                         .ok_or_else(|| io::Error::other("process output cursor overflow"))?;
                     buffer.file_end = position;
-                    data_shared.changed.notify_all();
+                    data_shared.notify();
                 }
                 spool.sync_data()?;
                 let (end, file_end, discarded) = {
@@ -706,7 +758,7 @@ impl ProcessManager {
                 ));
             }
             buffer.output_closed = true;
-            data_shared.changed.notify_all();
+            data_shared.notify();
             // Closing a failed data pipe makes guardian readers request stopping and drain/discard
             // remaining target output. No successful complete-log claim is made.
         });
@@ -802,62 +854,6 @@ impl ProcessManager {
             .map_err(|_| failure("output cursor poisoned"))?;
         read_output(output, &mut state, cursor, limit)
     }
-    pub(crate) fn write(
-        &mut self,
-        id: &str,
-        sequence: i64,
-        bytes: &str,
-        eof: bool,
-    ) -> Result<Value, KernelError> {
-        let live = self
-            .live
-            .get_mut(id)
-            .ok_or_else(|| failure("process handle is not live in this epoch"))?;
-        if live.guardian_exited || live.control.stop_requested() {
-            return Err(failure("process is stopping or exited"));
-        }
-        let decoded = BASE64
-            .decode(bytes)
-            .map_err(|_| failure("stdin bytes are not valid base64"))?;
-        if decoded.len() > CHUNK_BYTES {
-            return Err(failure("stdin chunk exceeds the native transport bound"));
-        }
-        let hash = hash_json(&json!({"bytes":bytes,"eof":eof}))?;
-        let mut buffer = live.shared.lock();
-        if sequence == buffer.queued_sequence && hash == buffer.input_hash {
-            return Ok(json!({"queued":true,"sequence":sequence}));
-        }
-        if sequence != buffer.queued_sequence + 1 || buffer.queued_sequence != buffer.input_sequence
-        {
-            return Err(failure(
-                "process stdin sequence is stale or awaiting its write receipt",
-            ));
-        }
-        live.input
-            .lock()
-            .map_err(|_| failure("guardian input poisoned"))?
-            .as_ref()
-            .ok_or_else(|| failure("process input is closed"))?
-            .try_send(json!({"type":"write","sequence":sequence,"bytesBase64":bytes,"eof":eof}))
-            .map_err(|_| failure("process control backpressure; stdin was not queued"))?;
-        buffer.queued_sequence = sequence;
-        buffer.input_hash = hash;
-        Ok(json!({"queued":true,"sequence":sequence}))
-    }
-    pub(crate) fn resize(&mut self, id: &str, cols: u16, rows: u16) -> Result<Value, KernelError> {
-        let live = self
-            .live
-            .get(id)
-            .ok_or_else(|| failure("process handle is not live in this epoch"))?;
-        live.input
-            .lock()
-            .map_err(|_| failure("guardian input poisoned"))?
-            .as_ref()
-            .ok_or_else(|| failure("process input is closed"))?
-            .try_send(json!({"type":"resize","cols":cols,"rows":rows}))
-            .map_err(|_| failure("process control backpressure; resize was not queued"))?;
-        Ok(json!({"queued":true}))
-    }
     pub(crate) fn kill(&mut self, id: &str, force: bool) -> Result<Value, KernelError> {
         let live = self
             .live
@@ -910,30 +906,34 @@ impl ProcessManager {
             }
         }
         let deadline = Instant::now() + Duration::from_secs(5);
-        let result = (|| -> Result<(), KernelError> { loop {
-            let mut pending = false;
-            let ids: Vec<_> = self.live.keys().cloned().collect();
-            for id in ids {
-                if self
-                    .observation(&id)?
-                    .is_some_and(|value| value["writerActive"].as_bool() != Some(false))
-                {
-                    pending = true;
+        let result = (|| -> Result<(), KernelError> {
+            loop {
+                let mut pending = false;
+                let ids: Vec<_> = self.live.keys().cloned().collect();
+                for id in ids {
+                    if self
+                        .observation(&id)?
+                        .is_some_and(|value| value["writerActive"].as_bool() != Some(false))
+                    {
+                        pending = true;
+                    }
                 }
+                if !pending {
+                    return Ok(());
+                }
+                if Instant::now() >= deadline {
+                    return Err(failure(
+                        "native process exit remains unconfirmed; durable writers are retained",
+                    ));
+                }
+                thread::sleep(Duration::from_millis(10));
             }
-            if !pending {
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                return Err(failure(
-                    "native process exit remains unconfirmed; durable writers are retained",
-                ));
-            }
-            thread::sleep(Duration::from_millis(10));
-        } })();
+        })();
         // A failed stop remains uncertain. Closing control still invokes the guardian's loss path.
         for live in self.live.values_mut() {
-            if let Ok(mut input) = live.input.lock() { input.take(); }
+            if let Ok(mut input) = live.input.lock() {
+                input.take();
+            }
         }
         result
     }

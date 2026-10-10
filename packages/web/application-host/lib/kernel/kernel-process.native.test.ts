@@ -122,14 +122,16 @@ it("native process pipes preserve binary stdout/stderr, bounded cursors and the 
   assert.equal((await f.client.processSpawn(params)).status, "released");
 }, 30_000);
 
-it("native process stdin has exact sequence receipts and duplicate writes never execute twice", async () => {
+it("native process stdin has original interaction receipts and duplicate writes never execute twice", async () => {
   const f = await fixture();
   const params = f.spawn("stdin", "let b=[];process.stdin.on('data',x=>b.push(x));process.stdin.on('end',()=>process.stdout.write(Buffer.concat(b)))");
   await f.client.processSpawn(params);
   await waitFor(f.client, params.processId, (p) => p.pid !== null);
-  const write = { workspaceId: "ws", processId: params.processId, sequence: 0, bytesBase64: Buffer.from("only-once").toString("base64"), eof: true };
-  await f.client.processWrite(write);
-  await f.client.processWrite(write);
+  const write = { workspaceId: "ws", processId: params.processId, operationId: `input:${params.processId}`, bytesBase64: Buffer.from("only-once").toString("base64"), eof: true };
+  const receipt = await f.client.processWrite(write);
+  assert.equal(receipt.state, 'applied');
+  assert.deepEqual(await f.client.processWrite(write), receipt);
+  assert.deepEqual(await f.client.processInteractionInspect({ workspaceId: 'ws', processId: params.processId, operationId: write.operationId }), receipt);
   const result = await drain(f.client, params.processId);
   assert.equal(result.stdout.toString(), "only-once");
   assert.equal(result.process.exitCode, 0, JSON.stringify(result.process));
@@ -150,9 +152,9 @@ it("native PTY is a real terminal with its requested dimensions and resize input
     await pause();
   }
   assert.match(stripVTControlCharacters(initial), /TTY true true 90 30/);
-  await f.client.processResize({ workspaceId: "ws", processId: params.processId, cols: 111, rows: 41 });
+  await f.client.processResize({ workspaceId: "ws", processId: params.processId, operationId: `resize:${params.processId}`, cols: 111, rows: 41 });
   await pause(100);
-  await f.client.processWrite({ workspaceId: "ws", processId: params.processId, sequence: 0, bytesBase64: Buffer.from("go\r").toString("base64") });
+  await f.client.processWrite({ workspaceId: "ws", processId: params.processId, operationId: `input:${params.processId}`, bytesBase64: Buffer.from("go\r").toString("base64") });
   const result = await drain(f.client, params.processId, cursor);
   assert.match(stripVTControlCharacters(result.stdout.toString()), /SIZE 111 41/);
   assert.equal(result.process.exitCode, 0, JSON.stringify(result.process));
@@ -421,20 +423,12 @@ it("stdin control receipts progress behind unread output without duplicate input
     if (Date.now() > deadline) throw new Error("Unread output blocked the child before stdin admission");
     await pause();
   }
-  const first = { workspaceId: "ws", processId: "unread-input", sequence: 0, bytesBase64: Buffer.from("first-").toString("base64") };
+  const first = { workspaceId: "ws", processId: "unread-input", operationId: "unread-first", bytesBase64: Buffer.from("first-").toString("base64") };
   await f.client.processWrite(first);
   await f.client.processWrite(first);
-  // Acceptance of the next sequence proves the previous control receipt was
-  // delivered; no process.read call has consumed even one output byte.
-  for (;;) {
-    try {
-      await f.client.processWrite({ ...first, sequence: 1, bytesBase64: Buffer.from("second").toString("base64"), eof: true });
-      break;
-    } catch (error) {
-      if (!/awaiting its write receipt/.test(String(error)) || Date.now() > deadline) throw error;
-      await pause();
-    }
-  }
+  // Both actual write acknowledgements progress without consuming an output byte.
+  const second = await f.client.processWrite({ ...first, operationId: 'unread-second', bytesBase64: Buffer.from("second").toString("base64"), eof: true });
+  assert.equal(second.state, 'applied');
   assert.equal((await waitFor(f.client, "unread-input", s => !s.writerActive)).exitCode, 0);
   const result = await drain(f.client, "unread-input");
   assert.deepEqual(result.stdout, Buffer.alloc(8*1024*1024,91));
@@ -626,7 +620,7 @@ it("completed output reopens byte-exact after kernel restart while old process w
   assert.equal(after.stderr.toString(), "durable-stderr");
   assert.equal(after.process.writerActive, false);
   assert.equal(after.process.exitCode, 7);
-  await assert.rejects(reopened.client.processWrite({ workspaceId: "ws", processId, sequence: 0, bytesBase64: "" }), /stale kernel epoch/);
+  await assert.rejects(reopened.client.processWrite({ workspaceId: "ws", processId, operationId: `input:${processId}`, bytesBase64: "" }), /stale kernel epoch/);
   await assert.rejects(reopened.client.processKill({ workspaceId: "ws", processId, force: true }), /stale kernel epoch/);
   const files = outputFiles(f, processId);
   await reopened.client.processRelease({ workspaceId: "ws", processId });
@@ -716,7 +710,7 @@ vitestIt.skipIf(!available || process.platform !== "linux")("a complete retained
   const processId = "complete-log-unknown-writer";
   const initial = await f.client.processSpawn(f.spawn(processId, "process.stdin.once('data',()=>{process.stdout.write('complete-log');process.stdin.destroy()});process.stdin.resume()"));
   assert.equal(initial.writerActive, true);
-  await f.client.processWrite({ workspaceId: "ws", processId, sequence: 0, bytesBase64: Buffer.from("go").toString("base64") });
+  await f.client.processWrite({ workspaceId: "ws", processId, operationId: `input:${processId}`, bytesBase64: Buffer.from("go").toString("base64") });
   const files = outputFiles(f, processId);
   const deadline = Date.now() + 15_000;
   // Inspect durable evidence directly, leaving the Storage process snapshot
@@ -775,7 +769,7 @@ it("a held subscription data credit cannot block stdin acknowledgements or nativ
       if (Date.now() > deadline) throw new Error("Subscription did not deliver initial output");
       await pause();
     }
-    const input = { workspaceId: "ws", processId, sequence: 0, bytesBase64: Buffer.from("ack-me").toString("base64") };
+    const input = { workspaceId: "ws", processId, operationId: `input:${processId}`, bytesBase64: Buffer.from("ack-me").toString("base64") };
     await f.client.processWrite(input);
     while (inputSequence < 0) {
       if (observerFailure) throw observerFailure;

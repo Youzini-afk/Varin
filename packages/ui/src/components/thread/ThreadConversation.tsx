@@ -1,3 +1,4 @@
+import { attachProcessTerminal } from '@/lib/attachProcessTerminal';
 import { ThreadPlan } from './ThreadPlan';
 import { ThreadGoal } from './ThreadGoal';
 import { ThreadFollowups } from './ThreadFollowups';
@@ -104,6 +105,13 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         : value instanceof Error ? value.message : 'Thread request failed'));
     }
     finally { if (current()) { pendingAction.current = null; setPending(false); } }
+  };
+  const openProcessTerminal = async (operationId: string) => {
+    const generation = identityGeneration.current;
+    const terminal = await api.processes!.openTerminal({ ...identity, operationId });
+    if (generation === identityGeneration.current && host === getRuntimeEndpointGeneration()) {
+      attachProcessTerminal(terminal.cwd, terminal.sessionId, 'Agent process');
+    }
   };
   const addImages = async (files: File[]) => {
     const generation = fileReadGeneration.current;
@@ -216,6 +224,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         <ThreadPermission operation={operation} enabled={!pending && operation.run_id === run?.id && !run?.cancel_requested} onDecide={(permissionId, decision) => act(() => api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }))} />
         {operation.executor === 'ask_user' && <ThreadQuestion operation={operation} enabled={!pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on} onAnswer={answer => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}
         <div>Background operation · {operation.phase} · {operation.outcome ?? 'In progress'} · effect: {operation.effect}</div>
+        {api.processes && operation.executor === 'process_spawn' && operation.call_completion?.kind === 'job_accepted'
+          && (operation.intent as { call?: { arguments?: { mode?: string } } } | null)?.call?.arguments?.mode === 'pty'
+          && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => openProcessTerminal(operation.id))}>Open process terminal</Button>}
         {operation.external_receipt && <div className="text-xs text-muted-foreground">{operation.external_receipt.executor} · {operation.external_receipt.outcome}</div>}
         {operation.phase !== 'terminal' && (operation.executor !== 'ask_user' || run?.waiting_on === operation.waiting_on) && <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelOperation(operation.id), true)}>{operation.executor === 'dispatch' ? 'Cancel child task' : operation.executor === 'wait_child' ? 'Cancel observation wait' : 'Cancel operation'}</Button>}
       </div>)}

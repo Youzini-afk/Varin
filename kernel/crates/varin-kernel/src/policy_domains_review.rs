@@ -255,7 +255,7 @@ impl AgentPolicy for Sequence {
                     graph(
                         "spawn",
                         "process_spawn",
-                        json!({"cwd":"","command":"/bin/sh","args":["-c","printf 'policy-original-output\\n'"],"env":[],"mode":"pipe"}),
+                        json!({"cwd":"","command":"/bin/sh","args":["-c","IFS= read -r value; test \"$value\" = policy-original-input && printf 'policy-original-output\\n'"],"env":[],"mode":"pipe"}),
                     )
                 } else {
                     next["stage"] = json!(9);
@@ -271,7 +271,43 @@ impl AgentPolicy for Sequence {
                     panic!("spawn acceptance")
                 };
                 next["processId"] = json!(operation_id);
-                graph("wait", "wait_process", json!({"processId":operation_id}))
+                next["stage"] = json!(50);
+                graph(
+                    "input",
+                    "process_write",
+                    json!({"processId":operation_id,"text":"policy-original-input\n","eof":true}),
+                )
+            }
+            50 => {
+                assert!(matches!(
+                    receipts(event)[0].completion,
+                    PolicyNodeCompletion::Result {
+                        outcome: Outcome::Succeeded,
+                        effect: Effect::Confirmed,
+                        ..
+                    }
+                ));
+                PolicyAction::ReadResult {
+                    reference: receipts(event)[0].output().unwrap().clone(),
+                    index: 0,
+                }
+            }
+            51 => {
+                let PolicyEvent::ResultChunk { bytes, .. } = event else {
+                    panic!("read original input receipt")
+                };
+                let receipt: Value = serde_json::from_slice(bytes).unwrap();
+                assert_eq!(receipt["processId"], state["processId"]);
+                assert_eq!(receipt["state"], "applied");
+                assert_eq!(receipt["confirmedBytes"], 22);
+                assert_eq!(receipt["eofApplied"], true);
+                next["inputReceipt"] = receipt;
+                next["stage"] = json!(6);
+                graph(
+                    "wait",
+                    "wait_process",
+                    json!({"processId":state["processId"]}),
+                )
             }
             6 => {
                 assert!(matches!(
@@ -677,6 +713,7 @@ fn policy_todo_question_reopen_process_wait_and_explicit_resume_use_real_domains
         ToolKind::ProcessSpawn,
         ToolKind::ProcessInspect,
         ToolKind::ProcessRead,
+        ToolKind::ProcessWrite,
     ]);
     let mut binding = ToolBinding {
         grant_id: "process".into(),
@@ -712,6 +749,16 @@ fn policy_todo_question_reopen_process_wait_and_explicit_resume_use_real_domains
     let controls = crate::process::ProcessControlRegistry::default();
     storage.set_process_controls(controls.clone());
     let storage = Arc::new(Mutex::new(storage));
+    let interactions = crate::storage::process_interactions::Client::new({
+        let storage = storage.clone();
+        move |command| {
+            storage
+                .lock()
+                .unwrap()
+                .serve_interaction(command, EPOCH, HOST, GENERATION);
+            Ok(())
+        }
+    });
     let resources = KernelResourceClient::new(
         {
             let storage = storage.clone();
@@ -729,14 +776,22 @@ fn policy_todo_question_reopen_process_wait_and_explicit_resume_use_real_domains
         },
         |_| Ok(()),
         controls,
-    );
+    )
+    .with_process_interactions(interactions);
     let (bridge, queries, worker) = plan_owner();
     let declarations = |f: &Fixture| {
         let mut declarations = KernelToolExecutor::new(binding.clone(), resources.clone())
             .unwrap()
             .declarations(true);
-        declarations
-            .retain(|d| !["process_inspect", "process_read"].contains(&d.schema.name.as_str()));
+        declarations.retain(|d| {
+            ![
+                "process_inspect",
+                "process_read",
+                "process_write",
+                "process_resize",
+            ]
+            .contains(&d.schema.name.as_str())
+        });
         declarations.extend(process_wait::declarations(
             f.runtime.catalog(),
             binding.clone(),
@@ -769,6 +824,22 @@ fn policy_todo_question_reopen_process_wait_and_explicit_resume_use_real_domains
     let report = f.start(declarations(&f));
     assert_eq!(report.policy_state["processResult"]["status"], "exited");
     assert_eq!(report.policy_state["processResult"]["exitCode"], 0);
+    let operation = f
+        .runtime
+        .catalog()
+        .lock()
+        .unwrap()
+        .operation(
+            report.policy_state["inputReceipt"]["operationId"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+    let intent =
+        varin_runtime::catalog::tool_content::ToolIntent::from_operation(&operation).unwrap();
+    assert!(matches!(intent.origin(), ToolOrigin::PolicyAction { .. }));
+    assert_eq!(operation.effect, Effect::Confirmed);
+    assert!(operation.external_receipt.is_some());
     // Once paused, the completed tool graph no longer needs the process/plan directory to resume.
     f.finish(report);
     bridge.close();

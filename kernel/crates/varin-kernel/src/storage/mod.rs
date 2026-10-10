@@ -16,7 +16,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::authority::{path_allowed, path_allowed_scopes, path_metadata_allowed_scopes, require_capability};
+use crate::authority::{
+    path_allowed, path_allowed_scopes, path_metadata_allowed_scopes, require_capability,
+};
 use crate::error::KernelError;
 use crate::model::{
     BlobStream, BranchBuilder, BranchRow, BranchWriteBuilder, BuildTree, FileLease,
@@ -28,25 +30,26 @@ use crate::storage_schema::{
 };
 
 mod authority_store;
-mod child_sources;
 mod branches;
-mod core;
-mod compute_resources;
 pub(crate) mod capture_resources;
-pub(crate) mod materialization;
+mod child_sources;
+mod compute_resources;
+mod core;
 mod dispatch;
+pub(crate) mod file_mutations;
+mod file_reconciliation;
 mod file_resource_leases;
 mod file_resources;
 mod gc;
 mod maintenance;
+pub(crate) mod materialization;
 mod objects;
-pub(crate) mod file_mutations;
-mod file_reconciliation;
 mod operations;
+pub(crate) mod process_interactions;
 mod process_resources;
 mod records;
-pub(crate) mod result_publication;
 mod recovery;
+pub(crate) mod result_publication;
 mod state_tree;
 
 pub(crate) fn sync_directory(path: &Path) -> io::Result<()> {

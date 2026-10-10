@@ -804,6 +804,7 @@ describe("shell-supervisor disposal protection", () => {
     killThrows?: boolean;
     killEmitsExit?: boolean;
     readyDelayMs?: number;
+    rejectCommandWrite?: boolean;
   } = {}): PtyProcess & { emitData: (data: string) => void; emitExit: () => void } => {
     const dataHandlers = new Set<(data: string) => void>();
     const exitHandlers = new Set<(event: { exitCode: number; signal: number }) => void>();
@@ -834,9 +835,30 @@ describe("shell-supervisor disposal protection", () => {
         }
         const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+)/)?.[1];
         if (token) queueMicrotask(() => { for (const handler of dataHandlers) handler(`__VARIN_SENTINEL_${token}:B\n`); });
+        if (token && options.rejectCommandWrite) return Promise.reject(new Error('stdin acknowledgement lost after dispatch'));
       },
     };
   };
+
+  it("keeps writer protection after asynchronous input failure and settles only from actual process exit", async () => {
+    const outputStore = createOutputStore();
+    const process = controlledProcess({ rejectCommandWrite: true });
+    let closed = 0;
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} }, outputStore,
+      sessionId: "input-ack-loss", cwd: '/workspace', ptyProvider: { backend: "fake", spawn: () => process },
+      registerWriter: async () => ({ close: async () => { closed++; } }),
+    });
+    try {
+      await expect(supervisor.exec('possibly-partial-command', { waitMs: 1000, toolCallId: 'original-input' })).rejects.toThrow('acknowledgement lost');
+      expect(closed).toBe(0);
+      await expect(supervisor.read('original-input')).rejects.toThrow('acknowledgement lost');
+      process.emitExit();
+      await new Promise(resolve => setImmediate(resolve));
+      await expect(supervisor.read('original-input')).resolves.toMatchObject({ running: false, exitCode: 0 });
+      expect(closed).toBe(1);
+    } finally { process.emitExit(); await supervisor.dispose(); outputStore.dispose(); }
+  });
 
   it("returns a queryable identity for waitMs zero and waits for output without locking controls", async () => {
     const outputStore = createOutputStore();

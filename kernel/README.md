@@ -76,6 +76,31 @@ The Host still owns request policy, DTO projection, grammar installation admissi
 packing, embeddings/vector stores, TriviumDB, LSP protocol, and Pi/model orchestration. The kernel does not
 become another public search service or model runtime.
 
+## Interactive process component acceptance
+
+The original ProcessManager owns identified stdin/EOF and resize effects. Separate per-process stdin
+and resize queues preserve their accepted order without making resize wait for blocked input. Native
+`process_write` / `process_resize` tools and retained Agent terminal views use the same original process,
+Storage intent and guardian receipt. Body-admission credit is distinct from effect completion; the Host
+keeps the request's cancellation and shutdown ownership after that transport credit is returned.
+
+After building a fresh, manifest-matched kernel, the focused OS component cases can be run with:
+
+```sh
+VARIN_TEST_KERNEL_EXECUTABLE=/absolute/path/to/fresh/varin-kernel \
+  cargo test --manifest-path kernel/Cargo.toml -p varin-kernel --lib process_interaction_review:: -- --ignored --test-threads=1
+VARIN_TEST_KERNEL_EXECUTABLE=/absolute/path/to/fresh/varin-kernel \
+  cargo test --manifest-path kernel/Cargo.toml -p varin-kernel --lib native_input_uses_original_model_intent_and_guardian_receipt_then_reads_same_process -- --ignored
+VARIN_TEST_KERNEL_EXECUTABLE=/absolute/path/to/fresh/varin-kernel \
+  cargo test --manifest-path kernel/Cargo.toml -p varin-kernel --lib policy_todo_question_reopen_process_wait_and_explicit_resume_use_real_domains -- --ignored
+```
+
+These use real guardian pipes/PTYs and persistent domain stores with deterministic provider replies.
+They require their declared local process/PTY support; they do not constitute Application Host IPC,
+renderer/network or cross-platform product acceptance. The owning Host `request-credit.test.ts` and
+terminal `input-wire.test.ts` separately exercise actual consumers with in-memory transport fixtures.
+The regular native authority suite below remains the real Host-to-kernel acceptance entry.
+
 ## Authority regression acceptance
 
 `bun run test:kernel` requires the built release executable and executes the Node transport suite plus the Vitest

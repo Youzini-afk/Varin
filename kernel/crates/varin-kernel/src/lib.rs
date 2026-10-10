@@ -1,7 +1,7 @@
 //! Varin's private system kernel library. The binary target only starts this runtime.
-mod agent_runtime;
-mod agent_resources;
 mod agent_goals;
+mod agent_resources;
+mod agent_runtime;
 mod authority;
 mod collaboration;
 mod compute;
@@ -38,8 +38,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     runtime::run()
 }
 
-mod reconcile;
 mod integration_reconciliation;
+mod reconcile;
 
 #[cfg(test)]
 mod host_tool_review;
@@ -49,3 +49,6 @@ mod policy_activation_planning_review;
 
 #[cfg(test)]
 mod agent_resources_review;
+
+#[cfg(test)]
+mod process_interaction_review;

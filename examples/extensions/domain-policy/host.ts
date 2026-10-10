@@ -3,8 +3,8 @@ import type { JsonValue, VarinAgentPolicyDecision, VarinAgentPolicyEvidenceRef, 
 
 // The command runs in the admitted execution environment, not in this extension broker.
 // The answer selects a fixed example action; it is never interpolated into a shell command.
-const configuration = { command: 'node', args: ['-e', 'process.stdout.write("Varin policy process probe\\n")'] };
-type Phase = 'plan_read' | 'plan_update' | 'question' | 'question_status' | 'spawn' | 'wait_process'
+const configuration = { command: 'node', args: ['-e', 'process.stdin.once("data", bytes => { process.stdout.write("Varin policy process probe: " + bytes); process.exit(0); }); process.stdin.resume();'] };
+type Phase = 'plan_read' | 'plan_update' | 'question' | 'question_status' | 'spawn' | 'resize' | 'write' | 'wait_process'
   | 'process_status' | 'delivery' | 'pause' | 'final_delivery' | 'cancelled_delivery' | 'complete';
 interface State {
   phase: Phase;
@@ -14,7 +14,7 @@ interface State {
   nextChunk: number;
   bytes: number[];
 }
-const phases: Phase[] = ['plan_read', 'plan_update', 'question', 'question_status', 'spawn', 'wait_process',
+const phases: Phase[] = ['plan_read', 'plan_update', 'question', 'question_status', 'spawn', 'resize', 'write', 'wait_process',
   'process_status', 'delivery', 'pause', 'final_delivery', 'cancelled_delivery', 'complete'];
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
@@ -36,7 +36,7 @@ function node(name: string, args: JsonValue): VarinAgentPolicyToolNode {
 export default defineHostExtension({
   activate(context) {
     provideAgentPolicy(context, {
-      identity: { name: 'plan-question-process', version: '1' },
+      identity: { name: 'plan-question-process', version: '2' },
       configuration,
       decide(input, signal, declaredConfiguration): VarinAgentPolicyDecision {
         signal.throwIfAborted();
@@ -59,7 +59,7 @@ export default defineHostExtension({
         }
         if (event.kind === 'tool_graph_completed') {
           const names: Partial<Record<Phase, string>> = { plan_read: 'todo', plan_update: 'todo', question: 'ask_user', question_status: 'question_status',
-            spawn: 'process_spawn', wait_process: 'wait_process', process_status: 'process_inspect' };
+            spawn: 'process_spawn', resize: 'process_resize', write: 'process_write', wait_process: 'wait_process', process_status: 'process_inspect' };
           const expected = names[state.phase];
           const receipt = event.receipts[0];
           if (event.receipts.length !== 1 || !expected || receipt?.node_id !== expected) return fail('Unexpected domain graph boundary');
@@ -75,13 +75,18 @@ export default defineHostExtension({
             }
             if (state.phase === 'spawn') {
               state.processId = completion.operation_id;
-              return graph('wait_process', 'wait_process', { processId: state.processId });
+              return graph('resize', 'process_resize', { processId: state.processId, cols: 111, rows: 41 });
             }
             if (completion.phase !== 'awaiting_process' || !state.processId) return fail('Unexpected process observation acceptance');
             // Observation cancellation is not process termination; inspect the actual process.
             return graph('process_status', 'process_inspect', { processId: state.processId });
           }
           if (completion.kind !== 'result' || completion.outcome !== 'succeeded') return fail('The domain action did not succeed; do not repeat an uncertain mutation');
+          if (state.phase === 'resize' || state.phase === 'write') {
+            if (completion.effect !== 'confirmed' || !state.processId) return fail('Process interaction lacks an actual applied receipt');
+            if (state.phase === 'resize') return graph('write', 'process_write', { processId: state.processId, text: 'fixed policy input\n' });
+            return graph('wait_process', 'wait_process', { processId: state.processId });
+          }
           if (state.phase === 'plan_update') return graph('question', 'ask_user', {
             question: 'The example plan is recorded. Type run to execute the fixed Node process probe, or cancel this question to stop the example. Process permission is checked separately.',
             options: ['run', 'stop'],
@@ -114,7 +119,7 @@ export default defineHostExtension({
             if (result.status === 'cancelled') return deliver('cancelled_delivery', 'The question was cancelled. This example did not start a process.');
             if (result.status !== 'answered' || typeof result.answer !== 'string' || !text(result.historyId)) return fail('No authentic answered question is available');
             if (result.answer.trim() !== 'run') return deliver('cancelled_delivery', 'The answer did not select the fixed process probe. No process was started.');
-            return graph('spawn', 'process_spawn', { cwd: '', command: config.command, args: config.args, mode: 'pipe' });
+            return graph('spawn', 'process_spawn', { cwd: '', command: config.command, args: config.args, mode: 'pty' });
           }
           if (state.phase === 'process_status') {
             if (!text(result.status) || !(result.exitCode === null || typeof result.exitCode === 'number' && Number.isInteger(result.exitCode))) {

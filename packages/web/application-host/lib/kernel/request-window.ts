@@ -1,5 +1,6 @@
 /** Transport credits, not a product request limit. Callers wait before encoding
- * an envelope; a credit returns only on native acknowledgement or disconnect. */
+ * an envelope; a credit returns only on native acknowledgement or disconnect. Long process
+ * interactions acknowledge body admission separately from their final effect. */
 export class KernelRequestWindow {
   private used = 0;
   private failure: Error | undefined;

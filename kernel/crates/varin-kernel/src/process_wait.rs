@@ -20,6 +20,9 @@ struct ReadHandle {
     cursor: u64,
     max_bytes: Option<u64>,
 }
+fn interacts(name: &str) -> bool {
+    matches!(name, "process_write" | "process_resize")
+}
 fn observes(name: &str) -> bool {
     matches!(name, "process_inspect" | "process_read")
 }
@@ -64,7 +67,9 @@ pub(crate) fn declarations(
     });
     schemas(selected)
         .into_iter()
-        .filter(|schema| schema.name == WAIT_TOOL || observes(&schema.name))
+        .filter(|schema| {
+            schema.name == WAIT_TOOL || observes(&schema.name) || interacts(&schema.name)
+        })
         .map(|schema| {
             varin_runtime::composition::tools::ToolDeclaration::new(schema, endpoint.clone())
         })
@@ -120,7 +125,7 @@ impl ProcessWaitTools {
         call: &ToolCall,
         contract: &ToolContract,
     ) -> Result<(), ExecutionError> {
-        let expected = if observes(&call.name) {
+        let expected = if observes(&call.name) || interacts(&call.name) {
             crate::tools::KernelToolExecutor::new(self.binding.clone(), self.resources.clone())?
                 .process_observation_contract(c, call)?
         } else {
@@ -137,6 +142,114 @@ impl ProcessWaitTools {
             return Err(error("process observation contract changed"));
         }
         Ok(())
+    }
+    fn interaction_input(
+        &self,
+        c: &ToolExecutionContext,
+        call: &ToolCall,
+    ) -> Result<(String, crate::process::interaction::Input), ExecutionError> {
+        let (id, input, kind) = if call.name == "process_write" {
+            let args: crate::tools::ProcessWriteArgs =
+                serde_json::from_value(call.arguments.clone()).map_err(error)?;
+            (
+                args.process_id,
+                crate::process::interaction::Input::Write {
+                    bytes: args.text.into_bytes().into(),
+                    eof: args.eof,
+                },
+                ToolKind::ProcessWrite,
+            )
+        } else {
+            let args: crate::tools::ProcessResizeArgs =
+                serde_json::from_value(call.arguments.clone()).map_err(error)?;
+            (
+                args.process_id,
+                crate::process::interaction::Input::Resize {
+                    cols: args.cols,
+                    rows: args.rows,
+                },
+                ToolKind::ProcessResize,
+            )
+        };
+        if !self.binding.enabled_tools.contains(&kind) || c.run_id != self.binding.run_id {
+            return Err(error("process interaction is not selected for this Run"));
+        }
+        let owner = self.check_owner(c, &id)?;
+        if owner != c.run_id {
+            return Err(error("follow-up process delegation is observation-only"));
+        }
+        let catalog = self.catalog.lock().map_err(error)?;
+        let process = catalog.operation(&id).map_err(error)?;
+        if process.cancel_requested {
+            return Err(error("original process cancellation was requested"));
+        }
+        Ok((id, input))
+    }
+    fn interaction(
+        &self,
+        c: &ToolExecutionContext,
+        call: &ToolCall,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> Result<ToolCompletion, ExecutionError> {
+        self.validate_contract(c, call, contract)?;
+        let (id, input) = self.interaction_input(c, call)?;
+        let client = self
+            .resources
+            .interactions
+            .as_ref()
+            .ok_or_else(|| error("process interaction owner unavailable"))?;
+        let address = crate::storage::process_interactions::Address {
+            workspace_id: self.binding.workspace_id.clone(),
+            process_id: id,
+            operation_id: c.operation_id.clone(),
+            root_id: self.binding.root_id.clone(),
+        };
+        let context = crate::storage::process_interactions::Context {
+            grant_id: self.binding.grant_id.clone(),
+            epoch: None,
+            binding: Some(self.binding.clone()),
+        };
+        let native = crate::storage::process_interactions::Native {
+            context: c.clone(),
+            executor: call.name.clone(),
+        };
+        let receipt = client
+            .invoke(
+                context,
+                address,
+                || Ok(input),
+                Some(native.clone()),
+                cancel.clone(),
+            )
+            .map_err(|failure| {
+                ExecutionError::new(
+                    if failure.dispatched {
+                        "process_effect_unknown"
+                    } else {
+                        "process_not_dispatched"
+                    },
+                    failure.error.to_string(),
+                )
+            })?;
+        if receipt.identity().state != crate::process::interaction::State::Unknown {
+            crate::agent_runtime::record_process_interaction(
+                &self.catalog,
+                &native,
+                &receipt,
+                true,
+            )
+            .map_err(|failure| {
+                ExecutionError::new("process_effect_unknown", failure.to_string())
+            })?;
+        }
+        Ok(ToolCompletion::Result {
+            outcome: receipt.outcome(),
+            effect: receipt.effect(),
+            content: serde_json::to_value(receipt).map_err(|failure| {
+                ExecutionError::new("process_effect_unknown", failure.to_string())
+            })?,
+        })
     }
     fn observe(
         &self,
@@ -173,6 +286,17 @@ impl ProcessWaitTools {
     }
 }
 impl ToolExecutor for ProcessWaitTools {
+    fn watch_admission(
+        &self,
+        c: &ToolExecutionContext,
+        call: &ToolCall,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError>
+    {
+        crate::tools::KernelToolExecutor::new(self.binding.clone(), self.resources.clone())?
+            .watch_admission(c, call, contract, cancel)
+    }
     fn supports_policy_read(
         &self,
         frozen: &FrozenToolContext,
@@ -198,7 +322,7 @@ impl ToolExecutor for ProcessWaitTools {
         frozen: &FrozenToolContext,
         _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
-        if observes(&call.name) {
+        if observes(&call.name) || interacts(&call.name) {
             return crate::tools::KernelToolExecutor::new(
                 self.binding.clone(),
                 self.resources.clone(),
@@ -234,6 +358,21 @@ impl ToolExecutor for ProcessWaitTools {
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
+        if interacts(&call.name) {
+            if cancel.is_cancelled() {
+                return Err(error("process input cancelled before authorization"));
+            }
+            self.validate_contract(c, call, contract)?;
+            let (id, _) = self.interaction_input(c, call)?;
+            return self
+                .resources
+                .interactions
+                .as_ref()
+                .ok_or_else(|| error("process interaction owner unavailable"))?
+                .access(self.binding.clone(), id)
+                .map(|_| ())
+                .map_err(error);
+        }
         if observes(&call.name) {
             self.validate_contract(c, call, contract)?;
             return self.observe(c, call, true, cancel).map(|_| ());
@@ -253,6 +392,23 @@ impl ToolExecutor for ProcessWaitTools {
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> ToolCompletion {
+        if interacts(&call.name) {
+            return self
+                .interaction(c, call, contract, cancel)
+                .unwrap_or_else(|error| {
+                    if error.code == "process_effect_unknown" {
+                        ToolCompletion::Result {
+                            outcome: Outcome::Indeterminate,
+                            effect: Effect::Unknown,
+                            content: json!({"error":error.code,"message":error.message}),
+                        }
+                    } else {
+                        ToolCompletion::NotDispatched {
+                            reason: error.to_string(),
+                        }
+                    }
+                });
+        }
         if observes(&call.name) {
             if let Err(e) = self.validate_contract(c, call, contract) {
                 return ToolCompletion::NotDispatched {

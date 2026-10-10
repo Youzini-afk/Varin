@@ -15,7 +15,7 @@ export interface ThreadModelInfo extends ThreadModel { name?: string; acceptsIma
 interface ThreadSourceBase {
   workspaceId: string;
   executionWorkspaceId: string;
-  tools: Array<'file_read' | 'file_list' | 'file_search' | 'file_write' | 'file_edit' | 'process_inspect' | 'process_read' | 'process_spawn' | 'language_definition' | 'language_references' | 'language_diagnostics' | 'code_retrieval'>;
+  tools: Array<'file_read' | 'file_list' | 'file_search' | 'file_write' | 'file_edit' | 'process_inspect' | 'process_read' | 'process_spawn' | 'process_write' | 'process_resize' | 'language_definition' | 'language_references' | 'language_diagnostics' | 'code_retrieval'>;
 }
 export type ThreadSource = ThreadSourceBase & (
   | { mode: 'fixed_branch' | 'materialized'; branchId: string; revision: number; liveRoot?: never }
@@ -153,7 +153,18 @@ export interface ThreadPolicyPreparation {
 export interface ThreadPolicyInspection extends PolicySelections {
   preparation: ThreadPolicyPreparation | null;
 }
+export interface ThreadProcessTerminal {
+  sessionId: string;
+  cwd: string;
+  operationId: string;
+  processId: string;
+}
+export interface ThreadProcessesAPI {
+  /** Open a view of the original PTY job; this never launches another shell. */
+  openTerminal(input: ThreadIdentity & { operationId: string }): Promise<ThreadProcessTerminal>;
+}
 export interface ThreadsAPI {
+  processes?: ThreadProcessesAPI;
   goals: ThreadGoalsAPI;
   plan?: ThreadPlanAPI;
   collaboration?: ThreadCollaborationAPI;

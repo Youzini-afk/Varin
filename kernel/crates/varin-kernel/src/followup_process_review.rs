@@ -59,7 +59,8 @@ fn model_call(
         },
     );
     let binding = RequestBinding {
-        goal: None, resource_activations: Vec::new(),
+        goal: None,
+        resource_activations: Vec::new(),
         resource_checkpoint_id: None,
         connection_identity: "fixture".into(),
         provider_family: "fixture".into(),
@@ -600,5 +601,402 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
     drop(storage);
     drop(owner);
     drop(runtime);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+#[ignore = "requires a freshly built kernel executable"]
+fn native_input_uses_original_model_intent_and_guardian_receipt_then_reads_same_process() {
+    let executable = std::env::var_os("VARIN_TEST_KERNEL_EXECUTABLE")
+        .map(PathBuf::from)
+        .expect("VARIN_TEST_KERNEL_EXECUTABLE must identify the freshly built kernel binary");
+    assert!(
+        executable.is_file(),
+        "explicit kernel executable must exist"
+    );
+    let root =
+        std::env::temp_dir().join(format!("varin-real-input-origin-{}", uuid::Uuid::new_v4()));
+    let cwd = root.join("working");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let storage_root = root.join("storage");
+    let mut storage = Storage::open(&storage_root, HOST).unwrap();
+    storage.set_test_process_worker_executable(executable);
+    issue(&mut storage, &storage_root, "setup", "setup", EPOCH);
+    let registered = dispatch(
+        &mut storage,
+        "setup",
+        "file.root.register",
+        json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":cwd}),
+        EPOCH,
+    );
+    let kinds = BTreeSet::from([
+        ToolKind::ProcessSpawn,
+        ToolKind::ProcessInspect,
+        ToolKind::ProcessRead,
+        ToolKind::ProcessWrite,
+        ToolKind::ProcessResize,
+    ]);
+    let tools = KernelToolExecutor::selected_schemas(&kinds);
+    let mut binding = ToolBinding {
+        grant_id: "source".into(),
+        run_id: String::new(),
+        thread_id: "thread".into(),
+        workspace_id: "workspace".into(),
+        execution_workspace_id: "workspace".into(),
+        root_id: Some(registered["rootId"].as_str().unwrap().into()),
+        file_source: None,
+        source_mode: SourceMode::LiveRoot,
+        materialized_source: None,
+        live_root: Some(LiveRoot {
+            host_id: HOST.into(),
+            canonical_root: cwd.canonicalize().unwrap().to_string_lossy().into_owned(),
+            root_id: registered["rootId"].as_str().unwrap().into(),
+        }),
+        environment_run_id: None,
+        enabled_tools: kinds,
+    };
+    let launch:LaunchSelection=serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"fixture","provider_family":"fixture","model":"fixture","configuration_generation":1,"tool_schema_generation":1,"tools":tools,"policy":{"name":"fixture","version":"1"},"source":binding.source_selection().unwrap()})).unwrap();
+    let mut db = Catalog::open(root.join("catalog")).unwrap();
+    db.create_thread("thread", "branch").unwrap();
+    let prepared = db
+        .prepare_submission(
+            SubmitInput {
+                key: "source".into(),
+                thread_id: "thread".into(),
+                branch_id: "branch".into(),
+                expected_head: None,
+                input: json!("Run and inspect these jobs"),
+                configuration: json!({}),
+            },
+            None,
+            None,
+        )
+        .unwrap()
+        .load(Some(launch.clone()), false)
+        .unwrap();
+    let source = db.admit_submission(prepared).unwrap();
+    binding.run_id = source.run_id.clone();
+    issue(&mut storage, &storage_root, "source", &source.run_id, EPOCH);
+    let (terminals, terminal_rx) = mpsc::channel();
+    storage.set_process_terminal_sender(terminals);
+    let runtime = Arc::new(RunSupervisor::new(db));
+    let owner = runtime.catalog();
+    let storage = Arc::new(Mutex::new(Some(storage)));
+    let epoch = Arc::new(Mutex::new(EPOCH.to_owned()));
+    let resources = KernelResourceClient::new(
+        {
+            let storage = storage.clone();
+            let epoch = epoch.clone();
+            move |request| {
+                let mut storage = storage.lock().unwrap();
+                let result = serve_resource(
+                    storage.as_mut().unwrap(),
+                    &epoch.lock().unwrap(),
+                    HOST,
+                    GENERATION,
+                    &request,
+                );
+                request.reply.send(result).unwrap();
+                Ok(())
+            }
+        },
+        |_| Ok(()),
+        crate::process::ProcessControlRegistry::default(),
+    );
+
+    let interaction_owner = storage.clone();
+    let interaction_epoch = epoch.clone();
+    let interactions = crate::storage::process_interactions::Client::new(move |command| {
+        interaction_owner
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .serve_interaction(
+                command,
+                &interaction_epoch.lock().unwrap(),
+                HOST,
+                GENERATION,
+            );
+        Ok(())
+    });
+    let resources = resources.with_process_interactions(interactions.clone());
+    let mut declarations = KernelToolExecutor::new(binding.clone(), resources.clone())
+        .unwrap()
+        .declarations(true);
+    declarations.extend(crate::process_wait::declarations(
+        owner.clone(),
+        binding.clone(),
+        resources.clone(),
+    ));
+    let executor =
+        Arc::new(varin_runtime::composition::tools::ToolDirectory::assemble(declarations).unwrap());
+    let token = CancellationToken::default();
+    let spawn = ToolCall {
+        call_id: "spawn".into(),
+        name: "process_spawn".into(),
+        schema_version: "1".into(),
+        arguments: json!({"cwd":"","command":"/bin/sh","args":["-c","IFS= read -r value; printf 'received:%s' \"$value\""],"env":[],"mode":"pipe"}),
+    };
+    let (context, frozen) = model_call(&owner, &source.run_id, "original-spawn", &spawn, &tools);
+    let prepared = executor.clone().bind_call(&spawn, &frozen, &token).unwrap();
+    let contract = prepared.prepare(&token).unwrap();
+    record(
+        &owner,
+        &source.run_id,
+        ExecutionRecord::ToolAdmitted {
+            context: context.clone(),
+            tool: AdmittedTool {
+                call: spawn.clone(),
+                contract: contract.clone(),
+            },
+        },
+    );
+    prepared.authorize(&context, &contract, &token).unwrap();
+    record(
+        &owner,
+        &source.run_id,
+        ExecutionRecord::ToolDispatched {
+            context: context.clone(),
+            executor_owner: ExecutorOwner::Kernel,
+        },
+    );
+    let accepted = prepared.execute(&context, &contract, &token).completion;
+    assert!(matches!(accepted, ToolCompletion::JobAccepted { .. }));
+    close_call(&owner, &context, &spawn, accepted, false);
+    let process_id = context.operation_id;
+    let write = ToolCall {
+        call_id: "input".into(),
+        name: "process_write".into(),
+        schema_version: "1".into(),
+        arguments: json!({"processId":process_id,"text":"native-origin\n","eof":true}),
+    };
+    let (context, frozen) = model_call(&owner, &source.run_id, "original-write", &write, &tools);
+    let prepared = executor.clone().bind_call(&write, &frozen, &token).unwrap();
+    let contract = prepared.prepare(&token).unwrap();
+    assert!(!contract.read_only);
+    assert_eq!(contract.completion, CompletionKind::Result);
+    record(
+        &owner,
+        &source.run_id,
+        ExecutionRecord::ToolAdmitted {
+            context: context.clone(),
+            tool: AdmittedTool {
+                call: write.clone(),
+                contract: contract.clone(),
+            },
+        },
+    );
+    prepared.authorize(&context, &contract, &token).unwrap();
+    record(
+        &owner,
+        &source.run_id,
+        ExecutionRecord::ToolDispatched {
+            context: context.clone(),
+            executor_owner: ExecutorOwner::Kernel,
+        },
+    );
+    let completion = prepared.execute(&context, &contract, &token).completion;
+    assert!(
+        matches!(&completion,ToolCompletion::Result{outcome:varin_runtime::Outcome::Succeeded,effect:varin_runtime::Effect::Confirmed,content} if content["confirmedBytes"]==14&&content["eofApplied"]==true),
+        "{completion:?}"
+    );
+    // Exact endpoint retry obtains the original process-domain receipt, never more bytes.
+    assert_eq!(
+        prepared.execute(&context, &contract, &token).completion,
+        completion
+    );
+    close_call(&owner, &context, &write, completion.clone(), true);
+    let stored = owner
+        .lock()
+        .unwrap()
+        .operation(&context.operation_id)
+        .unwrap();
+    assert!(stored.external_receipt.is_some());
+    let intent = varin_runtime::catalog::tool_content::ToolIntent::from_operation(&stored).unwrap();
+    assert_eq!(intent.origin(), &context.origin);
+    let terminal = terminal_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(terminal.process_id, process_id);
+    apply_process_terminal(&runtime, &terminal).unwrap();
+    let read = read_call(&process_id);
+    let (c, frozen) = model_call(&owner, &source.run_id, "original-read", &read, &tools);
+    let prepared = executor.clone().bind_call(&read, &frozen, &token).unwrap();
+    let contract = prepared.prepare(&token).unwrap();
+    record(
+        &owner,
+        &source.run_id,
+        ExecutionRecord::ToolAdmitted {
+            context: c.clone(),
+            tool: AdmittedTool {
+                call: read.clone(),
+                contract: contract.clone(),
+            },
+        },
+    );
+    prepared.authorize(&c, &contract, &token).unwrap();
+    record(
+        &owner,
+        &source.run_id,
+        ExecutionRecord::ToolDispatched {
+            context: c.clone(),
+            executor_owner: prepared.executor_owner(),
+        },
+    );
+    let output = prepared.execute(&c, &contract, &token).completion;
+    assert_eq!(text(&output), "received:native-origin");
+    close_call(&owner, &c, &read, output, true);
+
+    // The executor can finish before its Catalog receipt is published. Revoking the
+    // original grant and reopening Storage must not erase that already-created effect.
+    let admit = |request: &str, call: &ToolCall| {
+        let (context, frozen) = model_call(&owner, &source.run_id, request, call, &tools);
+        let prepared = executor.clone().bind_call(call, &frozen, &token).unwrap();
+        let contract = prepared.prepare(&token).unwrap();
+        record(
+            &owner,
+            &source.run_id,
+            ExecutionRecord::ToolAdmitted {
+                context: context.clone(),
+                tool: AdmittedTool {
+                    call: call.clone(),
+                    contract: contract.clone(),
+                },
+            },
+        );
+        prepared.authorize(&context, &contract, &token).unwrap();
+        record(
+            &owner,
+            &source.run_id,
+            ExecutionRecord::ToolDispatched {
+                context: context.clone(),
+                executor_owner: ExecutorOwner::Kernel,
+            },
+        );
+        (context, prepared, contract)
+    };
+    let recover_spawn = ToolCall {
+        call_id: "recover-spawn".into(),
+        name: "process_spawn".into(),
+        schema_version: "1".into(),
+        arguments: json!({"cwd":"","command":"/bin/sh","args":["-c","IFS= read -r value; printf '%s' \"$value\""],"env":[],"mode":"pipe"}),
+    };
+    let (spawn_context, prepared, contract) = admit("recover-spawn-step", &recover_spawn);
+    let accepted = prepared
+        .execute(&spawn_context, &contract, &token)
+        .completion;
+    close_call(&owner, &spawn_context, &recover_spawn, accepted, false);
+    let recover_write = ToolCall {
+        call_id: "recover-input".into(),
+        name: "process_write".into(),
+        schema_version: "1".into(),
+        arguments: json!({"processId":spawn_context.operation_id,"text":"once\n","eof":true}),
+    };
+    let (write_context, _prepared, _contract) = admit("recover-input-step", &recover_write);
+    let native = crate::storage::process_interactions::Native {
+        context: write_context.clone(),
+        executor: "process_write".into(),
+    };
+    let address = crate::storage::process_interactions::Address {
+        workspace_id: "workspace".into(),
+        process_id: spawn_context.operation_id.clone(),
+        operation_id: write_context.operation_id.clone(),
+        root_id: binding.root_id.clone(),
+    };
+    let context = crate::storage::process_interactions::Context {
+        grant_id: "source".into(),
+        epoch: Some(EPOCH.into()),
+        binding: Some(binding.clone()),
+    };
+    // Deliberately stop at the process-domain boundary instead of publishing the
+    // endpoint's external receipt to Catalog, as in a lost executor response.
+    let actual = interactions
+        .invoke(
+            context.clone(),
+            address.clone(),
+            || {
+                Ok(crate::process::interaction::Input::Write {
+                    bytes: Arc::from(b"once\n".as_slice()),
+                    eof: true,
+                })
+            },
+            Some(native.clone()),
+            token.clone(),
+        )
+        .unwrap();
+    assert_eq!(
+        actual.identity().state,
+        crate::process::interaction::State::Applied
+    );
+    let terminal = terminal_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(terminal.process_id, spawn_context.operation_id);
+    apply_process_terminal(&runtime, &terminal).unwrap();
+    close_call(
+        &owner,
+        &write_context,
+        &recover_write,
+        ToolCompletion::Result {
+            outcome: varin_runtime::Outcome::Indeterminate,
+            effect: varin_runtime::Effect::Unknown,
+            content: json!({"error":"executor response was lost"}),
+        },
+        false,
+    );
+    let operation = owner
+        .lock()
+        .unwrap()
+        .operation(&write_context.operation_id)
+        .unwrap();
+    assert!(operation.external_receipt.is_none());
+    assert_eq!(operation.effect, varin_runtime::Effect::Unknown);
+    storage
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .revoke_grant(&json!({"grantId":"source"}), HOST)
+        .unwrap();
+    drop(storage.lock().unwrap().take());
+    *storage.lock().unwrap() = Some(Storage::open(&storage_root, HOST).unwrap());
+    assert!(interactions.inspect(context, address.clone()).is_err());
+    let mut wrong = native.clone();
+    wrong.context.origin = ToolOrigin::PolicyAction {
+        action_id: "foreign".into(),
+        node_id: "foreign".into(),
+    };
+    assert!(interactions.reconcile(wrong, address.clone()).is_err());
+    let (responses, response) = mpsc::sync_channel(1);
+    crate::reconcile::reconcile(
+        runtime.clone(),
+        resources.clone(),
+        binding.clone(),
+        vec![operation],
+        "recover-revoked".into(),
+        responses.into(),
+        Arc::new(|_| {}),
+    )
+    .unwrap();
+    let reconciled = response.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(
+        reconciled["result"]["reconciled"],
+        json!([write_context.operation_id]),
+        "{reconciled}"
+    );
+    let recovered = owner
+        .lock()
+        .unwrap()
+        .operation(&write_context.operation_id)
+        .unwrap();
+    assert_eq!(recovered.effect, varin_runtime::Effect::Confirmed);
+    assert!(recovered.external_receipt.is_some());
+    assert_eq!(
+        interactions.reconcile(native, address).unwrap().unwrap().1,
+        actual
+    );
+    drop(executor);
+    drop(resources);
+    drop(interactions);
+    drop(storage.lock().unwrap().take());
+    drop(runtime);
+    drop(owner);
     std::fs::remove_dir_all(root).unwrap();
 }

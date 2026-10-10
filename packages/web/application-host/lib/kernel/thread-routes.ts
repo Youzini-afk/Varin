@@ -43,6 +43,7 @@ const modelSelection = (value: unknown): ThreadModel => {
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
 export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler): void {
   const fields: Record<string, readonly string[]> = {
+    'process/terminal': ['runtime', 'threadId', 'branchId', 'operationId'],
     'model/select': ['runtime','threadId','branchId','runId','key','model'],
     'permission/decide': ['runtime', 'threadId', 'branchId', 'operationId', 'permissionId', 'decision'],
     'question/answer': ['runtime', 'threadId', 'branchId', 'operationId', 'answer'],
@@ -90,6 +91,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       } finally { response.removeListener('close', closed); }
     });
   };
+  post('process/terminal', body => adapter.openProcessTerminal({ ...identity(body), operationId: text(body.operationId) }));
   post('plan/read', (body, signal) => adapter.readPlan(identity(body), signal));
   post('plan/update', (body, signal) => {
     if (typeof body.content !== 'string') throw new Error('Plan content must be text');

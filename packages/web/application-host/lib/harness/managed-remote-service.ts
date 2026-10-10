@@ -6,6 +6,7 @@ import { sliceUtf8ByBytes, type ShellExecResult, type ShellReadResult } from "@v
 import os from "node:os";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { KernelBranchState, KernelRecordResult } from "../kernel/protocol.generated.js";
+import { requireAppliedProcessInteraction } from "../kernel/process-interaction.js";
 import { canonicalizePathIdentity } from "../workspace/path-safety.js";
 import type { ResourceService } from "./resources.js";
 import {
@@ -893,9 +894,11 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
 
   const shellWrite = async (principalId: string, coordinatorHostId: string, processId: string, inputText: string) => {
     const { scoped } = await shellRecord(principalId, coordinatorHostId, processId);
-    const current = await scoped.processRead({ workspaceId: WORKSPACE_ID, processId, cursor: 0, maxBytes: 0 });
-    const result = await scoped.processWrite({ workspaceId: WORKSPACE_ID, processId, sequence: current.inputSequence, bytesBase64: Buffer.from(inputText).toString("base64") });
-    return { accepted: result.queued === true };
+    const operationId = `remote-shell-input:${randomUUID()}`;
+    const bytes = Buffer.from(inputText);
+    const result = await scoped.processWrite({ workspaceId: WORKSPACE_ID, processId, operationId, bytesBase64: bytes.toString("base64") });
+    requireAppliedProcessInteraction(result, { processId, operationId, kind: 'write', requestedBytes: bytes.length, eofRequested: false });
+    return { accepted: true };
   };
 
   const shellKill = async (principalId: string, coordinatorHostId: string, processId: string) => {
