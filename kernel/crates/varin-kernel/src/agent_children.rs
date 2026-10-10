@@ -113,6 +113,12 @@ pub(super) fn execute(
             }
             child
         };
+        let writer_read = owner
+            .lock()
+            .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+            .capture_child_writer_bindings(&operation_id)
+            .map_err(domain)?;
+        let writers = writer_read.load().map_err(domain)?;
         runtime
             .quiesce_terminal(&binding.run_id)
             .map_err(|error| KernelError::Operation(error.to_string()))?;
@@ -131,12 +137,19 @@ pub(super) fn execute(
                 | varin_runtime::catalog::collaboration::ChildCodeResult::Settling { .. });
         {
             let directory_idle = if captures_directory {
-                resources.require_child_root_idle(&binding, &context, &cancel)
-                    .map_err(|error| KernelError::Operation(error.to_string()))?["writerStopped"] == true
-            } else { true };
-            let catalog = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-            if !directory_idle || !catalog.child_process_writers_stopped(&operation_id).map_err(domain)? {
-                let read = catalog.capture_child_read(catalog.child_task(&operation_id).map_err(domain)?);
+                resources
+                    .require_child_root_idle(&binding, &context, &cancel)
+                    .map_err(|error| KernelError::Operation(error.to_string()))?["writerStopped"]
+                    == true
+            } else {
+                true
+            };
+            let catalog = owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            if !directory_idle || !catalog.child_writers_stopped(&writers).map_err(domain)? {
+                let read =
+                    catalog.capture_child_read(catalog.child_task(&operation_id).map_err(domain)?);
                 drop(catalog);
                 return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
             }
@@ -159,7 +172,7 @@ pub(super) fn execute(
                         matches!(
                             operation.executor.as_deref(),
                             Some("file_write" | "file_edit")
-                        )
+                        ) && operation.execution_owner == Some(varin_runtime::ExecutorOwner::Kernel)
                     })
                     .map(|operation| catalog.capture_operation_read(operation))
                     .collect::<Vec<_>>()
@@ -200,13 +213,13 @@ pub(super) fn execute(
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
             let child = if method == "runtime.child.settle" {
                 catalog
-                    .begin_child_settlement(&operation_id)
+                    .begin_child_settlement_bound(&operation_id, &writers)
                     .map_err(domain)?
             } else if method == "runtime.child.result.candidate" {
                 let candidate =
                     crate::storage::result_publication::candidate_view(stored.as_ref().unwrap())?;
                 catalog
-                    .attach_child_candidate(&operation_id, candidate)
+                    .attach_child_candidate_bound(&operation_id, candidate, &writers)
                     .map_err(domain)?
             } else {
                 let value = stored.as_ref().unwrap();
@@ -226,9 +239,9 @@ pub(super) fn execute(
                     base_root: text("baseRoot")?,
                     record_id: text("recordId")?,
                 };
-                let effect = catalog.child_file_effect(&operation_id).map_err(domain)?;
+                let effect = catalog.child_file_effect_bound(&writers).map_err(domain)?;
                 catalog
-                    .attach_child_result(&operation_id, result, effect)
+                    .attach_child_result_bound(&operation_id, result, effect, &writers)
                     .map_err(domain)?
             };
             catalog.capture_child_read(child)

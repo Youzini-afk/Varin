@@ -7,6 +7,8 @@ import type {
   HostToolCall,
   LaunchTool,
   ExecutorOwner,
+  ExtensionToolBinding,
+  McpBinding,
 } from './protocol.generated.js';
 export type HostToolSchema = LaunchTool;
 export interface HostToolBinding {
@@ -38,6 +40,7 @@ export interface HostToolLease {
   readonly implementationIdentity: string;
   /** Different services occupy independent selected slots in one composition owner. */
   readonly slot?: string;
+  readonly extensionBinding?: ExtensionToolBinding;
   available(schema: HostToolSchema): boolean;
   authorize(call: HostToolCall, signal: AbortSignal): Promise<void>;
   revocationSignal(call: HostToolCall): AbortSignal;
@@ -47,6 +50,10 @@ export interface HostToolLease {
     owner: ExecutorOwner,
   ): Promise<ToolExecutionReceipt>;
   release(): void;
+}
+/** MCP configuration provenance is required only for MCP, never synthesized for a service. */
+export interface McpToolLease extends HostToolLease {
+  readonly binding: import('./protocol.generated.js').McpBinding;
 }
 interface Request {
   v: 1;
@@ -111,6 +118,7 @@ interface OwnerEntry {
   // The Host composition owns a candidate across kernel select/ready holder changes.
   retained: boolean;
   holders: Set<string>;
+  childHolders: Map<string, string>;
   active: Map<string, AbortController>;
   calls: Map<string, CallEntry>;
 }
@@ -235,6 +243,7 @@ export class ToolBridge {
         selected: false,
         retained: !selected,
         holders: new Set(),
+        childHolders: new Map(),
         active: new Map(),
         calls: new Map(),
       });
@@ -266,6 +275,7 @@ export class ToolBridge {
       entry.selected ||
       entry.retained ||
       entry.holders.size ||
+      entry.childHolders.size ||
       entry.active.size ||
       [...entry.calls.values()].some(
         (c) => c.started && (c.actualPending || !c.acknowledged),
@@ -340,6 +350,8 @@ export class ToolBridge {
     for (const run of this.#owners.keys()) this.unregister(run);
   }
   close(): void {
+    for (const entries of this.#owners.values())
+      for (const entry of entries.values()) entry.childHolders.clear();
     this.reset();
   }
   reconnect(): void {
@@ -348,10 +360,85 @@ export class ToolBridge {
         for (const call of owner.calls.values())
           void this.#publishReceipt(run, key, owner, call);
   }
+  releaseChild(parentRunId: string, childOperationId: string): void {
+    for (const [key, entry] of this.#owners.get(parentRunId) ?? []) {
+      entry.childHolders.delete(childOperationId);
+      this.#collect(parentRunId, key, entry);
+    }
+  }
+  reconcileChildren(
+    children: readonly { operation_id: string; report: unknown }[],
+  ): void {
+    const facts = new Map(children.map((child) => [child.operation_id, child]));
+    for (const [run, entries] of this.#owners)
+      for (const [key, entry] of entries) {
+        for (const [operation, epoch] of entry.childHolders) {
+          const child = facts.get(operation);
+          // An uncommitted current-epoch handoff may be between ACK and Catalog accept.
+          if (child?.report || (!child && epoch !== this.currentEpoch()))
+            entry.childHolders.delete(operation);
+        }
+        this.#collect(run, key, entry);
+      }
+  }
+  #retainChild(
+    parentRunId: string,
+    childOperationId: string,
+    mcp: McpBinding | null,
+    extensions: ExtensionToolBinding[],
+  ): boolean {
+    const entries = [...(this.#owners.get(parentRunId)?.values() ?? [])].filter(
+      (entry) => !entry.closing && entry.epoch === this.currentEpoch(),
+    );
+    const selected: OwnerEntry[] = [];
+    if (mcp) {
+      const entry = entries.find((candidate) => {
+        const binding = candidate.binding as McpBinding;
+        return (
+          (candidate.lease.slot ?? 'mcp') === 'mcp' &&
+          binding.reference === mcp.reference &&
+          binding.generation === mcp.generation &&
+          binding.provenance?.execution_scope ===
+            mcp.provenance.execution_scope &&
+          isDeepStrictEqual(
+            binding.provenance.configuration,
+            mcp.provenance.configuration,
+          ) &&
+          Object.entries(mcp.provenance.servers).every(([name, server]) =>
+            isDeepStrictEqual(binding.provenance.servers[name], server),
+          ) &&
+          Object.entries(mcp.resources).every(
+            ([name, resource]) => binding.resources[name] === resource,
+          ) &&
+          mcp.tools.every(
+            (tool) =>
+              binding.tools.some((value) => isDeepStrictEqual(value, tool)) &&
+              candidate.lease.available(tool),
+          )
+        );
+      });
+      if (!entry) return false;
+      selected.push(entry);
+    }
+    for (const binding of extensions) {
+      const entry = entries.find(
+        (candidate) =>
+          isDeepStrictEqual(candidate.lease.extensionBinding, binding) &&
+          candidate.lease.available(binding.tool),
+      );
+      if (!entry) return false;
+      selected.push(entry);
+    }
+    for (const entry of selected)
+      entry.childHolders.set(childOperationId, this.currentEpoch()!);
+    return true;
+  }
   consume(v: unknown): boolean {
     if (
       !record(v) ||
       ![
+        'host-tool-child-retain',
+        'host-tool-child-release',
         'host-tool-request',
         'host-tool-cancel',
         'host-tool-owner-release',
@@ -364,6 +451,60 @@ export class ToolBridge {
     )
       return false;
     if (v.v !== 1 || v.kernelEpoch !== this.currentEpoch()) return true;
+    if (v.kind === 'host-tool-child-release') {
+      if (
+        text(v.parentRunId) &&
+        text(v.childOperationId) &&
+        exact(v, [
+          'v',
+          'kind',
+          'kernelEpoch',
+          'parentRunId',
+          'childOperationId',
+        ])
+      )
+        this.releaseChild(v.parentRunId, v.childOperationId);
+      return true;
+    }
+    if (v.kind === 'host-tool-child-retain') {
+      if (
+        !text(v.id) ||
+        !text(v.parentRunId) ||
+        !text(v.childOperationId) ||
+        !Array.isArray(v.extensionBindings) ||
+        !v.extensionBindings.every(record) ||
+        (v.mcpBinding !== null && !record(v.mcpBinding)) ||
+        !exact(v, [
+          'v',
+          'kind',
+          'id',
+          'kernelEpoch',
+          'parentRunId',
+          'childOperationId',
+          'mcpBinding',
+          'extensionBindings',
+        ])
+      )
+        return true;
+      let ok = false;
+      try {
+        ok = this.#retainChild(
+          v.parentRunId,
+          v.childOperationId,
+          v.mcpBinding as McpBinding | null,
+          v.extensionBindings as unknown as ExtensionToolBinding[],
+        );
+      } catch {
+        /* Malformed or unavailable original bindings cannot establish a handoff. */
+      }
+      void this.#reply(
+        { id: v.id, kernelEpoch: String(v.kernelEpoch) },
+        ok
+          ? { ok }
+          : { ok, error: { code: 'child_tool_original_owner_unavailable' } },
+      );
+      return true;
+    }
     if (v.kind === 'host-tool-receipt-ack') {
       if (
         !exact(v, ['v', 'kind', 'kernelEpoch', 'id', 'accepted']) ||
@@ -488,7 +629,7 @@ export class ToolBridge {
     return true;
   }
   async #reply(
-    request: Request,
+    request: Pick<Request, 'id' | 'kernelEpoch'>,
     response: Pick<
       PrivateToolResponse,
       'ok' | 'completion' | 'executor_stopped' | 'error'

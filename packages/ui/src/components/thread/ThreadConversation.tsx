@@ -183,7 +183,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         {historyView && <span className="text-xs text-muted-foreground">Viewing saved history</span>}
       </div>
       {snapshot && <ThreadGoal api={api.goals} identity={identity} goals={snapshot.goals} sourceRunId={run?.id} refresh={async () => { await projection.current?.refresh(); }} />}
-      {launch && <ThreadChildProfiles catalog={launch.selection.child_dispatch} />}
+      {launch && <ThreadChildProfiles launch={launch.selection} />}
       {api.plan && <ThreadPlan api={api.plan} identity={identity} contextRevision={snapshot?.context.checkpoint?.revision} />}
       {visibleHistory.map(item => <article key={item.id} className="mx-auto max-w-3xl">
         <div className="mb-1 text-xs text-muted-foreground">{item.source}</div>

@@ -66,6 +66,7 @@ pub(crate) fn declarations(
     catalog: Arc<Mutex<Catalog>>,
     binding: Option<ToolBinding>,
     resources: KernelResourceClient,
+    host: crate::host_tools::ToolBridge,
 ) -> Vec<varin_runtime::composition::tools::ToolDeclaration> {
     let fixed = binding
         .as_ref()
@@ -74,6 +75,7 @@ pub(crate) fn declarations(
         catalog,
         binding,
         resources,
+        host,
     });
     schemas(Vec::new(), fixed)
         .into_iter()
@@ -86,6 +88,7 @@ struct CollaborationTools {
     catalog: Arc<Mutex<Catalog>>,
     binding: Option<ToolBinding>,
     resources: KernelResourceClient,
+    host: crate::host_tools::ToolBridge,
 }
 impl ToolExecutor for CollaborationTools {
     fn plan(
@@ -258,18 +261,32 @@ impl ToolExecutor for CollaborationTools {
                 let raw=self.resources.child_source_handoff(binding,c,&resolved.source_delegation(),false,cancel)?;
                 let handoff:ChildSourceHandoff=serde_json::from_value(raw).map_err(error)?;
                 let admission = (|| {
-                    if cancel.is_cancelled() { return Err(error("collaboration cancelled")); }
+                    if cancel.is_cancelled() {
+                        return Err(error("collaboration cancelled"));
+                    }
+                    let retained = self.host.retain_child(
+                        c,
+                        resolved.mcp_binding.as_ref(),
+                        &resolved.extension_bindings,
+                        cancel,
+                    )?;
                     let launch = varin_runtime::catalog::launches::LaunchSelection {
                         child_dispatch: Some(selected.catalog.clone()),
-                        extension_bindings: Vec::new(), policy_models: Vec::new(), mcp_binding: None,
+                        extension_bindings: resolved.extension_bindings.clone(),
+                        policy_models: Vec::new(),
+                        mcp_binding: resolved.mcp_binding.clone(),
                         credential_scope: resolved.model.credential_scope.clone(),
                         connection_identity: resolved.model.connection_identity().map_err(error)?,
                         provider_family: resolved.model.configuration.provider_family.clone(),
                         model: resolved.model.configuration.model.clone(),
-                        configuration_generation: resolved.model.configuration.configuration_generation,
-                        tool_schema_generation: self.catalog.lock().map_err(error)?.launch_metadata(&c.run_id).map_err(error)?
-                            .ok_or_else(|| error("parent launch missing"))?.selection.tool_schema_generation,
-                        tools: schemas, policy: crate::process_wait::default_policy_identity(), source: Some(handoff.source.clone()),
+                        configuration_generation: resolved
+                            .model
+                            .configuration
+                            .configuration_generation,
+                        tool_schema_generation: resolved.tool_schema_generation,
+                        tools: schemas,
+                        policy: crate::process_wait::default_policy_identity(),
+                        source: Some(handoff.source.clone()),
                     };
                     let preparation = self.catalog.lock().map_err(error)?.prepare_child_launch(&c.run_id, launch, resolved).map_err(error)?;
                     let prepared = preparation.load().map_err(error)?;
@@ -283,11 +300,16 @@ impl ToolExecutor for CollaborationTools {
                     if cancel.is_cancelled() {
                         return Err(error("collaboration cancelled"));
                     }
-                    self.catalog
+                    let child = self
+                        .catalog
                         .lock()
                         .map_err(error)?
                         .accept_child_references(prepared)
-                        .map_err(error)
+                        .map_err(error)?;
+                    if let Some(retained) = retained {
+                        retained.handoff();
+                    }
+                    Ok(child)
                 })();
                 if admission.is_err() && binding.source_mode==varin_runtime::SourceMode::FixedBranch {
                     let _ = self.resources.collaboration_pin(
@@ -358,11 +380,26 @@ impl ToolExecutor for CollaborationTools {
 }
 fn validate_preset(selected: &ChildDispatchSelection, input: &DispatchInput) -> Result<(), ExecutionError> {
     if let Some(id) = &input.preset {
-        let preset = selected.catalog.presets.iter().find(|preset| &preset.id == id).ok_or_else(|| error("preset is not selected"))?;
-        crate::child_capabilities::select(&preset.tools).map_err(error)?;
-        if preset.work_mode == ChildWorkMode::ReadOnly && crate::child_capabilities::descriptors().iter().any(|capability|
-            preset.tools.contains(&capability.name) && capability.source_requirement == varin_runtime::catalog::dispatch::ChildSourceRequirement::Physical) {
-            return Err(error("selected preset requires a physical execution source"));
+        let preset = selected
+            .catalog
+            .presets
+            .iter()
+            .find(|preset| &preset.id == id)
+            .ok_or_else(|| error("preset is not selected"))?;
+        crate::child_capabilities::select_frozen(selected, &preset.tools).map_err(error)?;
+        if preset.work_mode == ChildWorkMode::ReadOnly
+            && crate::child_capabilities::descriptors()
+                .iter()
+                .any(|capability| {
+                    preset.tools.contains(&capability.name)
+                        && selected.host_tool(&capability.name).is_none()
+                        && capability.source_requirement
+                            == varin_runtime::catalog::dispatch::ChildSourceRequirement::Physical
+                })
+        {
+            return Err(error(
+                "selected preset requires a physical execution source",
+            ));
         }
     }
     Ok(())
@@ -370,9 +407,21 @@ fn validate_preset(selected: &ChildDispatchSelection, input: &DispatchInput) -> 
 pub(crate) fn resolve_selection(selected: &ChildDispatchSelection, input: &DispatchInput) -> Result<(varin_runtime::catalog::dispatch::ResolvedChildSelection, Vec<ToolSchema>), ExecutionError> {
     validate_preset(selected, input)?;
     let resolved = selected.resolve(input).map_err(error)?;
-    let schemas = crate::child_capabilities::select(&resolved.profile.tools).map_err(error)?;
-    if input.preset.is_none() && schemas.iter().any(|schema| selected.frozen.allowed_delegation.iter().find(|original| original.name == schema.name).is_some_and(|original| original != schema)) {
-        return Err(error("actual delegated capability schema is unsupported by this child implementation"));
+    let schemas = crate::child_capabilities::select_frozen(selected, &resolved.profile.tools)
+        .map_err(error)?;
+    if input.preset.is_none()
+        && schemas.iter().any(|schema| {
+            selected
+                .frozen
+                .allowed_delegation
+                .iter()
+                .find(|original| original.name == schema.name)
+                .is_some_and(|original| original != schema)
+        })
+    {
+        return Err(error(
+            "actual delegated capability schema is unsupported by this child implementation",
+        ));
     }
     Ok((resolved, schemas))
 }

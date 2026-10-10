@@ -24,6 +24,7 @@ import { createAgentPolicy } from './lib/kernel/agent-policy.js';
 import { RunObservers } from './lib/kernel/run-observers.js';
 import { McpAuthority, McpCompositions, type McpCompositionScope, mcpHostAgentDir, mcpHostProjectTrusted, readMcpHostPermissionPolicy } from '@varin/pi-host/mcp-authority';
 import { createMcpLease } from './lib/kernel/mcp-owner.js';
+import { createChildMcpPreparer } from './lib/kernel/mcp-child-preparation.js';
 import { createExtensionTools } from './lib/kernel/extension-tool-owner.js';
 import { createMaterialToolOwner, MATERIAL_SNAPSHOT_CAPABILITY } from './lib/kernel/material-tool-owner.js';
 import { createIntegrationToolOwner, createIntegrationTargetOpener, createIntegrationReceiptReconciler, CHILD_INTEGRATION_CAPABILITY } from './lib/kernel/integration-tool-owner.js';
@@ -2904,7 +2905,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const modelAuthority = createModelAuthority(hostCredentialAuthority);
   const liveSources = createLiveSourceOwner({ documents: documentsAuthority, kernel: kernelClient });
   kernelClient.setLanguageOwner(createLanguageOwner({ documents: documentsAuthority, supervisor: languageSupervisor, validateSource: liveSources.validate }));
+  const prepareChildMcp = createChildMcpPreparer({ authority: mcpAuthority, kernel: kernelClient, agentDir: mcpAgentDir, hostId,
+    inspectWorkspace: id => documentsAuthority.inspectWorkspace(id),
+    projectTrusted: cwd => mcpHostProjectTrusted(mcpAgentDir, cwd),
+    currentPolicy: async (cwd, trusted) => readMcpHostPermissionPolicy(mcpAgentDir, cwd, trusted),
+  });
   const agentRuntime: AgentRuntimeClient = new AgentRuntimeClient(kernelClient, async (input, signal) => {
+    if (input.fixed) return prepareChildMcp(input, signal);
     // A read-only fixed branch has no executable filesystem view. Global MCP capabilities run
     // in the neutral Host scope; they must not borrow the mutable project directory.
     const workspace = input.source && input.executionCwd
@@ -2936,7 +2943,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const owner = await selected.ready;
     signal?.throwIfAborted();
     const lease = input.requiredBinding?await owner.restore(input.requiredBinding,signal):owner.snapshot();
-    return createMcpLease({ lease, kernel: kernelClient,
+    try { return createMcpLease({ lease, kernel: kernelClient,
+      ...(input.requiredBinding ? { selection: input.requiredBinding } : {}),
       ...(input.source && !input.executionCwd ? { unavailableWorkspaceScope: {
         workspaceId: input.source.workspaceId,
         reason: 'Project MCP capabilities require a prepared execution environment matching the pinned source. Only global Host MCP capabilities are available for this read-only source.',
@@ -2946,7 +2954,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         if (scope.projectTrusted && !trusted) throw new Error('MCP project trust was revoked');
         return readMcpHostPermissionPolicy(mcpAgentDir, configCwd, trusted);
       },
-    });
+    }); } catch (error) { lease.release(); throw error; }
   }, {
     prepare: (input, signal) => prepareAgentPolicy({ sessionId: input.threadId,
       ...(input.projectId ? { projectId: input.projectId } : {}),

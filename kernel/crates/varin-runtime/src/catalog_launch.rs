@@ -64,6 +64,32 @@ impl SourceSelection {
     }
 }
 /// Credential-free retained Host MCP generation, frozen before any model request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct McpConfiguration {
+    pub agent_dir: String,
+    pub config_cwd: String,
+    pub project_trusted: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct McpServerSelection {
+    pub definition_version: String,
+    pub resource_key: String,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpExecutionScope {
+    Global,
+    Workspace,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct McpProvenance {
+    pub configuration: McpConfiguration,
+    pub execution_scope: McpExecutionScope,
+    pub servers: std::collections::BTreeMap<String, McpServerSelection>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct HostToolBinding {
@@ -71,20 +97,44 @@ pub struct HostToolBinding {
     pub generation: u64,
     pub tools: Vec<ToolSchema>,
     pub resources: std::collections::BTreeMap<String, String>,
+    pub provenance: McpProvenance,
 }
 impl HostToolBinding {
     pub fn validate(&self) -> Result<()> {
         let mut names = std::collections::BTreeSet::new();
         if self.reference.is_empty()
-            || self
-                .resources
-                .iter()
-                .any(|(name, key)| name.is_empty() || key.is_empty())
+            || self.provenance.configuration.agent_dir.is_empty()
+            || self.provenance.configuration.config_cwd.is_empty()
+            || self.provenance.servers.iter().any(|(name, server)| {
+                name.is_empty()
+                    || server.definition_version.is_empty()
+                    || server.resource_key.is_empty()
+                    || self.resources.get(&format!("server:{name}")) != Some(&server.resource_key)
+            })
+            || self.resources.iter().any(|(name, key)| {
+                name.is_empty()
+                    || key.is_empty()
+                    || !self
+                        .provenance
+                        .servers
+                        .values()
+                        .any(|server| &server.resource_key == key)
+                    || (!name.starts_with("server:")
+                        && !self.tools.iter().any(|tool| &tool.name == name))
+                    || name.strip_prefix("server:").is_some_and(|server| {
+                        self.provenance
+                            .servers
+                            .get(server)
+                            .is_none_or(|selected| &selected.resource_key != key)
+                    })
+            })
             || self.tools.iter().any(|tool| {
                 tool.name.is_empty()
                     || tool.version.is_empty()
                     || !(tool.schema.is_object() || tool.schema.is_boolean())
                     || !names.insert(&tool.name)
+                    || (!matches!(tool.name.as_str(), "mcp_call" | "mcp_discover")
+                        && !self.resources.contains_key(&tool.name))
             })
         {
             return Err(RuntimeError::Invalid(
@@ -92,6 +142,63 @@ impl HostToolBinding {
             ));
         }
         Ok(())
+    }
+    /// Select descriptions from the original owner. The result is preparation intent only;
+    /// a child must derive its own execution binding through the existing MCP authority.
+    pub fn delegate(&self, names: &[String]) -> Option<Self> {
+        let tools: Vec<_> = self
+            .tools
+            .iter()
+            .filter(|tool| names.contains(&tool.name))
+            .cloned()
+            .collect();
+        if tools.is_empty() {
+            return None;
+        }
+        let gateway = tools
+            .iter()
+            .any(|tool| matches!(tool.name.as_str(), "mcp_call" | "mcp_discover"));
+        let mut selected = self.clone();
+        selected.provenance.servers.retain(|_, server| {
+            gateway
+                || tools
+                    .iter()
+                    .any(|tool| self.resources.get(&tool.name) == Some(&server.resource_key))
+        });
+        selected.resources.retain(|name, _| {
+            tools.iter().any(|tool| &tool.name == name)
+                || name
+                    .strip_prefix("server:")
+                    .is_some_and(|server| selected.provenance.servers.contains_key(server))
+        });
+        selected.tools = tools;
+        Some(selected)
+    }
+    pub fn derives_from(&self, original: &Self) -> bool {
+        self.tools == original.tools
+            && self.provenance.configuration == original.provenance.configuration
+            && self.provenance.execution_scope == original.provenance.execution_scope
+            && self.provenance.servers.len() == original.provenance.servers.len()
+            && self.provenance.servers.iter().all(|(name, server)| {
+                original
+                    .provenance
+                    .servers
+                    .get(name)
+                    .is_some_and(|old| old.definition_version == server.definition_version)
+            })
+            && self.resources.len() == original.resources.len()
+            && self.resources.iter().all(|(name, key)| {
+                original.resources.get(name).is_some_and(|old_key| {
+                    self.provenance.servers.iter().any(|(server, selected)| {
+                        &selected.resource_key == key
+                            && original
+                                .provenance
+                                .servers
+                                .get(server)
+                                .is_some_and(|old| &old.resource_key == old_key)
+                    })
+                })
+            })
     }
 }
 /// Exact ordinary service artifact and declaration; this identity grants no live authority.

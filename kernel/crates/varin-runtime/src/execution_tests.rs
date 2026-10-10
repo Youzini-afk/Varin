@@ -927,17 +927,57 @@ fn cancelling_one_queued_operation_does_not_fail_its_run_or_execute_it() {
         );
         std::thread::yield_now();
     }
-    let cancelled = supervisor.cancel_operation(&queued_id).unwrap();
-    assert!(cancelled.cancel_requested);
+    // Force the real fast-control/slow-Catalog ordering: the worker first settles
+    // Cancelled and finishes the Run, then the explicit request records its intent.
+    assert!(supervisor.cancel_operation_control(&queued_id));
     release_tx.send(()).unwrap();
     let report = handle.wait();
-    supervisor.shutdown().unwrap();
     assert!(
         report.is_ok(),
         "queued-operation cancellation aborted the whole worker: {report:?}"
     );
     assert_eq!(report.unwrap().state, RunState::Completed);
     assert_eq!(tools.queued_calls.load(Ordering::SeqCst), 0);
+    let before = supervisor
+        .catalog()
+        .lock()
+        .unwrap()
+        .operation(&queued_id)
+        .unwrap();
+    assert_eq!(before.outcome, Some(Outcome::Cancelled));
+    assert!(!before.cancel_requested);
+    let cancelled = supervisor.cancel_operation(&queued_id).unwrap();
+    let mut expected = before;
+    expected.cancel_requested = true;
+    expected.revision += 1;
+    assert_eq!(
+        cancelled, expected,
+        "record the request without rewriting its original result"
+    );
+    assert_eq!(
+        supervisor.cancel_operation(&queued_id).unwrap(),
+        cancelled,
+        "repeated intent is idempotent"
+    );
+    let first_id = queued_id.replace(":tool:queued", ":tool:first");
+    let completed = supervisor
+        .catalog()
+        .lock()
+        .unwrap()
+        .operation(&first_id)
+        .unwrap();
+    assert_eq!(completed.outcome, Some(Outcome::Succeeded));
+    assert_eq!(supervisor.cancel_operation(&first_id).unwrap(), completed);
+    assert!(
+        !supervisor
+            .catalog()
+            .lock()
+            .unwrap()
+            .run(&input.run_id)
+            .unwrap()
+            .cancel_requested
+    );
+    supervisor.shutdown().unwrap();
     assert_eq!(
         supervisor
             .catalog()

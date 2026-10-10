@@ -19,6 +19,12 @@ Run uses its materialized cwd while retaining the original project configuration
 source-less Run may use an explicitly admitted neutral global execution scope. Transport type
 is not a filesystem permission or a reason to reject a server.
 
+Native child delegation freezes configuration provenance, explicit execution scope and exact selected
+server definitions separately from execution resource identities. The original authority prepares the
+child's own execution binding and the runtime commits it once before first use. A global configuration
+file may still describe a workspace execution dependency; a fixed read-only child cannot borrow the
+parent's mutable cwd. Neutral global dependencies remain neutral even when a child has a private cwd.
+
 The Host supplies scope from its registered actor; the worker cannot send credential directories,
 project trust decisions or execution paths. Worker scope handles also bind authority instance,
 session, worker ID and worker generation. `control.mcp` is a normal-session capability; auxiliary
@@ -57,6 +63,13 @@ were selected first. Full JSON Schema validators are compiled once per declarati
 Ajv supports draft-07, 2019-09 and 2020-12 plus standard formats. Unsupported schemas fail before
 dispatch. Validation never coerces arguments, inserts defaults or removes additional properties.
 Remote annotations are descriptive and never grant permission or establish actual effects.
+
+Per-scope definition identities are captured from the original configuration snapshot. An accepted
+child may derive its execution scope from an exact still-live original definition after ordinary
+configuration replacement, including a deferred server that was not yet connected. Source identity,
+selected server set, current trust and credential/declaration checks remain with this authority.
+After the last original scope is gone, unavailable historical configuration is an explicit failure;
+there is no persisted configuration copy or latest-definition fallback.
 
 Ordinary replacement retains referenced connections. Explicit disable/removal, hidden tool
 withdrawal, sign-out and credential relink revoke admissions. Checks run before authorization

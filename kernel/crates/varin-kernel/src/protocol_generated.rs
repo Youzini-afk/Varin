@@ -1672,6 +1672,7 @@ pub(crate) struct LaunchSourceParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct McpBinding {
+    pub(crate) provenance: McpProvenance,
     pub(crate) resources: std::collections::BTreeMap<String, String>,
     pub(crate) reference: String,
     pub(crate) generation: i64,
@@ -1934,6 +1935,15 @@ pub(crate) struct LiveRoot {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpProvenance {
+    #[serde(rename = "execution_scope")]
+    pub(crate) execution_scope: varin_runtime::catalog::launches::McpExecutionScope,
+    pub(crate) configuration: McpConfiguration,
+    pub(crate) servers: std::collections::BTreeMap<String, McpServerSelection>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct LaunchTool {
     pub(crate) name: String,
     pub(crate) version: String,
@@ -1992,6 +2002,26 @@ pub(crate) struct ContextFragment {
     pub(crate) name: String,
     pub(crate) kind: String,
     pub(crate) content: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpConfiguration {
+    #[serde(rename = "agent_dir")]
+    pub(crate) agent_dir: String,
+    #[serde(rename = "config_cwd")]
+    pub(crate) config_cwd: String,
+    #[serde(rename = "project_trusted")]
+    pub(crate) project_trusted: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpServerSelection {
+    #[serde(rename = "definition_version")]
+    pub(crate) definition_version: String,
+    #[serde(rename = "resource_key")]
+    pub(crate) resource_key: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]

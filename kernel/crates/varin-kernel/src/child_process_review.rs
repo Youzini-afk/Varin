@@ -100,7 +100,12 @@ impl Harness {
         let preparation = owner
             .lock()
             .unwrap()
-            .prepare_child_dispatch_binding(&run.id, model, launch.tools.clone())
+            .prepare_child_dispatch_binding(
+                &run.id,
+                model,
+                launch.tool_schema_generation,
+                launch.tools.clone(),
+            )
             .unwrap();
         let prepared = preparation.load().unwrap();
         let dispatch_ref = owner
@@ -251,6 +256,7 @@ impl Harness {
                     self.runtime.catalog(),
                     Some(parent.binding.clone()),
                     self.resources.clone(),
+                    crate::host_tools::ToolBridge::new(std::sync::mpsc::sync_channel(1).0.into()),
                 ),
             )
             .unwrap(),
@@ -560,6 +566,7 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
     ])
     .unwrap();
     let catalog = ChildDispatchCatalog {
+        native_capabilities: Vec::new(),
         identity: "original-settings-selection".into(),
         normal_unavailable: None,
         presets: vec![ChildPreset {
@@ -757,7 +764,7 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
     assert!(!owner
         .lock()
         .unwrap()
-        .child_process_writers_stopped(child.operation.as_ref().unwrap())
+        .child_writers_stopped_sync(child.operation.as_ref().unwrap())
         .unwrap());
     let ack=h.controls.admit_control("runtime.tree.cancel",&json!({"target":{"kind":"child","operation_id":child.operation},"expectedParentThreadId":"parent"})).unwrap().unwrap();
     assert_eq!(ack["child_count"], 2);
@@ -776,12 +783,12 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
     assert!(owner
         .lock()
         .unwrap()
-        .child_process_writers_stopped(child.operation.as_ref().unwrap())
+        .child_writers_stopped_sync(child.operation.as_ref().unwrap())
         .unwrap());
     assert!(!owner
         .lock()
         .unwrap()
-        .child_process_writers_stopped(sibling.operation.as_ref().unwrap())
+        .child_writers_stopped_sync(sibling.operation.as_ref().unwrap())
         .unwrap());
     let before = std::fs::read(sibling.cwd.join("result.txt")).unwrap();
     wait_until(|| {

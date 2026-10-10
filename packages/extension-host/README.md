@@ -57,7 +57,10 @@ different implementation. Non-authoritative routing cannot create a new binding.
 
 A bound handle admits ordinary calls while its generation is active. A caller freezing an exchange
 can explicitly pin that generation, including its real broker drain lifetime, and must release the
-pin after settling the exchange. Normal replacement preserves pinned calls; disable/crash drainage
+pin after settling the exchange. An accepted child can derive an independent pin through `bindPinned`
+from that exact still-retained generation; it cannot revive an unpinned retired provider. The original
+supervisor keeps its artifact identity through actual owner retirement. Normal replacement preserves
+pinned calls; disable/crash drainage
 revokes both the active generation and older retained generations without waiting for abandoned pins.
 The first production native consumer is `varin.context.fragments@1`: existing scoped routing selects
 one brokered package, its frozen declaration crosses the private context boundary, and Rust's existing

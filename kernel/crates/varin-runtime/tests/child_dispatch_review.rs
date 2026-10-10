@@ -651,12 +651,24 @@ fn fixed_parent_can_admit_private_writable_child_and_cancelled_empty_report_keep
     assert!(matches!(child.source,ChildSource::Pending{..}));
     assert_eq!(child.code_result,ChildCodeResult::Pending);
     f.settle_exchange();
-    let (mut source,proposal,basis)=child_context(&child);source.mode=SourceMode::Materialized;
-    let child=f.db.prepare_child(&child.operation_id,source,proposal,basis).unwrap();
-    let run=child.receipt.as_ref().unwrap().run_id.clone();let epoch=f.db.epoch();
-    f.db.admit_operation("child-file-effect",&run,epoch,Lifetime::Run,json!({"fixture":"confirmed file mutation"})).unwrap();
-    f.db.dispatch_operation("child-file-effect",epoch,"file_write",true).unwrap();
-    f.db.settle_operation("child-file-effect",epoch,Outcome::Succeeded,Effect::Confirmed,json!({"written":true})).unwrap();
+    let (mut source, proposal, basis) = child_context(&child);
+    source.mode = SourceMode::Materialized;
+    let child =
+        f.db.prepare_child(&child.operation_id, source, proposal, basis)
+            .unwrap();
+    let run = child.receipt.as_ref().unwrap().run_id.clone();
+    let epoch = f.db.epoch();
+    let context = admit_native_child_writer(&mut f.db, &run, "file_write", "child-file-request");
+    settle_native_child_writer(
+        &mut f.db,
+        &context,
+        ToolCompletion::Result {
+            outcome: Outcome::Succeeded,
+            effect: Effect::Confirmed,
+            content: json!({"written":true}),
+        },
+        true,
+    );
     f.db.request_cancel_run(&run).unwrap();
     f.db.commit_execution(&run,epoch,&ExecutionRecord::StateChanged{state:RunState::Cancelled,waiting_on:None}).unwrap();
     f.db.reconcile_child_reports().unwrap();
@@ -717,40 +729,366 @@ fn ended_goal_detaches_new_primary_input_but_retains_admitted_child_attribution(
 #[test]
 fn completed_report_does_not_stop_process_tree_cancel_is_scoped_and_waits_for_original_stop() {
     use varin_runtime::catalog::dispatch::TreeCancelTarget;
-    let mut f=Fixture::new_isolated(); let child=f.accept(); f.settle_exchange();
-    let (mut source,proposal,basis)=child_context(&child); source.mode=SourceMode::Materialized;
-    let child=f.db.prepare_child(&child.operation_id,source,proposal,basis).unwrap();
-    let run=child.receipt.as_ref().unwrap().run_id.clone(); let epoch=f.db.epoch();
-    f.db.admit_operation("child-process",&run,epoch,Lifetime::Thread,json!({"fixture":"original process owner"})).unwrap();
-    f.db.dispatch_operation("child-process",epoch,"process_spawn",true).unwrap();
-    f.db.handoff_operation("child-process",epoch).unwrap();
-    f.db.settle_operation("child-process",epoch,Outcome::Indeterminate,Effect::Unknown,json!({"status":"unknown"})).unwrap();
-    f.db.commit_execution(&run,epoch,&ExecutionRecord::StateChanged {state:RunState::Runnable,waiting_on:None}).unwrap();
-    f.db.commit_execution(&run,epoch,&ExecutionRecord::StateChanged {state:RunState::Completed,waiting_on:None}).unwrap();
+    let mut f = Fixture::new_isolated_process();
+    let child = f.accept();
+    f.settle_exchange();
+    let (mut source, proposal, basis) = child_context(&child);
+    source.mode = SourceMode::Materialized;
+    let child =
+        f.db.prepare_child(&child.operation_id, source, proposal, basis)
+            .unwrap();
+    let run = child.receipt.as_ref().unwrap().run_id.clone();
+    let epoch = f.db.epoch();
+    let context =
+        admit_native_child_writer(&mut f.db, &run, "process_spawn", "child-process-request");
+    f.db.handoff_operation(&context.operation_id, epoch)
+        .unwrap();
+    settle_native_child_writer(
+        &mut f.db,
+        &context,
+        ToolCompletion::Result {
+            outcome: Outcome::Indeterminate,
+            effect: Effect::Unknown,
+            content: json!({"status":"unknown"}),
+        },
+        false,
+    );
+    f.db.commit_execution(
+        &run,
+        epoch,
+        &ExecutionRecord::StateChanged {
+            state: RunState::Runnable,
+            waiting_on: None,
+        },
+    )
+    .unwrap();
+    f.db.commit_execution(
+        &run,
+        epoch,
+        &ExecutionRecord::StateChanged {
+            state: RunState::Completed,
+            waiting_on: None,
+        },
+    )
+    .unwrap();
     f.db.reconcile_child_reports().unwrap();
-    let report=f.db.child_task(&child.operation_id).unwrap().report.unwrap();
-    assert!(!f.db.child_process_writers_stopped(&child.operation_id).unwrap());
+    let report =
+        f.db.child_task(&child.operation_id)
+            .unwrap()
+            .report
+            .unwrap();
+    assert!(!f
+        .db
+        .child_writers_stopped_sync(&child.operation_id)
+        .unwrap());
     assert!(f.db.begin_child_settlement(&child.operation_id).is_err());
-    assert!(f.db.pending_external_operations("process_spawn").unwrap().contains(&"child-process".into()));
-    let target=TreeCancelTarget::Child { operation_id:child.operation_id.clone() };
-    assert!(f.db.cancel_tree_checked(target.clone(),Some("unrelated-parent")).is_err());
-    assert!(!f.db.operation("child-process").unwrap().cancel_requested);
-    let before=f.db.run(&run).unwrap();
-    let capture=f.db.cancel_tree_checked(target.clone(),Some("thread:parent")).unwrap();
-    assert_eq!((capture.receipt.run_count,capture.receipt.child_count,capture.receipt.process_count),(1,1,1));
-    assert_eq!(capture.process_ids,vec!["child-process"]);
-    assert_eq!(f.db.run(&run).unwrap(),before,"a terminal report is not rewritten as fake cancellation");
+    assert!(f
+        .db
+        .pending_external_operations("process_spawn")
+        .unwrap()
+        .contains(&"child-process-request:tool:process_spawn".into()));
+    let target = TreeCancelTarget::Child {
+        operation_id: child.operation_id.clone(),
+    };
+    assert!(f
+        .db
+        .cancel_tree_checked(target.clone(), Some("unrelated-parent"))
+        .is_err());
+    assert!(
+        !f.db
+            .operation("child-process-request:tool:process_spawn")
+            .unwrap()
+            .cancel_requested
+    );
+    let before = f.db.run(&run).unwrap();
+    let capture =
+        f.db.cancel_tree_checked(target.clone(), Some("thread:parent"))
+            .unwrap();
+    assert_eq!(
+        (
+            capture.receipt.run_count,
+            capture.receipt.child_count,
+            capture.receipt.process_count
+        ),
+        (1, 1, 1)
+    );
+    assert_eq!(
+        capture.process_ids,
+        vec!["child-process-request:tool:process_spawn"]
+    );
+    assert_eq!(
+        f.db.run(&run).unwrap(),
+        before,
+        "a terminal report is not rewritten as fake cancellation"
+    );
     assert!(!f.db.run(&f.context.run_id).unwrap().cancel_requested);
-    assert!(f.db.operation("child-process").unwrap().cancel_requested);
-    assert_eq!(f.db.child_task(&child.operation_id).unwrap().report,Some(report));
-    let revision=f.db.operation("child-process").unwrap().revision;
-    f.db.cancel_tree(target).unwrap();assert_eq!(f.db.operation("child-process").unwrap().revision,revision);
-    f.db.record_external_receipt_with_stop("child-process",ExternalReceipt {identity:"child-process".into(),executor:"process_spawn".into(),epoch:"original-process".into(),outcome:Outcome::Indeterminate,effect:Effect::Unknown,result:json!({"treeConfirmed":true,"writerActive":false})},true).unwrap();
-    assert!(f.db.child_process_writers_stopped(&child.operation_id).unwrap());
+    assert!(
+        f.db.operation("child-process-request:tool:process_spawn")
+            .unwrap()
+            .cancel_requested
+    );
+    assert_eq!(
+        f.db.child_task(&child.operation_id).unwrap().report,
+        Some(report)
+    );
+    let revision =
+        f.db.operation("child-process-request:tool:process_spawn")
+            .unwrap()
+            .revision;
+    f.db.cancel_tree(target).unwrap();
+    assert_eq!(
+        f.db.operation("child-process-request:tool:process_spawn")
+            .unwrap()
+            .revision,
+        revision
+    );
+    f.db.record_external_receipt_with_stop(
+        "child-process-request:tool:process_spawn",
+        ExternalReceipt {
+            identity: "child-process-request:tool:process_spawn".into(),
+            executor: "process_spawn".into(),
+            epoch: "original-process".into(),
+            outcome: Outcome::Indeterminate,
+            effect: Effect::Unknown,
+            result: json!({"treeConfirmed":true,"writerActive":false}),
+        },
+        true,
+    )
+    .unwrap();
+    assert!(f
+        .db
+        .child_writers_stopped_sync(&child.operation_id)
+        .unwrap());
     f.db.begin_child_settlement(&child.operation_id).unwrap();
-    assert_eq!(f.db.child_file_effect(&child.operation_id).unwrap(),Effect::Unknown);
-    let root=f.root.clone();drop(f);let db=Catalog::open(&root).unwrap();
-    assert!(db.child_process_writers_stopped(&child.operation_id).unwrap());
-    assert_eq!(db.child_file_effect(&child.operation_id).unwrap(),Effect::Unknown);
-    drop(db);std::fs::remove_dir_all(root).unwrap();
+    assert_eq!(
+        f.db.child_file_effect(&child.operation_id).unwrap(),
+        Effect::Unknown
+    );
+    let root = f.root.clone();
+    drop(f);
+    let db = Catalog::open(&root).unwrap();
+    assert!(db.child_writers_stopped_sync(&child.operation_id).unwrap());
+    assert_eq!(
+        db.child_file_effect(&child.operation_id).unwrap(),
+        Effect::Unknown
+    );
+    drop(db);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+fn admit_native_child_writer(
+    db: &mut Catalog,
+    run: &str,
+    name: &str,
+    request: &str,
+) -> ToolExecutionContext {
+    let selection = db.launch_intent(run).unwrap().unwrap().selection;
+    let branch = db.run(run).unwrap().branch_id;
+    let schema = selection
+        .tools
+        .iter()
+        .find(|tool| tool.name == name)
+        .unwrap();
+    let call = ToolCall {
+        call_id: name.into(),
+        name: name.into(),
+        schema_version: schema.version.clone(),
+        arguments: json!({}),
+    };
+    let binding: RequestBinding = serde_json::from_value(json!({
+        "child_dispatch":null,"goal":null,"resource_activations":[],"resource_checkpoint_id":null,
+        "connection_identity":selection.connection_identity,"provider_family":selection.provider_family,"model":selection.model,
+        "credential_ref":null,"configuration_generation":selection.configuration_generation,"tool_schema_generation":selection.tool_schema_generation,
+        "tools":selection.tools,"instruction_sources":[],"memory_checkpoint":null,"attachment_refs":[],"environment_cursor":0,
+        "history_range":{"branch_id":branch,"ancestor_id":null,"leaf_id":db.head(&branch).unwrap()}
+    })).unwrap();
+    let epoch = db.epoch();
+    db.commit_execution(
+        run,
+        epoch,
+        &ExecutionRecord::StateChanged {
+            state: RunState::Runnable,
+            waiting_on: None,
+        },
+    )
+    .unwrap();
+    db.commit_execution(
+        run,
+        epoch,
+        &ExecutionRecord::RequestPrepared {
+            snapshot: RequestSnapshot {
+                view: RequestView {
+                    request_id: request.into(),
+                    run_id: run.into(),
+                    origin: RequestOrigin::Conversation {
+                        step: 1,
+                        history_range: binding.history_range.clone(),
+                    },
+                    binding,
+                    history: vec![],
+                },
+                serialized: json!({"fixture":"native child writer"}),
+            },
+        },
+    )
+    .unwrap();
+    db.commit_execution(
+        run,
+        epoch,
+        &ExecutionRecord::ModelDispatched {
+            request_id: request.into(),
+        },
+    )
+    .unwrap();
+    db.commit_execution(
+        run,
+        epoch,
+        &ExecutionRecord::ModelFinished {
+            request_id: request.into(),
+            outcome: ModelOutcome::Completed,
+            finish_reason: Some(FinishReason::ToolCalls),
+            items: vec![ProviderItem {
+                id: name.into(),
+                content: Content::ToolCall { call: call.clone() },
+                opaque: None,
+            }],
+            interrupted_deltas: vec![],
+            usage: UsageReceipt::default(),
+            failure: None,
+        },
+    )
+    .unwrap();
+    let origin = ToolOrigin::ModelStep {
+        request_id: request.into(),
+    };
+    let context = ToolExecutionContext {
+        run_id: run.into(),
+        operation_id: origin.operation_id(name),
+        origin,
+    };
+    db.commit_execution(
+        run,
+        epoch,
+        &ExecutionRecord::ToolAdmitted {
+            context: context.clone(),
+            tool: AdmittedTool {
+                call,
+                contract: ToolContract {
+                    name: name.into(),
+                    schema_version: schema.version.clone(),
+                    read_only: false,
+                    completion: if name == "process_spawn" {
+                        CompletionKind::Job
+                    } else {
+                        CompletionKind::Result
+                    },
+                    lifetime: if name == "process_spawn" {
+                        Lifetime::Thread
+                    } else {
+                        Lifetime::Run
+                    },
+                    resources: vec![],
+                },
+            },
+        },
+    )
+    .unwrap();
+    db.commit_execution(
+        run,
+        epoch,
+        &ExecutionRecord::ToolDispatched {
+            context: context.clone(),
+            executor_owner: ExecutorOwner::Kernel,
+        },
+    )
+    .unwrap();
+    context
+}
+fn settle_native_child_writer(
+    db: &mut Catalog,
+    context: &ToolExecutionContext,
+    completion: ToolCompletion,
+    stopped: bool,
+) {
+    let epoch = db.epoch();
+    db.commit_execution(
+        &context.run_id,
+        epoch,
+        &ExecutionRecord::ToolSettled {
+            context: context.clone(),
+            completion: completion.clone(),
+            executor_stopped: stopped,
+        },
+    )
+    .unwrap();
+    let ToolOrigin::ModelStep { request_id } = &context.origin else {
+        unreachable!()
+    };
+    let call_id = context.operation_id.rsplit(':').next().unwrap().to_string();
+    db.commit_execution(
+        &context.run_id,
+        epoch,
+        &ExecutionRecord::ToolBatchCommitted {
+            request_id: request_id.clone(),
+            results: vec![ToolResult {
+                request_id: request_id.clone(),
+                call_id,
+                completion,
+            }],
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn original_no_send_receipt_does_not_wait_for_a_nonexistent_native_process() {
+    let mut f = Fixture::new_isolated_process();
+    let child = f.accept();
+    f.settle_exchange();
+    let (mut source, proposal, basis) = child_context(&child);
+    source.mode = SourceMode::Materialized;
+    let child =
+        f.db.prepare_child(&child.operation_id, source, proposal, basis)
+            .unwrap();
+    let run = child.receipt.as_ref().unwrap().run_id.clone();
+    let context = admit_native_child_writer(&mut f.db, &run, "process_spawn", "not-sent-process");
+    settle_native_child_writer(
+        &mut f.db,
+        &context,
+        ToolCompletion::NotDispatched {
+            reason: "cancelled-before-spawn".into(),
+        },
+        true,
+    );
+    assert!(f
+        .db
+        .operation(&context.operation_id)
+        .unwrap()
+        .external_receipt
+        .is_none());
+    f.db.commit_execution(
+        &run,
+        f.db.epoch(),
+        &ExecutionRecord::StateChanged {
+            state: RunState::Completed,
+            waiting_on: None,
+        },
+    )
+    .unwrap();
+    let writers =
+        f.db.capture_child_writer_bindings(&child.operation_id)
+            .unwrap()
+            .load()
+            .unwrap();
+    assert!(f.db.child_writers_stopped(&writers).unwrap());
+    assert_eq!(
+        f.db.child_file_effect_bound(&writers).unwrap(),
+        Effect::None
+    );
+    f.db.begin_child_settlement_bound(&child.operation_id, &writers)
+        .unwrap();
+    let root = f.root.clone();
+    drop(writers);
+    drop(f);
+    std::fs::remove_dir_all(root).unwrap();
 }

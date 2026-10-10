@@ -171,7 +171,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 25, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
+Catalog version 26, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -650,9 +650,31 @@ existing controlled file_write/file_edit projection inside a private materialize
 add process authority or grant writes over the parent's source. Native children can select file tools,
 resources, questions, child dispatch/status/report/wait and managed process spawn/inspect/read/write/resize
 and wait. Process access requires the frozen configured capability or actual parent delegation, source
-authority and ordinary permission gates. A process cwd is not an OS sandbox. Arbitrary MCP/extension,
-planning/memory/Goal, LSP, Computer and remote child bindings are not silently enabled; those broader
-capability contracts remain separate work. Explicit parent Integration is a separate authorized action.
+authority and ordinary permission gates. A process cwd is not an OS sandbox. Selected ordinary
+extension and MCP tools retain the actual parent request's exact bindings; the child does not discover
+new capabilities from later routing or configuration. Planning/memory/Goal, custom policies, LSP,
+Computer and remote child bindings remain separate work. Explicit parent Integration is a separate
+authorized action.
+
+The frozen dispatch body retains original tool declarations, schema generation, MCP provenance and
+extension bindings through ContentStore references. Actual native capability descriptors are included
+for presentation; configuration parsing does not invent a second tool directory. Core selection checks
+the full configured preset against the real frozen directory before narrowing. Same-name Host tools
+remain Host tools and cannot acquire native process or file permissions by spelling.
+
+MCP provenance separates original configuration source and server definition from execution scope,
+reference, generation and resources. A workspace dependency is prepared only after the child has its
+own physical execution source; a neutral global dependency stays global. The existing unused-launch
+preparation transaction permits one child execution-binding derivation, fencing original provenance,
+exact declarations and current launch revision. Restore then reuses that committed child binding.
+An original global configuration file alone does not imply a global execution scope.
+
+Before durable child acceptance, a short private Host handoff retains original live owners while the
+parent's frozen exchange is still held. This performs no service preparation. Parent completion and
+channel replacement cannot release accepted child holders; successful independent child Run assembly,
+terminal child facts or old-epoch unaccepted recovery release them. Ordinary service replacement can
+derive a child pin from the still-retained exact generation. Explicit revocation remains authoritative;
+Host restart reconstructs only an available exact artifact/definition and never substitutes latest.
 
 The source owner validates whole-root read authority and records a bounded handoff under the
 persisted tool Operation. Fixed sources retain their original revision pin. Physical sources retain
@@ -684,8 +706,13 @@ environments and the complete collaboration product migration remain separate wo
 
 A report, execution outcome and file result are separate facts. A read-only textual report is valid
 with `no_changes`. A final child report can coexist with independent live processes. Writable children
-wait for actual file-worker/root-lease drainage and original process/guardian executor-stop evidence
-before fixing a candidate through the original Storage owner. Unknown effects remain distinct from
+wait for actual file-worker/root-lease drainage and original process/guardian executor-stop evidence,
+along with dispatched workspace MCP and source-scoped extension callback stop facts, before fixing a
+candidate through the original Storage owner. Writer classification loads the original child binding
+content outside Catalog and then fences its references against current metadata. Neutral global MCP
+is not classified as a child-directory writer by name; an undispatched operation needs no invented stop
+receipt. The effect summary describes source operations; exact file differences remain in the original
+WorkingResult root/base-root, not an inference from a successful callback. Unknown effects remain distinct from
 proved stop; neither report completion nor cancellation intent releases the writer barrier. Candidate/base pins and original operation receipts
 bridge crashes; an existing candidate can publish without its former physical directory. A readonly
 worker prepares the WorkingResult, then Storage atomically publishes its original branch revision,

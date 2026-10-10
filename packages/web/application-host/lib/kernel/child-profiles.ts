@@ -12,8 +12,8 @@ export type ChildProfilePreparer = (input: ChildProfileInput, signal?: AbortSign
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
   : record(value) ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
-const freeze = (presets: ChildPreset[], normal_unavailable: ChildCapabilityFailure | null): ChildDispatchCatalog => ({
-  identity: createHash('sha256').update(JSON.stringify(canonical({ presets, normal_unavailable }))).digest('hex'), presets, normal_unavailable,
+const freeze = (presets: ChildPreset[], normal_unavailable: ChildCapabilityFailure | null, native_capabilities: ChildCapabilityDescriptor[] = []): ChildDispatchCatalog => ({
+  identity: createHash('sha256').update(JSON.stringify(canonical({ presets, normal_unavailable, native_capabilities }))).digest('hex'), presets, normal_unavailable, native_capabilities,
 });
 const unavailable = (code: string, capabilities: string[] = []): ChildCapabilityFailure => ({ code, capabilities });
 
@@ -35,7 +35,6 @@ export function createChildProfilePreparer(owners: {
       return freeze([], unavailable(error instanceof Error && /invalid|malformed/i.test(error.message) ? 'child-settings-invalid' : 'child-settings-unavailable'));
     }
     const descriptors = await waitWithSignal(owners.capabilities(signal), signal);
-    const capabilities = new Map(descriptors.map(capability => [capability.name, capability]));
     const parent = input.parent;
     const main = parent.configuration.providerId ? { providerId: parent.configuration.providerId, modelId: parent.configuration.model } : null;
     const observations = observePresets(settings.models, main, settings.agents, input.workFocus);
@@ -46,10 +45,7 @@ export function createChildProfilePreparer(owners: {
         model_source: entry.modelSource, model: null, inherit_base: null, unavailable: null };
       if (!input.workFocus && definition.workFocus?.length) { profile.unavailable = unavailable('child-profile-scope_unavailable'); return profile; }
       if (entry.availability !== 'available') { profile.unavailable = unavailable(`child-profile-${entry.availability}`); return profile; }
-      const unsupported = definition.tools.filter(name => !capabilities.has(name));
-      if (unsupported.length) { profile.unavailable = unavailable('child-capability-unsupported', unsupported); return profile; }
-      const physical = definition.tools.filter(name => capabilities.get(name)!.source_requirement === 'physical');
-      if (profile.work_mode === 'read_only' && physical.length) { profile.unavailable = unavailable('child-physical-source-required', physical); return profile; }
+      // Host service capabilities are resolved only against the actual frozen Run directory.
       const overrides = definition.modelSettings;
       if (entry.modelSource === 'inherit' && (overrides?.temperature === undefined && overrides?.thinkingLevel === undefined)) return profile;
       try {
@@ -75,6 +71,6 @@ export function createChildProfilePreparer(owners: {
       return profile;
     }));
     signal?.throwIfAborted();
-    return freeze(presets, settings.models.worker?.enabled === false ? unavailable('child-worker-disabled') : null);
+    return freeze(presets, settings.models.worker?.enabled === false ? unavailable('child-worker-disabled') : null, descriptors);
   };
 }

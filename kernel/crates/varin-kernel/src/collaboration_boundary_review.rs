@@ -123,7 +123,12 @@ fn boundary(revoke_before: bool, policy: bool) {
     };
     let directory = Arc::new(
         varin_runtime::composition::tools::ToolDirectory::assemble(
-            crate::collaboration::declarations(db.clone(), Some(binding), resources),
+            crate::collaboration::declarations(
+                db.clone(),
+                Some(binding),
+                resources,
+                crate::host_tools::ToolBridge::new(std::sync::mpsc::sync_channel(1).0.into()),
+            ),
         )
         .unwrap(),
     );

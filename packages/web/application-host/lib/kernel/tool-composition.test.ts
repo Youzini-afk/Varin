@@ -1,13 +1,13 @@
-import { expect, it } from 'vitest';
-import { AgentRuntimeClient } from './agent-runtime-client.js';
+import { expect, it, vi } from 'vitest';
+import { AgentRuntimeClient, type McpPreparation } from './agent-runtime-client.js';
 import type { KernelClient } from './kernel-client.js';
 import type {
   ExtensionToolLease,
   ExtensionToolPreparer,
 } from './extension-tool-owner.js';
-import type { HostToolLease, LiveHostToolBinding } from './tool-bridge.js';
+import type { McpToolLease } from './tool-bridge.js';
 import type {
-  LiveExtensionToolBinding,
+  LiveExtensionToolBinding, LiveMcpBinding, ChildTask,
   LaunchIntent,
   Run,
   RunContextScope,
@@ -143,8 +143,9 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     gate: Promise<void> | undefined,
     failReady = false,
     failReadyNumber: number | undefined,
-    mcp: LiveHostToolBinding | undefined;
+    mcp: LiveMcpBinding | undefined;
   let admittedScope: RunContextScope | null = null;
+  let child: ChildTask | null = null;
   let currentProject: string | null = null;
   const preparedScopes: Array<Parameters<ExtensionToolPreparer>[0]> = [];
   const preparer: ExtensionToolPreparer = async (input) => {
@@ -187,6 +188,7 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     unregisterCredentialOwner() {},
     releaseRunPolicyOwners() {},
     cancelRunPreparation() {},
+    releaseChildToolHandoff: vi.fn(),
     unregisterToolOwners() {},
     registerExtensionTool: async (
       _run: string,
@@ -203,11 +205,11 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
       leases.get(live.ownerId)?.lease.release();
       leases.delete(live.ownerId);
     },
-    registerMcpOwner: async (_run: string, lease: HostToolLease) => {
+    registerMcpOwner: async (_run: string, lease: McpToolLease) => {
       mcp = { ownerId: 'initial-mcp', binding: lease.binding };
       return lease.binding;
     },
-    registerMcpCandidate: async (_run: string, lease: HostToolLease) => ({
+    registerMcpCandidate: async (_run: string, lease: McpToolLease) => ({
       ownerId: 'updated-mcp',
       binding: lease.binding,
     }),
@@ -226,7 +228,7 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
         case 'runtime.run.scope':
           return structuredClone(admittedScope);
         case 'runtime.child.for_thread':
-          return null;
+          return child;
         case 'runtime.context.inspect':
           return currentProject
             ? { personalization: { projectId: currentProject } }
@@ -274,10 +276,11 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
       }
     },
   } as unknown as KernelClient;
-  const mcpLeases: HostToolLease[] = [];
+  const mcpLeases: McpToolLease[] = [];
+  const mcpInputs: McpPreparation[] = [];
   const runtime = new AgentRuntimeClient(
     kernel,
-    async () => mcpLeases.shift(),
+    async input => { mcpInputs.push(structuredClone(input)); return mcpLeases.shift(); },
     undefined,
     undefined,
     undefined,
@@ -286,7 +289,9 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
   return {
     runtime,
     launch,
+    releaseChildHandoff: kernel.releaseChildToolHandoff,
     preparedScopes,
+    child: (value: ChildTask) => { child = value; },
     admittedScope: (scope: RunContextScope | null) => {
       admittedScope = scope;
     },
@@ -295,7 +300,7 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     },
     requests,
     ready,
-    mcpLeases,
+    mcpLeases, mcpInputs, resetMcp: () => { mcp = undefined; },
     publish: (
       key: string,
       lease: ExtensionToolLease | undefined,
@@ -319,14 +324,45 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     },
   };
 }
+it('a child binds only its admitted service set and derives MCP once before restoring its own binding', async () => {
+  const released: string[] = [], extension = contribution('chosen', '1', released), f = setup([extension]);
+  const base = contribution('mcp_read', '1', released).lease;
+  const original: McpToolLease = { ...base, slot: 'mcp', binding: { ...base.binding,
+    provenance: { execution_scope: 'global', configuration: { agent_dir: '/fixture', config_cwd: '/fixture', project_trusted: false }, servers: {} } } };
+  f.launch.selection.extension_bindings = [extension.binding];
+  f.launch.selection.mcp_binding = original.binding;
+  f.child({ operation_id: 'parent-dispatch', parent_run_id: 'parent-run', launch: structuredClone(f.launch.selection) } as ChildTask); // Committed child response fixture; Catalog fences are tested by its owner.
+  const derived: McpToolLease = { ...original, binding: { ...original.binding, reference: 'child-execution-owner' } };
+  f.mcpLeases.push(derived);
+  await f.runtime.prepareMcp('run', null);
+  expect(f.mcpInputs[0]).toMatchObject({ runId: 'run', threadId: 'thread', fixed: true, delegatedBinding: original.binding });
+  expect(f.launch.selection.mcp_binding).toEqual(derived.binding);
+  f.resetMcp(); f.mcpLeases.push(derived);
+  await f.runtime.prepareMcp('run', null);
+  expect(f.mcpInputs[1]).toMatchObject({ requiredBinding: derived.binding, fixed: true });
+  expect(f.mcpInputs[1]).not.toHaveProperty('delegatedBinding');
+  const started = deferred<void>(); f.startGate(started.promise);
+  const starting = f.runtime.startRun('run');
+  await expect.poll(() => f.requests.some(request => request.method === 'runtime.run.start')).toBe(true);
+  expect(f.releaseChildHandoff).not.toHaveBeenCalled();
+  started.resolve(); await starting;
+  expect(f.releaseChildHandoff).toHaveBeenCalledExactlyOnceWith('parent-run', 'parent-dispatch');
+  expect(f.preparedScopes).toEqual([{ runId: 'run', threadId: 'thread', fixed: true }]);
+  const start = f.requests.find(request => request.method === 'runtime.run.start')!;
+  expect((start.params.extensionBindings as LiveExtensionToolBinding[]).map(value => value.binding)).toEqual([extension.binding]);
+  await f.publish('unselected@1', contribution('unselected', '1', released));
+  expect(f.ready).toEqual([]);
+  expect(released).toContain('unselected:1');
+});
 it('first Run starts without slow contributions; concurrent ready completions and MCP refresh merge through one short publication chain', async () => {
   const released: string[] = [],
     a = deferred<ExtensionToolLease>(),
     b = deferred<ExtensionToolLease>(),
     f = setup();
-  const mcp = (name: string): HostToolLease => ({
+  const mcp = (name: string): McpToolLease => ({
     ...contribution(name, '1', released).lease,
     slot: 'mcp',
+    binding: { ...contribution(name, '1', released).lease.binding, provenance: { execution_scope: 'global', configuration: { agent_dir: '/fixture', config_cwd: '/fixture', project_trusted: false }, servers: {} } },
   });
   f.mcpLeases.push(mcp('mcp_initial'));
   await f.runtime.prepareMcp('run', null);
@@ -365,7 +401,7 @@ it('first Run starts without slow contributions; concurrent ready completions an
       (e) => e.binding.serviceId,
     ),
   ).toEqual(['A', 'B']);
-  expect((final.binding as LiveHostToolBinding).binding.tools[0]!.name).toBe(
+  expect((final.binding as LiveMcpBinding).binding.tools[0]!.name).toBe(
     'mcp_next',
   );
   expect(
@@ -518,9 +554,10 @@ it('source start, saved rebind and successor continuation preserve ordinary and 
     const released: string[] = [],
       extension = contribution('extension_read', 'v1', released),
       f = setup([extension]);
-    const mcp = {
+    const mcp: McpToolLease = {
       ...contribution('mcp_read', 'v1', released).lease,
       slot: 'mcp',
+      binding: { ...contribution('mcp_read', 'v1', released).lease.binding, provenance: { execution_scope: 'global', configuration: { agent_dir: '/fixture', config_cwd: '/fixture', project_trusted: false }, servers: {} } },
     };
     f.mcpLeases.push(mcp);
     f.launch.selection.source = {
@@ -565,7 +602,7 @@ it('source start, saved rebind and successor continuation preserve ordinary and 
         (binding) => binding.binding,
       ),
     ).toEqual([extension.binding]);
-    expect((start.mcpBinding as LiveHostToolBinding).binding).toEqual(
+    expect((start.mcpBinding as LiveMcpBinding).binding).toEqual(
       mcp.binding,
     );
   }

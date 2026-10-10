@@ -145,13 +145,38 @@ pub fn reconcile_reports(catalog: &std::sync::Mutex<Catalog>) -> Result<()> {
             .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?
             .admit_child_report(prepared)?;
     }
-    {
-        let mut owner=catalog.lock().map_err(|_|RuntimeError::Invalid("catalog owner failed".into()))?;
-        for child in owner.child_tasks()? {
-            if let collaboration::ChildCodeResult::Published{result,effect:Effect::Unknown}=&child.code_result {
-                let effect=owner.child_file_effect(&child.operation_id)?;
-                if effect!=Effect::Unknown {owner.attach_child_result(&child.operation_id,result.clone(),effect)?;}
-            }
+    let candidates = {
+        let owner = catalog
+            .lock()
+            .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?;
+        owner
+            .child_tasks()?
+            .into_iter()
+            .filter_map(|child| {
+                if let collaboration::ChildCodeResult::Published {
+                    result,
+                    effect: Effect::Unknown,
+                } = child.code_result
+                {
+                    Some(
+                        owner
+                            .capture_child_writer_bindings(&child.operation_id)
+                            .map(|read| (child.operation_id, result, read)),
+                    )
+                } else {
+                    None
+                }
+            })
+            .collect::<Result<Vec<_>>>()?
+    };
+    for (operation_id, result, read) in candidates {
+        let bindings = read.load()?;
+        let mut owner = catalog
+            .lock()
+            .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?;
+        let effect = owner.child_file_effect_bound(&bindings)?;
+        if effect != Effect::Unknown {
+            owner.attach_child_result_bound(&operation_id, result, effect, &bindings)?;
         }
     }
     let receipts = catalog.lock().map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?.capture_child_receipts()?;

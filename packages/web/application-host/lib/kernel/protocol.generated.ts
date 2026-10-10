@@ -849,7 +849,27 @@ export interface PolicyPrepareParams {
   policyModels: PolicyModelCapability[];
 }
 
+export interface McpConfiguration {
+  agent_dir: string;
+  config_cwd: string;
+  project_trusted: boolean;
+}
+
+export interface McpServerSelection {
+  definition_version: string;
+  resource_key: string;
+}
+
+export type McpExecutionScope = 'global' | 'workspace';
+
+export interface McpProvenance {
+  execution_scope: McpExecutionScope;
+  configuration: McpConfiguration;
+  servers: Record<string, McpServerSelection>;
+}
+
 export interface McpBinding {
+  provenance: McpProvenance;
   resources: Record<string, string>;
   reference: string;
   generation: number;
@@ -2787,6 +2807,7 @@ export interface ChildPreset {
 }
 
 export interface ChildDispatchCatalog {
+  native_capabilities: ChildCapabilityDescriptor[];
   identity: string;
   presets: ChildPreset[];
   normal_unavailable: ChildCapabilityFailure | null;

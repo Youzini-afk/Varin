@@ -43,7 +43,7 @@ fn available_metadata_is_the_actual_native_directory_and_classifies_real_source_
 }
 
 #[test]
-fn explicit_normal_narrowing_keeps_full_unknown_delegation_and_checks_exact_owning_schema() {
+fn explicit_normal_narrowing_keeps_frozen_extensions_and_checks_exact_owning_schema() {
     let available = schemas();
     let read = available
         .iter()
@@ -55,7 +55,13 @@ fn explicit_normal_narrowing_keeps_full_unknown_delegation_and_checks_exact_owni
         .find(|tool| tool.name == "dispatch")
         .unwrap()
         .clone();
-    let f = fixture::Fixture::new_extended_parent_with_schemas(read.clone(), dispatch.clone());
+    let wait = available
+        .iter()
+        .find(|tool| tool.name == "wait_child")
+        .unwrap()
+        .clone();
+    let f =
+        fixture::Fixture::new_extended_parent_with_schemas(read.clone(), dispatch.clone(), wait);
     let selected =
         f.db.capture_child_dispatch_invocation(&f.context)
             .unwrap()
@@ -69,7 +75,9 @@ fn explicit_normal_narrowing_keeps_full_unknown_delegation_and_checks_exact_owni
     assert!(crate::collaboration::resolve_selection(&selected, &f.input).is_ok());
     let mut all = f.input.clone();
     all.tools = None;
-    assert!(crate::collaboration::resolve_selection(&selected, &all).is_err());
+    let (resolved, full) = crate::collaboration::resolve_selection(&selected, &all).unwrap();
+    assert_eq!(resolved.extension_bindings, selected.extension_bindings);
+    assert!(full.contains(&selected.extension_bindings[0].tool));
     let root = f.root.clone();
     drop(selected);
     drop(f);

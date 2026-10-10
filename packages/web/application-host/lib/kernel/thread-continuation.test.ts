@@ -135,7 +135,7 @@ it('slow startup launch cannot block the existing child/process pump or a later 
     status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
   const continues = vi.fn(async (runId: string, signal: AbortSignal) => { if (runId === f.run.id) await f.adapter.continueLaunch(runId, { signal }); });
-  const collaboration = new ThreadCollaboration({ kernel: {} as never, storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error("No source expected"); }, sourceCaptureOwners: {} as never, runtime: runtime as unknown as AgentRuntimeClient,
+  const collaboration = new ThreadCollaboration({ kernel: { reconcileChildToolHandoffs() {}, releaseChildToolHandoff() {} } as never, storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error("No source expected"); }, sourceCaptureOwners: {} as never, runtime: runtime as unknown as AgentRuntimeClient,
     workingStates: {} as never, prepareContext: (async () => { throw new Error('No child preparation expected'); }) as never,
     continueRun: continues, recoverLaunches: signal => f.adapter.recover(signal), onError: (_id, error) => { f.errors.push(error); } });
   try {
@@ -162,7 +162,7 @@ it.each(['followup.admitted', 'goal.run_ready'] as const)('%s uses the same cold
     status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
   const continues = vi.fn((runId: string, signal: AbortSignal) => f.adapter.continueLaunch(runId, { signal }));
-  const collaboration = new ThreadCollaboration({ kernel: {} as never, storageAdapter: {} as never,
+  const collaboration = new ThreadCollaboration({ kernel: { reconcileChildToolHandoffs() {}, releaseChildToolHandoff() {} } as never, storageAdapter: {} as never,
     resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
     runtime: runtime as unknown as AgentRuntimeClient, workingStates: {} as never, prepareContext: {} as never,
     continueRun: continues, recoverLaunches: signal => f.adapter.recover(signal), onError: (_id, error) => { f.errors.push(error); } });
@@ -206,7 +206,7 @@ it.each(['followup.admitted', 'goal.run_ready'] as const)('startup discovery ret
     reconcileChildren: async () => [], reconcileProcessWaits: async () => [], children: async () => [], unacceptedChildSources: async () => [],
     status: async () => ({ eventCursor: events.at(-1)?.cursor ?? 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
-  const collaboration = new ThreadCollaboration({ kernel: {} as never, storageAdapter: {} as never,
+  const collaboration = new ThreadCollaboration({ kernel: { reconcileChildToolHandoffs() {}, releaseChildToolHandoff() {} } as never, storageAdapter: {} as never,
     resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
     runtime: runtime as unknown as AgentRuntimeClient, workingStates: {} as never, prepareContext: {} as never,
     continueRun: (runId, signal) => f.adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => f.adapter.recover(signal),
@@ -393,7 +393,7 @@ it.each(['child_revision', 'process_receipt'] as const)('%s observed during an a
     status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
   const continueRun = vi.fn(async () => { await gate; });
-  const collaboration = new ThreadCollaboration({ kernel: {} as never, storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
+  const collaboration = new ThreadCollaboration({ kernel: { reconcileChildToolHandoffs() {}, releaseChildToolHandoff() {} } as never, storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
     runtime: runtime as unknown as AgentRuntimeClient, workingStates: {} as never, prepareContext: {} as never,
     continueRun, recoverLaunches: async () => {}, onError: (_id, error) => { f.errors.push(error); } });
   try {
@@ -425,7 +425,7 @@ it('domain receipt discovery keeps the new epoch wake while an aborted old disco
     status: async () => ({ eventCursor: 0 }), events: async () => [],
   });
   const reconcileDomainReceipts = vi.fn(async (_signal: AbortSignal) => {}).mockImplementationOnce(async () => { await gate; });
-  const collaboration = new ThreadCollaboration({ kernel: {} as never, storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
+  const collaboration = new ThreadCollaboration({ kernel: { reconcileChildToolHandoffs() {}, releaseChildToolHandoff() {} } as never, storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
     runtime: runtime as unknown as AgentRuntimeClient, workingStates: {} as never, prepareContext: {} as never,
     continueRun: async () => {}, recoverLaunches: async () => {}, reconcileDomainReceipts, onError: (_id, error) => { f.errors.push(error); } });
   try {

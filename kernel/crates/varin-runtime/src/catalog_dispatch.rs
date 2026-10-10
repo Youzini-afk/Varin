@@ -117,6 +117,7 @@ pub struct ChildPreset {
 #[serde(deny_unknown_fields)]
 pub struct ChildDispatchCatalog {
     pub identity: String,
+    pub native_capabilities: Vec<ChildCapabilityDescriptor>,
     pub normal_unavailable: Option<ChildCapabilityFailure>,
     pub presets: Vec<ChildPreset>,
 }
@@ -125,6 +126,22 @@ impl ChildDispatchCatalog {
         if self.identity.trim().is_empty() {
             return Err(RuntimeError::Invalid(
                 "child configuration snapshot has no identity".into(),
+            ));
+        }
+        validate_names(
+            &self
+                .native_capabilities
+                .iter()
+                .map(|capability| capability.name.clone())
+                .collect::<Vec<_>>(),
+        )?;
+        if self
+            .native_capabilities
+            .iter()
+            .any(|capability| capability.version.is_empty())
+        {
+            return Err(RuntimeError::Invalid(
+                "native capability descriptors require their original version".into(),
             ));
         }
         let mut names = std::collections::BTreeSet::new();
@@ -204,10 +221,14 @@ pub struct FrozenChildDispatch {
     pub catalog_ref: Value,
     pub parent_model: ChildModelBinding,
     pub allowed_delegation: Vec<ToolSchema>,
+    pub tool_schema_generation: u64,
+    pub tools_ref: Value,
+    pub mcp_binding_ref: Option<Value>,
+    pub extension_bindings_ref: Value,
 }
 
 pub struct ChildDispatchPreparation {
-    catalog_ref: Option<Value>,
+    selection: super::launch_content::LaunchSelectionMetadata,
     model: ChildModelBinding,
     allowed_delegation: Vec<ToolSchema>,
     content: crate::content::ContentStore,
@@ -215,9 +236,7 @@ pub struct ChildDispatchPreparation {
 }
 pub struct PreparedChildDispatch {
     pub reference: Option<Value>,
-    catalog_ref: Option<Value>,
-    connection_identity: String,
-    credential_scope: Option<CredentialScope>,
+    selection: super::launch_content::LaunchSelectionMetadata,
     _publication: crate::content::ContentPublication,
 }
 
@@ -230,6 +249,8 @@ pub struct ChildDispatchSelection {
     pub reference: Value,
     pub frozen: FrozenChildDispatch,
     pub catalog: ChildDispatchCatalog,
+    pub mcp_binding: Option<super::launches::HostToolBinding>,
+    pub extension_bindings: Vec<super::launches::ExtensionToolBinding>,
     _publication: crate::content::ContentPublication,
 }
 #[derive(Debug)]
@@ -238,6 +259,10 @@ pub struct ResolvedChildSelection {
     pub catalog_ref: Value,
     pub profile: ChildSelectedProfile,
     pub model: ChildModelBinding,
+    pub tool_schema_generation: u64,
+    pub parent_tools_ref: Value,
+    pub mcp_binding: Option<super::launches::HostToolBinding>,
+    pub extension_bindings: Vec<super::launches::ExtensionToolBinding>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -251,11 +276,24 @@ impl ResolvedChildSelection {
     pub fn source_delegation(&self) -> ChildSourceDelegation {
         ChildSourceDelegation {
             work_mode: self.profile.work_mode,
-            process: self
-                .profile
-                .tools
-                .iter()
-                .any(|name| name.starts_with("process_") || name == "wait_process"),
+            process: self.profile.tools.iter().any(|name| {
+                matches!(
+                    name.as_str(),
+                    "process_spawn"
+                        | "process_inspect"
+                        | "process_read"
+                        | "process_write"
+                        | "process_resize"
+                        | "wait_process"
+                ) && !self
+                    .extension_bindings
+                    .iter()
+                    .any(|binding| &binding.tool.name == name)
+                    && !self
+                        .mcp_binding
+                        .as_ref()
+                        .is_some_and(|binding| binding.tools.iter().any(|tool| &tool.name == name))
+            }),
             configured_preset: self.profile.preset_id.is_some(),
             selection_ref: self.frozen_reference.clone(),
         }
@@ -275,6 +313,16 @@ fn physical_tool(name: &str) -> bool {
     )
 }
 impl ChildDispatchSelection {
+    pub fn host_tool(&self, name: &str) -> Option<&ToolSchema> {
+        self.extension_bindings
+            .iter()
+            .map(|binding| &binding.tool)
+            .chain(self.mcp_binding.iter().flat_map(|binding| &binding.tools))
+            .find(|tool| tool.name == name && self.frozen.allowed_delegation.contains(tool))
+    }
+    fn physical_tool(&self, name: &str) -> bool {
+        self.host_tool(name).is_none() && physical_tool(name)
+    }
     /// Resolve only an already authenticated configuration snapshot. Executable declarations
     /// are still assembled and checked by their owning tool directory in the kernel.
     pub fn resolve(&self, input: &DispatchInput) -> Result<ResolvedChildSelection> {
@@ -328,7 +376,7 @@ impl ChildDispatchSelection {
                 .map(|tool| tool.name.clone())
                 .collect();
             if input.work_mode == Some(ChildWorkMode::ReadOnly) {
-                tools.retain(|name| !physical_tool(name));
+                tools.retain(|name| !self.physical_tool(name));
             }
             if input.work_mode == Some(ChildWorkMode::IsolatedWrite) {
                 for name in ["file_write", "file_edit"] {
@@ -338,7 +386,7 @@ impl ChildDispatchSelection {
                 }
             }
             let mode = input.work_mode.unwrap_or_else(|| {
-                if tools.iter().any(|name| physical_tool(name)) {
+                if tools.iter().any(|name| self.physical_tool(name)) {
                     ChildWorkMode::IsolatedWrite
                 } else {
                     ChildWorkMode::ReadOnly
@@ -355,7 +403,7 @@ impl ChildDispatchSelection {
             tools = selected.clone();
         }
         let mode = if input.preset.is_none() && input.work_mode.is_none() {
-            if tools.iter().any(|name| physical_tool(name)) {
+            if tools.iter().any(|name| self.physical_tool(name)) {
                 ChildWorkMode::IsolatedWrite
             } else {
                 ChildWorkMode::ReadOnly
@@ -363,7 +411,7 @@ impl ChildDispatchSelection {
         } else {
             mode
         };
-        if mode == ChildWorkMode::ReadOnly && tools.iter().any(|name| physical_tool(name)) {
+        if mode == ChildWorkMode::ReadOnly && tools.iter().any(|name| self.physical_tool(name)) {
             return Err(RuntimeError::Invalid(
                 "selected child effects require a private physical source".into(),
             ));
@@ -374,6 +422,18 @@ impl ChildDispatchSelection {
             frozen_reference: self.reference.clone(),
             catalog_ref: self.frozen.catalog_ref.clone(),
             model,
+            tool_schema_generation: self.frozen.tool_schema_generation,
+            parent_tools_ref: self.frozen.tools_ref.clone(),
+            mcp_binding: self
+                .mcp_binding
+                .as_ref()
+                .and_then(|binding| binding.delegate(&tools)),
+            extension_bindings: self
+                .extension_bindings
+                .iter()
+                .filter(|binding| tools.contains(&binding.tool.name))
+                .cloned()
+                .collect(),
             profile: ChildSelectedProfile {
                 preset_id: input.preset.clone(),
                 catalog_identity: Some(self.catalog.identity.clone()),
@@ -392,10 +452,47 @@ impl ChildDispatchRead {
             serde_json::from_value(self.content.load(&frozen.catalog_ref)?)?;
         catalog.validate()?;
         frozen.parent_model.connection_identity()?;
+        let tools: Vec<ToolSchema> = serde_json::from_value(self.content.load(&frozen.tools_ref)?)?;
+        if frozen
+            .allowed_delegation
+            .iter()
+            .any(|tool| !tools.contains(tool))
+        {
+            return Err(RuntimeError::Invalid(
+                "delegation differs from its original tool directory".into(),
+            ));
+        }
+        let mcp_binding: Option<super::launches::HostToolBinding> = frozen
+            .mcp_binding_ref
+            .as_ref()
+            .map(|reference| {
+                serde_json::from_value(self.content.load(reference)?).map_err(RuntimeError::from)
+            })
+            .transpose()?;
+        let extension_bindings: Vec<super::launches::ExtensionToolBinding> =
+            serde_json::from_value(self.content.load(&frozen.extension_bindings_ref)?)?;
+        if let Some(binding) = &mcp_binding {
+            binding.validate()?;
+            if binding.tools.iter().any(|tool| !tools.contains(tool)) {
+                return Err(RuntimeError::Invalid(
+                    "delegated MCP declaration differs from its original directory".into(),
+                ));
+            }
+        }
+        for binding in &extension_bindings {
+            binding.validate()?;
+            if !tools.contains(&binding.tool) {
+                return Err(RuntimeError::Invalid(
+                    "delegated extension declaration differs from its original directory".into(),
+                ));
+            }
+        }
         Ok(ChildDispatchSelection {
             reference: self.reference,
             frozen,
             catalog,
+            mcp_binding,
+            extension_bindings,
             _publication: self._publication,
         })
     }
@@ -451,9 +548,27 @@ impl ChildInvocationRead {
 impl ChildDispatchPreparation {
     pub fn load(self) -> Result<PreparedChildDispatch> {
         let connection_identity = self.model.connection_identity()?;
-        let credential_scope = self.model.credential_scope.clone();
+        if self.selection.connection_identity != connection_identity
+            || self.selection.credential_scope != self.model.credential_scope
+        {
+            return Err(RuntimeError::Conflict(
+                "delegation model differs from its launch".into(),
+            ));
+        }
+        let tools: Vec<ToolSchema> =
+            serde_json::from_value(self.content.load(&self.selection.tools_ref)?)?;
+        if self
+            .allowed_delegation
+            .iter()
+            .any(|tool| !tools.contains(tool))
+        {
+            return Err(RuntimeError::Conflict(
+                "delegation differs from its selected tool generation".into(),
+            ));
+        }
         let reference = self
-            .catalog_ref
+            .selection
+            .child_dispatch_ref
             .clone()
             .map(|catalog_ref| {
                 let catalog: ChildDispatchCatalog =
@@ -464,14 +579,16 @@ impl ChildDispatchPreparation {
                         catalog_ref,
                         parent_model: self.model.clone(),
                         allowed_delegation: self.allowed_delegation,
+                        tool_schema_generation: self.selection.tool_schema_generation,
+                        tools_ref: self.selection.tools_ref.clone(),
+                        mcp_binding_ref: self.selection.mcp_binding_ref.clone(),
+                        extension_bindings_ref: self.selection.extension_bindings_ref.clone(),
                     })?)
             })
             .transpose()?;
         Ok(PreparedChildDispatch {
             reference,
-            catalog_ref: self.catalog_ref,
-            connection_identity,
-            credential_scope,
+            selection: self.selection,
             _publication: self.publication,
         })
     }
@@ -486,10 +603,7 @@ impl Catalog {
         let run: Run = record(&tx, "runs", run_id)?;
         fence(&run, self.epoch)?;
         let mut launch: launch_content::LaunchMetadata = record(&tx, "run_launches", run_id)?;
-        if launch.selection.child_dispatch_ref != prepared.catalog_ref
-            || launch.selection.connection_identity != prepared.connection_identity
-            || launch.selection.credential_scope != prepared.credential_scope
-        {
+        if run.cancel_requested || launch.selection != prepared.selection {
             return Err(RuntimeError::Conflict(
                 "child delegation launch changed during preparation".into(),
             ));
@@ -553,13 +667,19 @@ impl Catalog {
         &self,
         run_id: &str,
         model: ChildModelBinding,
+        tool_schema_generation: u64,
         allowed_delegation: Vec<ToolSchema>,
     ) -> Result<ChildDispatchPreparation> {
         let launch = self
             .launch_metadata(run_id)?
             .ok_or_else(|| RuntimeError::NotFound("Run launch".into()))?;
+        if launch.selection.tool_schema_generation != tool_schema_generation {
+            return Err(RuntimeError::Conflict(
+                "delegation tool generation differs from its selected directory".into(),
+            ));
+        }
         Ok(ChildDispatchPreparation {
-            catalog_ref: launch.selection.child_dispatch_ref,
+            selection: launch.selection,
             model,
             allowed_delegation,
             content: self.content.clone(),
@@ -712,7 +832,7 @@ impl Catalog {
         let mut process_ids = Vec::new();
         for run in &runs {
             let ids = {
-                let mut statement = tx.prepare("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.executor')='process_spawn' AND coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 ORDER BY id")?;
+                let mut statement = tx.prepare("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.executor')='process_spawn' AND json_extract(body,'$.execution_owner.kind')='kernel' AND coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 ORDER BY id")?;
                 let rows = statement.query_map([&run.id], |row| row.get::<_, String>(0))?;
                 rows.collect::<std::result::Result<Vec<_>, _>>()?
             };

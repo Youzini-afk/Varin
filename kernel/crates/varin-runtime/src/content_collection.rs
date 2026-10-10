@@ -231,6 +231,11 @@ impl ContentCollection {
             let frozen: crate::catalog::dispatch::FrozenChildDispatch = serde_json::from_value(self.load_body(&dispatch)?)?;
             references.push(reference);
             references.push(serde_json::from_value(frozen.catalog_ref)?);
+            references.push(serde_json::from_value(frozen.tools_ref)?);
+            references.push(serde_json::from_value(frozen.extension_bindings_ref)?);
+            if let Some(reference) = frozen.mcp_binding_ref {
+                references.push(serde_json::from_value(reference)?);
+            }
         }
         let mut live = HashSet::new();
         let mut verified = HashSet::new();

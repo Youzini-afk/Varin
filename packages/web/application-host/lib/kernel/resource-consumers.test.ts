@@ -205,7 +205,7 @@ it('ThreadAdapter submits an explicit source with real forSource preparation and
     { id: 99, scope: { kind: 'global' }, content: 'ORIGINAL SOURCE MEMORY', updatedAt: '2026-10-10T00:00:00Z' }] };
   const prepare = createThreadContext({ resources, personalization: { catalog: async () => structuredClone(catalog) }, projectForWorkspace: projectLookup });
   const original = await prepare(identity, null, { mode: 'agent', threadRole: 'worker', projectId: 'admitted-project' });
-  const frozenProfiles = { identity: 'original-child-catalog', presets: [], normal_unavailable: null };
+  const frozenProfiles = { identity: 'original-child-catalog', presets: [], normal_unavailable: null, native_capabilities: [] };
   const childProfiles = vi.fn(async () => structuredClone(frozenProfiles));
   const saved = checkpoint(original); const fAdapter = adapterFixture(saved, prepare, childProfiles);
   catalog = { revision: 6, prompts: {}, memories: [
@@ -238,7 +238,7 @@ it('ThreadAdapter submits an explicit source with real forSource preparation and
 
 it('ThreadAdapter reuses an accepted input receipt after settings break, and only a matching raced receipt can recover a new preparation failure', async () => {
   const f = await fixture(); const saved = checkpoint(f.context);
-  const childProfiles = vi.fn(async () => ({ identity: 'accepted-profile-snapshot', presets: [], normal_unavailable: null }));
+  const childProfiles = vi.fn(async () => ({ identity: 'accepted-profile-snapshot', presets: [], normal_unavailable: null, native_capabilities: [] }));
   const fAdapter = adapterFixture(saved, f.prepare, childProfiles);
   const source: ThreadSource = { workspaceId: 'selected-workspace', executionWorkspaceId: 'selected-workspace',
     mode: 'fixed_branch', branchId: 'selected-source', revision: 0, tools: ['file_read'] };

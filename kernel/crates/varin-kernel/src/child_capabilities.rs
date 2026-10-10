@@ -63,6 +63,34 @@ pub(crate) fn select(names: &[String]) -> Result<Vec<ToolSchema>, varin_runtime:
         })
         .collect()
 }
+pub(crate) fn select_frozen(
+    selected: &varin_runtime::catalog::dispatch::ChildDispatchSelection,
+    names: &[String],
+) -> Result<Vec<ToolSchema>, varin_runtime::RuntimeError> {
+    let native = names
+        .iter()
+        .filter(|name| selected.host_tool(name).is_none())
+        .cloned()
+        .collect::<Vec<_>>();
+    let available = select(&native)?;
+    names
+        .iter()
+        .map(|name| {
+            if let Some(tool) = selected.host_tool(name) {
+                return Ok(tool.clone());
+            }
+            available
+                .iter()
+                .find(|tool| &tool.name == name)
+                .cloned()
+                .ok_or_else(|| {
+                    varin_runtime::RuntimeError::Invalid(format!(
+                        "unsupported child capability: {name}"
+                    ))
+                })
+        })
+        .collect()
+}
 /// Automatic main-only helpers are not delegation selections. Every returned tool is
 /// present in the actual parent directory with the identical owning declaration.
 pub(crate) fn delegated(parent: &[ToolSchema]) -> Vec<ToolSchema> {
@@ -123,7 +151,12 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
             .catalog
             .lock()
             .map_err(|e| error(e.to_string()))?
-            .prepare_child_dispatch_binding(run_id, model, delegated(&binding.tools))
+            .prepare_child_dispatch_binding(
+                run_id,
+                model,
+                binding.tool_schema_generation,
+                delegated(&binding.tools),
+            )
             .map_err(|e| error(e.to_string()))?;
         let prepared = prepared.load().map_err(|e| error(e.to_string()))?;
         if cancel.is_cancelled() {
@@ -188,11 +221,10 @@ fn discovery(
     selected: &varin_runtime::catalog::dispatch::ChildDispatchSelection,
 ) -> serde_json::Value {
     use serde_json::json;
-    let available = schemas();
     let unsupported = |tools: &[String]| {
         tools
             .iter()
-            .filter(|name| !available.iter().any(|tool| &tool.name == *name))
+            .filter(|name| select_frozen(selected, std::slice::from_ref(*name)).is_err())
             .cloned()
             .collect::<Vec<_>>()
     };

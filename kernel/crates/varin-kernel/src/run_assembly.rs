@@ -27,6 +27,10 @@ pub(crate) struct RunAssembly {
     pub responses: crate::transport::Sender,
     pub epoch: String,
 }
+
+#[cfg(test)]
+#[path = "run_assembly_review.rs"]
+mod tests;
 pub(crate) enum PreparedLaunch {
     Selection(Value),
     Start(RunStart),
@@ -114,11 +118,7 @@ impl RunAssembly {
             .require_child_launch(&run.id)
             .map_err(domain)?
             .is_some();
-        if is_child
-            && (p.mcp_binding.is_some()
-                || p.extension_bindings.is_some()
-                || p.policy_binding.is_some())
-        {
+        if is_child && p.policy_binding.is_some() {
             return Err(KernelError::Authorization(
                 "child cannot expand its admitted capabilities".into(),
             ));
@@ -349,6 +349,7 @@ impl RunAssembly {
                 runtime.catalog(),
                 collaboration_source.clone(),
                 resources.clone(),
+                self.tools.bridge(),
             ));
             if let Some(source) = collaboration_source {
                 declarations.extend(crate::process_wait::declarations(
@@ -374,10 +375,12 @@ impl RunAssembly {
             .capture_launch(&p.run_id).map_err(domain)?;
         let saved_launch = saved_launch.map(|read| read.load()).transpose().map_err(domain)?;
         if is_child {
-            let admitted = &saved_launch.as_ref().ok_or_else(|| KernelError::Authorization("Child launch missing".into()))?.selection.tools;
-            crate::child_capabilities::select(&admitted.iter().map(|tool| tool.name.clone()).collect::<Vec<_>>()).map_err(domain)?;
+            let admitted = &saved_launch
+                .as_ref()
+                .ok_or_else(|| KernelError::Authorization("Child launch missing".into()))?
+                .selection
+                .tools;
             declarations.retain(|declaration| admitted.contains(&declaration.schema));
-            if declarations.len() != admitted.len() { return Err(KernelError::Authorization("Child capability rebind does not match admitted declarations".into())); }
         }
         let mcp_live = p.mcp_binding.map(live_mcp_binding).transpose()?;
         let mcp_binding = mcp_live.as_ref().map(|live| live.binding.clone());
@@ -387,7 +390,21 @@ impl RunAssembly {
             .into_iter()
             .map(live_extension_binding)
             .collect::<Result<Vec<_>, _>>()?;
-        let extension_bindings = extensions.iter().map(|live| live.binding.clone()).collect();
+        let extension_bindings: Vec<_> =
+            extensions.iter().map(|live| live.binding.clone()).collect();
+        if is_child {
+            let admitted = &saved_launch
+                .as_ref()
+                .expect("child launch checked")
+                .selection;
+            if admitted.mcp_binding != mcp_binding
+                || admitted.extension_bindings != extension_bindings
+            {
+                return Err(KernelError::Authorization(
+                    "Child Host owner differs from its admitted binding".into(),
+                ));
+            }
+        }
         if let Some(generation) = saved_schema_generation {
             start.binding.tool_schema_generation = generation;
         }
@@ -395,6 +412,20 @@ impl RunAssembly {
             .tools
             .prepare_scope(&p.run_id, declarations, mcp_live, extensions)
             .map_err(|error| KernelError::Protocol(error.to_string()))?;
+        if is_child {
+            let mut admitted = saved_launch
+                .as_ref()
+                .expect("child launch checked")
+                .selection
+                .tools
+                .clone();
+            admitted.sort_by(|left, right| left.name.cmp(&right.name));
+            if directory.schemas() != admitted {
+                return Err(KernelError::Authorization(
+                    "Child capability rebind does not match admitted declarations".into(),
+                ));
+            }
+        }
         start.binding.tools = directory.schemas().to_vec();
         let policy_read = runtime
             .catalog()
@@ -477,7 +508,9 @@ impl RunAssembly {
                 .install(&p.run_id, start.binding.tool_schema_generation, directory)
                 .map_err(|error| KernelError::Operation(error.to_string()))?
         } else {
-            directory.into_static()
+            directory
+                .into_static()
+                .map_err(|error| KernelError::Operation(error.to_string()))?
         };
         if !is_context_job {
             start.provider = self.models.wrap(start.provider);

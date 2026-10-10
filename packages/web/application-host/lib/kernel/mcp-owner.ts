@@ -1,5 +1,6 @@
 /** Adapter for a lease from the sole shared MCP authority; no clients or config stores here. */
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import {
   evaluateGate,
   validatePermissionMode,
@@ -13,12 +14,12 @@ import type {
 import type { KernelClient } from './kernel-client.js';
 import { permissionService } from './permission-service.js';
 import type {
-  HostToolBinding,
   HostToolCall,
   HostToolCompletion,
-  HostToolLease,
+  McpToolLease,
   ToolExecutionReceipt,
 } from './tool-bridge.js';
+import type { McpBinding } from './protocol.generated.js';
 
 export const MCP_DISCOVER = 'mcp_discover';
 export const MCP_CALL = 'mcp_call';
@@ -39,6 +40,9 @@ export interface McpOwnerOptions {
   currentPolicy(): Promise<PermissionPolicy>;
   /** An admitted workspace exists but no consistent MCP execution view has been prepared. */
   unavailableWorkspaceScope?: { workspaceId: string; reason: string };
+  /** Exact visible dependency set. Retargeting changes only the execution owner/resources. */
+  selection?: McpBinding;
+  retarget?: boolean;
 }
 interface Target {
   tool: McpAuthorityTool;
@@ -54,9 +58,11 @@ type Selection =
       args: Record<string, unknown>;
     }
   | { kind: 'direct'; target: Target };
-export function createMcpLease(options: McpOwnerOptions): HostToolLease {
+export function createMcpLease(options: McpOwnerOptions): McpToolLease {
   const { lease } = options;
   const entries = new Map(lease.binding.tools.map((tool) => [tool.name, tool]));
+  const aliases = new Map<string, string>();
+  const targetName = (name: string, version: string) => aliases.get(JSON.stringify([name, version])) ?? name;
   const servers = new Map(
     lease.binding.servers
       .filter(
@@ -65,7 +71,8 @@ export function createMcpLease(options: McpOwnerOptions): HostToolLease {
       )
       .map((server) => [server.name, server]),
   );
-  const binding: HostToolBinding = {
+  const binding: McpBinding = {
+    provenance: structuredClone(lease.binding.provenance),
     reference: lease.binding.reference,
     generation: lease.binding.generation,
     resources: Object.fromEntries([
@@ -127,6 +134,37 @@ export function createMcpLease(options: McpOwnerOptions): HostToolLease {
         },
       },
     );
+  if (options.selection) {
+    const selected = options.selection;
+    if (binding.provenance.execution_scope !== selected.provenance.execution_scope || !isDeepStrictEqual(binding.provenance.configuration, selected.provenance.configuration)) throw new Error('mcp_configuration_source_changed');
+    for (const [name, original] of Object.entries(selected.provenance.servers)) {
+      if (binding.provenance.servers[name]?.definition_version !== original.definition_version) throw new Error('mcp_saved_definition_unavailable');
+    }
+    binding.provenance.servers = Object.fromEntries(Object.entries(binding.provenance.servers).filter(([name]) => name in selected.provenance.servers));
+    entries.clear();
+    binding.tools = selected.tools.map(original => {
+      if (original.name === MCP_DISCOVER || original.name === MCP_CALL) {
+        const actual = binding.tools.find(tool => tool.name === original.name);
+        if (!actual || !isDeepStrictEqual(actual, original)) throw new Error('mcp_saved_schema_unavailable');
+        return actual;
+      }
+      const server = Object.entries(selected.provenance.servers)
+        .find(([, value]) => value.resource_key === selected.resources[original.name])?.[0];
+      const target = lease.binding.tools.find(tool => tool.server === server && tool.schemaVersion === original.version);
+      const actual = target && binding.tools.find(tool => tool.name === target.name && tool.version === target.schemaVersion);
+      if (!target || !actual || !isDeepStrictEqual({ ...actual, name: original.name }, original)) throw new Error('mcp_saved_schema_unavailable');
+      // Composition may disambiguate a public name across several servers. Preserve that
+      // frozen name while the same original authority receives its concrete target name.
+      aliases.set(JSON.stringify([original.name, original.version]), target.name);
+      entries.set(original.name, { ...target, name: original.name });
+      binding.resources[original.name] = target.resourceKey;
+      return { ...actual, name: original.name };
+    });
+    binding.resources = Object.fromEntries(Object.entries(binding.resources).filter(([name]) =>
+      binding.tools.some(tool => tool.name === name) || (name.startsWith('server:') && name.slice(7) in selected.provenance.servers)));
+    for (const name of servers.keys()) if (!(name in selected.provenance.servers)) servers.delete(name);
+    if (!options.retarget && !isDeepStrictEqual(binding, selected)) throw new Error('mcp_saved_binding_unavailable');
+  }
   const approved = new Map<
     string,
     { identity: string; policy: string; target: Target }
@@ -203,9 +241,10 @@ export function createMcpLease(options: McpOwnerOptions): HostToolLease {
     implementationIdentity: lease.implementationIdentity,
     available(schema) {
       if (released) return false;
+      if (!binding.tools.some(tool => isDeepStrictEqual(tool, schema))) return false;
       if (schema.name === MCP_DISCOVER || schema.name === MCP_CALL) return true;
       try {
-        lease.assertCallable(schema.name, schema.version);
+        lease.assertCallable(targetName(schema.name, schema.version), schema.version);
         return true;
       } catch {
         return false;
@@ -225,12 +264,12 @@ export function createMcpLease(options: McpOwnerOptions): HostToolLease {
         )
           throw new Error('mcp_authorization_changed');
         lease.validateArguments(
-          approval.target.tool.name,
+          targetName(approval.target.tool.name, approval.target.tool.schemaVersion),
           approval.target.tool.schemaVersion,
           approval.target.args,
         );
         lease.assertCallable(
-          approval.target.tool.name,
+          targetName(approval.target.tool.name, approval.target.tool.schemaVersion),
           approval.target.tool.schemaVersion,
         );
         signal.throwIfAborted();
@@ -251,13 +290,13 @@ export function createMcpLease(options: McpOwnerOptions): HostToolLease {
               args: selected.args,
             };
       lease.validateArguments(
-        target.tool.name,
+        targetName(target.tool.name, target.tool.schemaVersion),
         target.tool.schemaVersion,
         target.args,
       );
       const authorizedSignal = AbortSignal.any([
         signal,
-        lease.revocationSignal(target.tool.name, target.tool.schemaVersion),
+        lease.revocationSignal(targetName(target.tool.name, target.tool.schemaVersion), target.tool.schemaVersion),
       ]);
       const current = await policy();
       const result = decision(current.value, target);
@@ -275,7 +314,7 @@ export function createMcpLease(options: McpOwnerOptions): HostToolLease {
           authorizedSignal,
         );
       authorizedSignal.throwIfAborted();
-      lease.assertCallable(target.tool.name, target.tool.schemaVersion);
+      lease.assertCallable(targetName(target.tool.name, target.tool.schemaVersion), target.tool.schemaVersion);
       approved.set(call.operationId, {
         identity: JSON.stringify(call),
         policy: current.generation,
@@ -285,7 +324,7 @@ export function createMcpLease(options: McpOwnerOptions): HostToolLease {
     revocationSignal(call) {
       const target = approved.get(call.operationId)?.target;
       return target
-        ? lease.revocationSignal(target.tool.name, target.tool.schemaVersion)
+        ? lease.revocationSignal(targetName(target.tool.name, target.tool.schemaVersion), target.tool.schemaVersion)
         : new AbortController().signal;
     },
     async execute(call, signal) {
@@ -347,7 +386,7 @@ export function createMcpLease(options: McpOwnerOptions): HostToolLease {
         policyGeneration = approval.policy;
         signal.throwIfAborted();
         lease.validateArguments(
-          target.tool.name,
+          targetName(target.tool.name, target.tool.schemaVersion),
           target.tool.schemaVersion,
           target.args,
         );
@@ -371,7 +410,7 @@ export function createMcpLease(options: McpOwnerOptions): HostToolLease {
         return noEffect('mcp_dispatch_rejected');
       }
       try {
-        const result = await lease.callTool(target.tool.name, target.args, {
+        const result = await lease.callTool(targetName(target.tool.name, target.tool.schemaVersion), target.args, {
           schemaVersion: target.tool.schemaVersion,
           signal,
           // Reconnect/OAuth preparation can take time. Recheck at the actual tools/call boundary,
@@ -384,7 +423,7 @@ export function createMcpLease(options: McpOwnerOptions): HostToolLease {
               decision(current.value, target).decision === 'deny'
             )
               throw new Error('mcp_authorization_changed');
-            lease.assertCallable(target.tool.name, target.tool.schemaVersion);
+            lease.assertCallable(targetName(target.tool.name, target.tool.schemaVersion), target.tool.schemaVersion);
           },
         });
         // An MCP isError receipt is a tool failure, not proof of rollback/no remote effects.
