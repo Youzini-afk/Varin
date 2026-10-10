@@ -19,6 +19,9 @@ use varin_runtime::{model_session, supervisor::RunSupervisor, Catalog, SubmitInp
 #[path = "agent_policy.rs"]
 mod policy_commands;
 
+#[path = "agent_followups.rs"]
+mod followup_commands;
+
 #[path = "agent_inputs.rs"]
 mod input_commands;
 
@@ -76,7 +79,9 @@ impl AgentControl {
                 "child source handoff was already released".into(),
             ));
         }
-        let handoff=child.source.handoff().ok_or_else(||KernelError::Authorization("execution has no parent source handoff".into()))?;
+        let handoff = child.source.handoff().ok_or_else(|| {
+            KernelError::Authorization("execution has no parent source handoff".into())
+        })?;
         if child.child_thread_id != p.child_thread_id
             || child.child_branch_id != p.child_branch_id
             || handoff.operation_id != p.handoff_operation_id
@@ -245,7 +250,7 @@ pub(crate) fn spawn(
         let mut runtime: Option<Arc<RunSupervisor>> = None;
         let mut run_models: Option<Arc<crate::run_models::RunModels>> = None;
         let mut run_tools: Option<Arc<crate::run_tools::RunTools>> = None;
-        let mut continuation_stop:Option<crate::continuation_wake::StopGuard> = None;
+        let mut continuation_stop: Option<crate::continuation_wake::StopGuard> = None;
         let mut opening = false;
         let mut initialization_failure: Option<String> = None;
         let mut waiting = std::collections::VecDeque::new();
@@ -412,12 +417,20 @@ pub(crate) fn spawn(
                         let catalog = result?;
                         let owner = Arc::new(RunSupervisor::new(catalog));
                         let (notify, notifications) = mpsc::sync_channel(1);
-                        let (continuation_notify, continuation_wakes) = crate::continuation_wake::channel()?;
-                        continuation_stop=Some(crate::continuation_wake::StopGuard(continuation_notify.clone()));
+                        let (continuation_notify, continuation_wakes) =
+                            crate::continuation_wake::channel()?;
+                        continuation_stop = Some(crate::continuation_wake::StopGuard(
+                            continuation_notify.clone(),
+                        ));
                         let continuation_owner = Arc::downgrade(&owner);
                         thread::Builder::new()
                             .name("thread-continuations".into())
-                            .spawn(move || crate::continuation_wake::drive(continuation_owner, continuation_wakes))?;
+                            .spawn(move || {
+                                crate::continuation_wake::drive(
+                                    continuation_owner,
+                                    continuation_wakes,
+                                )
+                            })?;
                         owner
                             .catalog()
                             .lock()
@@ -568,6 +581,7 @@ pub(crate) fn spawn(
                                 | "runtime.input.enqueue"
                                 | "runtime.input.edit"
                                 | "runtime.messages.send"
+                                | "runtime.followup.register"
                                 | "runtime.child.continuation.accept"
                                 | "runtime.child.prepare"
                                 | "runtime.child.source.ready"
@@ -632,18 +646,27 @@ pub(crate) fn spawn(
                                 }
                             }
                         }
-                        if method == "runtime.followup.register" {
-                            let p: FollowupRegisterParams = serde_json::from_value(params)?;
-                            let value = runtime
-                                .catalog()
-                                .lock()
-                                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                                .register_followup(&p.key, &p.run_id, &p.operation_id)
-                                .map_err(domain)?;
-                            // The original Storage receipt may already exist, including when the
-                            // Catalog's metadata became terminal before real stop evidence arrived.
-                            resources.replay_process_terminals(vec![p.operation_id])?;
-                            return Ok(serde_json::to_value(value)?);
+                        if matches!(method, "runtime.followup.register" | "runtime.followup.get") {
+                            let runtime = runtime.clone();
+                            let resources = resources.clone();
+                            let method = method.to_owned();
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            thread::spawn(move || {
+                                let result = followup_commands::execute(
+                                    runtime, resources, &method, params, &cancelled,
+                                );
+                                let response = match result {
+                                    Ok(value) => response_ok(&response_id, value),
+                                    Err(error) => response_error(&response_id, &error),
+                                };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
+                            });
+                            deferred = true;
+                            return Ok(Value::Null);
                         }
                         if method == "runtime.followup.list" {
                             let p: ThreadParams = serde_json::from_value(params)?;
@@ -986,28 +1009,42 @@ pub(crate) fn spawn(
                         }
                         if method == "runtime.operation.status" {
                             let p: OperationParams = serde_json::from_value(params)?;
-                            let operation = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.operation(&p.operation_id).map_err(domain)?;
+                            let operation = runtime
+                                .catalog()
+                                .lock()
+                                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                                .operation(&p.operation_id)
+                                .map_err(domain)?;
                             return Ok(operation_cancellation_receipt(&operation));
                         }
                         if method == "runtime.child.capabilities" {
-                            if !params.as_object().is_some_and(|value| value.is_empty()) { return Err(KernelError::Protocol("child capabilities takes an empty object".into())); }
-                            return Ok(serde_json::to_value(crate::child_capabilities::descriptors())?);
+                            if !params.as_object().is_some_and(|value| value.is_empty()) {
+                                return Err(KernelError::Protocol(
+                                    "child capabilities takes an empty object".into(),
+                                ));
+                            }
+                            return Ok(serde_json::to_value(
+                                crate::child_capabilities::descriptors(),
+                            )?);
                         }
                         if method == "runtime.model.select" {
                             let runtime = runtime.clone();
-                            let run_models = run_models.as_ref().expect("initialized runtime models").clone();
+                            let run_models = run_models
+                                .as_ref()
+                                .expect("initialized runtime models")
+                                .clone();
                             let response_id = id.clone();
                             let response_sender = responses.clone();
                             let done = finished.clone();
                             let cancelled = cancellation.clone();
                             thread::spawn(move || {
                                 let result = (|| -> Result<Value, KernelError> {
-                            let p: ModelSelectParams = serde_json::from_value(params)?;
-                            let configuration = serde_json::from_value(p.configuration)?;
-                            let scope = p
-                                .credential_scope
-                                .map(|scope| {
-                                    Ok::<_, KernelError>(
+                                    let p: ModelSelectParams = serde_json::from_value(params)?;
+                                    let configuration = serde_json::from_value(p.configuration)?;
+                                    let scope =
+                                        p.credential_scope
+                                            .map(|scope| {
+                                                Ok::<_, KernelError>(
                                         varin_runtime::providers::auth::CredentialScope {
                                             reference: scope.reference,
                                             authority: scope.authority,
@@ -1022,23 +1059,42 @@ pub(crate) fn spawn(
                                             )?,
                                         },
                                     )
-                                })
-                                .transpose()?;
-                            let preparation = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.prepare_child_catalog(p.child_dispatch);
-                            let prepared = preparation.load().map_err(domain)?;
-                            if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
-                            let selection = runtime
-                                .catalog()
-                                .lock()
-                                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                                .select_model_prepared(&p.run_id, &p.key, configuration, scope, Some(prepared))
-                                .map_err(domain)?;
-                            run_models
-                                .prepare(selection.clone())
-                                .map_err(|error| KernelError::Operation(error.to_string()))?;
-                            Ok(serde_json::to_value(selection)?)
+                                            })
+                                            .transpose()?;
+                                    let preparation = runtime
+                                        .catalog()
+                                        .lock()
+                                        .map_err(|_| {
+                                            KernelError::Storage("catalog owner failed".into())
+                                        })?
+                                        .prepare_child_catalog(p.child_dispatch);
+                                    let prepared = preparation.load().map_err(domain)?;
+                                    if cancelled.load(Ordering::Acquire) {
+                                        return Err(KernelError::Cancelled);
+                                    }
+                                    let selection = runtime
+                                        .catalog()
+                                        .lock()
+                                        .map_err(|_| {
+                                            KernelError::Storage("catalog owner failed".into())
+                                        })?
+                                        .select_model_prepared(
+                                            &p.run_id,
+                                            &p.key,
+                                            configuration,
+                                            scope,
+                                            Some(prepared),
+                                        )
+                                        .map_err(domain)?;
+                                    run_models.prepare(selection.clone()).map_err(|error| {
+                                        KernelError::Operation(error.to_string())
+                                    })?;
+                                    Ok(serde_json::to_value(selection)?)
                                 })();
-                                let response = match result { Ok(value) => response_ok(&response_id, value), Err(error) => response_error(&response_id, &error) };
+                                let response = match result {
+                                    Ok(value) => response_ok(&response_id, value),
+                                    Err(error) => response_error(&response_id, &error),
+                                };
                                 done(&response_id);
                                 let _ = response_sender.send(response);
                             });
@@ -1655,39 +1711,79 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
-                        if matches!(method, "runtime.family.list" | "runtime.family.runs" | "runtime.family.read" | "runtime.family.item") {
+                        if matches!(
+                            method,
+                            "runtime.family.list"
+                                | "runtime.family.runs"
+                                | "runtime.family.read"
+                                | "runtime.family.item"
+                        ) {
                             let command = {
                                 let owner = runtime.catalog();
-                                let catalog = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+                                let catalog = owner.lock().map_err(|_| {
+                                    KernelError::Storage("catalog owner failed".into())
+                                })?;
                                 FamilyCommand::capture(&catalog, method, params)?
                             };
                             let response_id = id.clone();
                             let response_sender = responses.clone();
                             let done = finished.clone();
                             let cancelled = cancellation.clone();
-                            content_tasks.send(Box::new(move || {
-                                let result = command.load(&|| cancelled.load(Ordering::Acquire));
-                                let response = match result { Ok(value) => response_ok(&response_id, value), Err(error) => response_error(&response_id, &error) };
-                                done(&response_id);
-                                let _ = response_sender.send(response);
-                            })).map_err(|_| KernelError::Storage("content reader unavailable".into()))?;
+                            content_tasks
+                                .send(Box::new(move || {
+                                    let result =
+                                        command.load(&|| cancelled.load(Ordering::Acquire));
+                                    let response = match result {
+                                        Ok(value) => response_ok(&response_id, value),
+                                        Err(error) => response_error(&response_id, &error),
+                                    };
+                                    done(&response_id);
+                                    let _ = response_sender.send(response);
+                                }))
+                                .map_err(|_| {
+                                    KernelError::Storage("content reader unavailable".into())
+                                })?;
                             deferred = true;
                             return Ok(Value::Null);
                         }
                         if method == "runtime.history.page" {
                             let p: HistoryPageParams = serde_json::from_value(params)?;
-                            let limit = u32::try_from(p.limit).map_err(|_| KernelError::Protocol("history page limit out of range".into()))?;
-                            let read = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.capture_history_page(&p.branch_id).map_err(domain)?;
+                            let limit = u32::try_from(p.limit).map_err(|_| {
+                                KernelError::Protocol("history page limit out of range".into())
+                            })?;
+                            let read = runtime
+                                .catalog()
+                                .lock()
+                                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                                .capture_history_page(&p.branch_id)
+                                .map_err(domain)?;
                             let response_id = id.clone();
                             let response_sender = responses.clone();
                             let done = finished.clone();
                             let cancelled = cancellation.clone();
-                            content_tasks.send(Box::new(move || {
-                                let result = read.load(p.head_id.as_deref(), p.before_id.as_deref(), limit, &|| cancelled.load(Ordering::Acquire)).map_err(domain).and_then(|page|serde_json::to_value(page).map_err(Into::into));
-                                let response = match result { Ok(value) => response_ok(&response_id, value), Err(error) => response_error(&response_id, &error) };
-                                done(&response_id);
-                                let _ = response_sender.send(response);
-                            })).map_err(|_| KernelError::Storage("content reader unavailable".into()))?;
+                            content_tasks
+                                .send(Box::new(move || {
+                                    let result = read
+                                        .load(
+                                            p.head_id.as_deref(),
+                                            p.before_id.as_deref(),
+                                            limit,
+                                            &|| cancelled.load(Ordering::Acquire),
+                                        )
+                                        .map_err(domain)
+                                        .and_then(|page| {
+                                            serde_json::to_value(page).map_err(Into::into)
+                                        });
+                                    let response = match result {
+                                        Ok(value) => response_ok(&response_id, value),
+                                        Err(error) => response_error(&response_id, &error),
+                                    };
+                                    done(&response_id);
+                                    let _ = response_sender.send(response);
+                                }))
+                                .map_err(|_| {
+                                    KernelError::Storage("content reader unavailable".into())
+                                })?;
                             deferred = true;
                             return Ok(Value::Null);
                         }
@@ -2506,44 +2602,119 @@ mod policy_domains_review;
 /// The public API and ordinary tools consume the same captured domain reader.
 enum FamilyCommand {
     List(varin_runtime::catalog::family::FamilyRead, bool),
-    Runs(varin_runtime::catalog::family::FamilyRead, Option<String>, Option<usize>),
-    Read(varin_runtime::catalog::family::FamilyRead, varin_runtime::catalog::family::ReadRequest),
-    Item(varin_runtime::catalog::family::FamilyRead, varin_runtime::catalog::family::ItemRequest),
+    Runs(
+        varin_runtime::catalog::family::FamilyRead,
+        Option<String>,
+        Option<usize>,
+    ),
+    Read(
+        varin_runtime::catalog::family::FamilyRead,
+        varin_runtime::catalog::family::ReadRequest,
+    ),
+    Item(
+        varin_runtime::catalog::family::FamilyRead,
+        varin_runtime::catalog::family::ItemRequest,
+    ),
 }
 impl FamilyCommand {
     fn capture(catalog: &Catalog, method: &str, params: Value) -> Result<Self, KernelError> {
         fn size(value: Option<i64>) -> Result<Option<usize>, KernelError> {
-            value.map(|value| usize::try_from(value).map_err(|_| KernelError::Protocol("family byte/page position must be nonnegative".into()))).transpose()
+            value
+                .map(|value| {
+                    usize::try_from(value).map_err(|_| {
+                        KernelError::Protocol(
+                            "family byte/page position must be nonnegative".into(),
+                        )
+                    })
+                })
+                .transpose()
         }
         Ok(match method {
             "runtime.family.list" => {
                 let p: FamilyListParams = serde_json::from_value(params)?;
-                Self::List(catalog.capture_family_read(&p.caller_thread_id, None, None).map_err(domain)?, p.include_self.unwrap_or(false))
+                Self::List(
+                    catalog
+                        .capture_family_read(&p.caller_thread_id, None, None)
+                        .map_err(domain)?,
+                    p.include_self.unwrap_or(false),
+                )
             }
             "runtime.family.runs" => {
                 let p: FamilyRunsParams = serde_json::from_value(params)?;
-                Self::Runs(catalog.capture_family_read(&p.caller_thread_id, Some(&p.thread_id), Some(&p.branch_id)).map_err(domain)?, p.cursor, size(p.limit)?)
+                Self::Runs(
+                    catalog
+                        .capture_family_read(
+                            &p.caller_thread_id,
+                            Some(&p.thread_id),
+                            Some(&p.branch_id),
+                        )
+                        .map_err(domain)?,
+                    p.cursor,
+                    size(p.limit)?,
+                )
             }
             "runtime.family.read" => {
                 let p: FamilyReadParams = serde_json::from_value(params)?;
-                Self::Read(catalog.capture_family_read(&p.caller_thread_id, Some(&p.thread_id), Some(&p.branch_id)).map_err(domain)?, varin_runtime::catalog::family::ReadRequest { run_id: p.run_id, anchor: p.anchor, cursor: p.cursor, query: p.query })
+                Self::Read(
+                    catalog
+                        .capture_family_read(
+                            &p.caller_thread_id,
+                            Some(&p.thread_id),
+                            Some(&p.branch_id),
+                        )
+                        .map_err(domain)?,
+                    varin_runtime::catalog::family::ReadRequest {
+                        run_id: p.run_id,
+                        anchor: p.anchor,
+                        cursor: p.cursor,
+                        query: p.query,
+                    },
+                )
             }
             "runtime.family.item" => {
                 let p: FamilyItemParams = serde_json::from_value(params)?;
-                Self::Item(catalog.capture_family_read(&p.caller_thread_id, Some(&p.thread_id), Some(&p.branch_id)).map_err(domain)?, varin_runtime::catalog::family::ItemRequest { run_id: p.run_id, anchor: p.anchor, item_id: p.item_id, offset: size(p.offset)?, max_bytes: size(p.max_bytes)? })
+                Self::Item(
+                    catalog
+                        .capture_family_read(
+                            &p.caller_thread_id,
+                            Some(&p.thread_id),
+                            Some(&p.branch_id),
+                        )
+                        .map_err(domain)?,
+                    varin_runtime::catalog::family::ItemRequest {
+                        run_id: p.run_id,
+                        anchor: p.anchor,
+                        item_id: p.item_id,
+                        offset: size(p.offset)?,
+                        max_bytes: size(p.max_bytes)?,
+                    },
+                )
             }
             _ => return Err(KernelError::Protocol("unknown family read method".into())),
         })
     }
     fn load(self, cancelled: &dyn Fn() -> bool) -> Result<Value, KernelError> {
-        if cancelled() { return Err(KernelError::Cancelled); }
+        if cancelled() {
+            return Err(KernelError::Cancelled);
+        }
         let value = match self {
-            Self::List(read, include_self) => serde_json::to_value(read.list(include_self, cancelled).map_err(domain)?),
-            Self::Runs(read, cursor, limit) => serde_json::to_value(read.runs(cursor.as_deref(), limit, cancelled).map_err(domain)?),
-            Self::Read(read, request) => serde_json::to_value(read.read(request, cancelled).map_err(domain)?),
-            Self::Item(read, request) => serde_json::to_value(read.item(request, cancelled).map_err(domain)?),
+            Self::List(read, include_self) => {
+                serde_json::to_value(read.list(include_self, cancelled).map_err(domain)?)
+            }
+            Self::Runs(read, cursor, limit) => serde_json::to_value(
+                read.runs(cursor.as_deref(), limit, cancelled)
+                    .map_err(domain)?,
+            ),
+            Self::Read(read, request) => {
+                serde_json::to_value(read.read(request, cancelled).map_err(domain)?)
+            }
+            Self::Item(read, request) => {
+                serde_json::to_value(read.item(request, cancelled).map_err(domain)?)
+            }
         }?;
-        if cancelled() { return Err(KernelError::Cancelled); }
+        if cancelled() {
+            return Err(KernelError::Cancelled);
+        }
         Ok(value)
     }
 }

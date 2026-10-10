@@ -1,6 +1,7 @@
 //! Durable process admission and writer receipts, sharing the kernel catalog.
 //! Command arguments and environment are hashed, never persisted or logged.
 use super::*;
+use crate::model::GrantState;
 use crate::process::{self, CHUNK_BYTES};
 fn string<'a>(value: &'a Value, key: &str) -> Result<&'a str, KernelError> {
     value
@@ -244,8 +245,8 @@ impl Storage {
             .process_record(id)?
             .ok_or_else(|| KernelError::Operation("process not found".into()))?;
         if original.run_id.is_some() {
-            if original.revoked
-                || grant.revoked
+            if original.state != GrantState::Active
+                || grant.state != GrantState::Active
                 || original.run_id != grant.run_id
                 || original.thread_id.is_none()
                 || original.thread_id != grant.thread_id
@@ -375,13 +376,13 @@ impl Storage {
             grant,
             root_id,
             &[FileLeaseResource {
-                path: canonical_relative,
+                path: canonical_relative.clone(),
                 subtree: true,
             }],
             None,
         )?;
         let record = json!({"processId":id,"kernelEpoch":grant.kernel_epoch,"workspaceId":workspace,
-            "cwd":cwd,"mode":mode,"status":"starting","pid":null,"exitCode":null,"signal":null,
+            "cwd":cwd,"sourceRoot":root.canonical_root,"sourceRelativeCwd":canonical_relative,"mode":mode,"status":"starting","pid":null,"exitCode":null,"signal":null,
             "reason":null,"writerActive":true,"outputAvailable":false});
         let job_name = process::job_name(&self.root, id);
         self.conn.execute("INSERT INTO process_records(process_id,workspace_id,execution_workspace_id,grant_id,kernel_epoch,cwd,job_name,params_hash,status_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
@@ -411,8 +412,8 @@ impl Storage {
         self.refresh_process_record(id)?
             .ok_or_else(|| KernelError::Storage("process intent disappeared".into()))
     }
-    /// Exact read-only delegation for a Catalog-validated original process Run. A one-shot
-    /// continuation may read only its trigger process; the Catalog supplies source_run_id.
+    /// Read-only access to a Catalog-validated original Thread/Environment process Job.
+    /// Catalog checks the exact requested process, branch, lifetime and source_run_id.
     /// The current grant was authorized by the Storage actor; the original grant is never
     /// revived or substituted as the caller. No persisted observer or control authority exists.
     pub(crate) fn observe_run_process(
@@ -422,6 +423,7 @@ impl Storage {
         grant: &Grant,
         root_id: Option<&str>,
         source_run_id: &str,
+        lineage: Option<&varin_runtime::catalog::process_wait::ProcessResultLineage>,
         authorize_only: bool,
     ) -> Result<Value, KernelError> {
         if !matches!(method, "process.inspect" | "process.read") {
@@ -437,8 +439,8 @@ impl Storage {
             |row| row.get(0),
         )?;
         let original = self.load_grant(&actor)?;
-        if original.revoked
-            || grant.revoked
+        if original.state == GrantState::Revoked
+            || grant.state != GrantState::Active
             || original.run_id.is_none()
             || original.thread_id.is_none()
             || original.run_id.as_deref() != Some(source_run_id)
@@ -463,12 +465,42 @@ impl Storage {
             })?,
             grant,
         )?;
-        let cwd: String = self.conn.query_row(
-            "SELECT cwd FROM process_records WHERE process_id=?1",
-            [id],
-            |row| row.get(0),
-        )?;
-        if root.owning_workspace_id != workspace || !contains(&root.canonical_root, Path::new(&cwd))
+        let record = self
+            .refresh_process_record(id)?
+            .ok_or_else(|| KernelError::Operation("process disappeared".into()))?;
+        let cwd = string(&record, "cwd")?;
+        let relative = string(&record, "sourceRelativeCwd")?;
+        let original_root = Path::new(string(&record, "sourceRoot")?);
+        if root.owning_workspace_id != workspace
+            || !contains(original_root, Path::new(cwd))
+            || original_root.join(relative) != Path::new(cwd)
+            || !path_allowed(&original, relative)
+            || !path_allowed(grant, relative)
+        {
+            return Err(KernelError::Authorization(
+                "process output path is outside original or current source scope".into(),
+            ));
+        }
+        if let Some(proof) = lineage {
+            if proof.process_id() != id
+                || proof.source_run_id() != source_run_id
+                || Some(proof.target_run_id()) != grant.run_id.as_deref()
+                || proof.executions().is_empty()
+                || proof.source().workspace_id != workspace
+                || proof.target().workspace_id != workspace
+                || Some(proof.source().execution_workspace_id.as_str())
+                    != original.execution_workspace.as_deref()
+                || Some(proof.target().execution_workspace_id.as_str())
+                    != grant.execution_workspace.as_deref()
+                || record["writerActive"] != false
+                || !matches!(record["status"].as_str(), Some("exited" | "failed"))
+            {
+                return Err(KernelError::Authorization(
+                    "delegated process result is not a stopped source ancestor".into(),
+                ));
+            }
+        } else if !contains(&root.canonical_root, Path::new(cwd))
+            || original.path_scopes != grant.path_scopes
         {
             return Err(KernelError::Authorization(
                 "process observation physical source changed".into(),
@@ -663,11 +695,16 @@ impl Storage {
         target: &Path,
     ) -> Result<(), KernelError> {
         if let Some(process) = self.process_directory_writer(target)? {
-            return Err(KernelError::Operation(format!("process writer {process} has not confirmed exit; directory is retained")));
+            return Err(KernelError::Operation(format!(
+                "process writer {process} has not confirmed exit; directory is retained"
+            )));
         }
         Ok(())
     }
-    pub(super) fn process_directory_writer(&mut self, target: &Path) -> Result<Option<String>, KernelError> {
+    pub(super) fn process_directory_writer(
+        &mut self,
+        target: &Path,
+    ) -> Result<Option<String>, KernelError> {
         self.refresh_process_records()?;
         let records = self
             .conn

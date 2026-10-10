@@ -28,6 +28,7 @@ pub(crate) fn schemas() -> Vec<ToolSchema> {
     tools = crate::collaboration::schemas(tools, true);
     tools.extend(crate::family_tools::schemas());
     tools.push(crate::message_tools::schema());
+    tools.push(crate::followup_tools::schema());
     tools.sort_by(|a, b| a.name.cmp(&b.name));
     tools
 }

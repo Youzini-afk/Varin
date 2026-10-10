@@ -67,9 +67,9 @@ export interface MessagePage {
   nextCursor: string | null;
 }
 
-export type FollowupTrigger = { kind: 'process_stopped'; operation_id: string } | { kind: 'run_completed'; cursor: number } | { kind: 'goal_requested'; cursor: number };
+export type FollowupTrigger = { kind: 'process_stopped'; operation_id: string } | { kind: 'run_completed'; cursor: number } | { kind: 'goal_requested'; cursor: number } | { kind: 'at'; at_ms: number };
 
-export type FollowupEvidence = { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | { kind: 'run_completed'; run_revision: number } | { kind: 'goal_requested'; run_revision: number };
+export type FollowupEvidence = { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | { kind: 'run_completed'; run_revision: number } | { kind: 'goal_requested'; run_revision: number } | { kind: 'at'; at_ms: number; observed_at_ms: number };
 
 export type GoalState = 'active' | 'paused' | 'blocked' | 'budget_limited' | 'complete' | 'cancelled';
 
@@ -1025,10 +1025,42 @@ export interface RunContextScope {
 
 export type FollowupControlAction = 'pause' | 'resume' | 'cancel';
 
+export type FollowupRegistrationTrigger = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string };
+
+export type FollowupActor = { kind: 'user' } | { kind: 'agent'; run_id: string; operation_id: string; origin: ToolOrigin } | { kind: 'goal'; goal_id: string };
+
+export interface FollowupGetParams {
+  followupId: string;
+}
+
+export interface FollowupView {
+  followup: Followup;
+  instruction: string | null;
+}
+
+export interface FollowupObservation {
+  wait_id: string;
+  operation_id: string;
+  run_id: string;
+  state: 'waiting' | 'triggered' | 'cancelled';
+  delivered: boolean;
+}
+
+export interface FollowupDelivery {
+  input_id: string;
+  state: InputState;
+  activation_state: 'pending' | 'bound' | 'cancelled' | 'failed';
+  run_id: string | null;
+  execution_id: string | null;
+  delivered_cursor: number | null;
+  failure_code: string | null;
+}
+
 export interface FollowupRegisterParams {
   key: string;
   runId: string;
-  operationId: string;
+  trigger: FollowupRegistrationTrigger;
+  instruction: string;
 }
 
 export interface FollowupControlParams {
@@ -1039,7 +1071,7 @@ export interface FollowupControlParams {
 
 export interface FollowupWait {
   id: string;
-  kind: 'process_stopped' | 'run_completed' | 'goal_requested';
+  kind: 'process_stopped' | 'run_completed' | 'goal_requested' | 'at';
   after_cursor: number;
   trigger_cursor: number | null;
   state: 'waiting' | 'observed' | 'consumed' | 'cancelled';
@@ -1050,9 +1082,9 @@ export interface FollowupOccurrence {
   generation: number;
   trigger_cursor: number;
   state: 'observed' | 'held' | 'admitted' | 'completed' | 'failed' | 'cancelled';
-  hold_reason: 'control_paused' | 'source_run_active' | 'source_unsettled' | 'branch_active' | 'context_scope_changed' | 'preparation_failed' | 'goal_paused' | 'goal_budget' | 'goal_blocked' | 'goal_ended' | 'goal_superseded' | null;
-  receipt: InputSubmitReceipt | null;
+  hold_reason: 'control_paused' | 'source_run_active' | 'source_unsettled' | 'branch_active' | 'context_scope_changed' | 'preparation_failed' | 'goal_paused' | 'goal_budget' | 'goal_blocked' | 'goal_ended' | 'goal_superseded' | null | 'manual_pause' | 'question' | 'preparing';
   evidence: FollowupEvidence;
+  delivery: FollowupDelivery | null;
 }
 
 export interface Followup {
@@ -1068,6 +1100,10 @@ export interface Followup {
   occurrence: FollowupOccurrence | null;
   goal_id: string | null;
   trigger: FollowupTrigger;
+  actor: FollowupActor;
+  has_instruction: boolean;
+  registered_at_ms: number;
+  observation: FollowupObservation | null;
 }
 
 export interface RunParams {
@@ -1487,7 +1523,7 @@ export interface ChildExecutionReportReadParams {
   maxBytes?: number;
 }
 
-export type DelegatedExecutionTrigger = { kind: 'dispatch' } | { kind: 'user_continuation'; key: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'message_request'; message_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null };
+export type DelegatedExecutionTrigger = { kind: 'dispatch' } | { kind: 'user_continuation'; key: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'message_request'; message_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'followup'; followup_id: string; occurrence_id: string; input_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null };
 
 export type ChildSourceBasis = { kind: 'working_result'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; result: ChildWorkingResultRef } | { kind: 'immutable_source'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; pin: ChildSourcePin };
 

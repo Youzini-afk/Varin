@@ -138,12 +138,17 @@ impl Fixture {
     fn admit(&mut self) -> Vec<String> {
         let mut ids = vec![];
         for p in self.db.capture_followup_continuations().unwrap() {
-            if let ContinuationAdmission::Admitted(r) = self
+            if let ContinuationAdmission::Admitted(_) = self
                 .db
                 .admit_followup_continuation(p.load().unwrap())
                 .unwrap()
+            {}
+        }
+        for p in self.db.capture_request_activations().unwrap() {
+            if let varin_runtime::catalog::activation::RequestActivationAdmission::Bound(run) =
+                self.db.admit_request_activation(p.load().unwrap()).unwrap()
             {
-                ids.push(r.run_id);
+                ids.push(run)
             }
         }
         ids

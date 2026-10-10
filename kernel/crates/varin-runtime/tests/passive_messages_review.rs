@@ -649,18 +649,29 @@ fn idle_inform_does_not_block_an_already_authorized_goal_continuation() {
     .unwrap();
     let mut continuations = f.db.capture_followup_continuations().unwrap();
     assert_eq!(continuations.len(), 1);
-    let ContinuationAdmission::Admitted(next) =
+    let ContinuationAdmission::Admitted(_) =
         f.db.admit_followup_continuation(continuations.pop().unwrap().load().unwrap())
             .unwrap()
     else {
         panic!("authorized continuation was blocked by passive information")
     };
-    assert_ne!(next.run_id, current.run_id);
-    let prepared =
-        f.db.prepare_input_delivery(&next.run_id, f.db.epoch(), Some(&next.input_id))
+    let candidate = f.db.capture_request_activations().unwrap().pop().unwrap();
+    let varin_runtime::catalog::activation::RequestActivationAdmission::Bound(next) =
+        f.db.admit_request_activation(candidate.load().unwrap())
             .unwrap()
-            .load()
-            .unwrap();
+    else {
+        panic!("expected root admission")
+    };
+    assert_ne!(next, current.run_id);
+    let prepared =
+        f.db.prepare_input_delivery(
+            &next,
+            f.db.epoch(),
+            f.db.head("branch:parent").unwrap().as_deref(),
+        )
+        .unwrap()
+        .load()
+        .unwrap();
     let batch = f.db.admit_input_delivery(prepared).unwrap().unwrap();
     assert!(!batch.activating);
     assert_eq!(batch.items.len(), 1);
@@ -676,7 +687,7 @@ fn idle_inform_does_not_block_an_already_authorized_goal_continuation() {
         .unwrap()
         .summary
         .delivered_run_id,
-        Some(next.run_id)
+        Some(next)
     );
     let root = f.root.clone();
     drop(f);

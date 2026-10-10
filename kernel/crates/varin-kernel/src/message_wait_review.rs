@@ -40,7 +40,7 @@ fn fixture() -> Fixture {
         vec!["send".into()],
     )
 }
-fn waiting(f: &Fixture, model: bool, calls: Vec<ToolCall>) {
+pub(super) fn waiting(f: &Fixture, model: bool, calls: Vec<ToolCall>) {
     f.prepare_policy(0, "http://127.0.0.1:1/unused-planner");
     let mut start = f.start(0);
     start.provider = Arc::new(Batch {

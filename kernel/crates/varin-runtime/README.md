@@ -293,13 +293,13 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 31, input domain 4 and collaboration domain 5 store input intents/queue bodies and context-job ownership,
+Catalog version 32, input domain 5 and collaboration domain 6 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
 history, all model outputs (including rejected output), original command intents, queued-history references, context
 checkpoints, memory projections, summary recipes and source parts, policy action/checkpoint bodies,
-and indexed graph calls/receipts, Goal objective/reason/creation-intent references, planning-model request/output references, ordinary tool arguments/results,
+and indexed graph calls/receipts, follow-up instructions, Goal objective/reason/creation-intent references, planning-model request/output references, ordinary tool arguments/results,
 external executor receipts and permission call/scope bodies, including historical receipt and completed
 permission audit events and original invocation completions. It verifies each distinct live object
 before sweeping and preserves unknown files; it never deletes history or invokes system-kernel GC.
@@ -561,38 +561,58 @@ a cancelled old epoch cannot erase a newer valid wake. The client separates `res
 `retryPreparation(runId)`, and the UI uses the exact displayed pause while preserving Stop run during
 pending requests. See the ordinary [SDK example](../../../examples/extensions/delivery-pause-policy/README.md).
 
-## One-shot process follow-ups
+## Explicit one-shot follow-ups
 
-`runtime.followup.register` explicitly authorizes one continuation of the original work after a
-selected accepted `process_spawn` has really stopped and its original Run has ended. The Catalog
-requires the canonical JobAccepted or original executor receipt; a tool intent alone is not an
-accepted process. The definition freezes the original Thread/branch, launch, configuration and
-context scope. Its next-Run Wait and occurrence are distinct from the existing Run-bound process Wait.
-No Goal, calendar rule, arbitrary user prompt or restored old Run is created by this command.
+The ordinary `follow_up` tool supports register/list/get/control from the actual ModelStep or policy
+invocation. `runtime.followup.register` is the authenticated User path. Each registration retains one
+explicit instruction and an absolute `at` instant or the original accepted `process_spawn` identity.
+Catalog derives the Thread/branch, actor and operation from the caller; Agent arguments cannot forge
+User authority. Original bodies live in ContentStore and are read on demand through `get`, while list
+and control use short metadata. Registration retries preserve the original identity and exact intent.
 
-The original executor receipt retains monotonic stop evidence; terminal phase, EffectNone and absent
-occupancy do not establish it. Registration records the source cursor and rechecks an already stored
-stop fact. A Kernel event worker observes durable facts even without an attached Host. It prepares the
-typed Environment history on a content worker, then one transaction consumes the occurrence and
-admits its new input, Run and frozen launch. Startup discovery and stale preparation reuse those
-identities. Current user work, queued inputs, explicit Pause and changed context/source scope hold the
-occurrence rather than being overwritten. Same-source head/context refresh does not invalidate an
-authorization simply because history advanced.
+Registration returns promptly. Only an explicit tool `wait: {}` creates a separate original Job
+observation, joining child/process/reply observations at the shared decision barrier. Cancelling that
+observation does not cancel its definition or target process. No-wait registration is not an implicit
+Pause or a blocker that suppresses an otherwise eligible Goal continuation.
 
-Independent definition pause/resume/cancel checks its revision. Cancelling the original Run cancels
-its independent unconsumed authorizations in the same transaction. A definition associated with an
-explicit Goal follows that Goal’s control instead; Run cancellation pauses the Goal and preserves its
-real dependency for a later explicit resume. Once consumed, definition controls return the original receipt;
-the new Run has its own cancellation identity. Its actual terminal transition settles the occurrence.
-Shutdown fences old-worker admission; a later owner can recover unconsumed work. Held states do not
-emit repeated events or drive a polling loop. Preparation failures remain visible and explicitly retryable.
+The native continuation worker owns absolute deadlines and actual process-stop facts. Past instants
+trigger once, and an observed but held occurrence no longer appears as a pending clock deadline.
+Control/source/Goal events subsequently reconsider it without a polling loop or a Host scheduler.
+Process terminal business outcome, EffectNone or missing occupancy cannot substitute for the original
+executor's stop evidence. Registration rechecks an already stored stop fact.
 
-The continuation can inspect/read only its exact original process when the retained tool selection
-already permits that operation. The Catalog derives the original Run from the consumed occurrence;
-Storage checks both original and current grants, Thread, workspace and physical source. No other process,
-stdin, kill or new process Wait is delegated, and revoked original authority stays revoked. Process
-output remains in its existing owner, not in a second follow-up output store. Definition launch content
-and original receipt/history references remain normal ContentStore roots.
+An occurrence enters the existing input queue with typed Followup provenance, original IDs and one
+referenced Environment history item. Active lawful work consumes it at its existing input boundary.
+An idle root uses its current actual predecessor's launch/configuration/context; an idle child uses
+the original delegated execution owner and fixed WorkingResult, producing a new execution and Run.
+Message requests and follow-ups share this activation owner and `ingress.run_ready` event. Ordinary
+User admission atomically claims ready ingress instead of creating a competing writer. Same-scope
+history/instruction refresh is allowed; changed source or ContextScope holds the occurrence.
+
+Binding is not delivery. Pause/cancel still controls bound-but-queued ingress; only actual history
+delivery consumes the definition. Cancelling a definition never cancels a shared Run or the observed
+process. Delivered definitions return their original facts and the Run has its own cancellation
+identity. Stop fences definitions already accepted at that time; a later explicit User registration
+from the stopped predecessor is new intent and survives the old Run's eventual terminal receipt.
+Manual Pause, questions, Goal control, budgets and unresolved usage retain their own authority.
+
+An explicit At input under the same current Goal generation can make one real check while that Goal
+is blocked on its original Dependency. The dependency and stop subscription remain intact. Other
+blocks and pause/cancel/complete/budget gates are not bypassed; a report or control generation change
+invalidates the old check. Finishing this check does not start an automatic polling chain.
+
+Read-only process observation uses the original Kernel Job and current selected capability. A legal
+same-Thread/branch successor may read a Thread/Environment process under the same source authority.
+A delegated successor crossing a fixed WorkingResult uses Catalog's exact predecessor/source chain;
+Storage still validates original/current grants, path scopes, workspace, Host, physical current root
+and actual stopped spool. Normal source retirement closes the old grant's caller lifetime while
+retaining creating provenance. Explicit revocation remains a denial, including after later retirement.
+No old file, stdin, resize, kill or new process Wait permission follows from a result read.
+
+Startup and stale preparation reuse original identities. Failures remain explicit while unrelated
+healthy continuations can advance. Shutdown fences old workers, publication leases protect staged
+bodies, and original instructions/input/history remain normal GC roots. This one-shot contract does
+not implement calendar recurrence, arbitrary event conditions or implicit continuing authorization.
 
 ## Explicit continuing Goals
 
@@ -629,9 +649,9 @@ both dependency completion and other domain answers. Already dispatched effects 
 retain their original lifetime and factual settlement.
 
 The existing followup owner also records typed `run_completed` and explicitly authorized
-`goal_requested` occurrences. Consuming an occurrence and admitting its Submission/Run/launch share
-one transaction, rechecking Goal generation, actual usage, unsettled operations, original waits,
-queued user work and branch/source scope. A normal final answer ends one Run, not its Goal. A Goal
+`goal_requested` occurrences. Occurrence admission and its original typed input are atomic; activation then rechecks Goal generation,
+actual usage, unsettled operations, original waits, queued user work and branch/source scope before
+binding or admitting its Submission/Run/launch. A normal final answer ends one Run, not its Goal. A Goal
 reporting a real blocker does not spin another model request. The original blocked report may end
 its own Run; later user work under the same blocked Goal stays parked instead of being marked
 completed without consumption. A paused, blocked or budget-limited live Run parks on `goal.ready`; the supervisor quiesces its old worker before durable `goal.run_ready` release.

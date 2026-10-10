@@ -1,9 +1,7 @@
 //! Durable parent/child facts. This is a Catalog domain, not a second task registry.
 //! Preparation and model I/O are performed by their existing owners after admission.
 use super::*;
-use crate::execution::{
-    ToolExecutionContext, ToolOrigin,
-};
+use crate::execution::{ToolExecutionContext, ToolOrigin};
 use serde::Deserialize;
 
 pub const DISPATCH_TOOL: &str = "dispatch";
@@ -20,20 +18,45 @@ pub struct ChildSourcePin {
     pub source: launches::SourceSelection,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag="consistency",deny_unknown_fields)]
+#[serde(tag = "consistency", deny_unknown_fields)]
 pub enum ChildSourceProvenance {
-    #[serde(rename="fixed-root")]
-    FixedRoot {root:String, #[serde(skip_serializing_if="Option::is_none")] resources:Option<Value>},
-    #[serde(rename="stable-capture")]
-    StableCapture {#[serde(rename="contentMode")] content_mode:ChildSourceContentMode,#[serde(rename="captureScopes")]capture_scopes:Vec<String>,#[serde(rename="omittedDraftPaths")]omitted_draft_paths:Vec<String>, #[serde(skip_serializing_if="Option::is_none")] resources:Option<Value>},
-    #[serde(rename="git-base-with-overlay")]
-    GitBaseWithOverlay {#[serde(rename="contentMode")] content_mode:ChildSourceContentMode,#[serde(rename="captureScopes")]capture_scopes:Vec<String>,#[serde(rename="omittedDraftPaths")]omitted_draft_paths:Vec<String>, #[serde(skip_serializing_if="Option::is_none")] resources:Option<Value>},
+    #[serde(rename = "fixed-root")]
+    FixedRoot {
+        root: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resources: Option<Value>,
+    },
+    #[serde(rename = "stable-capture")]
+    StableCapture {
+        #[serde(rename = "contentMode")]
+        content_mode: ChildSourceContentMode,
+        #[serde(rename = "captureScopes")]
+        capture_scopes: Vec<String>,
+        #[serde(rename = "omittedDraftPaths")]
+        omitted_draft_paths: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resources: Option<Value>,
+    },
+    #[serde(rename = "git-base-with-overlay")]
+    GitBaseWithOverlay {
+        #[serde(rename = "contentMode")]
+        content_mode: ChildSourceContentMode,
+        #[serde(rename = "captureScopes")]
+        capture_scopes: Vec<String>,
+        #[serde(rename = "omittedDraftPaths")]
+        omitted_draft_paths: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resources: Option<Value>,
+    },
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all="kebab-case")]
-pub enum ChildSourceContentMode {SavedFiles,FixedDraftBaseline}
+#[serde(rename_all = "kebab-case")]
+pub enum ChildSourceContentMode {
+    SavedFiles,
+    FixedDraftBaseline,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChildSourceRoot {
     Fixed { pin: ChildSourcePin },
     Physical { root: launches::LiveRoot },
@@ -46,40 +69,94 @@ pub struct ChildSourceHandoff {
     pub root: ChildSourceRoot,
 }
 impl ChildSourceHandoff {
-    pub fn fixed(operation_id:&str,pin:ChildSourcePin)->Self {
-        Self {operation_id:format!("child-source-handoff:{operation_id}"),source:pin.source.clone(),root:ChildSourceRoot::Fixed{pin}}
+    pub fn fixed(operation_id: &str, pin: ChildSourcePin) -> Self {
+        Self {
+            operation_id: format!("child-source-handoff:{operation_id}"),
+            source: pin.source.clone(),
+            root: ChildSourceRoot::Fixed { pin },
+        }
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChildSource {
-    Pending { handoff: ChildSourceHandoff },
-    Ready { handoff: Option<ChildSourceHandoff>, pin: ChildSourcePin, selection: launches::SourceSelection, provenance_ref: Value },
+    Pending {
+        handoff: ChildSourceHandoff,
+    },
+    Ready {
+        handoff: Option<ChildSourceHandoff>,
+        pin: ChildSourcePin,
+        selection: launches::SourceSelection,
+        provenance_ref: Value,
+    },
 }
 impl ChildSource {
-    pub fn handoff(&self)->Option<&ChildSourceHandoff> {match self{Self::Pending{handoff}=>Some(handoff),Self::Ready{handoff,..}=>handoff.as_ref()}}
-    pub fn pin(&self)->Option<&ChildSourcePin> {match self{Self::Ready{pin,..}=>Some(pin),Self::Pending{handoff}=>match &handoff.root{ChildSourceRoot::Fixed{pin}=>Some(pin),_=>None}}}
-    pub fn selection(&self)->Option<&launches::SourceSelection>{match self{Self::Ready{selection,..}=>Some(selection),_=>None}}
+    pub fn handoff(&self) -> Option<&ChildSourceHandoff> {
+        match self {
+            Self::Pending { handoff } => Some(handoff),
+            Self::Ready { handoff, .. } => handoff.as_ref(),
+        }
+    }
+    pub fn pin(&self) -> Option<&ChildSourcePin> {
+        match self {
+            Self::Ready { pin, .. } => Some(pin),
+            Self::Pending { handoff } => match &handoff.root {
+                ChildSourceRoot::Fixed { pin } => Some(pin),
+                _ => None,
+            },
+        }
+    }
+    pub fn selection(&self) -> Option<&launches::SourceSelection> {
+        match self {
+            Self::Ready { selection, .. } => Some(selection),
+            _ => None,
+        }
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildWorkingResultRef {
-    pub publication_id:String,pub workspace_id:String,pub branch_id:String,pub result_revision:u64,
-    pub root:String,pub base_root:String,pub record_id:String,
+    pub publication_id: String,
+    pub workspace_id: String,
+    pub branch_id: String,
+    pub result_revision: u64,
+    pub root: String,
+    pub base_root: String,
+    pub record_id: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChildCodeResult {
     Pending,
-    Settling {publication_id:String},
-    Candidate {candidate:crate::KernelWorkingResultCandidate},
-    Published {result:ChildWorkingResultRef,effect:Effect},
+    Settling {
+        publication_id: String,
+    },
+    Candidate {
+        candidate: crate::KernelWorkingResultCandidate,
+    },
+    Published {
+        result: ChildWorkingResultRef,
+        effect: Effect,
+    },
     NoChanges,
-    Unavailable {code:String,effect:Effect},
+    Unavailable {
+        code: String,
+        effect: Effect,
+    },
 }
 impl ChildCodeResult {
-    pub fn settled(&self)->bool {matches!(self,Self::Published{..}|Self::NoChanges|Self::Unavailable{..})}
-    pub fn effect(&self)->Effect {match self{Self::Published{effect,..}|Self::Unavailable{effect,..}=>*effect,_=>Effect::None}}
+    pub fn settled(&self) -> bool {
+        matches!(
+            self,
+            Self::Published { .. } | Self::NoChanges | Self::Unavailable { .. }
+        )
+    }
+    pub fn effect(&self) -> Effect {
+        match self {
+            Self::Published { effect, .. } | Self::Unavailable { effect, .. } => *effect,
+            _ => Effect::None,
+        }
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -139,10 +216,18 @@ impl Catalog {
         max_bytes: usize,
     ) -> Result<ChildTextPage> {
         let _synchronous = self.content.begin_synchronous()?;
-        self.capture_child_report(operation_id,item_id,offset,max_bytes)?.load()
+        self.capture_child_report(operation_id, item_id, offset, max_bytes)?
+            .load()
     }
-    pub fn capture_child_report(&self,operation_id:&str,item_id:&str,offset:usize,max_bytes:usize)->Result<child_content::ChildReportRead>{
-        self.child_task(operation_id)?;self.capture_delegated_report(operation_id,item_id,offset,max_bytes)
+    pub fn capture_child_report(
+        &self,
+        operation_id: &str,
+        item_id: &str,
+        offset: usize,
+        max_bytes: usize,
+    ) -> Result<child_content::ChildReportRead> {
+        self.child_task(operation_id)?;
+        self.capture_delegated_report(operation_id, item_id, offset, max_bytes)
     }
     pub fn capture_delegated_report(
         &self,
@@ -161,16 +246,26 @@ impl Catalog {
                 "item is not a report of this child".into(),
             ));
         }
-        Ok(child_content::ChildReportRead::new(self, &child.execution_id, &child.operation_id, item_id, offset, max_bytes,
-            record(&self.db,"history",item_id)?))
+        Ok(child_content::ChildReportRead::new(
+            self,
+            &child.execution_id,
+            &child.operation_id,
+            item_id,
+            offset,
+            max_bytes,
+            record(&self.db, "history", item_id)?,
+        ))
     }
 
     pub fn child_task(&self, operation_id: &str) -> Result<ChildTask> {
-        delegated::relation(&self.db,operation_id)?;
+        delegated::relation(&self.db, operation_id)?;
         delegated::execution_task(&self.db, operation_id)
     }
     pub fn child_tasks(&self) -> Result<Vec<ChildTask>> {
-        read_all::<delegated::ChildRelation>(&self.db, "child_tasks")?.into_iter().map(|child|delegated::execution_task(&self.db,&child.operation_id)).collect()
+        read_all::<delegated::ChildRelation>(&self.db, "child_tasks")?
+            .into_iter()
+            .map(|child| delegated::execution_task(&self.db, &child.operation_id))
+            .collect()
     }
     pub fn child_task_for_thread(&self, thread_id: &str) -> Result<Option<ChildTask>> {
         let raw: Option<String> = self
@@ -181,7 +276,11 @@ impl Catalog {
                 |r| r.get(0),
             )
             .optional()?;
-        raw.map(|raw| { let child:delegated::ChildRelation=serde_json::from_str(&raw)?; delegated::execution_task(&self.db,&child.operation_id) }).transpose()
+        raw.map(|raw| {
+            let child: delegated::ChildRelation = serde_json::from_str(&raw)?;
+            delegated::execution_task(&self.db, &child.operation_id)
+        })
+        .transpose()
     }
     /// The source owner has already admitted and pinned this exact revision under the real parent
     /// grant. No directory capture, credential preparation or extension callback runs here.
@@ -194,23 +293,48 @@ impl Catalog {
         child_launch: launches::LaunchSelection,
     ) -> Result<ChildTask> {
         let _synchronous = self.content.begin_synchronous()?;
-        let selected = self.capture_child_dispatch_invocation(context)?.load()?.resolve(&input)?;
-        let prepared = self.prepare_child_launch(&context.run_id, child_launch, selected)?.load()?;
+        let selected = self
+            .capture_child_dispatch_invocation(context)?
+            .load()?
+            .resolve(&input)?;
+        let prepared = self
+            .prepare_child_launch(&context.run_id, child_launch, selected)?
+            .load()?;
         self.accept_prepared_child(context, input, pin, prepared)
     }
     /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
-    pub fn accept_prepared_child(&mut self, context: &ToolExecutionContext, input: DispatchInput,
-        pin: ChildSourcePin, prepared: launch_content::PreparedChildLaunch) -> Result<ChildTask> {
+    pub fn accept_prepared_child(
+        &mut self,
+        context: &ToolExecutionContext,
+        input: DispatchInput,
+        pin: ChildSourcePin,
+        prepared: launch_content::PreparedChildLaunch,
+    ) -> Result<ChildTask> {
         let _synchronous = self.content.begin_synchronous()?;
-        let prepared = self.prepare_child_admission(context,input,ChildSourceHandoff::fixed(&context.operation_id,pin),prepared)?.load()?;
+        let prepared = self
+            .prepare_child_admission(
+                context,
+                input,
+                ChildSourceHandoff::fixed(&context.operation_id, pin),
+                prepared,
+            )?
+            .load()?;
         self.accept_child_references(prepared)
     }
-    pub fn accept_child_references(&mut self, prepared: child_content::PreparedChildAdmission) -> Result<ChildTask> {
+    pub fn accept_child_references(
+        &mut self,
+        prepared: child_content::PreparedChildAdmission,
+    ) -> Result<ChildTask> {
         let context = &prepared.context;
         let child_launch = &prepared.launch;
         let handoff = &prepared.handoff;
-        if let Some(old) =
-            optional_record::<delegated::ChildRelation>(&self.db, "child_tasks", &context.operation_id)?.map(|_|self.child_task(&context.operation_id)).transpose()?
+        if let Some(old) = optional_record::<delegated::ChildRelation>(
+            &self.db,
+            "child_tasks",
+            &context.operation_id,
+        )?
+        .map(|_| self.child_task(&context.operation_id))
+        .transpose()?
         {
             if old.parent_run_id == context.run_id
                 && old.origin == context.origin
@@ -229,7 +353,8 @@ impl Catalog {
         let run: Run = record(&tx, "runs", &context.run_id)?;
         fence(&run, self.epoch)?;
         let mut op: Operation = record(&tx, "operations", &context.operation_id)?;
-        let admitted = super::tool_content::require_job_invocation(&tx, &run, &op, context, DISPATCH_TOOL)?;
+        let admitted =
+            super::tool_content::require_job_invocation(&tx, &run, &op, context, DISPATCH_TOOL)?;
         if admitted.call().call_id != prepared.call_id
             || op.revision != prepared.operation_revision
             || op.phase != OperationPhase::Running
@@ -272,8 +397,14 @@ impl Catalog {
             selected_profile_ref: prepared.selected_profile_ref,
             dispatch_context_ref: prepared.frozen_reference,
             launch: prepared.launch,
-            source: ChildSource::Pending { handoff: prepared.handoff },
-            code_result: if prepared.work_mode == super::dispatch::ChildWorkMode::ReadOnly { ChildCodeResult::NoChanges } else { ChildCodeResult::Pending },
+            source: ChildSource::Pending {
+                handoff: prepared.handoff,
+            },
+            code_result: if prepared.work_mode == super::dispatch::ChildWorkMode::ReadOnly {
+                ChildCodeResult::NoChanges
+            } else {
+                ChildCodeResult::Pending
+            },
             state: "preparing".into(),
             revision: 1,
             cursor: 0,
@@ -296,8 +427,8 @@ impl Catalog {
             "child.accepted",
             json!({"child_thread_id":child.child_thread_id,"parent_run_id":run.id}),
         )?;
-        delegated::insert_initial(&tx,&child)?;
-        super::goals::bind_child(&tx,&op.id,&run.id)?;
+        delegated::insert_initial(&tx, &child)?;
+        super::goals::bind_child(&tx, &op.id, &run.id)?;
         tx.commit()?;
         Ok(child)
     }
@@ -338,7 +469,9 @@ pub(super) fn pending_cancelled_observation(
     if admitted.call().name != WAIT_TOOL {
         return Ok(false);
     }
-    let Some(child) = optional_record::<delegated::ChildRelation>(db, "child_tasks", &wait.subject)? else {
+    let Some(child) =
+        optional_record::<delegated::ChildRelation>(db, "child_tasks", &wait.subject)?
+    else {
         return Ok(false);
     };
     Ok(child.parent_thread_id == run.thread_id)
@@ -360,7 +493,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             .collect::<std::result::Result<_, _>>()?;
         rows
     };
-    if version != Some(5)
+    if version != Some(6)
         || columns
             != vec![
                 ("id".into(), "TEXT".into(), 0, 1),
@@ -465,7 +598,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
     Ok(())
 }
 pub(super) fn initialize_new(db: &Connection) -> Result<()> {
-    db.execute_batch("CREATE TABLE child_tasks(id TEXT PRIMARY KEY REFERENCES operations(id),child_thread_id TEXT NOT NULL UNIQUE REFERENCES threads(id),body TEXT NOT NULL); CREATE TABLE delegated_executions(id TEXT PRIMARY KEY,child_operation_id TEXT NOT NULL REFERENCES child_tasks(id),command_key TEXT UNIQUE,run_id TEXT UNIQUE REFERENCES runs(id),body TEXT NOT NULL); CREATE INDEX delegated_executions_child ON delegated_executions(child_operation_id); INSERT INTO runtime_domains(name,version) VALUES('collaboration',5);")?;
+    db.execute_batch("CREATE TABLE child_tasks(id TEXT PRIMARY KEY REFERENCES operations(id),child_thread_id TEXT NOT NULL UNIQUE REFERENCES threads(id),body TEXT NOT NULL); CREATE TABLE delegated_executions(id TEXT PRIMARY KEY,child_operation_id TEXT NOT NULL REFERENCES child_tasks(id),command_key TEXT UNIQUE,run_id TEXT UNIQUE REFERENCES runs(id),body TEXT NOT NULL); CREATE INDEX delegated_executions_child ON delegated_executions(child_operation_id); INSERT INTO runtime_domains(name,version) VALUES('collaboration',6);")?;
     Ok(())
 }
 
@@ -489,17 +622,26 @@ impl Catalog {
         let checkpoint = self
             .capture_active_checkpoint(&child.child_branch_id)?
             .map(|checkpoint| checkpoint.id);
-        let execution=self.delegated_execution(operation_id)?;
-        let message=if let delegated::DelegatedTrigger::MessageRequest{message_id,..}=&execution.trigger {
-            let row:inputs::QueuedInputMetadata=record(&self.db,"input_queue",message_id)?;
-            let inputs::InputOrigin::Message{identity,..}=row.origin else{return Err(RuntimeError::Invalid("delegated request message missing".into()))};
-            Some((identity,execution.input_ref.clone()))
-        }else{None};
+        let execution = self.delegated_execution(operation_id)?;
+        let ingress_id = match &execution.trigger {
+            delegated::DelegatedTrigger::MessageRequest { message_id, .. } => Some(message_id),
+            delegated::DelegatedTrigger::Followup { input_id, .. } => Some(input_id),
+            _ => None,
+        };
+        let ingress = ingress_id
+            .map(|id| -> Result<_> {
+                Ok((
+                    record::<inputs::QueuedInputMetadata>(&self.db, "input_queue", id)?,
+                    execution.input_ref.clone(),
+                ))
+            })
+            .transpose()?;
         Ok(ChildPreparation {
-            message,
-            execution:self.delegated_execution(operation_id)?,
-            current:self.capture_active_checkpoint(&child.child_branch_id)?,
-            input_preparation:None,expected_checkpoint:checkpoint.clone(),
+            ingress,
+            execution: self.delegated_execution(operation_id)?,
+            current: self.capture_active_checkpoint(&child.child_branch_id)?,
+            input_preparation: None,
+            expected_checkpoint: checkpoint.clone(),
             child,
             source,
             proposal,
@@ -528,26 +670,39 @@ impl Catalog {
         self.execution_task(&operation_id)
     }
     pub fn require_child_launch(&self, run_id: &str) -> Result<Option<ChildTask>> {
-        let run=self.run(run_id)?;
-        let Some(execution)=self.delegated_execution_for_run(run_id)? else {
-            if self.child_task_for_thread(&run.thread_id)?.is_some(){return Err(RuntimeError::Conflict("delegated Run has no exact execution admission".into()));}
+        let run = self.run(run_id)?;
+        let Some(execution) = self.delegated_execution_for_run(run_id)? else {
+            if self.child_task_for_thread(&run.thread_id)?.is_some() {
+                return Err(RuntimeError::Conflict(
+                    "delegated Run has no exact execution admission".into(),
+                ));
+            }
             return Ok(None);
         };
-        if execution.cancel_requested || execution.report.is_some() || execution.receipt.as_ref().map(|r|r.run_id.as_str())!=Some(run_id) {
-            return Err(RuntimeError::Conflict("delegated execution is not eligible to launch".into()));
+        if execution.cancel_requested
+            || execution.report.is_some()
+            || execution.receipt.as_ref().map(|r| r.run_id.as_str()) != Some(run_id)
+        {
+            return Err(RuntimeError::Conflict(
+                "delegated execution is not eligible to launch".into(),
+            ));
         }
-        if matches!(execution.trigger,delegated::DelegatedTrigger::Dispatch) && self.operation(&execution.child_operation_id)?.cancel_requested {
+        if matches!(execution.trigger, delegated::DelegatedTrigger::Dispatch)
+            && self
+                .operation(&execution.child_operation_id)?
+                .cancel_requested
+        {
             return Err(RuntimeError::Conflict("dispatch was cancelled".into()));
         }
         Ok(Some(self.execution_task(&execution.execution_id)?))
     }
 }
 pub struct ChildPreparation {
-    execution:delegated::DelegatedExecution,
-    message:Option<(messages::MessageIdentity,Value)>,
-    current:Option<context::CheckpointRead>,
-    input_preparation:Option<resources::InputResourcePreparation>,
-    expected_checkpoint:Option<String>,
+    execution: delegated::DelegatedExecution,
+    ingress: Option<(inputs::QueuedInputMetadata, Value)>,
+    current: Option<context::CheckpointRead>,
+    input_preparation: Option<resources::InputResourcePreparation>,
+    expected_checkpoint: Option<String>,
     child: ChildTask,
     source: launches::SourceSelection,
     proposal: context::ContextProposal,
@@ -565,15 +720,28 @@ pub struct PreparedChild {
     receipt: Option<Receipt>,
 }
 impl ChildPreparation {
-    pub fn with_input_preparation(mut self,input:Option<resources::InputResourcePreparation>)->Self {self.input_preparation=input;self}
-    pub fn with_expected_checkpoint(mut self,checkpoint:Option<String>)->Self {self.expected_checkpoint=checkpoint;self}
+    pub fn with_input_preparation(
+        mut self,
+        input: Option<resources::InputResourcePreparation>,
+    ) -> Self {
+        self.input_preparation = input;
+        self
+    }
+    pub fn with_expected_checkpoint(mut self, checkpoint: Option<String>) -> Self {
+        self.expected_checkpoint = checkpoint;
+        self
+    }
     pub fn with_resources(mut self, resources: Option<resources::ContextResources>) -> Self {
         self.resources = resources;
         self
     }
     pub fn load(self) -> Result<PreparedChild> {
         let Self {
-            execution,message,current,input_preparation,expected_checkpoint,
+            execution,
+            ingress,
+            current,
+            input_preparation,
+            expected_checkpoint,
             child,
             source,
             proposal,
@@ -585,10 +753,32 @@ impl ChildPreparation {
             content,
             publication,
         } = self;
-        if child.receipt.is_none() && expected_checkpoint!=checkpoint {return Err(RuntimeError::Conflict("child context changed during preparation".into()));}
-        let continuing=!matches!(execution.trigger,delegated::DelegatedTrigger::Dispatch);
-        if message.is_some()&&input_preparation.is_some(){return Err(RuntimeError::Invalid("message requests cannot acquire User skill input".into()))}
-        if let Some(input)=input_preparation.as_ref().filter(|_|child.receipt.is_none()) {let expected=if resources.is_some(){None}else{checkpoint.clone()};if input.expected_context_checkpoint!=expected {return Err(RuntimeError::Conflict("prepared skill context is based on another delegated checkpoint".into()));}}
+        if child.receipt.is_none() && expected_checkpoint != checkpoint {
+            return Err(RuntimeError::Conflict(
+                "child context changed during preparation".into(),
+            ));
+        }
+        let continuing = !matches!(execution.trigger, delegated::DelegatedTrigger::Dispatch);
+        if ingress.is_some() && input_preparation.is_some() {
+            return Err(RuntimeError::Invalid(
+                "message requests cannot acquire User skill input".into(),
+            ));
+        }
+        if let Some(input) = input_preparation
+            .as_ref()
+            .filter(|_| child.receipt.is_none())
+        {
+            let expected = if resources.is_some() {
+                None
+            } else {
+                checkpoint.clone()
+            };
+            if input.expected_context_checkpoint != expected {
+                return Err(RuntimeError::Conflict(
+                    "prepared skill context is based on another delegated checkpoint".into(),
+                ));
+            }
+        }
         let scope = serde_json::to_value(&basis)?;
         if basis.session_id != child.child_thread_id
             || basis.project_id != child.project_id
@@ -604,23 +794,37 @@ impl ChildPreparation {
             ));
         }
         source.validate()?;
-        let expected = child.source.selection().cloned().ok_or_else(|| RuntimeError::Conflict("child source is not ready".into()))?;
+        let expected = child
+            .source
+            .selection()
+            .cloned()
+            .ok_or_else(|| RuntimeError::Conflict("child source is not ready".into()))?;
         if source != expected {
             return Err(RuntimeError::Conflict(
                 "prepared source does not match child baseline identity".into(),
             ));
         }
         if let Some(receipt) = &child.receipt {
-            if continuing {return Ok(PreparedChild{operation_id:child.execution_id,receipt:Some(receipt.clone()),submission:None});}
+            if continuing {
+                return Ok(PreparedChild {
+                    operation_id: child.execution_id,
+                    receipt: Some(receipt.clone()),
+                    submission: None,
+                });
+            }
             if let Some(resources) = resources.as_mut() {
-                resources.source = super::followups::normalized_source(resources.source.take(), &receipt.run_id);
+                resources.source =
+                    super::followups::normalized_source(resources.source.take(), &receipt.run_id);
             }
             let admitted = admitted
                 .ok_or_else(|| {
                     RuntimeError::Invalid("child admission has no context checkpoint".into())
                 })?
                 .load()?;
-            if admitted.proposal != proposal || admitted.personalization.as_ref() != Some(&basis) || admitted.resources != resources {
+            if admitted.proposal != proposal
+                || admitted.personalization.as_ref() != Some(&basis)
+                || admitted.resources != resources
+            {
                 return Err(RuntimeError::Conflict(
                     "child preparation retry changed its admitted context".into(),
                 ));
@@ -631,8 +835,17 @@ impl ChildPreparation {
                 submission: None,
             });
         }
-        let raw_input=if message.is_some(){Value::Null}else{content.load(&child.input_ref)?};
-        let input=if continuing {raw_input} else {let input:DispatchInput=serde_json::from_value(raw_input)?;Value::String(input.task)};
+        let raw_input = if ingress.is_some() {
+            Value::Null
+        } else {
+            content.load(&child.input_ref)?
+        };
+        let input = if continuing {
+            raw_input
+        } else {
+            let input: DispatchInput = serde_json::from_value(raw_input)?;
+            Value::String(input.task)
+        };
         let configuration = content.load(&child.configuration_ref)?;
         let mut launch = child.launch.load(&content)?;
         launch.source = Some(source);
@@ -643,19 +856,42 @@ impl ChildPreparation {
                 key: format!("child:{operation_id}"),
                 thread_id: child.child_thread_id,
                 branch_id: child.child_branch_id,
-                expected_head:match &execution.trigger {delegated::DelegatedTrigger::UserContinuation{expected_head,..}|delegated::DelegatedTrigger::MessageRequest{expected_head,..}=>expected_head.clone(),_=>None},
+                expected_head: match &execution.trigger {
+                    delegated::DelegatedTrigger::UserContinuation { expected_head, .. }
+                    | delegated::DelegatedTrigger::MessageRequest { expected_head, .. }
+                    | delegated::DelegatedTrigger::Followup { expected_head, .. } => {
+                        expected_head.clone()
+                    }
+                    _ => None,
+                },
                 input,
                 configuration,
             },
             launch: Some(launch),
             inherit_source: false,
             initial: Some(proposal),
-            current:if continuing {current}else{None},
+            current: if continuing { current } else { None },
             personalization: Some(basis),
             resources,
-            origin: if let Some((identity,history))=message {submissions::SubmissionOrigin::MessageRequest{identity,history,execution_id:Some(operation_id.clone()),checkpoint}} else if continuing {submissions::SubmissionOrigin::ChildContinuation{execution_id:operation_id.clone(),checkpoint}} else {submissions::SubmissionOrigin::Child {
-                operation_id: operation_id.clone(),checkpoint,parent_thread_id: child.parent_thread_id,
-            }},
+            origin: if let Some((input, history)) = ingress {
+                submissions::SubmissionOrigin::Ingress {
+                    input,
+                    history,
+                    execution_id: Some(operation_id.clone()),
+                    checkpoint,
+                }
+            } else if continuing {
+                submissions::SubmissionOrigin::ChildContinuation {
+                    execution_id: operation_id.clone(),
+                    checkpoint,
+                }
+            } else {
+                submissions::SubmissionOrigin::Child {
+                    operation_id: operation_id.clone(),
+                    checkpoint,
+                    parent_thread_id: child.parent_thread_id,
+                }
+            },
             epoch,
             content,
             publication,
@@ -668,15 +904,23 @@ impl ChildPreparation {
     }
 }
 impl Catalog {
-    pub fn fail_child_preparation(&mut self,execution_id:&str,reason:&str)->Result<ChildTask>{
-        self.fail_delegated_preparation(execution_id,reason)?;self.execution_task(execution_id)
+    pub fn fail_child_preparation(
+        &mut self,
+        execution_id: &str,
+        reason: &str,
+    ) -> Result<ChildTask> {
+        self.fail_delegated_preparation(execution_id, reason)?;
+        self.execution_task(execution_id)
     }
     pub fn cancel_child(&mut self, operation_id: &str) -> Result<ChildTask> {
-        self.cancel_tree(super::dispatch::TreeCancelTarget::Child { operation_id: operation_id.into() })?;
+        self.cancel_tree(super::dispatch::TreeCancelTarget::Child {
+            operation_id: operation_id.into(),
+        })?;
         self.child_task(operation_id)
     }
-    pub fn mark_child_resources_released(&mut self,execution_id:&str)->Result<ChildTask>{
-        self.release_delegated_resources(execution_id)?;self.execution_task(execution_id)
+    pub fn mark_child_resources_released(&mut self, execution_id: &str) -> Result<ChildTask> {
+        self.release_delegated_resources(execution_id)?;
+        self.execution_task(execution_id)
     }
     pub(super) fn publish_child_report(&mut self, mut child: ChildTask) -> Result<ChildTask> {
         let tx = self.db.transaction()?;
@@ -686,8 +930,15 @@ impl Catalog {
         }
         child.revision = old.revision + 1;
         delegated::write_child_task(&tx, &child)?;
-        let mut execution=delegated::execution(&tx,&child.execution_id)?;
-        if let Some(receipt)=&execution.receipt {execution.terminal_head=tx.query_row("SELECT head FROM branches WHERE id=?1",[&receipt.branch_id],|row|row.get(0))?;delegated::write_execution(&tx,&execution)?;}
+        let mut execution = delegated::execution(&tx, &child.execution_id)?;
+        if let Some(receipt) = &execution.receipt {
+            execution.terminal_head = tx.query_row(
+                "SELECT head FROM branches WHERE id=?1",
+                [&receipt.branch_id],
+                |row| row.get(0),
+            )?;
+            delegated::write_execution(&tx, &execution)?;
+        }
         event(
             &tx,
             &child.execution_id,
@@ -698,26 +949,55 @@ impl Catalog {
         tx.commit()?;
         Ok(child)
     }
-
 }
 
-pub(super) fn validate_submission(tx:&Transaction<'_>,execution_id:&str,command:&submissions::SubmissionIdentity)->Result<()> {
-    let execution=delegated::execution(tx,execution_id)?;let child=delegated::relation(tx,&execution.child_operation_id)?;
-    if execution.receipt.is_some() || execution.report.is_some() || execution.cancel_requested || execution.source.is_none()
-        || command.thread_id!=child.child_thread_id || command.branch_id!=child.child_branch_id {
-        return Err(RuntimeError::Conflict("delegated preparation was cancelled or superseded".into()));
+pub(super) fn validate_submission(
+    tx: &Transaction<'_>,
+    execution_id: &str,
+    command: &submissions::SubmissionIdentity,
+) -> Result<()> {
+    let execution = delegated::execution(tx, execution_id)?;
+    let child = delegated::relation(tx, &execution.child_operation_id)?;
+    if execution.receipt.is_some()
+        || execution.report.is_some()
+        || execution.cancel_requested
+        || execution.source.is_none()
+        || command.thread_id != child.child_thread_id
+        || command.branch_id != child.child_branch_id
+    {
+        return Err(RuntimeError::Conflict(
+            "delegated preparation was cancelled or superseded".into(),
+        ));
     }
-    if matches!(execution.trigger,delegated::DelegatedTrigger::Dispatch) && record::<Operation>(tx,"operations",&child.operation_id)?.cancel_requested {
-        return Err(RuntimeError::Conflict("dispatch preparation was cancelled".into()));
+    if matches!(execution.trigger, delegated::DelegatedTrigger::Dispatch)
+        && record::<Operation>(tx, "operations", &child.operation_id)?.cancel_requested
+    {
+        return Err(RuntimeError::Conflict(
+            "dispatch preparation was cancelled".into(),
+        ));
     }
     Ok(())
 }
-pub(super) fn publish_submission(tx:&Transaction<'_>,execution_id:&str,receipt:&Receipt)->Result<()> {
-    let mut execution=delegated::execution(tx,execution_id)?;
-    execution.receipt=Some(receipt.clone());execution.revision+=1;delegated::write_execution(tx,&execution)?;
-    let mut launch:launch_content::LaunchMetadata=record(tx,"run_launches",&receipt.run_id)?;
-    launch.policy_target=execution.policy_target;put(tx,"run_launches",&receipt.run_id,&launch)?;
-    event(tx,execution_id,execution.revision,"child.prepared",json!({"run_id":receipt.run_id}))?;Ok(())
+pub(super) fn publish_submission(
+    tx: &Transaction<'_>,
+    execution_id: &str,
+    receipt: &Receipt,
+) -> Result<()> {
+    let mut execution = delegated::execution(tx, execution_id)?;
+    execution.receipt = Some(receipt.clone());
+    execution.revision += 1;
+    delegated::write_execution(tx, &execution)?;
+    let mut launch: launch_content::LaunchMetadata = record(tx, "run_launches", &receipt.run_id)?;
+    launch.policy_target = execution.policy_target;
+    put(tx, "run_launches", &receipt.run_id, &launch)?;
+    event(
+        tx,
+        execution_id,
+        execution.revision,
+        "child.prepared",
+        json!({"run_id":receipt.run_id}),
+    )?;
+    Ok(())
 }
 
 impl Catalog {
@@ -820,27 +1100,35 @@ impl Catalog {
             params![run_id,WAIT_TOOL],|row|row.get(0)).optional().map_err(Into::into)
     }
 
-    pub fn inspect_child_wait(&self,wait_id:&str) -> Result<Wait> {
-        if !wait_id.starts_with("child-wait:") {return Err(RuntimeError::Invalid("not a collaboration Wait".into()));}
-        record(&self.db,"waits",wait_id)
+    pub fn inspect_child_wait(&self, wait_id: &str) -> Result<Wait> {
+        if !wait_id.starts_with("child-wait:") {
+            return Err(RuntimeError::Invalid("not a collaboration Wait".into()));
+        }
+        record(&self.db, "waits", wait_id)
     }
-    pub fn request_cancel_child_wait(&mut self,wait_id:&str) -> Result<Wait> {
+    pub fn request_cancel_child_wait(&mut self, wait_id: &str) -> Result<Wait> {
         if !wait_id.starts_with("child-wait:") {
             return Err(RuntimeError::Invalid("not a collaboration Wait".into()));
         }
         self.reconcile_waits()?;
-        let wait:Wait=record(&self.db,"waits",wait_id)?;
-        if wait.trigger_cursor.is_some(){return Ok(wait)}
+        let wait: Wait = record(&self.db, "waits", wait_id)?;
+        if wait.trigger_cursor.is_some() {
+            return Ok(wait);
+        }
         self.cancel_wait(wait_id)
     }
     /// Only a parked Run has relinquished its model-history writer. Do not append a report
     /// between a model call and its tool results, or concurrently with a frozen request.
     pub(super) fn close_finished_parent_waits(&mut self) -> Result<()> {
         let tx = self.db.transaction()?;
-        let operations:Vec<Operation>={
+        let operations: Vec<Operation> = {
             let mut statement=tx.prepare("SELECT o.body FROM operations o JOIN runs r ON r.id=o.run_id WHERE json_extract(o.body,'$.executor')=?1 AND json_extract(o.body,'$.phase')!='terminal' AND json_extract(r.body,'$.state') IN ('completed','failed','cancelled')")?;
-            let rows=statement.query_map([WAIT_TOOL],|row|row.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
-            rows.into_iter().map(|row|serde_json::from_str(&row).map_err(Into::into)).collect::<Result<_>>()?
+            let rows = statement
+                .query_map([WAIT_TOOL], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            rows.into_iter()
+                .map(|row| serde_json::from_str(&row).map_err(Into::into))
+                .collect::<Result<_>>()?
         };
         let mut released = Vec::new();
         for mut op in operations {
@@ -861,9 +1149,14 @@ impl Catalog {
             op.effect = Effect::None;
             op.cancel_requested = true;
             op.revision += 1;
-            op.result = Some(OperationResultMetadata::Control { value: json!({"wait_cancelled":true,"reason":"parent_run_finished"}) });
+            op.result = Some(OperationResultMetadata::Control {
+                value: json!({"wait_cancelled":true,"reason":"parent_run_finished"}),
+            });
             put(&tx, "operations", &op.id, &op)?;
-            tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1", [&op.id])?;
+            tx.execute(
+                "DELETE FROM resource_occupancy WHERE operation_id=?1",
+                [&op.id],
+            )?;
             event(
                 &tx,
                 &op.id,
@@ -874,10 +1167,11 @@ impl Catalog {
             released.push(op.id);
         }
         tx.commit()?;
-        for id in released { self.resource_admission.release(&id); }
+        for id in released {
+            self.resource_admission.release(&id);
+        }
         Ok(())
     }
-
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -942,58 +1236,156 @@ impl Catalog {
     }
 }
 
-
 pub struct ChildSourcePreparation {
-    execution:delegated::DelegatedExecution,pin:ChildSourcePin,selection:launches::SourceSelection,provenance:ChildSourceProvenance,
-    epoch:u64,content:crate::content::ContentStore,publication:crate::content::ContentPublication,
+    execution: delegated::DelegatedExecution,
+    pin: ChildSourcePin,
+    selection: launches::SourceSelection,
+    provenance: ChildSourceProvenance,
+    epoch: u64,
+    content: crate::content::ContentStore,
+    publication: crate::content::ContentPublication,
 }
-pub struct PreparedChildSource {execution:delegated::DelegatedExecution,source:ChildSource,epoch:u64,_publication:crate::content::ContentPublication}
+pub struct PreparedChildSource {
+    execution: delegated::DelegatedExecution,
+    source: ChildSource,
+    epoch: u64,
+    _publication: crate::content::ContentPublication,
+}
 impl ChildSourcePreparation {
-    pub fn load(self)->Result<PreparedChildSource> {
-        self.pin.source.validate()?;self.selection.validate()?;
-        let branch=format!("child-source:{}",self.execution.execution_id);
-        let mode=if matches!(self.execution.code_result,ChildCodeResult::NoChanges){SourceMode::FixedBranch}else{SourceMode::Materialized};
-        let (base,handoff)=match (&self.execution.source,&self.execution.source_basis) {
-            (Some(ChildSource::Pending{handoff}),None)=>(handoff.source.clone(),Some(handoff.clone())),
-            (Some(ChildSource::Ready{handoff,selection,..}),_) => (selection.clone(),handoff.clone()),
-            (None,Some(basis))=>(basis.source().clone(),None),
-            _=>return Err(RuntimeError::Conflict("delegated source basis is unavailable".into())),
+    pub fn load(self) -> Result<PreparedChildSource> {
+        self.pin.source.validate()?;
+        self.selection.validate()?;
+        let branch = format!("child-source:{}", self.execution.execution_id);
+        let mode = if matches!(self.execution.code_result, ChildCodeResult::NoChanges) {
+            SourceMode::FixedBranch
+        } else {
+            SourceMode::Materialized
         };
-        if self.selection.mode!=mode || self.selection.branch_id.as_deref()!=Some(&branch) || self.selection.revision!=Some(0)
-            || self.selection.environment_run_id.is_some() || self.selection.workspace_id!=base.workspace_id || self.selection.execution_workspace_id!=base.execution_workspace_id
-            || self.pin.source.mode!=SourceMode::FixedBranch || self.pin.source.branch_id.as_deref()!=Some(&branch) || self.pin.source.revision!=Some(0)
-            || self.pin.source.workspace_id!=self.selection.workspace_id || self.pin.source.execution_workspace_id!=self.selection.execution_workspace_id
-            || self.pin.root.is_empty() || self.pin.pin_id.is_empty() || (self.execution.source_basis.is_some() && self.pin.pin_id!=format!("child-source-pin:{}",self.execution.execution_id)) {
-            return Err(RuntimeError::Conflict("prepared delegated source identity changed".into()));
+        let (base, handoff) = match (&self.execution.source, &self.execution.source_basis) {
+            (Some(ChildSource::Pending { handoff }), None) => {
+                (handoff.source.clone(), Some(handoff.clone()))
+            }
+            (
+                Some(ChildSource::Ready {
+                    handoff, selection, ..
+                }),
+                _,
+            ) => (selection.clone(), handoff.clone()),
+            (None, Some(basis)) => (basis.source().clone(), None),
+            _ => {
+                return Err(RuntimeError::Conflict(
+                    "delegated source basis is unavailable".into(),
+                ))
+            }
+        };
+        if self.selection.mode != mode
+            || self.selection.branch_id.as_deref() != Some(&branch)
+            || self.selection.revision != Some(0)
+            || self.selection.environment_run_id.is_some()
+            || self.selection.workspace_id != base.workspace_id
+            || self.selection.execution_workspace_id != base.execution_workspace_id
+            || self.pin.source.mode != SourceMode::FixedBranch
+            || self.pin.source.branch_id.as_deref() != Some(&branch)
+            || self.pin.source.revision != Some(0)
+            || self.pin.source.workspace_id != self.selection.workspace_id
+            || self.pin.source.execution_workspace_id != self.selection.execution_workspace_id
+            || self.pin.root.is_empty()
+            || self.pin.pin_id.is_empty()
+            || (self.execution.source_basis.is_some()
+                && self.pin.pin_id != format!("child-source-pin:{}", self.execution.execution_id))
+        {
+            return Err(RuntimeError::Conflict(
+                "prepared delegated source identity changed".into(),
+            ));
         }
-        let provenance_ref=self.content.save(&serde_json::to_value(&self.provenance)?)?;
-        if let Some(basis)=&self.execution.source_basis {
-            if self.pin.root!=basis.root() || provenance_ref!=*basis.provenance_ref() {return Err(RuntimeError::Conflict("continued source differs from its exact immutable basis".into()));}
-        } else if let Some(handoff)=&handoff {
-            if let ChildSourceRoot::Fixed{pin}=&handoff.root {
-                if pin.root!=self.pin.root || !matches!(&self.provenance,ChildSourceProvenance::FixedRoot{root,..} if root==&pin.root) {
-                    return Err(RuntimeError::Conflict("fixed child source differs from its handoff".into()));
+        let provenance_ref = self
+            .content
+            .save(&serde_json::to_value(&self.provenance)?)?;
+        if let Some(basis) = &self.execution.source_basis {
+            if self.pin.root != basis.root() || provenance_ref != *basis.provenance_ref() {
+                return Err(RuntimeError::Conflict(
+                    "continued source differs from its exact immutable basis".into(),
+                ));
+            }
+        } else if let Some(handoff) = &handoff {
+            if let ChildSourceRoot::Fixed { pin } = &handoff.root {
+                if pin.root != self.pin.root
+                    || !matches!(&self.provenance,ChildSourceProvenance::FixedRoot{root,..} if root==&pin.root)
+                {
+                    return Err(RuntimeError::Conflict(
+                        "fixed child source differs from its handoff".into(),
+                    ));
                 }
-            } else if matches!(self.provenance,ChildSourceProvenance::FixedRoot{..}) {return Err(RuntimeError::Conflict("physical capture cannot claim a fixed-root source".into()));}
+            } else if matches!(self.provenance, ChildSourceProvenance::FixedRoot { .. }) {
+                return Err(RuntimeError::Conflict(
+                    "physical capture cannot claim a fixed-root source".into(),
+                ));
+            }
         }
-        let source=ChildSource::Ready{handoff,pin:self.pin,selection:self.selection,provenance_ref};
-        Ok(PreparedChildSource{execution:self.execution,source,epoch:self.epoch,_publication:self.publication})
+        let source = ChildSource::Ready {
+            handoff,
+            pin: self.pin,
+            selection: self.selection,
+            provenance_ref,
+        };
+        Ok(PreparedChildSource {
+            execution: self.execution,
+            source,
+            epoch: self.epoch,
+            _publication: self.publication,
+        })
     }
 }
 impl Catalog {
-    pub fn prepare_child_source(&self,execution_id:&str,pin:ChildSourcePin,selection:launches::SourceSelection,provenance:ChildSourceProvenance)->Result<ChildSourcePreparation> {
-        Ok(ChildSourcePreparation{execution:self.delegated_execution(execution_id)?,pin,selection,provenance,epoch:self.epoch,content:self.content.clone(),publication:self.content.begin_publication()})
+    pub fn prepare_child_source(
+        &self,
+        execution_id: &str,
+        pin: ChildSourcePin,
+        selection: launches::SourceSelection,
+        provenance: ChildSourceProvenance,
+    ) -> Result<ChildSourcePreparation> {
+        Ok(ChildSourcePreparation {
+            execution: self.delegated_execution(execution_id)?,
+            pin,
+            selection,
+            provenance,
+            epoch: self.epoch,
+            content: self.content.clone(),
+            publication: self.content.begin_publication(),
+        })
     }
-    pub fn attach_child_source(&mut self,prepared:PreparedChildSource)->Result<ChildTask> {
-        let mut execution=self.delegated_execution(&prepared.execution.execution_id)?;
-        if execution.source.as_ref()==Some(&prepared.source){return self.execution_task(&execution.execution_id);}
-        if prepared.epoch!=self.epoch || execution.revision!=prepared.execution.revision || execution.receipt.is_some() || execution.report.is_some()
-            || execution.cancel_requested || matches!(execution.source,Some(ChildSource::Ready{..}))
-            || (matches!(execution.trigger,delegated::DelegatedTrigger::Dispatch) && self.operation(&execution.child_operation_id)?.cancel_requested) {
-            return Err(RuntimeError::Conflict("delegated source preparation was cancelled or superseded".into()));
+    pub fn attach_child_source(&mut self, prepared: PreparedChildSource) -> Result<ChildTask> {
+        let mut execution = self.delegated_execution(&prepared.execution.execution_id)?;
+        if execution.source.as_ref() == Some(&prepared.source) {
+            return self.execution_task(&execution.execution_id);
         }
-        execution.source=Some(prepared.source);execution.revision+=1;
-        let tx=self.db.transaction()?;delegated::write_execution(&tx,&execution)?;event(&tx,&execution.execution_id,execution.revision,"child.source_ready",Value::Null)?;tx.commit()?;
+        if prepared.epoch != self.epoch
+            || execution.revision != prepared.execution.revision
+            || execution.receipt.is_some()
+            || execution.report.is_some()
+            || execution.cancel_requested
+            || matches!(execution.source, Some(ChildSource::Ready { .. }))
+            || (matches!(execution.trigger, delegated::DelegatedTrigger::Dispatch)
+                && self
+                    .operation(&execution.child_operation_id)?
+                    .cancel_requested)
+        {
+            return Err(RuntimeError::Conflict(
+                "delegated source preparation was cancelled or superseded".into(),
+            ));
+        }
+        execution.source = Some(prepared.source);
+        execution.revision += 1;
+        let tx = self.db.transaction()?;
+        delegated::write_execution(&tx, &execution)?;
+        event(
+            &tx,
+            &execution.execution_id,
+            execution.revision,
+            "child.source_ready",
+            Value::Null,
+        )?;
+        tx.commit()?;
         self.execution_task(&execution.execution_id)
     }
     /// Synchronous fixture convenience; production loads writer bindings outside Catalog.
@@ -1059,7 +1451,12 @@ impl Catalog {
         if candidate.publication_id != publication_id
             || candidate.candidate_operation_id != format!("result-prepare:{publication_id}")
             || candidate.branch_id != format!("child-source:{operation_id}")
-            || candidate.workspace_id != child.source.selection().ok_or_else(||RuntimeError::Conflict("child source is not ready".into()))?.workspace_id
+            || candidate.workspace_id
+                != child
+                    .source
+                    .selection()
+                    .ok_or_else(|| RuntimeError::Conflict("child source is not ready".into()))?
+                    .workspace_id
         {
             return Err(RuntimeError::Conflict(
                 "result candidate does not belong to this child".into(),
@@ -1108,15 +1505,43 @@ impl Catalog {
         self.require_child_writers_stopped(bindings)?;
         let mut child = self.execution_task(operation_id)?;
         match &child.code_result {
-            ChildCodeResult::Candidate{candidate} if candidate.publication_id==result.publication_id && candidate.workspace_id==result.workspace_id
-                && candidate.branch_id==result.branch_id && candidate.root==result.root && candidate.base_root==result.base_root=>(),
-            ChildCodeResult::Published{result:old,effect:old_effect} if old==&result && (*old_effect==effect || *old_effect==Effect::Unknown)=>(),
-            _=>return Err(RuntimeError::Conflict("WorkingResult does not match the original child candidate".into()))
+            ChildCodeResult::Candidate { candidate }
+                if candidate.publication_id == result.publication_id
+                    && candidate.workspace_id == result.workspace_id
+                    && candidate.branch_id == result.branch_id
+                    && candidate.root == result.root
+                    && candidate.base_root == result.base_root =>
+            {
+                ()
+            }
+            ChildCodeResult::Published {
+                result: old,
+                effect: old_effect,
+            } if old == &result && (*old_effect == effect || *old_effect == Effect::Unknown) => (),
+            _ => {
+                return Err(RuntimeError::Conflict(
+                    "WorkingResult does not match the original child candidate".into(),
+                ))
+            }
         }
-        if child.code_result==(ChildCodeResult::Published{result:result.clone(),effect}){return Ok(child);}
-        child.code_result=ChildCodeResult::Published{result,effect};
-        if let Some(report)=&child.report {child.state=match report.outcome{Outcome::Succeeded=>"completed",Outcome::Cancelled=>"cancelled",_=>"failed"}.into();}
-        self.commit_child_metadata(child,"child.result_ready")
+        if child.code_result
+            == (ChildCodeResult::Published {
+                result: result.clone(),
+                effect,
+            })
+        {
+            return Ok(child);
+        }
+        child.code_result = ChildCodeResult::Published { result, effect };
+        if let Some(report) = &child.report {
+            child.state = match report.outcome {
+                Outcome::Succeeded => "completed",
+                Outcome::Cancelled => "cancelled",
+                _ => "failed",
+            }
+            .into();
+        }
+        self.commit_child_metadata(child, "child.result_ready")
     }
     /// Synchronous fixture convenience; production loads the original binding bodies outside Catalog.
     pub fn child_writers_stopped_sync(&self, operation_id: &str) -> Result<bool> {
@@ -1231,9 +1656,13 @@ impl Catalog {
             _publication: self.content.begin_publication(),
         })
     }
-    fn commit_child_metadata(&mut self,mut child:ChildTask,kind:&str)->Result<ChildTask> {
-        let tx=self.db.transaction()?;child.revision+=1;delegated::write_child_task(&tx,&child)?;
-        event(&tx,&child.execution_id,child.revision,kind,Value::Null)?;tx.commit()?;Ok(child)
+    fn commit_child_metadata(&mut self, mut child: ChildTask, kind: &str) -> Result<ChildTask> {
+        let tx = self.db.transaction()?;
+        child.revision += 1;
+        delegated::write_child_task(&tx, &child)?;
+        event(&tx, &child.execution_id, child.revision, kind, Value::Null)?;
+        tx.commit()?;
+        Ok(child)
     }
 }
 

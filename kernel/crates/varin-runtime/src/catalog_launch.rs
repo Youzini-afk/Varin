@@ -296,7 +296,9 @@ impl LaunchSelection {
         }
     }
     pub(super) fn validate(&self) -> Result<()> {
-        if let Some(catalog) = &self.child_dispatch { catalog.validate()?; }
+        if let Some(catalog) = &self.child_dispatch {
+            catalog.validate()?;
+        }
         validate_policy_models(&self.policy_models)?;
         let mut tools = std::collections::BTreeMap::new();
         if self.tools.iter().any(|tool| {
@@ -827,9 +829,11 @@ pub(super) fn policy_preparable(
     {
         return Ok(false);
     }
-    let continued:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM delegated_executions WHERE run_id=?1 AND json_extract(body,'$.trigger.kind') IN ('user_continuation','message_request'))",[&run.id],|r|r.get(0))?;
-    let message:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM input_queue WHERE run_id=?1 AND origin='message' AND id IN (SELECT json_extract(data,'$.message_id') FROM events WHERE kind='message.run_ready'))",[&run.id],|r|r.get(0))?;
-    if continued || message {return Ok(false);}
+    let continued:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM delegated_executions WHERE run_id=?1 AND json_extract(body,'$.trigger.kind') IN ('user_continuation','message_request','followup'))",[&run.id],|r|r.get(0))?;
+    let message:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM input_queue WHERE run_id=?1 AND origin IN ('message','followup') AND id IN (SELECT json_extract(data,'$.input_id') FROM events WHERE kind='ingress.run_ready'))",[&run.id],|r|r.get(0))?;
+    if continued || message {
+        return Ok(false);
+    }
     let used:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1) OR EXISTS(SELECT 1 FROM policy_checkpoints WHERE run_id=?1) OR EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='run.launch_bound')",[&run.id],|r|r.get(0))?;
     Ok(!used)
 }

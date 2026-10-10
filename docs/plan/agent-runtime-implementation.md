@@ -8,6 +8,15 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-11 增量：一次时间/进程意图与真实来源接续
+
+- 普通 `follow_up` **版本1** 支持真实 ModelStep/PolicyAction 的 register/list/get/control；明确原指令与 At/ProcessStopped 条件持久保存。注册不隐式停车，只有显式 wait 才进入原 Job/Operation/共同观察屏障；取消观察保登记，取消定义只取消未交付 ingress。User API、认证 route、原正文按需读取及时间/进程 UI 同步接线，未知响应保原 key/trigger/body/source。Catalog **32**、input **5**、collaboration **6**，旧内部格式拒绝。
+- 原 occurrence 使用 typed Followup input 与 message request 共用 `catalog_activation`。活动 Run 在原边界消费，idle root/child 按当前真实前轮配置/来源和原 delegated owner 接续，不克隆旧 dispatch。绑定不算交付，queued 仍可暂停/取消；Stop 后新 User 意图不被旧 worker 终态追溯取消。原 native 期限源先记真实到期，held 项不保留过去 deadline 忙转。Goal Dependency 可作同世代一次明确 At 检查，保原 block/订阅与暂停/预算；报告换代后不续自动链。
+- Host 真实 online/startup 消费者原来漏掉统一 `ingress.run_ready`，两条原用例先红后修复，删旧事件分支而非新增重复通知。正常 terminal child 按持久 Storage Host/Run 退休来源 grant，单一 Active/Retired/Revoked 状态区分关闭 caller 与撤销 provenance。准确前轮/固定 WorkingResult 链允许同工作环境新物理目录读取原 stopped spool；原 revoke 仍拒绝，旧文件/交互权限不扩张。Storage marker/schema **11**，旧数字版本不再自动清库，拒旧前保留 catalog/objects/in-flight stream。
+- 独审两原反例证实新增全局 Unknown gate 把已停止、已固定 child 的明确 ProcessStopped/At 永远挡住。最小修复删除重复谓词，不建例外名单，保原效果、实际 writer/occupancy/source 和自主 Goal 守卫。两原探针不改源转绿，六条原生命周期链也在最终 rlib 复验通过。该结论不把业务未知伪造为成功，也不重放效果。
+- 最终同源 runtime **368/0、2 ignored**，kernel **89/0、11 ignored**，all-targets 通过；Portable Host **40/40**、UI **39/39**，生成协议/类型/lint/实际 Host bundle 通过。准确 artifact 已 stage，同源真实 guardian/Storage **3/3**；构建证据和可复跑入口见[本切片验收](../reviews/runtime-time-followups-2026-10-11.md)。完整 Host IPC 双触发冷启动用例已类型检查但未运行，平台/组合证据边界保留。
+- 下一步继续日历发生项/重复规则、通用事件条件和其他领域。两设计整体未完成；默认 runtime、Pi 删除及资产全面迁移仍交用户先验收后执行。
+
 ## 2026-10-11 增量：关联回复、实际期限与共同观察屏障
 
 - 普通 `send` **版本3** 支持显式无期限或带 `timeoutMs` 的关联回复观察。消息、Confirmed 效果、原 JobAccepted、Operation/Wait 同事务受理，两实际调用来源保留原回执。`acceptedAtMs` 与绝对期限重试/重开不变；早于期限受理的原关联回复获胜，截止及之后为迟到消息，已确定事实不被时钟回拨或取消重写。Catalog **31**、input **4**、collaboration **5**，旧内部格式拒绝。

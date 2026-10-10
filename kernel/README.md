@@ -32,9 +32,10 @@ Host has locked the default executable on Windows.
 
 Release packaging must copy the resulting executable outside an Electron `app.asar` archive and set
 `VARIN_KERNEL_PATH` (or use the release layout resolver). The kernel acquires an owner file in its
-storage root, rejects a second writer, recreates obsolete internal catalog formats, and leaves a
-corrupt/future catalog as an error rather than an empty store. Recreation never touches workspace files,
-Git, native Pi data, or external configuration.
+storage root and rejects a second writer. Unsupported older/future formats and corrupt catalogs are
+errors, not permission to recreate a store. Format/schema checks precede staging cleanup; rejection
+preserves the catalog, retained objects and pending streams. Workspace files, Git, native Pi data and
+external configuration remain user assets.
 
 R1 storage commands are domain operations: durable content-object installation, immutable trie roots,
 write-revision CAS, published revisions, pins, idempotent operation IDs, recovery records, and GC.
@@ -115,10 +116,18 @@ Current milestone evidence is in [harness status](../docs/status.md).
 
 ## R4 native process resources
 
-The format-v10 catalog adds process identities and outcomes to the same Storage. Scoped
+The format-v11 catalog keeps process identities, outcomes and grant lifecycle in the same Storage. Scoped
 `process.spawn/inspect/list/read/write/resize/kill/release` operate on admitted roots/grants.
 A guardian is another invocation of this packaged executable, not another kernel/database or Node
 PTY shim. It owns a pipe or real PTY and reports a durable native tree-exit receipt.
+
+Grant state is one durable Active/Retired/Revoked value. Retirement disables the old caller without
+revoking creation provenance for an already stopped process; it requires real stop evidence and never
+kills a process to manufacture that evidence. Explicit revocation remains denied after a later retire.
+The private retirement selector names one grant or the original Host/Run, so a restarted Host does not
+rely on an old in-memory grant list. A delegated successor's read-only old spool access requires the
+Catalog's exact source lineage plus current and creating Storage authority; other old resources and
+process controls are not inherited. Existing subscription/admission cancellation closes retired callers.
 
 Raw channel-tagged output has a bounded 1 MiB per-process queue and at most 64 KiB read chunks.
 Slow readers apply backpressure. Input has sequence/content identity and acknowledgements;

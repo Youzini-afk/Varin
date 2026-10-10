@@ -23,6 +23,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "kernel.ping",
     "kernel.shutdown",
     "authority.grant.revoke",
+    "authority.grant.retire",
     "runtime.status",
     "runtime.tools.select",
     "runtime.run.inspect",
@@ -58,6 +59,7 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "kernel.ping",
     "kernel.shutdown",
     "authority.grant.revoke",
+    "authority.grant.retire",
     "runtime.status",
     "runtime.tools.select",
     "runtime.run.scope",
@@ -147,7 +149,14 @@ pub(crate) struct ResourceSnapshotParams {
 pub(crate) struct FollowupRegisterParams {
     pub(crate) key: String,
     pub(crate) run_id: String,
-    pub(crate) operation_id: String,
+    pub(crate) trigger: varin_runtime::catalog::followups::FollowupRegistrationTrigger,
+    pub(crate) instruction: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupGetParams {
+    pub(crate) followup_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -668,8 +677,14 @@ pub(crate) struct KernelGrantIssueParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct KernelGrantRevokeParams {
+pub(crate) struct KernelGrantTargetParams {
     pub(crate) grant_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelGrantRetireParams {
+    pub(crate) target: crate::model::GrantRetireTarget,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2192,6 +2207,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.followup.list" => serde_json::from_value::<ThreadParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.followup.get" => serde_json::from_value::<FollowupGetParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.followup.control" => {
             serde_json::from_value::<FollowupControlParams>(params.clone())
                 .map(|_| ())
@@ -2473,7 +2491,12 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "authority.grant.revoke" => {
-            serde_json::from_value::<KernelGrantRevokeParams>(params.clone())
+            serde_json::from_value::<KernelGrantTargetParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "authority.grant.retire" => {
+            serde_json::from_value::<KernelGrantRetireParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

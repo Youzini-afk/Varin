@@ -46,7 +46,7 @@ import type {
   ChildPrepareParams,
   ChildSourceReadyParams, ChildSettleParams, ChildResultCandidateParams, ChildResultPublishedParams, HostToolReconcileParams,
   ChildWait,
-  Followup,
+  Followup, FollowupView,
   Goal, GoalControlReceipt, GoalStartParams, GoalUpdateParams, GoalControlParams,
   FollowupRegisterParams,
   FollowupControlParams,
@@ -409,14 +409,10 @@ export class AgentRuntimeClient {
     grants?.delete(grantId);
     if (!grants?.size) this.sourceGrants.delete(runId);
   }
-  async releaseSourceGrants(runId: string): Promise<void> {
-    const grants = this.sourceGrants.get(runId);
-    if (!grants) return;
-    for (const grantId of grants) {
-      await this.kernel.revokeGrant(grantId);
-      grants.delete(grantId);
-    }
-    if (!grants.size) this.sourceGrants.delete(runId);
+  async retireSourceGrants(runId: string): Promise<void> {
+    // The durable Storage grant owner resolves this Run, including grants from a previous Host.
+    await this.kernel.retireRunGrants(runId);
+    this.sourceGrants.delete(runId);
   }
   /** Host admission and nested resource assembly share the same Run/epoch cancellation owner. */
   async withRunPreparation<T>(
@@ -640,6 +636,9 @@ export class AgentRuntimeClient {
   }
   followups(threadId: string, signal?: AbortSignal): Promise<Followup[]> {
     return this.kernel.agentRuntimeRequest('runtime.followup.list', { threadId }, signal);
+  }
+  followup(followupId: string, signal?: AbortSignal): Promise<FollowupView> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.get', { followupId }, signal);
   }
   controlFollowup(input: FollowupControlParams, signal?: AbortSignal): Promise<Followup> {
     return this.kernel.agentRuntimeRequest('runtime.followup.control', input, signal);

@@ -231,7 +231,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       </div>)}
       {api.collaboration && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelTree(identity))}>Stop task and children</Button>}
       {snapshot && <ThreadFollowups key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.followups} identity={identity}
-        operations={snapshot.operations} followups={snapshot.followups} pending={pending} act={act} />}
+        run={run ?? undefined} operations={snapshot.operations} followups={snapshot.followups} pending={pending} act={act}
+        cancelObservation={operationId => act(() => api.cancelOperation(operationId))} />}
       {snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
         <ThreadPermission operation={operation} enabled={!pending && operation.run_id === run?.id && !run?.cancel_requested} onDecide={(permissionId, decision) => act(() => api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }))} />
         {operation.executor === 'ask_user' && <ThreadQuestion operation={operation} enabled={!pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on} onAnswer={answer => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}

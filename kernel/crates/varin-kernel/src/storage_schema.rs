@@ -13,7 +13,7 @@ pub(crate) const CATALOG_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS metadata (ke
 	     CREATE TABLE IF NOT EXISTS pins (pin_id TEXT PRIMARY KEY, branch_id TEXT NOT NULL, workspace_id TEXT NOT NULL, revision INTEGER NOT NULL, write_revision INTEGER NOT NULL, root_hash TEXT NOT NULL, grant_id TEXT NOT NULL, ephemeral INTEGER NOT NULL, created_at INTEGER NOT NULL);
      CREATE TABLE IF NOT EXISTS root_blobs (root_hash TEXT NOT NULL, blob_hash TEXT NOT NULL, PRIMARY KEY(root_hash, blob_hash));
      CREATE TABLE IF NOT EXISTS root_parents (root_hash TEXT PRIMARY KEY, parent_root TEXT NOT NULL);
-     CREATE TABLE IF NOT EXISTS grants (grant_id TEXT PRIMARY KEY, host_id TEXT NOT NULL, grant_json TEXT NOT NULL, params_hash TEXT NOT NULL, revoked INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+     CREATE TABLE IF NOT EXISTS grants (grant_id TEXT PRIMARY KEY, host_id TEXT NOT NULL, grant_json TEXT NOT NULL, params_hash TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('active','retired','revoked')), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
      CREATE TABLE IF NOT EXISTS operations (operation_id TEXT PRIMARY KEY, kind TEXT NOT NULL, params_hash TEXT NOT NULL, state TEXT NOT NULL, result_json TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
      CREATE TABLE IF NOT EXISTS operation_owners (operation_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, created_at INTEGER NOT NULL);
 	     CREATE TABLE IF NOT EXISTS object_owners (owner_id TEXT PRIMARY KEY, blob_hash TEXT NOT NULL, workspace_id TEXT, operation_id TEXT, grant_id TEXT NOT NULL, created_at INTEGER NOT NULL);
@@ -41,7 +41,7 @@ pub(crate) const CATALOG_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS metadata (ke
      CREATE INDEX IF NOT EXISTS domain_records_thread ON domain_records(workspace_id, thread_id, record_type);
      CREATE INDEX IF NOT EXISTS domain_record_refs_hash ON domain_record_refs(object_hash);";
 
-pub(crate) const CATALOG_USER_VERSION: i64 = 10;
+pub(crate) const CATALOG_USER_VERSION: i64 = 11;
 
 pub(crate) const REQUIRED_TABLES: &[&str] = &[
     "blobs",
@@ -126,7 +126,7 @@ pub(crate) const REQUIRED_COLUMNS: &[(&str, &[&str])] = &[
             "host_id",
             "grant_json",
             "params_hash",
-            "revoked",
+            "state",
             "created_at",
             "updated_at",
         ],

@@ -10,6 +10,38 @@ use varin_runtime::catalog::launches::LaunchSelection;
 use varin_runtime::execution::*;
 use varin_runtime::*;
 
+trait RegisterProcessFollowup {
+    fn register_process_followup(
+        &mut self,
+        key: &str,
+        run: &str,
+        process: &str,
+    ) -> Result<Followup, varin_runtime::catalog::RuntimeError>;
+}
+impl RegisterProcessFollowup for Catalog {
+    fn register_process_followup(
+        &mut self,
+        key: &str,
+        run: &str,
+        process: &str,
+    ) -> Result<Followup, varin_runtime::catalog::RuntimeError> {
+        let p = self
+            .prepare_followup_registration(
+                key,
+                run,
+                FollowupRegistration {
+                    trigger: FollowupRegistrationTrigger::ProcessStopped {
+                        operation_id: process.into(),
+                    },
+                    instruction: "Inspect the original process result".into(),
+                    wait: None,
+                },
+            )?
+            .load()?;
+        Ok(self.admit_followup_registration(p)?.followup)
+    }
+}
+
 struct Fixture {
     root: std::path::PathBuf,
     db: Catalog,
@@ -30,6 +62,7 @@ impl Fixture {
             schema("process_spawn"),
             schema("process_read"),
             schema("process_inspect"),
+            schema("goal_report"),
         ];
         let launch:LaunchSelection=serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"original-connection","provider_family":"fixture","model":"original-model","configuration_generation":7,"tool_schema_generation":7,"tools":tools,"policy":{"name":"fixture-policy","version":"1"},"source":source})).unwrap();
         let receipt = db
@@ -59,7 +92,8 @@ impl Fixture {
         };
         let binding = RequestBinding {
             child_dispatch: None,
-            goal: None, resource_activations: Vec::new(),
+            goal: None,
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "original-connection".into(),
             provider_family: "fixture".into(),
@@ -172,7 +206,7 @@ impl Fixture {
     }
     fn register(&mut self) -> Followup {
         self.db
-            .register_followup("authorization", &self.run, &self.process)
+            .register_process_followup("authorization", &self.run, &self.process)
             .unwrap()
     }
     fn receipt(&self) -> ExternalReceipt {
@@ -200,9 +234,24 @@ impl Fixture {
                     .admit_followup_continuation(candidate.load().unwrap())
                     .unwrap()
                 {
-                    ContinuationAdmission::Admitted(r) => runs.push(r.run_id),
+                    ContinuationAdmission::Admitted(_) => (),
                     ContinuationAdmission::Stale => stale = true,
                     ContinuationAdmission::Held => (),
+                }
+            }
+            for candidate in self.db.capture_request_activations().unwrap() {
+                match self
+                    .db
+                    .admit_request_activation(candidate.load().unwrap())
+                    .unwrap()
+                {
+                    varin_runtime::catalog::activation::RequestActivationAdmission::Bound(run) => {
+                        runs.push(run)
+                    }
+                    varin_runtime::catalog::activation::RequestActivationAdmission::Stale => {
+                        stale = true
+                    }
+                    _ => (),
                 }
             }
             if !stale {
@@ -244,78 +293,55 @@ fn schema(name: &str) -> ToolSchema {
 }
 
 #[test]
-fn stopped_process_starts_one_new_run_after_original_terminal_and_survives_launch_crash() {
+fn stopped_process_enters_the_active_original_run_once_and_survives_reopen() {
     let mut f = Fixture::new();
     f.register();
     assert!(f.reconcile().is_empty());
     f.terminal(true);
     assert!(f.reconcile().is_empty());
-    assert_eq!(
-        f.db.followup("authorization")
-            .unwrap()
-            .occurrence
-            .unwrap()
-            .hold_reason,
-        Some(HoldReason::SourceRunActive)
-    );
-    f.state(RunState::Completed);
-    let old = f.db.run(&f.run).unwrap();
-    let new = f.reconcile().pop().unwrap();
-    assert_ne!(new, f.run);
-    assert_eq!(f.db.run(&f.run).unwrap(), old);
-    let occurrence = f.db.followup("authorization").unwrap().occurrence.unwrap();
-    assert_eq!(occurrence.state, OccurrenceState::Admitted);
-    let history = f.db.history("branch").unwrap();
-    let item = history.last().unwrap();
-    assert_eq!(item.source, HistorySource::Environment);
-    let body: ConversationItem = serde_json::from_value(item.content.clone()).unwrap();
+    let value = f.db.followup("authorization").unwrap();
+    let delivery = value.occurrence.unwrap().delivery.unwrap();
+    assert_eq!(delivery.run_id.as_deref(), Some(f.run.as_str()));
+    assert_eq!(delivery.state, InputState::Queued);
+    assert_eq!(value.wait.state, NextRunWaitState::Observed);
+    let prepared =
+        f.db.prepare_input_delivery(
+            &f.run,
+            f.db.epoch(),
+            f.db.head("branch").unwrap().as_deref(),
+        )
+        .unwrap()
+        .load()
+        .unwrap();
+    let batch = f.db.admit_input_delivery(prepared).unwrap().unwrap();
+    assert!(batch.activating);
+    assert_eq!(batch.items.len(), 1);
     assert!(matches!(
-        body.provenance,
+        batch.items[0].provenance,
         Provenance::EnvironmentFact { .. }
     ));
-    let Content::Text { text } = body.content else {
-        panic!("typed process continuation text")
+    let Content::Text { text } = &batch.items[0].content else {
+        panic!("follow-up text")
     };
-    assert!(text.contains("process_read"));
+    assert!(text.contains("Inspect the original process result"));
     assert!(text.contains(&f.process));
-    f.terminal(true);
-    assert!(f.reconcile().is_empty());
+    assert_eq!(
+        f.db.followup("authorization").unwrap().wait.state,
+        NextRunWaitState::Consumed
+    );
+    f.state(RunState::Completed);
     let mut f = f.reopen();
     assert!(f.reconcile().is_empty());
+    let before = f.db.followup("authorization").unwrap();
     assert_eq!(
-        f.db.pending_launches()
-            .unwrap()
-            .iter()
-            .filter(|launch| launch.run_id == new)
-            .count(),
-        1
-    );
-    assert_eq!(
-        f.db.launch_intent(&new).unwrap().unwrap().selection.model,
-        "original-model"
-    );
-    let run = f.db.run(&new).unwrap();
-    let run =
-        f.db.transition_run(&new, run.epoch, run.revision, RunState::Runnable)
-            .unwrap();
-    f.db.transition_run(&new, run.epoch, run.revision, RunState::Completed)
-        .unwrap();
-    assert_eq!(
-        f.db.followup("authorization")
-            .unwrap()
-            .occurrence
-            .unwrap()
-            .state,
+        before.occurrence.as_ref().unwrap().state,
         OccurrenceState::Completed
     );
-    assert!(f
-        .db
-        .control_followup("authorization", 0, FollowupControlAction::Cancel)
-        .unwrap()
-        .occurrence
-        .unwrap()
-        .receipt
-        .is_some());
+    assert_eq!(
+        f.db.control_followup("authorization", 0, FollowupControlAction::Cancel)
+            .unwrap(),
+        before
+    );
     f.cleanup();
 }
 
@@ -344,8 +370,20 @@ fn receipt_without_stopped_evidence_and_recovery_terminal_do_not_trigger() {
         Some(Outcome::Indeterminate)
     );
     assert!(f.reconcile().is_empty());
-    f.terminal(true);
-    assert_eq!(f.reconcile().len(), 1);
+    let mut uncertain = f.receipt();
+    uncertain.outcome = Outcome::Indeterminate;
+    uncertain.effect = Effect::Unknown;
+    uncertain.result = json!({"processId":f.process,"status":"failed","writerActive":false,
+        "reason":"executor stopped; original business effect remains uncertain"});
+    f.db.record_external_receipt_with_stop(&f.process.clone(), uncertain, true)
+        .unwrap();
+    let original = f.db.operation(&f.process).unwrap();
+    assert_eq!(original.effect, Effect::Unknown);
+    assert_eq!(original.outcome, Some(Outcome::Indeterminate));
+    let next = f.reconcile();
+    assert_eq!(next.len(), 1);
+    assert_eq!(f.db.operation(&f.process).unwrap(), original);
+    assert!(f.db.pending_run_operations(&next[0]).unwrap().is_empty());
     f.cleanup();
 }
 
@@ -361,7 +399,7 @@ fn terminal_before_registration_and_observed_crash_are_rechecked() {
     assert_eq!(f.register().wait.state, NextRunWaitState::Consumed);
     assert!(f
         .db
-        .register_followup("authorization", &f.run, "different")
+        .register_process_followup("authorization", &f.run, "different")
         .is_err());
     f.cleanup();
 }
@@ -430,13 +468,14 @@ fn cancelling_source_run_atomically_cancels_pending_authorization() {
     assert!(f.reconcile().is_empty());
     assert!(f
         .db
-        .register_followup("new-authorization", &f.run, &f.process)
-        .is_err());
+        .register_process_followup("new-authorization", &f.run, &f.process)
+        .is_ok());
+    assert_eq!(f.reconcile().len(), 1);
     f.cleanup();
 }
 
 #[test]
-fn concurrent_user_input_wins_and_continuation_uses_its_new_head_after_terminal() {
+fn concurrent_user_input_claims_the_original_occurrence_without_a_second_run() {
     let mut f = Fixture::new();
     f.register();
     f.state(RunState::Completed);
@@ -448,28 +487,50 @@ fn concurrent_user_input_wins_and_continuation_uses_its_new_head_after_terminal(
             .unwrap()
             .load()
             .unwrap();
+    let launch = f.db.launch_intent(&f.run).unwrap().unwrap().selection;
     let user =
-        f.db.submit(&SubmitInput {
-            key: "user-two".into(),
-            thread_id: "thread".into(),
-            branch_id: "branch".into(),
-            expected_head: f.db.head("branch").unwrap(),
-            input: json!("Additional user constraint"),
-            configuration: json!({}),
-        })
+        f.db.submit_with_launch(
+            &SubmitInput {
+                key: "user-two".into(),
+                thread_id: "thread".into(),
+                branch_id: "branch".into(),
+                expected_head: f.db.head("branch").unwrap(),
+                input: json!("Additional user constraint"),
+                configuration: json!({"user":"new configuration"}),
+            },
+            Some(launch),
+        )
         .unwrap();
-    assert_eq!(
+    assert!(matches!(
         f.db.admit_followup_continuation(candidate).unwrap(),
-        ContinuationAdmission::Held
-    );
+        ContinuationAdmission::Admitted(_)
+    ));
     assert!(f.reconcile().is_empty());
     let run = f.db.run(&user.run_id).unwrap();
-    let run =
-        f.db.transition_run(&run.id, run.epoch, run.revision, RunState::Runnable)
-            .unwrap();
-    f.db.transition_run(&run.id, run.epoch, run.revision, RunState::Completed)
+    f.db.transition_run(&run.id, run.epoch, run.revision, RunState::Runnable)
         .unwrap();
-    assert_eq!(f.reconcile().len(), 1);
+    let p =
+        f.db.prepare_input_delivery(
+            &user.run_id,
+            f.db.epoch(),
+            f.db.head("branch").unwrap().as_deref(),
+        )
+        .unwrap()
+        .load()
+        .unwrap();
+    assert_eq!(
+        f.db.admit_input_delivery(p).unwrap().unwrap().items.len(),
+        1
+    );
+    let row =
+        f.db.followup("authorization")
+            .unwrap()
+            .occurrence
+            .unwrap()
+            .delivery
+            .unwrap();
+    assert_eq!(row.run_id, Some(user.run_id.clone()));
+    assert_eq!(row.state, InputState::Delivered);
     let history = f.db.history("branch").unwrap();
     assert_eq!(
         history.last().unwrap().parent.as_deref(),
@@ -663,34 +724,467 @@ fn materialized_source_inheritance_preserves_the_original_environment_owner() {
 }
 
 #[test]
-fn goal_owned_process_occurrence_honors_goal_pause_and_actual_stop_after_reopen() {
+fn explicit_process_occurrence_is_managed_independently_and_honors_goal_pause() {
     use varin_runtime::catalog::goals::*;
-    let mut f=Fixture::new();
-    let scope=GoalScope{thread_id:"thread".into(),branch_id:"branch".into()};
-    let p=f.db.prepare_goal_start("goal",&f.run,scope.clone(),"Process the actual result".into(),None).unwrap().load().unwrap();
+    let mut f = Fixture::new();
+    let scope = GoalScope {
+        thread_id: "thread".into(),
+        branch_id: "branch".into(),
+    };
+    let p =
+        f.db.prepare_goal_start(
+            "goal",
+            &f.run,
+            scope.clone(),
+            "Process the actual result".into(),
+            None,
+        )
+        .unwrap()
+        .load()
+        .unwrap();
     f.db.admit_goal_mutation(p).unwrap();
-    let followup=f.register();assert_eq!(followup.goal_id.as_deref(),Some("goal"));
-    assert!(f.db.control_followup("authorization",1,FollowupControlAction::Pause).is_err());
-    f.db.control_goal("goal",1,&scope,GoalControlAction::Pause).unwrap();f.state(RunState::Completed);f.terminal(true);assert!(f.reconcile().is_empty());
-    let mut f=f.reopen();assert!(f.reconcile().is_empty());f.db.control_goal("goal",2,&scope,GoalControlAction::Resume).unwrap();let runs=f.reconcile();assert_eq!(runs.len(),1);assert_eq!(f.db.followup_process_source(&runs[0],&f.process).unwrap().as_deref(),Some(f.run.as_str()));assert!(f.reconcile().is_empty());f.cleanup();
+    let followup = f.register();
+    assert_eq!(followup.goal_id.as_deref(), Some("goal"));
+    f.db.control_followup("authorization", 1, FollowupControlAction::Pause)
+        .unwrap();
+    f.db.control_followup("authorization", 2, FollowupControlAction::Resume)
+        .unwrap();
+    f.db.control_goal("goal", 1, &scope, GoalControlAction::Pause)
+        .unwrap();
+    f.state(RunState::Completed);
+    f.terminal(true);
+    assert!(f.reconcile().is_empty());
+    let mut f = f.reopen();
+    assert!(f.reconcile().is_empty());
+    f.db.control_goal("goal", 2, &scope, GoalControlAction::Resume)
+        .unwrap();
+    let runs = f.reconcile();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(
+        f.db.require_process_observation(&runs[0], &f.process)
+            .unwrap()
+            .run_id,
+        f.run
+    );
+    assert!(f.reconcile().is_empty());
+    f.cleanup();
 }
 
 #[test]
 fn tree_stop_cancels_terminal_source_triggers_before_process_stop_can_restart_a_run() {
     use varin_runtime::catalog::dispatch::TreeCancelTarget;
-    for goal_owned in [false,true] {
-        let mut f=Fixture::new();
+    for goal_owned in [false, true] {
+        let mut f = Fixture::new();
         if goal_owned {
             use varin_runtime::catalog::goals::*;
-            let prepared=f.db.prepare_goal_start("goal",&f.run,GoalScope { thread_id:"thread".into(),branch_id:"branch".into() },"Observe process result".into(),None).unwrap().load().unwrap();
+            let prepared =
+                f.db.prepare_goal_start(
+                    "goal",
+                    &f.run,
+                    GoalScope {
+                        thread_id: "thread".into(),
+                        branch_id: "branch".into(),
+                    },
+                    "Observe process result".into(),
+                    None,
+                )
+                .unwrap()
+                .load()
+                .unwrap();
             f.db.admit_goal_mutation(prepared).unwrap();
         }
-        f.register();f.state(RunState::Completed);let original=f.db.run(&f.run).unwrap();
-        let capture=f.db.cancel_tree(TreeCancelTarget::Thread {thread_id:"thread".into()}).unwrap();
-        assert_eq!(capture.receipt.run_count,1);
-        assert_eq!(f.db.run(&f.run).unwrap(),original);
-        assert_eq!(f.db.followup("authorization").unwrap().state,FollowupState::Cancelled);
-        f.terminal(true);assert!(f.reconcile().is_empty());
-        let mut f=f.reopen();assert!(f.reconcile().is_empty());f.cleanup();
+        f.register();
+        f.state(RunState::Completed);
+        let original = f.db.run(&f.run).unwrap();
+        let capture =
+            f.db.cancel_tree(TreeCancelTarget::Thread {
+                thread_id: "thread".into(),
+            })
+            .unwrap();
+        assert_eq!(capture.receipt.run_count, 1);
+        assert_eq!(f.db.run(&f.run).unwrap(), original);
+        assert_eq!(
+            f.db.followup("authorization").unwrap().state,
+            FollowupState::Cancelled
+        );
+        f.terminal(true);
+        assert!(f.reconcile().is_empty());
+        let mut f = f.reopen();
+        assert!(f.reconcile().is_empty());
+        f.cleanup();
     }
+}
+
+fn at(f: &mut Fixture, key: &str, instant: u64, text: &str) -> Followup {
+    let p =
+        f.db.prepare_followup_registration(
+            key,
+            &f.run,
+            FollowupRegistration {
+                trigger: FollowupRegistrationTrigger::At { at_ms: instant },
+                instruction: text.into(),
+                wait: None,
+            },
+        )
+        .unwrap()
+        .load()
+        .unwrap();
+    f.db.admit_followup_registration(p).unwrap().followup
+}
+#[test]
+fn explicit_instants_deliver_once_while_thread_process_is_running_and_cancel_only_queued_work() {
+    let mut f = Fixture::new();
+    let first = at(&mut f, "first", 0, "Check the still-running job once");
+    let second = at(&mut f, "second", 0, "A separate check");
+    assert_eq!(first.wait.state, NextRunWaitState::Observed);
+    assert!(first.observation.is_none());
+    assert_eq!(first.actor, FollowupActor::User);
+    assert_eq!(
+        at(&mut f, "first", 0, "Check the still-running job once").id,
+        first.id
+    );
+    assert!(f
+        .db
+        .prepare_followup_registration(
+            "first",
+            &f.run,
+            FollowupRegistration {
+                trigger: FollowupRegistrationTrigger::At { at_ms: 1 },
+                instruction: "Check the still-running job once".into(),
+                wait: None
+            }
+        )
+        .unwrap()
+        .load()
+        .and_then(|p| f.db.admit_followup_registration(p))
+        .is_err());
+    assert!(f.reconcile().is_empty());
+    assert_eq!(
+        f.db.operation(&f.process).unwrap().phase,
+        OperationPhase::Running
+    );
+    let queued = f.db.followup(&second.id).unwrap();
+    assert_eq!(
+        queued
+            .occurrence
+            .as_ref()
+            .unwrap()
+            .delivery
+            .as_ref()
+            .unwrap()
+            .state,
+        InputState::Queued
+    );
+    f.db.control_followup(&second.id, queued.revision, FollowupControlAction::Cancel)
+        .unwrap();
+    let p =
+        f.db.prepare_input_delivery(
+            &f.run,
+            f.db.epoch(),
+            f.db.head("branch").unwrap().as_deref(),
+        )
+        .unwrap()
+        .load()
+        .unwrap();
+    let batch = f.db.admit_input_delivery(p).unwrap().unwrap();
+    assert_eq!(batch.items.len(), 1);
+    let Content::Text { text } = &batch.items[0].content else {
+        panic!("text")
+    };
+    assert!(text.contains("Check the still-running job once"));
+    assert_eq!(
+        f.db.followup("first").unwrap().wait.state,
+        NextRunWaitState::Consumed
+    );
+    assert_eq!(
+        f.db.followup("second").unwrap().state,
+        FollowupState::Cancelled
+    );
+    assert!(!f.db.run(&f.run).unwrap().cancel_requested);
+    assert!(f.reconcile().is_empty());
+    f.cleanup();
+}
+#[test]
+fn paused_due_instant_is_observed_off_deadline_then_reopens_without_busy_retry() {
+    let mut f = Fixture::new();
+    let now = varin_runtime::catalog::observations::wall_time_ms().unwrap();
+    let registered = at(&mut f, "later", now + 60_000, "Inspect later");
+    f.db.control_followup(
+        &registered.id,
+        registered.revision,
+        FollowupControlAction::Pause,
+    )
+    .unwrap();
+    assert_eq!(
+        f.db.nearest_followup_deadline().unwrap(),
+        Some(now + 60_000)
+    );
+    f.db.reconcile_followup_facts_at(now + 60_000).unwrap();
+    assert_eq!(f.db.nearest_followup_deadline().unwrap(), None);
+    let paused = f.db.followup("later").unwrap();
+    assert_eq!(paused.wait.state, NextRunWaitState::Observed);
+    assert_eq!(
+        paused.occurrence.unwrap().hold_reason,
+        Some(HoldReason::ControlPaused)
+    );
+    f.state(RunState::Completed);
+    let mut f = f.reopen();
+    assert!(f.reconcile().is_empty());
+    let original = f.db.operation(&f.process).unwrap();
+    assert_eq!(original.outcome, Some(Outcome::Indeterminate));
+    assert_eq!(original.effect, Effect::Unknown);
+    assert!(!original
+        .external_receipt
+        .as_ref()
+        .is_some_and(|r| r.executor_stopped));
+    let paused = f.db.followup("later").unwrap();
+    f.db.control_followup("later", paused.revision, FollowupControlAction::Resume)
+        .unwrap();
+    let next = f.reconcile();
+    assert_eq!(next.len(), 1);
+    assert_ne!(next[0], f.run);
+    assert_eq!(
+        f.db.followup("later").unwrap().wait.state,
+        NextRunWaitState::Consumed
+    );
+    assert_eq!(f.db.operation(&f.process).unwrap(), original);
+    assert!(f.db.pending_run_operations(&next[0]).unwrap().is_empty());
+    assert!(f.reconcile().is_empty());
+    f.cleanup();
+}
+#[test]
+fn late_cancelled_worker_does_not_revoke_user_intent_accepted_after_stop() {
+    let mut f = Fixture::new();
+    let old = at(&mut f, "old", u64::from(4_000_000_000u32), "Old check");
+    f.db.request_cancel_run(&f.run).unwrap();
+    assert_eq!(
+        f.db.followup(&old.id).unwrap().state,
+        FollowupState::Cancelled
+    );
+    let new = at(&mut f, "after-stop", 0, "New explicit check after Stop");
+    f.state(RunState::Cancelled);
+    assert_eq!(f.db.followup(&new.id).unwrap().state, FollowupState::Active);
+    assert_eq!(f.reconcile().len(), 1);
+    f.cleanup();
+}
+#[test]
+fn unreadable_instruction_returns_original_error_after_delivering_independent_due_work() {
+    let mut f = Fixture::new();
+    at(&mut f, "broken", 0, "Damaged retained instruction");
+    at(&mut f, "healthy", 0, "Healthy retained instruction");
+    use sha2::Digest;
+    let hash = format!(
+        "sha256-{}",
+        hex::encode(sha2::Sha256::digest(
+            serde_json::to_vec(&json!("Damaged retained instruction")).unwrap()
+        ))
+    );
+    let path = varin_runtime::content::object_path(&f.root.join("content"), &hash).unwrap();
+    std::fs::write(&path, b"corrupt").unwrap();
+    let owner = std::sync::Mutex::new(f.db);
+    assert!(varin_runtime::catalog::followups::reconcile(&owner).is_err());
+    f.db = owner.into_inner().unwrap();
+    assert_eq!(
+        f.db.followup("broken")
+            .unwrap()
+            .occurrence
+            .unwrap()
+            .hold_reason,
+        Some(HoldReason::PreparationFailed)
+    );
+    assert!(f
+        .db
+        .followup("healthy")
+        .unwrap()
+        .occurrence
+        .unwrap()
+        .delivery
+        .is_some());
+    assert_eq!(f.db.nearest_followup_deadline().unwrap(), None);
+    f.cleanup();
+}
+
+fn report_dependency(f: &mut Fixture, request: &str, wait: Option<String>) {
+    use varin_runtime::catalog::goals::*;
+    let launch = f.db.launch_intent(&f.run).unwrap().unwrap().selection;
+    let range = HistoryRange {
+        branch_id: "branch".into(),
+        ancestor_id: None,
+        leaf_id: f.db.head("branch").unwrap(),
+    };
+    let call = ToolCall {
+        call_id: "report".into(),
+        name: REPORT_TOOL.into(),
+        schema_version: "1".into(),
+        arguments: json!({"state":"blocked","reason":"Original process is still producing results","waitOperationId":wait}),
+    };
+    let context = ToolExecutionContext {
+        run_id: f.run.clone(),
+        operation_id: format!("{request}:tool:report"),
+        origin: ToolOrigin::ModelStep {
+            request_id: request.into(),
+        },
+    };
+    let binding = RequestBinding {
+        child_dispatch: None,
+        goal: f.db.goal_binding(&f.run).unwrap(),
+        resource_activations: vec![],
+        resource_checkpoint_id: None,
+        connection_identity: launch.connection_identity,
+        provider_family: launch.provider_family,
+        model: launch.model,
+        credential_ref: None,
+        configuration_generation: launch.configuration_generation,
+        tool_schema_generation: launch.tool_schema_generation,
+        tools: launch.tools,
+        instruction_sources: vec![],
+        memory_checkpoint: None,
+        attachment_refs: vec![],
+        environment_cursor: 0,
+        history_range: range.clone(),
+    };
+    f.record(ExecutionRecord::RequestPrepared {
+        snapshot: RequestSnapshot {
+            view: RequestView {
+                request_id: request.into(),
+                run_id: f.run.clone(),
+                origin: RequestOrigin::Conversation {
+                    step: 2,
+                    history_range: range,
+                },
+                binding,
+                history: vec![],
+            },
+            serialized: json!({}),
+        },
+    });
+    f.record(ExecutionRecord::ModelDispatched {
+        request_id: request.into(),
+    });
+    f.record(ExecutionRecord::ModelFinished {
+        request_id: request.into(),
+        outcome: ModelOutcome::Completed,
+        finish_reason: Some(FinishReason::ToolCalls),
+        items: vec![ProviderItem {
+            id: request.into(),
+            content: Content::ToolCall { call: call.clone() },
+            opaque: None,
+        }],
+        interrupted_deltas: vec![],
+        usage: UsageReceipt::default(),
+        failure: None,
+    });
+    f.record(ExecutionRecord::ToolAdmitted {
+        context: context.clone(),
+        tool: AdmittedTool {
+            call,
+            contract: ToolContract {
+                name: REPORT_TOOL.into(),
+                schema_version: "1".into(),
+                read_only: false,
+                completion: CompletionKind::Result,
+                lifetime: Lifetime::Run,
+                resources: vec![],
+            },
+        },
+    });
+    f.record(ExecutionRecord::ToolDispatched {
+        context: context.clone(),
+        executor_owner: ExecutorOwner::Kernel,
+    });
+    let p = f.db.prepare_goal_report(&context).unwrap().load().unwrap();
+    let completion = f.db.admit_goal_report(p).unwrap();
+    f.record(ExecutionRecord::ToolBatchCommitted {
+        request_id: request.into(),
+        results: vec![ToolResult {
+            request_id: request.into(),
+            call_id: "report".into(),
+            completion,
+        }],
+    });
+}
+#[test]
+fn one_explicit_check_enters_original_dependency_goal_without_clearing_subscription_or_renewing_permission(
+) {
+    use varin_runtime::catalog::goals::*;
+    let mut f = Fixture::new();
+    let scope = GoalScope {
+        thread_id: "thread".into(),
+        branch_id: "branch".into(),
+    };
+    let p =
+        f.db.prepare_goal_start(
+            "dependency-goal",
+            &f.run,
+            scope.clone(),
+            "Observe the actual job".into(),
+            None,
+        )
+        .unwrap()
+        .load()
+        .unwrap();
+    f.db.admit_goal_mutation(p).unwrap();
+    let process = f.process.clone();
+    report_dependency(&mut f, "blocked-report", Some(process.clone()));
+    let before =
+        f.db.capture_goal("dependency-goal")
+            .unwrap()
+            .load()
+            .unwrap();
+    assert_eq!(before.blocked_reason, Some(GoalBlockReason::Dependency));
+    f.state(RunState::Completed);
+    at(
+        &mut f,
+        "check-dependency",
+        0,
+        "Inspect the unfinished job once",
+    );
+    let runs = f.reconcile();
+    assert_eq!(runs.len(), 1);
+    let next = runs[0].clone();
+    let after =
+        f.db.capture_goal("dependency-goal")
+            .unwrap()
+            .load()
+            .unwrap();
+    assert_eq!(after.blocked_reason, Some(GoalBlockReason::Dependency));
+    assert_eq!(
+        after.dependency_operation_id.as_deref(),
+        Some(process.as_str())
+    );
+    assert_eq!(after.generation, before.generation);
+    assert!(f.db.require_process_observation(&next, &process).is_ok());
+    assert_eq!(
+        f.db.goal_binding(&next).unwrap().unwrap().generation,
+        before.generation
+    );
+    assert!(matches!(
+        f.db.goal_boundary(&next, f.db.epoch()).unwrap(),
+        GoalBoundary::Continue
+    ));
+    f.run = next;
+    f.state(RunState::Runnable);
+    // A real new goal_report invalidates the consumed check's frozen generation.
+    report_dependency(&mut f, "new-report", None);
+    assert!(matches!(
+        f.db.goal_boundary(&f.run, f.db.epoch()).unwrap(),
+        GoalBoundary::Finish {
+            state: RunState::Completed
+        }
+    ));
+    f.state(RunState::Completed);
+    assert!(f.reconcile().is_empty());
+    let current =
+        f.db.capture_goal("dependency-goal")
+            .unwrap()
+            .load()
+            .unwrap();
+    assert_eq!(current.blocked_reason, Some(GoalBlockReason::Reported));
+    assert!(f.db.followups("thread").unwrap().iter().any(|v| matches!(
+        v.actor,
+        FollowupActor::Goal { .. }
+    ) && v.operation_id.as_deref()
+        == Some(process.as_str())
+        && v.wait.state == NextRunWaitState::Waiting));
+    f.cleanup();
 }

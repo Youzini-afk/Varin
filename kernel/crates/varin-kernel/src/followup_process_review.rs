@@ -231,7 +231,8 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
         ToolKind::ProcessInspect,
         ToolKind::ProcessRead,
     ]);
-    let tools = KernelToolExecutor::selected_schemas(&kinds);
+    let mut tools = KernelToolExecutor::selected_schemas(&kinds);
+    tools.push(crate::followup_tools::schema());
     let mut binding = ToolBinding {
         grant_id: "source".into(),
         run_id: String::new(),
@@ -310,7 +311,17 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
         } else {
             (
                 "/bin/sh",
-                vec!["-c".to_owned(), format!("printf '{marker}\\n'")],
+                vec![
+                    "-c".to_owned(),
+                    format!(
+                        "printf '{marker}\\n'; {}",
+                        if index == 0 {
+                            "while [ ! -f finish-original ]; do sleep 0.02; done"
+                        } else {
+                            "true"
+                        }
+                    ),
+                ],
             )
         };
         let call = ToolCall {
@@ -355,11 +366,13 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
             "real process acceptance: {completion:?}"
         );
         close_call(&owner, &context, &call, completion, false);
-        let terminal = terminal_rx
-            .recv_timeout(Duration::from_secs(20))
-            .expect("original guardian terminal receipt");
-        assert_eq!(terminal.process_id, context.operation_id);
-        apply_process_terminal(&runtime, &terminal).unwrap();
+        if index != 0 || cfg!(windows) {
+            let terminal = terminal_rx
+                .recv_timeout(Duration::from_secs(20))
+                .expect("original guardian terminal receipt");
+            assert_eq!(terminal.process_id, context.operation_id);
+            apply_process_terminal(&runtime, &terminal).unwrap();
+        }
         processes.push(context.operation_id);
     }
     record(
@@ -370,15 +383,170 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
             waiting_on: None,
         },
     );
+    let prepared = owner
+        .lock()
+        .unwrap()
+        .prepare_followup_registration(
+            "check-while-running",
+            &source.run_id,
+            varin_runtime::catalog::followups::FollowupRegistration {
+                trigger: varin_runtime::catalog::followups::FollowupRegistrationTrigger::At {
+                    at_ms: 0,
+                },
+                instruction: "Inspect the job once even if it is still running".into(),
+                wait: None,
+            },
+        )
+        .unwrap()
+        .load()
+        .unwrap();
     owner
         .lock()
         .unwrap()
-        .register_followup("one-shot", &source.run_id, &processes[0])
+        .admit_followup_registration(prepared)
         .unwrap();
+    let check_run = varin_runtime::catalog::followups::reconcile(&owner)
+        .unwrap()
+        .pop()
+        .unwrap();
+    issue(
+        storage.lock().unwrap().as_mut().unwrap(),
+        &storage_root,
+        "timed-check",
+        &check_run,
+        EPOCH,
+    );
+    let mut checking = binding.clone();
+    checking.run_id = check_run.clone();
+    checking.grant_id = "timed-check".into();
+    let read = read_call(&processes[0]);
+    let (check_context, check_frozen) =
+        model_call(&owner, &check_run, "time-check-read", &read, &tools);
+    let check_directory = Arc::new(
+        varin_runtime::composition::tools::ToolDirectory::assemble(
+            crate::process_wait::declarations(owner.clone(), checking.clone(), resources.clone()),
+        )
+        .unwrap(),
+    );
+    let check_call = check_directory
+        .bind_call(&read, &check_frozen, &token)
+        .unwrap();
+    let check_contract = check_call.prepare(&token).unwrap();
+    record(
+        &owner,
+        &check_run,
+        ExecutionRecord::ToolAdmitted {
+            context: check_context.clone(),
+            tool: AdmittedTool {
+                call: read.clone(),
+                contract: check_contract.clone(),
+            },
+        },
+    );
+    check_call
+        .authorize(&check_context, &check_contract, &token)
+        .unwrap();
+    record(
+        &owner,
+        &check_run,
+        ExecutionRecord::ToolDispatched {
+            context: check_context.clone(),
+            executor_owner: ExecutorOwner::Kernel,
+        },
+    );
+    let limit = Instant::now() + Duration::from_secs(10);
+    let checked = loop {
+        let value = check_call
+            .execute(&check_context, &check_contract, &token)
+            .completion;
+        if text(&value).contains("followup-original-output") {
+            break value;
+        }
+        assert!(Instant::now() < limit);
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    if cfg!(unix) {
+        let ToolCompletion::Result { content, .. } = &checked else {
+            unreachable!()
+        };
+        assert_eq!(content["process"]["writerActive"], true);
+    }
+    close_call(&owner, &check_context, &read, checked, true);
+    // The actual successor tool registers against the original accepted Thread process owner.
+    let follow = ToolCall {
+        call_id: "on-stop".into(),
+        name: "follow_up".into(),
+        schema_version: "1".into(),
+        arguments: json!({"action":"register","trigger":{"kind":"process_stopped","operationId":processes[0]},"instruction":"Read the final original output after stop"}),
+    };
+    let (follow_context, follow_frozen) =
+        model_call(&owner, &check_run, "time-check-register", &follow, &tools);
+    let follow_directory = Arc::new(
+        varin_runtime::composition::tools::ToolDirectory::assemble(vec![
+            crate::followup_tools::declaration(owner.clone()),
+        ])
+        .unwrap(),
+    );
+    let follow_call = follow_directory
+        .bind_call(&follow, &follow_frozen, &token)
+        .unwrap();
+    let follow_contract = follow_call.prepare(&token).unwrap();
+    record(
+        &owner,
+        &check_run,
+        ExecutionRecord::ToolAdmitted {
+            context: follow_context.clone(),
+            tool: AdmittedTool {
+                call: follow.clone(),
+                contract: follow_contract.clone(),
+            },
+        },
+    );
+    follow_call
+        .authorize(&follow_context, &follow_contract, &token)
+        .unwrap();
+    record(
+        &owner,
+        &check_run,
+        ExecutionRecord::ToolDispatched {
+            context: follow_context.clone(),
+            executor_owner: ExecutorOwner::Kernel,
+        },
+    );
+    let registration = follow_call
+        .execute(&follow_context, &follow_contract, &token)
+        .completion;
+    assert!(
+        matches!(
+            &registration,
+            ToolCompletion::Result {
+                outcome: varin_runtime::Outcome::Succeeded,
+                ..
+            }
+        ),
+        "actual successor registration: {registration:?}"
+    );
+    close_call(&owner, &follow_context, &follow, registration, true);
+    record(
+        &owner,
+        &check_run,
+        ExecutionRecord::StateChanged {
+            state: RunState::Completed,
+            waiting_on: None,
+        },
+    );
+    if cfg!(unix) {
+        std::fs::write(cwd.join("finish-original"), b"finish").unwrap();
+        let terminal = terminal_rx.recv_timeout(Duration::from_secs(20)).unwrap();
+        assert_eq!(terminal.process_id, processes[0]);
+        apply_process_terminal(&runtime, &terminal).unwrap();
+    }
     let new_run = varin_runtime::catalog::followups::reconcile(&owner)
         .unwrap()
         .pop()
         .unwrap();
+    drop(check_call);
+    drop(follow_call);
     issue(
         storage.lock().unwrap().as_mut().unwrap(),
         &storage_root,
@@ -439,8 +607,8 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
     assert!(
         other_bound
             .authorize(&context, &other_contract, &token)
-            .is_err(),
-        "another process from the same source Run is not delegated"
+            .is_ok(),
+        "the exact other Thread Job is observable under the same source and grants"
     );
     // A changed kernel epoch can read the original durable output using fresh current authority,
     // without reissuing the original grant or spawning either command a second time.
@@ -541,8 +709,8 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
     assert!(
         unrelated_call
             .authorize(&unrelated_context, &unrelated_contract, &token)
-            .is_err(),
-        "another Run on the same Thread does not inherit the one-shot process capability"
+            .is_ok(),
+        "a legitimate later Run can read its exact Thread Job under unchanged source and grants"
     );
     drop(unrelated_call);
     drop(unrelated_directory);

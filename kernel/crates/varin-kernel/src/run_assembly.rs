@@ -29,11 +29,11 @@ pub(crate) struct RunAssembly {
 }
 
 #[cfg(test)]
-#[path = "run_assembly_review.rs"]
-mod tests;
-#[cfg(test)]
 #[path = "child_policy_review.rs"]
 mod child_policy_review;
+#[cfg(test)]
+#[path = "run_assembly_review.rs"]
+mod tests;
 pub(crate) enum PreparedLaunch {
     Selection(Value),
     Start(RunStart),
@@ -247,11 +247,10 @@ impl RunAssembly {
                 start.binding.tools = crate::questions::schemas(start.binding.tools);
                 start.binding.tools.extend(crate::family_tools::schemas());
                 start.binding.tools.push(crate::message_tools::schema());
+                start.binding.tools.push(crate::followup_tools::schema());
                 start.binding.tools.push(crate::agent_goals::schema());
-                start.binding.tools = crate::collaboration::schemas(
-                    start.binding.tools,
-                    selected.source.0.is_some(),
-                );
+                start.binding.tools =
+                    crate::collaboration::schemas(start.binding.tools, selected.source.0.is_some());
                 start.binding.tools = crate::process_wait::schemas(start.binding.tools);
                 start.binding.tools.push(crate::memory::schema(true));
                 if plan_eligible {
@@ -340,14 +339,20 @@ impl RunAssembly {
             collaboration_source = Some(collaboration_binding);
         }
         if !is_context_job {
-            declarations.push(crate::agent_resources::declaration(runtime.catalog(),self.resource.clone()));
+            declarations.push(crate::agent_resources::declaration(
+                runtime.catalog(),
+                self.resource.clone(),
+            ));
         }
         if !is_context_job {
             declarations.push(crate::questions::declaration(runtime.catalog()));
             declarations.extend(crate::family_tools::declarations(runtime.catalog()));
             declarations.push(crate::message_tools::declaration(runtime.catalog()));
+            declarations.push(crate::followup_tools::declaration(runtime.catalog()));
             declarations.push(crate::questions::status_declaration(runtime.catalog()));
-            if !is_child { declarations.push(crate::agent_goals::declaration(runtime.catalog())); }
+            if !is_child {
+                declarations.push(crate::agent_goals::declaration(runtime.catalog()));
+            }
             declarations.extend(crate::collaboration::declarations(
                 runtime.catalog(),
                 collaboration_source.clone(),
@@ -373,10 +378,16 @@ impl RunAssembly {
                 plan_bridge.clone(),
             ));
         }
-        let saved_launch = runtime.catalog().lock()
+        let saved_launch = runtime
+            .catalog()
+            .lock()
             .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-            .capture_launch(&p.run_id).map_err(domain)?;
-        let saved_launch = saved_launch.map(|read| read.load()).transpose().map_err(domain)?;
+            .capture_launch(&p.run_id)
+            .map_err(domain)?;
+        let saved_launch = saved_launch
+            .map(|read| read.load())
+            .transpose()
+            .map_err(domain)?;
         if is_child {
             let admitted = &saved_launch
                 .as_ref()
@@ -490,7 +501,9 @@ impl RunAssembly {
             selection.extension_bindings = extension_bindings;
             selection.credential_scope = selected_credential_scope;
             selection.policy_models = policy_models;
-            selection.child_dispatch = saved_launch.as_ref().and_then(|launch| launch.selection.child_dispatch.clone());
+            selection.child_dispatch = saved_launch
+                .as_ref()
+                .and_then(|launch| launch.selection.child_dispatch.clone());
             check_cancelled()?;
             let preparation = runtime
                 .catalog()
@@ -517,7 +530,10 @@ impl RunAssembly {
         };
         if !is_context_job {
             start.provider = self.models.wrap(start.provider);
-            start.context_preparation = Arc::new(crate::child_capabilities::BindingPreparation { inner: start.context_preparation, catalog: runtime.catalog() });
+            start.context_preparation = Arc::new(crate::child_capabilities::BindingPreparation {
+                inner: start.context_preparation,
+                catalog: runtime.catalog(),
+            });
             start.context_preparation = Arc::new(crate::context::CapacityPreparation::new(
                 start.context_preparation,
                 runtime.catalog(),

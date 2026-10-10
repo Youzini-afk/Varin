@@ -121,8 +121,14 @@ impl RunSupervisor {
         let cancel = CancellationToken::default();
         {
             let quiescence = self.quiescence.lock().map_err(error)?;
-            if quiescence.get(run_id).is_some_and(|drain|drain.active.load(Ordering::Acquire)) {
-                return Err(ExecutionError::new("run_already_owned", "the previous Run worker is still relinquishing ownership"));
+            if quiescence
+                .get(run_id)
+                .is_some_and(|drain| drain.active.load(Ordering::Acquire))
+            {
+                return Err(ExecutionError::new(
+                    "run_already_owned",
+                    "the previous Run worker is still relinquishing ownership",
+                ));
             }
             let mut workers = self.workers.lock().map_err(error)?;
             if self.stopping.load(Ordering::Acquire) {
@@ -600,64 +606,136 @@ impl RunSupervisor {
     }
     /// The question wait was durably committed, so its worker has no further execution work.
     /// Join its final teardown before an answer can make the same Run runnable again.
-    pub fn reconcile_goal_waits(&self)->Result<()> {
-        let runs=self.catalog.lock().map_err(error)?.goal_waiting_runs().map_err(error)?;
-        for run in runs{
-            self.quiesce_run(&run,|r|r.state==RunState::Waiting&&r.waiting_on.as_deref().is_some_and(|w|w.starts_with("goal-wait:")))?;
-            self.catalog.lock().map_err(error)?.release_goal_wait(&run).map_err(error)?;
+    pub fn reconcile_goal_waits(&self) -> Result<()> {
+        let runs = self
+            .catalog
+            .lock()
+            .map_err(error)?
+            .goal_waiting_runs()
+            .map_err(error)?;
+        for run in runs {
+            self.quiesce_run(&run, |r| {
+                r.state == RunState::Waiting
+                    && r.waiting_on
+                        .as_deref()
+                        .is_some_and(|w| w.starts_with("goal-wait:"))
+            })?;
+            self.catalog
+                .lock()
+                .map_err(error)?
+                .release_goal_wait(&run)
+                .map_err(error)?;
         }
         Ok(())
     }
     pub fn reconcile_observations(&self) -> Result<Vec<String>> {
-        self.catalog.lock().map_err(error)?.reconcile_waits().map_err(error)?;
+        self.catalog
+            .lock()
+            .map_err(error)?
+            .reconcile_waits()
+            .map_err(error)?;
         // Child reports and fixed file results remain in their original producer/receipt owner.
         // An unreadable report is retained as an error, not a gate for unrelated observations.
-        let mut failure = crate::catalog::child_delivery::reconcile_reports(&self.catalog).err().map(error);
+        let mut failure = crate::catalog::child_delivery::reconcile_reports(&self.catalog)
+            .err()
+            .map(error);
         let progress = (|| {
-            self.catalog.lock().map_err(error)?.interrupt_request_observations().map_err(error)?;
+            self.catalog
+                .lock()
+                .map_err(error)?
+                .interrupt_request_observations()
+                .map_err(error)?;
             self.quiesce_observations()?;
             loop {
-                let before = self.catalog.lock().map_err(error)?.observation_positions().map_err(error)?;
-                self.catalog.lock().map_err(error)?.select_ready_observations().map_err(error)?;
+                let before = self
+                    .catalog
+                    .lock()
+                    .map_err(error)?
+                    .observation_positions()
+                    .map_err(error)?;
+                self.catalog
+                    .lock()
+                    .map_err(error)?
+                    .select_ready_observations()
+                    .map_err(error)?;
                 // Evaluate every original consumer even when another content owner failed. Each
                 // consumer still validates its own Run/Wait and publication boundary before writing.
                 for result in [
                     crate::catalog::child_delivery::deliver_waits(&self.catalog),
                     crate::catalog::process_delivery::deliver_waits(&self.catalog),
                     crate::catalog::messages::reply_wait::deliver_waits(&self.catalog),
+                    crate::catalog::followups::observation::deliver_waits(&self.catalog),
                 ] {
-                    if let Err(cause) = result { failure.get_or_insert_with(|| error(cause)); }
+                    if let Err(cause) = result {
+                        failure.get_or_insert_with(|| error(cause));
+                    }
                 }
-                let after = self.catalog.lock().map_err(error)?.observation_positions().map_err(error)?;
-                if before == after || after.is_empty() { break; }
+                let after = self
+                    .catalog
+                    .lock()
+                    .map_err(error)?
+                    .observation_positions()
+                    .map_err(error)?;
+                if before == after || after.is_empty() {
+                    break;
+                }
             }
-            self.catalog.lock().map_err(error)?.pending_observation_continuations().map_err(error)
+            self.catalog
+                .lock()
+                .map_err(error)?
+                .pending_observation_continuations()
+                .map_err(error)
         })();
-        if let Some(failure) = failure { return Err(failure); }
+        if let Some(failure) = failure {
+            return Err(failure);
+        }
         progress
     }
-    pub fn reconcile_message_requests(&self)->Result<()> {
+    pub fn reconcile_message_requests(&self) -> Result<()> {
         let observations = self.reconcile_observations();
         // Legal request activation is a separate ingress owner. Its original guards decide
         // eligibility; a failed, unrelated observation cannot suppress this event-driven pass.
-        let activation = crate::catalog::messages::activation::reconcile(&self.catalog).map_err(error);
+        let activation = crate::catalog::activation::reconcile(&self.catalog).map_err(error);
         observations?;
         activation?;
         Ok(())
     }
-    pub fn resume_policy_pause(&self, run_id: &str, wait_id: &str) -> Result<crate::catalog::policy_control::PolicyResumeReceipt> {
-        if let Some(receipt) = self.catalog.lock().map_err(error)?.policy_resume_receipt(run_id, wait_id).map_err(error)? { return Ok(receipt); }
-        self.quiesce_run(run_id, |run| run.state == RunState::Waiting && run.waiting_on.as_deref() == Some(wait_id))?;
+    pub fn resume_policy_pause(
+        &self,
+        run_id: &str,
+        wait_id: &str,
+    ) -> Result<crate::catalog::policy_control::PolicyResumeReceipt> {
+        if let Some(receipt) = self
+            .catalog
+            .lock()
+            .map_err(error)?
+            .policy_resume_receipt(run_id, wait_id)
+            .map_err(error)?
+        {
+            return Ok(receipt);
+        }
+        self.quiesce_run(run_id, |run| {
+            run.state == RunState::Waiting && run.waiting_on.as_deref() == Some(wait_id)
+        })?;
         let mut catalog = self.catalog.lock().map_err(error)?;
         let epoch = catalog.epoch();
-        catalog.resume_policy_pause(run_id, wait_id, epoch).map_err(error)
+        catalog
+            .resume_policy_pause(run_id, wait_id, epoch)
+            .map_err(error)
     }
     /// Read-only overlay for launch consumers; the catalog still owns durable eligibility.
     pub fn start_available(&self, run_id: &str) -> Result<bool> {
         let quiescence = self.quiescence.lock().map_err(error)?;
-        if quiescence.get(run_id).is_some_and(|drain| drain.active.load(Ordering::Acquire)) { return Ok(false); }
+        if quiescence
+            .get(run_id)
+            .is_some_and(|drain| drain.active.load(Ordering::Acquire))
+        {
+            return Ok(false);
+        }
         let workers = self.workers.lock().map_err(error)?;
-        Ok(workers.get(run_id).is_none_or(|worker| worker.join.as_ref().is_some_and(JoinHandle::is_finished)))
+        Ok(workers
+            .get(run_id)
+            .is_none_or(|worker| worker.join.as_ref().is_some_and(JoinHandle::is_finished)))
     }
     pub fn quiesce_question(&self, operation_id: &str) -> Result<()> {
         let run_id = {
@@ -672,8 +750,10 @@ impl RunSupervisor {
             }
             run.id
         };
-        self.quiesce_run(&run_id, |run| run.state == RunState::Waiting
-            && run.waiting_on.as_deref() == Some(&format!("question:{operation_id}")))
+        self.quiesce_run(&run_id, |run| {
+            run.state == RunState::Waiting
+                && run.waiting_on.as_deref() == Some(&format!("question:{operation_id}"))
+        })
     }
     pub fn quiesce_context_job(&self, job_id: &str) -> Result<()> {
         let parent = self
@@ -686,23 +766,51 @@ impl RunSupervisor {
             return Ok(());
         };
         let wait_id = format!("context-wait:{parent}:{job_id}");
-        self.quiesce_run(&parent, |run| run.state == RunState::Waiting && run.waiting_on.as_deref() == Some(&wait_id))
+        self.quiesce_run(&parent, |run| {
+            run.state == RunState::Waiting && run.waiting_on.as_deref() == Some(&wait_id)
+        })
     }
     /// Each waiter shares its Run's teardown. No Catalog or global worker lock crosses join.
     /// Joins the terminal Run worker. Storage file leases must also be drained separately.
     pub fn quiesce_terminal(&self, run_id: &str) -> Result<()> {
-        self.quiesce_run(run_id, |run| matches!(run.state, RunState::Completed | RunState::Failed | RunState::Cancelled))
+        self.quiesce_run(run_id, |run| {
+            matches!(
+                run.state,
+                RunState::Completed | RunState::Failed | RunState::Cancelled
+            )
+        })
     }
     fn quiesce_run(&self, run_id: &str, waiting: impl Fn(&Run) -> bool) -> Result<()> {
-        let serial = self.quiescence.lock().map_err(error)?.entry(run_id.into())
-            .or_insert_with(||Arc::new(RunDrain { serial: Mutex::new(()), active: AtomicBool::new(true) })).clone();
+        let serial = self
+            .quiescence
+            .lock()
+            .map_err(error)?
+            .entry(run_id.into())
+            .or_insert_with(|| {
+                Arc::new(RunDrain {
+                    serial: Mutex::new(()),
+                    active: AtomicBool::new(true),
+                })
+            })
+            .clone();
         let guard = serial.serial.lock().map_err(error)?;
         let result = (|| {
-            if !waiting(&self.catalog.lock().map_err(error)?.run(run_id).map_err(error)?) { return Ok(()); }
+            if !waiting(
+                &self
+                    .catalog
+                    .lock()
+                    .map_err(error)?
+                    .run(run_id)
+                    .map_err(error)?,
+            ) {
+                return Ok(());
+            }
             serial.active.store(true, Ordering::Release);
             let worker = self.workers.lock().map_err(error)?.remove(run_id);
             if let Some(mut worker) = worker {
-                if let Some(join) = worker.join.take() { join.join().map_err(|_|error("Run wait teardown failed"))?; }
+                if let Some(join) = worker.join.take() {
+                    join.join().map_err(|_| error("Run wait teardown failed"))?;
+                }
             }
             Ok(())
         })();
@@ -710,23 +818,47 @@ impl RunSupervisor {
         serial.active.store(false, Ordering::Release);
         drop(guard);
         let mut entries = self.quiescence.lock().map_err(error)?;
-        if Arc::strong_count(&serial) == 2 { entries.remove(run_id); }
+        if Arc::strong_count(&serial) == 2 {
+            entries.remove(run_id);
+        }
         result
     }
     fn quiesce_waits(&self, prefix: &str) -> Result<()> {
-        let mut ids: std::collections::BTreeSet<String> = self.workers.lock().map_err(error)?.keys().cloned().collect();
+        let mut ids: std::collections::BTreeSet<String> = self
+            .workers
+            .lock()
+            .map_err(error)?
+            .keys()
+            .cloned()
+            .collect();
         ids.extend(self.quiescence.lock().map_err(error)?.keys().cloned());
         for id in ids {
-            let waiting = |run: &Run| run.state == RunState::Waiting
-                && run.waiting_on.as_deref().is_some_and(|key|key.starts_with(prefix));
-            if waiting(&self.catalog.lock().map_err(error)?.run(&id).map_err(error)?) { self.quiesce_run(&id, waiting)?; }
+            let waiting = |run: &Run| {
+                run.state == RunState::Waiting
+                    && run
+                        .waiting_on
+                        .as_deref()
+                        .is_some_and(|key| key.starts_with(prefix))
+            };
+            if waiting(
+                &self
+                    .catalog
+                    .lock()
+                    .map_err(error)?
+                    .run(&id)
+                    .map_err(error)?,
+            ) {
+                self.quiesce_run(&id, waiting)?;
+            }
         }
         Ok(())
     }
     /// A persisted child Wait has relinquished the history writer. Join only final teardown,
     /// never a running model/tool, before its durable report makes that same Run runnable.
     pub fn quiesce_observations(&self) -> Result<()> {
-        self.quiesce_child_waits()?; self.quiesce_process_waits()?; self.quiesce_waits("reply-wait:")
+        self.quiesce_child_waits()?;
+        self.quiesce_process_waits()?;
+        self.quiesce_waits("reply-wait:")
     }
     pub fn quiesce_child_waits(&self) -> Result<()> {
         self.quiesce_waits("child-wait:")
@@ -736,9 +868,13 @@ impl RunSupervisor {
     }
     pub fn cancel_operation(&self, operation_id: &str) -> Result<crate::OperationMetadata> {
         {
-            let mut catalog=self.catalog.lock().map_err(error)?;
-            let op=catalog.operation(operation_id).map_err(error)?;
-            if op.waiting_on.as_deref().is_some_and(crate::catalog::observations::is_observation_id) {
+            let mut catalog = self.catalog.lock().map_err(error)?;
+            let op = catalog.operation(operation_id).map_err(error)?;
+            if op
+                .waiting_on
+                .as_deref()
+                .is_some_and(crate::catalog::observations::is_observation_id)
+            {
                 return catalog.cancel_observation(operation_id).map_err(error);
             }
         }
@@ -848,7 +984,8 @@ impl RunSupervisor {
     }
     pub fn shutdown(&self) -> Result<()> {
         self.stopping.store(true, Ordering::Release);
-        { let catalog = self.catalog.lock().map_err(error)?;
+        {
+            let catalog = self.catalog.lock().map_err(error)?;
             catalog.stop_followup_admission();
             catalog.cancel_content_collection();
         }
@@ -875,5 +1012,5 @@ impl From<RuntimeError> for ExecutionError {
 }
 
 #[cfg(test)]
-#[path="supervisor_wait_tests.rs"]
+#[path = "supervisor_wait_tests.rs"]
 mod wait_tests;

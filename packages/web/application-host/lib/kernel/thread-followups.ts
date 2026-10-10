@@ -5,21 +5,30 @@ type FollowupOwner = Pick<ThreadAdapter, 'runtime' | 'requireIdentity'>;
 
 /** The Catalog owns definitions, waits and occurrences. The Host checks the selected branch only. */
 export async function listThreadFollowups(owner: FollowupOwner, identity: ThreadIdentity, signal?: AbortSignal) {
-  await owner.requireIdentity(identity);
+  await owner.requireIdentity(identity, signal);
   return (await owner.runtime.followups(identity.threadId, signal))
     .filter(followup => followup.thread_id === identity.threadId && followup.branch_id === identity.branchId);
 }
 
 export async function registerThreadFollowup(owner: FollowupOwner,
   input: Parameters<ThreadFollowupsAPI['register']>[0], signal?: AbortSignal) {
-  await owner.requireIdentity(input);
+  await owner.requireIdentity(input, signal);
   const run = await owner.runtime.run(input.runId, signal);
   if (run.thread_id !== input.threadId || run.branch_id !== input.branchId) {
     throw new Error('Follow-up source Run belongs to another Thread branch');
   }
-  // Catalog checks the operation's Run and trusted process receipt atomically. Inspecting its
-  // full result here would hydrate unrelated process output before this small control request.
-  return owner.runtime.registerFollowup({ key: input.key, runId: run.id, operationId: input.operationId }, signal);
+  // Catalog validates the trigger, original process evidence (when selected), and registration
+  // identity atomically. Registration never hydrates process output or starts work in the Host.
+  return owner.runtime.registerFollowup({ key: input.key, runId: run.id, trigger: input.trigger, instruction: input.instruction }, signal);
+}
+
+export async function getThreadFollowup(owner: FollowupOwner,
+  identity: ThreadIdentity, followupId: string, signal?: AbortSignal) {
+  const followups = await listThreadFollowups(owner, identity, signal);
+  if (!followups.some(followup => followup.id === followupId)) {
+    throw new Error('Follow-up does not belong to the selected Thread branch');
+  }
+  return owner.runtime.followup(followupId, signal);
 }
 
 export async function controlThreadFollowup(owner: FollowupOwner,
