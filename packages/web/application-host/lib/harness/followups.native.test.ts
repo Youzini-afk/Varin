@@ -81,6 +81,7 @@ const artifactView = (overrides: Partial<ExperimentArtifactView> = {}): Experime
 const attemptView = (overrides: Partial<ExperimentAttemptView> = {}): ExperimentAttemptView => ({
   attemptId: "attempt-1",
   specId: "spec-1",
+  cancelRequested: false,
   backend: "local",
   collection: "none",
   createdAt: Date.now(),

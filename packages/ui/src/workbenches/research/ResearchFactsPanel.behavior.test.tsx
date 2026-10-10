@@ -29,6 +29,7 @@ vi.mock('@/lib/varinEvents', () => ({
 const attempt = {
   attemptId: 'attempt-1',
   specId: 'spec-1',
+  cancelRequested: false,
   backend: 'local',
   machineId: 'local',
   state: 'running',
@@ -210,16 +211,19 @@ describe('ResearchFactsPanel', () => {
     expect((cancelCall![1] as RequestInit).method).toBe('POST');
   });
 
-  it('reruns a failed attempt through the real rerun route', async () => {
+  it('retries an unknown rerun with its original key and keeps a preparing receipt visible', async () => {
     const failed = { ...attempt, state: 'failed' };
+    const preparing = { ...failed, attemptId: 'attempt-2', specId: null, state: 'submitted', retryOfAttemptId: 'attempt-1' };
+    let requests = 0;
     factsResponse(failed);
     await render();
     vi.mocked(runtimeFetch).mockImplementation(async (input) => {
       const url = String(input);
       if (url.endsWith('/rerun')) {
-        return new Response(JSON.stringify({ spec: { specId: 'spec-1' }, attempt: { ...failed, attemptId: 'attempt-2', state: 'submitted', retryOfAttemptId: 'attempt-1' }, text: 'rerun' }));
+        if (++requests === 1) throw new Error('accepted response was lost');
+        return new Response(JSON.stringify({ spec: null, attempt: preparing, text: 'accepted; preparing input' }));
       }
-      if (url.endsWith('/experiments')) return new Response(JSON.stringify({ attempts: [failed] }));
+      if (url.endsWith('/experiments')) return new Response(JSON.stringify({ attempts: requests >= 2 ? [failed, preparing] : [failed] }));
       if (url.endsWith('/resources')) return new Response(JSON.stringify({ machines: [], generatedAt: 6 }));
       if (url.endsWith('/sources')) return new Response(JSON.stringify({ sources: [] }));
       return new Response('not found', { status: 404 });
@@ -228,10 +232,17 @@ describe('ResearchFactsPanel', () => {
       .find((button) => button.textContent === 'research-facts.rerun');
     expect(rerunButton).toBeTruthy();
     await act(async () => rerunButton!.click());
-    const rerunCall = vi.mocked(runtimeFetch).mock.calls.find(([input]) => String(input).endsWith('/rerun'));
+    expect(container.textContent).toContain('accepted response was lost');
+    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'research-facts.rerun')!.click());
+    const rerunCalls = vi.mocked(runtimeFetch).mock.calls.filter(([input]) => String(input).endsWith('/rerun'));
+    expect(rerunCalls).toHaveLength(2);
+    expect(rerunCalls[1]![1]?.body).toBe(rerunCalls[0]![1]?.body);
+    const rerunCall = rerunCalls[0];
     expect(rerunCall).toBeTruthy();
     expect((rerunCall![1] as RequestInit).method).toBe('POST');
     expect(JSON.parse(String((rerunCall![1] as RequestInit).body))).toEqual(expect.objectContaining({ requestId: expect.any(String) }));
+    expect(container.textContent).toContain('attempt-2');
+    expect([...container.querySelectorAll('button')].filter(button => button.textContent === 'research-facts.cancel')).toHaveLength(1);
   });
 
   it('cancels selected attempts through the batch route', async () => {

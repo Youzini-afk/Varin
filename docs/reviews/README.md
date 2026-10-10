@@ -8,6 +8,7 @@ Last updated: 2026-10-11
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [实验短受理与真实排空（2026-10-11）](runtime-experiment-admission-2026-10-11.md) | 原实验/资源 owner、异步准备、取消恢复与 Pi/User 消费；独立七条反例修后通过 |
 | [原来源文件条件（2026-10-11）](runtime-file-followups-2026-10-11.md) | 精确来源/权限、真实 watcher/capture/writer、取消恢复与公开消费者；已完成分层验证 |
 | [组合条件与原发生项（2026-10-11）](runtime-composite-followups-2026-10-11.md) | 逐叶授权/耐久事实、Any/All、原输入/Goal/child/取消恢复及真实公开消费者 |
 | [日历资产与实际发生项（2026-10-11）](runtime-calendar-2026-10-11.md) | 原定义/UTC slot/ingress、冷工作与既有工作、跨 owner once 交接及真实公开消费者 |

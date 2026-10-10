@@ -75,7 +75,10 @@ export interface ExperimentSpecView {
 
 export interface ExperimentAttemptView {
   attemptId: string;
-  specId: string;
+  /** Null until the accepted intent has a durably prepared immutable spec. */
+  specId: string | null;
+  /** A requested stop is distinct from a confirmed terminal state. */
+  cancelRequested: boolean;
   backend: ExperimentBackend;
   machineId?: string;
   state: ExperimentAttemptState;
@@ -165,7 +168,7 @@ export interface ExperimentSubmitParams {
 }
 
 export interface ExperimentSubmitResult {
-  spec: ExperimentSpecView;
+  spec: ExperimentSpecView | null;
   attempt: ExperimentAttemptView;
   text: string;
 }

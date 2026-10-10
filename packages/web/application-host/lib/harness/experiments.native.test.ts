@@ -4,8 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, it as vitestIt } from "vitest";
-import { createKernelClient, type KernelClient } from "../kernel/kernel-client.js";
+import { createKernelClient, KernelClientError, type KernelClient } from "../kernel/kernel-client.js";
 import { createExperimentService, type ExperimentCaller } from "./experiments.js";
+import type { ExperimentAttemptState } from "@varin/protocol";
 import type { ExperimentBackend } from "./experiment-backend.js";
 import { createResourceService } from "./resources.js";
 import { createSourceService } from "./sources.js";
@@ -115,8 +116,18 @@ async function serviceWithBackend(
   });
 }
 
+async function prepared(service: ReturnType<typeof createExperimentService>, caller: ExperimentCaller, attemptId: string, state?: ExperimentAttemptState) {
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    const detail = await service.get(caller, attemptId);
+    if (state ? detail.attempt.state === state : detail.spec !== undefined) return detail;
+    if (Date.now() >= deadline) throw new Error(`Experiment did not reach ${state ?? "a frozen spec"}: ${JSON.stringify(detail)}`);
+    await pause();
+  }
+}
+
 describe("experiment service on the real kernel", () => {
-  it("cancels input preparation before admission and leaves later kernel calls usable", async () => {
+  it("keeps accepted preparation independent of caller abort and supports explicit cancellation", async () => {
     const f = await fixture();
     await fs.writeFile(path.join(f.workspace, "input.txt"), "source");
     const controller = new AbortController();
@@ -125,12 +136,12 @@ describe("experiment service on the real kernel", () => {
     const originalScoped = f.client.scoped.bind(f.client);
     f.client.scoped = (grant) => new Proxy(originalScoped(grant), {
       get(target, key) {
-        if (key === "fileCapture") return async (_params: unknown, signal?: AbortSignal) => {
+        if (key === "fileCaptureBatch") return async (_params: unknown, signal?: AbortSignal) => {
           entered();
-          assert.ok(signal, "submission cancellation must reach native input capture");
+          assert.ok(signal, "attempt preparation must carry its own cancellation signal");
           await new Promise<void>((_resolve, reject) => {
-            if (signal.aborted) reject(signal.reason);
-            else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+            if (signal.aborted) reject(new KernelClientError({ code: "cancelled", message: "fixture capture acknowledged cancellation" }));
+            else signal.addEventListener("abort", () => reject(new KernelClientError({ code: "cancelled", message: "fixture capture acknowledged cancellation" })), { once: true });
           });
         };
         const value = Reflect.get(target, key);
@@ -138,21 +149,18 @@ describe("experiment service on the real kernel", () => {
       },
     });
     try {
-      const submitting = f.experiments.submit(f.caller, node("process.stdout.write('never started')"), controller.signal)
-        .then((value) => value, (error: unknown) => error);
+      const submitted = await f.experiments.submit(f.caller, node("process.stdout.write('never started')"), controller.signal);
+      assert.equal(submitted.spec, null);
       await capturing;
       controller.abort();
-      const outcome = await submitting;
-      assert.ok(outcome instanceof Error && outcome.name === "AbortError");
+      assert.equal((await f.experiments.get(f.caller, submitted.attempt.attemptId)).attempt.state, "submitted");
+      assert.equal((await f.experiments.cancel(f.caller, submitted.attempt.attemptId)).cancelRequested, true);
+      assert.equal((await f.experiments.wait(f.caller, submitted.attempt.attemptId, 15_000)).attempt.state, "cancelled");
     } finally {
-      controller.abort();
       f.client.scoped = originalScoped;
     }
-    assert.deepEqual((await f.experiments.list(f.caller, {})).attempts, []);
-    assert.ok((await f.resources.list(f.caller.workspaceId)).machines.length > 0);
     const submitted = await f.experiments.submit(f.caller, node("process.stdout.write('after cancellation')"));
-    const waited = await f.experiments.wait(f.caller, submitted.attempt.attemptId, 15_000);
-    assert.equal(waited.attempt.state, "completed");
+    assert.equal((await f.experiments.wait(f.caller, submitted.attempt.attemptId, 15_000)).attempt.state, "completed");
   });
 
   it("runs a local attempt to completion, collects streams and output files, and dedupes the request", async () => {
@@ -168,7 +176,7 @@ describe("experiment service on the real kernel", () => {
       ...spec,
       outputPaths: ["result.txt"],
     });
-    assert.equal(submitted.spec.state, "active");
+    assert.equal(submitted.spec, null);
     assert.match(submitted.attempt.attemptId, /^attempt-[a-f0-9]{40}$/);
 
     // A retry with the same requestId returns the recorded attempt — no second job.
@@ -206,13 +214,13 @@ describe("experiment service on the real kernel", () => {
     assert.match(err.text, /stderr-marker/);
 
     // specId reuse launches a second attempt under the same pinned spec.
-    const second = await f.experiments.submit(f.caller, { specId: submitted.spec.specId });
-    assert.equal(second.attempt.specId, submitted.spec.specId);
+    const second = await f.experiments.submit(f.caller, { specId: detail.spec!.specId });
+    assert.equal(second.attempt.specId, detail.spec!.specId);
     assert.notEqual(second.attempt.attemptId, submitted.attempt.attemptId);
     const secondWait = await f.experiments.wait(f.caller, second.attempt.attemptId, 30_000);
     assert.equal(secondWait.attempt.state, "completed");
 
-    const listed = await f.experiments.list(f.caller, { specId: submitted.spec.specId });
+    const listed = await f.experiments.list(f.caller, { specId: detail.spec!.specId });
     assert.equal(listed.attempts.length, 2);
     assert.deepEqual(f.errors, []);
   });
@@ -247,8 +255,8 @@ describe("experiment service on the real kernel", () => {
       ...node("process.stdout.write('never')"),
       resources: { cpuCores: 1_000_000 },
     });
-    assert.equal(impossible.attempt.state, "queued");
-    assert.ok(impossible.attempt.queueReason);
+    const queued = await prepared(f.experiments, f.caller, impossible.attempt.attemptId, "queued");
+    assert.ok(queued.attempt.queueReason);
 
     // The queue is a visible resource fact, separate from confirmed commitments.
     const whileQueued = await f.resources.list(f.caller.workspaceId);
@@ -261,7 +269,8 @@ describe("experiment service on the real kernel", () => {
 
     // Cancelling the queued attempt releases nothing it never held and ends it.
     const cancelled = await f.experiments.cancel(f.caller, impossible.attempt.attemptId);
-    assert.equal(cancelled.state, "cancelled");
+    assert.equal(cancelled.cancelRequested, true);
+    assert.equal((await f.experiments.wait(f.caller, impossible.attempt.attemptId, 15_000)).attempt.state, "cancelled");
 
     const overview = await f.resources.list(f.caller.workspaceId);
     const local = overview.machines.find((machine) => machine.machineId === "local");
@@ -377,25 +386,16 @@ describe("experiment service on the real kernel", () => {
     const detail = await f.experiments.get(f.caller, submitted.attempt.attemptId);
     assert.equal(detail.spec?.inputs[0]?.sourceId, registered.sourceId);
 
-    // A bogus object hash is rejected at submit, not at run time.
-    await assert.rejects(
-      f.experiments.submit(f.caller, { ...node("process.stdout.write('x')"), inputs: [{ objectHash: "md5-deadbeef" }] }),
-      /sha256/i,
-    );
-    // An unknown source is rejected as well.
-    await assert.rejects(
-      f.experiments.submit(f.caller, { ...node("process.stdout.write('x')"), inputs: [{ sourceId: "src-missing" }] }),
-      /unknown|retired/i,
-    );
+    // Source authorization and input metadata validation precede acceptance; file capture stays independent.
+    await assert.rejects(f.experiments.submit(f.caller, { ...node("process.stdout.write('x')"), inputs: [{ objectHash: "md5-deadbeef" }] }), /sha256/i);
+    await assert.rejects(f.experiments.submit(f.caller, { ...node("process.stdout.write('x')"), inputs: [{ sourceId: "src-missing" }] }), /unknown|retired/i);
     assert.deepEqual(f.errors, []);
   });
 
   it("fails honestly when a registered machine has no backend, and refuses unregistered machines", async () => {
     const f = await fixture();
-    await assert.rejects(
-      f.experiments.submit(f.caller, { ...node("process.stdout.write('x')"), machineId: "ghost" }),
-      /not registered/i,
-    );
+    const missing = await f.experiments.submit(f.caller, { ...node("process.stdout.write('x')"), machineId: "ghost" });
+    assert.match((await f.experiments.wait(f.caller, missing.attempt.attemptId, 15_000)).attempt.error ?? "", /not registered/i);
 
     const registered = await f.resources.registerMachine(f.caller.workspaceId, {
       machineId: "remote-a",
@@ -410,8 +410,8 @@ describe("experiment service on the real kernel", () => {
       ...node("process.stdout.write('x')"),
       machineId: "remote-a",
     });
-    assert.equal(submitted.attempt.state, "failed");
-    assert.match(submitted.attempt.error ?? "", /no execution backend/i);
+    const failed = await prepared(f.experiments, f.caller, submitted.attempt.attemptId, "failed");
+    assert.match(failed.attempt.error ?? "", /no execution backend/i);
     assert.deepEqual(f.errors, []);
   });
 
@@ -494,9 +494,6 @@ describe("experiment service on the real kernel", () => {
       outputPaths: ["result.txt"],
       machineId: "sim-cluster",
     });
-    assert.equal(submitted.attempt.backend, "sim");
-    assert.equal(submitted.attempt.machineId, "sim-cluster");
-
     const waited = await experiments.wait(f.caller, submitted.attempt.attemptId, 15_000);
     assert.equal(waited.timedOut, false);
     assert.equal(waited.attempt.state, "completed");
@@ -507,6 +504,8 @@ describe("experiment service on the real kernel", () => {
     assert.ok(released[0]!.startsWith("sim-"));
 
     const detail = await experiments.get(f.caller, submitted.attempt.attemptId);
+    assert.equal(detail.attempt.backend, "sim");
+    assert.equal(detail.attempt.machineId, "sim-cluster");
     assert.equal(detail.job?.backend, "sim");
     assert.equal(detail.job?.machineId, "sim-cluster");
     assert.ok(detail.job?.backendJobId?.startsWith("sim-"));
@@ -544,7 +543,7 @@ describe("experiment service on the real kernel", () => {
       resources,
     });
     assert.notEqual(first.attempt.attemptId, reordered.attempt.attemptId);
-    assert.notEqual(first.spec.specId, reordered.spec.specId);
+    assert.notEqual((await prepared(f.experiments, f.caller, first.attempt.attemptId)).spec!.specId, (await prepared(f.experiments, f.caller, reordered.attempt.attemptId)).spec!.specId);
     await assert.rejects(
       f.experiments.submit(f.caller, {
         requestId: "matrix/a?b",
@@ -564,12 +563,12 @@ describe("experiment service on the real kernel", () => {
       command: "never-launched",
       resources: { cpuCores: 1_000_000 },
     });
-    assert.equal(first.attempt.state, "queued");
+    const firstDetail = await prepared(f.experiments, f.caller, first.attempt.attemptId, "queued");
     await f.experiments.cancel(f.caller, first.attempt.attemptId);
 
-    const reused = await f.experiments.submit(f.caller, { specId: first.spec.specId });
-    assert.equal(reused.attempt.state, "queued");
-    assert.match(reused.attempt.queueReason ?? "", /cpuCores|insufficient/i);
+    const reused = await f.experiments.submit(f.caller, { specId: firstDetail.spec!.specId });
+    const reusedDetail = await prepared(f.experiments, f.caller, reused.attempt.attemptId, "queued");
+    assert.match(reusedDetail.attempt.queueReason ?? "", /cpuCores|insufficient/i);
     await f.experiments.cancel(f.caller, reused.attempt.attemptId);
   });
 
@@ -611,14 +610,12 @@ describe("experiment service on the real kernel", () => {
       resources: { cpuCores: 1 },
     });
     assert.equal(submitted.attempt.state, "submitted");
-    const reserved = await f.resources.list(f.caller.workspaceId);
-    assert.equal(reserved.machines.find((machine) => machine.machineId === "fault-reconcile-machine")?.commitments.length, 1);
 
     const waited = await experiments.wait(f.caller, submitted.attempt.attemptId, 15_000);
     assert.equal(waited.timedOut, false);
     assert.equal(waited.attempt.state, "completed");
     assert.equal(createdJobs, 1);
-    assert.equal(spawnCalls, 2);
+    assert.equal(spawnCalls, 1);
     assert.ok(readCalls >= 2);
     const logs = await experiments.logs(f.caller, { attemptId: submitted.attempt.attemptId });
     assert.equal(logs.text, "reconciled-output");
@@ -672,7 +669,8 @@ describe("experiment service on the real kernel", () => {
     const collected = await experiments.collect(f.caller, submitted.attempt.attemptId);
     assert.equal(collected.attempt.collection, "done");
     assert.equal(releases, 1);
-    const retriedRelease = await experiments.get(f.caller, submitted.attempt.attemptId);
+    let retriedRelease = await experiments.get(f.caller, submitted.attempt.attemptId);
+    while (retriedRelease.job?.state !== "released") { await pause(); retriedRelease = await experiments.get(f.caller, submitted.attempt.attemptId); }
     assert.equal(releases, 2);
     assert.equal(retriedRelease.job?.state, "released");
     const persistedLog = await experiments.logs(f.caller, { attemptId: submitted.attempt.attemptId });
@@ -720,6 +718,8 @@ describe("experiment service on the real kernel", () => {
 
     releaseUnavailable = false;
     const reconciled = await experiments.get(f.caller, submitted.attempt.attemptId);
+    const releaseDeadline = Date.now() + 15_000;
+    while ((await f.resources.list(f.caller.workspaceId)).machines.find((machine) => machine.machineId === "local")?.commitments.length && Date.now() < releaseDeadline) await pause();
     assert.equal(reconciled.job?.state, "released");
     assert.equal(
       (await f.resources.list(f.caller.workspaceId)).machines.find((machine) => machine.machineId === "local")?.commitments.length,
@@ -760,7 +760,7 @@ describe("experiment service on the real kernel", () => {
       ...node("process.exit(0)"),
       machineId: "unknown-recovery-machine",
     });
-    assert.equal(submitted.attempt.state, "running");
+    await prepared(first, f.caller, submitted.attempt.attemptId, "running");
     first.detachObservers();
     phase = "recovery";
     const restarted = await serviceWithBackend(f, "unknown-recovery-machine", backend);
@@ -819,7 +819,7 @@ describe("experiment service on the real kernel", () => {
     };
     const first = await f.experiments.submit(firstCaller, node("process.stdout.write('one')"));
     const second = await f.experiments.submit(secondCaller, node("process.stdout.write('two')"));
-    assert.notEqual(first.spec.specId, second.spec.specId);
+    assert.notEqual((await prepared(f.experiments, firstCaller, first.attempt.attemptId)).spec!.specId, (await prepared(f.experiments, secondCaller, second.attempt.attemptId)).spec!.specId);
     await assert.rejects(f.experiments.get(firstCaller, second.attempt.attemptId), /unknown experiment attempt/i);
     assert.deepEqual((await f.experiments.list(firstCaller, {})).attempts.map((attempt) => attempt.attemptId), [first.attempt.attemptId]);
 

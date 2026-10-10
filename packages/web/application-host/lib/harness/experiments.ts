@@ -38,17 +38,23 @@ import { waitWithSignal } from "../cancellation.js";
 import { HarnessServiceError } from "./service-error.js";
 import {
   createLocalExperimentBackend,
+  ExperimentPreparationError,
   type BackendJobHandle,
   type BackendObservation,
   type ExperimentBackend,
   type ExperimentBackendSite,
   type ResolvedExperimentBackend,
 } from "./experiment-backend.js";
-import type { ResourceService } from "./resources.js";
+import { validateResources, type ResourceService } from "./resources.js";
 import type { SourceService } from "./sources.js";
 import {
   materializeExperimentAttempt,
   prepareExperimentInput,
+  ExperimentInputCaptureError,
+  recoverExperimentInput,
+  reconcileExperimentPreparation,
+  reconcileExperimentCapture,
+  type ExperimentInputCapture,
   type ExperimentInputSnapshot,
 } from "./experiment-workspace.js";
 
@@ -61,6 +67,8 @@ const POLL_MS = 250;
 const RECONNECT_POLL_MS = 500;
 const BLOB_PAGE_BYTES = 256 * 1024;
 const TERMINAL: ReadonlySet<ExperimentAttemptState> = new Set(["completed", "failed", "cancelled", "lost"]);
+const STOPPED_BACKEND_STATES: ReadonlySet<BackendObservation["status"]> = new Set(["exited", "failed", "cancelled", "released"]);
+const ATTEMPT_STATES: ReadonlySet<string> = new Set(["submitted", "queued", "running", "stopping", ...TERMINAL]);
 
 export const isTerminalAttemptState = (state: ExperimentAttemptState): boolean => TERMINAL.has(state);
 
@@ -110,7 +118,15 @@ interface RunningJob {
   observerOwner: symbol;
 }
 
+interface AttemptFlight {
+  controller: AbortController;
+  promise: Promise<void>;
+}
+
 interface SharedExperimentRuntime {
+  resumers: Map<symbol, (workspaceId: string, attemptId: string) => void>;
+  flights: Map<string, AttemptFlight>;
+  stops: Map<string, Promise<void>>;
   jobs: Map<string, RunningJob>;
   attemptOperations: Map<string, Promise<void>>;
   listeners: Set<(workspaceId: string, attemptId: string, view: ExperimentAttemptView | null) => void>;
@@ -124,6 +140,9 @@ const sharedExperimentRuntime = (client: KernelClient): SharedExperimentRuntime 
   const existing = sharedExperimentRuntimes.get(client);
   if (existing) return existing;
   const created: SharedExperimentRuntime = {
+    resumers: new Map(),
+    flights: new Map(),
+    stops: new Map(),
     jobs: new Map(),
     attemptOperations: new Map(),
     listeners: new Set(),
@@ -252,10 +271,12 @@ const attemptView = (record: KernelRecordResult): ExperimentAttemptView | null =
   const payload = payloadOf(record);
   const attemptId = str(payload.id);
   const specId = str(payload.specId);
-  if (!attemptId || !specId) return null;
+  const backend = str(payload.backend);
+  if (!attemptId || (!specId && payload.specId !== null) || !backend || typeof payload.cancelRequested !== "boolean"
+    || !ATTEMPT_STATES.has(record.state) || (!specId && ["queued", "running", "completed"].includes(record.state))) return null;
   const machineId = str(payload.machineId);
   const signal = str(payload.signal);
-  const error = str(payload.error);
+  const error = str(payload.error) ?? str(payload.preparationError) ?? str(payload.materializationError);
   const queueReason = str(payload.queueReason);
   const requestId = str(payload.requestId);
   const retryOfAttemptId = str(payload.retryOfAttemptId);
@@ -267,8 +288,9 @@ const attemptView = (record: KernelRecordResult): ExperimentAttemptView | null =
   const endedAt = num(payload.endedAt);
   return {
     attemptId,
-    specId,
-    backend: str(payload.backend) ?? "local",
+    specId: specId ?? null,
+    cancelRequested: payload.cancelRequested,
+    backend,
     ...(machineId ? { machineId } : {}),
     state: record.state as ExperimentAttemptState,
     collection: (["none", "pending", "done", "failed"] as const)
@@ -421,7 +443,6 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
   const waiters = new Map<string, Set<(view: ExperimentAttemptView | null) => void>>();
   const queued = new Map<string, Set<string>>();
   const attemptOperations = sharedRuntime.attemptOperations;
-  const queueDrains = new Map<string, Promise<void>>();
   const report = (error: unknown) => {
     if (deps.onError) deps.onError(error instanceof Error ? error : new Error(String(error)));
   };
@@ -492,12 +513,6 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     return creating;
   };
 
-  const context = async (caller: ExperimentCaller): Promise<ExperimentContext> => {
-    const resolved = await deps.resolveWorkspaceRoot(caller.executionWorkspaceId);
-    if (!resolved) throw new HarnessServiceError("unavailable", `Workspace root is unavailable: ${caller.executionWorkspaceId}`);
-    return contextAt(caller, await canonicalizePathIdentity(resolved));
-  };
-
   const recordContext = (workspaceId: string): Promise<ExperimentContext> => {
     const existing = recordContexts.get(workspaceId);
     if (existing) return existing;
@@ -560,7 +575,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
   ): Promise<ResolvedExperimentBackend | null> => {
     const machine = machineId === LOCAL_MACHINE_ID
       ? null
-      : await deps.resources.getMachineRecord(caller.workspaceId, machineId).catch(() => null);
+      : await deps.resources.getMachineRecord(caller.workspaceId, machineId);
     if (deps.resolveBackend) {
       const resolved = await deps.resolveBackend(ctx, machineId, machine, caller);
       if (resolved || machineId !== LOCAL_MACHINE_ID) return resolved;
@@ -574,8 +589,9 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         canonicalRoot: ctx.canonicalRoot,
         transport: ctx.scoped,
       },
-      prepare: async ({ attemptId, input }) => {
-        const materialized = await materializeExperimentAttempt(deps.client, caller, attemptId, input);
+      reconcilePreparation: ({ attemptId, input }) => reconcileExperimentPreparation(deps.client, caller, attemptId, input),
+      prepare: async ({ attemptId, input, signal }) => {
+        const materialized = await materializeExperimentAttempt(deps.client, caller, attemptId, input, signal ? { signal } : {});
         return {
           backend: createLocalExperimentBackend(materialized.scoped),
           site: {
@@ -680,7 +696,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     workspaceId: string,
     caller: ExperimentCaller,
     attemptId: string,
-    state: ExperimentAttemptState,
+    state: ExperimentAttemptState | ((current: ExperimentAttemptView) => ExperimentAttemptState),
     mutate: (payload: Record<string, unknown>) => Record<string, unknown>,
     onlyIf?: (current: ExperimentAttemptView) => boolean,
   ): Promise<KernelRecordResult> => {
@@ -694,7 +710,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         const record = await putRecord(ctx, workspaceId, recordCaller(workspaceId, existing), {
           recordId: existing.recordId,
           recordType: "experiment.attempt",
-          state,
+          state: typeof state === "function" ? state(current) : state,
           expectedRecordRevision: existing.recordRevision,
           payload: mutate(payloadOf(existing)),
         });
@@ -1252,7 +1268,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     running: RunningJob,
     observation: BackendObservation,
   ): Promise<void> => serializeAttempt(workspaceId, attemptId, async () => {
-    if (observation.status === "unknown" || observation.writerActive) return;
+    if (!STOPPED_BACKEND_STATES.has(observation.status) || observation.writerActive) return;
     const attemptRecord = await getAttemptRecord(ctx, workspaceId, attemptId);
     const attempt = attemptRecord ? attemptView(attemptRecord) : null;
     if (!attemptRecord || !attempt) return;
@@ -1268,7 +1284,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       endedAt: now(),
     });
 
-    const specRecord = await ctx.scoped.getRecord(workspaceId, recordIdFor.spec(attempt.specId));
+    const specRecord = attempt.specId ? await ctx.scoped.getRecord(workspaceId, recordIdFor.spec(attempt.specId)) : null;
     const spec = specRecord ? specView(specRecord) : null;
     let collection: ExperimentAttemptView["collection"] = "failed";
     if (spec) {
@@ -1346,6 +1362,13 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         }
         running.totals = nextTotals;
         running.cursor = result.nextCursor;
+        // The durable control receipt remains authoritative across an observer's attach/read awaits.
+        const current = await getAttemptRecord(ctx, workspaceId, attemptId);
+        if (!current) throw new Error(`Experiment attempt disappeared during observation: ${attemptId}`);
+        running.cancelRequested ||= current.state === "stopping" || payloadOf(current).cancelRequested === true;
+        if (running.cancelRequested && (!STOPPED_BACKEND_STATES.has(observation.status) || observation.writerActive)) {
+          void requestBackendStop(ctx, workspaceId, current, running).catch(report);
+        }
         if (observation.status === "unknown") {
           if (running.lastObservationKey !== observationKey) {
             running.lastObservationKey = observationKey;
@@ -1356,9 +1379,14 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
           await new Promise((resolve) => setTimeout(resolve, RECONNECT_POLL_MS));
           continue;
         }
-        if (!observation.writerActive && running.cursor === result.endCursor) {
+        if (STOPPED_BACKEND_STATES.has(observation.status) && !observation.writerActive && running.cursor === result.endCursor) {
           await finalize(ctx, workspaceId, caller, attemptId, running, observation);
           return;
+        }
+        if (observation.status === "running" || observation.status === "starting") {
+          await updateAttempt(ctx, workspaceId, caller, attemptId, "running", (p) => ({
+            ...p, backend: running.backend.backend, startedAt: num(p.startedAt) ?? now(), phase: "running",
+          }), (current) => current.state === "submitted");
         }
         const state = jobStateFor(observation);
         if ((state === "starting" || state === "running") && running.lastObservationKey !== observationKey) {
@@ -1406,16 +1434,17 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     caller: ExperimentCaller,
     attemptRecord: KernelRecordResult,
     preResolved?: ResolvedExperimentBackend,
+    signal?: AbortSignal,
   ): Promise<void> => {
     const attempt = attemptView(attemptRecord);
-    if (!attempt || jobs.has(attemptKey(workspaceId, attempt.attemptId)) || attempt.state !== "submitted") return;
+    if (!attempt || !attempt.specId || jobs.has(attemptKey(workspaceId, attempt.attemptId)) || attempt.state !== "submitted") return;
     const payload = payloadOf(attemptRecord);
     const resources = payload.resources && typeof payload.resources === "object"
       ? payload.resources as ExperimentResourceRequest : {};
     const needsAdmission = (["cpuCores", "memoryMb", "gpuCount", "gpuMemoryMb"] as const)
       .some((key) => (resources[key] ?? 0) > 0);
     if (needsAdmission && !str(payload.commitmentId)) return;
-    const specRecord = await ctx.scoped.getRecord(workspaceId, recordIdFor.spec(attempt.specId));
+    const specRecord = attempt.specId ? await ctx.scoped.getRecord(workspaceId, recordIdFor.spec(attempt.specId)) : null;
     const spec = specRecord ? specView(specRecord) : null;
     if (!spec) {
       await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, "failed", (p) => ({
@@ -1433,18 +1462,35 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     const backendJobId = processIdFor(workspaceId, attempt.attemptId);
     const resolved = preResolved ?? await resolveBackend(ctx, caller, attempt.machineId ?? LOCAL_MACHINE_ID);
     if (!resolved) {
-      await upsertJob(ctx, workspaceId, caller, attempt.attemptId, "unknown", {
-        backend: attempt.backend,
-        machineId: attempt.machineId ?? LOCAL_MACHINE_ID,
-        backendJobId,
-        reason: "execution backend is unavailable; reconciliation remains pending",
-      }).catch(report);
+      if (payload.preparationStarted && payload.preparationDrained !== true) {
+        await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, (current) => current.state,
+          (p) => ({ ...p, preparationUncertain: true, preparationError: "Original preparation backend is unavailable; drain reconciliation remains pending" }));
+        return;
+      }
+      await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, "failed", (p) => ({
+        ...p, error: `no execution backend is registered for machine ${attempt.machineId ?? LOCAL_MACHINE_ID}`, endedAt: now(), collection: "none",
+      }), (current) => current.state === "submitted");
       return;
     }
     let executionBackend: ResolvedExperimentBackend;
     let executionCwd: string;
+    signal?.throwIfAborted();
+    if (payload.preparationStarted && payload.preparationDrained !== true) {
+      if (!resolved.reconcilePreparation || await resolved.reconcilePreparation({ attemptId: attempt.attemptId, input: inputSnapshot }) !== "drained") {
+        await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, (current) => current.state,
+          (p) => ({ ...p, preparationError: "Previous preparation effect is not yet confirmed drained; reconciliation remains pending" }));
+        return;
+      }
+    }
+    signal?.throwIfAborted();
+    await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, (current) => current.state,
+      (p) => ({ ...p, preparationStarted: true, preparationDrained: false }));
     try {
-      const prepared = await resolved.prepare({ attemptId: attempt.attemptId, input: inputSnapshot });
+      const prepared = await resolved.prepare({ attemptId: attempt.attemptId, input: inputSnapshot, ...(signal ? { signal } : {}) });
+      await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, (current) => current.state,
+        (p) => ({ ...p, preparationDrained: true, preparationUncertain: false }));
+      signal?.throwIfAborted();
+      if (prepared.inputRoot !== inputSnapshot.root) throw new ExperimentPreparationError("Prepared input does not match the frozen experiment snapshot", { drained: true, retryable: false });
       executionBackend = {
         backend: prepared.backend ?? resolved.backend,
         site: prepared.site,
@@ -1462,12 +1508,17 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         materializationError: undefined,
       }), (current) => current.state === "submitted");
     } catch (error) {
-      await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, "submitted", (p) => ({
-        ...p, materializationError: errorMessage(error),
-      }), (current) => current.state === "submitted").catch(report);
+      // Adapters distinguish actual drain from a disconnected/unknown preparation effect.
+      const drained = error instanceof ExperimentPreparationError && error.drained;
+      await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, (current) => current.state, (p) => ({
+        ...p, preparationDrained: p.preparationDrained === true || drained,
+        preparationUncertain: p.preparationDrained !== true && !drained, materializationError: errorMessage(error),
+      })).catch(report);
+      if (signal?.aborted || (error instanceof ExperimentPreparationError && !error.retryable)) throw error;
       report(error);
       return;
     }
+    signal?.throwIfAborted();
     await upsertJob(ctx, workspaceId, caller, attempt.attemptId, "starting", {
       backend: executionBackend.backend.backend,
       machineId: attempt.machineId ?? LOCAL_MACHINE_ID,
@@ -1485,8 +1536,19 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         if (typeof value === "string") mergedEnv[name] = value;
       }
     }
+    signal?.throwIfAborted();
+    const dispatch = await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, "submitted", (p) => ({
+      ...p, backend: executionBackend.backend.backend, spawnDispatched: true, phase: "dispatching",
+    }), (current) => current.state === "submitted");
+    if (attemptView(dispatch)?.state !== "submitted") return;
+    if (signal?.aborted) {
+      const latest = await getAttemptRecord(ctx, workspaceId, attempt.attemptId);
+      if (latest && latest.state === "stopping") await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, "stopping", (p) => ({ ...p, spawnDispatched: false }), (view) => view.state === "stopping");
+      return;
+    }
+    let spawnReceipt: { handle: BackendJobHandle; observation: BackendObservation } | undefined;
     try {
-      const { handle, observation } = await executionBackend.backend.spawn(executionBackend.site, {
+      spawnReceipt = await executionBackend.backend.spawn(executionBackend.site, {
         attemptId: attempt.attemptId,
         backendJobId,
         cwd: executionCwd,
@@ -1498,6 +1560,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         resources,
         ...(gpuAllocation ? { gpuAllocation } : {}),
       });
+      const { handle, observation } = spawnReceipt;
       const actualSite = handle.executionRootId && handle.executionCanonicalRoot
         ? {
             ...executionBackend.site,
@@ -1539,79 +1602,42 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         observerOwner: serviceToken,
         poll: Promise.resolve(),
       };
+      if (running.cancelRequested) void requestBackendStop(ctx, workspaceId, refreshed ?? attemptRecord, running).catch(report);
       startPolling(ctx, workspaceId, recordCaller(workspaceId, refreshed ?? attemptRecord), attempt.attemptId, running);
     } catch (error) {
       const message = errorMessage(error);
+      const retainedHandle = spawnReceipt?.handle ?? { backendJobId };
+      const retainedSite = retainedHandle.executionRootId && retainedHandle.executionCanonicalRoot
+        ? { ...executionBackend.site, rootId: retainedHandle.executionRootId, canonicalRoot: retainedHandle.executionCanonicalRoot }
+        : executionBackend.site;
       await upsertJob(ctx, workspaceId, caller, attempt.attemptId, "unknown", {
         backend: executionBackend.backend.backend,
         machineId: attempt.machineId ?? LOCAL_MACHINE_ID,
-        backendJobId,
-        reason: `submit response unavailable: ${message}`,
+        backendJobId: retainedHandle.backendJobId,
+        reason: `submit response or durable receipt unavailable: ${message}`,
         lastObservedAt: now(),
       }).catch(report);
       await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, "submitted", (p) => ({
         ...p, reconciliationError: message,
       }), (current) => current.state === "submitted").catch(report);
       report(error);
+      const current = await getAttemptRecord(ctx, workspaceId, attempt.attemptId);
+      const recovering: RunningJob = {
+        backend: executionBackend.backend, site: retainedSite, handle: retainedHandle,
+        cursor: 0, totals: { stdout: 0, stderr: 0 }, cancelRequested: current?.state === "stopping", finalized: false,
+        observerOwner: serviceToken, poll: Promise.resolve(),
+      };
+      if (recovering.cancelRequested && current) void requestBackendStop(ctx, workspaceId, current, recovering).catch(report);
+      startPolling(ctx, workspaceId, caller, attempt.attemptId, recovering);
     }
   };
 
   const drainQueue = async (workspaceId: string): Promise<void> => {
-    const existing = queueDrains.get(workspaceId);
-    if (existing) return existing;
-    const draining = (async () => {
-      const pending = queued.get(workspaceId);
-      if (!pending || pending.size === 0) return;
-      for (const attemptId of [...pending]) {
-        await serializeAttempt(workspaceId, attemptId, async () => {
-          let admissionCommitment: string | undefined;
-          try {
-            const scanCtx = await recordContext(workspaceId);
-            const record = await getAttemptRecord(scanCtx, workspaceId, attemptId);
-            const attempt = record ? attemptView(record) : null;
-            if (!attempt || !record || attempt.state !== "queued") {
-              pending.delete(attemptId);
-              return;
-            }
-            const owner = recordCaller(workspaceId, record);
-            const ctx = await contextForAttempt(owner, record);
-            const resources = (payloadOf(record).resources ?? {}) as ExperimentResourceRequest;
-            const admission = await deps.resources.admit(workspaceId, attempt.machineId ?? LOCAL_MACHINE_ID, resources, attemptId);
-            if (admission.status !== "confirmed") return;
-            const commitmentId = admission.commitmentId;
-            if (!commitmentId) throw new Error("Resource admission returned no commitment identity");
-            admissionCommitment = commitmentId;
-            const current = await getAttemptRecord(ctx, workspaceId, attemptId);
-            const currentView = current ? attemptView(current) : null;
-            if (!current || currentView?.state !== "queued") {
-              await deps.resources.release(workspaceId, commitmentId, "queued attempt changed before admission commit");
-              pending.delete(attemptId);
-              return;
-            }
-            const admitted = await updateAttempt(ctx, workspaceId, owner, attemptId, "submitted", (p) => ({
-              ...p, commitmentId, admissionState: "confirmed", queueReason: undefined,
-            }), (view) => view.state === "queued");
-            if (attemptView(admitted)?.state !== "submitted") {
-              await deps.resources.release(workspaceId, commitmentId, "queued attempt was cancelled during admission");
-              pending.delete(attemptId);
-              return;
-            }
-            pending.delete(attemptId);
-            await launch(ctx, workspaceId, owner, admitted);
-          } catch (error) {
-            if (admissionCommitment) {
-              await deps.resources.release(workspaceId, admissionCommitment, "admission transition failed").catch(report);
-            }
-            report(error);
-          }
-        });
-      }
-    })();
-    queueDrains.set(workspaceId, draining);
-    try {
-      await draining;
-    } finally {
-      if (queueDrains.get(workspaceId) === draining) queueDrains.delete(workspaceId);
+    const ctx = await recordContext(workspaceId);
+    for (const attemptId of [...(queued.get(workspaceId) ?? [])]) {
+      const record = await getAttemptRecord(ctx, workspaceId, attemptId);
+      if (!record || record.state !== "queued") { queued.get(workspaceId)?.delete(attemptId); continue; }
+      void reconcileAttempt(ctx, workspaceId, recordCaller(workspaceId, record), record).catch(report);
     }
   };
 
@@ -1703,6 +1729,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       ...(record.sessionId ? { sessionId: record.sessionId } : {}),
       ...(record.threadId ? { threadId: record.threadId } : {}),
       ...(record.runId ? { runId: record.runId } : {}),
+      workspaceScope: strArray(payload.workspaceScope),
     };
   };
 
@@ -1723,11 +1750,11 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       } while (cursor !== undefined);
       for (const record of all) {
         const attempt = attemptView(record);
-        if (!attempt || attempt.state === "lost") continue;
+        if (!attempt) { report(new Error(`Experiment attempt is unreadable: ${record.recordId}`)); continue; }
+        if (attempt.state === "lost") continue;
         const caller = recordCaller(workspaceId, record);
         try {
-          const attemptCtx = await contextForAttempt(caller, record);
-          await reconcileAttempt(attemptCtx, workspaceId, caller, record);
+          void reconcileAttempt(ctx, workspaceId, caller, record).catch(report);
         } catch (error) {
           report(new Error(`attempt ${attempt.attemptId} reconciliation is pending: ${errorMessage(error)}`));
         }
@@ -1744,231 +1771,306 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     }
   };
 
+  const submissionResources = (resources: ExperimentResourceRequest): ExperimentResourceRequest => {
+    try { return validateResources(resources); }
+    catch (error) { throw new HarnessServiceError("invalid-params", errorMessage(error)); }
+  };
+
+  const normalizeSubmission = (params: ExperimentSubmitParams): ExperimentSubmitParams => {
+    if (params.specId !== undefined && (params.command !== undefined || params.args !== undefined
+      || params.inputs !== undefined || params.resources !== undefined || params.outputPaths !== undefined
+      || params.env !== undefined || params.cwd !== undefined)) {
+      throw new HarnessServiceError("invalid-params", "specId cannot be combined with inline spec fields");
+    }
+    if (params.requestId !== undefined && !params.requestId.trim()) throw new HarnessServiceError("invalid-params", "requestId cannot be empty");
+    if (params.retryOfAttemptId !== undefined && !params.retryOfAttemptId.trim()) throw new HarnessServiceError("invalid-params", "retryOfAttemptId cannot be empty");
+    const common = {
+      ...(params.requestId === undefined ? {} : { requestId: params.requestId }),
+      ...(params.retryOfAttemptId === undefined ? {} : { retryOfAttemptId: params.retryOfAttemptId.trim() }),
+      ...(params.machineId?.trim() ? { machineId: params.machineId.trim() } : {}),
+      ...(params.title?.trim() ? { title: params.title.trim() } : {}),
+    };
+    if (params.specId !== undefined) {
+      if (!params.specId.trim()) throw new HarnessServiceError("invalid-params", "specId cannot be empty");
+      return { ...common, specId: params.specId.trim() };
+    }
+    const command = typeof params.command === "string" ? params.command.trim() : "";
+    if (!command) throw new HarnessServiceError("invalid-params", "experiment submit requires a command");
+    const args = params.args ?? [];
+    if (!Array.isArray(args) || !args.every((arg) => typeof arg === "string")) throw new HarnessServiceError("invalid-params", "experiment args must be a string array");
+    const env = params.env ?? {};
+    if (!Object.values(env).every((value) => typeof value === "string")) throw new HarnessServiceError("invalid-params", "experiment env values must be strings");
+    const outputPaths = (params.outputPaths ?? []).map((entry) => {
+      if (typeof entry !== "string" || !entry.trim() || path.isAbsolute(entry) || entry.includes("..") || entry.includes("\0")) {
+        throw new HarnessServiceError("invalid-params", `Invalid experiment output path: ${String(entry)}`);
+      }
+      return entry.replaceAll("\\", "/");
+    });
+    return { ...common, command, args: [...args], env: { ...env }, inputs: structuredClone(params.inputs ?? []),
+      outputPaths, ...(params.cwd === undefined ? {} : { cwd: params.cwd }),
+      ...(params.resources === undefined ? {} : { resources: submissionResources(params.resources) }) };
+  };
+
+  const submissionFingerprint = (caller: ExperimentCaller, params: ExperimentSubmitParams): string => {
+    const ordered = (value: unknown): unknown => Array.isArray(value) ? value.map(ordered)
+      : value && typeof value === "object" ? Object.fromEntries(Object.entries(value)
+        .filter(([, entry]) => entry !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, entry]) => [key, ordered(entry)])) : value;
+    return digestId(JSON.stringify(ordered({ params, workspaceId: caller.workspaceId,
+      rootSessionId: callerNamespace(caller) })));
+  };
+
+  const requireSpec = async (ctx: ExperimentContext, caller: ExperimentCaller, specId: string): Promise<KernelRecordResult> => {
+    const record = await ctx.scoped.getRecord(caller.workspaceId, recordIdFor.spec(specId));
+    if (!record) throw new HarnessServiceError("unavailable", `Experiment spec is missing: ${specId}`);
+    assertRecordAllowed(caller, record, `experiment spec: ${specId}`);
+    if (!specView(record) || !inputSnapshotOf(record)) throw new HarnessServiceError("failed", `Experiment spec is unreadable: ${specId}`);
+    return record;
+  };
+
   const submitUnsafe = async (
     caller: ExperimentCaller,
-    params: ExperimentSubmitParams,
+    requested: ExperimentSubmitParams,
     signal?: AbortSignal,
-  ): Promise<{ spec: ExperimentSpecView; attempt: ExperimentAttemptView; text: string }> => {
+  ): Promise<{ spec: ExperimentSpecView | null; attempt: ExperimentAttemptView; text: string }> => {
     signal?.throwIfAborted();
-    await waitWithSignal(ensureReconciled(caller.workspaceId), signal);
-    const ctx = await waitWithSignal(params.specId !== undefined ? recordContext(caller.workspaceId) : context(caller), signal);
-    if (params.specId !== undefined) {
-      if (params.command !== undefined || params.args !== undefined || params.inputs !== undefined
-        || params.resources !== undefined || params.outputPaths !== undefined || params.env !== undefined
-        || params.cwd !== undefined) {
-        throw new HarnessServiceError("invalid-params", "specId cannot be combined with inline spec fields");
-      }
-    }
-    let specRecord: KernelRecordResult;
-    let spec: ExperimentSpecView | null;
-    if (params.specId !== undefined) {
-      const found = await ctx.scoped.getRecord(caller.workspaceId, recordIdFor.spec(params.specId));
-      spec = found ? specView(found) : null;
-      if (!spec || spec.state !== "active") {
-        throw new HarnessServiceError("not-found", `Unknown or retired experiment spec: ${params.specId}`);
-      }
-      assertRecordAllowed(caller, found!, `experiment spec: ${params.specId}`);
-      specRecord = found!;
-    } else {
-      const command = typeof params.command === "string" ? params.command.trim() : "";
-      if (!command) throw new HarnessServiceError("invalid-params", "experiment submit requires a command");
-      const args = params.args ?? [];
-      if (!Array.isArray(args) || !args.every((arg) => typeof arg === "string")) {
-        throw new HarnessServiceError("invalid-params", "experiment args must be a string array");
-      }
-      const env = params.env ?? {};
-      if (!Object.values(env).every((value) => typeof value === "string")) {
-        throw new HarnessServiceError("invalid-params", "experiment env values must be strings");
-      }
-      const cwd = await resolveCwd(ctx.canonicalRoot, params.cwd, caller.workspaceScope);
-      const inputs = await resolveInputs(caller, params.inputs);
-      const outputPaths = (params.outputPaths ?? []).map((entry) => {
-        if (typeof entry !== "string" || !entry.trim() || path.isAbsolute(entry) || entry.includes("..")) {
-          throw new HarnessServiceError("invalid-params", `Invalid experiment output path: ${String(entry)}`);
-        }
-        return entry.replaceAll("\\", "/");
-      });
-      const inputSnapshot = await prepareExperimentInput(deps.client, caller, ctx.canonicalRoot, {
-        captureScopes: caller.workspaceScope ?? [],
-        ...(cwd ? { cwd } : {}),
-        ...(signal ? { signal } : {}),
-      });
-      try {
-        await assertInputPathsCaptured(ctx, inputSnapshot, inputs);
-        signal?.throwIfAborted();
-      } catch (error) {
-        await ctx.scoped.deleteBranch({
-          operationId: `experiment-input-discard:${randomUUID()}`,
-          branchId: inputSnapshot.branchId,
-        }).catch(report);
-        throw error;
-      }
-      const contentDigest = specDigest({
-        command, args, cwd, env, inputs, outputPaths,
-        ...(params.resources ? { resources: params.resources } : {}),
-        inputRoot: inputSnapshot.root,
-      });
-      const specId = `spec-${digestId(caller.workspaceId, callerNamespace(caller), contentDigest).slice(0, 40)}`;
-      const existing = await ctx.scoped.getRecord(caller.workspaceId, recordIdFor.spec(specId));
-      if (existing) {
-        assertRecordAllowed(caller, existing, `experiment spec: ${specId}`);
-        if (str(payloadOf(existing).contentDigest) !== contentDigest) {
-          throw new HarnessServiceError("failed", `Experiment spec identity collision: ${specId}`);
-        }
-        const persistedInput = inputSnapshotOf(existing);
-        if (!persistedInput) throw new HarnessServiceError("unavailable", `Experiment spec has no durable input snapshot: ${specId}`);
-        if (persistedInput.branchId !== inputSnapshot.branchId) {
-          await ctx.scoped.deleteBranch({
-            operationId: `experiment-input-deduplicate:${randomUUID()}`,
-            branchId: inputSnapshot.branchId,
-          }).catch(report);
-        }
-        spec = specView(existing);
-        specRecord = existing;
-      } else {
-        try {
-          specRecord = await putRecord(ctx, caller.workspaceId, caller, {
-            recordId: recordIdFor.spec(specId),
-            recordType: "experiment.spec",
-            state: "active",
-            payload: {
-              id: specId,
-              workspaceId: caller.workspaceId,
-              rootSessionId: callerNamespace(caller),
-              contentDigest,
-              ...(params.title?.trim() ? { title: params.title.trim() } : {}),
-              command,
-              args,
-              ...(cwd ? { cwd } : {}),
-              env,
-              inputs,
-              inputSnapshot,
-              ...(params.resources ? { resources: params.resources } : {}),
-              outputPaths,
-              createdAt: now(),
-            },
-            references: inputs.flatMap((input, index) => input.objectHash
-              ? [{ slot: `input:${index}`, objectHash: input.objectHash }]
-              : []),
-          });
-        } catch (error) {
-          const raced = await ctx.scoped.getRecord(caller.workspaceId, recordIdFor.spec(specId));
-          if (!raced) throw error;
-          assertRecordAllowed(caller, raced, `experiment spec: ${specId}`);
-          if (str(payloadOf(raced).contentDigest) !== contentDigest) throw error;
-          if (inputSnapshotOf(raced)?.branchId !== inputSnapshot.branchId) {
-            await ctx.scoped.deleteBranch({
-              operationId: `experiment-input-race-discard:${randomUUID()}`,
-              branchId: inputSnapshot.branchId,
-            }).catch(report);
-          }
-          specRecord = raced;
-        }
-        spec = specView(specRecord);
-      }
-      if (!spec) throw new HarnessServiceError("failed", "experiment spec record is unreadable");
-    }
-    if (!inputSnapshotOf(specRecord)) {
-      throw new HarnessServiceError("unavailable", `Experiment spec has no durable input snapshot: ${spec.specId}`);
-    }
-    let retryOfAttemptId: string | undefined;
-    if (params.retryOfAttemptId !== undefined) {
-      retryOfAttemptId = params.retryOfAttemptId.trim();
-      if (!retryOfAttemptId) throw new HarnessServiceError("invalid-params", "retryOfAttemptId cannot be empty");
-      const priorRecord = await getAttemptRecord(ctx, caller.workspaceId, retryOfAttemptId);
-      const prior = priorRecord ? attemptView(priorRecord) : null;
-      if (!priorRecord || !prior) throw new HarnessServiceError("not-found", `Unknown retry source attempt: ${retryOfAttemptId}`);
-      assertRecordAllowed(caller, priorRecord, `experiment attempt: ${retryOfAttemptId}`);
-      if (prior.specId !== spec.specId) {
-        throw new HarnessServiceError("invalid-params", `Retry source ${retryOfAttemptId} uses a different experiment spec`);
-      }
-    }
+    const params = normalizeSubmission(requested);
+    const fingerprint = submissionFingerprint(caller, params);
     const attemptId = params.requestId ? attemptIdForRequest(caller, params.requestId) : `attempt-${randomUUID()}`;
-    // A retried submit response must keep the target already recorded for this
-    // request. New implicit placement uses only currently confirmable capacity,
-    // prefers local when equally suitable, and is persisted on the attempt so
-    // queue reconciliation never reselects a different Host.
-    const recordedAttempt = params.requestId
-      ? await getAttemptRecord(ctx, caller.workspaceId, attemptId).catch(() => null)
-      : null;
-    const recordedMachineId = recordedAttempt ? attemptView(recordedAttempt)?.machineId : undefined;
-    const machineId = await selectMachine(
-      caller.workspaceId,
-      spec.resources ?? {},
-      params.machineId?.trim() || undefined,
-      recordedMachineId,
-    );
-    const machineRecord = machineId === LOCAL_MACHINE_ID
-      ? null
-      : await deps.resources.getMachineRecord(caller.workspaceId, machineId).catch(() => null);
-    if (machineId !== LOCAL_MACHINE_ID && !machineRecord) {
-      throw new HarnessServiceError("not-found", `Machine is not registered: ${machineId}`);
+    const ctx = await waitWithSignal(recordContext(caller.workspaceId), signal);
+    const reuse = async (record: KernelRecordResult) => {
+      assertRecordAllowed(caller, record, `experiment attempt: ${attemptId}`);
+      const attempt = attemptView(record);
+      if (!attempt) throw new HarnessServiceError("failed", `Experiment attempt is unreadable: ${attemptId}`);
+      if (payloadOf(record).submissionFingerprint !== fingerprint) throw new HarnessServiceError("invalid-params", `requestId ${params.requestId ?? attemptId} is already bound to a different experiment submission`);
+      const spec = attempt.specId ? specView(await requireSpec(ctx, caller, attempt.specId)) : null;
+      void reconcileAttempt(ctx, caller.workspaceId, recordCaller(caller.workspaceId, record), record).catch(report);
+      return { spec, attempt, text: describeAttempt(spec, attempt) };
+    };
+    // Resolve the durable receipt before touching live source paths or execution targets.
+    const prior = await getAttemptRecord(ctx, caller.workspaceId, attemptId);
+    if (prior) return reuse(prior);
+    let spec: ExperimentSpecView | null = null;
+    let sourceRoot: string | undefined;
+    let sourceCwd: string | undefined;
+    let resolvedInputs: ExperimentInputRef[] | undefined;
+    let retrySpecId: string | undefined;
+    if (params.retryOfAttemptId) {
+      const retry = await getAttemptRecord(ctx, caller.workspaceId, params.retryOfAttemptId);
+      if (!retry) throw new HarnessServiceError("not-found", `Unknown retry source attempt: ${params.retryOfAttemptId}`);
+      assertRecordAllowed(caller, retry, `experiment attempt: ${params.retryOfAttemptId}`);
+      const retryAttempt = attemptView(retry);
+      if (!retryAttempt?.specId) throw new HarnessServiceError("invalid-params", "Retry source has no frozen experiment spec");
+      retrySpecId = retryAttempt.specId;
+      if (params.specId && params.specId !== retrySpecId) throw new HarnessServiceError("invalid-params", "Retry source uses a different experiment spec");
     }
-    const resolvedBackend = await resolveBackend(ctx, caller, machineId);
-    const requestedResources = spec.resources ?? {};
-    const needsAdmission = (["cpuCores", "memoryMb", "gpuCount", "gpuMemoryMb"] as const)
-      .some((key) => (requestedResources[key] ?? 0) > 0);
-    let createdAttempt = false;
-    let recorded = await serializeAttempt(caller.workspaceId, attemptId, async () => {
+    if (params.specId) {
+      spec = specView(await requireSpec(ctx, caller, params.specId));
+      if (spec?.state !== "active") throw new HarnessServiceError("invalid-params", `Experiment spec is retired: ${params.specId}`);
+    } else {
+      resolvedInputs = await waitWithSignal(resolveInputs(caller, params.inputs), signal);
+      const root = await waitWithSignal(deps.resolveWorkspaceRoot(caller.executionWorkspaceId), signal);
+      if (!root) throw new HarnessServiceError("unavailable", `Workspace root is unavailable: ${caller.executionWorkspaceId}`);
+      sourceRoot = await waitWithSignal(canonicalizePathIdentity(root), signal);
+      sourceCwd = await waitWithSignal(resolveCwd(sourceRoot, params.cwd, caller.workspaceScope), signal);
+    }
+    const record = await serializeAttempt(caller.workspaceId, attemptId, async () => {
       const existing = await getAttemptRecord(ctx, caller.workspaceId, attemptId);
-      if (existing) {
-        assertRecordAllowed(caller, existing, `experiment attempt: ${attemptId}`);
-        const prior = attemptView(existing);
-        if (!prior) throw new HarnessServiceError("failed", `Experiment attempt is unreadable: ${attemptId}`);
-        if (prior.specId !== spec!.specId || (prior.machineId ?? LOCAL_MACHINE_ID) !== machineId
-          || (params.requestId !== undefined && prior.requestId !== params.requestId)
-          || prior.retryOfAttemptId !== retryOfAttemptId) {
-          throw new HarnessServiceError("invalid-params", `requestId ${params.requestId ?? attemptId} is already bound to a different experiment submission`);
-        }
-        return existing;
+      if (existing) return existing;
+      if (caller.threadId && sharedRuntime.stoppingThreads.has(`${caller.workspaceId}\0${caller.threadId}`)) {
+        throw new HarnessServiceError("unavailable", `Thread ${caller.threadId} is stopping and cannot submit a new experiment`);
       }
-      // Once the attempt intent is durable, reconciliation owns its outcome.
-      // Before that boundary, cancellation must stop preparation and admission.
       signal?.throwIfAborted();
       try {
-        const created = await putRecord(ctx, caller.workspaceId, caller, {
-          recordId: recordIdFor.attempt(attemptId),
-          recordType: "experiment.attempt",
-          state: "submitted",
-          payload: {
-            id: attemptId,
-            specId: spec!.specId,
-            backend: resolvedBackend?.backend.backend
-              ?? str(machineRecord ? payloadOf(machineRecord).backend : null)
-              ?? "unresolved",
-            machineId,
-            executionWorkspaceId: caller.executionWorkspaceId,
-            rootSessionId: callerNamespace(caller),
+        return await putRecord(ctx, caller.workspaceId, caller, {
+          recordId: recordIdFor.attempt(attemptId), recordType: "experiment.attempt", state: "submitted",
+          payload: { id: attemptId, specId: spec?.specId ?? null, backend: "unresolved", cancelRequested: false,
+            executionWorkspaceId: caller.executionWorkspaceId, rootSessionId: callerNamespace(caller),
+            workspaceScope: [...(caller.workspaceScope ?? [])], submissionFingerprint: fingerprint,
+            submission: params, sourceRoot, sourceCwd, resolvedInputs, retrySpecId, phase: "accepted", createdAt: now(),
             ...(params.requestId ? { requestId: params.requestId } : {}),
-            ...(retryOfAttemptId ? { retryOfAttemptId } : {}),
-            resources: requestedResources,
-            admissionState: needsAdmission ? "pending" : "not-required",
-            createdAt: now(),
+            ...(params.retryOfAttemptId ? { retryOfAttemptId: params.retryOfAttemptId } : {}),
           },
         });
-        createdAttempt = true;
-        return created;
       } catch (error) {
         const raced = await getAttemptRecord(ctx, caller.workspaceId, attemptId);
         if (!raced) throw error;
-        assertRecordAllowed(caller, raced, `experiment attempt: ${attemptId}`);
-        const prior = attemptView(raced);
-        if (!prior || prior.specId !== spec!.specId || (prior.machineId ?? LOCAL_MACHINE_ID) !== machineId) throw error;
         return raced;
       }
     });
-    if (createdAttempt && !resolvedBackend && attemptView(recorded)?.state === "submitted") {
-      recorded = await updateAttempt(ctx, caller.workspaceId, caller, attemptId, "failed", (p) => ({
-        ...p, error: `no execution backend is registered for machine ${machineId}`, endedAt: now(),
-      }), (current) => current.state === "submitted");
-    } else if (!TERMINAL.has(attemptView(recorded)!.state)) {
-      await reconcileAttempt(ctx, caller.workspaceId, recordCaller(caller.workspaceId, recorded), recorded, resolvedBackend ?? undefined);
-    }
-    const view = await getAttemptRecord(ctx, caller.workspaceId, attemptId).then((r) => r ? attemptView(r) : null);
-    return { spec, attempt: view!, text: describeAttempt(spec, view) };
+    const result = await reuse(record);
+    notify(caller.workspaceId, attemptId, result.attempt);
+    try { deps.onAttemptChanged?.(caller.workspaceId); } catch { /* observers do not own admission */ }
+    return result;
   };
 
-  const reconcileAttempt = async (
+  /** Settle only this attempt's recorded candidate; published specs keep their original branch. */
+  const settleInputCandidate = async (ctx: ExperimentContext, workspaceId: string, record: KernelRecordResult): Promise<boolean> => {
+    const payload = payloadOf(record);
+    const capture = payload.inputCapture as ExperimentInputCapture | undefined;
+    if (!capture || payload.inputCaptureDisposition === "spec" || payload.inputCaptureDisposition === "released") return true;
+    const id = str(payload.id)!;
+    const owner = recordCaller(workspaceId, record);
+    const recipient = str(payload.inputCandidateSpecId);
+    if (recipient) {
+      const specRecord = await ctx.scoped.getRecord(workspaceId, recordIdFor.spec(recipient));
+      if (specRecord) {
+        const snapshot = inputSnapshotOf(specRecord);
+        if (!snapshot) throw new Error("Experiment candidate recipient spec is unreadable");
+        if (snapshot.branchId === capture.branchId) {
+          await updateAttempt(ctx, workspaceId, owner, id, (view) => view.state, (p) => ({ ...p, inputCaptureDisposition: "spec" }));
+          return true;
+        }
+      }
+    }
+    const cleanupOperationId = `experiment-input-candidate-release:${capture.branchId}`;
+    const deletion = await ctx.scoped.getOperation(cleanupOperationId);
+    if (deletion !== null) {
+      const result = deletion.result as Record<string, unknown> | undefined;
+      if (deletion.state !== "committed" || result?.branchId !== capture.branchId || typeof result.deleted !== "boolean") return false;
+    } else {
+      const receipt = await ctx.scoped.getOperation(`experiment-input-branch:${capture.branchId}`);
+      if (receipt === null) {
+        // A locally observed pre-dispatch failure is evidence; an absent reply after restart is not.
+        if (payload.captureCreateUnsent !== true) return false;
+      } else {
+        const result = receipt.result as Record<string, unknown> | undefined;
+        if (receipt.state !== "committed" || result?.branchId !== capture.branchId || result.created !== true || typeof result.root !== "string") return false;
+        const branch = await ctx.scoped.readBranch({ branchId: capture.branchId });
+        if (branch.workspaceId !== workspaceId || branch.root !== result.root || branch.currentRoot !== result.root) {
+          throw new Error("Experiment candidate branch no longer matches its original creation receipt");
+        }
+        const deleted = await ctx.scoped.deleteBranch({ operationId: cleanupOperationId, branchId: capture.branchId });
+        if (deleted.deleted !== true) return false;
+      }
+    }
+    await updateAttempt(ctx, workspaceId, owner, id, (view) => view.state, (p) => ({ ...p, inputCaptureDisposition: "released" }));
+    return true;
+  };
+
+  const prepareAccepted = async (ctx: ExperimentContext, caller: ExperimentCaller, record: KernelRecordResult, signal: AbortSignal): Promise<KernelRecordResult> => {
+    const attempt = attemptView(record)!;
+    const payload = payloadOf(record);
+    const params = payload.submission as ExperimentSubmitParams | undefined;
+    if (!params || typeof params !== "object") throw new Error("Experiment submission intent is unavailable");
+    let specRecord: KernelRecordResult;
+    if (attempt.specId) {
+      specRecord = await requireSpec(ctx, caller, attempt.specId);
+    } else {
+      const sourceRoot = str(payload.sourceRoot);
+      if (!sourceRoot || typeof payload.sourceCwd !== "string") throw new Error("Experiment source identity is unavailable");
+      const inputs = Array.isArray(payload.resolvedInputs) ? payload.resolvedInputs as ExperimentInputRef[] : null;
+      if (!inputs) throw new Error("Experiment authorized input metadata is unavailable");
+      signal.throwIfAborted();
+      const capture = payloadOf(record).inputCapture as ExperimentInputCapture | undefined;
+      let inputSnapshot = capture ? await recoverExperimentInput(deps.client, caller, capture, signal) : null;
+      if (!inputSnapshot) {
+        await updateAttempt(ctx, caller.workspaceId, caller, attempt.attemptId, (current) => current.state,
+          (p) => ({ ...p, captureStarted: true, captureDrained: false }));
+        try {
+          inputSnapshot = await prepareExperimentInput(deps.client, caller, sourceRoot, {
+            captureScopes: caller.workspaceScope ?? [], cwd: payload.sourceCwd, signal,
+            branchId: `experiment-input-${digestId(caller.workspaceId, attempt.attemptId).slice(0, 40)}`,
+            beforeBranchCreate: async (inputCapture) => {
+              signal.throwIfAborted();
+              await updateAttempt(ctx, caller.workspaceId, caller, attempt.attemptId, "submitted", (p) => ({ ...p, inputCapture, captureCreateUnsent: false }), (view) => view.state === "submitted");
+              signal.throwIfAborted();
+            },
+          });
+          await updateAttempt(ctx, caller.workspaceId, caller, attempt.attemptId, (current) => current.state,
+            (p) => ({ ...p, captureDrained: true }));
+        } catch (error) {
+          if (error instanceof ExperimentInputCaptureError && !error.branchCreateDispatched) await updateAttempt(ctx, caller.workspaceId, caller, attempt.attemptId, (current) => current.state,
+            (p) => ({ ...p, captureCreateUnsent: true }));
+          if (error instanceof ExperimentPreparationError && error.drained) await updateAttempt(ctx, caller.workspaceId, caller, attempt.attemptId, (current) => current.state,
+            (p) => ({ ...p, captureDrained: true }));
+          throw error;
+        }
+      }
+      await assertInputPathsCaptured(ctx, inputSnapshot, inputs);
+      signal.throwIfAborted();
+      const contentDigest = specDigest({ command: params.command!, args: params.args ?? [], cwd: payload.sourceCwd,
+        env: params.env ?? {}, inputs, outputPaths: params.outputPaths ?? [], resources: params.resources ?? {}, inputRoot: inputSnapshot.root });
+      // The immutable spec retains its creator's record access boundary; only content blobs deduplicate across owners.
+      const specOwner = caller.threadId ? ["thread", caller.threadId] : caller.sessionId ? ["session", caller.sessionId] : ["host"];
+      const specId = `spec-${digestId(caller.workspaceId, callerNamespace(caller), ...specOwner, contentDigest).slice(0, 40)}`;
+      // Record the sole possible recipient before publishing the spec, including lost-write-ACK recovery.
+      record = await updateAttempt(ctx, caller.workspaceId, caller, attempt.attemptId, (view) => view.state,
+        (p) => ({ ...p, inputCandidateSpecId: specId }));
+      signal.throwIfAborted();
+      const existing = await ctx.scoped.getRecord(caller.workspaceId, recordIdFor.spec(specId));
+      if (existing) {
+        if (payloadOf(existing).contentDigest !== contentDigest) throw new Error("Experiment spec identity collision");
+        specRecord = await requireSpec(ctx, caller, specId);
+      } else {
+        try {
+          specRecord = await putRecord(ctx, caller.workspaceId, caller, {
+            recordId: recordIdFor.spec(specId), recordType: "experiment.spec", state: "active",
+            payload: { id: specId, workspaceId: caller.workspaceId, rootSessionId: callerNamespace(caller), contentDigest,
+              ...(params.title ? { title: params.title } : {}), command: params.command, args: params.args ?? [],
+              ...(payload.sourceCwd ? { cwd: payload.sourceCwd } : {}), env: params.env ?? {}, inputs, inputSnapshot,
+              ...(params.resources ? { resources: params.resources } : {}), outputPaths: params.outputPaths ?? [], createdAt: now() },
+            references: inputs.flatMap((input, index) => input.objectHash ? [{ slot: `input:${index}`, objectHash: input.objectHash }] : []),
+          });
+        } catch (error) {
+          const raced = await ctx.scoped.getRecord(caller.workspaceId, recordIdFor.spec(specId));
+          if (!raced || payloadOf(raced).contentDigest !== contentDigest) throw error;
+          specRecord = await requireSpec(ctx, caller, specId);
+        }
+      }
+      record = await updateAttempt(ctx, caller.workspaceId, caller, attempt.attemptId, "submitted", (p) => ({ ...p, specId, phase: "placing" }), (view) => view.state === "submitted");
+    }
+    if (!await settleInputCandidate(ctx, caller.workspaceId, record)) throw new Error("Experiment input candidate cleanup remains pending");
+    signal.throwIfAborted();
+    const spec = specView(specRecord)!;
+    const resources = submissionResources(spec.resources ?? {});
+    if (params.retryOfAttemptId) {
+      if (!str(payload.retrySpecId)) throw new Error("Experiment authorized retry binding is unavailable");
+      if (payload.retrySpecId !== spec.specId) throw new HarnessServiceError("invalid-params", "Retry source uses a different experiment spec");
+    }
+    const machineId = await selectMachine(caller.workspaceId, resources, params.machineId, str(payloadOf(record).machineId));
+    signal.throwIfAborted();
+    if (machineId !== LOCAL_MACHINE_ID && !payload.preparationStarted && !await deps.resources.getMachineRecord(caller.workspaceId, machineId)) {
+      throw new HarnessServiceError("not-found", `Machine is not registered: ${machineId}`);
+    }
+    return updateAttempt(ctx, caller.workspaceId, caller, attempt.attemptId, "submitted", (p) => ({ ...p, machineId,
+      resources, phase: "preparing", preparationError: undefined }), (view) => view.state === "submitted");
+  };
+
+  const finishUnspawnedCancellation = async (ctx: ExperimentContext, workspaceId: string, record: KernelRecordResult): Promise<void> => {
+    const payload = payloadOf(record);
+    if (record.state !== "stopping" || payload.spawnDispatched) return;
+    const id = str(payload.id)!;
+    if (payload.captureStarted && payload.captureDrained !== true) {
+      const sourceRoot = str(payload.sourceRoot);
+      if (!sourceRoot || await reconcileExperimentCapture(deps.client, recordCaller(workspaceId, record), sourceRoot, strArray(payload.workspaceScope)) !== "drained") return;
+      record = await updateAttempt(ctx, workspaceId, recordCaller(workspaceId, record), id, (current) => current.state,
+        (p) => ({ ...p, captureDrained: true }));
+    }
+    if (payload.preparationStarted && payload.preparationDrained !== true) {
+      const owner = recordCaller(workspaceId, record);
+      const specId = str(payload.specId);
+      if (!specId) throw new Error("Unsettled preparation has no frozen spec");
+      const specRecord = await requireSpec(ctx, owner, specId);
+      const input = inputSnapshotOf(specRecord)!;
+      const resolved = await resolveBackend(ctx, owner, str(payload.machineId) ?? LOCAL_MACHINE_ID);
+      if (!resolved?.reconcilePreparation || await resolved.reconcilePreparation({ attemptId: id, input }) !== "drained") return;
+      record = await updateAttempt(ctx, workspaceId, owner, id, (current) => current.state,
+        (p) => ({ ...p, preparationDrained: true, preparationUncertain: false }));
+    }
+    // Admission can have committed remotely before its reply reached this owner. Only the original resource owner can reconcile it.
+    if (payload.admissionStarted && !str(payload.commitmentId) && payload.admissionDrained !== true) {
+      const admission = await deps.resources.reconcileAdmission(workspaceId, str(payload.machineId) ?? LOCAL_MACHINE_ID,
+        (payload.resources ?? {}) as ExperimentResourceRequest, id);
+      if (admission.status === "unknown") return;
+      record = await updateAttempt(ctx, workspaceId, recordCaller(workspaceId, record), id, (current) => current.state,
+        (p) => ({ ...p, admissionDrained: true, ...(admission.status === "confirmed" ? { commitmentId: admission.commitmentId } : {}) }));
+    }
+    if (!await settleInputCandidate(ctx, workspaceId, record)) return;
+    const cancelled = await updateAttempt(ctx, workspaceId, recordCaller(workspaceId, record), id, "cancelled", (p) => ({ ...p, endedAt: now(), collection: "none", phase: "settled" }), (view) => view.state === "stopping");
+    await releaseTerminalCommitment(ctx, workspaceId, cancelled);
+  };
+
+  const reconcileAttempt = (
     ctx: ExperimentContext,
     workspaceId: string,
     caller: ExperimentCaller,
@@ -1976,60 +2078,88 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     preResolved?: ResolvedExperimentBackend,
   ): Promise<void> => {
     const initial = attemptView(record);
-    if (!initial) return;
-    await serializeAttempt(workspaceId, initial.attemptId, async () => {
-      const fresh = await getAttemptRecord(ctx, workspaceId, initial.attemptId);
-      const attempt = fresh ? attemptView(fresh) : null;
+    if (!initial) return Promise.reject(new Error(`Experiment attempt is unreadable: ${record.recordId}`));
+    const key = attemptKey(workspaceId, initial.attemptId);
+    const existing = sharedRuntime.flights.get(key);
+    if (existing) return existing.promise;
+    const controller = new AbortController();
+    const signal = controller.signal;
+    const flight: AttemptFlight = { controller, promise: Promise.resolve() };
+    sharedRuntime.flights.set(key, flight);
+    flight.promise = (async () => {
+      let fresh = await getAttemptRecord(ctx, workspaceId, initial.attemptId);
+      let attempt = fresh ? attemptView(fresh) : null;
       if (!fresh || !attempt || attempt.state === "lost") return;
-      const payload = payloadOf(fresh);
-      if (TERMINAL.has(attempt.state)) await releaseTerminalCommitment(ctx, workspaceId, fresh);
+      let payload = payloadOf(fresh);
+      if (TERMINAL.has(attempt.state)) {
+        if (!await settleInputCandidate(ctx, workspaceId, fresh)) return;
+        await releaseTerminalCommitment(ctx, workspaceId, fresh);
+        if (!payload.spawnDispatched) return;
+      }
+      if (attempt.state === "stopping" && !payload.spawnDispatched) {
+        await finishUnspawnedCancellation(ctx, workspaceId, fresh);
+        return;
+      }
       const key = attemptKey(workspaceId, attempt.attemptId);
       const existingJob = jobs.get(key);
       if (existingJob) {
+        existingJob.cancelRequested ||= attempt.state === "stopping" || payload.cancelRequested === true;
+        if (existingJob.cancelRequested && !existingJob.finalized) void requestBackendStop(ctx, workspaceId, fresh, existingJob).catch(report);
         if (TERMINAL.has(attempt.state) && attempt.collection === "done" && existingJob.finalized) {
           await releaseFinalizedJob(ctx, workspaceId, recordCaller(workspaceId, fresh), attempt.attemptId, existingJob);
         }
         return;
       }
-      if (attempt.state === "queued") {
-        const set = queued.get(workspaceId) ?? new Set<string>();
-        set.add(attempt.attemptId);
-        queued.set(workspaceId, set);
-        void drainQueue(workspaceId).catch(report);
-        return;
-      }
-      const resources = payload.resources && typeof payload.resources === "object"
-        ? payload.resources as ExperimentResourceRequest : {};
-      const needsAdmission = (["cpuCores", "memoryMb", "gpuCount", "gpuMemoryMb"] as const)
-        .some((dimension) => (resources[dimension] ?? 0) > 0);
-      if (attempt.state === "submitted" && needsAdmission && !str(payload.commitmentId)) {
-        const admission = await deps.resources.admit(workspaceId, attempt.machineId ?? LOCAL_MACHINE_ID, resources, attempt.attemptId);
-        if (admission.status !== "confirmed") {
-          const queuedRecord = await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, "queued", (p) => ({
-            ...p, admissionState: "pending", queueReason: admission.reason ?? "insufficient resources",
-          }), (current) => current.state === "submitted");
-          if (attemptView(queuedRecord)?.state === "queued") {
-            const set = queued.get(workspaceId) ?? new Set<string>();
-            set.add(attempt.attemptId);
-            queued.set(workspaceId, set);
+      if ((attempt.state === "submitted" || attempt.state === "queued") && !payload.spawnDispatched) {
+        if (attempt.state === "submitted") {
+          fresh = await prepareAccepted(ctx, caller, fresh, signal);
+          attempt = attemptView(fresh)!;
+          payload = payloadOf(fresh);
+        }
+        signal.throwIfAborted();
+        const resources = (payload.resources ?? {}) as ExperimentResourceRequest;
+        const needsAdmission = (["cpuCores", "memoryMb", "gpuCount", "gpuMemoryMb"] as const)
+          .some((dimension) => (resources[dimension] ?? 0) > 0);
+        if (needsAdmission && !str(payload.commitmentId)) {
+          if (payload.admissionStarted && payload.admissionDrained !== true) {
+            const outcome = await deps.resources.reconcileAdmission(workspaceId, attempt.machineId ?? LOCAL_MACHINE_ID, resources, attempt.attemptId);
+            if (outcome.status === "unknown") {
+              await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, (view) => view.state,
+                (p) => ({ ...p, preparationError: "Previous resource admission has no confirmed outcome; reconciliation remains pending" }));
+              return;
+            }
+            fresh = await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, (view) => view.state,
+              (p) => ({ ...p, admissionDrained: true, ...(outcome.status === "confirmed" ? { commitmentId: outcome.commitmentId } : {}) }));
+            payload = payloadOf(fresh);
+            signal.throwIfAborted();
           }
-          return;
+          if (!str(payload.commitmentId)) {
+            await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, attempt.state, (p) => ({ ...p, admissionStarted: true, admissionDrained: false }), (view) => view.state === attempt!.state);
+            signal.throwIfAborted();
+            const admission = await deps.resources.admit(workspaceId, attempt.machineId ?? LOCAL_MACHINE_ID, resources, attempt.attemptId);
+            if (admission.status !== "confirmed") {
+              const pending = await updateAttempt(ctx, workspaceId, caller, attempt.attemptId,
+                (view) => view.state === "stopping" ? "stopping" : "queued", (p) => ({ ...p,
+                  admissionDrained: true, admissionState: "pending", queueReason: admission.reason ?? "insufficient resources" }),
+                (view) => view.state === "submitted" || view.state === "queued" || view.state === "stopping");
+              if (pending.state === "queued") {
+                const set = queued.get(workspaceId) ?? new Set<string>(); set.add(attempt.attemptId); queued.set(workspaceId, set);
+              }
+              return;
+            }
+            if (!admission.commitmentId) throw new Error("Resource admission returned no commitment identity");
+            // Persist even a late admission receipt before handling cancellation.
+            const latest = await getAttemptRecord(ctx, workspaceId, attempt.attemptId);
+            if (!latest) throw new Error("Experiment attempt disappeared during resource admission");
+            fresh = await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, (current) => current.state,
+              (p) => ({ ...p, commitmentId: admission.commitmentId, admissionDrained: true, admissionState: "confirmed", queueReason: undefined }));
+            signal.throwIfAborted();
+          }
         }
-        const commitmentId = admission.commitmentId;
-        if (!commitmentId) throw new Error("Resource admission returned no commitment identity");
-        const latest = await getAttemptRecord(ctx, workspaceId, attempt.attemptId);
-        if (attemptView(latest!)?.state !== "submitted") {
-          await deps.resources.release(workspaceId, commitmentId, "attempt changed during admission");
-          return;
-        }
-        const admitted = await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, "submitted", (p) => ({
-          ...p, commitmentId, admissionState: "confirmed", queueReason: undefined,
-        }), (current) => current.state === "submitted");
-        await launch(ctx, workspaceId, recordCaller(workspaceId, admitted), admitted, preResolved);
-        return;
-      }
-      if (attempt.state === "submitted") {
-        await launch(ctx, workspaceId, recordCaller(workspaceId, fresh), fresh, preResolved);
+        if (fresh.state === "queued") fresh = await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, "submitted", (p) => ({ ...p, queueReason: undefined }), (view) => view.state === "queued");
+        queued.get(workspaceId)?.delete(attempt.attemptId);
+        signal.throwIfAborted();
+        await launch(ctx, workspaceId, recordCaller(workspaceId, fresh), fresh, preResolved, signal);
         return;
       }
 
@@ -2076,7 +2206,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
             executionRootId: observation.executionRootId,
             executionCanonicalRoot: observation.executionCanonicalRoot,
             ...(observation.executionCwd !== undefined ? { executionCwd: observation.executionCwd } : {}),
-          }));
+          }), (view) => view.state === attempt!.state);
           running.site = {
             ...running.site,
             rootId: observation.executionRootId,
@@ -2084,20 +2214,20 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
           };
           record = reconciled;
         }
+        const latest = await getAttemptRecord(ctx, workspaceId, attempt.attemptId);
+        if (!latest) throw new Error(`Experiment attempt disappeared during backend attachment: ${attempt.attemptId}`);
+        running.cancelRequested ||= latest.state === "stopping" || payloadOf(latest).cancelRequested === true;
+        if (running.cancelRequested && (!STOPPED_BACKEND_STATES.has(observation.status) || observation.writerActive)) {
+          void requestBackendStop(ctx, workspaceId, latest, running).catch(report);
+        }
         if (observation.status === "unknown") {
           await upsertJob(ctx, workspaceId, caller, attempt.attemptId, "unknown", {
+            backendJobId, backend: executionResolved.backend.backend,
             reason: observation.reason ?? "backend state is not currently observable", lastObservedAt: now(),
           });
           running.lastObservationKey = `unknown\0${observation.reason ?? ""}`;
           startPolling(ctx, workspaceId, caller, attempt.attemptId, running);
           return;
-        }
-        if (running.cancelRequested && executionResolved.backend.controls.includes("cancel")) {
-          await executionResolved.backend.kill(executionResolved.site, backendJobId).catch(async (error) => {
-            await upsertJob(ctx, workspaceId, caller, attempt.attemptId, "unknown", {
-              reason: `cancel request could not be confirmed: ${errorMessage(error)}`,
-            }).catch(report);
-          });
         }
         startPolling(ctx, workspaceId, caller, attempt.attemptId, running);
       } catch (error) {
@@ -2108,19 +2238,40 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         running.lastObservationKey = `error\0${errorMessage(error)}`;
         startPolling(ctx, workspaceId, caller, attempt.attemptId, running);
       }
+    })().catch(async (error) => {
+      if (!signal.aborted) {
+        const current = await getAttemptRecord(ctx, workspaceId, initial.attemptId);
+        let definiteFailure = (error instanceof ExperimentPreparationError && error.drained && !error.retryable)
+            || (error instanceof HarnessServiceError && ["invalid-params", "not-found", "forbidden"].includes(error.harnessCode));
+        if (definiteFailure && current) definiteFailure = await settleInputCandidate(ctx, workspaceId, current);
+        if (current && !TERMINAL.has(current.state as ExperimentAttemptState)) {
+          await updateAttempt(ctx, workspaceId, caller, initial.attemptId,
+            (view) => definiteFailure && view.state !== "stopping" ? "failed" : view.state,
+            (p) => ({ ...p, preparationError: errorMessage(error), ...(definiteFailure ? { endedAt: now() } : {}) }));
+        }
+        if (!definiteFailure) report(error);
+      }
+    }).finally(async () => {
+      try {
+        const current = await getAttemptRecord(ctx, workspaceId, initial.attemptId);
+        if (current?.state === "stopping" && !payloadOf(current).spawnDispatched) await finishUnspawnedCancellation(ctx, workspaceId, current);
+        else if (current && TERMINAL.has(current.state as ExperimentAttemptState)) await releaseTerminalCommitment(ctx, workspaceId, current);
+      } finally {
+        if (sharedRuntime.flights.get(key) === flight) sharedRuntime.flights.delete(key);
+        // A retired service can finish an admitted worker. Hand observation to a live owner only after it drains.
+        if (disposed) sharedRuntime.resumers.values().next().value?.(workspaceId, initial.attemptId);
+      }
     });
+    return flight.promise;
   };
 
   const submit = async (
     caller: ExperimentCaller,
     params: ExperimentSubmitParams,
     signal?: AbortSignal,
-  ): Promise<{ spec: ExperimentSpecView; attempt: ExperimentAttemptView; text: string }> => {
+  ): Promise<{ spec: ExperimentSpecView | null; attempt: ExperimentAttemptView; text: string }> => {
     if (!caller.threadId) return submitUnsafe(caller, params, signal);
     const key = `${caller.workspaceId}\0${caller.threadId}`;
-    if (sharedRuntime.stoppingThreads.has(key)) {
-      throw new HarnessServiceError("unavailable", `Thread ${caller.threadId} is stopping and cannot submit a new experiment`);
-    }
     const submitted = submitUnsafe(caller, params, signal);
     const active = sharedRuntime.submissionsByThread.get(key) ?? new Set<Promise<unknown>>();
     active.add(submitted);
@@ -2134,8 +2285,9 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     return submitted;
   };
 
-  const describeAttempt = (spec: ExperimentSpecView, attempt: ExperimentAttemptView | null): string => {
-    if (!attempt) return `spec ${spec.specId}: attempt record unreadable`;
+  const describeAttempt = (spec: ExperimentSpecView | null, attempt: ExperimentAttemptView | null): string => {
+    if (!attempt) throw new HarnessServiceError("failed", "Experiment attempt record is unreadable");
+    if (!spec) return `attempt ${attempt.attemptId} ${attempt.state}: accepted; input preparation pending`;
     const command = [spec.command, ...spec.args].join(" ");
     const state = attempt.state;
     const suffix = attempt.state === "queued" ? ` (${attempt.queueReason ?? "queued"})`
@@ -2149,18 +2301,19 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     caller: ExperimentCaller,
     attemptId: string,
   ): Promise<{ ctx: ExperimentContext; record: KernelRecordResult; view: ExperimentAttemptView }> => {
-    await ensureReconciled(caller.workspaceId);
+    void ensureReconciled(caller.workspaceId).catch(report);
     const ctx = await recordContext(caller.workspaceId);
     const record = await getAttemptRecord(ctx, caller.workspaceId, attemptId);
     const view = record ? attemptView(record) : null;
-    if (!record || !view) throw new HarnessServiceError("not-found", `Unknown experiment attempt: ${attemptId}`);
+    if (!record) throw new HarnessServiceError("not-found", `Unknown experiment attempt: ${attemptId}`);
+    if (!view) throw new HarnessServiceError("failed", `Experiment attempt is unreadable: ${attemptId}`);
     assertRecordAllowed(caller, record, `experiment attempt: ${attemptId}`);
     return { ctx, record, view };
   };
 
   const get = async (caller: ExperimentCaller, attemptId: string): Promise<ExperimentGetResult> => {
     const { ctx, view } = await requireAttempt(caller, attemptId);
-    const specRecord = await ctx.scoped.getRecord(caller.workspaceId, recordIdFor.spec(view.specId));
+    const specRecord = view.specId ? await requireSpec(ctx, caller, view.specId) : null;
     const spec = specRecord && recordAllowed(caller, specRecord) ? specView(specRecord) : null;
     const jobRecord = await ctx.scoped.getRecord(caller.workspaceId, recordIdFor.job(jobIdFor(attemptId)));
     const job = jobRecord ? jobView(jobRecord) : null;
@@ -2190,7 +2343,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     caller: ExperimentCaller,
     params: { state?: ExperimentAttemptState; specId?: string; limit?: number },
   ): Promise<ExperimentListResult> => {
-    await ensureReconciled(caller.workspaceId);
+    void ensureReconciled(caller.workspaceId).catch(report);
     const ctx = await recordContext(caller.workspaceId);
     const attempts: ExperimentAttemptView[] = [];
     let cursor: number | undefined;
@@ -2202,7 +2355,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       for (const record of page.records) {
         if (!recordAllowed(caller, record)) continue;
         const view = attemptView(record);
-        if (!view) continue;
+        if (!view) throw new HarnessServiceError("failed", `Experiment attempt is unreadable: ${record.recordId}`);
         if (params.state && view.state !== params.state) continue;
         if (params.specId && view.specId !== params.specId) continue;
         attempts.push(view);
@@ -2222,79 +2375,67 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     return { attempts: limited, text };
   };
 
-  const cancel = async (caller: ExperimentCaller, attemptId: string): Promise<ExperimentAttemptView> => {
-    const { ctx, view } = await requireAttempt(caller, attemptId);
-    if (TERMINAL.has(view.state)) return view;
-    let reconcileRecord: KernelRecordResult | null = null;
-    const result = await serializeAttempt(caller.workspaceId, attemptId, async () => {
-      const current = await getAttemptRecord(ctx, caller.workspaceId, attemptId);
-      const currentView = current ? attemptView(current) : null;
-      if (!current || !currentView) throw new HarnessServiceError("not-found", `Unknown experiment attempt: ${attemptId}`);
-      assertRecordAllowed(caller, current, `experiment attempt: ${attemptId}`);
-      if (TERMINAL.has(currentView.state)) return currentView;
-      if (currentView.state === "queued") {
-        queued.get(caller.workspaceId)?.delete(attemptId);
-        const cancelled = await updateAttempt(ctx, caller.workspaceId, caller, attemptId, "cancelled", (p) => ({
-          ...p, cancelRequested: true, endedAt: now(), collection: "none",
-        }), (attempt) => attempt.state === "queued");
-        return attemptView(cancelled)!;
+  const requestBackendStop = (
+    ctx: ExperimentContext,
+    workspaceId: string,
+    record: KernelRecordResult,
+    running?: RunningJob,
+  ): Promise<void> => {
+    const attempt = attemptView(record)!;
+    const key = attemptKey(workspaceId, attempt.attemptId);
+    // A late spawn reply can reveal the backend's native identity; do not let an older stop flight suppress it.
+    const stopKey = `${key}\0${running?.handle.backendJobId ?? "dispatch"}`;
+    const existing = sharedRuntime.stops.get(stopKey);
+    if (existing) return existing;
+    const stopping = (async () => {
+      const owner = recordCaller(workspaceId, record);
+      const resolved = running ?? await resolveBackend(await contextForAttempt(owner, record), owner, attempt.machineId ?? LOCAL_MACHINE_ID);
+      if (!resolved) throw new Error("Execution backend is unavailable; cancellation remains pending");
+      if (!resolved.backend.controls.includes("cancel")) throw new Error(`Backend ${resolved.backend.backend} does not support cancellation`);
+      const job = await ctx.scoped.getRecord(workspaceId, recordIdFor.job(jobIdFor(attempt.attemptId)));
+      const backendJobId = running?.handle.backendJobId ?? str(job ? payloadOf(job).backendJobId : null) ?? processIdFor(workspaceId, attempt.attemptId);
+      try {
+        await resolved.backend.kill(resolved.site, backendJobId);
+      } catch (error) {
+        await upsertJob(ctx, workspaceId, owner, attempt.attemptId, "unknown", {
+          backendJobId, reason: `termination could not be confirmed: ${errorMessage(error)}`, lastObservedAt: now(),
+        });
+        throw error;
       }
+    })().finally(() => { if (sharedRuntime.stops.get(stopKey) === stopping) sharedRuntime.stops.delete(stopKey); });
+    sharedRuntime.stops.set(stopKey, stopping);
+    return stopping;
+  };
 
-      const key = attemptKey(caller.workspaceId, attemptId);
-      const running = jobs.get(key);
-      const owner = recordCaller(caller.workspaceId, current);
-      const executionCtx = running ? ctx : await contextForAttempt(owner, current).catch(() => null);
-      const resolved = running
-        ? { backend: running.backend, site: running.site }
-        : executionCtx
-          ? await resolveBackend(executionCtx, owner, currentView.machineId ?? LOCAL_MACHINE_ID).catch(() => null)
-          : null;
-      if (resolved && !resolved.backend.controls.includes("cancel")) {
-        throw new HarnessServiceError("invalid-params", `Backend ${resolved.backend.backend} does not support cancellation`);
-      }
-      const stopping = await updateAttempt(ctx, caller.workspaceId, caller, attemptId, "stopping", (p) => ({
-        ...p, cancelRequested: true,
-      }), (attempt) => !TERMINAL.has(attempt.state));
-      const stoppingView = attemptView(stopping)!;
-      if (TERMINAL.has(stoppingView.state)) return stoppingView;
-      if (running) running.cancelRequested = true;
-      const jobRecord = running ? null : await ctx.scoped
-        .getRecord(caller.workspaceId, recordIdFor.job(jobIdFor(attemptId)))
-        .catch(() => null);
-      const backendJobId = running?.handle.backendJobId
-        ?? str(jobRecord ? payloadOf(jobRecord).backendJobId : null)
-        ?? processIdFor(caller.workspaceId, attemptId);
-      if (resolved) {
-        try {
-          await resolved.backend.kill(resolved.site, backendJobId);
-        } catch (error) {
-          await upsertJob(ctx, caller.workspaceId, recordCaller(caller.workspaceId, current), attemptId, "unknown", {
-            backendJobId,
-            reason: `termination could not be confirmed: ${errorMessage(error)}`,
-            lastObservedAt: now(),
-          }).catch(report);
-        }
-      }
-      if (!running) reconcileRecord = stopping;
-      return attemptView(stopping)!;
-    });
-    if (reconcileRecord) {
-      const owner = recordCaller(caller.workspaceId, reconcileRecord);
-      await reconcileAttempt(await contextForAttempt(owner, reconcileRecord), caller.workspaceId, owner, reconcileRecord);
-    }
-    const updated = await getAttemptRecord(ctx, caller.workspaceId, attemptId);
-    return updated ? attemptView(updated) ?? result : result;
+  const cancel = async (caller: ExperimentCaller, attemptId: string): Promise<ExperimentAttemptView> => {
+    const { ctx, record, view } = await requireAttempt(caller, attemptId);
+    if (TERMINAL.has(view.state)) return view;
+    // This CAS is the control receipt. It never joins preparation, admission, spawn, or workspace reconciliation.
+    const stopping = await updateAttempt(ctx, caller.workspaceId, caller, attemptId, "stopping", (p) => ({
+      ...p, cancelRequested: true,
+    }), (current) => !TERMINAL.has(current.state));
+    const stoppedView = attemptView(stopping)!;
+    if (TERMINAL.has(stoppedView.state)) return stoppedView;
+    const key = attemptKey(caller.workspaceId, attemptId);
+    queued.get(caller.workspaceId)?.delete(attemptId);
+    const flight = sharedRuntime.flights.get(key);
+    flight?.controller.abort();
+    const running = jobs.get(key);
+    if (running) running.cancelRequested = true;
+    if (payloadOf(stopping).spawnDispatched || running) void requestBackendStop(ctx, caller.workspaceId, stopping, running).catch(report);
+    if (!flight) void reconcileAttempt(ctx, caller.workspaceId, recordCaller(caller.workspaceId, record), stopping).catch(report);
+    return stoppedView;
   };
 
   const wait = async (
     caller: ExperimentCaller,
     attemptId: string,
-    timeoutMs?: number,
+    timeoutMs?: number | null,
     signal?: AbortSignal,
   ): Promise<{ attempt: ExperimentAttemptView; timedOut: boolean }> => {
     const { view } = await requireAttempt(caller, attemptId);
     if (TERMINAL.has(view.state)) return { attempt: view, timedOut: false };
-    const deadline = timeoutMs === undefined ? 30_000 : Math.max(0, timeoutMs);
+    const deadline = timeoutMs === null ? null : timeoutMs === undefined ? 30_000 : Math.max(0, timeoutMs);
     if (signal?.aborted) return { attempt: view, timedOut: true };
     const key = attemptKey(caller.workspaceId, attemptId);
     let finishRegistered: ((value: ExperimentAttemptView | null) => void) | undefined;
@@ -2311,7 +2452,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       // Cancelling the wait must not cancel the job: abort only ends this
       // observation, the attempt keeps its reservation and lifecycle.
       const onAbort = () => finish(null);
-      const timer = setTimeout(() => {
+      const timer = deadline === null ? undefined : setTimeout(() => {
         set.delete(finish);
         signal?.removeEventListener("abort", onAbort);
         resolve(null);
@@ -2383,7 +2524,8 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     if (view.state === "lost") {
       throw new HarnessServiceError("unavailable", `Attempt ${attemptId} is lost; its backend state is unknown`);
     }
-    const specRecord = await ctx.scoped.getRecord(caller.workspaceId, recordIdFor.spec(view.specId));
+    if (!view.specId && !payloadOf(record).spawnDispatched) return { attempt: view, artifacts: [] };
+    const specRecord = view.specId ? await requireSpec(ctx, caller, view.specId) : null;
     const spec = specRecord ? specView(specRecord) : null;
     if (!spec) throw new HarnessServiceError("unavailable", "experiment spec record is unavailable");
     const running = jobs.get(attemptKey(caller.workspaceId, attemptId)) ?? null;
@@ -2578,7 +2720,6 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     try {
       const inFlight = stopKeys.flatMap((key) => [...(sharedRuntime.submissionsByThread.get(key) ?? [])]);
       await Promise.allSettled(inFlight);
-      await ensureReconciled(workspaceId);
       const scanCtx = await recordContext(workspaceId);
       const records: KernelRecordResult[] = [];
       let cursor: number | undefined;
@@ -2599,29 +2740,16 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         const owner = recordCaller(workspaceId, record);
         const stopped = await cancel(owner, attempt.attemptId);
         if (TERMINAL.has(stopped.state)) return;
-        const ctx = await contextForAttempt(owner, record);
-        const jobRecord = await ctx.scoped.getRecord(workspaceId, recordIdFor.job(jobIdFor(attempt.attemptId))).catch(() => null);
-        const resolved = await resolveBackend(ctx, owner, stopped.machineId ?? LOCAL_MACHINE_ID).catch(() => null);
-        if (!resolved) {
-          throw new HarnessServiceError("unavailable", `Attempt ${attempt.attemptId} stop is pending because its backend is unavailable`);
-        }
-        const backendJobId = str(jobRecord ? payloadOf(jobRecord).backendJobId : null)
-          ?? processIdFor(workspaceId, attempt.attemptId);
-        let observation: BackendObservation;
-        try {
-          observation = await resolved.backend.inspect(resolved.site, backendJobId);
-        } catch (error) {
-          throw new HarnessServiceError(
-            "unavailable",
-            `Attempt ${attempt.attemptId} stop could not be confirmed: ${errorMessage(error)}`,
-          );
-        }
-        if (observation.status === "unknown" || observation.writerActive) {
-          throw new HarnessServiceError("unavailable", `Attempt ${attempt.attemptId} has not confirmed termination`);
-        }
+        const flight = sharedRuntime.flights.get(attemptKey(workspaceId, attempt.attemptId));
+        if (flight) await flight.promise;
+        const ctx = await recordContext(workspaceId);
         const latest = await getAttemptRecord(ctx, workspaceId, attempt.attemptId);
-        if (latest) await reconcileAttempt(ctx, workspaceId, owner, latest, resolved);
-        const waited = await wait(owner, attempt.attemptId);
+        if (!latest) throw new Error(`Experiment attempt disappeared: ${attempt.attemptId}`);
+        if (TERMINAL.has(latest.state as ExperimentAttemptState)) return;
+        const running = jobs.get(attemptKey(workspaceId, attempt.attemptId));
+        if (payloadOf(latest).spawnDispatched) await requestBackendStop(ctx, workspaceId, latest, running);
+        await reconcileAttempt(ctx, workspaceId, owner, latest);
+        const waited = await wait(owner, attempt.attemptId, null);
         if (waited.timedOut || !TERMINAL.has(waited.attempt.state)) {
           throw new HarnessServiceError("unavailable", `Attempt ${attempt.attemptId} termination was not durably recorded`);
         }
@@ -2647,6 +2775,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     if (disposed) return;
     disposed = true;
     sharedRuntime.listeners.delete(deliverNotification);
+    sharedRuntime.resumers.delete(serviceToken);
     for (const [key, running] of jobs) {
       if (running.observerOwner === serviceToken) jobs.delete(key);
     }
@@ -2668,6 +2797,14 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     sharedRuntime.listeners.add(listener);
     return () => sharedRuntime.listeners.delete(listener);
   };
+
+  sharedRuntime.resumers.set(serviceToken, (workspaceId, attemptId) => {
+    void (async () => {
+      const ctx = await recordContext(workspaceId);
+      const record = await getAttemptRecord(ctx, workspaceId, attemptId);
+      if (record) await reconcileAttempt(ctx, workspaceId, recordCaller(workspaceId, record), record);
+    })().catch(report);
+  });
 
   return {
     submit, list, get, logs, cancel, wait, collect, readArtifact, readArtifactPage,

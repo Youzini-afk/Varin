@@ -46,6 +46,7 @@ function scriptedBridge(handlers: Record<string, (params: never) => unknown>) {
 const attemptView = (over: Record<string, unknown> = {}) => ({
   attemptId: "attempt-1",
   specId: "spec-1",
+  cancelRequested: false,
   backend: "local",
   machineId: "local",
   state: "running",
@@ -74,15 +75,15 @@ describe("experiment tool", () => {
     bridge.dispose();
   });
 
-  it("submit forwards the inline spec and returns spec+attempt identities", async () => {
+  it("submit retains the tool-call key and returns an accepted attempt before its spec is ready", async () => {
     const { bridge, requests } = scriptedBridge({
       "experiment.submit": (params: { command: string; args?: string[] }) => {
         assert.equal(params.command, "python");
         assert.deepEqual(params.args, ["train.py", "--seed", "1"]);
         return {
-          spec: { specId: "spec-1", command: "python", args: ["train.py"], inputs: [], outputPaths: [], state: "active", revision: 1, createdAt: 1 },
-          attempt: attemptView(),
-          text: "attempt attempt-1 running on local",
+          spec: null,
+          attempt: attemptView({ specId: null, state: "submitted" }),
+          text: "attempt attempt-1 accepted; preparing input",
         };
       },
     });
@@ -95,6 +96,10 @@ describe("experiment tool", () => {
     assert.equal(isError(result), undefined);
     assert.equal(requests[0]!.method, "experiment.submit");
     assert.equal((result.details as { attemptId: string }).attemptId, "attempt-1");
+    assert.equal((result.details as { specId: string | null }).specId, null);
+    await tool.execute("call-1", { action: "submit", command: "python", args: ["train.py", "--seed", "1"] } as never, undefined, undefined, undefined as never);
+    assert.equal((requests[0]!.params as { requestId: string }).requestId, "experiment:call-1");
+    assert.equal((requests[1]!.params as { requestId: string }).requestId, "experiment:call-1");
     bridge.dispose();
   });
 

@@ -22,6 +22,8 @@ import {
 const ACTIVE_STATES = new Set(['submitted', 'queued', 'running', 'stopping']);
 const COLLECTABLE = new Set(['completed', 'failed', 'cancelled']);
 const RERUNNABLE = new Set(['failed', 'cancelled', 'lost']);
+type RerunIntent = { attemptId: string; specId: string; machineId?: string; requestId: string };
+let rerunSequence = 0;
 
 const formatResources = (resources: { cpuCores?: number; memoryMb?: number; gpus?: ResourceGpuView[] } | undefined): string => {
   if (!resources) return '';
@@ -118,7 +120,7 @@ const AttemptRow: React.FC<{
   const { t } = useI18n();
   const attemptState = attempt.state as string;
   const active = ACTIVE_STATES.has(attemptState);
-  const collectable = COLLECTABLE.has(attemptState) && (attempt.collection === 'none' || attempt.collection === 'failed');
+  const collectable = attempt.specId !== null && COLLECTABLE.has(attemptState) && (attempt.collection === 'none' || attempt.collection === 'failed');
   const target = machine?.target;
   const waitingForDispatch = target?.unassignedWorkRequiresCoordinator === true
     && (attemptState === 'submitted' || attemptState === 'queued');
@@ -161,7 +163,7 @@ const AttemptRow: React.FC<{
             {t('research-facts.collect')}
           </button>
         ) : null}
-        {RERUNNABLE.has(attemptState) ? (
+        {attempt.specId !== null && RERUNNABLE.has(attemptState) ? (
           <button type="button" disabled={busy}
             className="shrink-0 text-primary hover:underline disabled:opacity-50"
             onClick={() => onAction(attempt.attemptId, 'rerun')}>
@@ -444,7 +446,26 @@ export const ResearchFactsPanel: React.FC = () => {
   const [collectedArtifacts, setCollectedArtifacts] = React.useState<Record<string, ExperimentArtifactView[]>>({});
   const activeSessionRef = React.useRef<string | null>(sessionId);
   const reloadRef = React.useRef<{ epoch: number; controller: AbortController | null }>({ epoch: 0, controller: null });
+  // Only unresolved HTTP intents live here. Durable attempt state remains with the service.
+  const rerunIntents = React.useRef(new Map<string, RerunIntent>());
   activeSessionRef.current = sessionId;
+
+  const rerunIntent = React.useCallback((attempt: ExperimentAttemptView): RerunIntent => {
+    const existing = rerunIntents.current.get(attempt.attemptId);
+    if (existing) return existing;
+    if (attempt.specId === null) throw new Error('This attempt has no prepared immutable spec to rerun');
+    const intent = { attemptId: attempt.attemptId, specId: attempt.specId,
+      ...(attempt.machineId ? { machineId: attempt.machineId } : {}),
+      requestId: globalThis.crypto?.randomUUID?.() ?? `ui-rerun-${Date.now()}-${++rerunSequence}-${attempt.attemptId}` };
+    rerunIntents.current.set(attempt.attemptId, intent);
+    return intent;
+  }, []);
+  const acceptRerun = React.useCallback((intent: RerunIntent, attempt: ExperimentAttemptView) => {
+    if (rerunIntents.current.get(intent.attemptId) === intent) rerunIntents.current.delete(intent.attemptId);
+    setFacts(current => current ? { ...current,
+      attempts: [...current.attempts.filter(item => item.attemptId !== attempt.attemptId), attempt] } : current);
+    setSelectedAttemptIds(current => { const next = new Set(current); next.delete(intent.attemptId); return next; });
+  }, []);
 
   const invalidateReload = React.useCallback(() => {
     reloadRef.current.epoch += 1;
@@ -484,6 +505,7 @@ export const ResearchFactsPanel: React.FC = () => {
     setSelectedAttemptId(null);
     setSelectedAttemptIds(new Set());
     setCollectedArtifacts({});
+    rerunIntents.current.clear();
     if (!sessionId || !workspaceId) return () => invalidateReload();
     void reload();
     const unsubscribe = subscribeVarinEvents((event) => {
@@ -511,7 +533,14 @@ export const ResearchFactsPanel: React.FC = () => {
           ? await collectResearchAttempt(actionSessionId, attemptId)
           : null;
         if (action === 'cancel') await cancelResearchAttempt(actionSessionId, attemptId);
-        if (action === 'rerun') await rerunResearchAttempt(actionSessionId, attemptId);
+        if (action === 'rerun') {
+          const original = facts?.attempts.find(item => item.attemptId === attemptId);
+          if (!original) throw new Error('Original experiment attempt is unavailable');
+          const intent = rerunIntent(original);
+          const accepted = await rerunResearchAttempt(actionSessionId, attemptId, intent);
+          if (activeSessionRef.current !== actionSessionId) return;
+          acceptRerun(intent, accepted.attempt);
+        }
         if (activeSessionRef.current !== actionSessionId) return;
         if (result && result.artifacts.length > 0) {
           setCollectedArtifacts((previous) => ({ ...previous, [attemptId]: result.artifacts }));
@@ -525,7 +554,7 @@ export const ResearchFactsPanel: React.FC = () => {
         if (activeSessionRef.current === actionSessionId) setBusy(false);
       }
     })();
-  }, [reload, sessionId]);
+  }, [acceptRerun, facts, reload, rerunIntent, sessionId]);
 
   const toggleAttemptSelection = React.useCallback((attemptId: string) => {
     setSelectedAttemptIds((current) => {
@@ -545,7 +574,7 @@ export const ResearchFactsPanel: React.FC = () => {
   const machinesById = new Map(machines.map((machine) => [machine.machineId, machine]));
   const selectedAttempts = attempts.filter((attempt) => selectedAttemptIds.has(attempt.attemptId));
   const cancellableSelected = selectedAttempts.filter((attempt) => ACTIVE_STATES.has(attempt.state));
-  const rerunnableSelected = selectedAttempts.filter((attempt) => RERUNNABLE.has(attempt.state));
+  const rerunnableSelected = selectedAttempts.filter((attempt) => attempt.specId !== null && RERUNNABLE.has(attempt.state));
 
   const onBulkAction = (action: 'cancel' | 'rerun') => {
     if (!sessionId || busy) return;
@@ -560,7 +589,15 @@ export const ResearchFactsPanel: React.FC = () => {
           const failed = results.filter((result) => !result.ok);
           if (failed.length > 0) throw new Error(failed.map((result) => `${result.attemptId}: ${result.error ?? t('research-facts.actionFailed')}`).join('; '));
         } else {
-          const results = await rerunResearchAttempts(actionSessionId, targets);
+          const intents = targets.map(rerunIntent);
+          const results = await rerunResearchAttempts(actionSessionId, intents);
+          if (activeSessionRef.current !== actionSessionId) return;
+          for (const result of results) {
+            const intent = intents.find(item => item.requestId === result.requestId);
+            if (!intent) throw new Error('Rerun response belongs to another request');
+            if (result.accepted && result.attempt) acceptRerun(intent, result.attempt);
+          }
+          if (results.length !== intents.length) throw new Error('Batch rerun response is incomplete');
           const failed = results.filter((result) => !result.accepted);
           if (failed.length > 0) throw new Error(failed.map((result) => result.error ?? t('research-facts.actionFailed')).join('; '));
         }

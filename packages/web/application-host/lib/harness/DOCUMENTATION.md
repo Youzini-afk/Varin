@@ -207,15 +207,40 @@ storage. `experiment-workspace.ts` captures and checks source bytes through Rust
 files under the declared capture scope, excludes the kernel scan's `.git`/`.varin` metadata, and
 rewrites internal absolute links to remain inside the captured tree. It does not promise an OS sandbox.
 Capturing a large dependency/data tree has a real cost; spec reuse keeps the prior input root.
-Submission cancellation reaches grant issuance, native inventory and file capture before an attempt
-is admitted, including transport timeout cancellation. Shared startup reconciliation retains its own
-lifetime while a cancelled caller stops waiting. Once the attempt intent is durable, its backend and
-reconciliation continue to own the accepted outcome.
+Inline spec deduplication stays within the original creating Thread/session ownership. Explicit
+cross-Thread spec reuse still requires the current caller to be allowed to read that spec.
+Submission first resolves a caller/request identity against the original attempt receipt. A new request
+binds its canonical source, scope, cwd and normalized intent, then returns the durable `submitted`
+attempt before capture, placement, materialization or process dispatch. Its `specId` and returned spec
+are explicitly null until the immutable input exists. Pi calls derive a default request key from the
+original tool call; the research panel retains the same rerun key and body across an unknown response.
+A pending attempt is visible and cancellable, but cannot rerun or collect a nonexistent fixed spec.
+
+The accepted worker owns its lifetime independently of the submit response. Capture uses Rust's
+existing source lease and cancellable capture-batch worker; the original branch/create identity is
+saved before publication. Recovery reads that receipt and exact branch, never recaptures a missing
+committed branch from current files. File inventory scanning still uses the existing synchronous Rust
+metadata scan; this slice does not claim that arbitrary large directory enumeration is off the
+Storage actor. No file bytes are copied or hashed by the TypeScript control owner.
+
+Cancellation first commits `cancelRequested`/`stopping` through a short record update. It does not
+wait behind preparation, spawn, or workspace reconciliation. The original worker/late dispatch receipt
+must drain before terminal cleanup; a caller abort or disconnected HTTP request alone is not drain.
+Local materialization retains its original completion and, after an uncertain reply, checks the
+original committed root plus the actual target lease. Remote materialization retains a dispatched
+commit promise and only its original ready-material observation proves completion. Unknown effects
+remain visible and keep their commitments; recovery does not blindly prepare, reserve, or spawn again.
+Service replacement transfers observation only after an old admitted worker settles. Thread stop seals
+the current admission boundary and drains accepted work without permanently banning future runs.
 
 Machine capacity, observations and Varin commitments share a Host-level kernel catalog domain in
 `resources.ts`. Reservations are serialized across owning workspaces and survive service recreation;
 they do not claim OS isolation from external processes. Resource release can wake queued attempts in
-other workspaces. Unknown CPU/GPU measurements remain unknown. `sources.ts` retains actual object
+other workspaces. If an admission response is lost, `reconcileAdmission` observes the same original
+workspace/machine/attempt and resource request. A managed target reads its actual ResourceService
+allocation under the original authenticated principal and restores the original coordinator receipt;
+it does not reserve again. Missing facts remain unknown, while a retained released allocation is
+positive no-allocation evidence. Unknown CPU/GPU measurements remain unknown. `sources.ts` retains actual object
 references; a path or URI locator alone is provenance, not proof that remote content was downloaded.
 
 `experiment-routes.ts` exposes the same authorized facts to the research panel, including paged logs
@@ -226,9 +251,11 @@ older requests on session changes, and exposes failures without replacing them w
 Thread kill/delete closes the worker before stopping its independent attempts and reclaiming state.
 Normal Run settlement and archive do not terminate an experiment. Host shutdown detaches observers;
 the backend owns execution and reconnection facts. Backend uncertainty is not observed termination.
-The local backend is implemented; registering another machine or testing an injected backend does
-not provide a managed remote or Slurm implementation. Full desktop restart and real-model research
-quality require their own evidence. D-301/7G request preparation and D-302/7H tool execution
+Local and managed-remote adapters have implementations; registration alone does not prove a reachable
+backend, and injected transport/Storage tests do not establish a real remote-machine or Slurm run.
+The native runtime's research actor authorization, ordinary-tool Job/Wait and child/source integration
+remain a separate next slice; this admission foundation does not claim those consumers are complete.
+Full desktop restart and real-model research quality require their own evidence. D-301/7G request preparation and D-302/7H tool execution
 use the shared context and shell paths described below.
 
 ### HarnessServiceHost (`service-host.ts`)

@@ -2,14 +2,15 @@ import { createHash, randomUUID } from "node:crypto";
 import type { KernelClient } from "../kernel/kernel-client.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
 import type { ExperimentCaller, ExperimentContext } from "./experiments.js";
-import type {
-  BackendObservation,
-  BackendRemoteObject,
-  ExperimentBackend,
-  ResolvedExperimentBackend,
+import {
+  ExperimentPreparationError,
+  type BackendObservation,
+  type BackendRemoteObject,
+  type ExperimentBackend,
+  type ResolvedExperimentBackend,
 } from "./experiment-backend.js";
 import { openExperimentInputTransfer } from "./experiment-workspace.js";
-import type { ExternalResourceAuthority, ResourceMachineRegistration, ResourceService } from "./resources.js";
+import type { ExternalResourceAuthority, ResourceAdmissionReconciliation, ResourceMachineRegistration, ResourceService } from "./resources.js";
 import {
   MANAGED_REMOTE_PROTOCOL_VERSION,
   type ManagedRemoteAdmissionReceipt,
@@ -427,6 +428,13 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
         attemptId: input.attemptId,
         resources: input.resources,
       }),
+      reconcileAdmission: async (input) => client.json<ResourceAdmissionReconciliation>("/resources/observe", {
+        coordinatorHostId: options.coordinatorHostId,
+        workspaceId: input.workspaceId,
+        machineId: input.machineId,
+        attemptId: input.attemptId,
+        resources: input.resources,
+      }),
       release: async (input) => {
         await client.json("/resources/release", {
           coordinatorHostId: options.coordinatorHostId,
@@ -509,41 +517,69 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
         machineId,
         transport: { targetHostId: target.hostId },
       },
-      prepare: async ({ attemptId, input }) => {
+      reconcilePreparation: async ({ input }) => {
         const transfer = await openExperimentInputTransfer(options.kernel, caller, input);
-        const manifest: ManagedRemoteMaterialManifest = {
-          coordinatorHostId: options.coordinatorHostId,
-          materialId: transfer.materialId,
-          entries: transfer.entries,
-          ...(transfer.cwd ? { cwd: transfer.cwd } : {}),
-        };
-        const probeReceipt = await client.json<ManagedRemoteMaterialProbe>("/materials/probe", manifest);
-        for (const object of probeReceipt.missingObjects) {
-          await client.request(`/objects/${encodeURIComponent(object.objectHash)}`, {
-            method: "PUT",
-            headers: {
-              "X-Varin-Coordinator-Host": options.coordinatorHostId,
-              "X-Varin-Object-Length": String(object.byteLength),
-              "Content-Type": "application/octet-stream",
+        const probe = await client.json<ManagedRemoteMaterialProbe>("/materials/probe", {
+          coordinatorHostId: options.coordinatorHostId, materialId: transfer.materialId,
+          entries: transfer.entries, ...(transfer.cwd ? { cwd: transfer.cwd } : {}),
+        });
+        // Absence of the ready record cannot rule out an in-flight remote commit.
+        return probe.ready && probe.rootId && probe.canonicalRoot ? "drained" : "unknown";
+      },
+      prepare: async ({ attemptId, input, signal }) => {
+        let commitDispatched = false;
+        try {
+          signal?.throwIfAborted();
+          const transfer = await openExperimentInputTransfer(options.kernel, caller, input, signal ? { signal } : {});
+          const manifest: ManagedRemoteMaterialManifest = {
+            coordinatorHostId: options.coordinatorHostId,
+            materialId: transfer.materialId,
+            entries: transfer.entries,
+            ...(transfer.cwd ? { cwd: transfer.cwd } : {}),
+          };
+          const probeReceipt = await client.json<ManagedRemoteMaterialProbe>("/materials/probe", manifest, undefined, signal);
+          for (const object of probeReceipt.missingObjects) {
+            signal?.throwIfAborted();
+            await client.request(`/objects/${encodeURIComponent(object.objectHash)}`, {
+              method: "PUT",
+              headers: {
+                "X-Varin-Coordinator-Host": options.coordinatorHostId,
+                "X-Varin-Object-Length": String(object.byteLength),
+                "Content-Type": "application/octet-stream",
+              },
+              body: transfer.readObject(object.objectHash, object.byteLength, signal),
+              ...(signal ? { signal } : {}),
+            });
+          }
+          signal?.throwIfAborted();
+          // A dispatched remote materialization is an owned writer. Cancelling its
+          // response would not stop the target; retain the real completion for drain.
+          let receipt: ManagedRemoteMaterialReceipt;
+          if (probeReceipt.ready && probeReceipt.rootId && probeReceipt.canonicalRoot) {
+            receipt = { materialId: transfer.materialId, root: transfer.materialId, rootId: probeReceipt.rootId,
+              canonicalRoot: probeReceipt.canonicalRoot, cwd: probeReceipt.cwd ?? "", reused: true };
+          } else {
+            commitDispatched = true;
+            receipt = await client.json<ManagedRemoteMaterialReceipt>("/materials/commit", manifest);
+          }
+          return {
+            site: {
+              workspaceId: caller.workspaceId,
+              rootId: receipt.rootId,
+              canonicalRoot: receipt.canonicalRoot,
+              machineId,
+              transport: { targetHostId: target.hostId, materialId: transfer.materialId, backendJobId: `experiment-${digest(caller.workspaceId, attemptId).slice(0, 40)}` },
             },
-            body: transfer.readObject(object.objectHash, object.byteLength),
-          });
+            cwd: receipt.cwd,
+            inputRoot: receipt.root,
+            reused: receipt.reused,
+          };
+        } catch (error) {
+          // Before commit this adapter has not started an attempt/materialization
+          // writer. Uploaded objects remain with the shared content owner.
+          if (!commitDispatched) throw new ExperimentPreparationError(error instanceof Error ? error.message : String(error), { drained: true, cause: error });
+          throw error;
         }
-        const receipt = probeReceipt.ready && probeReceipt.rootId && probeReceipt.canonicalRoot
-          ? { materialId: transfer.materialId, root: transfer.materialId, rootId: probeReceipt.rootId, canonicalRoot: probeReceipt.canonicalRoot, cwd: probeReceipt.cwd ?? "", reused: true }
-          : await client.json<ManagedRemoteMaterialReceipt>("/materials/commit", manifest);
-        return {
-          site: {
-            workspaceId: caller.workspaceId,
-            rootId: receipt.rootId,
-            canonicalRoot: receipt.canonicalRoot,
-            machineId,
-            transport: { targetHostId: target.hostId, materialId: transfer.materialId, backendJobId: `experiment-${digest(caller.workspaceId, attemptId).slice(0, 40)}` },
-          },
-          cwd: receipt.cwd,
-          inputRoot: receipt.root,
-          reused: receipt.reused,
-        };
       },
     };
   };

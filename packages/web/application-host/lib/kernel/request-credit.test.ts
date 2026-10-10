@@ -58,6 +58,24 @@ it('keeps an aborted admitted input until its original effect response after cre
   f.finish(0); await drained; expect(idle).toBe(true);
 });
 
+it.each(['capture', 'materialize'] as const)('retains the %s worker promise until its original completion while control remains available', async kind => {
+  const f = fixture(); const controller = new AbortController();
+  const grant = f.owner.grantFromResponse({ grant_id: 'preparation', kernel_epoch: 'epoch' });
+  let settled = false;
+  const work = (kind === 'capture'
+    ? f.client.fileCaptureBatch({ operationId: 'capture', workspaceId: 'workspace', rootId: 'root', paths: ['input'], leaseId: 'input-lease', store: true }, grant, controller.signal)
+    : f.client.fileMaterialize({ operationId: 'materialize', workspaceId: 'workspace', rootId: 'root', path: 'attempt', sourceRoot: 'source' }, grant, controller.signal))
+    .finally(() => { settled = true; });
+  await tick(); controller.abort(); await tick();
+  expect(settled).toBe(false);
+  expect(f.sent[1]).toMatchObject({ lane: 'control', frame: { kind: 'cancel' } });
+  const control = f.request('runtime.operation.cancel');
+  await tick(); f.finish(2); await control;
+  expect(settled).toBe(false);
+  f.finish(0); await work; await f.owner.whenRequestsIdle();
+  expect(settled).toBe(true);
+});
+
 
 it.each(['retire', 'revoke'] as const)('%s closes the original grant caller over the control lane without consuming its unsettled effect receipt', async action => {
   const f = fixture();

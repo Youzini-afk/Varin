@@ -10,8 +10,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { KernelBranchState } from "../kernel/protocol.generated.js";
-import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
+import { KernelClientError, type KernelClient, type KernelScopedClient } from "../kernel/kernel-client.js";
 import { canonicalizePathIdentity, isPathWithinRoot } from "../workspace/path-safety.js";
+
+import { ExperimentPreparationError } from "./experiment-backend.js";
+import { waitWithSignal } from "../cancellation.js";
 
 const MANAGED_EXPERIMENTS_DIRECTORY = path.join("managed", "experiments");
 const CAPTURE_EXCLUDED_DIRECTORIES = [".git", ".varin"] as const;
@@ -32,7 +35,20 @@ export interface PrepareExperimentInputOptions {
   /** Working directory relative to the captured source root. */
   cwd?: string;
   signal?: AbortSignal;
+  /** Original attempt-owned identity; a lost create reply is recovered through operation.get. */
+  branchId?: string;
+  beforeBranchCreate?: (capture: ExperimentInputCapture) => Promise<void>;
 }
+
+/** Reports whether this flight actually dispatched the original candidate-branch create. */
+export class ExperimentInputCaptureError extends ExperimentPreparationError {
+  constructor(message: string, readonly branchCreateDispatched: boolean, options: { drained: boolean; retryable: boolean; cause: unknown }) {
+    super(message, options);
+    this.name = "ExperimentInputCaptureError";
+  }
+}
+
+export type ExperimentInputCapture = Omit<ExperimentInputSnapshot, "root">;
 
 export interface ExperimentInputSnapshot {
   schemaVersion: 1;
@@ -323,117 +339,163 @@ export async function prepareExperimentInput(
   canonicalRoot: string,
   options: PrepareExperimentInputOptions = {},
 ): Promise<ExperimentInputSnapshot> {
-  assertCaller(caller);
-  options.signal?.throwIfAborted();
-  const sourceRoot = await canonicalizePathIdentity(asNonEmptyString(canonicalRoot, "Experiment source root"));
-  if (!options.captureScopes) throw new Error("Experiment capture scopes must be explicit caller-authorized paths");
-  const scopes = [...new Set(options.captureScopes.map((entry) => normalizeRelative(entry, "Experiment capture scope")))].sort();
-  for (const scope of scopes) await validateScope(sourceRoot, scope);
-  const cwd = options.cwd === undefined ? undefined : normalizeRelative(options.cwd, "Experiment cwd");
-  const scoped = await issueExperimentGrant(client, caller, "prepare", options.signal);
-  const registered = await scoped.fileRootRegister({
-    workspaceId: caller.workspaceId,
-    executionWorkspaceId: caller.executionWorkspaceId,
-    canonicalRoot: sourceRoot,
-  }, options.signal);
-  const sourceRootId = rootIdFrom(registered, "Source file root registration");
-  const inventory = await scanInventory(scoped, caller.workspaceId, sourceRootId, scopes, options.signal);
-  if (cwd !== undefined) await validateCwd(sourceRoot, cwd, inventory.paths);
-
-  const entries: CapturedEntry[] = [];
-  let createdBranchId: string | undefined;
+  let captureDrained = true;
+  let branchCreateUncertain = false;
+  let branchCreateDispatched = false;
   try {
-    for (const relative of inventory.paths) {
-      options.signal?.throwIfAborted();
-      const value = await scoped.fileCapture({
-        operationId: `experiment-input-capture:${randomUUID()}`,
-        workspaceId: caller.workspaceId,
-        rootId: sourceRootId,
-        path: relative,
-        store: true,
-      }, options.signal);
-      const captured = captureState(value, relative);
-      const snapshotState = await symlinkStateForSnapshot(sourceRoot, relative, captured.state, inventory.paths);
-      entries.push({ ...captured, state: snapshotState, sourceState: captured.state });
-    }
-
-    // The list fingerprint protects scan pagination, while this fresh scan
-    // catches additions/removals during the capture window.
-    const afterInventory = await scanInventory(scoped, caller.workspaceId, sourceRootId, scopes, options.signal);
-    if (afterInventory.fingerprint !== inventory.fingerprint
-      || afterInventory.paths.length !== inventory.paths.length
-      || afterInventory.paths.some((entry, index) => entry !== inventory.paths[index])) {
-      throw new Error("Experiment source changed while its input snapshot was being captured");
-    }
-
-    // A path inventory does not include file bytes. Re-observe every captured
-    // path so a multi-file snapshot cannot silently mix two live generations.
-    for (const entry of entries) {
-      options.signal?.throwIfAborted();
-      const observed = await scoped.fileCapture({
-        operationId: `experiment-input-verify:${randomUUID()}`,
-        workspaceId: caller.workspaceId,
-        rootId: sourceRootId,
-        path: entry.path,
-        store: false,
-      }, options.signal);
-      const verified = captureState(observed, entry.path, false);
-      if (stableState(verified.state) !== stableState(entry.sourceState)) {
-        throw new Error(`Experiment source changed while capturing: ${entry.path}`);
-      }
-      await symlinkStateForSnapshot(sourceRoot, entry.path, verified.state, inventory.paths);
-    }
-
-    const branchId = `experiment-input-${randomUUID()}`;
-    const created = await scoped.createBranch({
-      operationId: `experiment-input-branch:${branchId}`,
-      branchId,
-      workspaceId: caller.workspaceId,
-      entries: entries.map(({ path: entryPath, state, ownerId }) => ({
-        path: entryPath,
-        state,
-        ...(ownerId ? { ownerId } : {}),
-      })),
-      draftBasePaths: [],
-      captureScopes: scopes,
-    }, options.signal);
-    if (created.created === true) createdBranchId = branchId;
-    const root = typeof created.root === "string" ? created.root : "";
-    if (!root || created.branchId !== branchId) throw new Error("Kernel returned an invalid experiment input branch");
-    const branch = await scoped.readBranch({ branchId }, options.signal);
-    if (branch.workspaceId !== caller.workspaceId || branch.root !== root || branch.currentRoot !== root) {
-      throw new Error("Experiment input branch changed while it was being created");
-    }
-    return {
-      schemaVersion: 1,
-      branchId,
-      root,
-      sourceRoot,
+    assertCaller(caller);
+    options.signal?.throwIfAborted();
+    const sourceRoot = await canonicalizePathIdentity(asNonEmptyString(canonicalRoot, "Experiment source root"));
+    if (sourceRoot !== canonicalRoot) throw new Error("Experiment source root identity changed after admission");
+    if (!options.captureScopes) throw new Error("Experiment capture scopes must be explicit caller-authorized paths");
+    const scopes = [...new Set(options.captureScopes.map((entry) => normalizeRelative(entry, "Experiment capture scope")))].sort();
+    for (const scope of scopes) await validateScope(sourceRoot, scope);
+    const cwd = options.cwd === undefined ? undefined : normalizeRelative(options.cwd, "Experiment cwd");
+    const scoped = await issueExperimentGrant(client, caller, "prepare", options.signal);
+    const registered = await scoped.fileRootRegister({
       workspaceId: caller.workspaceId,
       executionWorkspaceId: caller.executionWorkspaceId,
-      captureScopes: scopes,
-      capturedPathCount: inventory.paths.length,
-      inventoryFingerprint: inventory.fingerprint,
-      captureSemantics: {
-        excludedDirectories: CAPTURE_EXCLUDED_DIRECTORIES,
-        gitignore: "not-applied",
-        ignoredFilesIncluded: true,
-      },
-      ...(cwd ? { cwd } : {}),
-    };
-  } catch (error) {
-    // If branch creation succeeded but the post-create provenance check failed,
-    // remove only the branch allocated by this call before releasing any
-    // remaining temporary owners. A `created:false` response is never deleted.
-    if (createdBranchId) {
-      await scoped.deleteBranch({
-        operationId: `experiment-input-branch-cleanup:${createdBranchId}:${randomUUID()}`,
-        branchId: createdBranchId,
-      }).catch(() => undefined);
+      canonicalRoot: sourceRoot,
+    }, options.signal);
+    const sourceRootId = rootIdFrom(registered, "Source file root registration");
+    const leaseId = `experiment-input-lease:${randomUUID()}`;
+    for (;;) {
+      options.signal?.throwIfAborted();
+      const lease = await scoped.fileLeaseAcquire({ workspaceId: caller.workspaceId, rootId: sourceRootId, leaseId,
+        resources: (scopes.length ? scopes : [""]).map((entry) => ({ path: entry, scope: "subtree" })) });
+      if (lease.status === "acquired") break;
+      if (lease.status !== "busy") throw new Error("Experiment input source lease returned no admission fact");
+      await waitWithSignal(new Promise<void>((resolve) => setTimeout(resolve, 250)), options.signal);
     }
-    await releaseOwners(scoped, entries.flatMap((entry) => entry.ownerId ? [entry.ownerId] : []));
-    throw error;
+    try {
+      const capturePath = async (relative: string, store: boolean): Promise<Record<string, unknown>> => {
+        options.signal?.throwIfAborted();
+        captureDrained = false;
+        try {
+          const result = await scoped.fileCaptureBatch({ operationId: `experiment-input-${store ? "capture" : "verify"}:${randomUUID()}`,
+            workspaceId: caller.workspaceId, rootId: sourceRootId, paths: [relative], store, leaseId }, options.signal);
+          captureDrained = true;
+          if (!Array.isArray(result.entries) || result.entries.length !== 1 || !result.entries[0] || typeof result.entries[0] !== "object") throw new Error("Kernel returned an invalid experiment input capture batch");
+          return result.entries[0] as Record<string, unknown>;
+        } catch (error) {
+          if (error instanceof KernelClientError && error.code === "cancelled") captureDrained = true;
+          throw error;
+        }
+      };
+      const inventory = await scanInventory(scoped, caller.workspaceId, sourceRootId, scopes, options.signal);
+      if (cwd !== undefined) await validateCwd(sourceRoot, cwd, inventory.paths);
+
+      const entries: CapturedEntry[] = [];
+      let createdBranchId: string | undefined;
+      try {
+        for (const relative of inventory.paths) {
+          options.signal?.throwIfAborted();
+          const value = await capturePath(relative, true);
+          const captured = captureState(value, relative);
+          const snapshotState = await symlinkStateForSnapshot(sourceRoot, relative, captured.state, inventory.paths);
+          entries.push({ ...captured, state: snapshotState, sourceState: captured.state });
+        }
+
+        // The list fingerprint protects scan pagination, while this fresh scan
+        // catches additions/removals during the capture window.
+        const afterInventory = await scanInventory(scoped, caller.workspaceId, sourceRootId, scopes, options.signal);
+        if (afterInventory.fingerprint !== inventory.fingerprint
+          || afterInventory.paths.length !== inventory.paths.length
+          || afterInventory.paths.some((entry, index) => entry !== inventory.paths[index])) {
+          throw new Error("Experiment source changed while its input snapshot was being captured");
+        }
+
+        // A path inventory does not include file bytes. Re-observe every captured
+        // path so a multi-file snapshot cannot silently mix two live generations.
+        for (const entry of entries) {
+          options.signal?.throwIfAborted();
+          const observed = await capturePath(entry.path, false);
+          const verified = captureState(observed, entry.path, false);
+          if (stableState(verified.state) !== stableState(entry.sourceState)) {
+            throw new Error(`Experiment source changed while capturing: ${entry.path}`);
+          }
+          await symlinkStateForSnapshot(sourceRoot, entry.path, verified.state, inventory.paths);
+        }
+
+        const branchId = options.branchId ?? `experiment-input-${randomUUID()}`;
+        const capture: ExperimentInputCapture = {
+          schemaVersion: 1, branchId, sourceRoot,
+          workspaceId: caller.workspaceId, executionWorkspaceId: caller.executionWorkspaceId,
+          captureScopes: scopes, capturedPathCount: inventory.paths.length,
+          inventoryFingerprint: inventory.fingerprint,
+          captureSemantics: { excludedDirectories: CAPTURE_EXCLUDED_DIRECTORIES, gitignore: "not-applied", ignoredFilesIncluded: true },
+          ...(cwd ? { cwd } : {}),
+        };
+        await options.beforeBranchCreate?.(capture);
+        options.signal?.throwIfAborted();
+        branchCreateUncertain = true;
+        branchCreateDispatched = true;
+        // This short metadata commit keeps its actual ACK; cancelling the caller must not lose its ownership receipt.
+        const created = await scoped.createBranch({
+          operationId: `experiment-input-branch:${branchId}`,
+          branchId,
+          workspaceId: caller.workspaceId,
+          entries: entries.map(({ path: entryPath, state, ownerId }) => ({
+            path: entryPath,
+            state,
+            ...(ownerId ? { ownerId } : {}),
+          })),
+          draftBasePaths: [],
+          captureScopes: scopes,
+        });
+        branchCreateUncertain = false;
+        if (created.created === true) createdBranchId = branchId;
+        const root = typeof created.root === "string" ? created.root : "";
+        if (!root || created.branchId !== branchId) throw new Error("Kernel returned an invalid experiment input branch");
+        const branch = await scoped.readBranch({ branchId }, options.signal);
+        if (branch.workspaceId !== caller.workspaceId || branch.root !== root || branch.currentRoot !== root) {
+          throw new Error("Experiment input branch changed while it was being created");
+        }
+        return { ...capture, root };
+      } catch (error) {
+        // If branch creation succeeded but the post-create provenance check failed,
+        // remove only the branch allocated by this call before releasing any
+        // remaining temporary owners. A `created:false` response is never deleted.
+        if (createdBranchId && !options.branchId) {
+          await scoped.deleteBranch({
+            operationId: `experiment-input-branch-cleanup:${createdBranchId}:${randomUUID()}`,
+            branchId: createdBranchId,
+          }).catch(() => undefined);
+        }
+        await releaseOwners(scoped, entries.flatMap((entry) => entry.ownerId ? [entry.ownerId] : []));
+        throw error;
+      }
+    } finally {
+      await scoped.fileLeaseRelease({ workspaceId: caller.workspaceId, rootId: sourceRootId, leaseId });
+    }
+  } catch (error) {
+    throw new ExperimentInputCaptureError(error instanceof Error ? error.message : String(error), branchCreateDispatched, { drained: captureDrained, retryable: !captureDrained || branchCreateUncertain || error instanceof KernelClientError, cause: error });
   }
+}
+
+/** Recover only the original create receipt; a missing/changed committed branch is never recaptured. */
+export async function recoverExperimentInput(
+  client: KernelClient,
+  caller: ExperimentWorkspaceCaller,
+  capture: ExperimentInputCapture,
+  signal?: AbortSignal,
+): Promise<ExperimentInputSnapshot | null> {
+  const scoped = await issueExperimentGrant(client, caller, "prepare", signal);
+  const receipt = await scoped.getOperation(`experiment-input-branch:${capture.branchId}`, signal);
+  if (receipt === null) return null;
+  const result = receipt.result;
+  if (receipt.state !== "committed" || !result || typeof result !== "object") {
+    throw new Error("Experiment input branch creation has no confirmed immutable result");
+  }
+  const created = result as Record<string, unknown>;
+  if (created.branchId !== capture.branchId || typeof created.root !== "string" || !created.root) {
+    throw new Error("Experiment input branch receipt is unreadable");
+  }
+  const branch = await scoped.readBranch({ branchId: capture.branchId }, signal);
+  if (branch.workspaceId !== caller.workspaceId || branch.root !== created.root || branch.currentRoot !== created.root) {
+    throw new Error("Experiment input branch no longer matches its committed create receipt");
+  }
+  return { ...capture, root: created.root };
 }
 
 /** Materialize one independent attempt directory from the spec's immutable root. */
@@ -444,61 +506,120 @@ export async function materializeExperimentAttempt(
   input: ExperimentInputSnapshot,
   options: { signal?: AbortSignal } = {},
 ): Promise<MaterializedExperimentAttempt> {
+  let materializationDispatched = false;
+  let materializationDrained = false;
+  try {
+    assertCaller(caller);
+    if (caller.workspaceId !== input.workspaceId || caller.executionWorkspaceId !== input.executionWorkspaceId) {
+      throw new Error("Experiment execution identity does not match the input snapshot");
+    }
+    asNonEmptyString(input.branchId, "Experiment input branch identity");
+    asNonEmptyString(input.root, "Experiment input root identity");
+    asNonEmptyString(attemptId, "Experiment attempt identity");
+    const scoped = await issueExperimentGrant(client, caller, "materialize", options.signal);
+    const branch = await scoped.readBranch({ branchId: input.branchId }, options.signal);
+    if (branch.workspaceId !== caller.workspaceId || branch.root !== input.root || branch.currentRoot !== input.root) {
+      throw new Error("Experiment input branch no longer matches the persisted immutable root");
+    }
+    const handshake = client.handshake ?? await client.start();
+    const storageRoot = await canonicalizePathIdentity(handshake.storageRoot);
+    const { managedRoot, attemptRoot } = managedAttemptPath(storageRoot, caller.workspaceId, attemptId);
+    const container = await scoped.fileRootRegister({
+      workspaceId: caller.workspaceId,
+      executionWorkspaceId: caller.executionWorkspaceId,
+      canonicalRoot: storageRoot,
+    }, options.signal);
+    const containerRootId = rootIdFrom(container, "Experiment managed storage root registration");
+    const relativeTarget = path.relative(storageRoot, attemptRoot).replaceAll("\\", "/");
+    if (!relativeTarget || relativeTarget.startsWith("../") || path.isAbsolute(relativeTarget)) {
+      throw new Error("Experiment attempt directory escaped managed storage");
+    }
+    materializationDispatched = true;
+    const materialized = await scoped.fileMaterialize({
+      operationId: `experiment-attempt-materialize:${caller.workspaceId}:${attemptId}`,
+      workspaceId: caller.workspaceId,
+      rootId: containerRootId,
+      path: relativeTarget,
+      sourceRoot: input.root,
+    }, options.signal);
+    materializationDrained = true;
+    if (materialized.status !== "materialized") {
+      throw new Error(`Experiment attempt materialization was not completed: ${String(materialized.reason ?? "conflict")}`);
+    }
+    const canonicalTarget = await canonicalizePathIdentity(attemptRoot);
+    assertInRoot(canonicalTarget, managedRoot, "Experiment materialized attempt");
+    const target = await scoped.fileRootRegister({
+      workspaceId: caller.workspaceId,
+      executionWorkspaceId: caller.executionWorkspaceId,
+      canonicalRoot: canonicalTarget,
+    }, options.signal);
+    const rootId = rootIdFrom(target, "Experiment attempt root registration");
+    return {
+      attemptId,
+      branchId: input.branchId,
+      snapshotRoot: input.root,
+      scoped,
+      rootId,
+      canonicalRoot: canonicalTarget,
+      cwd: input.cwd ?? "",
+      containerRootId,
+      managedRoot,
+      materialized: true,
+    };
+  } catch (error) {
+    throw new ExperimentPreparationError(error instanceof Error ? error.message : String(error), {
+      drained: !materializationDispatched || materializationDrained || (error instanceof KernelClientError && error.code === "cancelled"),
+      retryable: (materializationDispatched && !materializationDrained) || error instanceof KernelClientError,
+      cause: error,
+    });
+  }
+}
+
+/** Probe the original source lease after an interrupted input worker, without recapturing content. */
+export async function reconcileExperimentCapture(
+  client: KernelClient,
+  caller: ExperimentWorkspaceCaller,
+  sourceRoot: string,
+  captureScopes: readonly string[],
+): Promise<"drained" | "unknown"> {
+  if (await canonicalizePathIdentity(sourceRoot) !== sourceRoot) throw new Error("Experiment source identity changed");
+  const scoped = await issueExperimentGrant(client, caller, "prepare");
+  const root = await scoped.fileRootRegister({ workspaceId: caller.workspaceId, executionWorkspaceId: caller.executionWorkspaceId, canonicalRoot: sourceRoot });
+  const rootId = rootIdFrom(root, "Experiment source reconciliation");
+  const leaseId = `experiment-input-observe:${randomUUID()}`;
+  const lease = await scoped.fileLeaseAcquire({ workspaceId: caller.workspaceId, rootId, leaseId,
+    resources: (captureScopes.length ? [...captureScopes] : [""]).map((entry) => ({ path: entry, scope: "subtree" })) });
+  if (lease.status === "busy") return "unknown";
+  if (lease.status !== "acquired") throw new Error("Experiment source lease returned no confirmed acquisition");
+  try { return "drained"; }
+  finally { await scoped.fileLeaseRelease({ workspaceId: caller.workspaceId, rootId, leaseId }); }
+}
+
+/** Confirm the original local materialization has committed and its real physical writer lease has drained. */
+export async function reconcileExperimentPreparation(
+  client: KernelClient,
+  caller: ExperimentWorkspaceCaller,
+  attemptId: string,
+  input: ExperimentInputSnapshot,
+): Promise<"drained" | "unknown"> {
   assertCaller(caller);
-  if (caller.workspaceId !== input.workspaceId || caller.executionWorkspaceId !== input.executionWorkspaceId) {
-    throw new Error("Experiment execution identity does not match the input snapshot");
-  }
-  asNonEmptyString(input.branchId, "Experiment input branch identity");
-  asNonEmptyString(input.root, "Experiment input root identity");
-  asNonEmptyString(attemptId, "Experiment attempt identity");
   const scoped = await issueExperimentGrant(client, caller, "materialize");
-  const branch = await scoped.readBranch({ branchId: input.branchId }, options.signal);
-  if (branch.workspaceId !== caller.workspaceId || branch.root !== input.root || branch.currentRoot !== input.root) {
-    throw new Error("Experiment input branch no longer matches the persisted immutable root");
-  }
+  const receipt = await scoped.getOperation(`experiment-attempt-materialize:${caller.workspaceId}:${attemptId}`);
+  if (!receipt || receipt.state !== "committed" || !receipt.result || typeof receipt.result !== "object"
+    || (receipt.result as Record<string, unknown>).root !== input.root) return "unknown";
   const handshake = client.handshake ?? await client.start();
   const storageRoot = await canonicalizePathIdentity(handshake.storageRoot);
-  const { managedRoot, attemptRoot } = managedAttemptPath(storageRoot, caller.workspaceId, attemptId);
-  const container = await scoped.fileRootRegister({
-    workspaceId: caller.workspaceId,
-    executionWorkspaceId: caller.executionWorkspaceId,
-    canonicalRoot: storageRoot,
-  }, options.signal);
-  const containerRootId = rootIdFrom(container, "Experiment managed storage root registration");
-  const relativeTarget = path.relative(storageRoot, attemptRoot).replaceAll("\\", "/");
-  if (!relativeTarget || relativeTarget.startsWith("../") || path.isAbsolute(relativeTarget)) {
-    throw new Error("Experiment attempt directory escaped managed storage");
-  }
-  const materialized = await scoped.fileMaterialize({
-    operationId: `experiment-attempt-materialize:${caller.workspaceId}:${attemptId}`,
-    workspaceId: caller.workspaceId,
-    rootId: containerRootId,
-    path: relativeTarget,
-    sourceRoot: input.root,
-  }, options.signal);
-  if (materialized.status !== "materialized") {
-    throw new Error(`Experiment attempt materialization was not completed: ${String(materialized.reason ?? "conflict")}`);
-  }
-  const canonicalTarget = await canonicalizePathIdentity(attemptRoot);
-  assertInRoot(canonicalTarget, managedRoot, "Experiment materialized attempt");
-  const target = await scoped.fileRootRegister({
-    workspaceId: caller.workspaceId,
-    executionWorkspaceId: caller.executionWorkspaceId,
-    canonicalRoot: canonicalTarget,
-  }, options.signal);
-  const rootId = rootIdFrom(target, "Experiment attempt root registration");
-  return {
-    attemptId,
-    branchId: input.branchId,
-    snapshotRoot: input.root,
-    scoped,
-    rootId,
-    canonicalRoot: canonicalTarget,
-    cwd: input.cwd ?? "",
-    containerRootId,
-    managedRoot,
-    materialized: true,
-  };
+  const { attemptRoot } = managedAttemptPath(storageRoot, caller.workspaceId, attemptId);
+  const registered = await scoped.fileRootRegister({ workspaceId: caller.workspaceId,
+    executionWorkspaceId: caller.executionWorkspaceId, canonicalRoot: storageRoot });
+  const rootId = rootIdFrom(registered, "Experiment preparation reconciliation root");
+  const leaseId = `experiment-preparation-observe:${randomUUID()}`;
+  const lease = await scoped.fileLeaseAcquire({ workspaceId: caller.workspaceId, rootId, leaseId,
+    resources: [{ path: path.relative(storageRoot, attemptRoot).replaceAll("\\", "/"), scope: "subtree" }] });
+  if (lease.status === "busy") return "unknown";
+  if (lease.status !== "acquired") throw new Error("Experiment preparation lease returned no confirmed acquisition");
+  try { return "drained"; }
+  finally { await scoped.fileLeaseRelease({ workspaceId: caller.workspaceId, rootId, leaseId }); }
 }
 
 /**
@@ -516,7 +637,7 @@ export async function openExperimentInputTransfer(
   if (caller.workspaceId !== input.workspaceId || caller.executionWorkspaceId !== input.executionWorkspaceId) {
     throw new Error("Experiment transfer identity does not match the input snapshot");
   }
-  const scoped = await issueExperimentGrant(client, caller, "prepare");
+  const scoped = await issueExperimentGrant(client, caller, "prepare", options.signal);
   const entries: Array<{ path: string; state: KernelBranchState }> = [];
   let cursor: number | undefined;
   do {
