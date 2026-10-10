@@ -32,7 +32,7 @@ impl ChildAdmissionPreparation {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         let operation: Operation = record(&database, "operations", &self.context.operation_id)?;
-        let admitted: crate::execution::AdmittedTool = serde_json::from_value(operation.intent)?;
+        let admitted=super::tool_content::ToolIntent::from_operation(&operation)?.load(&self.content)?;
         if admitted.call.name != collaboration::DISPATCH_TOOL
             || admitted.call.arguments != serde_json::to_value(&self.input)?
         {

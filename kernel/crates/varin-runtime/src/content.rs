@@ -30,6 +30,25 @@ pub fn object_path(root: &Path, hash: &str) -> std::io::Result<PathBuf> {
 fn identity(bytes: &[u8]) -> String {
     format!("sha256-{}", hex::encode(Sha256::digest(bytes)))
 }
+fn content_chunks(bytes: &[u8]) -> Vec<&[u8]> {
+    let mut chunks = Vec::new();
+    let (mut start, mut rolling) = (0, 0u64);
+    for (index, byte) in bytes.iter().enumerate() {
+        rolling = rolling
+            .rotate_left(1)
+            .wrapping_add((*byte as u64 + 1).wrapping_mul(0x9e3779b185ebca87));
+        let size = index + 1 - start;
+        if size >= 16 * 1024 && (rolling & 0xffff == 0 || size >= 256 * 1024) {
+            chunks.push(&bytes[start..=index]);
+            start = index + 1;
+            rolling = 0;
+        }
+    }
+    if start < bytes.len() {
+        chunks.push(&bytes[start..]);
+    }
+    chunks
+}
 fn sync_directory(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -150,22 +169,10 @@ impl ContentStore {
     /// Serialization still visits the full provider request; only changed chunks need durable writes.
     pub(crate) fn save(&self, value: &Value) -> Result<Value> {
         let bytes = serde_json::to_vec(value)?;
-        let mut chunks = Vec::new();
-        let (mut start, mut rolling) = (0, 0u64);
-        for (i, byte) in bytes.iter().enumerate() {
-            rolling = rolling
-                .rotate_left(1)
-                .wrapping_add((*byte as u64 + 1).wrapping_mul(0x9e3779b185ebca87));
-            let size = i + 1 - start;
-            if size >= 16 * 1024 && (rolling & 0xffff == 0 || size >= 256 * 1024) {
-                chunks.push(self.put_bytes(&bytes[start..=i])?);
-                start = i + 1;
-                rolling = 0;
-            }
-        }
-        if start < bytes.len() {
-            chunks.push(self.put_bytes(&bytes[start..])?);
-        }
+        let chunks = content_chunks(&bytes)
+            .into_iter()
+            .map(|chunk| self.put_bytes(chunk))
+            .collect::<Result<Vec<_>>>()?;
         let manifest = Manifest {
             version: 1,
             bytes: bytes.len() as u64,
@@ -174,6 +181,18 @@ impl ContentStore {
         let hash = self.put_bytes(&serde_json::to_vec(&manifest)?)?;
         Ok(serde_json::to_value(Reference {
             content_object: hash,
+        })?)
+    }
+    /// Derive the same identity without filesystem I/O. Large values are fingerprinted on workers.
+    pub(crate) fn reference(value: &Value) -> Result<Value> {
+        let bytes = serde_json::to_vec(value)?;
+        let manifest = Manifest {
+            version: 1,
+            bytes: bytes.len() as u64,
+            chunks: content_chunks(&bytes).into_iter().map(identity).collect(),
+        };
+        Ok(serde_json::to_value(Reference {
+            content_object: identity(&serde_json::to_vec(&manifest)?),
         })?)
     }
     pub(crate) fn load(&self, reference: &Value) -> Result<Value> {
@@ -262,6 +281,12 @@ impl ContentStore {
             UNION ALL SELECT json_extract(p.value,'$.body') FROM run_launches l,json_each(l.body,'$.selection.policy_models') p");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.answer_ref') FROM operations WHERE json_extract(body,'$.executor')='ask_user' AND json_extract(body,'$.result.answer_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT state_ref FROM policy_checkpoints UNION ALL SELECT action_ref FROM policy_checkpoints");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.arguments_ref') FROM tool_calls
+            UNION ALL SELECT json_extract(body,'$.intent.call.arguments_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='tool'");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.permission.call_ref') FROM operations WHERE json_extract(body,'$.result.permission.call_ref') IS NOT NULL
+            UNION ALL SELECT json_extract(body,'$.result.permission.scope_ref') FROM operations WHERE json_extract(body,'$.result.permission.scope_ref') IS NOT NULL
+            UNION ALL SELECT json_extract(data,'$.result.permission.call_ref') FROM events WHERE kind='permission.opened'
+            UNION ALL SELECT json_extract(data,'$.result.permission.scope_ref') FROM events WHERE kind='permission.opened'");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.input_ref') FROM child_tasks
             UNION ALL SELECT json_extract(body,'$.configuration_ref') FROM child_tasks
             UNION ALL SELECT json_extract(body,'$.launch.tools_ref') FROM child_tasks

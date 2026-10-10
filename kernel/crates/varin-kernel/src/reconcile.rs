@@ -22,6 +22,9 @@ pub(crate) fn reconcile(
         .spawn(move || {
             let result = (|| -> Result<Value, KernelError> {
                 let requested: Vec<String> = operations.iter().map(|op| op.id.clone()).collect();
+                let reads={let owner=runtime.catalog();let catalog=owner.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?;
+                    operations.into_iter().map(|operation|catalog.capture_operation_read(operation)).collect::<Vec<_>>()};
+                let operations=reads.into_iter().map(|read|read.load().map_err(|error|KernelError::Operation(error.to_string()))).collect::<Result<Vec<_>,_>>()?;
                 let receipts = resources.reconcile_mutations(binding, operations)?;
                 let mut reconciled = Vec::new();
                 {

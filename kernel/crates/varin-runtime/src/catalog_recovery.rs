@@ -625,7 +625,7 @@ impl Catalog {
             ))
         })? {
             let (body, receipt, done) = row?;
-            let call: ToolCall = serde_json::from_str(&body)?;
+            let call = serde_json::from_str::<super::tool_content::ToolCallMetadata>(&body)?.load(content)?;
             if let Some(receipt) = receipt {
                 receipts.insert(
                     call.call_id.clone(),

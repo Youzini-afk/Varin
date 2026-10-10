@@ -2,7 +2,7 @@
 //! Preparation and model I/O are performed by their existing owners after admission.
 use super::*;
 use crate::execution::{
-    AdmittedTool, ToolCompletion, ToolExecutionContext, ToolOrigin, ToolResult,
+    ToolCompletion, ToolExecutionContext, ToolOrigin, ToolResult,
 };
 use serde::Deserialize;
 
@@ -805,7 +805,7 @@ impl Catalog {
         op.revision += 1;
         put(&tx, "operations", &op.id, &op)?;
         // Preserve this Job receipt through Host/kernel loss just as dispatch admission does.
-        let admitted: AdmittedTool = serde_json::from_value(op.intent.clone())?;
+        let admitted=super::tool_content::ToolIntent::from_operation(&op)?;
         let request_id = match &context.origin {
             ToolOrigin::ModelStep { request_id } => request_id,
             _ => {
@@ -816,7 +816,7 @@ impl Catalog {
         };
         let receipt = ToolResult {
             request_id: request_id.clone(),
-            call_id: admitted.call.call_id,
+            call_id: admitted.call().call_id.clone(),
             completion: ToolCompletion::JobAccepted {
                 operation_id: op.id.clone(),
                 phase: "awaiting_child".into(),

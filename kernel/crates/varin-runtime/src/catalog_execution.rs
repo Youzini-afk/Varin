@@ -1,6 +1,7 @@
 //! Atomic bridge from the executor to its sole durable authority.
 use super::*;
 use crate::execution::*;
+use super::tool_content::{ToolCallMetadata,ToolIntent};
 use std::sync::Mutex;
 
 impl Persistence for Mutex<Catalog> {
@@ -11,12 +12,12 @@ impl Persistence for Mutex<Catalog> {
         let run = catalog.run(&context.run_id).map_err(policy_error)?;
         fence(&run, epoch).map_err(policy_error)?;
         let operation = catalog.operation(&context.operation_id).map_err(policy_error)?;
-        let admitted: AdmittedTool = serde_json::from_value(operation.intent.clone())
+        let admitted: ToolIntent = serde_json::from_value(operation.intent.clone())
             .map_err(|error| ExecutionError::new("external_receipt", error.to_string()))?;
         let ToolOrigin::ModelStep { request_id } = &context.origin else { return Ok(false); };
         Ok(catalog.epoch() == epoch && operation.epoch == epoch && operation.run_id == run.id
-            && operation.id == format!("{request_id}:tool:{}", admitted.call.call_id)
-            && operation.executor.as_deref() == Some(admitted.call.name.as_str())
+            && operation.id == format!("{request_id}:tool:{}", admitted.call().call_id)
+            && operation.executor.as_deref() == Some(admitted.call().name.as_str())
             && confirmed_no_effect_receipt(&operation, *outcome, content))
     }
 
@@ -187,7 +188,7 @@ fn policy_model_body(catalog: &Mutex<Catalog>, run: &str, epoch: u64, action: &s
     let reference = catalog.policy_model_request_reference(run, epoch, action).map_err(policy_error)?;
     Ok((catalog.content.clone(), catalog.content.begin_publication(), reference))
 }
-fn append_item(tx: &Transaction<'_>, run: &Run, item: &ConversationItem, body_reference: &Value) -> Result<()> {
+fn append_item(tx: &Transaction<'_>, run: &Run, id:&str, source:HistorySource, body_reference: &Value) -> Result<()> {
     let (head, active): (Option<String>, Option<String>) = tx.query_row(
         "SELECT head,active_run FROM branches WHERE id=?1",
         [&run.branch_id],
@@ -198,17 +199,8 @@ fn append_item(tx: &Transaction<'_>, run: &Run, item: &ConversationItem, body_re
             "branch execution owner changed".into(),
         ));
     }
-    let source = match item.provenance {
-        Provenance::Assistant => HistorySource::Assistant,
-        Provenance::ToolData { .. } => HistorySource::Tool,
-        Provenance::UserInstruction { .. } | Provenance::SystemInstruction { .. } => {
-            HistorySource::User
-        }
-        Provenance::AgentMessage { .. } => HistorySource::Agent,
-        _ => HistorySource::Environment,
-    };
     let stored = HistoryItem {
-        id: item.id.clone(),
+        id: id.into(),
         thread_id: run.thread_id.clone(),
         parent: head,
         source,
@@ -257,6 +249,8 @@ struct PreparedExecutionBodies {
     request: Option<Value>,
     tools_ref: Option<Value>,
     policy_checkpoint: Option<super::policy_checkpoint::PolicyCheckpointReferences>,
+    calls: std::collections::HashMap<String,ToolCallMetadata>,
+    admitted: std::collections::HashMap<String,ToolIntent>,
     frozen_history_range: Option<HistoryRange>,
     memory_deliveries: Option<super::memory::PreparedMemoryDeliveries>,
     history: std::collections::HashMap<String, Value>,
@@ -277,6 +271,23 @@ impl ExecutionBodyPreparation {
             ExecutionRecord::PolicyCheckpoint { state, action, .. } => Some(super::policy_checkpoint::PolicyCheckpointReferences::write(&self.content,state,action)?),
             _ => None,
         };
+        let mut calls=std::collections::HashMap::new();
+        let mut admitted=std::collections::HashMap::new();
+        match record {
+            ExecutionRecord::ModelFinished {items,..} => {
+                for item in items {
+                    if let Content::ToolCall {call}=&item.content {calls.insert(call.call_id.clone(),ToolCallMetadata::write(&self.content,call)?);}
+                }
+            }
+            ExecutionRecord::ToolsAdmitted {tools,..} => {
+                for tool in tools {
+                    let intent=ToolIntent::write(&self.content,tool)?;
+                    calls.insert(tool.call.call_id.clone(),intent.call().clone());
+                    admitted.insert(tool.call.call_id.clone(),intent);
+                }
+            }
+            _=>(),
+        }
         let snapshot: Option<RequestSnapshot> = self.frozen_request.as_ref()
             .map(|reference| self.content.load(reference).and_then(|value| Ok(serde_json::from_value(value)?)))
             .transpose()?;
@@ -301,7 +312,7 @@ impl ExecutionBodyPreparation {
             (Some(self.content.save_originals(&provider_originals(items))?),
              Some(self.content.save(&json!({"status":"committed","record":record}))?))
         } else { (None, None) };
-        Ok(PreparedExecutionBodies { _publication: self.publication, request, tools_ref, policy_checkpoint, frozen_history_range, memory_deliveries, history, originals, output })
+        Ok(PreparedExecutionBodies { _publication: self.publication, request, tools_ref, policy_checkpoint, calls, admitted, frozen_history_range, memory_deliveries, history, originals, output })
     }
 }
 impl Catalog {
@@ -340,7 +351,7 @@ impl Catalog {
         &mut self, run_id: &str, epoch: u64, record: &ExecutionRecord, prepared: PreparedExecutionBodies,
     ) -> Result<()> {
         let PreparedExecutionBodies {
-            _publication, request: prepared_request, tools_ref, policy_checkpoint, frozen_history_range, memory_deliveries, history: prepared_history,
+            _publication, request: prepared_request, tools_ref, policy_checkpoint, calls:prepared_calls, admitted:prepared_admitted, frozen_history_range, memory_deliveries, history: prepared_history,
             originals: prepared_originals, output: prepared_output,
         } = prepared;
         // A receipt retry confirms the original completion. Keep exact request/owner fencing,
@@ -583,17 +594,17 @@ impl Catalog {
                 // Completion, original output, semantic history and unresolved call identities commit together.
                 if *outcome == ModelOutcome::Completed {
                     for item in items {
-                        let history_item = model_history_item(request_id, item);
+                        let history_id=model_history_id(request_id,&item.id);
                         append_item(
                             &tx,
                             &run,
-                            &history_item,
-                            prepared_history.get(&history_item.id).ok_or_else(|| RuntimeError::Invalid("prepared history body missing".into()))?,
+                            &history_id,HistorySource::Assistant,
+                            prepared_history.get(&history_id).ok_or_else(|| RuntimeError::Invalid("prepared history body missing".into()))?,
                         )?;
                         if let Content::ToolCall { call } = &item.content {
                             tx.execute(
                                 "INSERT INTO tool_calls(request_id,call_id,body) VALUES(?1,?2,?3)",
-                                params![request_id, call.call_id, encode(call)?],
+                                params![request_id, call.call_id, encode(prepared_calls.get(&call.call_id).ok_or_else(||RuntimeError::Invalid("prepared call identity missing".into()))?)?],
                             )?;
                         }
                     }
@@ -613,7 +624,8 @@ impl Catalog {
                         params![request_id, tool.call.call_id],
                         |r| r.get(0),
                     )?;
-                    if expected != encode(&tool.call)? {
+                    let intent=prepared_admitted.get(&tool.call.call_id).ok_or_else(||RuntimeError::Invalid("prepared tool intent missing".into()))?;
+                    if serde_json::from_str::<ToolCallMetadata>(&expected)? != *intent.call() {
                         return Err(RuntimeError::Conflict(
                             "tool call changed since model output".into(),
                         ));
@@ -621,7 +633,7 @@ impl Catalog {
                     if !tool.contract.read_only || tool.contract.completion == CompletionKind::Job {
                         let key = operation_id(request_id, &tool.call.call_id);
                         if let Some(mut previous) = optional_record::<Operation>(&tx, "operations", &key)? {
-                            if previous.run_id != run_id || previous.phase != OperationPhase::Accepted || previous.effect != Effect::None || previous.intent != serde_json::to_value(tool)? {
+                            if previous.run_id != run_id || previous.phase != OperationPhase::Accepted || previous.effect != Effect::None || previous.intent != serde_json::to_value(intent)? {
                                 return Err(RuntimeError::Conflict("tool admission cannot replace an existing effect or contract".into()));
                             }
                             previous.epoch=epoch;
@@ -642,7 +654,7 @@ impl Catalog {
                             handed_off: false,
                             executor: None,
                             waiting_on: None,
-                            intent: serde_json::to_value(tool)?,
+                            intent: serde_json::to_value(intent)?,
                             result: None,
                         };
                         tx.execute(
@@ -666,16 +678,16 @@ impl Catalog {
                 {
                     return Err(RuntimeError::Conflict("tool no longer admitted".into()));
                 }
-                let tool: AdmittedTool = serde_json::from_value(op.intent.clone())?;
+                let tool: ToolIntent = serde_json::from_value(op.intent.clone())?;
                 op.phase = OperationPhase::Running;
-                op.effect = if tool.contract.read_only {
+                op.effect = if tool.contract().read_only {
                     Effect::None
                 } else {
                     Effect::Dispatched
                 };
                 op.revision += 1;
-                op.executor = Some(tool.call.name);
-                tx.execute("INSERT INTO resource_occupancy(operation_id,claims) VALUES(?1,?2)", params![key, encode(&tool.contract.resources)?])?;
+                op.executor = Some(tool.call().name.clone());
+                tx.execute("INSERT INTO resource_occupancy(operation_id,claims) VALUES(?1,?2)", params![key, encode(&tool.contract().resources)?])?;
                 put(&tx, "operations", &key, &op)?;
             }
             ExecutionRecord::ToolSettled { result } => {
@@ -754,8 +766,8 @@ impl Catalog {
                 }
                 // Effect uncertainty and executor occupancy are separate facts. A returned
                 // synchronous call has stopped; an unconfirmed background job may still run.
-                let tool: AdmittedTool = serde_json::from_value(op.intent.clone())?;
-                let stopped = tool.contract.completion != CompletionKind::Job
+                let tool: ToolIntent = serde_json::from_value(op.intent.clone())?;
+                let stopped = tool.contract().completion != CompletionKind::Job
                     || matches!(result.completion, ToolCompletion::NotDispatched { .. })
                     || matches!(result.completion, ToolCompletion::Result { effect, .. } if effect != Effect::Unknown);
                 if stopped { tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1", [&key])?; }
@@ -821,16 +833,7 @@ impl Catalog {
                     append_item(
                         &tx,
                         &run,
-                        &ConversationItem {
-                            id: format!("{}:result:{}", request_id, result.call_id),
-                            provenance: Provenance::ToolData {
-                                call_id: result.call_id.clone(),
-                            },
-                            content: Content::ToolResult {
-                                result: result.clone(),
-                            },
-                            opaque: None,
-                        },
+                        &format!("{}:result:{}", request_id, result.call_id),HistorySource::Tool,
                         prepared_history.get(&format!("{}:result:{}", request_id, result.call_id)).ok_or_else(|| RuntimeError::Invalid("prepared tool history body missing".into()))?,
                     )?;
                 }

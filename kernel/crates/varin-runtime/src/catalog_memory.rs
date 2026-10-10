@@ -324,8 +324,8 @@ fn owned_receipt(
     {
         return Ok(None);
     }
-    let tool: crate::execution::AdmittedTool = serde_json::from_value(operation.intent)?;
-    if tool.call.name != "memory" || tool.call.call_id != call_id {
+    let tool=super::tool_content::ToolIntent::from_operation(&operation)?;
+    if tool.call().name != "memory" || tool.call().call_id != call_id {
         return Ok(None);
     }
     let owned: bool = db.query_row(
@@ -357,9 +357,8 @@ pub(super) fn trusted_memory_receipts(
     let mut receipts = BTreeMap::new();
     for row in rows {
         let operation: Operation = serde_json::from_str(&row)?;
-        let tool: crate::execution::AdmittedTool =
-            serde_json::from_value(operation.intent.clone())?;
-        if tool.call.name != "memory" {
+        let tool=super::tool_content::ToolIntent::from_operation(&operation)?;
+        if tool.call().name != "memory" {
             continue;
         }
         if let Some(receipt) = operation

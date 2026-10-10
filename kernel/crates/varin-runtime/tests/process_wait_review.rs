@@ -17,7 +17,7 @@ impl Fixture {
         db.create_thread("thread", "branch").unwrap();
         let launch: LaunchSelection = serde_json::from_value(json!({"connection_identity":"fixture",
             "provider_family":"fixture","model":"model","configuration_generation":1,"tool_schema_generation":1,
-            "tools":[],"policy":{"name":"fixture","version":"1"},"source":null})).unwrap();
+            "tools":[{"name":WAIT_TOOL,"version":"1","schema":{"type":"object"}}],"policy":{"name":"fixture","version":"1"},"source":null})).unwrap();
         let receipt = db.submit_with_launch(&SubmitInput { key:"input".into(),thread_id:"thread".into(),branch_id:"branch".into(),
             expected_head:None,input:json!("Observe process"),configuration:json!({}) }, Some(launch)).unwrap();
         let mut f = Self { root, db, run:receipt.run_id };

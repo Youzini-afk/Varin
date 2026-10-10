@@ -126,13 +126,14 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 13, input domain 2 and collaboration domain 2 store input intents/queue bodies and context-job ownership,
+Catalog version 14, input domain 2 and collaboration domain 2 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. `Catalog::collect_content_objects` marks requests, provider originals,
 history, all model outputs (including rejected output), original command intents, queued-history references, context
 checkpoints, memory projections, summary recipes and source parts, policy action/checkpoint bodies,
-and indexed graph receipts and planning-model request/output references. It verifies every live object
+and indexed graph receipts, planning-model request/output references, ordinary tool arguments and
+permission call/scope bodies, including completed permission audit events. It verifies every live object
 before sweeping and preserves unknown files; it never deletes history or invokes system-kernel GC.
 
 Child task records retain ownership/state and references to task text, configuration and launch
@@ -142,6 +143,14 @@ resource-release queries use metadata. Public child views and report pages hydra
 Completed report selection and Wait previews also run on workers. Their commits recheck the original
 Run, Wait, branch head and cancellation; changed candidates cannot append stale report messages.
 Previously delivered reports are found through branch ancestry without rereading their body.
+
+Ordinary tool calls and Operations retain frozen argument references. Admission compares their
+prepared identities; dispatch, settlement and cancellation use metadata. Recovery and public Operation
+views load arguments on workers. Permission preparation also stages the exact call and scope outside
+Catalog; approval and consumption compare those identities against the admitted action. Public views
+restore the original call/scope shape. Plan authorization reads its frozen model request outside Catalog,
+then rechecks the current owner and request reference. Generic tool results and external receipt bodies
+still remain inline; their isolation is unfinished.
 
 Provider serialization still visits and sends full legal requests; chunk reuse is not remote
 incremental-context support or a measured speedup claim.

@@ -315,9 +315,12 @@ pub struct ProviderItem {
 /// deterministic tuple of the globally owned request ID and the unmodified provider ID.
 /// Length-prefixing the request makes delimiters inside either component unambiguous.
 /// Opaque originals and the durable ProviderItem record retain provider-native IDs verbatim.
+pub(crate) fn model_history_id(request_id:&str,item_id:&str) -> String {
+    format!("model-item:{}:{}:{}",request_id.len(),request_id,item_id)
+}
 pub(crate) fn model_history_item(request_id: &str, item: &ProviderItem) -> ConversationItem {
     ConversationItem {
-        id: format!("model-item:{}:{}:{}", request_id.len(), request_id, item.id),
+        id: model_history_id(request_id,&item.id),
         provenance: Provenance::Assistant,
         content: item.content.clone(),
         opaque: item.opaque.clone(),

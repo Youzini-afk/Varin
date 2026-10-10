@@ -7,7 +7,7 @@ impl Fixture {
         Self(std::env::temp_dir().join(format!("varin-content-review-{}", uuid::Uuid::new_v4())))
     }
     fn store(&self) -> ContentStore {
-        ContentStore::open(self.0.clone()).unwrap()
+        ContentStore::open(self.0.join("content")).unwrap()
     }
 }
 impl Drop for Fixture {
@@ -15,19 +15,41 @@ impl Drop for Fixture {
         let _ = fs::remove_dir_all(&self.0);
     }
 }
-fn db() -> Connection {
-    let db = Connection::open_in_memory().unwrap();
-    db.execute_batch("CREATE TABLE model_steps(id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE history(id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE model_outputs(request_id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE input_queue(id TEXT PRIMARY KEY,body TEXT NOT NULL)")
+fn collection_db(fixture: &Fixture) -> Connection {
+    // Use the installed Catalog schema so new content domains participate in the GC fixture.
+    let mut catalog = crate::Catalog::open(&fixture.0).unwrap();
+    catalog.create_thread("thread", "branch").unwrap();
+    let prepared = catalog
+        .prepare_submission(
+            crate::SubmitInput {
+                key: "gc-owner".into(),
+                thread_id: "thread".into(),
+                branch_id: "branch".into(),
+                expected_head: None,
+                input: json!("GC fixture"),
+                configuration: json!({}),
+            },
+            None,
+            None,
+        )
+        .unwrap()
+        .load(None, false)
         .unwrap();
-    db
-}
-fn collection_db() -> Connection {
-    let db = db();
-    db.execute_batch(
-        "CREATE TABLE input_history_content(input_id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE commands(intent TEXT NOT NULL); CREATE TABLE operations(id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE context_jobs(recipe TEXT NOT NULL); CREATE TABLE context_job_parts(body TEXT NOT NULL)",
-    )
-    .unwrap();
-    db
+    catalog.admit_submission(prepared).unwrap();
+    let queued = catalog
+        .prepare_enqueue(crate::catalog::inputs::EnqueueInput {
+            key: "gc-queue".into(),
+            thread_id: "thread".into(),
+            branch_id: "branch".into(),
+            mode: crate::InputMode::Boundary,
+            input: json!("Queued GC fixture"),
+            configuration: None,
+        })
+        .load()
+        .unwrap();
+    catalog.admit_queued_input(queued).unwrap();
+    drop(catalog);
+    Connection::open(fixture.0.join("conversation.sqlite")).unwrap()
 }
 fn chunks(store: &ContentStore, reference: &Value) -> Vec<String> {
     let manifest: Manifest = serde_json::from_slice(
@@ -48,6 +70,7 @@ fn immutable_request_roundtrip_and_appended_history_reuse_existing_chunks() {
     let original = large_request();
     let first = store.save(&original).unwrap();
     assert_eq!(first, store.save(&original).unwrap());
+    assert_eq!(first, ContentStore::reference(&original).unwrap());
     assert_eq!(store.load(&first).unwrap(), original);
     let mut appended = original.clone();
     appended["history"]
@@ -55,6 +78,7 @@ fn immutable_request_roundtrip_and_appended_history_reuse_existing_chunks() {
         .unwrap()
         .push(json!({"opaque":{"unknown":["keep",null,3]},"text":"next"}));
     let second = store.save(&appended).unwrap();
+    assert_eq!(second, ContentStore::reference(&appended).unwrap());
     let before = chunks(&store, &first);
     let after = chunks(&store, &second);
     assert!(before.len() > 1);
@@ -76,9 +100,9 @@ fn garbage_collection_keeps_all_live_chunks_and_removes_only_orphans() {
     let orphan = store
         .save(&json!({"orphan":"uncommitted content"}))
         .unwrap();
-    let db = collection_db();
+    let db = collection_db(&fixture);
     db.execute(
-        "INSERT INTO model_steps VALUES('live',?1)",
+        "INSERT INTO model_steps(id,run_id,state,body) SELECT 'live',id,'prepared',?1 FROM runs LIMIT 1",
         [json!({"request":live}).to_string()],
     )
     .unwrap();
@@ -95,13 +119,13 @@ fn corrupt_or_missing_live_object_aborts_sweep_before_deleting_other_objects() {
     let orphan = store
         .save(&json!({"uncommitted":"keep on failed mark"}))
         .unwrap();
-    let db = collection_db();
+    let db = collection_db(&fixture);
     db.execute(
-        "INSERT INTO model_steps VALUES('live',?1)",
+        "INSERT INTO model_steps(id,run_id,state,body) SELECT 'live',id,'prepared',?1 FROM runs LIMIT 1",
         [json!({"request":live}).to_string()],
     )
     .unwrap();
-    let path = object_path(&fixture.0, &chunks(&store, &live)[0]).unwrap();
+    let path = object_path(&store.root, &chunks(&store, &live)[0]).unwrap();
     fs::write(&path, b"corrupt").unwrap();
     assert!(store.load(&live).is_err());
     assert!(store.collect(&db).is_err());
@@ -118,18 +142,28 @@ fn unsupported_catalog_versions_preserve_original_database_and_content() {
     for version in [0, 1, 2, 3, 4, 5, 6, 8] {
         let fixture = Fixture::new();
         fs::create_dir_all(fixture.0.join("content/objects")).unwrap();
-        let sentinel=fixture.0.join("content/objects/original-user-content");
-        fs::write(&sentinel,b"original bytes, do not convert").unwrap();
-        let path=fixture.0.join("conversation.sqlite");
-        let db=Connection::open(&path).unwrap();
+        let sentinel = fixture.0.join("content/objects/original-user-content");
+        fs::write(&sentinel, b"original bytes, do not convert").unwrap();
+        let path = fixture.0.join("conversation.sqlite");
+        let db = Connection::open(&path).unwrap();
         db.execute_batch("CREATE TABLE original_rows(id TEXT PRIMARY KEY,body TEXT NOT NULL); INSERT INTO original_rows VALUES('retained','opaque original')").unwrap();
-        db.pragma_update(None,"user_version",version).unwrap();
+        db.pragma_update(None, "user_version", version).unwrap();
         drop(db);
-        let original=fs::read(&path).unwrap();
+        let original = fs::read(&path).unwrap();
         assert!(crate::Catalog::open(&fixture.0).is_err());
-        assert_eq!(fs::read(&path).unwrap(),original,"unsupported format {version} was rewritten");
-        assert_eq!(fs::read(&sentinel).unwrap(),b"original bytes, do not convert");
-        assert!(!fixture.0.join("content/staging").exists(),"unsupported catalog must fail before content initialization");
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            original,
+            "unsupported format {version} was rewritten"
+        );
+        assert_eq!(
+            fs::read(&sentinel).unwrap(),
+            b"original bytes, do not convert"
+        );
+        assert!(
+            !fixture.0.join("content/staging").exists(),
+            "unsupported catalog must fail before content initialization"
+        );
         assert!(!fixture.0.join("conversation.sqlite-wal").exists());
     }
 }
@@ -138,9 +172,9 @@ fn unsupported_catalog_versions_preserve_original_database_and_content() {
 fn content_format_marker_mismatch_never_reinterprets_existing_references() {
     let fixture = Fixture::new();
     let store = fixture.store();
-    let mut db = collection_db();
-    db.pragma_update(None,"user_version",crate::catalog::FORMAT).unwrap();
-    db.execute_batch("CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY,version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,3)").unwrap();
+    let mut db = collection_db(&fixture);
+    db.pragma_update(None, "user_version", crate::catalog::FORMAT)
+        .unwrap();
     initialize(&mut db, &store).unwrap();
     assert_eq!(
         db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
@@ -149,7 +183,8 @@ fn content_format_marker_mismatch_never_reinterprets_existing_references() {
     );
     db.pragma_update(None, "user_version", 1).unwrap();
     assert!(initialize(&mut db, &store).is_err());
-    db.pragma_update(None, "user_version", crate::catalog::FORMAT).unwrap();
+    db.pragma_update(None, "user_version", crate::catalog::FORMAT)
+        .unwrap();
     db.execute_batch("DROP TABLE runtime_content_format")
         .unwrap();
     assert!(initialize(&mut db, &store).is_err());
@@ -169,20 +204,20 @@ fn gc_removes_abandoned_staging_only_after_successful_mark() {
     let fixture = Fixture::new();
     let store = fixture.store();
     let live = store.save(&json!({"opaque":"preserve"})).unwrap();
-    let db = collection_db();
+    let db = collection_db(&fixture);
     db.execute(
-        "INSERT INTO model_steps VALUES('live',?1)",
+        "INSERT INTO model_steps(id,run_id,state,body) SELECT 'live',id,'prepared',?1 FROM runs LIMIT 1",
         [json!({"request":live}).to_string()],
     )
     .unwrap();
-    let abandoned = fixture
-        .0
+    let abandoned = store
+        .root
         .join("staging")
         .join(uuid::Uuid::new_v4().to_string());
-    let unknown = fixture.0.join("staging").join("user-note.txt");
+    let unknown = store.root.join("staging").join("user-note.txt");
     fs::write(&abandoned, b"partial immutable object").unwrap();
     fs::write(&unknown, b"not ours").unwrap();
-    let manifest = object_path(&fixture.0, live["content_object"].as_str().unwrap()).unwrap();
+    let manifest = object_path(&store.root, live["content_object"].as_str().unwrap()).unwrap();
     let intact = fs::read(&manifest).unwrap();
     fs::write(&manifest, b"corrupt").unwrap();
     assert!(store.collect(&db).is_err());
@@ -196,22 +231,52 @@ fn gc_removes_abandoned_staging_only_after_successful_mark() {
 
 #[test]
 fn current_format_gc_preserves_request_original_history_output_and_input_references() {
-    let fixture=Fixture::new();let store=fixture.store();let mut db=collection_db();
-    db.pragma_update(None,"user_version",crate::catalog::FORMAT).unwrap();
-    db.execute_batch("CREATE TABLE runtime_content_format(id INTEGER PRIMARY KEY,version INTEGER NOT NULL); INSERT INTO runtime_content_format VALUES(1,3)").unwrap();
-    let request=json!({"request_id":"same","opaque":[null,{"signed":"request"}]});
-    let original=json!({"signed":"provider original","unknown":[2,null]});
-    let history=json!({"content":{"text":"visible"},"provider":{"signature":"keep"}});
-    let output=json!({"status":"rejected","record":{"items":[{"encrypted":"output"}]}});
-    let queued=json!({"content":{"text":"queued"},"provider":null});
-    let request_ref=store.save(&request).unwrap();let original_ref=store.save(&original).unwrap();
-    let history_ref=store.save(&history).unwrap();let output_ref=store.save(&output).unwrap();let queued_ref=store.save(&queued).unwrap();
-    db.execute("INSERT INTO model_steps VALUES('step',?1)",[json!({"request":request_ref,"original":[{"item":original_ref}]}).to_string()]).unwrap();
-    db.execute("INSERT INTO history VALUES('entry',?1)",[json!({"content":history_ref}).to_string()]).unwrap();
-    db.execute("INSERT INTO model_outputs VALUES('step',?1)",[output_ref.to_string()]).unwrap();
-    db.execute("INSERT INTO input_history_content VALUES('input',?1)",[queued_ref.to_string()]).unwrap();
-    initialize(&mut db,&store).unwrap();
-    store.save(&json!({"orphan":"remove only this"})).unwrap();assert!(store.collect(&db).unwrap()>0);
-    for (reference,value) in [(request_ref,request),(original_ref,original),(history_ref,history),(output_ref,output),(queued_ref,queued)] {assert_eq!(store.load(&reference).unwrap(),value);}
-    initialize(&mut db,&store).unwrap();assert_eq!(store.collect(&db).unwrap(),0);
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    let mut db = collection_db(&fixture);
+    db.pragma_update(None, "user_version", crate::catalog::FORMAT)
+        .unwrap();
+    let request = json!({"request_id":"same","opaque":[null,{"signed":"request"}]});
+    let original = json!({"signed":"provider original","unknown":[2,null]});
+    let history = json!({"content":{"text":"visible"},"provider":{"signature":"keep"}});
+    let output = json!({"status":"rejected","record":{"items":[{"encrypted":"output"}]}});
+    let queued = json!({"content":{"text":"queued"},"provider":null});
+    let request_ref = store.save(&request).unwrap();
+    let original_ref = store.save(&original).unwrap();
+    let history_ref = store.save(&history).unwrap();
+    let output_ref = store.save(&output).unwrap();
+    let queued_ref = store.save(&queued).unwrap();
+    db.execute("INSERT INTO model_steps(id,run_id,state,body) SELECT 'step',id,'prepared',?1 FROM runs LIMIT 1",[json!({"request":request_ref,"original":[{"item":original_ref}]}).to_string()]).unwrap();
+    db.execute(
+        "INSERT INTO history(id,thread_id,parent,body) VALUES('entry','thread',NULL,?1)",
+        [json!({"content":history_ref}).to_string()],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO model_outputs VALUES('step',?1)",
+        [output_ref.to_string()],
+    )
+    .unwrap();
+    assert_eq!(
+        db.execute(
+            "UPDATE input_history_content SET body=?1",
+            [queued_ref.to_string()]
+        )
+        .unwrap(),
+        1
+    );
+    initialize(&mut db, &store).unwrap();
+    store.save(&json!({"orphan":"remove only this"})).unwrap();
+    assert!(store.collect(&db).unwrap() > 0);
+    for (reference, value) in [
+        (request_ref, request),
+        (original_ref, original),
+        (history_ref, history),
+        (output_ref, output),
+        (queued_ref, queued),
+    ] {
+        assert_eq!(store.load(&reference).unwrap(), value);
+    }
+    initialize(&mut db, &store).unwrap();
+    assert_eq!(store.collect(&db).unwrap(), 0);
 }

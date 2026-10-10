@@ -1,6 +1,5 @@
 //! User clarification is an Operation plus an ordinary durable Wait, never a permission grant.
 use super::*;
-use crate::execution::AdmittedTool;
 
 pub const QUESTION_TOOL: &str = "ask_user";
 
@@ -89,13 +88,13 @@ impl Catalog {
                 serde_json::to_value(&wait)?,
             )?;
         }
-        let tool: AdmittedTool = serde_json::from_value(op.intent.clone())?;
+        let tool=super::tool_content::ToolIntent::from_operation(&op)?;
         let receipt = crate::execution::ToolResult {
             request_id: operation_id
-                .strip_suffix(&format!(":tool:{}", tool.call.call_id))
+                .strip_suffix(&format!(":tool:{}", tool.call().call_id))
                 .ok_or_else(|| RuntimeError::Invalid("question operation identity missing".into()))?
                 .into(),
-            call_id: tool.call.call_id,
+            call_id: tool.call().call_id.clone(),
             completion: crate::execution::ToolCompletion::JobAccepted {
                 operation_id: operation_id.into(),
                 phase: "awaiting_user".into(),

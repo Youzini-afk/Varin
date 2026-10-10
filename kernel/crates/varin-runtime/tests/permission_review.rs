@@ -1,10 +1,10 @@
-#[path="fixtures/input_admission.rs"]
+#[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
 use serde_json::{json, Value};
 use varin_runtime::catalog::launches::LaunchSelection;
 use varin_runtime::execution::{AdmittedTool, CompletionKind, ToolCall, ToolContract};
-use varin_runtime::{Catalog, Lifetime, SubmitInput};
+use varin_runtime::{Catalog, Effect, Lifetime, Outcome, SubmitInput};
 struct Fixture {
     root: std::path::PathBuf,
     db: Catalog,
@@ -50,14 +50,8 @@ impl Fixture {
                 resources: vec![],
             },
         };
-        db.admit_operation(
-            &op,
-            &receipt.run_id,
-            db.epoch(),
-            Lifetime::Run,
-            serde_json::to_value(tool).unwrap(),
-        )
-        .unwrap();
+        db.admit_tool_operation(&op, &receipt.run_id, db.epoch(), &tool)
+            .unwrap();
         let call = json!({"runId":receipt.run_id,"requestId":"request-1","operationId":op,"callId":"call-1","name":"fixture_send","schemaVersion":"schema-1","arguments":{"target":"chosen","text":"approved content"}});
         let scope = json!({"ownerReference":"owner-1","ownerGeneration":3,"toolSchemaVersion":"schema-1","policyGeneration":"policy-1","reason":"external effect"});
         Self {
@@ -93,7 +87,7 @@ fn permission_is_exact_one_use_and_denial_or_cancellation_never_authorizes_dispa
         f.db.open_permission(&f.op, "permission-1", f.call.clone(), f.scope.clone())
             .unwrap();
     assert_eq!(
-        opened.result.unwrap()["permission"]["actor"]["account"],
+        opened.result.as_ref().unwrap()["permission"]["actor"]["account"],
         "selected-account"
     );
     f.db.decide_permission(&f.op, "permission-1", "allow_once")
@@ -126,6 +120,23 @@ fn permission_is_exact_one_use_and_denial_or_cancellation_never_authorizes_dispa
         .db
         .decide_permission(&f.op, "permission-1", "allow_once")
         .is_err());
+    // A terminal receipt replaces the active permission. Its audit event must still retain
+    // the exact approved bodies, and the Operation must retain its original tool arguments.
+    f.db.settle_operation(
+        &f.op,
+        f.db.epoch(),
+        Outcome::Cancelled,
+        Effect::None,
+        json!({"cancelled":true}),
+    )
+    .unwrap();
+    f.db.collect_content_objects().unwrap();
+    let view = f.db.capture_operation_read(opened).load().unwrap();
+    let tool: AdmittedTool = serde_json::from_value(view.intent).unwrap();
+    assert_eq!(tool.call.arguments, f.call["arguments"]);
+    let permission = &view.result.as_ref().unwrap()["permission"];
+    assert_eq!(permission["call"], f.call);
+    assert_eq!(permission["scope"], f.scope);
     let root = f.root.clone();
     drop(f);
     std::fs::remove_dir_all(root).unwrap();

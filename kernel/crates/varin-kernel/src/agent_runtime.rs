@@ -23,6 +23,8 @@ mod input_commands;
 mod control_commands;
 #[path="agent_children.rs"]
 mod child_commands;
+#[path="agent_operations.rs"]
+mod operation_commands;
 
 fn run_cancellation_receipt(run: &varin_runtime::Run) -> Value {
     json!({"id":run.id,"thread_id":run.thread_id,"branch_id":run.branch_id,"state":run.state,
@@ -364,7 +366,7 @@ pub(crate) fn spawn(
                         let params = value.get_mut("params").map(Value::take).unwrap_or_else(|| json!({}));
                         // Typed body contracts are consumed once on their independent worker.
                         // Generated validation would otherwise clone all input/attachment content here.
-                        if !matches!(method,"runtime.thread.create"|"runtime.input.submit"|"runtime.input.enqueue"|"runtime.input.edit"|"runtime.child.prepare"|"runtime.tools.ready"|"runtime.launch.mcp.prepare"|"runtime.launch.policy.prepare"|"runtime.question.answer") {
+                        if !matches!(method,"runtime.thread.create"|"runtime.input.submit"|"runtime.input.enqueue"|"runtime.input.edit"|"runtime.child.prepare"|"runtime.tools.ready"|"runtime.launch.mcp.prepare"|"runtime.launch.policy.prepare"|"runtime.question.answer"|"runtime.permission.open"|"runtime.permission.consume") {
                             validate_method_params(method, &params)?;
                         }
                         if let Some(failure) = &initialization_failure {
@@ -388,6 +390,16 @@ pub(crate) fn spawn(
                                 done(&response_id); let _ = response_sender.send(response);
                             });
                             deferred = true; return Ok(Value::Null);
+                        }
+                        if matches!(method,"runtime.operation.inspect"|"runtime.thread.operations.active"|"runtime.permission.open"|"runtime.permission.consume"|"runtime.permission.decide") {
+                            let runtime=runtime.clone();let method=method.to_owned();
+                            let response_id=id.clone();let response_sender=responses.clone();let done=finished.clone();let cancelled=cancellation.clone();
+                            thread::spawn(move||{
+                                let result=operation_commands::execute(runtime,&method,params,&cancelled);
+                                let response=match result{Ok(value)=>response_ok(&response_id,value),Err(error)=>response_error(&response_id,&error)};
+                                done(&response_id);let _=response_sender.send(response);
+                            });
+                            deferred=true;return Ok(Value::Null);
                         }
                         if matches!(method,"runtime.child.list"|"runtime.child.for_thread"|"runtime.child.inspect"|"runtime.child.release"|"runtime.child.fail"|"runtime.child.report.read") {
                             let runtime=runtime.clone();let method=method.to_owned();
@@ -816,23 +828,6 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
-                        if matches!(method, "runtime.permission.open" | "runtime.permission.consume") {
-                            let p: PermissionOpenParams = serde_json::from_value(params)?;
-                            let catalog = runtime.catalog();
-                            let mut db = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-                            let result = if method == "runtime.permission.open" {
-                                db.open_permission(&p.operation_id, &p.permission_id, p.call, p.scope)
-                            } else {
-                                db.consume_permission(&p.operation_id, &p.permission_id, p.call, p.scope)
-                            }.map_err(domain)?;
-                            return Ok(serde_json::to_value(result)?);
-                        }
-                        if method == "runtime.permission.decide" {
-                            let p: PermissionDecideParams = serde_json::from_value(params)?;
-                            let result = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                                .decide_permission(&p.operation_id, &p.permission_id, &p.decision).map_err(domain)?;
-                            return Ok(serde_json::to_value(result)?);
-                        }
                         let catalog = runtime.catalog();
                         let mut catalog = catalog.lock().map_err(|_| {
                             KernelError::Storage("catalog owner failed".into())
@@ -904,14 +899,6 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                 .map_err(domain)?,
         )?);
     }
-    if method == "runtime.thread.operations.active" {
-        let p: ThreadOperationsParams = serde_json::from_value(params)?;
-        return Ok(serde_json::to_value(
-            catalog
-                .active_thread_operations(&p.thread_id, p.branch_id.as_deref())
-                .map_err(domain)?,
-        )?);
-    }
     if method == "runtime.thread.inspect" {
         let p: ThreadParams = serde_json::from_value(params)?;
         return catalog.inspect_thread(&p.thread_id).map_err(domain);
@@ -945,11 +932,6 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
             let p: RunParams = serde_json::from_value(params)?;
             if method.ends_with("cancel") { Ok(run_cancellation_receipt(&catalog.request_cancel_run(&p.run_id).map_err(domain)?)) }
             else { Ok(serde_json::to_value(catalog.run(&p.run_id).map_err(domain)?)?) }
-        }
-        "runtime.operation.inspect" | "runtime.operation.cancel" => {
-            let p: OperationParams = serde_json::from_value(params)?;
-            if method.ends_with("cancel") { Ok(operation_cancellation_receipt(&catalog.request_cancel_operation(&p.operation_id).map_err(domain)?)) }
-            else { Ok(serde_json::to_value(catalog.operation(&p.operation_id).map_err(domain)?)?) }
         }
         "runtime.observer.read" => {
             let p: ObserverReadParams = serde_json::from_value(params)?;
