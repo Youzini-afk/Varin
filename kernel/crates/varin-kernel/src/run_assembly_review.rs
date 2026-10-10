@@ -63,6 +63,8 @@ fn child_assembly_rebinds_only_admitted_extension_and_activates_its_own_static_o
         responses: output.into(),
         epoch: "child-test".into(),
     };
+    assembly.policy.initialize("child-test");
+    assembly.policy.set_catalog(runtime.catalog());
     let params = json!({"runId":run.id,"credentialScope":launch.credential_scope,
         "toolBinding":{"grantId":"child-source-grant","runId":run.id,"threadId":run.thread_id,
             "workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,

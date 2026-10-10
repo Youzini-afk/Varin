@@ -312,9 +312,10 @@ impl Catalog {
         let mut run: Run = record(&tx, "runs", run_id)?;
         fence(&run, self.epoch)?;
         let launch: LaunchMetadata = record(&tx, "run_launches", run_id)?;
+        // Ordinary child Runs participate in the same closed decision boundary. Only internal
+        // compaction retains a fixed policy; child capability delegation is a separate authority.
         let fixed: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM context_jobs WHERE run_id=?1)
-             OR EXISTS(SELECT 1 FROM child_tasks WHERE json_extract(body,'$.receipt.run_id')=?1)",
+            "SELECT EXISTS(SELECT 1 FROM context_jobs WHERE run_id=?1)",
             [run_id],
             |row| row.get(0),
         )?;

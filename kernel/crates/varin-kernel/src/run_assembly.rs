@@ -31,6 +31,9 @@ pub(crate) struct RunAssembly {
 #[cfg(test)]
 #[path = "run_assembly_review.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "child_policy_review.rs"]
+mod child_policy_review;
 pub(crate) enum PreparedLaunch {
     Selection(Value),
     Start(RunStart),
@@ -118,11 +121,6 @@ impl RunAssembly {
             .require_child_launch(&run.id)
             .map_err(domain)?
             .is_some();
-        if is_child && p.policy_binding.is_some() {
-            return Err(KernelError::Authorization(
-                "child cannot expand its admitted capabilities".into(),
-            ));
-        }
         if is_context_job
             && (selected.is_some()
                 || tool_binding.is_some()
@@ -213,7 +211,9 @@ impl RunAssembly {
                 "committed policy artifact requires its exact live binding".into(),
             ));
         }
-        if !is_context_job && !is_child {
+        if !is_context_job {
+            // Policy ownership is per Run, including accepted children. Delegated tool/source
+            // authority remains independently frozen by the child directory below.
             start.policy = policy_bridge
                 .install(
                     &p.run_id,
@@ -443,7 +443,7 @@ impl RunAssembly {
                 "context jobs cannot acquire planning capabilities".into(),
             ));
         }
-        if !is_context_job && !is_child {
+        if !is_context_job {
             let mut models = std::collections::BTreeMap::new();
             for capability in &policy_models {
                 if capability.status != varin_runtime::execution::PolicyModelStatus::Available {

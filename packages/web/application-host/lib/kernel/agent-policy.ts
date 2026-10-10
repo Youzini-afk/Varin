@@ -31,6 +31,43 @@ const canonical = (value: unknown): string => JSON.stringify(value, (_key, item)
 const hash = (value: unknown): string => createHash('sha256').update(canonical(value)).digest('hex');
 const generationValid = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 0;
 
+async function retainAgentPolicy(
+  runtime: ApplicationExtensionRuntime,
+  selected: HostServiceBinding,
+  required: AgentPolicyArtifactBinding | undefined,
+  assertSelection: () => Promise<void>,
+  signal?: AbortSignal,
+): Promise<AgentPolicyLease> {
+  const pin = selected.pin();
+  try {
+    const provider = runtime.services.getSnapshot().providers.find(candidate => candidate.providerId === selected.providerId);
+    const artifact = provider && runtime.supervisor.getRetainedArtifactIdentity(provider);
+    if (!provider || !artifact) throw new Error('Policy executing artifact identity is unavailable');
+    const description = parseVarinAgentPolicyDescription(await waitWithSignal(pin.invoke('describe', [], signal), signal));
+    signal?.throwIfAborted();
+    await assertSelection();
+    if (runtime.supervisor.getRetainedArtifactIdentity(provider) !== artifact) throw new Error('Policy artifact changed during preparation');
+    const configurationIdentity = hash(description.configuration);
+    const durable: AgentPolicyArtifactBinding = {
+      providerKey: selected.providerKey, extensionId: provider.extensionId, extensionVersion: provider.extensionVersion,
+      serviceId: VARIN_AGENT_POLICY_SERVICE_ID, serviceVersion: VARIN_AGENT_POLICY_VERSION, artifactIntegrity: artifact,
+      configurationIdentity, declaredIdentity: description.identity, modelRoles: description.modelRoles, stateTransition: description.stateTransition,
+      identity: { name: `${selected.providerKey}:${description.identity.name}`, version: hash({ artifact, configurationIdentity,
+        identity: description.identity, modelRoles: description.modelRoles, stateTransition: description.stateTransition, serviceVersion: VARIN_AGENT_POLICY_VERSION }) },
+    };
+    if (required && !isDeepStrictEqual(durable, required)) throw new Error('policy_exact_binding_unavailable');
+    pin.assertAvailable();
+    return { binding: { reference: selected.providerId, artifact: durable }, revocationSignal: pin.revocationSignal,
+      decide: async (input, signal) => parseVarinAgentPolicyDecision(await pin.invoke('decide', [input as unknown as JsonValue], AbortSignal.any([signal, pin.revocationSignal]))),
+      transitionState: async (input, signal) => {
+        signal.throwIfAborted(); pin.assertAvailable();
+        if (durable.stateTransition === 'unsupported') return { kind: 'incompatible', reason: 'Policy does not implement state compatibility' };
+        return parseVarinAgentPolicyTransition(await pin.invoke('transitionState', [input as unknown as JsonValue], AbortSignal.any([signal, pin.revocationSignal])));
+      },
+      release: () => pin.release() };
+  } catch (error) { pin.release(); throw error; }
+}
+
 export function createAgentPolicy(runtime: ApplicationExtensionRuntime): AgentPolicyPreparer {
   const prepare = async (scope: AgentPolicyScope, signal?: AbortSignal): Promise<AgentPolicyLease | undefined> => {
     signal?.throwIfAborted();
@@ -38,23 +75,45 @@ export function createAgentPolicy(runtime: ApplicationExtensionRuntime): AgentPo
     let selected: HostServiceBinding;
     let assertSelection = async (): Promise<void> => {};
     if (required) {
-      // Recovery identifies the original installed package directly. A different current route
-      // can neither replace it nor grant permission to load an arbitrary archived artifact.
-      const snapshot = await waitWithSignal(runtime.state(), signal);
-      if (!snapshot.catalog.authoritative) throw new Error('Policy catalog is unavailable');
-      const installed = snapshot.catalog.extensions.find(entry => entry.manifest.id === required.extensionId);
-      if (!installed || !installed.desired.enabled || installed.manifest.version !== required.extensionVersion
-        || installed.integrity !== required.artifactIntegrity || required.serviceId !== VARIN_AGENT_POLICY_SERVICE_ID
-        || required.serviceVersion !== VARIN_AGENT_POLICY_VERSION
-        || !installed.manifest.provides?.services?.some(service => service.id === required.serviceId && service.version === required.serviceVersion)) {
+      if (required.serviceId !== VARIN_AGENT_POLICY_SERVICE_ID || required.serviceVersion !== VARIN_AGENT_POLICY_VERSION) {
         throw new Error('policy_exact_binding_unavailable');
       }
-      await waitWithSignal(runtime.supervisor.activateExtension(required.extensionId), signal);
-      const provider = runtime.services.getSnapshot().providers.find(candidate => candidate.status === 'active'
-        && candidate.providerKey === required.providerKey && candidate.extensionId === required.extensionId
-        && candidate.extensionVersion === required.extensionVersion);
-      if (!provider || runtime.supervisor.getActiveArtifactIdentity(provider) !== required.artifactIntegrity) throw new Error('policy_exact_binding_unavailable');
-      selected = runtime.services.bind(required.serviceId, required.serviceVersion, provider.providerId);
+      // An already pinned original generation remains the authority across ordinary replacement.
+      // Recovery may derive its own pin; it cannot resurrect a released or revoked artifact.
+      const retained = runtime.services.getSnapshot().providers.filter(provider => provider.providerKey === required.providerKey
+        && provider.extensionId === required.extensionId && provider.extensionVersion === required.extensionVersion
+        && runtime.supervisor.getRetainedArtifactIdentity(provider) === required.artifactIntegrity);
+      if (retained.length) {
+        // The same artifact can have live generations with different declared configuration.
+        // Only a complete identity match restores the saved policy; enumeration is not routing.
+        for (const provider of retained) {
+          signal?.throwIfAborted();
+          try {
+            selected = runtime.services.bindPinned(required.serviceId, required.serviceVersion, provider.providerId);
+            return await retainAgentPolicy(runtime, selected, required, assertSelection, signal);
+          } catch {
+            signal?.throwIfAborted();
+            // A mismatching or unavailable generation owns no replacement authority. The helper
+            // releases its pin before the next exact-artifact candidate is inspected.
+          }
+        }
+        throw new Error('policy_exact_binding_unavailable');
+      } else {
+        const snapshot = await waitWithSignal(runtime.state(), signal);
+        if (!snapshot.catalog.authoritative) throw new Error('Policy catalog is unavailable');
+        const installed = snapshot.catalog.extensions.find(entry => entry.manifest.id === required.extensionId);
+        if (!installed || !installed.desired.enabled || installed.manifest.version !== required.extensionVersion
+          || installed.integrity !== required.artifactIntegrity
+          || !installed.manifest.provides?.services?.some(service => service.id === required.serviceId && service.version === required.serviceVersion)) {
+          throw new Error('policy_exact_binding_unavailable');
+        }
+        await waitWithSignal(runtime.supervisor.activateExtension(required.extensionId), signal);
+        const provider = runtime.services.getSnapshot().providers.find(candidate => candidate.status === 'active'
+          && candidate.providerKey === required.providerKey && candidate.extensionId === required.extensionId
+          && candidate.extensionVersion === required.extensionVersion);
+        if (!provider || runtime.supervisor.getActiveArtifactIdentity(provider) !== required.artifactIntegrity) throw new Error('policy_exact_binding_unavailable');
+        selected = runtime.services.bind(required.serviceId, required.serviceVersion, provider.providerId);
+      }
     } else {
       const routing = await waitWithSignal(runtime.routing.read(), signal);
       if (!routing.authoritative) throw new Error('Cannot prepare a Host service from stale selection state');
@@ -91,34 +150,7 @@ export function createAgentPolicy(runtime: ApplicationExtensionRuntime): AgentPo
         assertSelectionsUnchanged();
       };
     }
-    const pin = selected.pin();
-    try {
-      const provider = runtime.services.getSnapshot().providers.find(candidate => candidate.providerId === selected.providerId && candidate.status === 'active');
-      const artifact = provider && runtime.supervisor.getActiveArtifactIdentity(provider);
-      if (!provider || !artifact) throw new Error('Policy executing artifact identity is unavailable');
-      const description = parseVarinAgentPolicyDescription(await waitWithSignal(pin.invoke('describe', [], signal), signal));
-      signal?.throwIfAborted();
-      await assertSelection();
-      if (runtime.supervisor.getActiveArtifactIdentity(provider) !== artifact) throw new Error('Policy artifact changed during preparation');
-      const configurationIdentity = hash(description.configuration);
-      const durable: AgentPolicyArtifactBinding = {
-        providerKey: selected.providerKey, extensionId: provider.extensionId, extensionVersion: provider.extensionVersion,
-        serviceId: VARIN_AGENT_POLICY_SERVICE_ID, serviceVersion: VARIN_AGENT_POLICY_VERSION, artifactIntegrity: artifact,
-        configurationIdentity, declaredIdentity: description.identity, modelRoles: description.modelRoles, stateTransition: description.stateTransition,
-        identity: { name: `${selected.providerKey}:${description.identity.name}`, version: hash({ artifact, configurationIdentity,
-          identity: description.identity, modelRoles: description.modelRoles, stateTransition: description.stateTransition, serviceVersion: VARIN_AGENT_POLICY_VERSION }) },
-      };
-      if (required && !isDeepStrictEqual(durable, required)) throw new Error('policy_exact_binding_unavailable');
-      pin.assertAvailable();
-      return { binding: { reference: selected.providerId, artifact: durable }, revocationSignal: pin.revocationSignal,
-        decide: async (input, signal) => parseVarinAgentPolicyDecision(await pin.invoke('decide', [input as unknown as JsonValue], AbortSignal.any([signal, pin.revocationSignal]))),
-        transitionState: async (input, signal) => {
-          signal.throwIfAborted(); pin.assertAvailable();
-          if (durable.stateTransition === 'unsupported') return { kind: 'incompatible', reason: 'Policy does not implement state compatibility' };
-          return parseVarinAgentPolicyTransition(await pin.invoke('transitionState', [input as unknown as JsonValue], AbortSignal.any([signal, pin.revocationSignal])));
-        },
-        release: () => pin.release() };
-    } catch (error) { pin.release(); throw error; }
+    return retainAgentPolicy(runtime, selected, required, assertSelection, signal);
   };
   const observe: AgentPolicyPreparer['observe'] = (scope, changed, signal) => {
     let closed = false, reading = false, dirty = false, previous: string | undefined;

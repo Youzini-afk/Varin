@@ -8,6 +8,15 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-10 增量：子任务独立策略与规划模型
+
+- 已受理 child Run 现在使用原 AgentPolicy/PolicyBridge，而非固定默认循环。首次准备按真实 child Thread 与已准入 project 路由，原 Launch/generation 提交完整 artifact/configuration；不复制父策略私有状态、不增加 preset 配置源。恢复先恢复原提交身份与保存的 planning 模型，再按原候选协议处理后来路由。
+- Child 的策略/规划 generation 可在闭合边界变更，原 tools/source/profile/MCP/extensions 仍使用静态冻结目录。真实 PolicyAction ToolGraph 走相同权限/Operation/执行回执；未委派 memory 工具在派发前拒绝。内部 compaction job 仍固定且 tool-free，没有为 child 新建策略或执行账本。
+- 规划调用使用 child Run/generation 的原凭据与真实模型 Operation，产出/usage 被原消费者读取并计入已存在的 delegated Goal；child 不继承 primary Goal 或自动续接授权。Prepared 与 dispatched 的恢复边界不变，未知已派发请求不自动重发。换代后 Pause→重开→Resume、报告正文及 no_changes 都由原 Run/ChildTask 交付；实际独立作业与文件结果仍按原停止屏障结算。
+- 普通策略更新保留真实旧 pin；精确重绑可恢复仍存续的原 artifact。独审复现了同 artifact 多代配置下错误取首个实例的恢复缺口，修复只在原 artifact 候选内匹配完整 described identity、失配释放临时 pin。原双向探针修后确认新/旧配置都恢复，不存在配置拒绝；明确停用及最后引用释放后不复活，没有缓存权威或 latest fallback。
+- 最终 runtime **324/0、2 ignored**，kernel lib **65/0、11 ignored**，Host **57/57**；all-targets、Host类型/lint/bundle、文档检查通过。Fresh binary 的真实 writable-child guardian / WorkingResult **1/1** 是共享消费者回归；新的 custom child policy 成功链走 Host helper 与 no_changes，不冒称自定义策略文件写入 E2E。Linux x64 identity `0.9.25` stage SHA-256 `ebe413729c39fe8108f7a4010e4c25c7134be567c7c1a86a8299d29073bf30bd`。
+- 本地取消用例停在已存 dispatch intent 后、credential reply 前，尚无 HTTP 发出；它证明取消与晚到栅栏，不证明远端在途取消。实际 loopback adapter/usage、真实 SDK broker与组件 RPC 的证据分别记录；完整 Host IPC、真实 provider 账号与跨平台仍保留边界。child memory/plan/Goal/LSP/Computer/远端及 family 通信等完整设计工作继续，具体复跑见[本阶段验收记录](../reviews/runtime-child-policy-2026-10-10.md)。
+
 ## 2026-10-10 增量：普通扩展与 MCP 子任务委派
 
 - Child dispatch 现在以原 ToolDirectory、schema generation、工具与 Host bindings 冻结实际配置；native 描述只投影原 owner 声明，UI 与 Host 不再用第二份原生工具名白名单。普通扩展保留原 artifact/configuration/declaration，不因名字相同获得原生进程/文件权限。完整 preset 先验证，缩减不掩盖不可用项。
