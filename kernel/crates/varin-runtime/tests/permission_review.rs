@@ -50,7 +50,7 @@ impl Fixture {
                 resources: vec![],
             },
         };
-        db.admit_tool_operation(&op, &receipt.run_id, db.epoch(), &tool)
+        db.admit_tool_operation(&op, &receipt.run_id, db.epoch(), &varin_runtime::execution::ToolOrigin::ModelStep{request_id:"request-1".into()}, &tool)
             .unwrap();
         let call = json!({"runId":receipt.run_id,"requestId":"request-1","operationId":op,"callId":"call-1","name":"fixture_send","schemaVersion":"schema-1","arguments":{"target":"chosen","text":"approved content"}});
         let scope = json!({"ownerReference":"owner-1","ownerGeneration":3,"toolSchemaVersion":"schema-1","policyGeneration":"policy-1","reason":"external effect"});
@@ -132,7 +132,7 @@ fn permission_is_exact_one_use_and_denial_or_cancellation_never_authorizes_dispa
     .unwrap();
     f.db.collect_content_objects().unwrap();
     let view = f.db.capture_operation_read(opened).load().unwrap();
-    let tool: AdmittedTool = serde_json::from_value(view.intent).unwrap();
+    let tool: varin_runtime::execution::ToolInvocation = serde_json::from_value(view.intent).unwrap();
     assert_eq!(tool.call.arguments, f.call["arguments"]);
     let permission = &view.result.as_ref().unwrap()["permission"];
     assert_eq!(permission["call"], f.call);

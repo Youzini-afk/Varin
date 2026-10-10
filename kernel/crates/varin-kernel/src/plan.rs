@@ -121,7 +121,7 @@ fn query(
     {
         return Err(error("plan call does not match its admitted contract"));
     }
-    let intent = varin_runtime::catalog::tool_content::ToolIntent::fingerprint(call, contract)
+    let intent = varin_runtime::catalog::tool_content::ToolIntent::fingerprint(&context.origin, call, contract)
         .map_err(error)?;
     let (epoch, run, read) = {
         let catalog = owner.lock().map_err(error)?;
@@ -319,7 +319,7 @@ impl ToolExecutor for PlanTools {
             // exact receipt before allowing the dispatched Operation to settle None.
             let recorded = (|| -> Result<(), ExecutionError> {
                 let intent =
-                    varin_runtime::catalog::tool_content::ToolIntent::fingerprint(call, contract)
+                    varin_runtime::catalog::tool_content::ToolIntent::fingerprint(&context.origin, call, contract)
                         .map_err(error)?;
                 let catalog = self.catalog.lock().map_err(error)?;
                 let run = catalog.run(&context.run_id).map_err(error)?;
@@ -403,18 +403,13 @@ pub(crate) fn reconcile(
                         .map_err(error)?
                         .capture_operation_read(operation);
                     let operation = read.load().map_err(error)?;
-                    let admitted: AdmittedTool =
+                    let admitted: ToolInvocation =
                         serde_json::from_value(operation.intent.clone()).map_err(error)?;
-                    let original_request = operation
-                        .id
-                        .strip_suffix(&format!(":tool:{}", admitted.call.call_id))
-                        .ok_or_else(|| error("plan operation lacks an original request"))?;
+                    if !matches!(admitted.origin,ToolOrigin::ModelStep{..}) || operation.id!=admitted.origin.operation_id(&admitted.call.call_id) {
+                        return Err(error("plan recovery currently requires its original model invocation"));
+                    }
                     let context = ToolExecutionContext {
-                        run_id: run_id.clone(),
-                        operation_id: operation.id.clone(),
-                        origin: ToolOrigin::ModelStep {
-                            request_id: original_request.into(),
-                        },
+                        run_id: run_id.clone(), operation_id: operation.id.clone(), origin:admitted.origin.clone(),
                     };
                     let query = query(
                         &runtime.catalog(),

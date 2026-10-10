@@ -150,6 +150,7 @@ pub enum Provenance {
     UserInstruction { input_id: String },
     Assistant,
     ToolData { call_id: String },
+    PolicyToolData { reference: PolicyEvidenceRef },
     ExternalData { source: String },
     AgentMessage { thread_id: String },
     EnvironmentFact { event_id: String },
@@ -539,6 +540,14 @@ pub enum ToolOrigin {
     ModelStep { request_id: String },
     PolicyAction { action_id: String, node_id: String },
 }
+impl ToolOrigin {
+    pub fn operation_id(&self, call_id: &str) -> String {
+        match self {
+            Self::ModelStep { request_id } => format!("{request_id}:tool:{call_id}"),
+            Self::PolicyAction { action_id, node_id } => format!("{action_id}:node:{node_id}"),
+        }
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FrozenToolContext {
@@ -652,6 +661,15 @@ pub struct AdmittedTool {
     pub contract: ToolContract,
 }
 
+/// Public hydrated tool intent. Origin is durable and never reconstructed from an ID string.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ToolInvocation {
+    pub origin: ToolOrigin,
+    pub call: ToolCall,
+    pub contract: ToolContract,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelOutcome {
@@ -688,16 +706,16 @@ pub enum ExecutionRecord {
     },
     /// Each admitted effectful call's intent precedes its side effects. A record may contain one
     /// independently prepared call. Read-only results need no per-stage operation.
-    ToolsAdmitted {
-        request_id: String,
-        tools: Vec<AdmittedTool>,
+    ToolAdmitted {
+        context: ToolExecutionContext,
+        tool: AdmittedTool,
     },
     ToolDispatched {
-        request_id: String,
-        call_id: String,
+        context: ToolExecutionContext,
     },
     ToolSettled {
-        result: ToolResult,
+        context: ToolExecutionContext,
+        completion: ToolCompletion,
     },
     /// Ordered, complete pairing is committed before another model request can observe results.
     ToolBatchCommitted {
@@ -721,7 +739,10 @@ pub struct ContextProjection {
     pub memory_checkpoint: Option<String>,
 }
 
+pub enum ToolResume { New, Admitted { cancel_requested:bool }, Completed(crate::catalog::result_content::ToolCompletionRead) }
+
 pub trait Persistence: Send + Sync {
+    fn resume_tool(&self,_context:&ToolExecutionContext,_epoch:u64)->Result<ToolResume,ExecutionError>{Err(ExecutionError::new("policy_graph_unavailable","canonical tool invocation authority required"))}
     /// Only durable executor evidence may refine dispatched work to a no-effect result.
     /// Other persistence backends retain the conservative Unknown normalization.
     fn confirms_no_effect(&self, _context: &ToolExecutionContext, _epoch: u64, _completion: &ToolCompletion)
@@ -739,7 +760,7 @@ pub trait Persistence: Send + Sync {
     fn policy_graph(&self, _run: &str, _epoch: u64) -> Result<Option<PolicyGraphState>, ExecutionError> { Ok(None) }
     fn admit_policy_graph(&self, _run: &str, _epoch: u64, _intent: &PolicyGraphIntent) -> Result<PolicyGraphState, ExecutionError> { Err(ExecutionError::new("policy_graph_unavailable", "durable graph authority required")) }
     fn settle_policy_node(&self, _run: &str, _epoch: u64, _action: &str, _node: &str, _completion: &ToolCompletion) -> Result<PolicyNodeReceipt, ExecutionError> { Err(ExecutionError::new("policy_graph_unavailable", "durable graph authority required")) }
-    fn policy_evidence(&self, _run: &str, _epoch: u64, _reference: &PolicyEvidenceRef) -> Result<ConversationItem, ExecutionError> { Err(ExecutionError::new("policy_graph_unavailable", "durable graph authority required")) }
+    fn policy_evidence(&self, _run: &str, _epoch: u64, _reference: &PolicyEvidenceRef) -> Result<PolicyEvidence, ExecutionError> { Err(ExecutionError::new("policy_graph_unavailable", "durable graph authority required")) }
     fn policy_chunk(&self, _run: &str, _epoch: u64, _reference: &PolicyEvidenceRef, _index: usize) -> Result<crate::content::ContentChunk, ExecutionError> { Err(ExecutionError::new("policy_graph_unavailable", "durable graph authority required")) }
     fn tool_source(&self, _run: &str) -> Result<Option<crate::catalog::launches::SourceSelection>, ExecutionError> { Ok(None) }
 
@@ -826,7 +847,7 @@ pub enum PolicyAction {
     RequestModel,
     RequestModelWithEvidence { evidence: Vec<PolicyEvidenceRef> },
     RequestModelJob { capability_id: String, instructions: Vec<String>, evidence: Vec<PolicyEvidenceRef> },
-    ReadGraph { nodes: Vec<PolicyReadNode> },
+    ToolGraph { nodes: Vec<PolicyToolNode> },
     ReadResult { reference: PolicyEvidenceRef, index: usize },
     ExecuteTools,
     /// Persistence must verify that this wait references a durably registered event condition.
@@ -852,7 +873,7 @@ pub enum PolicyEvent {
         input_ids: Vec<String>,
     },
     Started,
-    ReadGraphCompleted { action_id: String, receipts: Vec<PolicyNodeReceipt> },
+    ToolGraphCompleted { action_id: String, receipts: Vec<PolicyNodeReceipt> },
     ModelJobCompleted { action_id: String, receipt: PolicyModelReceipt },
     ResultChunk { reference: PolicyEvidenceRef, index: usize, total_chunks: usize, total_bytes: u64, bytes: Vec<u8> },
     ModelCompleted {
@@ -910,7 +931,7 @@ impl AgentPolicy for DefaultAgentPolicy {
             PolicyEvent::ToolsCompleted { results } if results.iter().any(|result|
                 matches!(result.completion, ToolCompletion::Result { outcome: Outcome::Indeterminate, .. })) =>
                 PolicyAction::Fail { reason: "tool effect is indeterminate; reconcile the original operation before continuing".into() },
-            PolicyEvent::ToolsCompleted { .. } | PolicyEvent::ModelJobCompleted { .. } | PolicyEvent::ReadGraphCompleted { .. } | PolicyEvent::ResultChunk { .. } => PolicyAction::RequestModel,
+            PolicyEvent::ToolsCompleted { .. } | PolicyEvent::ModelJobCompleted { .. } | PolicyEvent::ToolGraphCompleted { .. } | PolicyEvent::ResultChunk { .. } => PolicyAction::RequestModel,
         };
         Ok(PolicyDecision {
             action,
@@ -1031,7 +1052,7 @@ impl<
         if pending.is_some() && resumed_graph.as_ref().is_some_and(|graph|!graph.terminal) { return Err(ExecutionError::new("unclosed_model_exchange","policy graph conflicts with model exchange")); }
         if let Some(graph)=resumed_graph {
             recovered_decision=graph.decision.clone();
-            event=self.execute_read_graph(&input,graph,&cancel)?;
+            event=self.execute_tool_graph(&input,graph,&cancel,None)?;
         }
         if let Some(job) = self.persistence.policy_model_job(&input.run_id,input.owner_generation)? {
             if pending.is_some() { return Err(ExecutionError::new("unclosed_model_exchange","model job conflicts with model exchange")); }
@@ -1147,7 +1168,7 @@ impl<
             // A policy can neither fabricate a closed exchange nor bypass the tool admission path.
             let legal = match &decision.action {
                 PolicyAction::ExecuteTools => pending.is_some(),
-                PolicyAction::RequestModel | PolicyAction::RequestModelJob { .. } | PolicyAction::RequestModelWithEvidence { .. } | PolicyAction::ReadGraph { .. } | PolicyAction::ReadResult { .. } | PolicyAction::Complete | PolicyAction::Wait { .. } => {
+                PolicyAction::RequestModel | PolicyAction::RequestModelJob { .. } | PolicyAction::RequestModelWithEvidence { .. } | PolicyAction::ToolGraph { .. } | PolicyAction::ReadResult { .. } | PolicyAction::Complete | PolicyAction::Wait { .. } => {
                     pending.is_none()
                 }
                 PolicyAction::Fail { .. } => pending.is_none(),
@@ -1171,7 +1192,7 @@ impl<
                 finish!('agent, RunState::Failed, None,
                     Some(ExecutionError::new("illegal_policy_action", "unclosed tool exchange or no tools to execute")));
             }
-            if !matches!(decision.action,PolicyAction::ReadGraph{..}|PolicyAction::RequestModelJob{..}) { self.commit(
+            if !matches!(decision.action,PolicyAction::ToolGraph{..}|PolicyAction::RequestModelJob{..}) { self.commit(
                 &input,
                 ExecutionRecord::PolicyCheckpoint {
                     identity: self.policy.identity(),
@@ -1205,9 +1226,16 @@ impl<
                     };
                     event = self.execute_model_job(&input, job, &cancel)?;
                 }
-                PolicyAction::ReadGraph { nodes } => {
-                    let graph=match self.admit_read_graph(&input,nodes,policy_state.clone(), &cancel) {Ok(graph)=>graph,Err(error) if error.code=="input_pending" || cancel.is_cancelled()=>{policy_state=previous_policy_state;continue 'agent},Err(error)=>{policy_state=previous_policy_state;finish!('agent,RunState::Failed,None,Some(error))}};
-                    event=self.execute_read_graph(&input,graph,&cancel)?;
+                PolicyAction::ToolGraph { nodes } => {
+                    let selected = match guarded("tool_selection_panicked",||self.tools.select_for_request(&input.run_id,input.owner_generation,&cancel)) {
+                        Ok(selected)=>selected,
+                        Err(_) if cancel.is_cancelled()=>{policy_state=previous_policy_state;continue 'agent;},
+                        Err(error)=>finish!('agent,RunState::Failed,None,Some(error)),
+                    };
+                    if let Some(selected)=&selected {input.binding.tools=selected.schemas.clone();input.binding.tool_schema_generation=selected.generation;}
+                    let retained=match selected {Some(selected)=>Some(selected.executor),None=>self.tools.freeze(&input.binding.tools)?};
+                    let graph=match self.admit_tool_graph(&input,nodes,policy_state.clone(), &cancel) {Ok(graph)=>graph,Err(error) if error.code=="input_pending" || cancel.is_cancelled()=>{policy_state=previous_policy_state;continue 'agent},Err(error)=>{policy_state=previous_policy_state;finish!('agent,RunState::Failed,None,Some(error))}};
+                    event=self.execute_tool_graph(&input,graph,&cancel,retained)?;
                 }
                 PolicyAction::ReadResult { reference,index } => {
                     let chunk=match self.persistence.policy_chunk(&input.run_id,input.owner_generation,&reference,index) {Ok(chunk)=>chunk,Err(error)=>finish!('agent,RunState::Failed,None,Some(error))};
@@ -1268,7 +1296,8 @@ impl<
                     for reference in evidence {
                         if !selected.insert((reference.action_id.clone(),reference.node_id.clone())) { finish!('agent,RunState::Failed,None,Some(ExecutionError::new("duplicate_evidence","evidence references must be unique"))); }
                         let item=match self.persistence.policy_evidence(&input.run_id,input.owner_generation,&reference){Ok(item)=>item,Err(error)=>finish!('agent,RunState::Failed,None,Some(error))};
-                        request_history.push(item);
+                        request_history.retain(|previous| !matches!(&previous.provenance,Provenance::EnvironmentFact{event_id} if item.memory_facts.contains(event_id)));
+                        request_history.push(item.item);
                     }
                     let view = RequestView {
                         request_id: format!(
@@ -1845,13 +1874,24 @@ impl<
                         {
                             self.commit(
                                 input,
-                                ExecutionRecord::ToolsAdmitted {
-                                    request_id: snapshot.view.request_id.clone(),
-                                    tools: vec![tool.clone()],
+                                ExecutionRecord::ToolAdmitted {
+                                    context: ToolExecutionContext {
+                                        run_id: input.run_id.clone(),
+                                        origin: ToolOrigin::ModelStep { request_id: snapshot.view.request_id.clone() },
+                                        operation_id: format!("{}:tool:{}", snapshot.view.request_id, call.call_id),
+                                    },
+                                    tool: tool.clone(),
                                 },
                             )?;
                         }
-                        self.execute_one(input, snapshot, &tool, bound.as_ref(), &operation_cancel, reservation)
+                        let context = ToolExecutionContext {
+                            run_id: input.run_id.clone(),
+                            origin: ToolOrigin::ModelStep { request_id: snapshot.view.request_id.clone() },
+                            operation_id: format!("{}:tool:{}", snapshot.view.request_id, call.call_id),
+                        };
+                        let durable = !tool.contract.read_only || tool.contract.completion == CompletionKind::Job;
+                        let completion = self.execute_one(input, &context, &tool, bound.as_ref(), &operation_cancel, reservation, durable)?;
+                        Ok(self.unprepared_result(input, snapshot, call, completion))
                     });
                     let _ = tx.send((index, result));
                 });
@@ -1909,34 +1949,29 @@ impl<
     fn execute_one(
         &self,
         input: &ExecutionInput,
-        snapshot: &RequestSnapshot,
+        context: &ToolExecutionContext,
         tool: &AdmittedTool,
         bound: &dyn PreparedToolCall,
         cancel: &CancellationToken,
         reservation: crate::resource_admission::ResourceReservation,
-    ) -> Result<ToolResult, ExecutionError> {
-        let context = ToolExecutionContext {
-            run_id: input.run_id.clone(),
-            origin: ToolOrigin::ModelStep {
-                request_id: snapshot.view.request_id.clone(),
-            },
-            operation_id: format!("{}:tool:{}", snapshot.view.request_id, tool.call.call_id),
-        };
+        durable: bool,
+    ) -> Result<ToolCompletion, ExecutionError> {
         let mut lease = None;
         let mut reservation = Some(reservation);
         let mut _admission_control = None;
         let completion = if cancel.is_cancelled() {
-            ToolCompletion::cancelled()
+            ToolCompletion::NotDispatched {
+                reason: "cancelled".into(),
+            }
         } else if let Err(error) = guarded("tool_authorize_panicked", || {
-            bound.authorize(&context, &tool.contract, cancel)
+            bound.authorize(context, &tool.contract, cancel)
         }) {
-            ToolCompletion::failure(&error.code, &error.message, Effect::None)
-        } else if cancel.is_cancelled() {
-            ToolCompletion::cancelled()
+            ToolCompletion::NotDispatched {
+                reason: format!("{}: {}", error.code, error.message),
+            }
         } else {
             let ready = prepare_dispatch(cancel, || {
-                _admission_control =
-                    bound.watch_admission(&context, &tool.contract, cancel)?;
+                _admission_control = bound.watch_admission(context, &tool.contract, cancel)?;
                 lease = reservation
                     .take()
                     .expect("one admission per call")
@@ -1944,109 +1979,103 @@ impl<
                 Ok(lease.is_some())
             })?;
             if !ready {
-                return self.settle_tool(
-                    input,
-                    tool,
-                    ToolResult {
-                        request_id: snapshot.view.request_id.clone(),
-                        call_id: tool.call.call_id.clone(),
-                        completion: ToolCompletion::cancelled(),
-                    },
-                );
-            }
-            // A queued call can outlive authorization or its Run generation. Recheck only at
-            // the actual dispatch boundary, outside both Catalog and admission locks.
-            if let Err(error) = self
+                ToolCompletion::NotDispatched {
+                    reason: "cancelled".into(),
+                }
+            } else if let Err(error) = self
                 .persistence
                 .task_family(&input.run_id, input.owner_generation)
                 .and_then(|_| {
                     guarded("tool_authorize_panicked", || {
-                        bound.authorize(&context, &tool.contract, cancel)
+                        bound.authorize(context, &tool.contract, cancel)
                     })
                 })
             {
-                return self.settle_tool(
-                    input,
-                    tool,
-                    ToolResult {
-                        request_id: snapshot.view.request_id.clone(),
-                        call_id: tool.call.call_id.clone(),
-                        completion: ToolCompletion::NotDispatched {
-                            reason: format!("{}: {}", error.code, error.message),
+                ToolCompletion::NotDispatched {
+                    reason: format!("{}: {}", error.code, error.message),
+                }
+            } else if cancel.is_cancelled() {
+                ToolCompletion::NotDispatched {
+                    reason: "cancelled".into(),
+                }
+            } else {
+                let dispatch_cancelled = if durable {
+                    match self.commit(
+                        input,
+                        ExecutionRecord::ToolDispatched {
+                            context: context.clone(),
                         },
-                    },
-                );
-            }
-            if !tool.contract.read_only || tool.contract.completion == CompletionKind::Job {
-                // Authorization may have waited or synchronously requested cancellation.
-                // Successful authorization is not evidence that this call is still wanted.
-                if cancel.is_cancelled() {
-                    return self.settle_tool(input, tool, ToolResult {
-                        request_id: snapshot.view.request_id.clone(),
-                        call_id: tool.call.call_id.clone(),
-                        completion: ToolCompletion::NotDispatched { reason: "cancelled".into() },
-                    });
-                }
-                self.commit(
-                    input,
-                    ExecutionRecord::ToolDispatched {
-                        request_id: snapshot.view.request_id.clone(),
-                        call_id: tool.call.call_id.clone(),
-                    },
-                )?;
-                if let Some(lease) = lease.as_mut() {
-                    lease.dispatched();
-                }
-            }
-            // Only this operation's resource plan is held; no catalog or tool-environment mutex.
-            let result = if cancel.is_cancelled() {
-                Ok(ToolCompletion::NotDispatched { reason: "cancelled".into() })
-            } else { std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                bound.execute(&context, &tool.contract, cancel)
-            })) };
-            match result {
-                Ok(completion) => {
-                    let confirmed_no_effect = !tool.contract.read_only
-                        && matches!(
-                            &completion,
-                            ToolCompletion::Result {
-                                effect: Effect::None,
-                                ..
+                    ) {
+                        Ok(()) => {
+                            if let Some(lease) = lease.as_mut() {
+                                lease.dispatched();
                             }
-                        )
-                        && guarded("receipt_evidence_panicked", || {
-                            self.persistence.confirms_no_effect(
-                                &context,
-                                input.owner_generation,
+                            false
+                        }
+                        Err(error) if error.code == "dispatch_cancelled" => true,
+                        Err(error) => return Err(error),
+                    }
+                } else {
+                    false
+                };
+                let result = if dispatch_cancelled || cancel.is_cancelled() {
+                    Ok(ToolCompletion::NotDispatched {
+                        reason: "cancelled".into(),
+                    })
+                } else {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        bound.execute(context, &tool.contract, cancel)
+                    }))
+                };
+                match result {
+                    Ok(completion) => {
+                        let confirmed_no_effect = !tool.contract.read_only
+                            && matches!(
                                 &completion,
+                                ToolCompletion::Result {
+                                    effect: Effect::None,
+                                    ..
+                                }
                             )
-                        })
-                        .unwrap_or(false);
-                    normalize_completion(completion, &tool.contract, confirmed_no_effect)
+                            && guarded("receipt_evidence_panicked", || {
+                                self.persistence.confirms_no_effect(
+                                    context,
+                                    input.owner_generation,
+                                    &completion,
+                                )
+                            })
+                            .unwrap_or(false);
+                        normalize_completion(completion, &tool.contract, confirmed_no_effect)
+                    }
+                    Err(_) => ToolCompletion::failure(
+                        "tool_panicked",
+                        "tool worker stopped without a receipt",
+                        if tool.contract.read_only {
+                            Effect::None
+                        } else {
+                            Effect::Unknown
+                        },
+                    ),
                 }
-                Err(_) => ToolCompletion::failure(
-                    "tool_panicked",
-                    "tool worker stopped without a receipt",
-                    if tool.contract.read_only {
-                        Effect::None
-                    } else {
-                        Effect::Unknown
-                    },
-                ),
             }
         };
-        let result = ToolResult {
-            request_id: snapshot.view.request_id.clone(),
-            call_id: tool.call.call_id.clone(),
-            completion,
+        let settled = if durable {
+            self.commit(
+                input,
+                ExecutionRecord::ToolSettled {
+                    context: context.clone(),
+                    completion: completion.clone(),
+                },
+            )
+            .map(|_| completion)
+        } else {
+            Ok(completion)
         };
-        let settled = self.settle_tool(input, tool, result);
-        // Catalog settlement releases synchronous occupancy atomically after its durable receipt.
-        // Background jobs and a failed durable receipt remain owned until executor reconciliation.
+        // Only original executor completion/stop evidence releases dispatched occupancy.
         if let Some(lease) = lease {
             if settled.is_err()
                 || matches!(
-                    settled.as_ref().map(|r| &r.completion),
+                    settled.as_ref(),
                     Ok(ToolCompletion::JobAccepted { .. })
                         | Ok(ToolCompletion::Result {
                             effect: Effect::Unknown,
@@ -2062,14 +2091,6 @@ impl<
         settled
     }
 
-    fn settle_tool(&self, input: &ExecutionInput, tool: &AdmittedTool, result: ToolResult) -> Result<ToolResult, ExecutionError> {
-        if !tool.contract.read_only || tool.contract.completion == CompletionKind::Job {
-            self.commit(input, ExecutionRecord::ToolSettled { result: result.clone() })?;
-        }
-        self.progress
-            .emit(&input.run_id, ExecutionEvent::ToolCompleted(result.clone()));
-        Ok(result)
-    }
 }
 
 /// Cancellation wins only while no tool has been dispatched. Inspect it after admission

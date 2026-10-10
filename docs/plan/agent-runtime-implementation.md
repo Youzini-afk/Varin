@@ -6,10 +6,23 @@
 
 目标是完整实现[完整运行时设计](../design/agent-runtime-design.md)和[能力组合设计](../design/runtime-extensibility-design.md)共同定义的长期运行底座：及时交互、低开销执行、按真实资源调度、深层能力组合和可替换策略。完成聊天循环、迁移已有工具或删除 Pi 都不是单独的完成标准；Pi 退出是这套设计落地后的一个结果。当前生产仍使用 Pi session worker、TypeScript Host 协调和 Rust 资源内核；现有权威见[架构](../architecture.md)。
 
+## 2026-10-10 增量：一般策略工具图与原始调用完成
+
+- `varin.agent.policy@2` 的 `tool_graph` 直接替换旧只读图；Rust、合同/parser、SDK、安装示例和 Host 消费一起更新。节点保留真实 action/node 来源、冻结 schema/源视图/执行端世代和显式依赖，不制造 ModelStep 或 provider 工具交换。合法新图边界可激活已准备工具候选；已受理图恢复仍使用原绑定。
+- 模型与策略复用同一单调用准备、授权、完整资源/容量准入、派发重核、执行和结算。可信 opt-in 的纯读 Result 继续轻量；其他调用在派发前进入原 Operation owner。逐节点准备及已完成正文读取独立运行，不阻塞无关节点；图父仅编排，不拥有第二份效果账本。文件对账读取持久 `ToolOrigin`，不从操作 ID 猜模型请求。
+- Operation 的 `call_completion` 保存原调用完成，节点回执与模型配对消费同一事实。tag 区分未派发、带必需正文引用的 Result 和 JobAccepted；实际 JSON null 仍有内容引用。JobAccepted 结束受理调用、允许依赖推进，作业终态由原 Operation/执行端回执和显式 Wait 观察。早到或迟到终态不覆盖原受理回执。
+- 恢复分别处理原身份未派发重准入、缺失可信纯读重做、已派发效果查询原执行端、canonical 回执已存而图尚未消费。单节点持久取消在重开后仍生效；取消赢得派发提交时，使用精确未进入执行端证据结算，不吞其他提交错误。独立反例还发现并修复了旧恢复分支把只读 Job 的 `Effect::None` 当作已停止、误记 Failed 并拒绝真正终态的问题；现在依据原 Job 合同保留完成未知及占用，等待原回执，不重执行或补造受理。
+- memory 策略调用沿既有领域 owner、CAS 和原回执工作。选用 memory evidence 时，核心认证 action/node、canonical 结果身份及原 memory 操作后，仅从候选请求删去同事实的重复 tail；不选择 evidence 时仍由原可信回执/tail 送达。主请求及辅助推理共用原 selected/sent/committed 交付 owner，稳定 system checkpoint 不因写入临时改写。
+- 显式选中的旧策略版本不会因安装了唯一新 provider 而被悄悄替换。版本判断复用原作用域 routing/selection，候选准备沿既有 routing revision 与同服务选择快照核对；成功和可选缺失出口都验证同一候选，不新增路由库或重试层。Catalog 当前格式 16，旧内部格式直接拒绝；当前及历史原调用完成、图调用与结果引用参加同一 ContentStore 回收。
+- 最终完整 `varin-runtime` 回归为 **231 passed、0 failed、2 个既有手动诊断 ignored**。实际 Engine/Catalog 覆盖上述恢复、Job、取消、零假模型配对和 memory evidence/tail 消费；其中 memory writer 是领域 fixture，不等于 production personalization owner。独立审查按设计复核共享生命周期，并用同一只读 Job 窄探针完成修前失败、修后通过，确认原终态接受、原受理不变、无 stop 不释放占用及父 Run 不复活。
+- TypeScript 合同/SDK **114 项**、真实 ApplicationExtensionRuntime/broker 选择 **8 项**、UI 行为 **19 项**通过；完整类型依赖重建、Host 测试类型、UI 类型、Host bundle、改动 TS lint、协议生成一致性及文档链接检查通过。实际 Linux 开发内核 identity `0.9.25` 构建通过，最终 SHA-256 为 `b30ece5a45918defe834c14b74929ca80aec1b5e7e2582d1fe33c09efb8041a4`。
+- **真实 Host/kernel 纵切仍未验收**：新增 memory artifact 确实通过 SDK helper 打包，源码包含真实 owner CAS 后崩溃、取消迟到、独立读取、选择/不选 evidence 和失败请求后续发窗口；当前环境的 Unix socket 限制未解除，这些 native 场景未计通过，也未用普通 Engine fixture 或 SDK/broker 通过拼接为端到端成功。上一阶段的具体 IPC 诊断继续适用。
+- 本阶段仍不等于完整 PolicyAction 或两设计完成：策略子任务、独立交付/暂停及安全策略切换继续推进；MCP 权限、计划、提问、进程观察和协作的来源接线各自保留真实范围。完整内容回收仍占 Catalog owner，普通扩展工具、其他领域及默认产品迁移另有未闭合项。
+
 ## 2026-10-10 增量：工具结果与原始回执正文
 
 - 普通工具结果、未派发原因和原始外部执行回执已进入既有 ContentStore；Catalog 仍是唯一执行事实 owner，只提交内容身份及 outcome/effect 等短元数据。普通正文与权限/策略/等待等短控制状态显式区分，包含 `permission` 等同名键的普通 JSON 不会被当成控制状态。Job 受理只保存原作业身份，不为短回执制造正文对象。
-- 写入先在 worker 持久化正文，publication lease 保留至原子事实提交；公开 Operation/events、模型批次配对、记忆信任与投影、文件/计划/进程对账、子任务迟到回执和重启读取统一恢复原内容。当前及历史事件中的引用都是回收 roots，重复内容身份只校验一次。Catalog 当前格式为 15，旧内部格式明确拒绝，不引入兼容读法或转换器。
+- 写入先在 worker 持久化正文，publication lease 保留至原子事实提交；公开 Operation/events、模型批次配对、记忆信任与投影、文件/计划/进程对账、子任务迟到回执和重启读取统一恢复原内容。当前及历史事件中的引用都是回收 roots，重复内容身份只校验一次。此阶段将 Catalog 格式升至 15，现行版本见上方最新增量；旧内部格式明确拒绝，不引入兼容读法或转换器。
 - 进程等待固定 Run/Wait/进程/Operation revision 和分支 head，在 worker 读取原回执并准备生命周期消息，提交重核原边界。取消观察不读取原进程正文、不终止进程；已有交付复用原历史。迟到子任务回执也按同一准备/提交边界结算。
 - 最终恢复检查实际复现并修复了旧崩溃窗口：执行端回执已持久化而核心结算尚未完成时重启，重复原回执不能因幂等早退而永久保留未知状态。现在只在原终态事实尚未应用时补结算；已应用的相同回执不新增 revision 或事件，成功/确定效果与失败/确定无效果都使用原证据，不重执行。
 - 最终源码的完整 `varin-runtime` 测试通过：225 passed，2 个既有手动诊断 ignored。独立仓库外探针验证 null/空值、控制键碰撞、大 Unicode 正文的公开读取/events/GC/重开往返，正文缺失显式报错而控制取消仍可执行；另独立验证上述成功/无效果恢复与重复幂等。Kernel 编译、实际 Linux 开发构建、Host bundle、Host 测试类型及协议一致性检查通过。
@@ -88,7 +101,7 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 
 ## 完整设计对照与下一工程纵切
 
-2026-10-09 源码核对：既有对照起点为 `24b920ed`，现按远端 `74265577` 后的工作树及后文已核验证据更新。本节同时读取两份设计、runtime/extension 所属文档及实际调用实现；辅助规划模型的冻结构建与独立检查证据单列在下文，局部通过不等于完整设计交付。下文简称「总设」为完整运行时设计，「扩设」为能力组合设计。既有通过记录保留在后文；所有通过结论限于所列实际运行范围。
+2026-10-10 源码核对：既有对照起点为 `24b920ed`，当前表按正文/回执隔离和一般工具图后的源码及分阶段证据更新。本节同时读取两份设计、runtime/extension 所属文档及实际调用实现；辅助规划模型的冻结构建与独立检查证据单列在下文，局部通过不等于完整设计交付。下文简称「总设」为完整运行时设计，「扩设」为能力组合设计。既有通过记录保留在后文；所有通过结论限于所列实际运行范围。
 
 完成判断看真实调用链和用户路径，不看是否已有同名 trait、DTO 或测试文件。每行给出当前 owner、仍缺的不变量、一个可执行的下一步与应取得的证据；它们不是另设审批、通用防御层或测试元数据平台。
 
@@ -97,11 +110,11 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 | 扩设 §4–6、§10：同一能力合同与预绑定调用 | `kernel/crates/varin-runtime/src/composition.rs` 的 `CompositionRegistry`/pins；`composition/resolver.rs` 的根可达依赖图；`packages/extension-host/src/service-registry.ts` 的 provider/drain/候选替换 | `varin.context.fragments@1` 已贯穿真实 Host 安装/作用域选择、broker 声明、Rust resolver/registry、预绑定纯变换与实际模型请求；Host 显式 provider 直查及 service 索引已接通。live-root 检索已通过同一 service routing/CompositionRegistry 选择 keyword-only、keyword+structure 与显式 semantic；更广工具组合仍未完成 | 在已验收的 context、Decision、Observer 和 live-root 检索上继续接其余领域/工具合同；保持内部 Rust 直接调用、仅真实边界编码 | 两个项目选择不同实现；工具/调用方无需修改；加未使用扩展不改变调用扫描范围；普通缺失与选定实现失败分别呈现 |
 | 扩设 §5.2–5.4、§9：作用域、共享实例及局部准备 | resolver 已有 `ScopedSelection`/`PreparationKey`/`preparable`，把优先级解析明确交给现有 routing owner；Host supervisor 已有候选及 owner | 公共生命周期长队列已按 owner/依赖拆开，独立准备/释放及共享依赖合并已有后文证据；父子作用域差量、全部能力的共享实例键和局部组合复用仍未完成 | 沿已拆开的 owner/依赖路径接入语言等真实能力；验证共享键、父子作用域差量和局部更新复用，不另外建安装器或配置库 | A 的 activate 或 dispose 未完成，独立 B 仍可启用/停用/调用；同依赖只启动一次；可选缺失不吞掉已选实现的启动失败；冲突选择给出实际来源 |
 | 扩设 §6：Provider / Transform / Decision / Observer 四类参与方式 | Rust `ModelProvider`、`ToolExecutor`、`AgentPolicy`、`ProgressSink` 和 Catalog durable events 各自存在；Host SDK 有 services/effect/Surface 贡献 | SDK 已有声明式 `provideContextFragments` 与同合同 inspect，内置默认/可安装项目实例经真实模型请求验收。Decision 与 Observer 已有真实 broker 作者合同、可安装示例及游标消费；跨 branch/Run 的 Observer scope 已按不可变受理 checkpoint 接通；多变换顺序/冲突和更广领域组合仍未完成；非阻塞 progress 不等于第三方执行隔离 | 沿已有 Transform、Decision、Observer 纵切扩展真实领域组合并核对多变换顺序/冲突；复用事实游标与既有 worker，慢计算作为真实 Operation | 慢/同步阻塞观察插件不阻止工具提交与无关 worker；观察者重连按游标恢复；变换不修改原历史；决策只阻塞依赖自己的工作；观察者后续动作有新命令来源 |
-| 总设 §11、扩设 §7：完整可替换 AgentPolicy | `execution.rs` 已有合法行动检查、版本化 `PolicyCheckpoint` 和默认循环；`model_session.rs` 默认绑定 `DefaultAgentPolicy` | `PolicyAction` 已通过所选 Decision 支持独立只读依赖图、作用域结果分块及引用证据请求；ExecuteTools 继续只结算真实模型批次。辅助规划模型已有下述冻结构建的独立检查证据；子任务、一般工具图和交付/暂停仍未完成；策略目前按整个 Run 固定 | 以研究/计划执行的一条真实策略路径补行动受理与状态关联，接组合选择；慢规划模型用独立推理工作，不在 `decide()` 内做 I/O；保留核心交换配对 | 替换策略后原文/模型 opaque 仍可读；规划等待期间其他 Run 可执行；重开不会重做已受理行动；不兼容私有状态不伪造迁移；策略卸载不删除已受理子任务 |
-| 扩设 §9：热变更、旧调用及持久工作寿命 | Composition handle/lease/pins 区分 retired 与 revoked，按实际实现持有引用；HostServiceRegistry 有 inFlight/drain | Rust pins 尚未贯穿生产 Host/Surface 世代发布。现有局部通过不能证明模型生成时更新工具包、无 UI backend、独占资源交接和已提交选择重启恢复 | 让真实工具包的候选选择直接驱动组合发布；旧 ModelStep 保留 schema/实现，后续请求取新绑定；显式禁用沿执行身份取消；Surface 只作为声明的组依赖 | 候选失败保留旧组合；旧参数按旧实现完成；撤权后的新副作用被拒；关窗口不杀后台作业；旧无关实现引用释放；独占能力只暂停自己的新调用 |
-| 总设 §7–8：按真实资源的跨 Run 调度和便宜读取 | `execution.rs::execute_tools` 先建合同、按 `contracts_conflict` 排序、独立完成工具；`catalog_execution.rs` 已避免为普通只读结果建立持久 Operation | 跨 Run 已有 Catalog 所属原子完整资源集合/FIFO 准入，后文含真实多 Engine 证据；仍为就绪工具启动线程，任务族公平、分类队列及负载容量尚未完成。文件 CAS 与资源准入分别负责提交和顺序 | 在已有跨 Run 准入上补任务族公平与分类执行队列；新能力由可信资源计划确定 environment/view/真实目标；短读保留内存身份，容量由资源/配置决定 | 两个 Run 的冲突写按资源顺序；不同资源继续；大量检索不会饿死另一个任务的交互；取消排队项不取消共享服务；无需给每个内部 helper 建 Operation |
+| 总设 §11、扩设 §7：完整可替换 AgentPolicy | `execution.rs` 已有合法行动检查、版本化 `PolicyCheckpoint` 和默认循环；`model_session.rs` 默认绑定 `DefaultAgentPolicy` | `PolicyAction` 已支持一般工具图、作用域结果分块及引用证据请求；模型与策略共用单调用执行，ExecuteTools 继续只结算真实模型批次。辅助规划模型保留下述独立证据；一般图的原生恢复与真实 Host 验收边界见本次增量。策略子任务、交付/暂停仍未完成；策略目前按整个 Run 固定 | 以研究/计划执行的一条真实策略路径补行动受理与状态关联，接组合选择；慢规划模型用独立推理工作，不在 `decide()` 内做 I/O；保留核心交换配对 | 替换策略后原文/模型 opaque 仍可读；规划等待期间其他 Run 可执行；重开不会重做已受理行动；不兼容私有状态不伪造迁移；策略卸载不删除已受理子任务 |
+| 扩设 §9：热变更、旧调用及持久工作寿命 | Composition handle/lease/pins 区分 retired 与 revoked，按实际实现持有引用；HostServiceRegistry 有 inFlight/drain | `run_tools` 已有 active/candidate、合法请求/图边界激活及原 MCP 世代保留；失败候选不替代活动组合。普通扩展工具/Surface 的完整世代发布、无 UI backend、独占资源交接和全域重启恢复仍未完成 | 让真实工具包的候选选择直接驱动组合发布；旧 ModelStep 保留 schema/实现，后续请求取新绑定；显式禁用沿执行身份取消；Surface 只作为声明的组依赖 | 候选失败保留旧组合；旧参数按旧实现完成；撤权后的新副作用被拒；关窗口不杀后台作业；旧无关实现引用释放；独占能力只暂停自己的新调用 |
+| 总设 §7–8：按真实资源的跨 Run 调度和便宜读取 | `ResourceAdmission` 统一冲突前序、完整资源与 local-compute 容量；单调用生命周期用于模型和策略；普通只读结果可不建持久 Operation | 跨 Run 原子资源/FIFO 与 FileSearch 任务族轮转、同源容量预算已有后文综合证据；FileList、复合检索、LSP、provider 配额、维护等分类及 worker 承载尚未全域接齐。文件 CAS 与资源准入分别负责提交和顺序 | 扩展已有家族公平与容量准入到真实分类执行者，核对共享预算与独立等待；新能力由可信资源计划确定 environment/view/目标；短读保留内存身份 | 两个 Run 的冲突写按资源顺序；不同资源继续；大量检索不会饿死另一个任务的交互；取消排队项不取消共享服务；无需给每个内部 helper 建 Operation |
 | 总设 §4.1、§9、§23：单一协议、控制/数据分离、事件推进 | `kernel/protocol/schema.json` 生成边界；native control worker、Host native client 独立 credits；guardian 推送/磁盘输出已有局部实证；历史引用分页已有 HTTP 实证 | 不能由某一进程通道推导所有域完成。file_list/file_search 及 compute 背压已使用输出/终态事件而非 10 ms 轮询；大内容模型请求仍全量序列化/读取；同进程资源桥仍需区分 typed 执行与外部 wire 解码 | 沿其他内部等待核查事件通知和共享准备；沿实际大截图/日志/内容路径核查独立数据流；逐域移除重复 JSON 中转而不新增统一 RPC 层 | 计算、输出或大内容拥塞时取消/状态可受理；完整日志可按游标重读；控制成功不冒充执行已停止；空闲内部等待不持续产生 read RPC |
-| 总设 §12–13：模型用途、稳定上下文、即时记忆与压缩 | `providers/`、credential broker、Host credential owner；`catalog_context*.rs`/`context_job.rs`；Host `thread-context.ts` | 多家族 fake/loopback 通过不等于真实认证/平台网络完整覆盖；显式摘要不是自动预算策略或完整记忆流程；agentPlanning 已有受所选策略显式请求的 tool-free 模型 Operation 实现与局部独立验收；embedding/rerank/其他 decision/image 仍须按用途接入 | 让内置 ContextCompiler 与可替换上下文策略消费同一来源/记忆 revision；即时写入走现有 memory owner，成功 checkpoint 原子更换稳定系统快照；在实际检索路径绑定非 chat 推理用途 | memory UI/工具交错不丢 revision；压缩候选期间新增尾部保留；失败保留旧 checkpoint；token 预算包含工具/附件/事件；按真实 provider、认证和网络场景分别记录覆盖 |
+| 总设 §12–13：模型用途、稳定上下文、即时记忆与压缩 | `providers/`、credential broker、Host credential owner；`catalog_context*.rs`/`context_job.rs`；Host `thread-context.ts` | 多家族 fake/loopback 通过不等于真实认证/平台网络完整覆盖。自动容量准备、分段摘要和 ordinary memory 已接原 owner；可替换预算策略、provider 容量错误反馈及全产品记忆流程仍缺。agentPlanning 已有独立 Operation 与局部证据；embedding/rerank/其他 decision/image 仍须按实际用途逐项闭合 | 让内置 ContextCompiler 与可替换上下文策略消费同一来源/记忆 revision；即时写入走现有 memory owner，成功 checkpoint 原子更换稳定系统快照；在实际检索路径绑定非 chat 推理用途 | memory UI/工具交错不丢 revision；压缩候选期间新增尾部保留；失败保留旧 checkpoint；token 预算包含工具/附件/事件；按真实 provider、认证和网络场景分别记录覆盖 |
 | 总设 §14–16：源视图、捕获、dispatch、恢复与整合 | Native source launch/selection、Storage 分支/内容/文件事务、Host Documents/WorkingState；native 历史 branch 与文件 journal 恢复已有证据 | 明确 native source 准备不等于主/子任务 dispatch 完成；编辑器草稿、文件副本与 Git/overview 仍需同源关联；报告和代码集成不能混为一物；组合恢复与 Host 启动续接须走完整产品路径 | 以一个有独立源视图的子任务贯穿立即持久回执、批量捕获/共享固定 root、准备取消、执行、报告和条件代码整合；复用底层 writer | 大非 Git 根准备时父任务和控制继续；重开继承真实副本而不重置文件；无改动子任务正常交付；父目录后来修改形成明确冲突；草稿不被聊天分支操作覆盖 |
 | 总设 §17、扩设 §5.3：语言/检索及一致环境 | 原生 live_root 语言三工具及可组合关键词/结构/语义检索复用既有 Language、Documents、Structure、semantic owner 与 Rust grant；语义已绑定真实 immutable reader 和持久外发事实 | live_root 检索已进入真实原生历史，语义 revision/chunk hash 分别验证；固定/物化工程依赖闭包、其余 LSP、rerank 和远端映射未完成；语言跨文件 revision 仍仅请求后观察，无版本诊断仍为 pending | 继续建立固定语言/检索依赖闭包与远端一致映射；后续 rerank 沿显式推理用途/持久外发合同接入，保留未知效果和零隐式付费规则 | 语言与检索的独立等待、授权/过期结果、配置/reader切代、撤权、取消和账本恢复证据见后文；固定闭包、远端不串源及大语料成本另证 |
 | 总设 §18：问题、计划、Goal、定时与 Bot | `catalog_questions.rs`/`questions.rs` 已出现问题持久路径；Host memory/todo、bots、followups、scheduled-tasks 仍各有领域 owner | 问题记录不代表 Goal/日历发生项全部完成；既有 Host 续接权威还须收敛到统一 Run/Wait；显式 Goal 授权、手动暂停、用量和时区语义不能丢失 | 逐域把领域事件接原生受理和 durable Wait，先完成关闭 UI 后回答/续接与一次日历发生项；计划保留单 revision，Bot 使用相同任务身份而保留独立知识 | 默认答案/到期不是批准；订阅登记窗口不丢唤醒；重启只准入一次 occurrence；分叉不复制自动授权；暂停不被 timer 覆盖；用量不因投影重复累计 |
@@ -112,8 +125,8 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 
 ### 当前优先级
 
-1. **保留已核验策略纵切并继续补行动范围**：安装策略 → 独立规划 Operation → 有界读取图 → 主模型回答已有下述证据；下一步领域接线保留取消、混合恢复、凭据隔离和未知效果语义，一般工具图、子任务及交付/暂停仍须完成。
-2. **扩展已核验的真实源与语言路径**：live_root 三语言工具、可组合关键词/结构检索和显式语义闭环已接通；下一步建立固定/物化的完整依赖闭包、远端一致环境，并按独立推理合同评估 rerank。跨 Run 准入、事件 compute 和 owner 级共享准备继续复用，任务族公平及全域共享准备仍需补齐。
+1. **保留已核验策略纵切并继续补行动范围**：安装策略 → 独立规划 Operation → 有界读取图 → 主模型回答已有下述证据；一般工具图本次已接共享执行与持久效果恢复，真实 Host 验收仍受环境阻塞；下一步接策略子任务与交付/暂停，保留取消、凭据隔离和未知效果语义。
+2. **扩展已核验的真实源与语言路径**：live_root 三语言工具、可组合关键词/结构检索和显式语义闭环已接通；下一步建立固定/物化的完整依赖闭包、远端一致环境，并按独立推理合同评估 rerank。跨 Run 准入、事件 compute 和 owner 级共享准备继续复用，FileSearch 家族公平已接通，其余分类及全域共享准备仍需补齐。
 3. **让策略和上下文真正可替换**：用实际多步工作证明行动合同，补齐默认记忆/压缩/推理用途；不以 trait 存在或默认循环能聊天作为完成证据。
 4. **沿同一合同接完领域与产品**：协作/源视图、语言/检索、问题/计划/Goal/定时、MCP/脚本、桌面/远端、科研/Bot/UI 各有真实使用路径。迁移可以并行，不能新增第二套领域状态权威。
 5. **以实证收尾完整设计**：局部热更新、独立等待、资源公平、成本复用与平台发行都成立，才完成最终切换及 Pi 清理。Pi 删除不是前四项的替代品。

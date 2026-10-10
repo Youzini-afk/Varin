@@ -673,10 +673,7 @@ fn persistence_failure_cancels_queued_successor_without_releasing_uncertain_occu
         .unwrap()
         .iter()
         .find_map(|record| match record {
-            ExecutionRecord::ToolDispatched {
-                request_id,
-                call_id,
-            } if call_id == "first" => Some(format!("{request_id}:tool:{call_id}")),
+            ExecutionRecord::ToolDispatched {context} if context.operation_id.ends_with(":tool:first") => Some(context.operation_id.clone()),
             _ => None,
         })
         .expect("durable dispatch identity");

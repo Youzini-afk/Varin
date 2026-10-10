@@ -126,15 +126,15 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 15, input domain 2 and collaboration domain 2 store input intents/queue bodies and context-job ownership,
+Catalog version 16, input domain 2 and collaboration domain 2 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. `Catalog::collect_content_objects` marks requests, provider originals,
 history, all model outputs (including rejected output), original command intents, queued-history references, context
 checkpoints, memory projections, summary recipes and source parts, policy action/checkpoint bodies,
-and indexed graph receipts, planning-model request/output references, ordinary tool arguments/results,
+and indexed graph calls/receipts, planning-model request/output references, ordinary tool arguments/results,
 external executor receipts and permission call/scope bodies, including historical receipt and completed
-permission audit events. It verifies each distinct live object
+permission audit events and original invocation completions. It verifies each distinct live object
 before sweeping and preserves unknown files; it never deletes history or invokes system-kernel GC.
 
 Child task records retain ownership/state and references to task text, configuration and launch
@@ -206,11 +206,13 @@ for the earlier verified boundaries. Catalog cold opening/recovery now runs on a
 worker; authenticated requests wait only for that owner, with their cancellation flags intact.
 Explicit context-job capture and publication also stage bodies outside the Catalog lock.
 
-## Policy-originated read graphs
+## Policy-originated tool graphs
 
-A pinned AgentPolicy may return `ReadGraph` before any model request. Nodes have unique identities,
-frozen schemas/source contexts and explicit acyclic prerequisites. Only trusted executor opt-in for
-read-only Result capabilities is eligible; untrusted read-only annotations confer no permission.
+A pinned AgentPolicy may return `ToolGraph` before any model request. The public Decision contract is
+`varin.agent.policy@2`; the old read-graph contract is replaced, not translated. Nodes have unique identities,
+frozen schemas/source contexts and explicit acyclic prerequisites. Tool preparation, authorization,
+atomic resource/capacity admission, dispatch reauthorization and settlement use the same single-call
+execution path as model tools. Untrusted read-only annotations confer no permission.
 `ToolOrigin` distinguishes actual ModelSteps from policy action/node origins. There are no fabricated
 requests, tool exchanges or user messages.
 
@@ -220,20 +222,39 @@ stores the shared frozen tool directory once. Nodes, dependencies and individual
 rows in the same Catalog; settling a node does not parse the definition or rewrite other receipts.
 Admission and the
 versioned private policy checkpoint commit atomically; changed intent at the same identity conflicts.
-Independent nodes share existing ResourceAdmission and can overlap. Each receipt commits before any
-dependent can start. Failed prerequisites produce explicit nonexecution receipts. Grants are checked
-again after resource waits; ordinary model-originated reads retain their cheaper batch path.
+Independent nodes share existing ResourceAdmission and can overlap, including during preparation.
+Each receipt commits before any dependent can start. Failed prerequisites produce explicit
+`not_dispatched` receipts. Ordinary model-originated reads retain their cheaper batch path.
 
-Restart preserves settled receipts and retries only interrupted pure reads using their retained
-schema/source. Recovery works before the first ModelStep and restores later decision checkpoints.
+Trusted opt-in read-only Result calls with read claims may remain transient. Other calls own a normal
+Operation with the actual persisted `ToolOrigin`; file recovery does not infer a model request from an
+operation-ID string. The Operation's immutable `call_completion` owns the original invocation receipt;
+graph nodes and model exchanges consume that fact. `result` and external receipts can subsequently
+describe an independent job's terminal state without replacing its original `job_accepted` completion.
+Graph dependencies wait for call completion, so Job acceptance permits continuation; observing the
+job's terminal result requires its explicit durable Wait.
+
+Restart distinguishes never-dispatched admission, interrupted replayable reads, dispatched work
+requiring original-executor reconciliation, and completed calls awaiting graph consumption. It never
+reexecutes an uncertain mutation. Recovery works before the first ModelStep and restores later decision
+checkpoints. Accepted work retains its frozen schemas/source and executor generation. Cancellation
+before executor entry records nonexecution; later confirmed effects remain attributable to their
+original Operation and do not revive a cancelled Run.
 The policy receives owned references and can request bounded `ReadResult` chunks. Selected evidence
-enters `RequestModelWithEvidence` as labeled ExternalData, without synthetic provider call/result
-pairing. Output references are checked against Run, action and node; no arbitrary object-hash reader
+enters `RequestModelWithEvidence` as labeled untrusted policy-tool data, without synthetic provider
+call/result pairing. Memory evidence is authenticated against the original memory Operation and
+canonical result identity. Facts carried by that evidence replace only their duplicate memory-tail
+items in the candidate request; selected/sent/committed delivery remains in the existing memory owner.
+Output references are checked against Run, action and node; no arbitrary object-hash reader
 is granted. Chunk/evidence reads and new graph output writes happen outside the Catalog mutex.
 The publication reference protects uncommitted objects until the short receipt transaction commits.
 Graph definition preparation validates all nodes on the worker before atomic admission. Worker reads
 restore the exact definition and receipts; cancellation and admission queries require only metadata.
 Private policy state and actions are immutable references, loaded outside Catalog when continuing.
+Memory mutations use the existing domain writer and receipt recovery. MCP permissions, plan tools,
+child dispatch, process observation and questions retain their explicit origin restrictions until
+their own policy-origin consumers are connected. Direct child actions, delivery and pause remain
+separate unfinished PolicyAction work; a general graph alone does not complete the design.
 
 ## Policy-originated planning models
 
@@ -438,7 +459,7 @@ family value. Parent completion does not change that identity. No second task tr
 log is created.
 
 The first classified production capability is bound `ToolKind::FileSearch`, including policy
-read-graph calls. Plain file reads, directory lists, dispatch, questions and control do not consume its
+tool-graph calls. Plain file reads, directory lists, dispatch, questions and control do not consume its
 capacity. The trusted executor supplies the classification; wrappers forward capabilities they do not
 own. MCP annotations cannot assign local execution classes. FileList, composite retrieval stages,
 LSP/service waits, model-provider quotas, maintenance and direct non-`compute.start` consumers

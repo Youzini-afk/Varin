@@ -816,8 +816,14 @@ export interface Run {
   cancel_requested: boolean;
 }
 
+export type OperationCallCompletion =
+  | { kind: 'not_dispatched'; reason: string }
+  | { kind: 'result'; outcome: Outcome; effect: Effect; content: unknown }
+  | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime };
+
 export interface Operation {
   external_receipt: ExternalReceipt | null;
+  call_completion: OperationCallCompletion | null;
   id: string;
   run_id: string;
   epoch: number;

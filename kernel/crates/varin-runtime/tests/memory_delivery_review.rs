@@ -586,3 +586,305 @@ fn unsupported_or_broken_context_domain_is_rejected_before_epoch_recovery_or_ass
         );
     }
 }
+
+#[test]
+fn policy_memory_mutation_uses_original_receipt_for_evidence_or_tail_delivery() {
+    use std::sync::{Arc, Mutex};
+    use varin_runtime::{Effect, Lifetime, Outcome, RunState};
+    struct MemoryWriter(Arc<Mutex<Catalog>>);
+    impl ToolExecutor for MemoryWriter {
+        fn plan(
+            &self,
+            call: &ToolCall,
+            context: &FrozenToolContext,
+            cancel: &CancellationToken,
+        ) -> Result<ToolPreparation, ExecutionError> {
+            self.prepare(call, context, cancel)
+                .map(ToolPreparation::Ready)
+        }
+        fn prepare(
+            &self,
+            call: &ToolCall,
+            _: &FrozenToolContext,
+            _: &CancellationToken,
+        ) -> Result<ToolContract, ExecutionError> {
+            Ok(ToolContract {
+                name: call.name.clone(),
+                schema_version: call.schema_version.clone(),
+                read_only: call.name == "read",
+                completion: CompletionKind::Result,
+                lifetime: Lifetime::Run,
+                resources: vec![],
+            })
+        }
+        fn supports_policy_read(
+            &self,
+            _: &FrozenToolContext,
+            call: &ToolCall,
+            _: &ToolContract,
+        ) -> bool {
+            call.name == "read"
+        }
+        fn authorize(
+            &self,
+            _: &ToolExecutionContext,
+            _: &ToolCall,
+            _: &ToolContract,
+            _: &CancellationToken,
+        ) -> Result<(), ExecutionError> {
+            Ok(())
+        }
+        fn execute(
+            &self,
+            context: &ToolExecutionContext,
+            call: &ToolCall,
+            _: &ToolContract,
+            _: &CancellationToken,
+        ) -> ToolCompletion {
+            assert!(matches!(context.origin, ToolOrigin::PolicyAction { .. }));
+            if call.name == "read" {
+                return ToolCompletion::Result {
+                    outcome: Outcome::Succeeded,
+                    effect: Effect::None,
+                    content: Value::Null,
+                };
+            }
+            let receipt = json!({"origin":format!("run:{}:{}",context.run_id,context.operation_id),"revision":2,"changes":[{"id":1,"scope":{"kind":"global"},"note":note(1,"POLICY_SAVED_NOTE")}]});
+            let preparation = self
+                .0
+                .lock()
+                .unwrap()
+                .prepare_memory_receipt(&context.run_id, receipt.clone())
+                .unwrap();
+            let prepared = preparation.load().unwrap();
+            assert!(self
+                .0
+                .lock()
+                .unwrap()
+                .publish_memory_state(prepared)
+                .unwrap());
+            ToolCompletion::Result {
+                outcome: Outcome::Succeeded,
+                effect: Effect::Confirmed,
+                content: json!({"status":"ready","memoryReceipt":receipt}),
+            }
+        }
+    }
+    struct MemoryPolicy {
+        evidence: bool,
+    }
+    impl AgentPolicy for MemoryPolicy {
+        fn identity(&self) -> PolicyIdentity {
+            PolicyIdentity {
+                name: "memory-policy".into(),
+                version: "2".into(),
+            }
+        }
+        fn decide(
+            &self,
+            _: &PolicyView<'_>,
+            event: &PolicyEvent,
+            _: &Value,
+            _: &CancellationToken,
+        ) -> Result<PolicyDecision, ExecutionError> {
+            let action = match event {
+                PolicyEvent::Started => PolicyAction::ToolGraph {
+                    nodes: [("save", "memory"), ("read", "read")]
+                        .into_iter()
+                        .map(|(id, name)| PolicyToolNode {
+                            id: id.into(),
+                            depends_on: vec![],
+                            call: ToolCall {
+                                call_id: id.into(),
+                                name: name.into(),
+                                schema_version: "1".into(),
+                                arguments: json!({"action":"save"}),
+                            },
+                        })
+                        .collect(),
+                },
+                PolicyEvent::ToolGraphCompleted { receipts, .. } => {
+                    assert!(receipts
+                        .iter()
+                        .all(|receipt| receipt.outcome() == Outcome::Succeeded));
+                    if self.evidence {
+                        PolicyAction::RequestModelWithEvidence {
+                            evidence: vec![receipts
+                                .iter()
+                                .find(|receipt| receipt.node_id == "save")
+                                .unwrap()
+                                .output()
+                                .unwrap()
+                                .clone()],
+                        }
+                    } else {
+                        PolicyAction::RequestModel
+                    }
+                }
+                PolicyEvent::ModelCompleted { .. } => PolicyAction::Complete,
+                _ => panic!("unexpected policy event"),
+            };
+            Ok(PolicyDecision {
+                action,
+                state: Value::Null,
+            })
+        }
+    }
+    #[derive(Default)]
+    struct Capture(Mutex<Vec<RequestSnapshot>>);
+    impl ModelProvider for Capture {
+        fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+            Ok(serde_json::to_value(view).unwrap())
+        }
+        fn generate(
+            &self,
+            request: &RequestSnapshot,
+            _: &CancellationToken,
+            emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
+        ) -> Result<FinishReason, ModelFailure> {
+            self.0.lock().unwrap().push(request.clone());
+            emit(ProviderEvent::ItemCompleted {
+                item: ProviderItem {
+                    id: "answer".into(),
+                    content: Content::Text {
+                        text: "done".into(),
+                    },
+                    opaque: None,
+                },
+            })
+            .unwrap();
+            Ok(FinishReason::Stop)
+        }
+    }
+    for select_evidence in [false, true] {
+        let f = Fixture::new();
+        let mut db = Catalog::open(&f.0).unwrap();
+        db.create_thread("thread", "main").unwrap();
+        let receipt = db
+            .submit_with_context_snapshot(
+                &SubmitInput {
+                    key: "policy-memory".into(),
+                    thread_id: "thread".into(),
+                    branch_id: "main".into(),
+                    expected_head: None,
+                    input: json!({"text":"save a note"}),
+                    configuration: json!({}),
+                },
+                None,
+                false,
+                Some(ContextProposal {
+                    key: "initial".into(),
+                    branch_id: "main".into(),
+                    through_id: None,
+                    expected_revision: 0,
+                    summary: String::new(),
+                    effective_system_prompt: "FROZEN_SYSTEM FROZEN_NOTE".into(),
+                    instruction_sources: vec!["review-source".into()],
+                    memory_checkpoint: Some("memory:1".into()),
+                }),
+                Some(basis()),
+            )
+            .unwrap();
+        let mut binding = snapshot(
+            &receipt.run_id,
+            &receipt.input_id,
+            "unused",
+            projection(&db, &receipt.run_id, db.epoch(), &receipt.input_id),
+        )
+        .view
+        .binding;
+        binding.tools = ["memory", "read"]
+            .into_iter()
+            .map(|name| ToolSchema {
+                name: name.into(),
+                version: "1".into(),
+                schema: json!({"type":"object"}),
+            })
+            .collect();
+        let policy = Arc::new(MemoryPolicy {
+            evidence: select_evidence,
+        });
+        let input = db
+            .prepare_execution(&receipt.run_id, binding, policy.identity(), Value::Null)
+            .unwrap();
+        let owner = Arc::new(Mutex::new(db));
+        let provider = Arc::new(Capture::default());
+        let engine = ExecutionEngine {
+            persistence: owner.clone(),
+            provider: provider.clone(),
+            tools: Arc::new(MemoryWriter(owner.clone())),
+            policy,
+            context_preparation: Arc::new(NoopContextPreparation),
+            progress: ProgressSink::default(),
+        };
+        assert_eq!(
+            engine
+                .run(input, CancellationToken::default())
+                .unwrap()
+                .state,
+            RunState::Completed
+        );
+        let requests = provider.0.lock().unwrap();
+        let request = &requests[0];
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            states(&f.0, &request.view.request_id),
+            vec!["\"committed\""]
+        );
+        assert_eq!(
+            request
+                .view
+                .history
+                .iter()
+                .filter(|item| matches!(item.provenance, Provenance::PolicyToolData { .. }))
+                .count(),
+            usize::from(select_evidence)
+        );
+        assert_eq!(request.view.history.iter().filter(|item|matches!(&item.provenance,Provenance::EnvironmentFact{event_id} if event_id.starts_with("memory:"))).count(),usize::from(!select_evidence));
+        assert_eq!(
+            serde_json::to_string(&request.view.history)
+                .unwrap()
+                .matches("POLICY_SAVED_NOTE")
+                .count(),
+            1
+        );
+        assert!(request.view.history.iter().any(|item| matches!(
+            item.provenance,
+            Provenance::SystemInstruction { .. }
+        ) && serde_json::to_string(&item.content)
+            .unwrap()
+            .contains("FROZEN_NOTE")));
+        assert!(!request.view.history.iter().any(|item| matches!(
+            item.content,
+            Content::ToolCall { .. } | Content::ToolResult { .. }
+        )));
+        let mut db = owner.lock().unwrap();
+        db.collect_content_objects().unwrap();
+        let operations: Vec<_> = db
+            .events_after(0, 1000)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == "operation.settled")
+            .collect();
+        let mutation = operations
+            .iter()
+            .find(|event| event.data["executor"] == "memory")
+            .unwrap();
+        let op = db
+            .capture_operation_read(db.operation(&mutation.subject).unwrap())
+            .load()
+            .unwrap();
+        assert_eq!(op.intent["origin"]["kind"], "policy_action");
+        assert!(matches!(
+            op.call_completion,
+            Some(ToolCompletion::Result {
+                effect: Effect::Confirmed,
+                ..
+            })
+        ));
+        assert_eq!(
+            db.memory_state("main").unwrap().unwrap().memories,
+            vec![note(1, "POLICY_SAVED_NOTE")]
+        );
+    }
+}

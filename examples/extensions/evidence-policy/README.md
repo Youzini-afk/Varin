@@ -1,6 +1,6 @@
 # Bounded evidence policy
 
-An ordinary brokered Host extension implementing `varin.agent.policy@1` through
+An ordinary brokered Host extension implementing `varin.agent.policy@2` through
 `provideAgentPolicy`. It gathers evidence before the first model request, inspects a committed
 result, chooses a subsequent read from that content, and asks the normal selected model to answer.
 
@@ -23,8 +23,8 @@ Select its provider in existing service routing, with a real project ID:
 ```json
 {
   "serviceId": "varin.agent.policy",
-  "version": 1,
-  "providerKey": "example.evidence-policy:host:varin.agent.policy@1",
+  "version": 2,
+  "providerKey": "example.evidence-policy:host:varin.agent.policy@2",
   "scope": { "projectId": "YOUR_PROJECT_ID" },
   "allowFallback": false
 }
@@ -45,13 +45,13 @@ Before capturing the Run's fixed branch source, create `evidence-index.json`:
 Create that target file with the evidence to use. Start the project-selected native Run with the
 ordinary `file_read` tool enabled and its existing authorized fixed branch/revision source.
 The extension cannot create this grant or source binding. Missing source, disabled tools or
-materialized/live-source reads are rejected by core admission. Files changed after capture do not
+unauthorized sources are rejected by core admission. Files changed after capture do not
 change this Run's source.
 
 The example performs these actual decisions:
 
-1. Submit a one-node `read_graph` for `evidence-index.json`, before any model request.
-2. Receive `read_graph_completed` with its committed own-Run action/node output reference.
+1. Submit a one-node `tool_graph` for `evidence-index.json`, before any model request.
+2. Receive `tool_graph_completed` with its committed own-Run action/node output reference.
 3. Request the output through `read_result` chunks. Inspect the native result's source provenance
    and parse its `content.text` JSON to obtain `nextFile`.
 4. Submit a second read graph for that content-selected path. A different `nextFile` changes this
@@ -67,13 +67,19 @@ The model budget of eight requests is also this example's configuration, not a r
 
 ## Author contract and ownership
 
-A read node contains `id`, `depends_on` and `call`; `call.call_id` equals the node ID. Dependencies
+A tool node contains `id`, `depends_on` and `call`; `call.call_id` equals the node ID. Dependencies
 refer to nodes in the same graph. Runtime admission validates the graph, frozen schema, source and
-trusted executor eligibility before dispatch. Eligibility is implemented by the native adapter,
-never an extension flag or MCP annotation. This first graph path supports fixed-source native
-synchronous file reads/list/search; it does not authorize writes, arbitrary MCP or background jobs.
+trusted executor contract before dispatch. Eligibility is implemented by the native adapter,
+never an extension flag or MCP annotation. The general graph uses the same authorization, resource,
+capacity and effect settlement path as model tool calls. This example deliberately submits only
+fixed-source file reads. Other calls still require their own admitted capability and origin scope;
+policy origins do not make every permissions, MCP, planning, child-task or question route available.
 
-`read_graph_completed` contains receipt metadata and scoped `output` references. `read_result`
+`tool_graph_completed` contains `{ node_id, completion }` receipts. A `result` completion records
+`outcome`, `effect` and a required scoped `output` reference, even when the underlying value is JSON
+null. A `not_dispatched` completion has a reason and no output. A `job_accepted` completion records
+`operation_id`, `phase`, `effect` and `lifetime`; it is not a successful job result. This example
+requires successful `result` completions before using evidence. `read_result`
 accepts that reference and a zero-based chunk index, producing `result_chunk` with byte data,
 chunk count and total byte count. Decode the complete UTF-8 JSON across chunk boundaries. The
 core checks the exact own-Run/action/node/content association; knowing a content hash grants no

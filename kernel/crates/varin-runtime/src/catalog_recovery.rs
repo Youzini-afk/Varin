@@ -654,6 +654,12 @@ impl Catalog {
             }
             let key = format!("{}:tool:{}", request_id, call.call_id);
             if let Some(op) = optional_record::<Operation>(database, "operations", &key)? {
+                let intent=super::tool_content::ToolIntent::from_operation(&op)?;
+                if intent.origin()!=&(ToolOrigin::ModelStep{request_id:request_id.clone()}) || op.run_id!=run_id {return Err(RuntimeError::Conflict("model invocation origin changed".into()));}
+                if let Some(completion)=op.call_completion.clone() {
+                    receipts.insert(call.call_id.clone(),ToolResult{request_id:request_id.clone(),call_id:call.call_id.clone(),completion:completion.load(content)?});
+                    continue;
+                }
                 if op.cancel_requested
                     && op.phase == OperationPhase::Accepted
                     && op.effect == Effect::None

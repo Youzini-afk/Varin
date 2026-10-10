@@ -6,19 +6,142 @@ use super::result_content::{ToolReceiptMetadata, ToolCompletionMetadata};
 use std::sync::Mutex;
 
 impl Persistence for Mutex<Catalog> {
-    fn confirms_no_effect(&self, context: &ToolExecutionContext, epoch: u64, completion: &ToolCompletion)
-        -> std::result::Result<bool, ExecutionError> {
-        let ToolCompletion::Result { outcome, effect: Effect::None, content } = completion else { return Ok(false); };
-        let content_identity = crate::content::ContentStore::reference(content).map_err(policy_error)?;
-        let catalog = self.lock().map_err(|_| ExecutionError::new("catalog_poisoned", "catalog owner failed"))?;
+    fn resume_tool(
+        &self,
+        context: &ToolExecutionContext,
+        epoch: u64,
+    ) -> std::result::Result<ToolResume, ExecutionError> {
+        let (completion, content, _publication) = {
+            let mut catalog = self.lock().map_err(catalog_lock_error)?;
+            fence(&catalog.run(&context.run_id).map_err(policy_error)?, epoch).map_err(policy_error)?;
+            let Some(mut operation) =
+                optional_record::<Operation>(&catalog.db, "operations", &context.operation_id)
+                    .map_err(policy_error)?
+            else {
+                return Ok(ToolResume::New);
+            };
+            let intent = ToolIntent::from_operation(&operation).map_err(policy_error)?;
+            if operation.run_id != context.run_id
+                || intent.origin() != &context.origin
+                || operation.id != context.origin.operation_id(&intent.call().call_id)
+            {
+                return Err(ExecutionError::new(
+                    "tool_origin_changed",
+                    "invocation origin differs from canonical owner",
+                ));
+            }
+            if operation.call_completion.is_none() {
+                if operation.phase == OperationPhase::Terminal
+                    && operation.outcome == Some(Outcome::Indeterminate)
+                {
+                    if let Some(receipt) = operation.external_receipt.clone().filter(|receipt| {
+                        receipt.outcome != Outcome::Indeterminate && receipt.effect != Effect::Unknown
+                    }) {
+                        apply_external_terminal(&mut operation, &receipt);
+                    }
+                }
+                if operation.phase == OperationPhase::Accepted && operation.effect == Effect::None {
+                    return Ok(ToolResume::Admitted {
+                        cancel_requested: operation.cancel_requested,
+                    });
+                }
+                if operation.phase != OperationPhase::Terminal
+                    || operation.outcome == Some(Outcome::Indeterminate)
+                    || operation.effect == Effect::Unknown
+                {
+                    return Err(ExecutionError::new(
+                        "tool_reconciliation_required",
+                        "original executor must settle this dispatched invocation; it will not replay",
+                    ));
+                }
+                let outcome = operation.outcome.ok_or_else(|| {
+                    ExecutionError::new(
+                        "tool_receipt_missing",
+                        "terminal invocation outcome missing",
+                    )
+                })?;
+                let reference = operation
+                    .result
+                    .as_ref()
+                    .ok_or_else(|| {
+                        ExecutionError::new(
+                            "tool_receipt_missing",
+                            "terminal invocation result missing",
+                        )
+                    })?
+                    .reference()
+                    .map_err(policy_error)?
+                    .clone();
+                operation.call_completion = Some(ToolCompletionMetadata::Result {
+                    outcome,
+                    effect: operation.effect,
+                    content_ref: reference,
+                });
+                operation.revision += 1;
+                let tx = catalog
+                    .db
+                    .transaction()
+                    .map_err(|error| policy_error(error.into()))?;
+                put(&tx, "operations", &operation.id, &operation).map_err(policy_error)?;
+                event(
+                    &tx,
+                    &operation.id,
+                    operation.revision,
+                    "operation.settled",
+                    serde_json::to_value(&operation).map_err(|error| policy_error(error.into()))?,
+                )
+                .map_err(policy_error)?;
+                tx.commit().map_err(|error| policy_error(error.into()))?;
+            }
+            (
+                operation
+                    .call_completion
+                    .expect("canonical call completion"),
+                catalog.content.clone(),
+                catalog.content.begin_publication(),
+            )
+        };
+        Ok(ToolResume::Completed(
+            super::result_content::ToolCompletionRead {
+                completion,
+                content,
+                _publication,
+            },
+        ))
+    }
+
+    fn confirms_no_effect(
+        &self,
+        context: &ToolExecutionContext,
+        epoch: u64,
+        completion: &ToolCompletion,
+    ) -> std::result::Result<bool, ExecutionError> {
+        let ToolCompletion::Result {
+            outcome,
+            effect: Effect::None,
+            content,
+        } = completion
+        else {
+            return Ok(false);
+        };
+        let content_identity =
+            crate::content::ContentStore::reference(content).map_err(policy_error)?;
+        let catalog = self
+            .lock()
+            .map_err(|_| ExecutionError::new("catalog_poisoned", "catalog owner failed"))?;
         let run = catalog.run(&context.run_id).map_err(policy_error)?;
         fence(&run, epoch).map_err(policy_error)?;
-        let operation = catalog.operation(&context.operation_id).map_err(policy_error)?;
+        let operation = catalog
+            .operation(&context.operation_id)
+            .map_err(policy_error)?;
         let admitted: ToolIntent = serde_json::from_value(operation.intent.clone())
             .map_err(|error| ExecutionError::new("external_receipt", error.to_string()))?;
-        let ToolOrigin::ModelStep { request_id } = &context.origin else { return Ok(false); };
-        Ok(catalog.epoch() == epoch && operation.epoch == epoch && operation.run_id == run.id
-            && operation.id == format!("{request_id}:tool:{}", admitted.call().call_id)
+
+        Ok(catalog.epoch() == epoch
+            && operation.epoch == epoch
+            && operation.run_id == run.id
+            && admitted.origin() == &context.origin
+            && operation.id == context.operation_id
             && operation.executor.as_deref() == Some(admitted.call().name.as_str())
             && confirmed_no_effect_receipt(&operation, *outcome, &content_identity))
     }
@@ -80,17 +203,48 @@ impl Persistence for Mutex<Catalog> {
             fence(&catalog.run(run).map_err(policy_error)?, epoch).map_err(policy_error)?;
             (catalog.content.clone(), catalog.content.begin_publication())
         };
-        let output = match completion {
-            ToolCompletion::Result { effect: Effect::None, content: body, .. } => Some(content.save(body).map_err(policy_error)?),
-            _ => None,
-        };
+        let metadata=ToolCompletionMetadata::write(&content,completion).map_err(policy_error)?;
         self.lock().map_err(catalog_lock_error)?
-            .settle_policy_node_reference(run, epoch, action, node, completion, output).map_err(policy_error)
+            .settle_policy_node_reference(run, epoch, action, node, completion, metadata).map_err(policy_error)
     }
-    fn policy_evidence(&self,run:&str,epoch:u64,reference:&PolicyEvidenceRef)->std::result::Result<ConversationItem,ExecutionError>{
-        let (content,owned,model)={let catalog=self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?;fence(&catalog.run(run).map_err(policy_error)?,epoch).map_err(policy_error)?;(catalog.content.clone(),catalog.owned_policy_reference(run,reference).map_err(policy_error)?,catalog.is_policy_model_reference(reference).map_err(policy_error)?)};
-        let value=content.load(&owned).map_err(policy_error)?;
-        Ok(if model {policy_model_evidence_item(reference,value)} else {policy_evidence_item(reference,value)})
+
+    fn policy_evidence(
+        &self,
+        run: &str,
+        epoch: u64,
+        reference: &PolicyEvidenceRef,
+    ) -> std::result::Result<PolicyEvidence, ExecutionError> {
+        let (content, owned, model, origin, thread, _publication) = {
+            let catalog = self.lock().map_err(catalog_lock_error)?;
+            let current = catalog.run(run).map_err(policy_error)?;
+            fence(&current, epoch).map_err(policy_error)?;
+            let owned = catalog
+                .owned_policy_reference(run, reference)
+                .map_err(policy_error)?;
+            let origin =
+                super::memory::owned_policy_receipt(&catalog.db, run, reference, &current.thread_id)
+                    .map_err(policy_error)?
+                    .map(|(_, origin)| origin);
+            (
+                catalog.content.clone(),
+                owned,
+                catalog
+                    .is_policy_model_reference(reference)
+                    .map_err(policy_error)?,
+                origin,
+                current.thread_id,
+                catalog.content.begin_publication(),
+            )
+        };
+        let value = content.load(&owned).map_err(policy_error)?;
+        let memory_facts = super::memory::carried_policy_facts(&value, origin.as_deref(), &thread)
+            .map_err(policy_error)?;
+        let item = if model {
+            policy_model_evidence_item(reference, value)
+        } else {
+            policy_evidence_item(reference, value)
+        };
+        Ok(PolicyEvidence { item, memory_facts })
     }
     fn policy_chunk(&self,run:&str,epoch:u64,reference:&PolicyEvidenceRef,index:usize)->std::result::Result<crate::content::ContentChunk,ExecutionError>{
         let (content,owned)={let catalog=self.lock().map_err(|_|ExecutionError::new("catalog_poisoned","catalog owner failed"))?;fence(&catalog.run(run).map_err(policy_error)?,epoch).map_err(policy_error)?;(catalog.content.clone(),catalog.owned_policy_reference(run,reference).map_err(policy_error)?)};
@@ -151,6 +305,7 @@ impl Persistence for Mutex<Catalog> {
             .commit_prepared_execution(run_id, epoch, record, prepared));
         match result {
             Ok(()) => Ok(()),
+            Err(RuntimeError::DispatchCancelled) => Err(ExecutionError::new("dispatch_cancelled","tool dispatch cancelled before executor entry")),
             Err(RuntimeError::InputPending) => Err(ExecutionError::new(
                 "input_pending",
                 "new user input is waiting at this boundary",
@@ -259,6 +414,7 @@ struct PreparedExecutionBodies {
     originals: Option<Vec<ProviderOriginal>>,
     output: Option<Value>,
     receipts: std::collections::HashMap<String, ToolReceiptMetadata>,
+    completion: Option<ToolCompletionMetadata>,
     results: std::collections::HashMap<String, OperationResultMetadata>,
 }
 impl ExecutionBodyPreparation {
@@ -283,12 +439,10 @@ impl ExecutionBodyPreparation {
                     if let Content::ToolCall {call}=&item.content {calls.insert(call.call_id.clone(),ToolCallMetadata::write(&self.content,call)?);}
                 }
             }
-            ExecutionRecord::ToolsAdmitted {tools,..} => {
-                for tool in tools {
-                    let intent=ToolIntent::write(&self.content,tool)?;
-                    calls.insert(tool.call.call_id.clone(),intent.call().clone());
-                    admitted.insert(tool.call.call_id.clone(),intent);
-                }
+            ExecutionRecord::ToolAdmitted {context,tool} => {
+                let intent=ToolIntent::write(&self.content,&context.origin,tool)?;
+                calls.insert(tool.call.call_id.clone(),intent.call().clone());
+                admitted.insert(tool.call.call_id.clone(),intent);
             }
             _=>(),
         }
@@ -319,7 +473,7 @@ impl ExecutionBodyPreparation {
         let mut receipts = std::collections::HashMap::new();
         let mut results = std::collections::HashMap::new();
         let tool_results: &[ToolResult] = match record {
-            ExecutionRecord::ToolSettled { result } => std::slice::from_ref(result),
+
             ExecutionRecord::ToolBatchCommitted { results, .. } => results,
             _ => &[],
         };
@@ -336,7 +490,20 @@ impl ExecutionBodyPreparation {
             results.insert(result.call_id.clone(), body);
             receipts.insert(result.call_id.clone(), receipt);
         }
-        Ok(PreparedExecutionBodies { _publication: self.publication, request, tools_ref, policy_checkpoint, calls, admitted, frozen_history_range, memory_deliveries, history, originals, output, receipts, results })
+        let completion = if let ExecutionRecord::ToolSettled { completion, .. } = record {
+            let receipt = ToolCompletionMetadata::write(&self.content, completion)?;
+            let body = match completion {
+                ToolCompletion::Result { .. } => match &receipt {
+                    ToolCompletionMetadata::Result { content_ref, .. } => OperationResultMetadata::Content { reference: content_ref.clone() },
+                    _ => unreachable!(),
+                },
+                ToolCompletion::NotDispatched { reason } => OperationResultMetadata::Content { reference: self.content.save(&json!({"not_dispatched":reason}))? },
+                ToolCompletion::JobAccepted { operation_id, phase, .. } => OperationResultMetadata::Control { value: json!({"operation_id":operation_id,"phase":phase}) },
+            };
+            results.insert("invocation".into(), body);
+            Some(receipt)
+        } else { None };
+        Ok(PreparedExecutionBodies { _publication: self.publication, request, tools_ref, policy_checkpoint, calls, admitted, frozen_history_range, memory_deliveries, history, originals, output, receipts, results, completion })
     }
 }
 impl Catalog {
@@ -376,7 +543,7 @@ impl Catalog {
     ) -> Result<()> {
         let PreparedExecutionBodies {
             _publication, request: prepared_request, tools_ref, policy_checkpoint, calls:prepared_calls, admitted:prepared_admitted, frozen_history_range, memory_deliveries, history: prepared_history,
-            originals: prepared_originals, output: prepared_output, receipts: prepared_receipts, results: prepared_results,
+            originals: prepared_originals, output: prepared_output, receipts: prepared_receipts, results: prepared_results, completion: prepared_completion,
         } = prepared;
         // A receipt retry confirms the original completion. Keep exact request/owner fencing,
         // reject altered output, and never rewrite history or resubmit a provider request.
@@ -408,10 +575,12 @@ impl Catalog {
         let referenced_request = match record {
             ExecutionRecord::ModelDispatched { request_id }
             | ExecutionRecord::ModelFinished { request_id, .. }
-            | ExecutionRecord::ToolsAdmitted { request_id, .. }
-            | ExecutionRecord::ToolDispatched { request_id, .. }
+
             | ExecutionRecord::ToolBatchCommitted { request_id, .. } => Some(request_id.as_str()),
-            ExecutionRecord::ToolSettled { result } => Some(result.request_id.as_str()),
+            ExecutionRecord::ToolAdmitted { context, .. } | ExecutionRecord::ToolDispatched { context } | ExecutionRecord::ToolSettled { context, .. } => match &context.origin {
+                ToolOrigin::ModelStep { request_id } => Some(request_id.as_str()),
+                ToolOrigin::PolicyAction { .. } => None,
+            },
             _ => None,
         };
         if let Some(request_id) = referenced_request {
@@ -503,7 +672,7 @@ impl Catalog {
                         return Err(RuntimeError::Conflict("request differs from the activated tool composition".into()));
                     }
                 }
-                let graph_pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_read_graph_v1','policy_model_job_v1') AND json_extract(body,'$.phase')!='terminal')",[run_id],|r|r.get(0))?;
+                let graph_pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_tool_graph_v1','policy_model_job_v1') AND json_extract(body,'$.phase')!='terminal')",[run_id],|r|r.get(0))?;
                 if graph_pending {return Err(RuntimeError::Conflict("policy graph is unsettled".into()));}
                 if super::inputs::has_boundary_inputs(&tx,run_id)?{return Err(RuntimeError::InputPending);}
 
@@ -641,68 +810,61 @@ impl Catalog {
                     ],
                 )?;
             }
-            ExecutionRecord::ToolsAdmitted { request_id, tools } => {
-                for tool in tools {
-                    let expected: String = tx.query_row(
-                        "SELECT body FROM tool_calls WHERE request_id=?1 AND call_id=?2",
-                        params![request_id, tool.call.call_id],
-                        |r| r.get(0),
-                    )?;
-                    let intent=prepared_admitted.get(&tool.call.call_id).ok_or_else(||RuntimeError::Invalid("prepared tool intent missing".into()))?;
-                    if serde_json::from_str::<ToolCallMetadata>(&expected)? != *intent.call() {
-                        return Err(RuntimeError::Conflict(
-                            "tool call changed since model output".into(),
-                        ));
-                    }
-                    if !tool.contract.read_only || tool.contract.completion == CompletionKind::Job {
-                        let key = operation_id(request_id, &tool.call.call_id);
-                        if let Some(mut previous) = optional_record::<Operation>(&tx, "operations", &key)? {
-                            if previous.run_id != run_id || previous.phase != OperationPhase::Accepted || previous.effect != Effect::None || previous.intent != serde_json::to_value(intent)? {
-                                return Err(RuntimeError::Conflict("tool admission cannot replace an existing effect or contract".into()));
-                            }
-                            previous.epoch=epoch;
-                            put(&tx,"operations",&key,&previous)?;
-                            continue;
+            ExecutionRecord::ToolAdmitted { context, tool } => {
+                if context.run_id != run_id || context.operation_id != context.origin.operation_id(&tool.call.call_id) {
+                    return Err(RuntimeError::Conflict("tool invocation owner changed".into()));
+                }
+                let intent = prepared_admitted.get(&tool.call.call_id).ok_or_else(||RuntimeError::Invalid("prepared tool intent missing".into()))?;
+                let expected = match &context.origin {
+                    ToolOrigin::ModelStep { request_id } => tx.query_row(
+                        "SELECT body FROM tool_calls WHERE request_id=?1 AND call_id=?2", params![request_id,tool.call.call_id], |row|row.get::<_,String>(0))?,
+                    ToolOrigin::PolicyAction { action_id,node_id } => {
+                        let graph: Operation = super::record(&tx,"operations",action_id)?;
+                        if graph.run_id != run_id || graph.epoch != epoch || graph.phase == OperationPhase::Terminal || super::policy::graph_metadata(&graph)?.is_none() || node_id != &tool.call.call_id {
+                            return Err(RuntimeError::Conflict("policy invocation no longer admitted".into()));
                         }
-                        let op = Operation {
-                            external_receipt: None,
-                            id: key.clone(),
-                            run_id: run_id.into(),
-                            epoch,
-                            revision: 1,
-                            phase: OperationPhase::Accepted,
-                            outcome: None,
-                            effect: Effect::None,
-                            cancel_requested: false,
-                            lifetime: tool.contract.lifetime,
-                            handed_off: false,
-                            executor: None,
-                            waiting_on: None,
-                            intent: serde_json::to_value(intent)?,
-                            result: None,
-                        };
-                        tx.execute(
-                            "INSERT INTO operations(id,run_id,body) VALUES(?1,?2,?3)",
-                            params![key, run_id, encode(&op)?],
-                        )?;
+                        tx.query_row("SELECT call FROM policy_graph_nodes WHERE action_id=?1 AND node_id=?2 AND receipt IS NULL",params![action_id,node_id],|row|row.get::<_,String>(0))?
                     }
+                };
+                if serde_json::from_str::<ToolCallMetadata>(&expected)? != *intent.call() || tool.contract.name != tool.call.name || tool.contract.schema_version != tool.call.schema_version {
+                    return Err(RuntimeError::Conflict("tool call changed since admission".into()));
+                }
+                let key = &context.operation_id;
+                if let Some(mut previous) = optional_record::<Operation>(&tx,"operations",key)? {
+                    if previous.run_id != run_id || previous.phase != OperationPhase::Accepted || previous.effect != Effect::None || previous.intent != serde_json::to_value(intent)? || previous.call_completion.is_some() {
+                        return Err(RuntimeError::Conflict("tool admission cannot replace an existing effect or contract".into()));
+                    }
+                    previous.epoch=epoch;
+                    put(&tx,"operations",key,&previous)?;
+                } else {
+                    let op = Operation {
+                        external_receipt: None, call_completion: None, id:key.clone(),run_id:run_id.into(),epoch,revision:1,
+                        phase:OperationPhase::Accepted,outcome:None,effect:Effect::None,cancel_requested:false,
+                        lifetime:tool.contract.lifetime,handed_off:false,executor:None,waiting_on:None,
+                        intent:serde_json::to_value(intent)?,result:None,
+                    };
+                    tx.execute("INSERT INTO operations(id,run_id,body) VALUES(?1,?2,?3)",params![key,run_id,encode(&op)?])?;
                 }
             }
-            ExecutionRecord::ToolDispatched {
-                request_id,
-                call_id,
-            } => {
-                let key = operation_id(request_id, call_id);
+            ExecutionRecord::ToolDispatched { context } => {
+                let key = context.operation_id.clone();
                 let mut op: Operation = super::record(&tx, "operations", &key)?;
                 if op.run_id != run_id
                     || op.epoch != epoch
                     || op.phase != OperationPhase::Accepted
-                    || op.cancel_requested
-                    || run.cancel_requested
                 {
                     return Err(RuntimeError::Conflict("tool no longer admitted".into()));
                 }
+                if op.cancel_requested || run.cancel_requested {return Err(RuntimeError::DispatchCancelled);}
                 let tool: ToolIntent = serde_json::from_value(op.intent.clone())?;
+                if context.run_id != run_id || tool.origin() != &context.origin || key != context.origin.operation_id(&tool.call().call_id) {
+                    return Err(RuntimeError::Conflict("tool dispatch origin changed".into()));
+                }
+                if let ToolOrigin::PolicyAction { action_id, .. } = &context.origin {
+                    let graph: Operation = super::record(&tx,"operations",action_id)?;
+                    if graph.epoch != epoch {return Err(RuntimeError::Conflict("policy graph generation changed".into()));}
+                    if graph.cancel_requested {return Err(RuntimeError::DispatchCancelled);}
+                }
                 op.phase = OperationPhase::Running;
                 op.effect = if tool.contract().read_only {
                     Effect::None
@@ -714,15 +876,22 @@ impl Catalog {
                 tx.execute("INSERT INTO resource_occupancy(operation_id,claims) VALUES(?1,?2)", params![key, encode(&tool.contract().resources)?])?;
                 put(&tx, "operations", &key, &op)?;
             }
-            ExecutionRecord::ToolSettled { result } => {
-                let key = operation_id(&result.request_id, &result.call_id);
+            ExecutionRecord::ToolSettled { context, completion } => {
+                let key = context.operation_id.clone();
                 let mut op: Operation = super::record(&tx, "operations", &key)?;
-                if op.run_id != run_id || op.epoch != epoch || op.phase == OperationPhase::Terminal
+                let invocation = ToolIntent::from_operation(&op)?;
+                if op.run_id != run_id || op.epoch != epoch || context.run_id != run_id || invocation.origin() != &context.origin
                 {
                     return Err(RuntimeError::Conflict("tool completion is stale".into()));
                 }
-                let prepared_result = prepared_results.get(&result.call_id).ok_or_else(|| RuntimeError::Invalid("prepared tool result missing".into()))?;
-                let receipt = prepared_receipts.get(&result.call_id).ok_or_else(|| RuntimeError::Invalid("prepared tool receipt missing".into()))?;
+                let prepared_result = prepared_results.get("invocation").ok_or_else(|| RuntimeError::Invalid("prepared tool result missing".into()))?;
+                let receipt = prepared_completion.as_ref().ok_or_else(|| RuntimeError::Invalid("prepared tool completion missing".into()))?;
+                if let Some(previous)=&op.call_completion {
+                    if previous!=receipt {return Err(RuntimeError::Conflict("original invocation completion changed".into()));}
+                    tx.commit()?;
+                    self.release_stopped_resource_owner(&key)?;
+                    return Ok(());
+                }
                 // Settle the permission rendezvous even when cancellation prevented a decision.
                 if let Some(wait_id) = op.waiting_on.clone().filter(|id| id.starts_with("permission:")) {
                     let mut wait: Wait = super::record(&tx, "waits", &wait_id)?;
@@ -730,11 +899,10 @@ impl Catalog {
                     put(&tx, "waits", &wait_id, &wait)?;
                     op.waiting_on = None;
                 }
-                match &result.completion {
-                    ToolCompletion::NotDispatched { .. } => {
+                match completion {
+                    ToolCompletion::NotDispatched { reason } => {
                         op.phase = OperationPhase::Terminal;
-                        op.outcome = Some(Outcome::Failed);
-                        op.effect = Effect::None;
+                        op.outcome = Some(if reason=="cancelled"{Outcome::Cancelled}else{Outcome::Failed});
                         op.effect = Effect::None;
                         op.result = Some(prepared_result.clone());
                     }
@@ -794,9 +962,10 @@ impl Catalog {
                 // synchronous call has stopped; an unconfirmed background job may still run.
                 let tool: ToolIntent = serde_json::from_value(op.intent.clone())?;
                 let stopped = tool.contract().completion != CompletionKind::Job
-                    || matches!(result.completion, ToolCompletion::NotDispatched { .. })
-                    || matches!(result.completion, ToolCompletion::Result { effect, .. } if effect != Effect::Unknown);
+                    || matches!(completion, ToolCompletion::NotDispatched { .. })
+                    || matches!(completion, ToolCompletion::Result { effect, .. } if *effect != Effect::Unknown);
                 if stopped { tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1", [&key])?; }
+                op.call_completion = Some(receipt.clone());
                 op.revision += 1;
                 put(&tx, "operations", &key, &op)?;
                 if op.phase == OperationPhase::Terminal {
@@ -808,10 +977,10 @@ impl Catalog {
                         serde_json::to_value(&op)?,
                     )?;
                 }
-                tx.execute(
-                    "UPDATE tool_calls SET receipt=?3 WHERE request_id=?1 AND call_id=?2",
-                    params![result.request_id, result.call_id, encode(receipt)?],
-                )?;
+                if let ToolOrigin::ModelStep { request_id } = &context.origin {
+                    let paired = ToolReceiptMetadata { request_id:request_id.clone(),call_id:invocation.call().call_id.clone(),completion:receipt.clone() };
+                    tx.execute("UPDATE tool_calls SET receipt=?3 WHERE request_id=?1 AND call_id=?2",params![request_id,invocation.call().call_id,encode(&paired)?])?;
+                }
             }
             ExecutionRecord::ToolBatchCommitted {
                 request_id,
@@ -848,13 +1017,19 @@ impl Catalog {
                     }
                     let key=operation_id(request_id,&result.call_id);
                     if let Some(mut op)=optional_record::<Operation>(&tx,"operations",&key)? {
+                        if op.call_completion.as_ref().is_some_and(|completion|completion!=&receipt.completion) {return Err(RuntimeError::Conflict("model pairing must consume canonical invocation completion".into()));}
+                        if op.call_completion.is_none() && op.phase==OperationPhase::Terminal {
+                            if !matches!(&receipt.completion,ToolCompletionMetadata::Result{outcome,effect,content_ref} if Some(*outcome)==op.outcome && *effect==op.effect && op.result.as_ref()==Some(&OperationResultMetadata::Content{reference:content_ref.clone()})) {return Err(RuntimeError::Conflict("recovered completion differs from executor terminal".into()));}
+                            op.call_completion=Some(receipt.completion.clone());
+                            put(&tx,"operations",&key,&op)?;
+                        }
                         if op.phase==OperationPhase::Accepted && op.effect==Effect::None {
                             let closure=match &result.completion {
                                 ToolCompletion::NotDispatched{..} => Some(Outcome::Failed),
                                 ToolCompletion::Result{outcome: outcome @ (Outcome::Cancelled|Outcome::Failed),effect:Effect::None,..} => Some(*outcome),
                                 _=>None,
                             };
-                            if let Some(outcome)=closure {op.phase=OperationPhase::Terminal;op.outcome=Some(outcome);op.result=Some(prepared_result.clone());op.revision+=1;put(&tx,"operations",&key,&op)?;event(&tx,&key,op.revision,"operation.settled",serde_json::to_value(&op)?)?;}
+                            if let Some(outcome)=closure {op.call_completion=Some(receipt.completion.clone());op.phase=OperationPhase::Terminal;op.outcome=Some(outcome);op.result=Some(prepared_result.clone());op.revision+=1;put(&tx,"operations",&key,&op)?;event(&tx,&key,op.revision,"operation.settled",serde_json::to_value(&op)?)?;}
                         }
                     }
                     tx.execute("UPDATE tool_calls SET receipt=?3,committed=1 WHERE request_id=?1 AND call_id=?2",params![request_id,result.call_id,serialized_result])?;
@@ -873,7 +1048,7 @@ impl Catalog {
             } => {
                 let saved:Option<String>=tx.query_row("SELECT identity FROM policy_checkpoints WHERE run_id=?1",[run_id],|r|r.get(0)).optional()?;
                 if saved.map(|raw|serde_json::from_str::<PolicyIdentity>(&raw)).transpose()?.is_some_and(|saved|saved!=*identity) { return Err(RuntimeError::Conflict("policy identity changed".into())); }
-                if matches!(action, PolicyAction::ReadGraph { .. }) { return Err(RuntimeError::Invalid("graph checkpoint requires atomic graph admission".into())); }
+                if matches!(action, PolicyAction::ToolGraph { .. }) { return Err(RuntimeError::Invalid("graph checkpoint requires atomic graph admission".into())); }
                 if let PolicyAction::Wait { wait_id } = action {
                     let wait: Wait = super::record(&tx, "waits", wait_id)?;
                     if wait.run_id != run_id || wait.cancelled {
@@ -897,7 +1072,7 @@ impl Catalog {
                 ExecutionRecord::RequestPrepared { .. } => "request_prepared",
                 ExecutionRecord::ModelDispatched { .. } => "model_dispatched",
                 ExecutionRecord::ModelFinished { .. } => "model_finished",
-                ExecutionRecord::ToolsAdmitted { .. } => "tools_admitted",
+                ExecutionRecord::ToolAdmitted { .. } => "tool_admitted",
                 ExecutionRecord::ToolDispatched { .. } => "tool_dispatched",
                 ExecutionRecord::ToolSettled { .. } => "tool_settled",
                 ExecutionRecord::ToolBatchCommitted { .. } => "tool_batch_committed",
@@ -905,9 +1080,8 @@ impl Catalog {
             }}),
         )?;
         tx.commit()?;
-        if let ExecutionRecord::ToolSettled { result } = record {
-            let owner = operation_id(&result.request_id, &result.call_id);
-            self.release_stopped_resource_owner(&owner)?;
+        if let ExecutionRecord::ToolSettled { context, .. } = record {
+            self.release_stopped_resource_owner(&context.operation_id)?;
         }
         if matches!(record, ExecutionRecord::ToolSettled { .. } | ExecutionRecord::ToolBatchCommitted { .. }) {
             self.reconcile_waits()?;

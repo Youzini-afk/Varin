@@ -14,6 +14,8 @@ use uuid::Uuid;
 pub enum RuntimeError {
     #[error("new user input is waiting at this execution boundary")]
     InputPending,
+    #[error("tool dispatch cancelled before executor entry")]
+    DispatchCancelled,
     #[error("catalog I/O: {0}")]
     Io(#[from] std::io::Error),
     #[error("catalog storage: {0}")]
@@ -30,7 +32,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 15;
+pub(crate) const FORMAT: i64 = 16;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -113,7 +115,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
     if version == FORMAT {
         inputs::check_format(db)?;
         db.prepare("SELECT run_id,identity,state_ref,action_ref FROM policy_checkpoints")?;
-        db.prepare("SELECT action_id,node_id,call_id,position,receipt,outcome FROM policy_graph_nodes")?;
+        db.prepare("SELECT action_id,node_id,call_id,position,call,receipt,outcome FROM policy_graph_nodes")?;
         db.prepare("SELECT action_id,node_id,dependency_id FROM policy_graph_dependencies")?;
         db.prepare("SELECT id,run_id,revision,status,active,body FROM model_selections")?;
         context_jobs::check_format(db)?;
@@ -608,7 +610,7 @@ impl Catalog {
         lifetime: Lifetime,
         intent: Value,
     ) -> Result<Operation> {
-        if intent.get("kind").and_then(Value::as_str).is_some_and(|kind|kind=="tool"||kind.starts_with("policy_read_graph")||kind.starts_with("policy_model_job")) {return Err(RuntimeError::Invalid("typed operations require their admission owner".into()));}
+        if intent.get("kind").and_then(Value::as_str).is_some_and(|kind|kind=="tool"||kind.starts_with("policy_tool_graph")||kind.starts_with("policy_model_job")) {return Err(RuntimeError::Invalid("typed operations require their admission owner".into()));}
         self.admit_operation_metadata(key,run_id,epoch,lifetime,intent)
     }
     pub(super) fn admit_operation_metadata(&mut self,key:&str,run_id:&str,epoch:u64,lifetime:Lifetime,intent:Value) -> Result<Operation> {
@@ -626,6 +628,7 @@ impl Catalog {
         }
         let op = Operation {
             external_receipt:None,
+            call_completion:None,
             id: key.into(),
             run_id: run_id.into(),
             epoch,
@@ -808,7 +811,7 @@ impl Catalog {
     ) -> Result<ModelStep> {
         let request_ref = self.content.save(&request)?;
         let tx = self.db.transaction()?;
-        let graph_pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_read_graph_v1','policy_model_job_v1') AND json_extract(body,'$.phase')!='terminal')",[run_id],|r|r.get(0))?;
+        let graph_pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_tool_graph_v1','policy_model_job_v1') AND json_extract(body,'$.phase')!='terminal')",[run_id],|r|r.get(0))?;
         if graph_pending {return Err(RuntimeError::Conflict("policy graph is unsettled".into()));}
         let run: Run = record(&tx, "runs", run_id)?;
         fence(&run, epoch)?;
@@ -1128,7 +1131,7 @@ impl Catalog {
         Ok(result)
     }
     fn recover(&mut self) -> Result<()> {
-        let interrupted_read: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE json_extract(body,'$.phase')='running' AND json_extract(body,'$.effect')='none' AND coalesce(json_extract(body,'$.intent.kind'),'') NOT IN ('policy_read_graph_v1','policy_model_job_v1'))", [], |row|row.get(0))?;
+        let interrupted_read: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE json_extract(body,'$.phase')='running' AND json_extract(body,'$.effect')='none' AND coalesce(json_extract(body,'$.intent.kind'),'') NOT IN ('policy_tool_graph_v1','policy_model_job_v1'))", [], |row|row.get(0))?;
         let interrupted_result = interrupted_read.then(|| self.content.save(&json!({"reason":"executor interrupted"}))).transpose()?;
         let tx = self.db.transaction()?;
         tx.execute("UPDATE resumptions SET claimed=0 WHERE acknowledged=0", [])?;
@@ -1186,7 +1189,7 @@ impl Catalog {
             }
             if let Some(intent)=policy::graph_metadata(&op)? {
                 policy_body::PolicyGraphProgress::read(&op,&intent)?;
-                // No external effect exists: retry only missing pure reads, retaining settled receipts.
+                // The graph owns orchestration only. Each durable node retains its own invocation/dispatch evidence; only trusted light reads can replay.
                 op.epoch=self.epoch;
                 put(&tx,"operations",&op.id,&op)?;
                 continue;
@@ -1222,8 +1225,16 @@ impl Catalog {
                     op.effect = Effect::Unknown;
                 } else if op.phase == OperationPhase::Running {
                     op.phase = OperationPhase::Terminal;
-                    op.outcome = Some(Outcome::Failed);
-                    op.result = Some(OperationResultMetadata::Content { reference: interrupted_result.as_ref().ok_or_else(|| RuntimeError::Invalid("interrupted result was not prepared".into()))?.clone() });
+                    if op.intent.get("kind").and_then(Value::as_str) == Some("tool")
+                        && tool_content::ToolIntent::from_operation(&op)?.contract().completion == crate::execution::CompletionKind::Job
+                    {
+                        // A background executor may still run without business side effects.
+                        // Keep its original call receipt and occupancy until that owner reports.
+                        op.outcome = Some(Outcome::Indeterminate);
+                    } else {
+                        op.outcome = Some(Outcome::Failed);
+                        op.result = Some(OperationResultMetadata::Content { reference: interrupted_result.as_ref().ok_or_else(|| RuntimeError::Invalid("interrupted result was not prepared".into()))?.clone() });
+                    }
                 }
                 op.epoch = self.epoch;
                 op.revision += 1;
@@ -1270,7 +1281,7 @@ CREATE UNIQUE INDEX model_steps_active ON model_steps(run_id) WHERE state IN ('p
 CREATE TABLE model_outputs(request_id TEXT PRIMARY KEY REFERENCES model_steps(id),body TEXT NOT NULL);
 CREATE TABLE tool_calls(request_id TEXT NOT NULL REFERENCES model_steps(id),call_id TEXT NOT NULL,body TEXT NOT NULL,receipt TEXT,committed INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(request_id,call_id));
 CREATE TABLE policy_checkpoints(run_id TEXT PRIMARY KEY REFERENCES runs(id),identity TEXT NOT NULL,state_ref TEXT NOT NULL,action_ref TEXT NOT NULL);
-CREATE TABLE policy_graph_nodes(action_id TEXT NOT NULL REFERENCES operations(id),node_id TEXT NOT NULL,call_id TEXT NOT NULL,position INTEGER NOT NULL,receipt TEXT,outcome TEXT,PRIMARY KEY(action_id,node_id),UNIQUE(action_id,call_id),UNIQUE(action_id,position));
+CREATE TABLE policy_graph_nodes(action_id TEXT NOT NULL REFERENCES operations(id),node_id TEXT NOT NULL,call_id TEXT NOT NULL,position INTEGER NOT NULL,call TEXT NOT NULL,receipt TEXT,outcome TEXT,PRIMARY KEY(action_id,node_id),UNIQUE(action_id,call_id),UNIQUE(action_id,position));
 CREATE TABLE policy_graph_dependencies(action_id TEXT NOT NULL,node_id TEXT NOT NULL,dependency_id TEXT NOT NULL,PRIMARY KEY(action_id,node_id,dependency_id),FOREIGN KEY(action_id,node_id) REFERENCES policy_graph_nodes(action_id,node_id),FOREIGN KEY(action_id,dependency_id) REFERENCES policy_graph_nodes(action_id,node_id));
 CREATE TABLE events(cursor INTEGER PRIMARY KEY AUTOINCREMENT,subject TEXT NOT NULL,revision INTEGER NOT NULL,kind TEXT NOT NULL,data TEXT NOT NULL);
 CREATE INDEX events_condition ON events(subject,kind,cursor);

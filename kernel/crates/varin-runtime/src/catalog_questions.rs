@@ -90,10 +90,10 @@ impl Catalog {
         }
         let tool=super::tool_content::ToolIntent::from_operation(&op)?;
         let receipt = crate::execution::ToolResult {
-            request_id: operation_id
-                .strip_suffix(&format!(":tool:{}", tool.call().call_id))
-                .ok_or_else(|| RuntimeError::Invalid("question operation identity missing".into()))?
-                .into(),
+            request_id:match tool.origin() {
+                crate::execution::ToolOrigin::ModelStep{request_id}=>request_id.clone(),
+                crate::execution::ToolOrigin::PolicyAction{..}=>return Err(RuntimeError::Invalid("questions currently require a model origin".into())),
+            },
             call_id: tool.call().call_id.clone(),
             completion: crate::execution::ToolCompletion::JobAccepted {
                 operation_id: operation_id.into(),
@@ -102,9 +102,13 @@ impl Catalog {
                 lifetime: Lifetime::Thread,
             },
         };
+        let accepted=super::result_content::ToolReceiptMetadata::job(&receipt)?;
+        if op.call_completion.as_ref().is_some_and(|previous|previous!=&accepted.completion) {return Err(RuntimeError::Conflict("original invocation acceptance changed".into()));}
+        op.call_completion=Some(accepted.completion.clone());
+        put(&tx,"operations",&op.id,&op)?;
         tx.execute(
             "UPDATE tool_calls SET receipt=?3 WHERE request_id=?1 AND call_id=?2",
-            params![receipt.request_id, receipt.call_id, encode(&super::result_content::ToolReceiptMetadata::job(&receipt)?)?],
+            params![receipt.request_id, receipt.call_id, encode(&accepted)?],
         )?;
         op.handed_off = true;
         op.phase = OperationPhase::Waiting;

@@ -160,9 +160,12 @@ pub(crate) struct PreparedMemoryDeliveries {
     facts: std::collections::BTreeSet<(String, u64)>,
     receipts: Vec<PreparedMemoryReceipt>,
 }
+enum MemoryReceiptOwner {
+    Model {request_id:String,call_id:String},
+    Policy {reference:crate::execution::PolicyEvidenceRef},
+}
 struct PreparedMemoryReceipt {
-    request_id: String,
-    call_id: String,
+    owner: MemoryReceiptOwner,
     result_ref: Value,
     origin: Option<String>,
     facts: Result<Vec<(u64, u64, String)>>,
@@ -216,12 +219,20 @@ impl PreparedMemoryDeliveries {
                 {
                     if let Some(receipt) = content.get("memoryReceipt") {
                         self.receipts.push(PreparedMemoryReceipt {
-                            request_id: result.request_id.clone(),
-                            call_id: result.call_id.clone(),
+                            owner:MemoryReceiptOwner::Model{request_id:result.request_id.clone(),call_id:result.call_id.clone()},
                             result_ref: crate::content::ContentStore::reference(content)?,
                             origin: receipt["origin"].as_str().map(str::to_owned),
                             facts: receipt_facts(receipt),
                         });
+                    }
+                }
+            }
+            (Provenance::PolicyToolData{reference},Content::Text{text}) => {
+                if let Some((_,body))=text.split_once('\n') {
+                    let envelope:Value=serde_json::from_str(body)?;
+                    let data=&envelope["data"];
+                    if let Some(receipt)=data.get("memoryReceipt") {
+                        self.receipts.push(PreparedMemoryReceipt{owner:MemoryReceiptOwner::Policy{reference:reference.clone()},result_ref:crate::content::ContentStore::reference(data)?,origin:receipt["origin"].as_str().map(str::to_owned),facts:receipt_facts(receipt)});
                     }
                 }
             }
@@ -265,8 +276,11 @@ pub(super) fn record_deliveries(
     let thread = &run.thread_id;
     let mut facts = prepared.facts;
     for candidate in prepared.receipts {
-        if !owned_receipt(tx, &candidate.request_id, &candidate.call_id, thread)?
-            .is_some_and(|(reference, origin)| reference == candidate.result_ref && candidate.origin.as_deref() == Some(origin.as_str()))
+        let owned=match &candidate.owner {
+            MemoryReceiptOwner::Model{request_id,call_id}=>owned_receipt(tx,request_id,call_id,thread)?,
+            MemoryReceiptOwner::Policy{reference}=>owned_policy_receipt(tx,&run.id,reference,thread)?,
+        };
+        if !owned.is_some_and(|(reference, origin)| reference == candidate.result_ref && candidate.origin.as_deref() == Some(origin.as_str()))
         {
             continue;
         }
@@ -327,7 +341,7 @@ fn owned_receipt(
         return Ok(None);
     }
     let tool=super::tool_content::ToolIntent::from_operation(&operation)?;
-    if tool.call().name != "memory" || tool.call().call_id != call_id {
+    if tool.call().name != "memory" || tool.call().call_id != call_id || tool.origin()!=&(crate::execution::ToolOrigin::ModelStep{request_id:request_id.into()}) {
         return Ok(None);
     }
     let owned: bool = db.query_row(
@@ -368,4 +382,89 @@ pub(super) fn trusted_memory_receipts(
         }
     }
     Ok(receipts)
+}
+
+/// Checks only canonical ownership and immutable identities. Parsing the original body stays on workers.
+pub(super) fn owned_policy_receipt(
+    db: &Connection,
+    run_id: &str,
+    reference: &crate::execution::PolicyEvidenceRef,
+    thread: &str,
+) -> Result<Option<(Value, String)>> {
+    use super::result_content::ToolCompletionMetadata;
+    use crate::execution::ToolOrigin;
+    let origin = ToolOrigin::PolicyAction {
+        action_id: reference.action_id.clone(),
+        node_id: reference.node_id.clone(),
+    };
+    let Some(operation) =
+        optional_record::<Operation>(db, "operations", &origin.operation_id(&reference.node_id))?
+    else {
+        return Ok(None);
+    };
+    let intent = super::tool_content::ToolIntent::from_operation(&operation)?;
+    let run: Run = record(db, "runs", run_id)?;
+    if run.thread_id != thread
+        || operation.run_id != run_id
+        || intent.origin() != &origin
+        || intent.call().call_id != reference.node_id
+        || intent.call().name != "memory"
+        || operation.executor.as_deref() != Some("memory")
+        || operation.outcome != Some(Outcome::Succeeded)
+        || operation.effect != Effect::Confirmed
+    {
+        return Ok(None);
+    }
+    let graph: Operation = record(db, "operations", &reference.action_id)?;
+    if graph.run_id != run_id || super::policy::graph_metadata(&graph)?.is_none() {
+        return Ok(None);
+    }
+    let Some(
+        completion @ ToolCompletionMetadata::Result {
+            outcome: Outcome::Succeeded,
+            effect: Effect::Confirmed,
+            content_ref,
+        },
+    ) = operation.call_completion.as_ref()
+    else {
+        return Ok(None);
+    };
+    if content_ref != &json!({"content_object":reference.content_ref}) {
+        return Ok(None);
+    }
+    let node: Option<String> = db.query_row(
+        "SELECT receipt FROM policy_graph_nodes WHERE action_id=?1 AND node_id=?2",
+        params![reference.action_id, reference.node_id],
+        |row| row.get(0),
+    )?;
+    let Some(node) = node else { return Ok(None) };
+    let node: Value = serde_json::from_str(&node)?;
+    if node["node_id"] != reference.node_id
+        || node["completion"] != serde_json::to_value(completion)?
+    {
+        return Ok(None);
+    }
+    Ok(Some((
+        content_ref.clone(),
+        format!("run:{}:{}", operation.run_id, operation.id),
+    )))
+}
+pub(super) fn carried_policy_facts(
+    body: &Value,
+    origin: Option<&str>,
+    thread: &str,
+) -> Result<Vec<String>> {
+    let Some(origin) = origin else {
+        return Ok(Vec::new());
+    };
+    let Some(receipt) = body
+        .get("memoryReceipt")
+        .filter(|receipt| receipt["origin"].as_str() == Some(origin))
+    else {
+        return Ok(Vec::new());
+    };
+    Ok(receipt_facts(receipt)?
+        .into_iter()
+        .map(|(revision, id, scope)| format!("memory:{thread}:{revision}:{id}:{scope}"))
+        .collect())
 }

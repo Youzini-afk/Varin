@@ -30,7 +30,7 @@ fn run_cancellation_receipt(run: &varin_runtime::Run) -> Value {
     json!({"id":run.id,"thread_id":run.thread_id,"branch_id":run.branch_id,"state":run.state,
         "revision":run.revision,"epoch":run.epoch,"cancel_requested":run.cancel_requested,"waiting_on":run.waiting_on})
 }
-fn operation_cancellation_receipt<E, R>(op: &varin_runtime::Operation<E, R>) -> Value {
+fn operation_cancellation_receipt<E, R, C>(op: &varin_runtime::Operation<E, R, C>) -> Value {
     json!({"id":op.id,"run_id":op.run_id,"epoch":op.epoch,"revision":op.revision,"phase":op.phase,"outcome":op.outcome,
         "effect":op.effect,"cancel_requested":op.cancel_requested,"lifetime":op.lifetime,"handed_off":op.handed_off,
         "executor":op.executor,"waiting_on":op.waiting_on})

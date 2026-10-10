@@ -291,14 +291,20 @@ impl ContentStore {
             UNION ALL SELECT json_extract(body,'$.configuration_ref') FROM child_tasks
             UNION ALL SELECT json_extract(body,'$.launch.tools_ref') FROM child_tasks
             UNION ALL SELECT json_extract(body,'$.launch.base_tools_ref') FROM child_tasks");
-        roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.body_ref') FROM operations WHERE json_extract(body,'$.intent.kind') IN ('policy_read_graph_v1','policy_model_job_v1')
-            UNION ALL SELECT json_object('content_object',json_extract(receipt,'$.output.content_ref')) FROM policy_graph_nodes WHERE json_extract(receipt,'$.output.content_ref') IS NOT NULL");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.body_ref') FROM operations WHERE json_extract(body,'$.intent.kind') IN ('policy_tool_graph_v1','policy_model_job_v1')
+            UNION ALL SELECT json_extract(receipt,'$.completion.content_ref') FROM policy_graph_nodes WHERE json_extract(receipt,'$.completion.kind')='result'
+            UNION ALL SELECT json_extract(receipt,'$.completion.reason_ref') FROM policy_graph_nodes WHERE json_extract(receipt,'$.completion.kind')='not_dispatched'
+            UNION ALL SELECT json_extract(call,'$.arguments_ref') FROM policy_graph_nodes");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.reference') FROM operations WHERE json_extract(body,'$.result.kind')='content'
             UNION ALL SELECT json_extract(body,'$.external_receipt.result_ref') FROM operations WHERE json_extract(body,'$.external_receipt') IS NOT NULL
             UNION ALL SELECT json_extract(data,'$.result.reference') FROM events WHERE json_extract(data,'$.result.kind')='content'
             UNION ALL SELECT json_extract(data,'$.external_receipt.result_ref') FROM events WHERE json_extract(data,'$.external_receipt') IS NOT NULL
             UNION ALL SELECT json_extract(receipt,'$.completion.content_ref') FROM tool_calls WHERE json_extract(receipt,'$.completion.kind')='result'
             UNION ALL SELECT json_extract(receipt,'$.completion.reason_ref') FROM tool_calls WHERE json_extract(receipt,'$.completion.kind')='not_dispatched'");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.call_completion.content_ref') FROM operations WHERE json_extract(body,'$.call_completion.kind')='result'
+            UNION ALL SELECT json_extract(body,'$.call_completion.reason_ref') FROM operations WHERE json_extract(body,'$.call_completion.kind')='not_dispatched'
+            UNION ALL SELECT json_extract(data,'$.call_completion.content_ref') FROM events WHERE json_extract(data,'$.call_completion.kind')='result'
+            UNION ALL SELECT json_extract(data,'$.call_completion.reason_ref') FROM events WHERE json_extract(data,'$.call_completion.kind')='not_dispatched'");
         let mut references=Vec::new();
         let mut stmt=db.prepare(&roots)?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;

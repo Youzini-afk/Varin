@@ -29,8 +29,9 @@ impl RunState {
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Operation<E = ExternalReceipt, R = Value> {
+pub struct Operation<E = ExternalReceipt, R = Value, C = crate::execution::ToolCompletion> {
     pub external_receipt:Option<E>,
+    pub call_completion: Option<C>,
     pub id: String,
     pub run_id: String,
     pub epoch: u64,
@@ -47,7 +48,7 @@ pub struct Operation<E = ExternalReceipt, R = Value> {
     pub result: Option<R>,
 }
 /// Catalog representation. Public reads hydrate immutable bodies into Operation.
-pub type OperationMetadata = Operation<ExternalReceiptMetadata, OperationResultMetadata>;
+pub type OperationMetadata = Operation<ExternalReceiptMetadata, OperationResultMetadata, crate::catalog::result_content::ToolCompletionMetadata>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]

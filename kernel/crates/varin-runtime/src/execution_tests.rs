@@ -847,6 +847,12 @@ fn cancelling_one_queued_operation_does_not_fail_its_run_or_execute_it() {
     started_rx
         .recv_timeout(std::time::Duration::from_secs(3))
         .unwrap();
+    // First executor entry does not imply the independent successor has finished admission.
+    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(3);
+    while supervisor.catalog().lock().unwrap().operation(&queued_id).is_err() {
+        assert!(std::time::Instant::now()<deadline,"queued intent was not admitted");
+        std::thread::yield_now();
+    }
     let cancelled = supervisor.cancel_operation(&queued_id).unwrap();
     assert!(cancelled.cancel_requested);
     release_tx.send(()).unwrap();
@@ -1199,21 +1205,14 @@ fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts(
                 lifetime: Lifetime::Run,
                 resources: vec![],
             };
-            commit(ExecutionRecord::ToolsAdmitted {
-                request_id: "saved-first".into(),
-                tools: vec![AdmittedTool {
+            commit({let tool=AdmittedTool {
                     call: calls[0].clone(),
                     contract,
-                }],
-            });
-            commit(ExecutionRecord::ToolDispatched {
-                request_id: "saved-first".into(),
-                call_id: "call-1".into(),
-            });
+                };ExecutionRecord::ToolAdmitted{context:{let request_id:String="saved-first".into();let call_id:String=tool.call.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},tool}});
+            commit(ExecutionRecord::ToolDispatched{context:{let request_id:String="saved-first".into();let call_id:String="call-1".into();varin_runtime::execution::ToolExecutionContext{run_id:(&run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}}});
         }
         if cut == 1 {
-            commit(ExecutionRecord::ToolSettled {
-                result: ToolResult {
+            commit({let result=ToolResult {
                     request_id: "saved-first".into(),
                     call_id: "call-1".into(),
                     completion: ToolCompletion::Result {
@@ -1221,8 +1220,7 @@ fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts(
                         effect: Effect::Confirmed,
                         content: json!("cached first result"),
                     },
-                },
-            });
+                };ExecutionRecord::ToolSettled{context:{let request_id:String=result.request_id.clone();let call_id:String=result.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},completion:result.completion}});
         }
         drop(db);
         let db = fixture.catalog();

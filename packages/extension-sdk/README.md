@@ -74,7 +74,7 @@ callback, or DOM access. `@varin/extension-sdk/testing` also exports
 `runEditorExtensionConformance` and a real mock document controller covering incremental failures and
 mount abort/disposal.
 
-`provideAgentPolicy` implements `varin.agent.policy@1` at committed execution boundaries. Its
+`provideAgentPolicy` implements `varin.agent.policy@2` at committed execution boundaries. Its
 immutable declared configuration and versioned private JSON state are distinct from core history;
 the Host pins exact package/configuration identity for the Run. Return a permitted action rather
 than calling models or tools in the decision handler. Core validates exchanges, permissions,

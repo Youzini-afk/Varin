@@ -30,7 +30,8 @@ impl Catalog {
         let run: Run = record(&tx, "runs", &op.run_id)?;
         let tool = ToolIntent::from_operation(&op)?;
         let call = &prepared.identity;
-        if call.run_id != op.run_id
+        if tool.origin()!=&(crate::execution::ToolOrigin::ModelStep{request_id:call.request_id.clone()})
+            || call.run_id != op.run_id
             || call.operation_id != op.id
             || call.call_id != tool.call().call_id
             || call.name != tool.call().name

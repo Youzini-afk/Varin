@@ -44,14 +44,14 @@ impl Fixture {
         self.record(ExecutionRecord::ModelFinished{request_id:request.clone(),outcome:ModelOutcome::Completed,finish_reason:Some(FinishReason::ToolCalls),
             items:vec![ProviderItem{id:format!("item-{suffix}"),content:Content::ToolCall{call:call.clone()},opaque:None}],
             interrupted_deltas:vec![],usage:UsageReceipt::default(),failure:None});
-        self.record(ExecutionRecord::ToolsAdmitted{request_id:request.clone(),tools:vec![AdmittedTool{call,
-            contract:ToolContract{name:WAIT_TOOL.into(),schema_version:"1".into(),read_only:true,completion:CompletionKind::Job,lifetime:Lifetime::Thread,resources:vec![]}}]});
-        self.record(ExecutionRecord::ToolDispatched{request_id:request.clone(),call_id:"wait".into()});
+        self.record({let tool=AdmittedTool{call,
+            contract:ToolContract{name:WAIT_TOOL.into(),schema_version:"1".into(),read_only:true,completion:CompletionKind::Job,lifetime:Lifetime::Thread,resources:vec![]}};ExecutionRecord::ToolAdmitted{context:{let request_id:String=request.clone();let call_id:String=tool.call.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&self.run).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},tool}});
+        self.record(ExecutionRecord::ToolDispatched{context:{let request_id:String=request.clone();let call_id:String="wait".into();varin_runtime::execution::ToolExecutionContext{run_id:(&self.run).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}}});
         let context=ToolExecutionContext{run_id:self.run.clone(),operation_id:format!("{request}:tool:wait"),origin:ToolOrigin::ModelStep{request_id:request.clone()}};
         let wait=self.db.wait_for_process(&context,"process").unwrap();
         let result=ToolResult{request_id:request.clone(),call_id:"wait".into(),completion:ToolCompletion::JobAccepted{
             operation_id:context.operation_id,phase:"awaiting_process".into(),effect:Effect::None,lifetime:Lifetime::Thread}};
-        self.record(ExecutionRecord::ToolSettled{result:result.clone()});
+        self.record({let result=result.clone();ExecutionRecord::ToolSettled{context:{let request_id:String=result.request_id.clone();let call_id:String=result.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&self.run).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},completion:result.completion}});
         self.record(ExecutionRecord::ToolBatchCommitted{request_id:request,results:vec![result]});
         self.state(RunState::Waiting,Some(wait.id.clone()));
         wait

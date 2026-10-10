@@ -375,7 +375,7 @@ it('does not silently discard a prepared workspace when a live run appears befor
 
 it('requires an explicit answer send, keeps the draft on failure and disables a stale question', async () => {
   const f = fixture(true);
-  const operation: ThreadSnapshot['operations'][number] = { id: 'question-op', run_id: 'ui-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'ask_user', waiting_on: 'question:question-op', intent: { call: { arguments: { question: 'Which approach?', options: ['Option A', 'Option B'] } } }, result: null, external_receipt: null };
+  const operation: ThreadSnapshot['operations'][number] = { id: 'question-op', run_id: 'ui-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'ask_user', waiting_on: 'question:question-op', intent: { call: { arguments: { question: 'Which approach?', options: ['Option A', 'Option B'] } } }, result: null, external_receipt: null, call_completion: null };
   f.view.activeRun!.state = 'waiting'; f.view.activeRun!.waiting_on = operation.waiting_on;
   f.view.operations = [operation];
   const answer = vi.fn<ThreadsAPI['answerQuestion']>().mockRejectedValueOnce(new Error('uncertain answer acceptance')).mockImplementation(async () => {
@@ -406,7 +406,7 @@ it('keeps a sibling branch question non-actionable while viewing an earlier conv
   const fork = { ...identity, branchId: 'earlier-fork-branch' };
   f.view.identity = fork;
   f.view.thread.branches.push({ branch_id: fork.branchId, head: 'earlier-user', active_run_id: null, latest_run: null });
-  f.view.operations = [{ id: 'source-question-op', run_id: 'source-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'ask_user', waiting_on: 'question:source-question-op', intent: { call: { arguments: { question: 'Original branch clarification', options: ['Proceed'] } } }, result: null, external_receipt: null }];
+  f.view.operations = [{ id: 'source-question-op', run_id: 'source-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'ask_user', waiting_on: 'question:source-question-op', intent: { call: { arguments: { question: 'Original branch clarification', options: ['Proceed'] } } }, result: null, external_receipt: null, call_completion: null }];
   const answer = vi.fn<ThreadsAPI['answerQuestion']>();
   const cancel = vi.fn<ThreadsAPI['cancelOperation']>();
   f.api.answerQuestion = answer; f.api.cancelOperation = cancel;
@@ -423,7 +423,7 @@ it('permission UI sends only an explicit one-action decision and cannot approve 
   const f = fixture(true);
   f.view.activeRun!.state = 'executing';
   const permission = { id: 'permission-1', call: { runId: 'ui-run', requestId: 'request-1', operationId: 'request-1:tool:call-1', callId: 'call-1', name: 'mcp_send', schemaVersion: 'schema-1', arguments: { recipient: 'chosen-target', body: 'exact content' } }, scope: { ownerReference: 'mcp-owner', ownerGeneration: 4, toolSchemaVersion: 'schema-1', policyGeneration: 'policy-generation', reason: 'External effect' }, actor: { account: 'selected-account', authority: 'fixture-authority' }, decision: null, consumed: false };
-  const operation: ThreadSnapshot['operations'][number] = { id: permission.call.operationId, run_id: 'ui-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'run', handed_off: false, executor: 'mcp_send', waiting_on: 'permission:permission-1', intent: {}, result: { permission }, external_receipt: null };
+  const operation: ThreadSnapshot['operations'][number] = { id: permission.call.operationId, run_id: 'ui-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'run', handed_off: false, executor: 'mcp_send', waiting_on: 'permission:permission-1', intent: {}, result: { permission }, external_receipt: null, call_completion: null };
   f.view.operations = [operation];
   const answer = vi.fn<ThreadsAPI['answerQuestion']>(); f.api.answerQuestion = answer;
   const decide = vi.fn<ThreadsAPI['decidePermission']>().mockRejectedValueOnce(new Error('decision transport unavailable')).mockImplementation(async () => {

@@ -291,7 +291,7 @@ pub(crate) fn reconcile(
             let mut reconciled = Vec::new(); let mut unresolved = Vec::new();
             for read in operations {
                 let operation=read.load().map_err(error)?;
-                let tool: AdmittedTool = serde_json::from_value(operation.intent.clone()).map_err(error)?;
+                let tool: ToolInvocation = serde_json::from_value(operation.intent.clone()).map_err(error)?;
                 let origin = format!("run:{run_id}:{}", operation.id);
                 let response = bridge.query(json!({"action":"receipt","runId":run_id,"scope":scope(&admitted),"origin":origin,"arguments":tool.call.arguments}), &CancellationToken::default())?;
                 if response["status"] != "ready" || response["memoryReceipt"].is_null() { unresolved.push(operation.id); continue; }

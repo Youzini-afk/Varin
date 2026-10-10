@@ -42,8 +42,8 @@ fn body_publication_keeps_policy_node_alive_and_receipt_idempotent() {
         outcome: Outcome::Succeeded, effect: Effect::None, content: json!("different body"),
     }).is_err());
     f.db.lock().unwrap().collect_content_objects().unwrap();
-    let evidence = f.db.policy_evidence(&run, epoch, receipt.output.as_ref().unwrap()).unwrap();
-    assert!(serde_json::to_string(&evidence.content).unwrap().contains(value["evidence"].as_str().unwrap()));
+    let evidence = f.db.policy_evidence(&run, epoch, receipt.output().unwrap()).unwrap();
+    assert!(serde_json::to_string(&evidence.item.content).unwrap().contains(value["evidence"].as_str().unwrap()));
 }
 
 #[test]
@@ -64,7 +64,7 @@ fn graph_cancellation_and_node_settlement_do_not_hydrate_the_definition() {
     f.db.lock().unwrap().request_cancel_operation(action).unwrap();
     for node in ["a","b"] {
         let receipt = f.db.settle_policy_node(run,epoch,action,node,&ToolCompletion::NotDispatched {reason:"cancelled".into()}).unwrap();
-        assert_eq!(receipt.outcome,Outcome::Cancelled);
+        assert_eq!(receipt.outcome(),Outcome::Cancelled);
     }
     let operation = f.db.lock().unwrap().operation(action).unwrap();
     assert_eq!(operation.phase,OperationPhase::Terminal);
@@ -146,7 +146,7 @@ fn node(id: &str, deps: &[&str]) -> Value {
     json!({"id":id,"depends_on":deps,"call":{"call_id":id,"name":"read","schema_version":"1","arguments":{"path":id}}})
 }
 fn graph(nodes: Vec<Value>) -> Value {
-    json!({"kind":"read_graph","nodes":nodes})
+    json!({"kind":"tool_graph","nodes":nodes})
 }
 
 #[derive(Default)]
@@ -321,12 +321,12 @@ impl AgentPolicy for Policy {
         self.events.lock().unwrap().push(event.clone());
         let (next, state) = match event["kind"].as_str().unwrap() {
             "started" => (graph(self.nodes.clone()), json!({"stage":"graph"})),
-            "read_graph_completed" => {
+            "tool_graph_completed" => {
                 let outputs: Vec<Value> = event["receipts"]
                     .as_array()
                     .unwrap()
                     .iter()
-                    .filter_map(|r| r.get("output").filter(|r| !r.is_null()).cloned())
+                    .filter_map(|r| r["completion"].get("output").filter(|r| !r.is_null()).cloned())
                     .collect();
                 if self.content_gate {
                     (
@@ -395,11 +395,11 @@ fn graph_starts_without_model_and_actual_bytes_change_the_next_action() {
         assert_eq!(requests.len(), expected_models);
         let events = e.policy.events.lock().unwrap();
         assert_eq!(events[0]["kind"], "started");
-        assert_eq!(events[1]["kind"], "read_graph_completed");
+        assert_eq!(events[1]["kind"], "tool_graph_completed");
         for request in requests.iter() {
             assert!(request.history.iter().any(|item| matches!(
                 &item.provenance,
-                Provenance::ExternalData { .. }
+                Provenance::PolicyToolData { .. }
             ) && serde_json::to_string(&item.content)
                 .unwrap()
                 .contains(body)));
@@ -435,25 +435,20 @@ fn invalid_dags_and_stale_schema_fail_before_any_execution() {
 }
 
 #[test]
-fn trusted_contract_and_dispatch_grant_cannot_be_claimed_by_policy() {
-    for (readonly, trusted, revoked) in [
-        (false, true, false),
-        (true, false, false),
-        (true, true, true),
-    ] {
-        let f = Fixture::new();
-        let mut tools = Tools::new("forbidden");
-        tools.readonly = readonly;
-        tools.trusted = trusted;
-        tools.revoked.store(revoked, Ordering::SeqCst);
-        let tools = Arc::new(tools);
-        let e = engine(
-            &f,
-            tools.clone(),
-            Arc::new(Policy::new(vec![node("x", &[])])),
-        );
-        let _ = e.run(f.input.clone(), CancellationToken::default());
-        assert!(tools.calls.lock().unwrap().is_empty());
+fn trusted_read_opt_in_controls_replay_cost_without_replacing_dispatch_authority() {
+    for (readonly,trusted,revoked) in [(false,true,false),(true,false,false),(true,true,true)] {
+        let f=Fixture::new();
+        let mut tools=Tools::new("ordinary invocation");
+        tools.readonly=readonly;tools.trusted=trusted;tools.revoked.store(revoked,Ordering::SeqCst);
+        let tools=Arc::new(tools);
+        let e=engine(&f,tools.clone(),Arc::new(Policy::new(vec![node("x",&[])])));
+        e.run(f.input.clone(),CancellationToken::default()).unwrap();
+        assert_eq!(tools.calls.lock().unwrap().len(),usize::from(!revoked));
+        let events=e.policy.events.lock().unwrap();
+        let completion=&events.iter().find(|event|event["kind"]=="tool_graph_completed").unwrap()["receipts"][0]["completion"];
+        if revoked {assert_eq!(completion["kind"],"not_dispatched");}
+        else if readonly {assert_eq!(completion["effect"],"none");}
+        else {assert_eq!(completion["effect"],"unknown");assert_eq!(completion["outcome"],"indeterminate");}
         assert!(e.provider.requests.lock().unwrap().is_empty());
     }
 }
@@ -597,11 +592,10 @@ fn admitted(f: &Fixture, nodes: Vec<Value>) -> PolicyGraphIntent {
         f.db.policy_boundary(&f.input.run_id, f.input.owner_generation)
             .unwrap();
     let action_id = format!("{}:policy:{}", f.input.run_id, boundary.id);
-    let tools = Tools::new("fixture");
     let nodes = nodes
         .into_iter()
         .map(|value| {
-            let node: PolicyReadNode = serde_json::from_value(value).unwrap();
+            let node: PolicyToolNode = serde_json::from_value(value).unwrap();
             let context = FrozenToolContext {
                 run_id: f.input.run_id.clone(),
                 origin: ToolOrigin::PolicyAction {
@@ -612,15 +606,14 @@ fn admitted(f: &Fixture, nodes: Vec<Value>) -> PolicyGraphIntent {
                 tools: Arc::new(f.input.binding.tools.clone()),
                 source: boundary.source.clone(),
             };
-            let contract = tools.prepare(&node.call, &context, &CancellationToken::default()).unwrap();
+
             PolicyAdmittedNode {
                 node,
                 context,
-                contract,
             }
         })
         .collect();
-    PolicyGraphIntent::PolicyReadGraphV1 {
+    PolicyGraphIntent::PolicyToolGraphV1 {
         action_id,
         boundary,
         identity: identity(),
@@ -656,7 +649,7 @@ fn admission_retry_is_same_action_and_changed_intent_is_rejected() {
             .unwrap();
     assert_eq!(first.intent, retry.intent);
     let mut altered = intent.clone();
-    let PolicyGraphIntent::PolicyReadGraphV1 { nodes, .. } = &mut altered;
+    let PolicyGraphIntent::PolicyToolGraphV1 { nodes, .. } = &mut altered;
     nodes[0].node.call.arguments["path"] = json!("different");
     assert!(f
         .db
@@ -714,7 +707,7 @@ fn restart_before_any_model_resumes_graph_at_each_durable_cut_without_rerunning_
         assert!(e.provider.requests.lock().unwrap().is_empty());
         assert_eq!(
             e.policy.events.lock().unwrap()[0]["kind"],
-            "read_graph_completed",
+            "tool_graph_completed",
             "must resume durable action rather than call Started again"
         );
         assert!(
@@ -793,7 +786,7 @@ fn output_chunks_are_owned_bounded_and_survive_content_collection() {
             &completion,
         )
         .unwrap();
-    let reference = receipt.output.unwrap();
+    let reference = receipt.output().unwrap().clone();
     f.db.lock().unwrap().collect_content_objects().unwrap();
     reopen(&mut f);
     let epoch = f.db.lock().unwrap().epoch();
@@ -877,8 +870,8 @@ fn newer_decision_checkpoint_after_graph_results_is_not_rolled_back_on_restart()
                 &settled(),
             )
             .unwrap()
-            .output
-            .unwrap();
+            .output()
+            .unwrap().clone();
         let next = match kind {
             "read_result" => json!({"kind":kind,"reference":reference,"index":0}),
             "request_model_with_evidence" => json!({"kind":kind,"evidence":[reference]}),
@@ -1040,16 +1033,16 @@ fn durable_operation_cancellation_before_worker_exists_prevents_recovered_reads(
     f.db.lock().unwrap().collect_content_objects().unwrap();
     let operation = f.db.lock().unwrap().operation(&action_id).unwrap();
     assert_eq!(operation.phase, OperationPhase::Terminal);
-    let database = rusqlite::Connection::open_with_flags(f.root.join("conversation.sqlite"),rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-    let mut statement = database.prepare("SELECT receipt FROM policy_graph_nodes WHERE action_id=?1 ORDER BY position").unwrap();
-    let receipts: Vec<PolicyNodeReceipt> = statement.query_map([&action_id],|row|row.get::<_,String>(0)).unwrap()
-        .map(|row|serde_json::from_str(&row.unwrap()).unwrap()).collect();
+    let events=e.policy.events.lock().unwrap();
+    let completed=events.iter().find(|event|event["kind"]=="tool_graph_completed").unwrap();
+    let receipts:Vec<PolicyNodeReceipt>=serde_json::from_value(completed["receipts"].clone()).unwrap();
     assert_eq!(receipts.len(), 2);
-    assert!(receipts.iter().all(|receipt| receipt.outcome == Outcome::Cancelled && receipt.output.is_none()));
+    assert!(receipts.iter().all(|receipt| receipt.outcome() == Outcome::Cancelled && receipt.output().is_none()));
 }
 
 // Inject real durable commands at exact worker interleavings. No fabricated Catalog errors.
 enum Interleaving {
+    CancelBeforeNodeDispatch {run:bool,token:CancellationToken},
     CancelAfterGraphLoad(String),
     InputBeforeGraphAdmission,
 }
@@ -1060,6 +1053,7 @@ struct InterleavingPersistence {
     observed_input_pending: AtomicBool,
 }
 impl Persistence for InterleavingPersistence {
+    fn resume_tool(&self,context:&ToolExecutionContext,epoch:u64)->Result<ToolResume,ExecutionError>{self.db.resume_tool(context,epoch)}
     fn resource_admission(
         &self,
     ) -> Arc<varin_runtime::resource_admission::ResourceAdmission> {
@@ -1087,6 +1081,12 @@ impl Persistence for InterleavingPersistence {
         epoch: u64,
         record: &ExecutionRecord,
     ) -> Result<(), ExecutionError> {
+        if let (Interleaving::CancelBeforeNodeDispatch{run:cancel_run,token},ExecutionRecord::ToolDispatched{context})=(&self.interleaving,record) {
+            if self.armed.swap(false,Ordering::SeqCst) {
+                if *cancel_run {self.db.lock().unwrap().request_cancel_run(run).unwrap();token.cancel();}
+                else {self.db.lock().unwrap().request_cancel_operation(&context.operation_id).unwrap();}
+            }
+        }
         self.db.commit(run, epoch, record)
     }
     fn policy_boundary(&self, run: &str, epoch: u64) -> Result<PolicyBoundary, ExecutionError> {
@@ -1160,7 +1160,7 @@ impl Persistence for InterleavingPersistence {
         run: &str,
         epoch: u64,
         reference: &PolicyEvidenceRef,
-    ) -> Result<ConversationItem, ExecutionError> {
+    ) -> Result<PolicyEvidence, ExecutionError> {
         self.db.policy_evidence(run, epoch, reference)
     }
     fn policy_chunk(
@@ -1279,7 +1279,7 @@ fn concurrent_small_receipt_publication_and_gc_preserve_every_committed_output()
     );
     f.db.lock().unwrap().collect_content_objects().unwrap();
     for (value, receipt) in results {
-        let reference = receipt.unwrap().output.unwrap();
+        let reference = receipt.unwrap().output().unwrap().clone();
         let chunk =
             f.db.policy_chunk(&f.input.run_id, f.input.owner_generation, &reference, 0)
                 .unwrap();
@@ -1373,4 +1373,697 @@ fn actual_new_input_winning_graph_admission_preserves_previous_policy_checkpoint
         .unwrap()
         .iter()
         .all(|event| event.kind != "policy.graph_admitted"));
+}
+
+/// A durable fixture executor journal models the independent resource owner's original receipt.
+struct EffectOwner {
+    journal: std::path::PathBuf,
+}
+impl EffectOwner {
+    fn receipt(&self) -> ExternalReceipt {
+        serde_json::from_value(
+            serde_json::from_slice::<Value>(&std::fs::read(&self.journal).unwrap()).unwrap()
+                ["receipt"]
+                .clone(),
+        )
+        .unwrap()
+    }
+    fn writes(&self) -> u64 {
+        std::fs::read(&self.journal)
+            .ok()
+            .map(|bytes| {
+                serde_json::from_slice::<Value>(&bytes).unwrap()["writes"]
+                    .as_u64()
+                    .unwrap()
+            })
+            .unwrap_or(0)
+    }
+}
+impl ToolExecutor for EffectOwner {
+    fn plan(
+        &self,
+        call: &ToolCall,
+        context: &FrozenToolContext,
+        cancel: &CancellationToken,
+    ) -> Result<ToolPreparation, ExecutionError> {
+        self.prepare(call, context, cancel)
+            .map(ToolPreparation::Ready)
+    }
+    fn prepare(
+        &self,
+        call: &ToolCall,
+        _: &FrozenToolContext,
+        _: &CancellationToken,
+    ) -> Result<ToolContract, ExecutionError> {
+        Ok(ToolContract {
+            name: call.name.clone(),
+            schema_version: call.schema_version.clone(),
+            read_only: call.arguments["read_only"] == true,
+            completion: if call.arguments["job"] == true {
+                CompletionKind::Job
+            } else {
+                CompletionKind::Result
+            },
+            lifetime: if call.arguments["job"] == true {
+                Lifetime::Thread
+            } else {
+                Lifetime::Run
+            },
+            resources: vec![ResourceClaim {
+                key: format!("owner:{}", call.call_id),
+                access: if call.arguments["read_only"] == true {
+                    Access::Read
+                } else {
+                    Access::Write
+                },
+            }],
+        })
+    }
+    fn authorize(
+        &self,
+        _: &ToolExecutionContext,
+        _: &ToolCall,
+        _: &ToolContract,
+        _: &CancellationToken,
+    ) -> Result<(), ExecutionError> {
+        Ok(())
+    }
+    fn execute(
+        &self,
+        context: &ToolExecutionContext,
+        _: &ToolCall,
+        contract: &ToolContract,
+        _: &CancellationToken,
+    ) -> ToolCompletion {
+        assert!(matches!(context.origin, ToolOrigin::PolicyAction { .. }));
+        let receipt = ExternalReceipt {
+            executor: contract.name.clone(),
+            identity: context.operation_id.clone(),
+            epoch: "original-executor-generation".into(),
+            outcome: Outcome::Succeeded,
+            effect: if contract.read_only {
+                Effect::None
+            } else {
+                Effect::Confirmed
+            },
+            result: Value::Null,
+        };
+        std::fs::write(
+            &self.journal,
+            serde_json::to_vec(&json!({"writes":self.writes()+1,"receipt":receipt})).unwrap(),
+        )
+        .unwrap();
+        if contract.completion == CompletionKind::Job {
+            ToolCompletion::JobAccepted {
+                operation_id: context.operation_id.clone(),
+                phase: "running".into(),
+                effect: if contract.read_only {
+                    Effect::None
+                } else {
+                    Effect::Dispatched
+                },
+                lifetime: Lifetime::Thread,
+            }
+        } else {
+            ToolCompletion::Result {
+                outcome: Outcome::Succeeded,
+                effect: Effect::Confirmed,
+                content: Value::Null,
+            }
+        }
+    }
+}
+fn effect_context(f: &Fixture, intent: &PolicyGraphIntent) -> (ToolExecutionContext, AdmittedTool) {
+    let node = &intent.nodes()[0];
+    let context = ToolExecutionContext {
+        run_id: f.input.run_id.clone(),
+        origin: node.context.origin.clone(),
+        operation_id: node.context.origin.operation_id(&node.node.call.call_id),
+    };
+    let owner = EffectOwner {
+        journal: f.root.join("owner-journal.json"),
+    };
+    let contract = owner
+        .prepare(
+            &node.node.call,
+            &node.context,
+            &CancellationToken::default(),
+        )
+        .unwrap();
+    (
+        context,
+        AdmittedTool {
+            call: node.node.call.clone(),
+            contract,
+        },
+    )
+}
+
+#[test]
+fn effect_graph_recovery_uses_original_executor_at_every_dispatch_cut() {
+    // 0: admitted; 1: dispatched without receipt; 2: original executor receipt durable;
+    // 3: canonical completion durable but graph has not consumed it.
+    for cut in 0..4 {
+        let mut f = Fixture::new();
+        let intent = admitted(&f, vec![node("mutation", &[])]);
+        f.db.admit_policy_graph(&f.input.run_id, f.input.owner_generation, &intent)
+            .unwrap();
+        let (context, tool) = effect_context(&f, &intent);
+        f.db.commit(
+            &f.input.run_id,
+            f.input.owner_generation,
+            &ExecutionRecord::ToolAdmitted {
+                context: context.clone(),
+                tool: tool.clone(),
+            },
+        )
+        .unwrap();
+        let owner = Arc::new(EffectOwner {
+            journal: f.root.join("owner-journal.json"),
+        });
+        if cut > 0 {
+            f.db.commit(
+                &f.input.run_id,
+                f.input.owner_generation,
+                &ExecutionRecord::ToolDispatched {
+                    context: context.clone(),
+                },
+            )
+            .unwrap();
+            let completion = owner.execute(
+                &context,
+                &tool.call,
+                &tool.contract,
+                &CancellationToken::default(),
+            );
+            if cut == 2 {
+                varin_runtime::catalog::result_content::record_external_receipt(
+                    &f.db,
+                    &context.operation_id,
+                    owner.receipt(),
+                    true,
+                )
+                .unwrap();
+            }
+            if cut == 3 {
+                f.db.commit(
+                    &f.input.run_id,
+                    f.input.owner_generation,
+                    &ExecutionRecord::ToolSettled {
+                        context: context.clone(),
+                        completion,
+                    },
+                )
+                .unwrap();
+            }
+        }
+        reopen(&mut f);
+        if cut == 1 {
+            let epoch = f.db.lock().unwrap().epoch();
+            assert!(
+                f.db.resume_tool(&context, epoch).is_err(),
+                "unknown dispatch must never become another execute"
+            );
+            assert_eq!(owner.writes(), 1);
+            varin_runtime::catalog::result_content::record_external_receipt(
+                &f.db,
+                &context.operation_id,
+                owner.receipt(),
+                true,
+            )
+            .unwrap();
+        }
+        let (input, recovery) =
+            f.db.lock()
+                .unwrap()
+                .prepare_recovered_execution(
+                    &f.input.run_id,
+                    f.input.binding.clone(),
+                    identity(),
+                    Value::Null,
+                )
+                .unwrap();
+        let e = ExecutionEngine {
+            persistence: f.db.clone(),
+            provider: Arc::new(Provider::default()),
+            tools: owner.clone(),
+            policy: Arc::new(Policy::new(vec![])),
+            context_preparation: Arc::new(NoopContextPreparation),
+            progress: ProgressSink::default(),
+        };
+        assert_eq!(
+            e.run_recovered(input, CancellationToken::default(), recovery)
+                .unwrap()
+                .state,
+            RunState::Completed
+        );
+        assert_eq!(
+            owner.writes(),
+            1,
+            "recovering cut {cut} repeated the effect"
+        );
+        let db = f.db.lock().unwrap();
+        let metadata = db.operation(&context.operation_id).unwrap();
+        let op = db.capture_operation_read(metadata).load().unwrap();
+        assert_eq!(
+            op.intent["origin"],
+            serde_json::to_value(&context.origin).unwrap()
+        );
+        assert_eq!(op.result, Some(Value::Null));
+        assert!(matches!(
+            op.call_completion,
+            Some(ToolCompletion::Result {
+                content: Value::Null,
+                effect: Effect::Confirmed,
+                ..
+            })
+        ));
+        let events = e.policy.events.lock().unwrap();
+        let receipt = &events
+            .iter()
+            .find(|event| event["kind"] == "tool_graph_completed")
+            .unwrap()["receipts"][0];
+        assert!(
+            receipt["completion"]["output"]["content_ref"].is_string(),
+            "null is real result content with an owned reference"
+        );
+        assert!(e.provider.requests.lock().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn cancelled_admitted_node_survives_reopen_without_dispatch_or_stranded_frontend_work() {
+    let mut f = Fixture::new();
+    let intent = admitted(&f, vec![node("mutation", &[])]);
+    f.db.admit_policy_graph(&f.input.run_id, f.input.owner_generation, &intent)
+        .unwrap();
+    let (context, tool) = effect_context(&f, &intent);
+    f.db.commit(
+        &f.input.run_id,
+        f.input.owner_generation,
+        &ExecutionRecord::ToolAdmitted {
+            context: context.clone(),
+            tool,
+        },
+    )
+    .unwrap();
+    f.db.lock()
+        .unwrap()
+        .request_cancel_operation(&context.operation_id)
+        .unwrap();
+    reopen(&mut f);
+    let (input, recovery) =
+        f.db.lock()
+            .unwrap()
+            .prepare_recovered_execution(
+                &f.input.run_id,
+                f.input.binding.clone(),
+                identity(),
+                Value::Null,
+            )
+            .unwrap();
+    let owner = Arc::new(EffectOwner {
+        journal: f.root.join("owner-journal.json"),
+    });
+    let e = ExecutionEngine {
+        persistence: f.db.clone(),
+        provider: Arc::new(Provider::default()),
+        tools: owner.clone(),
+        policy: Arc::new(Policy::new(vec![])),
+        context_preparation: Arc::new(NoopContextPreparation),
+        progress: ProgressSink::default(),
+    };
+    assert_eq!(
+        e.run_recovered(input, CancellationToken::default(), recovery)
+            .unwrap()
+            .state,
+        RunState::Completed
+    );
+    assert_eq!(owner.writes(), 0);
+    let op =
+        f.db.lock()
+            .unwrap()
+            .operation(&context.operation_id)
+            .unwrap();
+    assert_eq!(
+        (op.phase, op.outcome, op.effect),
+        (
+            OperationPhase::Terminal,
+            Some(Outcome::Cancelled),
+            Effect::None
+        )
+    );
+}
+
+#[test]
+fn job_acceptance_unblocks_graph_dependency_and_late_terminal_preserves_call_receipt() {
+    let f = Fixture::new();
+    let mut job = node("job", &[]);
+    job["call"]["arguments"]["job"] = json!(true);
+    let owner = Arc::new(EffectOwner {
+        journal: f.root.join("owner-journal.json"),
+    });
+    let e = ExecutionEngine {
+        persistence: f.db.clone(),
+        provider: Arc::new(Provider::default()),
+        tools: owner.clone(),
+        policy: Arc::new(Policy::new(vec![job, node("after", &["job"])])),
+        context_preparation: Arc::new(NoopContextPreparation),
+        progress: ProgressSink::default(),
+    };
+    assert_eq!(
+        e.run(f.input.clone(), CancellationToken::default())
+            .unwrap()
+            .state,
+        RunState::Completed
+    );
+    let events = e.policy.events.lock().unwrap();
+    let graph = events
+        .iter()
+        .find(|event| event["kind"] == "tool_graph_completed")
+        .unwrap();
+    assert_eq!(graph["receipts"][0]["completion"]["kind"], "job_accepted");
+    assert_eq!(graph["receipts"][1]["completion"]["outcome"], "succeeded");
+    let id = graph["receipts"][0]["completion"]["operation_id"]
+        .as_str()
+        .unwrap();
+    let before = f.db.lock().unwrap().operation(id).unwrap();
+    assert!(before.handed_off);
+    assert_ne!(before.phase, OperationPhase::Terminal);
+    let receipt = ExternalReceipt {
+        executor: "read".into(),
+        identity: id.into(),
+        epoch: "original-executor-generation".into(),
+        outcome: Outcome::Succeeded,
+        effect: Effect::Confirmed,
+        result: json!({"job":"finished"}),
+    };
+    let after =
+        varin_runtime::catalog::result_content::record_external_receipt(&f.db, id, receipt, true)
+            .unwrap();
+    assert_eq!(after.call_completion, before.call_completion);
+    assert_eq!(
+        (after.phase, after.outcome),
+        (OperationPhase::Terminal, Some(Outcome::Succeeded))
+    );
+    assert_eq!(
+        owner.writes(),
+        2,
+        "dependent ran before job completion without restarting either call"
+    );
+}
+
+#[test]
+fn cancellation_winning_durable_dispatch_settles_without_executor_entry() {
+    for cancel_run in [false, true] {
+        let f = Fixture::new();
+        let cancel = CancellationToken::default();
+        let persistence = Arc::new(InterleavingPersistence {
+            db: f.db.clone(),
+            interleaving: Interleaving::CancelBeforeNodeDispatch {
+                run: cancel_run,
+                token: cancel.clone(),
+            },
+            armed: AtomicBool::new(true),
+            observed_input_pending: AtomicBool::new(false),
+        });
+        let owner = Arc::new(EffectOwner {
+            journal: f.root.join("owner-journal.json"),
+        });
+        let e = ExecutionEngine {
+            persistence,
+            provider: Arc::new(Provider::default()),
+            tools: owner.clone(),
+            policy: Arc::new(Policy::new(vec![node("mutation", &[])])),
+            context_preparation: Arc::new(NoopContextPreparation),
+            progress: ProgressSink::default(),
+        };
+        let report = e.run(f.input.clone(), cancel).unwrap();
+        assert_eq!(
+            report.state,
+            if cancel_run {
+                RunState::Cancelled
+            } else {
+                RunState::Completed
+            }
+        );
+        assert_eq!(owner.writes(), 0);
+        let db = f.db.lock().unwrap();
+        let event = db
+            .events_after(0, 100)
+            .unwrap()
+            .into_iter()
+            .find(|event| event.kind == "operation.settled")
+            .unwrap();
+        let operation = db.operation(&event.subject).unwrap();
+        assert_eq!(
+            (operation.phase, operation.outcome, operation.effect),
+            (
+                OperationPhase::Terminal,
+                Some(Outcome::Cancelled),
+                Effect::None
+            )
+        );
+        assert!(db.resource_admission().inspect(&operation.id).is_none());
+    }
+}
+
+#[test]
+fn read_only_job_recovery_waits_for_original_executor_at_both_completion_cuts() {
+    for accepted in [false, true] {
+        let mut f = Fixture::new();
+        let mut job = node("job", &[]);
+        job["call"]["arguments"] = json!({"job":true,"read_only":true});
+        let intent = admitted(&f, vec![job]);
+        f.db.admit_policy_graph(&f.input.run_id, f.input.owner_generation, &intent)
+            .unwrap();
+        let (context, tool) = effect_context(&f, &intent);
+        let owner = Arc::new(EffectOwner {
+            journal: f.root.join("owner-journal.json"),
+        });
+        f.db.commit(
+            &f.input.run_id,
+            f.input.owner_generation,
+            &ExecutionRecord::ToolAdmitted {
+                context: context.clone(),
+                tool: tool.clone(),
+            },
+        )
+        .unwrap();
+        f.db.commit(
+            &f.input.run_id,
+            f.input.owner_generation,
+            &ExecutionRecord::ToolDispatched {
+                context: context.clone(),
+            },
+        )
+        .unwrap();
+        let original = owner.execute(
+            &context,
+            &tool.call,
+            &tool.contract,
+            &CancellationToken::default(),
+        );
+        if accepted {
+            f.db.commit(
+                &f.input.run_id,
+                f.input.owner_generation,
+                &ExecutionRecord::ToolSettled {
+                    context: context.clone(),
+                    completion: original.clone(),
+                },
+            )
+            .unwrap();
+        }
+        let before =
+            f.db.lock()
+                .unwrap()
+                .operation(&context.operation_id)
+                .unwrap();
+        assert_eq!(
+            (before.phase, before.effect),
+            (OperationPhase::Running, Effect::None)
+        );
+        reopen(&mut f);
+        let epoch = f.db.lock().unwrap().epoch();
+        let recovered =
+            f.db.lock()
+                .unwrap()
+                .operation(&context.operation_id)
+                .unwrap();
+        assert_eq!(
+            (recovered.phase, recovered.outcome, recovered.effect),
+            (
+                OperationPhase::Terminal,
+                Some(Outcome::Indeterminate),
+                Effect::None
+            )
+        );
+        assert_eq!(recovered.result, before.result);
+        assert_eq!(recovered.call_completion, before.call_completion);
+        assert!(f
+            .db
+            .lock()
+            .unwrap()
+            .pending_external_operations("read")
+            .unwrap()
+            .contains(&context.operation_id));
+        assert!(f
+            .db
+            .resource_admission()
+            .inspect(&context.operation_id)
+            .is_some());
+        if !accepted {
+            assert!(
+                matches!(f.db.resume_tool(&context,epoch),Err(error) if error.code=="tool_reconciliation_required")
+            );
+        }
+        let receipt = owner.receipt();
+        let after = varin_runtime::catalog::result_content::record_external_receipt(
+            &f.db,
+            &context.operation_id,
+            receipt.clone(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            (after.phase, after.outcome, after.effect),
+            (
+                OperationPhase::Terminal,
+                Some(Outcome::Succeeded),
+                Effect::None
+            )
+        );
+        assert_eq!(after.call_completion, before.call_completion);
+        assert!(
+            f.db.resource_admission()
+                .inspect(&context.operation_id)
+                .is_some(),
+            "business terminal is not executor-stop evidence"
+        );
+        let cursor =
+            f.db.lock()
+                .unwrap()
+                .events_after(0, 1000)
+                .unwrap()
+                .last()
+                .unwrap()
+                .cursor;
+        let repeated = varin_runtime::catalog::result_content::record_external_receipt(
+            &f.db,
+            &context.operation_id,
+            receipt.clone(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(repeated.revision, after.revision);
+        assert!(f
+            .db
+            .lock()
+            .unwrap()
+            .events_after(cursor, 1000)
+            .unwrap()
+            .is_empty());
+        let stopped = varin_runtime::catalog::result_content::record_external_receipt(
+            &f.db,
+            &context.operation_id,
+            receipt,
+            true,
+        )
+        .unwrap();
+        assert_eq!(stopped.revision, after.revision);
+        assert!(f
+            .db
+            .resource_admission()
+            .inspect(&context.operation_id)
+            .is_none());
+        let completion = match f.db.resume_tool(&context, epoch).unwrap() {
+            ToolResume::Completed(read) => read.load().unwrap(),
+            _ => panic!("original executor terminal must close the invocation"),
+        };
+        assert_eq!(
+            completion,
+            if accepted {
+                original
+            } else {
+                ToolCompletion::Result {
+                    outcome: Outcome::Succeeded,
+                    effect: Effect::None,
+                    content: Value::Null,
+                }
+            }
+        );
+        let revision =
+            f.db.lock()
+                .unwrap()
+                .operation(&context.operation_id)
+                .unwrap()
+                .revision;
+        let cursor =
+            f.db.lock()
+                .unwrap()
+                .events_after(0, 1000)
+                .unwrap()
+                .last()
+                .unwrap()
+                .cursor;
+        assert!(matches!(
+            f.db.resume_tool(&context, epoch).unwrap(),
+            ToolResume::Completed(_)
+        ));
+        assert_eq!(
+            f.db.lock()
+                .unwrap()
+                .operation(&context.operation_id)
+                .unwrap()
+                .revision,
+            revision
+        );
+        assert!(f
+            .db
+            .lock()
+            .unwrap()
+            .events_after(cursor, 1000)
+            .unwrap()
+            .is_empty());
+        let (input, recovery) =
+            f.db.lock()
+                .unwrap()
+                .prepare_recovered_execution(
+                    &f.input.run_id,
+                    f.input.binding.clone(),
+                    identity(),
+                    Value::Null,
+                )
+                .unwrap();
+        let engine = ExecutionEngine {
+            persistence: f.db.clone(),
+            provider: Arc::new(Provider::default()),
+            tools: owner.clone(),
+            policy: Arc::new(Policy::new(vec![])),
+            context_preparation: Arc::new(NoopContextPreparation),
+            progress: ProgressSink::default(),
+        };
+        assert_eq!(
+            engine
+                .run_recovered(input, CancellationToken::default(), recovery)
+                .unwrap()
+                .state,
+            RunState::Completed
+        );
+        let events = engine.policy.events.lock().unwrap();
+        let graph = events
+            .iter()
+            .find(|event| event["kind"] == "tool_graph_completed")
+            .unwrap();
+        assert_eq!(
+            graph["receipts"][0]["completion"]["kind"],
+            if accepted { "job_accepted" } else { "result" }
+        );
+        assert_eq!(
+            owner.writes(),
+            1,
+            "recovery must never re-enter the original executor"
+        );
+    }
 }
