@@ -139,6 +139,9 @@ Child task records retain ownership/state and references to task text, configura
 descriptions. Admission prepares those bodies and verifies the original dispatch arguments on a worker;
 commit rechecks the admitted Operation revision and current parent authority. Family, cancellation and
 resource-release queries use metadata. Public child views and report pages hydrate on request workers.
+Completed report selection and Wait previews also run on workers. Their commits recheck the original
+Run, Wait, branch head and cancellation; changed candidates cannot append stale report messages.
+Previously delivered reports are found through branch ancestry without rereading their body.
 
 Provider serialization still visits and sends full legal requests; chunk reuse is not remote
 incremental-context support or a measured speedup claim.

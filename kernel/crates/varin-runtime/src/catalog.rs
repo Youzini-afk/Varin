@@ -1301,6 +1301,8 @@ pub(crate) mod policy_checkpoint;
 pub(crate) mod policy_body;
 #[path="catalog_child_content.rs"]
 pub mod child_content;
+#[path="catalog_child_delivery.rs"]
+pub mod child_delivery;
 
 #[path="catalog_tools.rs"]
 pub mod tools;
