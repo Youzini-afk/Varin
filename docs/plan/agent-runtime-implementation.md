@@ -8,6 +8,15 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-11 增量：子任务独立新 Run 与逐轮结果
+
+- 已结束 child 的明确 User 输入现在通过原任务关系下的独立 execution 受理，新建 Run，不重启原 dispatch 或改写前轮回执。首轮和续轮共用一个执行准备/来源/报告/结果 owner；Run/Launch/Operation 仍拥有执行和效果。Catalog **29**、collaboration **4**，旧内部格式拒绝。原 wait_child 保持首轮，child_status/child_report 与普通 integrate_child **版本2** 按确切 execution/publication 消费。
+- 配置来自上一实际 Run/Launch，包括用户已热切换的模型/策略和原规划模型/凭据；新轮策略从独立世代开始。新文件源来自精确前轮 WorkingResult 或合法 immutable 基线，Host 不领取旧父 handoff。未停写者不能绕过；真停止并已发布的固定 root 即使旧效果 Unknown，也可承接新用户工作，旧事实保留。每轮报告只含本 Run 真正产生的原文。
+- 公开 client/认证 HTTP/Host/UI、MCP/扩展/资源/显式 skill、原 Integration journal 和启动发现均已接线。accepted-before-Run 可重开恢复、精确重试及原子树停止；历史 fork 继续可读，父页按需查看续轮原报告/结果。原 family、GC、tree cancel 和 Goal 消费同步更新，未建第二调度器或配置库。
+- 独审与整合闭合四个实际接缝：历史 fork 只读误拒；前轮 planner 世代 ID 和 Host/Rust optional-null 配置 hash 错位；将已停止/已固定的 Unknown 效果误当永久来源屏障；旧终态 Goal 把新 User Run 即刻取消。原失败探针修后逐一绿；Active Goal 的暂停/预算仍保留，旧 Run/用量和未停执行者没有被放宽。
+- 最终同源 runtime **351/0、2 ignored**，kernel **78/0、11 ignored**，fresh guardian/Storage → 前轮固定根 → 新 source/Run **1/1**，Host **129/129**、UI **31/31**。all-targets、类型/lint/协议/文档、真实 Host bundle 与准确 Linux x64 `0.9.25` binary/staging 通过；前后 Rust 输入清单一致。独审最终四条原生 probe、fork 与真实 Host→Catalog→Host planner 组合通过，接受此切片。完整 Host IPC 场景已补但未执行，证据分层见[验收与复跑](../reviews/runtime-child-continuation-2026-10-11.md)。
+- 主动 request、关联回复 Wait/期限和多等待屏障继续推进；本阶段的 User 新 Run 入口为其共享执行基础，不把尚未实现的消息激活算作完成。两设计整体与用户验收后自行全面迁移的分工保持。
+
 ## 2026-10-11 增量：同任务被动消息与关联回复
 
 - 普通 `send` 版本 1 和公开 User 入口支持 `inform`、固定 Thread/branch 与原 `replyTo`。真实 Agent 来自冻结 ModelStep/PolicyAction 和原 Operation，用户从 child UI 发出仍是 User；家系授权不依赖 cwd。消息与完整工具回执同事务确认，同一原调用的并发准备/重开只返回原事实。

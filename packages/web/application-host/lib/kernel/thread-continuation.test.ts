@@ -29,6 +29,7 @@ function fixture(prepareContext?: ContextPreparer) {
       return waitWithSignal(work(signal), signal);
     },
     run: vi.fn(async () => structuredClone(run)), launch: vi.fn(async () => structuredClone(launch)),
+    childExecutions: vi.fn(async () => [] as import('./protocol.generated.js').DelegatedExecution[]),
     pendingLaunches: vi.fn(async () => [structuredClone(launch)]), childForThread: vi.fn(async () => null),
     threads: vi.fn(async () => [{ thread_id: identity.threadId, observer_project_ids: [], branches: [{ branch_id: identity.branchId, active_run_id: run.id, head: null, latest_run: run }] }]),
     thread: vi.fn(async () => ({ thread_id: identity.threadId, observer_project_ids: [], branches: [{ branch_id: identity.branchId, active_run_id: run.id, head: null, latest_run: run }] })),
@@ -377,19 +378,21 @@ it.each(['child_revision', 'process_receipt'] as const)('%s observed during an a
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   let listener!: (event: AgentRuntimeStreamEvent) => void;
-  const child = { operation_id: 'child-operation', parent_run_id: 'parent', parent_thread_id: 'parent-thread', parent_branch_id: 'parent-branch',
-    child_thread_id: 'child-thread', child_branch_id: 'child-branch', origin: {}, call_id: 'dispatch', project_id: null,
+  const child = { execution_id: 'continued-execution', child_operation_id: 'child-operation', operation_id: 'child-operation',
+    trigger: { kind: 'user_continuation', key: 'continued', previous_execution_id: 'child-operation', previous_run_id: 'old-child-run', previous_run_revision: 3, expected_head: null },
+    source_basis: null, policy_target: { kind: 'default' }, terminal_head: null, cancel_requested: false, parent_run_id: 'parent', parent_thread_id: 'parent-thread', parent_branch_id: 'parent-branch',
+    child_thread_id: 'child-thread', child_branch_id: 'child-branch', origin: { kind: 'model_step', request_id: 'original-request' }, call_id: 'dispatch', project_id: null,
     input: { task: 'Read source', workMode: 'read_only' }, selected_profile: {preset_id:null, catalog_identity:null, work_mode:'read_only', tools:[], instructions:''}, configuration: {}, launch: f.launch.selection,
     state: 'ready', revision: 1, cursor: 1, receipt: { key: 'child-input', run_id: f.run.id, input_id: 'child-input', branch_id: 'child-branch', thread_id: 'child-thread', cursor: 1 },
     report: null, resources_released: true, code_result: { kind: 'no_changes' },
     source: { kind: 'pending', handoff: { operation_id: 'handoff', source: { mode: 'fixed_branch', workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null }, root: { kind: 'fixed', pin: { pin_id: 'pin', root: 'root', source: { mode: 'fixed_branch', workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null } } } } },
-  } as import('./protocol.generated.js').ChildTask;
+  } as import('./protocol.generated.js').DelegatedExecution;
   const children = vi.fn(async () => [structuredClone(child)]);
   const events: RuntimeEvent[] = [];
   const runtime = Object.assign(f.runtime, {
     onEvent: (handler: typeof listener) => { listener = handler; return () => {}; }, onExit: () => () => {}, onReady: () => () => {},
-    reconcileChildren: async () => [], reconcileProcessWaits: async () => [], children, unacceptedChildSources: async () => [],
-    child: async () => structuredClone(child), releaseSourceGrants: vi.fn(async () => {}),
+    reconcileChildren: async () => [], reconcileProcessWaits: async () => [], children, childExecutions: async () => [structuredClone(child)], unacceptedChildSources: async () => [],
+    childExecution: async () => structuredClone(child), releaseSourceGrants: vi.fn(async () => {}),
     status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
   const continueRun = vi.fn(async () => { await gate; });

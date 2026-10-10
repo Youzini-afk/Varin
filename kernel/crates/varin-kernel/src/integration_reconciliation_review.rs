@@ -28,6 +28,48 @@ fn compensated_receipt_distinguishes_unissued_surface_intent_from_unacknowledged
     replay_scenario(Some("external-intent"));
     replay_scenario(Some("external-dispatched"));
 }
+fn fix_result(db: &mut Catalog, child: &ChildTask) -> ChildWorkingResultRef {
+    let epoch = db.epoch();
+    let child_run = &child.receipt.as_ref().unwrap().run_id;
+    db.request_cancel_run(child_run).unwrap();
+    db.commit_execution(
+        child_run,
+        epoch,
+        &ExecutionRecord::StateChanged {
+            state: RunState::Cancelled,
+            waiting_on: None,
+        },
+    )
+    .unwrap();
+    db.reconcile_child_reports().unwrap();
+    db.begin_child_settlement(&child.execution_id).unwrap();
+    let publication = format!("child-result:{}", child.execution_id);
+    let candidate = KernelWorkingResultCandidate {
+        publication_id: publication.clone(),
+        candidate_operation_id: format!("result-prepare:{publication}"),
+        workspace_id: "workspace-A".into(),
+        branch_id: format!("child-source:{}", child.execution_id),
+        root: format!("result-root:{}", child.execution_id),
+        base_root: child.source.pin().unwrap().root.clone(),
+        write_revision: 1,
+        pin_id: "candidate-pin".into(),
+        base_pin_id: "candidate-base".into(),
+    };
+    db.attach_child_candidate(&child.execution_id, candidate.clone())
+        .unwrap();
+    let result = ChildWorkingResultRef {
+        publication_id: publication.clone(),
+        workspace_id: candidate.workspace_id,
+        branch_id: candidate.branch_id,
+        root: candidate.root,
+        base_root: candidate.base_root,
+        result_revision: 1,
+        record_id: "result-record".into(),
+    };
+    db.attach_child_result(&child.execution_id, result.clone(), Effect::Partial)
+        .unwrap();
+    result
+}
 fn replay_scenario(tail_phase: Option<&str>) {
     let mut f = fixture::Fixture::new_isolated();
     let child = f.accept();
@@ -41,45 +83,78 @@ fn replay_scenario(tail_phase: Option<&str>) {
     let child =
         f.db.prepare_child(&child.operation_id, source, proposal, basis)
             .unwrap();
+    let first_result = fix_result(&mut f.db, &child);
+    let (child, result) = if tail_phase.is_none() {
+        // The journal below deliberately integrates the second execution. An accidental
+        // lookup of the original dispatch's result cannot satisfy its exact publication.
+        let original = f.db.child_task(&child.operation_id).unwrap();
+        let command = varin_runtime::catalog::delegated::ChildContinuationCommand {
+            key: "continue-before-integration".into(),
+            child_operation_id: child.operation_id.clone(),
+            previous_run_id: child.receipt.as_ref().unwrap().run_id.clone(),
+            expected_head: f.db.head(&child.child_branch_id).unwrap(),
+            input: json!("Produce the next exact result"),
+        };
+        let prepared =
+            f.db.capture_child_continuation(command)
+                .unwrap()
+                .load()
+                .unwrap();
+        let next = f.db.accept_child_continuation(prepared).unwrap();
+        let view =
+            f.db.capture_delegated_execution(next.clone())
+                .unwrap()
+                .load()
+                .unwrap();
+        let mut source = next.source_basis.as_ref().unwrap().source().clone();
+        source.branch_id = Some(format!("child-source:{}", next.execution_id));
+        source.revision = Some(0);
+        let pin = ChildSourcePin {
+            pin_id: format!("child-source-pin:{}", next.execution_id),
+            root: first_result.root.clone(),
+            source: source.clone(),
+        };
+        source.mode = SourceMode::Materialized;
+        let prepared =
+            f.db.prepare_child_source(
+                &next.execution_id,
+                pin,
+                source.clone(),
+                serde_json::from_value(view.source_basis.unwrap()["provenance"].clone()).unwrap(),
+            )
+            .unwrap()
+            .load()
+            .unwrap();
+        f.db.attach_child_source(prepared).unwrap();
+        let context =
+            f.db.active_context(&child.child_branch_id)
+                .unwrap()
+                .unwrap();
+        let mut proposal = context.proposal;
+        proposal.key = "second-context".into();
+        proposal.expected_revision = 0;
+        proposal.through_id = None;
+        proposal.summary.clear();
+        let prepared =
+            f.db.capture_child_preparation(
+                &next.execution_id,
+                source,
+                proposal,
+                context.personalization.unwrap(),
+            )
+            .unwrap()
+            .load()
+            .unwrap();
+        let child = f.db.admit_child(prepared).unwrap();
+        let result = fix_result(&mut f.db, &child);
+        assert_ne!(result.publication_id, first_result.publication_id);
+        assert_eq!(f.db.child_task(&child.operation_id).unwrap(), original);
+        (child, result)
+    } else {
+        (child, first_result)
+    };
+    let publication = result.publication_id.clone();
     let epoch = f.db.epoch();
-    let child_run = &child.receipt.as_ref().unwrap().run_id;
-    f.db.request_cancel_run(child_run).unwrap();
-    f.db.commit_execution(
-        child_run,
-        epoch,
-        &ExecutionRecord::StateChanged {
-            state: RunState::Cancelled,
-            waiting_on: None,
-        },
-    )
-    .unwrap();
-    f.db.reconcile_child_reports().unwrap();
-    f.db.begin_child_settlement(&child.operation_id).unwrap();
-    let publication = format!("child-result:{}", child.operation_id);
-    let candidate = KernelWorkingResultCandidate {
-        publication_id: publication.clone(),
-        candidate_operation_id: format!("result-prepare:{publication}"),
-        workspace_id: "workspace-A".into(),
-        branch_id: format!("child-source:{}", child.operation_id),
-        root: "result-root".into(),
-        base_root: "fixed-root".into(),
-        write_revision: 1,
-        pin_id: "candidate-pin".into(),
-        base_pin_id: "candidate-base".into(),
-    };
-    f.db.attach_child_candidate(&child.operation_id, candidate.clone())
-        .unwrap();
-    let result = ChildWorkingResultRef {
-        publication_id: publication.clone(),
-        workspace_id: candidate.workspace_id,
-        branch_id: candidate.branch_id,
-        root: candidate.root,
-        base_root: candidate.base_root,
-        result_revision: 1,
-        record_id: "result-record".into(),
-    };
-    f.db.attach_child_result(&child.operation_id, result.clone(), Effect::Partial)
-        .unwrap();
     f.db.settle_child_receipts().unwrap();
     f.db.commit_execution(
         &f.context.run_id,
@@ -94,7 +169,7 @@ fn replay_scenario(tail_phase: Option<&str>) {
     let target=serde_json::from_value(json!({"mode":"live_root","live_root":{"hostId":"host","rootId":"original-root","canonicalRoot":nonexistent},"workspace_id":"workspace-A","execution_workspace_id":"workspace-A","branch_id":null,"revision":null})).unwrap();
     let tool = ToolSchema {
         name: "integrate_child".into(),
-        version: "1".into(),
+        version: "2".into(),
         description: String::new(),
         schema: json!({"type":"object"}),
         output_schema: None,
@@ -111,7 +186,8 @@ fn replay_scenario(tail_phase: Option<&str>) {
     };
     let binding = RequestBinding {
         child_dispatch: None,
-        goal: None, resource_activations: Vec::new(),
+        goal: None,
+        resource_activations: Vec::new(),
         resource_checkpoint_id: None,
         connection_identity: launch.connection_identity,
         provider_family: launch.provider_family,
@@ -129,8 +205,8 @@ fn replay_scenario(tail_phase: Option<&str>) {
     let call = ToolCall {
         call_id: "integrate".into(),
         name: "integrate_child".into(),
-        schema_version: "1".into(),
-        arguments: json!({"childOperationId":child.operation_id,"publicationId":publication}),
+        schema_version: "2".into(),
+        arguments: json!({"childOperationId":child.operation_id,"executionId":child.execution_id,"publicationId":publication}),
     };
     let context = ToolExecutionContext {
         run_id: run.run_id.clone(),
@@ -181,7 +257,7 @@ fn replay_scenario(tail_phase: Option<&str>) {
                 call: call.clone(),
                 contract: ToolContract {
                     name: "integrate_child".into(),
-                    schema_version: "1".into(),
+                    schema_version: "2".into(),
                     read_only: false,
                     completion: CompletionKind::Result,
                     lifetime: Lifetime::Run,
@@ -267,7 +343,7 @@ fn replay_scenario(tail_phase: Option<&str>) {
         identity: "installed:integrate@1".into(),
         epoch: "host-owner".into(),
     };
-    let operation_binding = json!({"kind":"runtime_operation","operationId":context.operation_id,"parentRunId":run.run_id,"parentThreadId":child.parent_thread_id,"parentBranchId":child.parent_branch_id,"origin":context.origin,"callId":call.call_id,"childOperationId":child.operation_id,"childThreadId":child.child_thread_id,
+    let operation_binding = json!({"kind":"runtime_operation","operationId":context.operation_id,"parentRunId":run.run_id,"parentThreadId":child.parent_thread_id,"parentBranchId":child.parent_branch_id,"origin":context.origin,"callId":call.call_id,"childOperationId":child.operation_id,"childExecutionId":child.execution_id,"childThreadId":child.child_thread_id,
         "result":{"workspaceId":result.workspace_id,"branchId":result.branch_id,"resultRevision":1,"root":result.root,"publicationId":publication},"target":launch.source});
     let journal_id = format!("integration:{}", context.operation_id);
     let mut storage = Storage::open(&root.join("storage"), "host").unwrap();

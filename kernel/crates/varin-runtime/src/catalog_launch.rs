@@ -826,6 +826,8 @@ pub(super) fn policy_preparable(
     {
         return Ok(false);
     }
+    let continued:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM delegated_executions WHERE run_id=?1 AND json_extract(body,'$.trigger.kind')='user_continuation')",[&run.id],|r|r.get(0))?;
+    if continued {return Ok(false);}
     let used:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1) OR EXISTS(SELECT 1 FROM policy_checkpoints WHERE run_id=?1) OR EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='run.launch_bound')",[&run.id],|r|r.get(0))?;
     Ok(!used)
 }

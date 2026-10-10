@@ -292,7 +292,7 @@ impl Harness {
             .unwrap()
             .claim_child_handoff(
                 &json!({"grantId":preparation_grant,"childThreadId":child.child_thread_id}),
-                child.source.handoff(),
+                child.source.handoff().unwrap(),
                 HOST,
                 GENERATION,
                 &self.root.join("storage").to_string_lossy(),
@@ -302,7 +302,7 @@ impl Harness {
         let create = format!("branch-create:{source_branch}");
         let mut begin = json!({"operationId":create,"builderId":create,"workspaceId":"workspace","branchId":source_branch,"draftBasePaths":[],"captureScopes":[]});
         let finish = json!({"operationId":create,"builderId":create});
-        let provenance = match &child.source.handoff().root {
+        let provenance = match &child.source.handoff().unwrap().root {
             ChildSourceRoot::Fixed { pin } => {
                 begin["baseRef"] = json!(pin.root);
                 ChildSourceProvenance::FixedRoot {
@@ -326,7 +326,7 @@ impl Harness {
             }
         };
         self.invoke(&preparation_grant, "branch.create.begin", begin);
-        if let ChildSourceRoot::Physical { root } = &child.source.handoff().root {
+        if let ChildSourceRoot::Physical { root } = &child.source.handoff().unwrap().root {
             // Exercise the existing physical capture/object/builder path on one known
             // file. This is not a replacement for the Host directory-capture consumer.
             let captured = self.invoke(&preparation_grant, "file.capture", json!({"operationId":format!("capture-marker-{name}"),"workspaceId":"workspace","rootId":root.root_id,"path":"marker.txt","store":true}));
@@ -510,7 +510,7 @@ impl Harness {
         if rootless {
             binding.root_id = None;
         }
-        let mut params = json!({"operationId":node.operation,"toolBinding":binding});
+        let mut params = json!({"executionId":node.operation,"toolBinding":binding});
         params
             .as_object_mut()
             .unwrap()
@@ -766,6 +766,25 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
         .unwrap()
         .child_writers_stopped_sync(child.operation.as_ref().unwrap())
         .unwrap());
+    let continuation_head = {
+        let db = owner.lock().unwrap();
+        db.head(&db.run(&child.binding.run_id).unwrap().branch_id)
+            .unwrap()
+    };
+    let continue_command = json!({"key":"explicit-user-after-writer", "childOperationId":child.operation,
+        "previousRunId":child.binding.run_id,"expectedHead":continuation_head,
+        "input":{"text":"Continue from the fixed result after the actual writer stops"}});
+    let blocked = child_commands::execute(
+        h.runtime.clone(),
+        h.resources.clone(),
+        "runtime.child.continuation.accept",
+        continue_command.clone(),
+        &AtomicBool::new(false),
+    );
+    assert!(
+        matches!(&blocked, Err(KernelError::Operation(message)) if message.contains("source writers have not confirmed stop")),
+        "live original writer must fence the new execution: {blocked:?}"
+    );
     let ack=h.controls.admit_control("runtime.tree.cancel",&json!({"target":{"kind":"child","operation_id":child.operation},"expectedParentThreadId":"parent"})).unwrap().unwrap();
     assert_eq!(ack["child_count"], 2);
     assert_eq!(ack["process_count"], 2);
@@ -866,6 +885,114 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
             .decode(fixed["bytesBase64"].as_str().unwrap())
             .unwrap(),
         bytes
+    );
+    // The same trusted User command is now admitted against the exact real Storage result.
+    let continued = child_commands::execute(
+        h.runtime.clone(),
+        h.resources.clone(),
+        "runtime.child.continuation.accept",
+        continue_command,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    let execution_id = continued["execution_id"].as_str().unwrap();
+    assert_ne!(Some(execution_id), child.operation.as_deref());
+    assert_eq!(continued["source_basis"]["kind"], "working_result");
+    assert_eq!(continued["source_basis"]["root"], candidate["root"]);
+    assert_eq!(
+        continued["source_basis"]["result"]["result_revision"],
+        published["resultRevision"]
+    );
+    assert!(
+        !child.cwd.exists(),
+        "the old physical source is no longer present"
+    );
+    // Fresh trusted source-admission grant, scoped to the existing child Thread. It has
+    // no Run yet and does not claim either the old Run grant or the parent handoff.
+    let prepare_grant = "continue-source-preparation";
+    h.storage.lock().unwrap().as_mut().unwrap().issue_grant(&json!({"grantId":prepare_grant,"hostGeneration":GENERATION,
+        "capabilities":["storage.read","storage.write"],"pathScopes":[""],"owningWorkspace":"workspace",
+        "executionWorkspace":"workspace","threadId":child.binding.thread_id}), HOST, GENERATION,
+        &root.join("storage").to_string_lossy(), EPOCH).unwrap();
+    let basis_pin = h.invoke(
+        prepare_grant,
+        "branch.pin",
+        json!({"operationId":"continue-result-pin","branchId":branch,
+        "revision":published["resultRevision"],"pinId":"continue-result-pin"}),
+    );
+    assert_eq!(basis_pin["root"], continued["source_basis"]["root"]);
+    let next_branch = format!("child-source:{execution_id}");
+    let create = format!("branch-create:{next_branch}");
+    h.invoke(
+        prepare_grant,
+        "branch.create.begin",
+        json!({"operationId":create,"builderId":create,"workspaceId":"workspace",
+        "branchId":next_branch,"baseRef":basis_pin["root"],"draftBasePaths":[],"captureScopes":[]}),
+    );
+    h.invoke(
+        prepare_grant,
+        "branch.create.finish",
+        json!({"operationId":create,"builderId":create}),
+    );
+    let next_pin = h.invoke(
+        prepare_grant,
+        "branch.pin",
+        json!({"operationId":"continue-source-pin","branchId":next_branch,
+        "revision":0,"pinId":format!("child-source-pin:{execution_id}")}),
+    );
+    assert_eq!(next_pin["root"], candidate["root"]);
+    let source = json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","mode":"materialized","branchId":next_branch,"revision":0});
+    let attached = child_commands::execute(h.runtime.clone(), h.resources.clone(), "runtime.child.source.ready", json!({"executionId":execution_id,
+        "source":source,"pin":{"pin_id":next_pin["pinId"],"root":next_pin["root"],"source":{"workspace_id":"workspace","execution_workspace_id":"workspace",
+            "mode":"fixed_branch","branch_id":next_branch,"revision":0,"live_root":null}},"provenance":continued["source_basis"]["provenance"]}), &AtomicBool::new(false)).unwrap();
+    assert_eq!(attached["source"]["handoff"], Value::Null);
+    let current_context = {
+        let db = owner.lock().unwrap();
+        db.active_context(&db.run(&child.binding.run_id).unwrap().branch_id)
+            .unwrap()
+            .unwrap()
+    };
+    let prepared = input_commands::execute(h.runtime.clone(), "runtime.child.prepare", json!({"executionId":execution_id,"source":source,
+        "expectedContextCheckpoint":current_context.id,"context":{"effectiveSystemPrompt":current_context.proposal.effective_system_prompt,
+            "instructionSources":current_context.proposal.instruction_sources,"memoryCheckpoint":current_context.proposal.memory_checkpoint,
+            "personalization":current_context.personalization}}), Arc::new(AtomicBool::new(false)), None).unwrap();
+    let next_run = prepared["receipt"]["run_id"].as_str().unwrap();
+    assert_ne!(next_run, child.binding.run_id);
+    assert_eq!(prepared["child_thread_id"], child.binding.thread_id);
+    assert_eq!(
+        owner
+            .lock()
+            .unwrap()
+            .require_child_launch(next_run)
+            .unwrap()
+            .unwrap()
+            .execution_id,
+        execution_id
+    );
+    assert_eq!(
+        owner
+            .lock()
+            .unwrap()
+            .launch_intent(next_run)
+            .unwrap()
+            .unwrap()
+            .selection
+            .source
+            .unwrap()
+            .branch_id,
+        Some(next_branch)
+    );
+    assert_eq!(
+        serde_json::to_value(
+            owner
+                .lock()
+                .unwrap()
+                .child_task(child.operation.as_ref().unwrap())
+                .unwrap()
+                .code_result
+        )
+        .unwrap(),
+        result["code_result"]
     );
     h.controls.admit_control("runtime.tree.cancel",&json!({"target":{"kind":"child","operation_id":sibling.operation},"expectedParentThreadId":"parent"})).unwrap();
     let terminal = h.terminals.recv_timeout(Duration::from_secs(20)).unwrap();

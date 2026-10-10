@@ -2315,7 +2315,7 @@ impl Catalog {
     /// Called only after the child supervisor joined and Storage proved the exact private
     /// root has no live writer leases. Unknown business effects remain unknown.
     pub fn confirm_child_file_writers_stopped(&mut self, child_operation_id: &str) -> Result<()> {
-        let child = self.child_task(child_operation_id)?;
+        let child = self.execution_task(child_operation_id)?;
         let run = child
             .receipt
             .as_ref()
@@ -2376,7 +2376,7 @@ impl Catalog {
         rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
     }
     pub fn pending_external_operations(&self, executor: &str) -> Result<Vec<String>> {
-        let mut statement=self.db.prepare("SELECT id FROM operations WHERE json_extract(body,'$.executor')=?1 AND (?1!='process_spawn' OR json_extract(body,'$.execution_owner.kind')='kernel') AND (json_extract(body,'$.phase')!='terminal' OR json_extract(body,'$.outcome')='indeterminate' OR (?1='process_spawn' AND coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 AND (EXISTS(SELECT 1 FROM followups f WHERE f.operation_id=operations.id AND json_extract(f.body,'$.wait.state') IN ('waiting','observed')) OR EXISTS(SELECT 1 FROM child_tasks c WHERE json_extract(c.body,'$.receipt.run_id')=operations.run_id AND json_extract(c.body,'$.code_result.kind') IN ('pending','settling','candidate'))))) ORDER BY id")?;
+        let mut statement=self.db.prepare("SELECT id FROM operations WHERE json_extract(body,'$.executor')=?1 AND (?1!='process_spawn' OR json_extract(body,'$.execution_owner.kind')='kernel') AND (json_extract(body,'$.phase')!='terminal' OR json_extract(body,'$.outcome')='indeterminate' OR (?1='process_spawn' AND coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 AND (EXISTS(SELECT 1 FROM followups f WHERE f.operation_id=operations.id AND json_extract(f.body,'$.wait.state') IN ('waiting','observed')) OR EXISTS(SELECT 1 FROM delegated_executions c WHERE c.run_id=operations.run_id AND json_extract(c.body,'$.code_result.kind') IN ('pending','settling','candidate'))))) ORDER BY id")?;
         let rows = statement.query_map([executor], |row| row.get(0))?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }

@@ -1,3 +1,4 @@
+import { ChildExecutions, ThreadExecutions } from './ThreadExecutions';
 import { ThreadMessages } from './ThreadMessages';
 import { ThreadFamily } from './ThreadFamily';
 import { attachProcessTerminal } from '@/lib/attachProcessTerminal';
@@ -78,13 +79,16 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const branch = snapshot?.thread.branches.find(value => value.branch_id === identity.branchId);
   const run = snapshot?.activeRun ?? branch?.latest_run;
   const active = Boolean(branch?.active_run_id);
+  const delegated = Boolean(snapshot?.delegatedExecutions?.length);
+  const preparingDelegation = snapshot?.delegatedExecutions?.some(execution => !execution.receipt && !execution.report && !execution.cancel_requested) ?? false;
+  React.useEffect(() => { if (delegated && inputMode === 'next_run') setInputMode('boundary'); }, [delegated, inputMode]);
   const launch = snapshot?.launch?.run_id === run?.id ? snapshot?.launch : null;
   const pause = run?.state === 'waiting' && launch?.pause?.wait_id === run.waiting_on ? launch.pause : null;
   const policy = snapshot?.policySelection;
   const policyUpdate = policy?.desired && policy.desired.run_id === run?.id ? policy.desired : null;
   const policyUpdatePending = policyUpdate?.status === 'preparing' || policyUpdate?.status === 'ready';
   const policyIncompatible = policyUpdate?.status === 'failed' && policyUpdate.failure === 'policy_state_incompatible';
-  const acceptsImages = active ? (run?.configuration as { acceptsImages?: boolean } | undefined)?.acceptsImages
+  const acceptsImages = active || delegated ? (run?.configuration as { acceptsImages?: boolean } | undefined)?.acceptsImages
     : models.find(model => model.providerId === providerId && model.modelId === modelId)?.acceptsImages;
   React.useEffect(() => {
     const config = (snapshot?.modelSelection.desired?.configuration ?? run?.configuration) as { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel } | undefined;
@@ -222,9 +226,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         <p>{child.input.task}</p>
         {child.report && <><div className="text-xs text-muted-foreground">Report · {child.report.outcome}</div><MarkdownRenderer messageId={`child:${child.operation_id}`} content={child.report.detail ?? "Report stored in child history."} /></>}
         {child.report?.history_ids.map(itemId => <ChildReportPage key={itemId} api={api} identity={identity} operationId={child.operation_id} itemId={itemId} />)}
+        <ChildExecutions key={`${host}:${identity.threadId}:${identity.branchId}:${child.operation_id}`} api={api} identity={identity} operationId={child.operation_id} />
         {api.collaboration && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelChild(identity, child.operation_id))}>Stop child subtree</Button>}
       </div>)}
-      {Boolean(snapshot?.children?.length) && api.collaboration && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelTree(identity))}>Stop task and children</Button>}
+      {(delegated || Boolean(snapshot?.children?.length)) && api.collaboration && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelTree(identity))}>Stop task and children</Button>}
       {snapshot && <ThreadFollowups key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.followups} identity={identity}
         operations={snapshot.operations} followups={snapshot.followups} pending={pending} act={act} />}
       {snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
@@ -253,8 +258,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     {snapshot?.context.checkpoint && <ThreadResources checkpoint={snapshot.context.checkpoint} pending={pending}
       onAddSkill={addSkill}
       onRefresh={() => void act(() => api.resources.refresh({ ...identity, expectedRevision: snapshot.context.checkpoint!.revision }))} />}
-    <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={initialWorkspacePath}
-      active={active || pending} launch={snapshot?.launch ?? null} prepared={preparedSource} onPrepared={setPreparedSource} onPreparingChange={setPreparingSource} />
+    {delegated && <div className="mx-auto w-full max-w-3xl px-4"><ThreadExecutions key={`${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} executions={snapshot?.delegatedExecutions ?? []} /></div>}
+    {!delegated && <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={initialWorkspacePath}
+      active={active || pending} launch={snapshot?.launch ?? null} prepared={preparedSource} onPrepared={setPreparedSource} onPreparingChange={setPreparingSource} />}
     {snapshot && <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">
       <summary className="cursor-pointer">Context summaries · checkpoint {snapshot.context.checkpoint?.revision ?? 0} · {snapshot.context.jobs.length} jobs</summary>
       {snapshot.context.checkpoint?.proposal.through_id && <div className="my-2" aria-label="Active context summary">
@@ -282,7 +288,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           const key = crypto.randomUUID();
           const submit = { ...identity, key, text, images, expectedHead: branch?.head ?? null, model: { providerId, modelId, thinkingLevel }, ...(preparedSource ? { source: preparedSource.source } : {}) };
           const queued = { ...identity, key, text, images, mode: inputMode };
-          pendingInput.current = { fingerprint, send: active ? () => api.enqueue(queued) : () => api.submit(submit) };
+          const continuation = { ...identity, key, text, images, previousRunId: run?.id ?? '', expectedHead: branch?.head ?? null };
+          if (!active && delegated && (!api.collaboration || !run)) throw new Error('Child continuation is unavailable');
+          pendingInput.current = { fingerprint, send: active ? () => api.enqueue(queued)
+            : delegated ? () => api.collaboration!.continueChild(continuation) : () => api.submit(submit) };
         }
         await pendingInput.current.send();
         if (generation !== identityGeneration.current || host !== getRuntimeEndpointGeneration()) return;
@@ -291,6 +300,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         setImages(current => current.filter(image => !images.includes(image)));
       });
     }}>
+      {delegated && !active && <p role="status" className="text-sm text-muted-foreground">{preparingDelegation
+        ? 'A delegated execution is preparing. Its original input remains accepted.'
+        : 'Continue in a new Run using this child’s exact previous configuration and fixed source. Previous reports and file results remain separate.'}</p>}
       {sourceCannotBeApplied && <p role="status" className="text-sm text-muted-foreground">The prepared workspace needs a new run. Keep the current workspace to queue this message, or wait for this run to finish.</p>}
       {pause && <p role="status" aria-label="Policy pause" className="text-sm text-muted-foreground">Paused: {pause.reason || 'Waiting for your explicit resume.'} Messages can be queued while paused.</p>}
       {policy && <p className="text-xs text-muted-foreground">Strategy: {policy.active.target.kind === 'extension' ? policy.active.target.artifact.declaredIdentity.name : 'Default'} · generation {policy.active.generation}</p>}
@@ -301,7 +313,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {snapshot?.modelSelection.desired?.status === 'failed' && <p role="alert" className="text-sm text-destructive">Model preparation failed: {snapshot.modelSelection.desired.failure}</p>}
       {snapshot?.modelSelection.desired && snapshot.modelSelection.desired.id !== snapshot.modelSelection.active?.id && snapshot.modelSelection.desired.status !== 'failed' && <p role="status" className="text-sm text-muted-foreground">Applies to the next model request</p>}
-      <select aria-label="Registered model" disabled={pending} className="w-full rounded border bg-background px-2 py-1 text-sm"
+      <select aria-label="Registered model" disabled={pending || (delegated && !active)} className="w-full rounded border bg-background px-2 py-1 text-sm"
         value={JSON.stringify([providerId, modelId])} onChange={event => {
           const [provider, model] = JSON.parse(event.target.value) as [string, string];
           const available = models.find(candidate => candidate.providerId === provider && candidate.modelId === model)?.thinkingLevels ?? ['off'];
@@ -310,12 +322,12 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         <option value={JSON.stringify(['', ''])}>Choose a registered model</option>
         {models.map(model => <option key={JSON.stringify([model.providerId, model.modelId])} value={JSON.stringify([model.providerId, model.modelId])}>{model.providerId} · {model.name ?? model.modelId}</option>)}
       </select>
-      {(models.find(model => model.providerId === providerId && model.modelId === modelId)?.thinkingLevels?.length ?? 0) > 1 && <select aria-label="Thinking level" disabled={pending}
+      {(models.find(model => model.providerId === providerId && model.modelId === modelId)?.thinkingLevels?.length ?? 0) > 1 && <select aria-label="Thinking level" disabled={pending || (delegated && !active)}
         className="rounded border bg-background px-2 py-1 text-sm" value={thinkingLevel} onChange={event => selectModel(providerId,modelId,event.target.value as ThreadThinkingLevel)}>
         {models.find(model => model.providerId === providerId && model.modelId === modelId)?.thinkingLevels?.map(level => <option key={level} value={level}>{level}</option>)}
       </select>}
       {active && <select aria-label="Input delivery" className="rounded border bg-background text-sm" value={inputMode} onChange={event => setInputMode(event.target.value as typeof inputMode)}>
-        <option value="boundary">At next model boundary</option><option value="interrupt">Interrupt current generation</option><option value="next_run">After current run</option>
+        <option value="boundary">At next model boundary</option><option value="interrupt">Interrupt current generation</option>{!delegated && <option value="next_run">After current run</option>}
       </select>}
       {images.length > 0 && acceptsImages === false && <p role="alert" className="text-sm text-destructive">Choose an image-capable model or remove these images before sending</p>}
       <ImageAttachmentStrip images={images} removeLabel={t('chat.fileAttachment.actions.removeImage')}
@@ -328,7 +340,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         onDrop={event => { const files = [...event.dataTransfer.files]; if (files.length) { event.preventDefault(); void addImages(files); } }} />
       <div className="flex gap-2">
         <Button type="button" variant="ghost" disabled={readingFiles || acceptsImages === false} onClick={() => fileInput.current?.click()}>Attach images</Button>
-        <Button type="submit" disabled={pending || preparingSource || sourceCannotBeApplied || readingFiles || (images.length > 0 && acceptsImages === false) || (!text.trim() && !images.length) || (!active && (!providerId || !modelId))}>{active ? 'Queue message' : 'Send'}</Button>
+        <Button type="submit" disabled={pending || preparingDelegation || preparingSource || sourceCannotBeApplied || readingFiles || (images.length > 0 && acceptsImages === false) || (!text.trim() && !images.length) || (!active && (delegated ? !api.collaboration || !run : !providerId || !modelId))}>{active ? 'Queue message' : delegated ? 'Continue child' : 'Send'}</Button>
         {active && branch?.active_run_id && <Button type="button" variant="outline" onClick={() => void act(() => api.cancelRun(branch.active_run_id!), true)}>Stop run</Button>}
         {run && pause && <Button type="button" variant="outline" disabled={pending || run.cancel_requested} onClick={() => void act(() => api.resume(run.id, pause.wait_id))}>Resume run</Button>}
         {active && run && policyUpdate && policyIncompatible && <Button type="button" variant="outline" disabled={pending || run.cancel_requested} onClick={() => void act(() => api.restartPolicy(identity, run.id, policyUpdate.selection_id))}>Restart strategy state</Button>}

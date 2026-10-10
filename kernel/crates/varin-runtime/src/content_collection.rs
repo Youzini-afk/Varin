@@ -338,14 +338,14 @@ impl ContentCollection {
             UNION ALL SELECT json_extract(data,'$.result.value.permission.call_ref') FROM events WHERE kind='permission.opened'
             UNION ALL SELECT json_extract(data,'$.result.value.permission.scope_ref') FROM events WHERE kind='permission.opened'");
         roots.push_str(
-            " UNION ALL SELECT json_extract(body,'$.input_ref') FROM child_tasks
-            UNION ALL SELECT json_extract(body,'$.configuration_ref') FROM child_tasks
-            UNION ALL SELECT json_extract(body,'$.launch.tools_ref') FROM child_tasks
-            UNION ALL SELECT json_extract(body,'$.launch.base_tools_ref') FROM child_tasks
-            UNION ALL SELECT json_extract(body,'$.launch.extension_bindings_ref') FROM child_tasks
-            UNION ALL SELECT json_extract(body,'$.launch.mcp_binding_ref') FROM child_tasks WHERE json_extract(body,'$.launch.mcp_binding_ref') IS NOT NULL
-            UNION ALL SELECT json_extract(p.value,'$.body') FROM child_tasks c,json_each(c.body,'$.launch.policy_models') p
-            UNION ALL SELECT json_extract(body,'$.source.provenance_ref') FROM child_tasks WHERE json_extract(body,'$.source.kind')='ready'",
+            " UNION ALL SELECT json_extract(body,'$.input_ref') FROM delegated_executions
+            UNION ALL SELECT json_extract(body,'$.configuration_ref') FROM delegated_executions
+            UNION ALL SELECT json_extract(body,'$.launch.tools_ref') FROM delegated_executions
+            UNION ALL SELECT json_extract(body,'$.launch.base_tools_ref') FROM delegated_executions
+            UNION ALL SELECT json_extract(body,'$.launch.extension_bindings_ref') FROM delegated_executions
+            UNION ALL SELECT json_extract(body,'$.launch.mcp_binding_ref') FROM delegated_executions WHERE json_extract(body,'$.launch.mcp_binding_ref') IS NOT NULL
+            UNION ALL SELECT json_extract(p.value,'$.body') FROM delegated_executions c,json_each(c.body,'$.launch.policy_models') p
+            UNION ALL SELECT json_extract(body,'$.source.provenance_ref') FROM delegated_executions WHERE json_extract(body,'$.source.kind')='ready' UNION ALL SELECT json_extract(body,'$.source_basis.provenance_ref') FROM delegated_executions WHERE json_extract(body,'$.source_basis') IS NOT NULL",
         );
         roots.push_str(&format!(" UNION ALL SELECT json_extract(body,'$.intent.body_ref') FROM operations WHERE json_extract(body,'$.intent.kind') IN ({})", crate::catalog::policy_body::ACTION_KINDS));
         roots.push_str("
@@ -364,7 +364,7 @@ impl ContentCollection {
             UNION ALL SELECT json_extract(data,'$.call_completion.reason_ref') FROM events WHERE json_extract(data,'$.call_completion.kind')='not_dispatched'");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.selection.child_dispatch_ref') FROM run_launches WHERE json_extract(body,'$.selection.child_dispatch_ref') IS NOT NULL
             UNION ALL SELECT json_extract(body,'$.launch.selection.child_dispatch_ref') FROM followups WHERE json_extract(body,'$.launch.selection.child_dispatch_ref') IS NOT NULL
-            UNION ALL SELECT json_extract(body,'$.launch.child_dispatch_ref') FROM child_tasks WHERE json_extract(body,'$.launch.child_dispatch_ref') IS NOT NULL
+            UNION ALL SELECT json_extract(body,'$.launch.child_dispatch_ref') FROM delegated_executions WHERE json_extract(body,'$.launch.child_dispatch_ref') IS NOT NULL
             UNION ALL SELECT json_extract(body,'$.selected_profile_ref') FROM child_tasks
             UNION ALL SELECT json_extract(body,'$.child_dispatch_ref') FROM model_selections WHERE json_extract(body,'$.child_dispatch_ref') IS NOT NULL");
         let mut references = Vec::new();

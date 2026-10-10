@@ -1278,7 +1278,7 @@ export type ChildSourceRoot = { kind: 'fixed'; pin: ChildSourcePin } | { kind: '
 
 export type ChildSourceProvenance = { consistency: 'fixed-root'; root: string; resources?: SourceResourceCapture } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; resources?: SourceResourceCapture };
 
-export type ChildSource = { kind: 'pending'; handoff: ChildSourceHandoff } | { kind: 'ready'; handoff: ChildSourceHandoff; pin: ChildSourcePin; selection: LaunchSource; provenance: ChildSourceProvenance };
+export type ChildSource = { kind: 'pending'; handoff: ChildSourceHandoff } | { kind: 'ready'; handoff: ChildSourceHandoff | null; pin: ChildSourcePin; selection: LaunchSource; provenance: ChildSourceProvenance };
 
 export interface ChildWorkingResultRef {
   publication_id: string;
@@ -1293,37 +1293,39 @@ export interface ChildWorkingResultRef {
 export type ChildCodeResult = { kind: 'pending' } | { kind: 'settling'; publication_id: string } | { kind: 'candidate'; candidate: KernelWorkingResultCandidate } | { kind: 'published'; result: ChildWorkingResultRef; effect: Effect } | { kind: 'no_changes' } | { kind: 'unavailable'; code: string; effect: Effect };
 
 export interface ChildSourceReadyParams {
-  operationId: string;
+  executionId: string;
   pin: ChildSourcePin;
   source: LaunchSourceParams;
   provenance: ChildSourceProvenance;
 }
 
 export interface ChildSettleParams {
-  operationId: string;
+  executionId: string;
   toolBinding: unknown;
 }
 
 export interface ChildResultCandidateParams {
-  operationId: string;
+  executionId: string;
   toolBinding: unknown;
   candidateOperationId: string;
 }
 
 export interface ChildResultPublishedParams {
-  operationId: string;
+  executionId: string;
   toolBinding: unknown;
   publicationId: string;
 }
 
 export interface ChildPrepareParams {
-  operationId: string;
+  executionId: string;
   source: LaunchSourceParams;
   context: InitialContext;
+  expectedContextCheckpoint: string | null;
+  inputPreparation?: InputResourcePreparation;
 }
 
 export interface ChildFailParams {
-  operationId: string;
+  executionId: string;
   code: string;
 }
 
@@ -1418,6 +1420,7 @@ export interface ChildTextPage {
   next_offset: number | null;
   total_bytes: number;
   text: string;
+  execution_id: string;
 }
 
 export interface ChildReport {
@@ -1450,6 +1453,63 @@ export interface ChildTask {
   source: ChildSource;
   code_result: ChildCodeResult;
   selected_profile: ChildSelectedProfile;
+}
+
+export interface ChildContinuationAcceptParams {
+  key: string;
+  childOperationId: string;
+  previousRunId: string;
+  expectedHead: string | null;
+  input: unknown;
+}
+
+export interface ChildExecutionParams {
+  executionId: string;
+}
+
+export interface ChildExecutionListParams {
+  childOperationId?: string;
+}
+
+export interface ChildExecutionReportReadParams {
+  executionId: string;
+  itemId: string;
+  offset?: number;
+  maxBytes?: number;
+}
+
+export type DelegatedExecutionTrigger = { kind: 'dispatch' } | { kind: 'user_continuation'; key: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null };
+
+export type ChildSourceBasis = { kind: 'working_result'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; result: ChildWorkingResultRef } | { kind: 'immutable_source'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; pin: ChildSourcePin };
+
+export interface DelegatedExecution {
+  execution_id: string;
+  child_operation_id: string;
+  parent_run_id: string;
+  parent_thread_id: string;
+  parent_branch_id: string;
+  origin: ToolOrigin;
+  call_id: string;
+  child_thread_id: string;
+  child_branch_id: string;
+  project_id: string | null;
+  trigger: DelegatedExecutionTrigger;
+  input: unknown;
+  configuration: unknown;
+  selected_profile: ChildSelectedProfile;
+  launch: LaunchSelection;
+  policy_target: PolicyTarget;
+  source_basis: ChildSourceBasis | null;
+  source: ChildSource | null;
+  code_result: ChildCodeResult;
+  state: string;
+  revision: number;
+  cursor: number;
+  receipt: InputSubmitReceipt | null;
+  report: ChildReport | null;
+  terminal_head: string | null;
+  resources_released: boolean;
+  cancel_requested: boolean;
 }
 
 export interface ChildWait {

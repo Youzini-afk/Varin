@@ -694,6 +694,14 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
             f.db.child_file_effect_bound(&writers).unwrap(),
             Effect::Unknown
         );
+        f.db.reconcile_child_reports().unwrap();
+        let continuation = varin_runtime::catalog::delegated::ChildContinuationCommand {
+            key: "explicit-after-callback".into(), child_operation_id: child.operation_id.clone(),
+            previous_run_id: run.clone(), expected_head: f.db.head(&child.child_branch_id).unwrap(),
+            input: json!("Continue from the exact fixed result"),
+        };
+        let pending=f.db.capture_child_continuation(continuation.clone()).unwrap().load().unwrap();
+        assert!(f.db.accept_child_continuation(pending).is_err(), "an unstopped source callback still blocks a new source");
         let receipt = |index: usize, effect| ExternalReceipt {
             identity: contexts[index].operation_id.clone(),
             executor: calls[index].name.clone(),
@@ -790,6 +798,14 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
         assert!(
             matches!(published.code_result, ChildCodeResult::Published { effect: actual, .. } if actual == effect)
         );
+        let old_receipts=contexts.iter().map(|context|f.db.operation(&context.operation_id).unwrap()).collect::<Vec<_>>();
+        let old_result=published.code_result.clone();
+        let pending=f.db.capture_child_continuation(continuation).unwrap().load().unwrap();
+        let next=f.db.accept_child_continuation(pending).unwrap();
+        let ChildCodeResult::Published { result: fixed, .. }=&old_result else{unreachable!()};
+        assert_eq!(next.source_basis.as_ref().unwrap().root(),fixed.root);
+        assert_eq!(f.db.child_task(&child.operation_id).unwrap().code_result,old_result);
+        for (context,old) in contexts.iter().zip(old_receipts){assert_eq!(f.db.operation(&context.operation_id).unwrap(),old);}
         drop(writers);
         drop(f);
         std::fs::remove_dir_all(root).unwrap();

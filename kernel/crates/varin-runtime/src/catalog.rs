@@ -34,7 +34,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 28;
+pub(crate) const FORMAT: i64 = 29;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -332,7 +332,7 @@ impl Catalog {
             ));
         }
         let child_operation = match &origin {
-            submissions::SubmissionOrigin::Child { operation_id, .. } => {
+            submissions::SubmissionOrigin::Child { operation_id, .. } | submissions::SubmissionOrigin::ChildContinuation { execution_id: operation_id, .. } => {
                 Some(operation_id.as_str())
             }
             _ => None,
@@ -359,6 +359,7 @@ impl Catalog {
         }
         if let submissions::SubmissionOrigin::User { checkpoint }
         | submissions::SubmissionOrigin::Child { checkpoint, .. }
+        | submissions::SubmissionOrigin::ChildContinuation { checkpoint, .. }
         | submissions::SubmissionOrigin::Continuation { checkpoint, .. } = &origin
         {
             let active: Option<String> = tx
@@ -427,7 +428,8 @@ impl Catalog {
         }
         let input_id = match &origin {
             submissions::SubmissionOrigin::Continuation { occurrence_id, .. } => format!("continuation-input:{occurrence_id}"),
-            _ => child_operation.map(|id| format!("child-input:{id}")).unwrap_or_else(id),
+            submissions::SubmissionOrigin::Child {operation_id,..} => format!("child-input:{operation_id}"),
+            _ => id(),
         };
         let run_id = prepared.run_id.clone();
         let history = HistoryItem {
@@ -437,7 +439,7 @@ impl Catalog {
             parent: head,
             source: if matches!(&origin, submissions::SubmissionOrigin::Continuation { .. }) {
                 HistorySource::Environment
-            } else if child_operation.is_some() {
+            } else if matches!(origin,submissions::SubmissionOrigin::Child{..}) {
                 HistorySource::Agent
             } else {
                 HistorySource::User
@@ -466,7 +468,6 @@ impl Catalog {
             "INSERT INTO runs(id,branch_id,body,context_checkpoint_id) VALUES(?1,?2,?3,(SELECT checkpoint_id FROM active_contexts WHERE branch_id=?2))",
             params![run_id, command.branch_id, encode(&run)?],
         )?;
-        goals::bind_admission(tx, &run)?;
         tx.execute(
             "UPDATE branches SET head=?2,active_run=?3 WHERE id=?1",
             params![command.branch_id, input_id, run_id],
@@ -528,6 +529,9 @@ impl Catalog {
         if let Some(operation_id) = child_operation {
             collaboration::publish_submission(&tx, operation_id, &receipt)?;
         }
+        // The exact delegated trigger must be visible to Goal admission in this same
+        // transaction. A new explicit User Run may outlive a completed parent Goal.
+        goals::bind_admission(tx, &run)?;
         if let Some((job, parts)) = context_job {
             job.publish(&tx, &receipt.run_id, parts)?;
         }
@@ -1560,6 +1564,9 @@ pub mod launches;
 
 #[path = "catalog_launch_content.rs"]
 pub mod launch_content;
+
+#[path = "catalog_delegated.rs"]
+pub mod delegated;
 
 #[path = "catalog_child_content.rs"]
 pub mod child_content;

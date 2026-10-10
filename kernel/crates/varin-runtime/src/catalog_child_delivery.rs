@@ -23,10 +23,10 @@ impl ChildReportPreparation {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         let snapshot = database.transaction()?;
-        let mut statement=snapshot.prepare("SELECT c.body FROM child_tasks c JOIN runs r ON r.id=json_extract(c.body,'$.receipt.run_id') WHERE json_extract(c.body,'$.report') IS NULL AND json_extract(r.body,'$.state') IN ('completed','failed','cancelled')")?;
+        let mut statement=snapshot.prepare("SELECT c.id FROM delegated_executions c JOIN runs r ON r.id=c.run_id WHERE json_extract(c.body,'$.report') IS NULL AND json_extract(r.body,'$.state') IN ('completed','failed','cancelled')")?;
         let mut reports = Vec::new();
         for row in statement.query_map([], |row| row.get::<_, String>(0))? {
-            let child: ChildTask = serde_json::from_str(&row?)?;
+            let child=delegated::execution_task(&snapshot,&row?)?;
             let run: Run = record(
                 &snapshot,
                 "runs",
@@ -40,17 +40,17 @@ impl ChildReportPreparation {
             let mut ancestor = head.clone();
             let mut history_ids = Vec::new();
             while let Some(id) = ancestor {
-                let item = self
-                    .content
-                    .hydrate_history(record(&snapshot, "history", &id)?)?;
-                ancestor = item.parent;
+                let metadata:HistoryItem=record(&snapshot,"history",&id)?;
+                ancestor=metadata.parent.clone();
+                if metadata.run_id!=run.id {continue;}
+                let item=self.content.hydrate_history(metadata)?;
                 let Ok(conversation) = serde_json::from_value::<ConversationItem>(item.content)
                 else {
                     continue;
                 };
                 match conversation.content {
                     Content::Text { text }
-                        if item.source == HistorySource::Assistant && !text.trim().is_empty() =>
+                        if item.run_id==run.id && item.source == HistorySource::Assistant && !text.trim().is_empty() =>
                     {
                         history_ids.push(item.id)
                     }
@@ -104,7 +104,7 @@ impl Catalog {
                 "child report belongs to a previous owner".into(),
             ));
         }
-        let mut child = self.child_task(&prepared.child.operation_id)?;
+        let mut child = self.execution_task(&prepared.child.execution_id)?;
         if child.report.is_some() {
             return Ok(false);
         }
@@ -147,7 +147,7 @@ pub fn reconcile_reports(catalog: &std::sync::Mutex<Catalog>) -> Result<()> {
             .lock()
             .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?;
         owner
-            .child_tasks()?
+            .delegated_executions(None)?
             .into_iter()
             .filter_map(|child| {
                 if let collaboration::ChildCodeResult::Published {
@@ -157,8 +157,8 @@ pub fn reconcile_reports(catalog: &std::sync::Mutex<Catalog>) -> Result<()> {
                 {
                     Some(
                         owner
-                            .capture_child_writer_bindings(&child.operation_id)
-                            .map(|read| (child.operation_id, result, read)),
+                            .capture_child_writer_bindings(&child.execution_id)
+                            .map(|read| (child.execution_id, result, read)),
                     )
                 } else {
                     None
@@ -346,7 +346,7 @@ impl Catalog {
         }
         let current_wait: Wait = record(&tx, "waits", &wait.id)?;
         let current_op: Operation = record(&tx, "operations", operation_id)?;
-        let current_child: ChildTask = record(&tx, "child_tasks", &child.operation_id)?;
+        let current_child=delegated::execution_task(&tx,&child.execution_id)?;
         let unresolved:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM tool_calls t JOIN model_steps m ON m.id=t.request_id WHERE m.run_id=?1 AND t.committed=0)",[&run.id],|row|row.get(0))?;
         if run != capture.run
             || current_wait != wait
@@ -521,12 +521,12 @@ impl ChildReceiptPreparation {
 }
 impl Catalog {
     pub fn capture_child_receipts(&self) -> Result<Vec<ChildReceiptPreparation>> {
-        let mut statement=self.db.prepare("SELECT c.body FROM child_tasks c JOIN operations o ON o.id=c.id WHERE json_extract(c.body,'$.report') IS NOT NULL AND (json_extract(o.body,'$.external_receipt') IS NULL OR (json_extract(o.body,'$.effect')='unknown' AND json_extract(c.body,'$.code_result.effect')!='unknown')) AND json_extract(o.body,'$.call_completion.kind')='job_accepted'")?;
+        let mut statement=self.db.prepare("SELECT c.id FROM delegated_executions c JOIN operations o ON o.id=c.id WHERE json_extract(c.body,'$.trigger.kind')='dispatch' AND json_extract(c.body,'$.report') IS NOT NULL AND (json_extract(o.body,'$.external_receipt') IS NULL OR (json_extract(o.body,'$.effect')='unknown' AND json_extract(c.body,'$.code_result.effect')!='unknown')) AND json_extract(o.body,'$.call_completion.kind')='job_accepted'")?;
         let rows = statement
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         rows.into_iter()
-            .map(|row| serde_json::from_str::<ChildTask>(&row).map_err(Into::into))
+            .map(|row| delegated::execution_task(&self.db,&row))
             .collect::<Result<Vec<_>>>()?
             .into_iter()
             .filter(|child| child.code_result.settled())

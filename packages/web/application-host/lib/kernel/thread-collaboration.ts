@@ -1,3 +1,6 @@
+import { parseExplicitSkillCommand } from '../agent-resources/activation.js';
+import { ResourceScopeError } from './thread-resource-scope.js';
+import type { ThreadSkillInputPreparer } from './thread-skill-input.js';
 import { randomUUID } from 'node:crypto';
 import { admitRunSourceAuthority, sourceToolSchemas } from './source-launch.js';
 import type { KernelClient } from './kernel-client.js';
@@ -9,7 +12,7 @@ import type { ThreadIdentity, ThreadSource } from '@varin/application-client';
 import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
 import type { ContextPreparer } from './thread-context.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
-import type { ChildTask, ChildSourceProvenance } from './protocol.generated.js';
+import type { DelegatedExecution, ChildSourceProvenance, InputResourcePreparation } from './protocol.generated.js';
 
 export interface ThreadCollaborationOwners {
   kernel: KernelClient;
@@ -21,6 +24,7 @@ export interface ThreadCollaborationOwners {
   recoverLaunches(signal: AbortSignal): Promise<void>;
   workingStates: WorkspaceWorkingStateRootAccess;
   prepareContext: ContextPreparer;
+  prepareSkillInput?: ThreadSkillInputPreparer;
   reconcileDomainReceipts?(signal: AbortSignal): Promise<void>;
   onError(operationId: string | undefined, error: unknown): void;
 }
@@ -81,6 +85,7 @@ export class ThreadCollaboration {
         const resumed = [...new Set([...await this.owners.runtime.reconcileChildren(epoch.signal), ...await this.owners.runtime.reconcileProcessWaits(epoch.signal)])];
         const children = await this.owners.runtime.children(epoch.signal);
         this.owners.kernel.reconcileChildToolHandoffs(children);
+        const executions = await this.owners.runtime.childExecutions(undefined, epoch.signal);
         const unaccepted = await this.owners.runtime.unacceptedChildSources(epoch.signal);
         for (const source of unaccepted) {
           if (this.cleaningSources.has(source.operation_id)) continue;
@@ -95,8 +100,8 @@ export class ThreadCollaboration {
           }).finally(() => this.cleaningSources.delete(source.operation_id));
         }
         epoch.signal.throwIfAborted();
-        for (const child of children) {
-          const active = this.tasks.get(child.operation_id);
+        for (const child of executions) {
+          const active = this.tasks.get(child.execution_id);
           if (child.report && active?.preparing) {
             active.recheck = true; active.controller.abort();
           }
@@ -105,12 +110,12 @@ export class ThreadCollaboration {
             const controller = new AbortController();
             const signal = AbortSignal.any([epoch.signal, controller.signal]);
             const task = { controller, work: Promise.resolve(), revision: child.revision, preparing: !child.report, recheck: false };
-            this.tasks.set(child.operation_id, task);
+            this.tasks.set(child.execution_id, task);
             task.work = this.advance(child, signal, epoch.signal).catch(error => {
-              if (!signal.aborted) this.owners.onError(child.operation_id, error);
+              if (!signal.aborted) this.owners.onError(child.execution_id, error);
             }).finally(() => {
-              if (this.tasks.get(child.operation_id) !== task) return;
-              this.tasks.delete(child.operation_id);
+              if (this.tasks.get(child.execution_id) !== task) return;
+              this.tasks.delete(child.execution_id);
               if (task.recheck && !this.stopped && !this.suspended) void this.recover();
             });
           }
@@ -144,7 +149,7 @@ export class ThreadCollaboration {
         if (event.kind.startsWith('operation.')) {
           this.domainRecoveryNeeded = true; this.dirty = true;
           // A process receipt can release a child's writer barrier without changing the
-          // ChildTask revision. Keep that wake even while its earlier check is draining.
+          // DelegatedExecution revision. Keep that wake even while its earlier check is draining.
           for (const task of this.tasks.values()) task.recheck = true;
         }
         if (event.kind === 'run.cancel_requested') this.owners.kernel.cancelRunPreparation(event.subject);
@@ -158,8 +163,8 @@ export class ThreadCollaboration {
       }
     } while (events.length === 256);
   }
-  private childSource(child: ChildTask): ThreadSource {
-    if (child.source.kind !== 'ready') throw new Error('Child source is not ready');
+  private childSource(child: DelegatedExecution): ThreadSource {
+    if (child.source?.kind !== 'ready') throw new Error('Child source is not ready');
     const fixed = child.source.selection;
     if ((fixed.mode !== 'fixed_branch' && fixed.mode !== 'materialized') || !fixed.branch_id || fixed.revision === null) throw new Error('Child source is not fixed');
     const tools = sourceToolSchemas(child.launch).map(tool => tool.name as ThreadSource['tools'][number]);
@@ -167,8 +172,10 @@ export class ThreadCollaboration {
       branchId: fixed.branch_id, revision: fixed.revision, tools,
       ...(fixed.environment_run_id ? { environmentRunId: fixed.environment_run_id } : {}) };
   }
-  private async prepareSource(child: ChildTask, signal: AbortSignal): Promise<ChildTask> {
-    if (child.source.kind === 'ready') return child;
+  private async prepareSource(child: DelegatedExecution, signal: AbortSignal): Promise<DelegatedExecution> {
+    if (child.source?.kind === 'ready') return child;
+    if (child.trigger.kind === 'user_continuation') return this.prepareContinuationSource(child, signal);
+    if (!child.source || !child.source.handoff) throw new Error('Dispatch source handoff is unavailable');
     const { kernel, storageAdapter, runtime, sourceCaptureOwners } = this.owners;
     const handoff = child.source.handoff;
     const workspace = handoff.source.workspace_id;
@@ -177,7 +184,7 @@ export class ThreadCollaboration {
     try {
       const context = await storageAdapter.contextFromBranchGrant({ grant, owningWorkspaceId: workspace, executionWorkspaceId: handoff.source.execution_workspace_id });
       let store = new KernelWorkingStateRootStore(context);
-      const sourceBranch = `child-source:${child.operation_id}`;
+      const sourceBranch = `child-source:${child.execution_id}`;
       let provenance: ChildSourceProvenance;
       if (handoff.root.kind === 'fixed') {
         const fixed = handoff.root.pin;
@@ -204,22 +211,47 @@ export class ThreadCollaboration {
           provenance = captured.provenance;
         }
       }
-      const pin = await store.pinBranchHandoff(sourceBranch, `child-source-pin:${child.operation_id}`, { revision: 0, signal });
+      const pin = await store.pinBranchHandoff(sourceBranch, `child-source-pin:${child.execution_id}`, { revision: 0, signal });
       signal.throwIfAborted();
       const source = { mode: child.code_result.kind === 'no_changes' ? 'fixed_branch' as const : 'materialized' as const,
         liveRoot: null, workspaceId: workspace, executionWorkspaceId: handoff.source.execution_workspace_id, branchId: sourceBranch, revision: 0 };
-      return await runtime.readyChildSource({ operationId: child.operation_id, source,
+      return await runtime.readyChildSource({ executionId: child.execution_id, source,
         pin: { pin_id: pin.pinId, root: pin.root, source: { mode: 'fixed_branch', live_root: null,
           workspace_id: workspace, execution_workspace_id: handoff.source.execution_workspace_id, branch_id: sourceBranch, revision: 0 } }, provenance }, signal);
-    } finally { await kernel.revokeGrant(grant.grantId).catch(error => { if (!signal.aborted) this.owners.onError(child.operation_id, error); }); }
+    } finally { await kernel.revokeGrant(grant.grantId).catch(error => { if (!signal.aborted) this.owners.onError(child.execution_id, error); }); }
   }
-  private async settle(child: ChildTask, signal: AbortSignal): Promise<ChildTask> {
-    if (!child.receipt || child.source.kind !== 'ready' || child.source.selection.mode !== 'materialized') return child;
+  private async prepareContinuationSource(child: DelegatedExecution, signal: AbortSignal): Promise<DelegatedExecution> {
+    const basis = child.source_basis;
+    if (!basis || basis.source.branch_id === null || basis.source.revision === null) throw new Error('Continuation has no exact immutable source');
+    const workspace = basis.source.workspace_id;
+    return this.owners.workingStates.withBranchStore(workspace, 'child-continuation-source', async store => {
+      if (!store.pinBranchHandoff) throw new Error('Durable source pin is unavailable');
+      const pin = await store.pinBranch(basis.source.branch_id!, { revision: basis.source.revision!, signal });
+      try {
+        if (pin.root !== basis.root) throw new Error('Continuation source root changed');
+        signal.throwIfAborted();
+        const branchId = `child-source:${child.execution_id}`;
+        const branch = await store.createBranchFromPin(workspace, branchId, pin,
+          `${basis.source.branch_id}@${basis.source.revision}`, undefined, [], { sourceProvenance: basis.provenance });
+        if (branch.baseRoot !== basis.root) throw new Error('Continuation branch has a different fixed baseline');
+        const retained = await store.pinBranchHandoff(branchId, `child-source-pin:${child.execution_id}`, { revision: 0, signal });
+        signal.throwIfAborted();
+        return this.owners.runtime.readyChildSource({ executionId: child.execution_id,
+          source: { mode: child.selected_profile.work_mode === 'read_only' ? 'fixed_branch' : 'materialized', liveRoot: null,
+            workspaceId: workspace, executionWorkspaceId: basis.source.execution_workspace_id, branchId, revision: 0 },
+          pin: { pin_id: retained.pinId, root: retained.root, source: { mode: 'fixed_branch', live_root: null,
+            workspace_id: workspace, execution_workspace_id: basis.source.execution_workspace_id, branch_id: branchId, revision: 0 } },
+          provenance: basis.provenance }, signal);
+      } finally { await pin.release(); }
+    }, 'shared', { threadId: child.child_thread_id });
+  }
+  private async settle(child: DelegatedExecution, signal: AbortSignal): Promise<DelegatedExecution> {
+    if (!child.receipt || child.source?.kind !== 'ready' || child.source.selection.mode !== 'materialized') return child;
     const { kernel, runtime, storageAdapter, resolveLiveSource } = this.owners;
     const source = this.childSource(child);
     if (source.mode !== 'materialized') throw new Error('Writable child lost its private source');
     const runId = child.receipt.run_id;
-    const publicationId = `child-result:${child.operation_id}`;
+    const publicationId = `child-result:${child.execution_id}`;
     const phases = child.code_result.kind === 'pending' ? ['source'] as const : ['result', 'source'] as const;
     for (const purpose of phases) {
       const authority = await admitRunSourceAuthority(kernel, runtime, { ...source, runId }, { signal, resolveLiveSource, purpose });
@@ -230,7 +262,7 @@ export class ThreadCollaboration {
         let candidate = await store.readResultCandidate(source.branchId, publicationId, { signal });
         if (!candidate) {
           if (purpose === 'result') continue;
-          child = await runtime.settleChild({ operationId: child.operation_id, toolBinding: authority.toolBinding }, signal);
+          child = await runtime.settleChild({ executionId: child.execution_id, toolBinding: authority.toolBinding }, signal);
           // A final report does not stop its accepted processes. Only the existing
           // settlement barrier authorizes freezing the private execution directory.
           if (child.code_result.kind !== 'settling') return child;
@@ -242,41 +274,59 @@ export class ThreadCollaboration {
             source: { kind: 'directory', directory: authority.canonicalRoot }, signal });
         }
         if (child.code_result.kind === 'settling') {
-          child = await runtime.attachChildCandidate({ operationId: child.operation_id, toolBinding: authority.toolBinding,
+          child = await runtime.attachChildCandidate({ executionId: child.execution_id, toolBinding: authority.toolBinding,
             candidateOperationId: candidate.candidateOperationId }, signal);
         }
         if (child.code_result.kind === 'candidate') {
           // Original WorkingState publication also confirms release of its candidate pins.
           await store.publishPreparedResult(publicationId, child.code_result.candidate, { signal });
-          child = await runtime.attachChildResult({ operationId: child.operation_id, toolBinding: authority.toolBinding, publicationId }, signal);
+          child = await runtime.attachChildResult({ executionId: child.execution_id, toolBinding: authority.toolBinding, publicationId }, signal);
         }
         return child;
       } finally { await authority.release(); }
     }
     return child;
   }
-  private async releaseHandoff(child: ChildTask, signal: AbortSignal): Promise<void> {
-    if (child.resources_released || (child.source.kind !== 'ready' && !child.report)) return;
+  private async releaseHandoff(child: DelegatedExecution, signal: AbortSignal): Promise<void> {
+    if (child.resources_released || (child.source?.kind !== 'ready' && !child.report)) return;
     const { kernel, runtime } = this.owners;
-    const handoff = child.source.handoff;
+    if (child.trigger.kind === 'user_continuation') {
+      if (!child.receipt && child.source_basis) {
+        await this.owners.workingStates.withBranchStore(child.source_basis.source.workspace_id, 'child-unused-continuation-source', async store => {
+          if (!store.releaseBranchHandoffPin) throw new Error('Durable source pin release is unavailable');
+          const branchId = `child-source:${child.execution_id}`;
+          const branch = await store.getBranchRoot(branchId);
+          if (branch) {
+            if (branch.baseRoot !== child.source_basis!.root) throw new Error('Unused continuation source identity changed');
+            await store.releaseBranchHandoffPin(branchId, `child-source-pin:${child.execution_id}`);
+            await store.deleteBranch(branchId);
+          }
+        }, 'shared', { threadId: child.child_thread_id });
+      }
+      signal.throwIfAborted();
+      await runtime.releaseChildResources(child.execution_id, signal);
+      return;
+    }
+    const handoff = child.source?.handoff;
+    if (!handoff) throw new Error('Original dispatch handoff is unavailable');
     const grant = await kernel.claimChildSource({ handoffOperationId: handoff.operation_id, grantId: `child-release:${randomUUID()}`,
       childThreadId: child.child_thread_id, childBranchId: child.child_branch_id }, signal);
     try {
       if (handoff.root.kind === 'fixed') {
-        await kernel.scoped(grant).unpinBranch({ operationId: `child-handoff-release:${child.operation_id}`,
+        await kernel.scoped(grant).unpinBranch({ operationId: `child-handoff-release:${child.execution_id}`,
           branchId: handoff.root.pin.source.branch_id!, pinId: handoff.root.pin.pin_id }, signal);
       }
       if (!child.receipt) {
-        const branchId = `child-source:${child.operation_id}`;
+        const branchId = `child-source:${child.execution_id}`;
         const client = kernel.scoped(grant);
-        await client.unpinBranch({ operationId: `child-unused-source-unpin:${child.operation_id}`, branchId,
-          pinId: `child-source-pin:${child.operation_id}` }, signal);
-        await client.deleteBranch({ operationId: `child-unused-source-delete:${child.operation_id}`, branchId }, signal);
+        await client.unpinBranch({ operationId: `child-unused-source-unpin:${child.execution_id}`, branchId,
+          pinId: `child-source-pin:${child.execution_id}` }, signal);
+        await client.deleteBranch({ operationId: `child-unused-source-delete:${child.execution_id}`, branchId }, signal);
       }
-      await runtime.releaseChildResources(child.operation_id, signal);
+      await runtime.releaseChildResources(child.execution_id, signal);
     } finally { await kernel.revokeGrant(grant.grantId); }
   }
-  private async advance(admitted: ChildTask, signal: AbortSignal, ownerSignal: AbortSignal): Promise<void> {
+  private async advance(admitted: DelegatedExecution, signal: AbortSignal, ownerSignal: AbortSignal): Promise<void> {
     const { runtime, prepareContext } = this.owners;
     let child = admitted;
     try {
@@ -284,25 +334,41 @@ export class ThreadCollaboration {
         child = await this.prepareSource(child, signal);
         const source = this.childSource(child);
         const identity: ThreadIdentity = { runtime: 'agent', threadId: child.child_thread_id, branchId: child.child_branch_id };
-        const context = await waitWithSignal(prepareContext(identity, source, { mode: 'agent', threadRole: 'worker', projectId: child.project_id, childProfile: child.selected_profile }), signal);
+        const checkpoint = child.trigger.kind === 'user_continuation' ? await runtime.context(child.child_branch_id, signal) : null;
+        if (child.trigger.kind === 'user_continuation' && (!checkpoint || !prepareContext.forSource)) throw new Error('Continuation context provenance is unavailable');
+        const context = await waitWithSignal(checkpoint
+          ? prepareContext.forSource!(checkpoint, source, signal)
+          : prepareContext(identity, source, { mode: 'agent', threadRole: 'worker', projectId: child.project_id, childProfile: child.selected_profile }), signal);
+        let inputPreparation: InputResourcePreparation | undefined;
+        if (child.trigger.kind === 'user_continuation') {
+          const input = child.input as { text?: unknown } | string;
+          const text = typeof input === 'string' ? input : typeof input?.text === 'string' ? input.text : '';
+          if (parseExplicitSkillCommand(text)) {
+            if (!this.owners.prepareSkillInput) throw new Error('Skill input preparation is unavailable');
+            const prepared = await this.owners.prepareSkillInput(identity, context.resources, text, signal);
+            if (prepared.status !== 'ready') throw new ResourceScopeError(prepared);
+            if (prepared.skill) inputPreparation = { expectedContextCheckpoint: null, skill: prepared.skill };
+          }
+        }
         signal.throwIfAborted();
         if (source.mode === 'live_root') throw new Error('Child source is not isolated');
-        child = await runtime.prepareChild({ operationId: child.operation_id, source: { mode: source.mode, liveRoot: null,
-          workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, branchId: source.branchId, revision: source.revision }, context }, signal);
+        child = await runtime.prepareChild({ executionId: child.execution_id, source: { mode: source.mode, liveRoot: null,
+          workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, branchId: source.branchId, revision: source.revision },
+          context, expectedContextCheckpoint: checkpoint?.id ?? null, ...(inputPreparation ? { inputPreparation } : {}) }, signal);
       }
       if (child.receipt && child.state === 'ready') await this.owners.continueRun(child.receipt.run_id, signal);
       if (child.report && child.receipt && ['pending', 'settling', 'candidate'].includes(child.code_result.kind)) child = await this.settle(child, signal);
     } catch (error) {
       if (!signal.aborted) {
-        const current = await runtime.child(child.operation_id);
+        const current = await runtime.childExecution(child.execution_id);
         // An admitted Run's unknown effects remain recoverable; preparation failure cannot erase them.
-        if (!current.receipt && !current.report) child = await runtime.failChild(child.operation_id, 'preparation_failed');
+        if (!current.receipt && !current.report) child = await runtime.failChild(child.execution_id, 'preparation_failed');
       }
       throw error;
     } finally {
       if (!ownerSignal.aborted) {
-        child = await runtime.child(child.operation_id, ownerSignal);
-        if (child.report) this.owners.kernel.releaseChildToolHandoff(child.parent_run_id, child.operation_id);
+        child = await runtime.childExecution(child.execution_id, ownerSignal);
+        if (child.report && child.trigger.kind === 'dispatch') this.owners.kernel.releaseChildToolHandoff(child.parent_run_id, child.child_operation_id);
         await this.releaseHandoff(child, ownerSignal);
         if (child.report && child.receipt && ['published', 'no_changes', 'unavailable'].includes(child.code_result.kind)) await runtime.releaseSourceGrants(child.receipt.run_id);
       }

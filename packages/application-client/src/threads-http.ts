@@ -40,6 +40,9 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     processes: { openTerminal: input => post('process/terminal', input) },
     plan: { read: identity => post('plan/read', identity), update: input => post('plan/update', input) },
     collaboration: {
+      continueChild: (input, signal) => post('child/continue', input, signal),
+      executions: (identity, operationId, signal) => post('child/executions', { ...identity, ...(operationId ? { operationId } : {}) }, signal),
+      readExecutionReport: (identity, executionId, itemId, offset, maxBytes, signal) => post('child/execution/report', { ...identity, executionId, itemId, offset, maxBytes }, signal),
       children: identity => post('child/list', identity),
       readReport: (identity, operationId, itemId, offset, maxBytes) => post('child/report', { ...identity, operationId, itemId, offset, maxBytes }),
       cancelChild: (identity, operationId) => post('child/cancel', { ...identity, operationId }),

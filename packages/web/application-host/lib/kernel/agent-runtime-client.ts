@@ -1,3 +1,4 @@
+import type { ChildContinuationAcceptParams, DelegatedExecution } from './protocol.generated.js';
 import type { MessageSendParams, MessageListParams, MessageGetParams, MessageReceipt, MessagePage, MessageView } from './protocol.generated.js';
 import type { FamilyListParams, FamilyRunsParams, FamilyReadParams, FamilyItemParams, FamilyList, FamilyRuns, FamilyRead, FamilyItem } from './protocol.generated.js';
 import type { ChildCapabilityDescriptor, ChildDispatchCatalog, TreeCancelTarget, TreeCancellationReceipt, McpBinding, LiveMcpBinding } from './protocol.generated.js';
@@ -246,7 +247,7 @@ export class AgentRuntimeClient {
         );
       return [];
     }
-    const child = await this.childForThread(run.thread_id, signal);
+    const child = await this.childExecutionForRun(runId, signal);
     if (child && !required.length) return [];
     const admittedScope = await this.kernel.agentRuntimeRequest<
       RunContextScope | null,
@@ -546,22 +547,37 @@ export class AgentRuntimeClient {
   reconcileHostTool(input: HostToolReconcileParams, signal?: AbortSignal): Promise<RunReconcileResult> {
     return this.kernel.agentRuntimeRequest('runtime.host_tool.reconcile', input, signal);
   }
-  readyChildSource(input: ChildSourceReadyParams, signal?: AbortSignal): Promise<ChildTask> {
+  acceptChildContinuation(input: ChildContinuationAcceptParams, signal?: AbortSignal): Promise<DelegatedExecution> {
+    return this.kernel.agentRuntimeRequest('runtime.child.continuation.accept', input, signal);
+  }
+  childExecution(executionId: string, signal?: AbortSignal): Promise<DelegatedExecution> {
+    return this.kernel.agentRuntimeRequest('runtime.child.execution.inspect', { executionId }, signal);
+  }
+  childExecutionForRun(runId: string, signal?: AbortSignal): Promise<DelegatedExecution | null> {
+    return this.kernel.agentRuntimeRequest('runtime.child.execution.for_run', { runId }, signal);
+  }
+  childExecutions(childOperationId?: string, signal?: AbortSignal): Promise<DelegatedExecution[]> {
+    return this.kernel.agentRuntimeRequest('runtime.child.execution.list', { ...(childOperationId ? { childOperationId } : {}) }, signal);
+  }
+  readChildExecutionReport(executionId: string, itemId: string, offset = 0, maxBytes = 65536, signal?: AbortSignal): Promise<ChildTextPage> {
+    return this.kernel.agentRuntimeRequest('runtime.child.execution.report.read', { executionId, itemId, offset, maxBytes }, signal);
+  }
+  readyChildSource(input: ChildSourceReadyParams, signal?: AbortSignal): Promise<DelegatedExecution> {
     return this.kernel.agentRuntimeRequest('runtime.child.source.ready', input, signal);
   }
-  settleChild(input: ChildSettleParams, signal?: AbortSignal): Promise<ChildTask> {
+  settleChild(input: ChildSettleParams, signal?: AbortSignal): Promise<DelegatedExecution> {
     return this.kernel.agentRuntimeRequest('runtime.child.settle', input, signal);
   }
-  attachChildCandidate(input: ChildResultCandidateParams, signal?: AbortSignal): Promise<ChildTask> {
+  attachChildCandidate(input: ChildResultCandidateParams, signal?: AbortSignal): Promise<DelegatedExecution> {
     return this.kernel.agentRuntimeRequest('runtime.child.result.candidate', input, signal);
   }
-  attachChildResult(input: ChildResultPublishedParams, signal?: AbortSignal): Promise<ChildTask> {
+  attachChildResult(input: ChildResultPublishedParams, signal?: AbortSignal): Promise<DelegatedExecution> {
     return this.kernel.agentRuntimeRequest('runtime.child.result.published', input, signal);
   }
   prepareChild(
     input: ChildPrepareParams,
     signal?: AbortSignal,
-  ): Promise<ChildTask> {
+  ): Promise<DelegatedExecution> {
     return this.kernel.agentRuntimeRequest(
       'runtime.child.prepare',
       input,
@@ -569,17 +585,17 @@ export class AgentRuntimeClient {
     );
   }
   failChild(
-    operationId: string,
+    executionId: string,
     code:
       | 'preparation_failed'
       | 'source_unavailable'
       | 'credentials_unavailable'
       | 'binding_changed',
     signal?: AbortSignal,
-  ): Promise<ChildTask> {
+  ): Promise<DelegatedExecution> {
     return this.kernel.agentRuntimeRequest(
       'runtime.child.fail',
-      { operationId, code },
+      { executionId, code },
       signal,
     );
   }
@@ -594,12 +610,12 @@ export class AgentRuntimeClient {
     );
   }
   releaseChildResources(
-    operationId: string,
+    executionId: string,
     signal?: AbortSignal,
-  ): Promise<ChildTask> {
+  ): Promise<DelegatedExecution> {
     return this.kernel.agentRuntimeRequest(
       'runtime.child.release',
-      { operationId },
+      { executionId },
       signal,
     );
   }
@@ -929,7 +945,7 @@ export class AgentRuntimeClient {
       if (existing) return existing;
       const saved = await this.launch(runId, signal);
       const run = await this.run(runId, signal);
-      const child = await this.childForThread(run.thread_id, signal);
+      const child = await this.childExecutionForRun(runId, signal);
       if (child && !saved?.selection.mcp_binding) return undefined;
       if (!this.prepareMcpOwner) {
         if (saved?.selection.mcp_binding)
@@ -1486,7 +1502,7 @@ export class AgentRuntimeClient {
     toolBinding?: unknown,
   ): Promise<RunStartReceipt> {
     return this.withRunPreparation(runId, signal, async (signal) => {
-      const delegatedChild = await this.childForThread((await this.run(runId, signal)).thread_id, signal);
+      const delegatedChild = await this.childExecutionForRun(runId, signal);
       const policyBinding = await this.preparePolicy(runId, signal);
       const mcpBinding = this.kernel.mcpLiveBinding(runId);
       const extensionBindings = await this.prepareExtensions(runId, signal);
@@ -1508,7 +1524,7 @@ export class AgentRuntimeClient {
           signal,
         );
         this.startedTools(runId);
-        if (delegatedChild) this.kernel.releaseChildToolHandoff(delegatedChild.parent_run_id, delegatedChild.operation_id);
+        if (delegatedChild?.trigger.kind === 'dispatch') this.kernel.releaseChildToolHandoff(delegatedChild.parent_run_id, delegatedChild.child_operation_id);
         return receipt;
       } catch (error) {
         this.releaseToolComposition(runId);
@@ -1524,7 +1540,7 @@ export class AgentRuntimeClient {
     toolBinding?: unknown,
   ): Promise<RunStartReceipt> {
     return this.withRunPreparation(runId, signal, async (signal) => {
-      const delegatedChild = await this.childForThread((await this.run(runId, signal)).thread_id, signal);
+      const delegatedChild = await this.childExecutionForRun(runId, signal);
       const selected = await this.modelSelections(runId, signal);
       const credentialScope = await this.kernel.registerCredentialOwner(
         runId,
@@ -1559,7 +1575,7 @@ export class AgentRuntimeClient {
           signal,
         );
         this.startedTools(runId);
-        if (delegatedChild) this.kernel.releaseChildToolHandoff(delegatedChild.parent_run_id, delegatedChild.operation_id);
+        if (delegatedChild?.trigger.kind === 'dispatch') this.kernel.releaseChildToolHandoff(delegatedChild.parent_run_id, delegatedChild.child_operation_id);
         return receipt;
       } catch (error) {
         this.releaseToolComposition(runId);

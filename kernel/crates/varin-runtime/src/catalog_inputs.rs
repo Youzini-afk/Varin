@@ -238,11 +238,6 @@ impl Catalog {
             [&command.thread_id],
             |row| row.get(0),
         )?;
-        if delegated {
-            return Err(RuntimeError::Invalid(
-                "read-only delegated Threads accept only their admitted child task".into(),
-            ));
-        }
         let (thread, active): (String, Option<String>) = tx.query_row(
             "SELECT thread_id,active_run FROM branches WHERE id=?1",
             [&command.branch_id],
@@ -262,6 +257,12 @@ impl Catalog {
             .is_some_and(|run| run.cancel_requested || run.state.terminal())
         {
             return Err(RuntimeError::Conflict("active Run is closing".into()));
+        }
+        if delegated {
+            let run=owner.as_ref().filter(|_|command.mode!=InputMode::NextRun).ok_or_else(||RuntimeError::Invalid("delegated next Run requires an explicit continuation admission".into()))?;
+            let raw:Option<String>=tx.query_row("SELECT body FROM delegated_executions WHERE run_id=?1",[&run.id],|row|row.get(0)).optional()?;
+            let execution:delegated::DelegatedExecution=raw.map(|raw|serde_json::from_str(&raw)).transpose()?.ok_or_else(||RuntimeError::Conflict("active delegated Run has no exact execution admission".into()))?;
+            if execution.cancel_requested || execution.report.is_some(){return Err(RuntimeError::Conflict("delegated execution is closing".into()));}
         }
         let predecessor: Option<Run> = if owner.is_some() {
             owner.clone()

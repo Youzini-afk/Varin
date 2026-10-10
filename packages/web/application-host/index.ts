@@ -3022,6 +3022,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       onError: (_operationId, _error) => console.error('[Integration] Original effect receipt requires attention') }),
     continueRun: (runId, signal) => threads.continueLaunch(runId, { signal }), recoverLaunches: signal => threads.recover(signal),
     workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter), prepareContext: threadContext,
+    prepareSkillInput: createThreadSkillInputPreparer(threadResources),
     onError: (operationId, _error) => console.error('[Collaboration] Preparation or delivery requires attention:', operationId ?? 'discovery'),
   });
   void collaboration.recover();

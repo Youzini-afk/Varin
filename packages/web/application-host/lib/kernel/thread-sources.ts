@@ -54,7 +54,7 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
 
 /** Submission and every continuation re-admit the same Host source authority. */
 export function createThreadSourceAdmission({ documents, workingStates, liveSources, runtime }: SourcePreparationOwners & { runtime: AgentRuntimeClient }) {
-  return async (source: ThreadSource, identity: ThreadIdentity): Promise<void> => {
+  return async (source: ThreadSource, identity: ThreadIdentity, runId?: string): Promise<void> => {
     if (source.mode === 'live_root') {
       if (!liveSources) throw new Error('Live workspace access is unavailable');
       await liveSources.admit(source, identity.threadId);
@@ -62,9 +62,12 @@ export function createThreadSourceAdmission({ documents, workingStates, liveSour
     }
     await documents.inspectWorkspace(source.workspaceId);
     await documents.inspectWorkspace(source.executionWorkspaceId);
-    const child = await runtime.childForThread(identity.threadId);
-    if (child) {
-      if (child.source.kind !== 'ready' || child.source.selection.branch_id !== source.branchId
+    const relation = await runtime.childForThread(identity.threadId);
+    if (relation) {
+      if (!runId) throw new Error('Delegated source admission requires its exact Run');
+      const child = await runtime.childExecutionForRun(runId);
+      if (!child || child.child_thread_id !== identity.threadId || child.child_branch_id !== identity.branchId
+        || child.source?.kind !== 'ready' || child.source.selection.branch_id !== source.branchId
         || child.source.selection.revision !== source.revision || child.source.selection.mode !== source.mode) throw new Error('Child source differs from its admitted private baseline');
       const admittedPin = child.source.pin;
       await workingStates.withBranchStore(source.workspaceId, 'child-source-check', async store => {

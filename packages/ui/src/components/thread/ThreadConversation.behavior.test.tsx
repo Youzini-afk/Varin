@@ -157,7 +157,7 @@ it('keeps subtree stop available after a child report while the original writer 
   f.view.children = [child];
   const cancelChild = vi.fn(async (_identity: ThreadIdentity, operationId: string) => ({ target: { kind: 'child' as const, operation_id: operationId }, cursor: 4, run_count: 1, child_count: 1, process_count: 1 }));
   const cancelTree = vi.fn(async () => ({ target: { kind: 'thread' as const, thread_id: identity.threadId }, cursor: 5, run_count: 2, child_count: 1, process_count: 1 }));
-  f.api.collaboration = { children: async () => [child], readReport: async () => { throw new Error('No history page'); }, cancelWait: async () => { throw new Error('No wait'); }, cancelChild, cancelTree };
+  f.api.collaboration = { continueChild: async () => { throw new Error('No continuation'); }, executions: async () => [], readExecutionReport: async () => { throw new Error('No report'); }, children: async () => [child], readReport: async () => { throw new Error('No history page'); }, cancelWait: async () => { throw new Error('No wait'); }, cancelChild, cancelTree };
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
   expect(container.textContent).toContain('Report complete; file result waiting for writers and original receipts');
   await act(async () => { button('Stop child subtree').click(); });
@@ -926,4 +926,50 @@ it('opens the original accepted PTY in the shared terminal and fences a late res
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={other} />); });
   await act(async () => { resolve(result); });
   expect(attachProcessTerminal).toHaveBeenCalledTimes(1);
+});
+
+
+it('continues a completed child with its exact predecessor and retries an uncertain receipt without changing its model or old report', async () => {
+  const f = fixture(true);
+  const previous = { ...f.view.activeRun!, state: 'completed' as const };
+  f.view.activeRun = null; f.view.thread.branches[0]!.active_run_id = null; f.view.thread.branches[0]!.latest_run = previous;
+  f.view.thread.branches[0]!.head = 'old-head';
+  const original = { execution_id: 'old-execution', child_operation_id: 'original-dispatch', child_thread_id: identity.threadId, child_branch_id: identity.branchId,
+    trigger: { kind: 'dispatch' }, state: 'completed', receipt: { run_id: previous.id }, cancel_requested: false,
+    code_result: { kind: 'published', effect: 'confirmed', result: { publication_id: 'old-publication', result_revision: 2 } },
+    report: { outcome: 'succeeded', detail: 'Original report stays fixed', history_ids: ['old-report'] } } as unknown as import('@varin/protocol').DelegatedExecution;
+  f.view.delegatedExecutions = [original];
+  const continued = { ...original, execution_id: 'new-execution', trigger: { kind: 'user_continuation', key: 'new', previous_execution_id: original.execution_id,
+    previous_run_id: previous.id, previous_run_revision: previous.revision, expected_head: 'old-head' }, state: 'preparing', receipt: null, report: null,
+    code_result: { kind: 'pending' } } as import('@varin/protocol').DelegatedExecution;
+  const continueChild = vi.fn<NonNullable<ThreadsAPI['collaboration']>['continueChild']>(async () => {
+    f.view.delegatedExecutions = [original, continued]; return continued;
+  }).mockRejectedValueOnce(new Error('uncertain continuation reply'));
+  const readExecutionReport = vi.fn<NonNullable<ThreadsAPI['collaboration']>['readExecutionReport']>(async (_identity, executionId, itemId) => ({
+    operation_id: original.child_operation_id, execution_id: executionId, item_id: itemId, offset: 0, next_offset: null, total_bytes: 12, text: 'old evidence' }));
+  const cancelTree = vi.fn<NonNullable<ThreadsAPI['collaboration']>['cancelTree']>(async target => ({ target: { kind: 'thread', thread_id: target.threadId }, cursor: 15, run_count: 0, child_count: 1, process_count: 0 }));
+  const unused = async (): Promise<never> => { throw new Error('unused collaboration control'); };
+  f.api.collaboration = { continueChild, readExecutionReport, executions: async () => f.view.delegatedExecutions!, children: async () => [],
+    readReport: unused, cancelChild: unused, cancelWait: unused, cancelTree };
+  await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  expect(container.querySelector<HTMLSelectElement>('[aria-label="Registered model"]')?.disabled).toBe(true);
+  expect(container.textContent).toContain('old-publication');
+  await edit('[aria-label="Message thread"]', 'Keep the next user instruction');
+  const form = container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!;
+  await submitForm(form);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')?.value).toBe('Keep the next user instruction');
+  await submitForm(form);
+  expect(continueChild).toHaveBeenCalledTimes(2);
+  expect(continueChild.mock.calls[1]![0]).toEqual(continueChild.mock.calls[0]![0]);
+  expect(continueChild.mock.calls[0]![0]).toMatchObject({ ...identity, previousRunId: previous.id, expectedHead: 'old-head', text: 'Keep the next user instruction' });
+  expect(continueChild.mock.calls[0]![0]).not.toHaveProperty('model');
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('Original report stays fixed');
+  expect(container.textContent).toContain('User continuation');
+  await act(async () => { button('Read execution report').click(); });
+  expect(readExecutionReport).toHaveBeenCalledWith(identity, 'old-execution', 'old-report', 0, undefined, expect.any(AbortSignal));
+  expect(container.textContent).toContain('old evidence');
+  expect(f.view.activeRun).toBeNull();
+  await act(async () => { button('Stop task and children').click(); });
+  expect(cancelTree).toHaveBeenCalledExactlyOnceWith(identity);
 });

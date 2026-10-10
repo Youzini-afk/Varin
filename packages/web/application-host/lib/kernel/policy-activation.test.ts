@@ -206,7 +206,8 @@ it('main-model continuation cleanup preserves all pinned policy credential gener
 it('planning recovery uses committed configuration and generation without consulting newer settings', async () => {
   const scope = { reference: 'ref', authority: 'owner', account: 'account', generation: 1 };
   const configuration: ModelSessionConfiguration = { providerId: 'planner', providerFamily: 'openai-responses', model: 'small', endpoint: 'https://example.test/responses',
-    credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 64 };
+    credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 64,
+    acceptsImages: false, legacyMaxTokens: false, modelOptions: { temperature: 0, extra: null } };
   const owner = new ExistingHostCredentialOwner({ providerId: 'planner', providerFamily: 'openai-responses', endpoint: configuration.endpoint, currentScope: async () => scope,
     runtime: { getAuth: async () => { throw new Error('No inference'); } } });
   const settings = vi.fn(async () => ({ global: { harness: { models: { agentPlanning: { enabled: true, providerId: 'planner', modelId: 'small' } } } } }));
@@ -218,6 +219,17 @@ it('planning recovery uses committed configuration and generation without consul
   const saved = await prepare({ threadId: 'thread', generation: 7, requestedModelRoles: ['agentPlanning'], savedCapabilities: [first!.capability] });
   expect(saved[0]!.capability).toEqual(first!.capability); expect(settings).toHaveBeenCalledOnce();
   expect(rebindModel).toHaveBeenCalledWith(configuration, scope);
+  const serialized = { ...first!.capability, configuration: { ...configuration, azureDeployment: null,
+    azureApiVersion: null, reasoningEffort: null, adapterId: null, adapterVersion: null,
+    includeStreamUsage: null, anthropicOauth: null, contextWindowTokens: null, thinkingLevel: null } as unknown as ModelSessionConfiguration };
+  const restored = await prepare({ threadId: 'thread', generation: 7, requestedModelRoles: ['agentPlanning'], savedCapabilities: [serialized] });
+  expect(restored[0]!.capability).toEqual(serialized);
+  expect(rebindModel).toHaveBeenLastCalledWith(serialized.configuration, scope);
+  for (const changed of [{ acceptsImages: true }, { legacyMaxTokens: null }, { modelOptions: { temperature: 1, extra: null } }, { modelOptions: { temperature: 0 } }]) {
+    await expect(prepare({ threadId: 'thread', generation: 7, requestedModelRoles: ['agentPlanning'],
+      savedCapabilities: [{ ...serialized, configuration: { ...serialized.configuration, ...changed } as ModelSessionConfiguration }] })).rejects.toThrow('policy-model-selection-changed');
+  }
+  expect(settings).toHaveBeenCalledOnce();
   await expect(prepare({ threadId: 'thread', generation: 8, requestedModelRoles: ['agentPlanning'], savedCapabilities: [first!.capability] })).rejects.toThrow('policy-model-selection-changed');
 });
 

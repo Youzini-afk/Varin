@@ -738,6 +738,11 @@ Policy candidates may change at closed decision boundaries while the child ToolD
 Declared planning roles bind credentials and model Operations to that child Run/generation; saved roles
 restore their exact original configuration. Planning usage remains attributed to the original delegated
 Goal where one exists; no primary Goal or automatic continuation authority is inherited.
+On an explicit new child Run, exact planning configuration and credential scope survive, but the
+credential binding belongs to that Run's new policy generation. The Host hashes typed optional model
+fields with one missing/null representation matching Rust serialization; zero, false and nested
+provider-option values remain distinct. Same-Run restore still verifies the complete configuration
+identity and generation without consulting newer settings.
 Compaction jobs keep their internal fixed strategy. A policy
 can pause/deliver/complete through the existing Thread controls and child report/result consumers.
 `createAgentPolicy` derives an independent pin from a still-retained exact policy artifact across ordinary
@@ -770,12 +775,36 @@ registered with Documents; a historical workspace ID never substitutes its unrel
 The branch-create transaction retains provenance through the existing blob/record references. Recovery
 reads the original fixed source receipt before attempting any current directory or Git observation.
 
+Initial and continued executions use the same `ThreadCollaboration` lifecycle, keyed by exact
+`DelegatedExecution.execution_id`. Only initial dispatch retains/releases the original parent ToolBridge
+handoff. Explicit User continuation is durably accepted with the previous Run and head before cold
+work. Startup discovery includes accepted executions that do not yet have a Run. The Host pins the
+predecessor's exact WorkingResult or immutable source, verifies its root, and creates a new branch,
+retained pin and materialized source under the execution identity. It does not recapture the parent
+directory or reclaim its retired handoff. Unused cancelled preparation is cleaned through the same
+Storage owner after local preparation has drained.
+
+Context preparation uses `forSource` with the original checkpoint, preserving summary, history anchor,
+role and memory. Explicit skills use the existing input-resource preparer: the outer checkpoint CAS
+references the old context, while the input binds the candidate context. New source admission, launch,
+MCP and extension preparation all look up the exact execution for the actual Run. Original artifact,
+configuration and schema identities remain frozen; fresh execution authority and current permission
+checks are not inherited live grants. A second MCP round can change its actual cwd without changing
+its admitted server definition, and later restore requires that round's committed binding.
+
+The authenticated `child/continue` route accepts only User key, previous Run, expected head and raw
+text/images on the actual child branch. It cannot choose a different actor, configuration or source.
+The shared composer uses this path when the child is idle, retains the original key after an uncertain
+response, and uses ordinary boundary/interrupt input when active. Snapshot and exact execution report
+routes expose separate Run/report/file-result identities; old dispatch cards and Waits remain original
+facts. Agent request activation and correlated Wait/deadline are separate unfinished capabilities.
+
 Child Run termination, report production, process lifetime and file settlement are separate facts.
 Actual worker/root leases, original file receipts, guardian-confirmed process stop and original
 workspace Host callback stop facts determine when a fixed file candidate may be published. A cancelled
 MCP request with unknown execution remains pending until its original owner can prove stop; a protocol
 cancel response is not that proof. The Host stops before directory capture if child settlement
-still reports pending. Original operation receipts wake settlement even when ChildTask revision does
+still reports pending. Original operation receipts wake settlement even when the delegated execution revision does
 not change, including a receipt arriving while an earlier attempt drains.
 Storage atomically fixes a candidate and base pins, then prepares its result document on a readonly
 worker before the short original branch revision/WorkingResult/receipt commit. An existing candidate
@@ -799,7 +828,7 @@ neither a cancellation ACK nor a report is displayed as actual process stop.
 
 Parent integration is explicit through the ordinary installed
 [child integration tool](../../../../../examples/extensions/child-integration-tool/README.md).
-The invocation fixes a publication identity and supplies real parent Run/Thread/source authority.
+Schema 2 fixes the child operation, exact execution and publication identities, and supplies real parent Run/Thread/source authority.
 The existing IntegrationCoordinator, three-way merge, Documents CAS and typed recovery journal own
 its effects. The journal records causal binding and actual path/Surface phases. Physical path leases
 protect the short reservation even across overlapping workspace roots; unrelated external Surface

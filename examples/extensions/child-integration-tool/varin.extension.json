@@ -2,26 +2,27 @@
   "schemaVersion": 1,
   "id": "example.child-integration-tool",
   "displayName": "Fixed Child Result Integration",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "engines": { "varin": "*" },
   "entrypoints": { "host": { "file": "host.cjs", "mode": "brokered", "activation": ["service-request"] } },
   "capabilities": { "host": ["collaboration.integrations"] },
   "provides": {
     "services": [{
       "id": "example.child-integration.apply",
-      "version": 1,
+      "version": 2,
       "tool": {
         "name": "integrate_child",
-        "description": "Explicitly integrate a published isolated child's fixed file result into this parent Thread's physical source. Supply the original child operation and publication identities returned by child_status. Uses the existing three-way merge and conditional file/Document writes; preserves conflicts and reports actual effects. It does not select a newer child result, write back to a fixed read-only source, or roll back conversation history.",
+        "description": "Explicitly integrate a published isolated child's fixed file result into this parent Thread's physical source. Supply the original child operation, exact execution and publication identities returned by child_status. Uses the existing three-way merge and conditional file/Document writes; preserves conflicts and reports actual effects. It does not select a newer child result, write back to a fixed read-only source, or roll back conversation history.",
         "completion": "result",
         "operation": "effect",
         "inputSchema": {
           "type": "object",
           "properties": {
             "childOperationId": { "type": "string", "minLength": 1, "pattern": "\\S" },
+            "executionId": { "type": "string", "minLength": 1, "pattern": "\\S" },
             "publicationId": { "type": "string", "minLength": 1, "pattern": "\\S" }
           },
-          "required": ["childOperationId", "publicationId"],
+          "required": ["childOperationId", "executionId", "publicationId"],
           "additionalProperties": false
         },
         "outputSchema": {
