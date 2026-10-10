@@ -241,6 +241,65 @@ function blockChild(original: ContextPreparer, entered: ReturnType<typeof gate>,
   return prepare;
 }
 
+it('family tools and public views read original and fork-inherited conversations without relaunch after reopen', async () => {
+  let parentSteps = 0; let childSteps = 0; let operationId = '';
+  const f = await fixture(({ body, response }) => {
+    assertPairing(body);
+    if (isParent(body)) {
+      if (++parentSteps === 1) complete(response, [tool('dispatch', { ...dispatch, tools: ['threads', 'read_thread'] }, 'family-child')]);
+      else if (parentSteps === 2) { operationId = job(body); complete(response, [tool('wait_child', { operationId }, 'family-wait')]); }
+      else complete(response, [answer('Parent received family read report', 'family-parent-done')]);
+    } else if (++childSteps === 1) complete(response, [tool('threads', {}, 'family-list')]);
+    else if (childSteps === 2) {
+      const content = result(body, 'threads')?.content as { trust: string; page: import('./protocol.generated.js').FamilyList };
+      expect(content.trust).toContain('not user instructions');
+      const parent = content.page.members.find(member => member.threadId === content.page.rootThreadId)!;
+      complete(response, [tool('read_thread', { threadId: parent.threadId, branchId: parent.branches[0]!.branchId,
+        query: { kind: 'search', text: 'FAMILY_PARENT_SEMANTIC', direction: 'older' } }, 'family-read-parent')]);
+    } else {
+      const content = result(body, 'read_thread')?.content as { page: import('./protocol.generated.js').FamilyRead };
+      expect(content.page.items.some(item => JSON.stringify(item.body).includes('FAMILY_PARENT_SEMANTIC'))).toBe(true);
+      complete(response, [answer('FAMILY_CHILD_REPORT 原始内容', 'family-child-done')]);
+    }
+  });
+  const h = await f.openHost();
+  const identity = await h.api.create('family-conversations');
+  const prepared = await h.api.prepareSource({ ...identity, key: 'family-source', path: f.workspace, mode: 'fixed_branch' });
+  prepared.source.tools = ['file_read'];
+  const receipt = await h.api.submit({ ...identity, key: 'family-input', expectedHead: null, text: 'FAMILY_PARENT_SEMANTIC: discover and read this original task', model, source: prepared.source });
+  await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
+  const child = await h.runtime.child(operationId);
+  expect(child.report?.outcome).toBe('succeeded'); expect(child.launch.tools.map(item => item.name)).toEqual(['read_thread', 'threads']);
+  const directory = await h.api.family!.list(identity);
+  expect(directory.members.map(member => member.threadId)).toEqual([child.child_thread_id]);
+  const target = { threadId: child.child_thread_id, branchId: child.child_branch_id };
+  const view = await h.api.family!.read(identity, { ...target, query: { kind: 'recent' } });
+  const original = view.items.find(item => JSON.stringify(item.body).includes('FAMILY_CHILD_REPORT'))!;
+  let offset = 0; let text = '';
+  for (;;) {
+    const chunk = await h.api.family!.item(identity, { ...target, anchor: view.anchor, itemId: original.id, offset, maxBytes: 64 });
+    text += chunk.text;
+    if (chunk.nextOffset === null) { expect(Buffer.byteLength(text)).toBe(chunk.totalBytes); break; }
+    offset = chunk.nextOffset;
+  }
+  expect(JSON.parse(text)).toEqual(original.body);
+  // Create inherited ancestry through the original Catalog API; viewing it is not child continuation.
+  const fork = await h.runtime.forkBranch(child.child_branch_id, 'branch:family-fork', view.headId);
+  const inheritedRuns = await h.api.family!.runs(identity, { threadId: fork.threadId, branchId: fork.branchId });
+  expect(inheritedRuns.runs).toContainEqual(expect.objectContaining({ runId: original.runId, branchId: child.child_branch_id }));
+  const selected = { threadId: fork.threadId, branchId: fork.branchId, runId: original.runId, query: { kind: 'recent' as const } };
+  expect((await h.api.family!.read(identity, selected)).items.some(item => item.id === original.id)).toBe(true);
+  const unrelated = await h.api.create('unrelated-family');
+  await expect(h.api.family!.read(identity, { threadId: unrelated.threadId, branchId: unrelated.branchId, query: { kind: 'recent' } })).rejects.toMatchObject({ status: 409 });
+  const requestCount = f.requests.length;
+  await h.close();
+  const reopened = await f.openHost();
+  await expect(reopened.api.family!.read(identity, { ...target, anchor: view.anchor, query: { kind: 'recent' } })).rejects.toMatchObject({ status: 409 });
+  expect((await reopened.api.family!.read(identity, selected)).items.some(item => item.id === original.id)).toBe(true);
+  expect(f.requests).toHaveLength(requestCount); expect(parentSteps).toBe(3); expect(childSteps).toBe(3);
+  expect(reopened.errors).toEqual([]);
+}, 30_000);
+
 it('selected read-only child owns its ordinary notes and plan through real Host owners and public plan consumers', async () => {
   const entered = gate(); const release = gate();
   let parentSteps = 0; let childSteps = 0; let operationId = '';

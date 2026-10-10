@@ -351,6 +351,7 @@ export interface HistoryReference {
   parent: string | null;
   source: HistorySource;
   content_ref: string;
+  run_id: string;
 }
 
 export interface HistoryPage {
@@ -1179,6 +1180,7 @@ export interface HistoryItem {
   source: HistorySource;
   content: unknown;
   provider: ProviderOriginal | null;
+  run_id: string;
 }
 
 export interface RuntimeEvent {
@@ -1401,3 +1403,112 @@ export interface ChildWait {
   trigger_cursor: number | null;
   cancelled: boolean;
 }
+
+export interface FamilyListParams {
+  callerThreadId: string;
+  includeSelf?: boolean;
+}
+
+export interface FamilyRunsParams {
+  callerThreadId: string;
+  threadId: string;
+  branchId: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface FamilyReadParams {
+  callerThreadId: string;
+  threadId: string;
+  branchId: string;
+  runId?: string;
+  anchor?: string;
+  cursor?: string;
+  query: FamilyReadQuery;
+}
+
+export interface FamilyItemParams {
+  callerThreadId: string;
+  threadId: string;
+  branchId: string;
+  runId?: string;
+  anchor: string;
+  itemId: string;
+  offset?: number;
+  maxBytes?: number;
+}
+
+export type FamilyReadQuery =
+  | { kind: 'recent'; limit?: number; maxItemBytes?: number }
+  | { kind: 'range'; afterId?: string; beforeId?: string; direction: 'older' | 'newer'; limit?: number; maxItemBytes?: number }
+  | { kind: 'search'; text: string; direction: 'older' | 'newer'; limit?: number; maxItemBytes?: number; scanLimit?: number };
+
+export interface FamilyRun {
+  runId: string;
+  branchId: string;
+  state: string;
+}
+
+export interface FamilyLatestRun {
+  runId: string;
+  state: string;
+}
+
+export interface FamilyBranch {
+  branchId: string;
+  headId: string | null;
+  activeRunId: string | null;
+  latestRun: FamilyLatestRun | null;
+}
+
+export interface FamilyMember {
+  threadId: string;
+  parentThreadId: string | null;
+  task: string | null;
+  state: string;
+  branches: FamilyBranch[];
+}
+
+export interface FamilyList {
+  rootThreadId: string;
+  members: FamilyMember[];
+}
+
+export interface FamilyRuns {
+  threadId: string;
+  branchId: string;
+  runs: FamilyRun[];
+  nextCursor: string | null;
+}
+
+export interface FamilyToolAssociation { requestId: string; callId: string; role: 'call' | 'result' }
+
+export interface FamilyHistoryEntry {
+  id: string;
+  parentId: string | null;
+  sequence: number;
+  runId: string;
+  source: string;
+  kind: string;
+  body: unknown | null;
+  preview: string;
+  bodyBytes: number;
+  bodyTruncated: boolean;
+  tool: FamilyToolAssociation | null;
+}
+
+export interface FamilyRead {
+  threadId: string;
+  branchId: string;
+  runId: string | null;
+  headId: string | null;
+  anchor: string;
+  items: FamilyHistoryEntry[];
+  nextCursor: string | null;
+  scanned: number;
+  scanComplete: boolean;
+  hasEarlier: boolean;
+  hasLater: boolean;
+}
+
+export interface FamilyItem { threadId: string; branchId: string; runId: string | null; headId: string | null; itemId: string; format: 'conversation_json'; text: string; offset: number; nextOffset: number | null; totalBytes: number }

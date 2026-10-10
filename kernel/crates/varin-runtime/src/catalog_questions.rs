@@ -223,6 +223,7 @@ impl Catalog {
             ));
         }
         let item = HistoryItem {
+                run_id: run.id.clone(),
             id: format!("question-answer:{operation_id}"),
             thread_id: run.thread_id.clone(),
             parent,
@@ -231,8 +232,8 @@ impl Catalog {
             provider: None,
         };
         tx.execute(
-            "INSERT INTO history(id,thread_id,parent,body) VALUES(?1,?2,?3,?4)",
-            params![item.id, item.thread_id, item.parent, encode(&item)?],
+            "INSERT INTO history(id,thread_id,parent,body,run_id) VALUES(?1,?2,?3,?4,?5)",
+            params![item.id, item.thread_id, item.parent, encode(&item)?, run.id],
         )?;
         tx.execute(
             "UPDATE branches SET head=?2 WHERE id=?1",

@@ -125,6 +125,7 @@ pub struct SubmitInput {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HistoryItem {
+    pub run_id: String,
     pub id: String,
     pub thread_id: String,
     pub parent: Option<String>,

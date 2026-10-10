@@ -41,6 +41,14 @@ An uncertain creation retry keeps its original key and input. Update/control con
 the current revision before a new explicit action. Ordinary message submission and conversation fork
 are not Goal creation commands. Goal-owned followups are controlled through their Goal.
 
+`ThreadsAPI.family` reads the original task family without selecting another execution target.
+The caller `ThreadIdentity` is separate from the target request. `list` discovers actual related
+Threads, `runs` lists direct and inherited historical Run owners, `read` uses fixed recent/range/search
+pages, and `item` expands the original semantic JSON in byte pages. These methods accept AbortSignal;
+Host/caller/target changes must discard old views. Anchors survive append/fork/rollback but expire with
+the runtime owner epoch. An empty scan page can still have a continuation cursor. Partial JSON is not
+a complete tool exchange. This API contains no target launch, source preparation or control method.
+
 The desktop contract defines:
 
 - `VarinDesktopCommandMap` — typed `{ args, result }` for all 58 `desktop_*` commands

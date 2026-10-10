@@ -19,6 +19,23 @@ stops queued admission or signals the active kernel operation without returning 
 child to exit. A missing executable, protocol mismatch, malformed response, revoked grant, or child exit is
 an explicit Host failure; it never selects the old backend as a fallback.
 
+## Same-task conversation views
+
+The four authenticated `/api/threads/family/{list,runs,read,item}` routes use the original
+AgentRuntimeClient and Rust Catalog/ContentStore reader. ThreadAdapter validates the caller's actual
+Thread/branch and supplies `callerThreadId`; the nested target request cannot override that identity.
+Rust alone derives family membership and validates query/anchor/Run/ancestry. The Host creates no
+conversation cache, lineage authority or target model/source preparation. HTTP close cancels only
+the original read request. Family replies use the ordinary content response path, not a control frame.
+
+`ThreadFamily` inside the shared ThreadConversation is an on-demand read-only view. It retains actual
+Run/item/tool identities, fixed-page cursors, explicit truncated previews and original JSON paging.
+Host/caller/target changes abort requests and ignore late replies. Signed view tokens are deliberately
+invalid after an owner restart; the user can request a new latest view. Ordinary history chunk hydration
+also forwards mandatory `HistoryReference.run_id`, preserving inherited items' original Run owners.
+Messages/continuation are not inferred from opening a view. See the
+[family read evidence](../../../../../docs/reviews/runtime-family-reads-2026-10-11.md).
+
 ## Runtime content maintenance
 
 `POST /api/runtime/content/collect` accepts an empty JSON object under the existing Host authentication.

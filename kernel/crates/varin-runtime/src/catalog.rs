@@ -34,7 +34,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 26;
+pub(crate) const FORMAT: i64 = 27;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -115,6 +115,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
         return Err(RuntimeError::Format(0));
     }
     if version == FORMAT {
+        db.prepare("SELECT id,thread_id,parent,run_id,body FROM history")?;
         inputs::check_format(db)?;
         followups::check_format(db)?;
         goals::check_format(db)?;
@@ -430,6 +431,7 @@ impl Catalog {
         };
         let run_id = prepared.run_id.clone();
         let history = HistoryItem {
+            run_id: run_id.to_owned(),
             id: input_id.clone(),
             thread_id: thread.clone(),
             parent: head,
@@ -444,8 +446,8 @@ impl Catalog {
             provider: None,
         };
         tx.execute(
-            "INSERT INTO history(id,thread_id,parent,body) VALUES(?1,?2,?3,?4)",
-            params![input_id, thread, history.parent, encode(&history)?],
+            "INSERT INTO history(id,thread_id,parent,body,run_id) VALUES(?1,?2,?3,?4,?5)",
+            params![input_id, thread, history.parent, encode(&history)?, run_id],
         )?;
         let run = Run {
             waiting_on: None,
@@ -652,6 +654,7 @@ impl Catalog {
             return Err(RuntimeError::Conflict("branch changed".into()));
         }
         let mut item = HistoryItem {
+            run_id: run_id.to_owned(),
             id: id(),
             thread_id: run.thread_id,
             parent: head,
@@ -660,8 +663,8 @@ impl Catalog {
             provider: None,
         };
         tx.execute(
-            "INSERT INTO history(id,thread_id,parent,body) VALUES(?1,?2,?3,?4)",
-            params![item.id, item.thread_id, item.parent, encode(&item)?],
+            "INSERT INTO history(id,thread_id,parent,body,run_id) VALUES(?1,?2,?3,?4,?5)",
+            params![item.id, item.thread_id, item.parent, encode(&item)?, run_id],
         )?;
         tx.execute(
             "UPDATE branches SET head=?2 WHERE id=?1",
@@ -1509,7 +1512,8 @@ INSERT INTO runtime_meta VALUES(1,0);
 CREATE TABLE threads(id TEXT PRIMARY KEY);
 CREATE TABLE branches(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES threads(id),head TEXT,active_run TEXT);
 CREATE INDEX branches_thread ON branches(thread_id);
-CREATE TABLE history(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES threads(id),parent TEXT REFERENCES history(id),body TEXT NOT NULL);
+CREATE TABLE history(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES threads(id),parent TEXT REFERENCES history(id),run_id TEXT NOT NULL REFERENCES runs(id) DEFERRABLE INITIALLY DEFERRED,body TEXT NOT NULL);
+CREATE INDEX history_run ON history(run_id);
 CREATE TABLE runs(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),body TEXT NOT NULL,context_checkpoint_id TEXT REFERENCES context_checkpoints(id));
 CREATE INDEX runs_branch ON runs(branch_id);
 CREATE TABLE commands(id TEXT PRIMARY KEY,intent TEXT NOT NULL,receipt TEXT NOT NULL);
@@ -1581,6 +1585,9 @@ mod observe;
 
 #[path = "catalog_context.rs"]
 pub mod context;
+
+#[path = "catalog_family.rs"]
+pub mod family;
 
 #[path = "catalog_history.rs"]
 pub mod history_views;

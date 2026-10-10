@@ -1614,6 +1614,48 @@ pub(crate) struct ChildWaitParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FamilyListParams {
+    pub(crate) caller_thread_id: String,
+    pub(crate) include_self: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FamilyRunsParams {
+    pub(crate) caller_thread_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) cursor: Option<String>,
+    pub(crate) limit: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FamilyReadParams {
+    pub(crate) caller_thread_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) run_id: Option<String>,
+    pub(crate) anchor: Option<String>,
+    pub(crate) cursor: Option<String>,
+    pub(crate) query: varin_runtime::catalog::family::FamilyReadQuery,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FamilyItemParams {
+    pub(crate) caller_thread_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) run_id: Option<String>,
+    pub(crate) anchor: String,
+    pub(crate) item_id: String,
+    pub(crate) offset: Option<i64>,
+    pub(crate) max_bytes: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct InitialContext {
     pub(crate) resources: Option<varin_runtime::catalog::resources::ContextResources>,
     pub(crate) personalization: Option<ContextPersonalization>,
@@ -2816,6 +2858,18 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.child.wait.cancel" => serde_json::from_value::<ChildWaitParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.family.list" => serde_json::from_value::<FamilyListParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.family.runs" => serde_json::from_value::<FamilyRunsParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.family.read" => serde_json::from_value::<FamilyReadParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.family.item" => serde_json::from_value::<FamilyItemParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         _ => Ok(()),

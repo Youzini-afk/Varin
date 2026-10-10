@@ -407,8 +407,11 @@ fn validate_preset(selected: &ChildDispatchSelection, input: &DispatchInput) -> 
 pub(crate) fn resolve_selection(selected: &ChildDispatchSelection, input: &DispatchInput) -> Result<(varin_runtime::catalog::dispatch::ResolvedChildSelection, Vec<ToolSchema>), ExecutionError> {
     validate_preset(selected, input)?;
     let resolved = selected.resolve(input).map_err(error)?;
-    let schemas = crate::child_capabilities::select_frozen(selected, &resolved.profile.tools)
+    let mut schemas = crate::child_capabilities::select_frozen(selected, &resolved.profile.tools)
         .map_err(error)?;
+    // The actual composed directory publishes a canonical name order; selection order grants
+    // no additional capability and must not make an identical child fail on restore.
+    schemas.sort_by(|left, right| left.name.cmp(&right.name));
     if input.preset.is_none()
         && schemas.iter().any(|schema| {
             selected

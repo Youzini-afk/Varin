@@ -239,7 +239,7 @@ it('shared file picker previews image-only input, retains bytes/key on failure, 
   const f = fixture();
   f.submit.mockRejectedValueOnce(new ThreadRequestError(400, 'kernel-frame-too-large'));
   f.submit.mockImplementationOnce(async input => {
-    f.view.history.push({ id: 'accepted-image', thread_id: identity.threadId, parent: null, source: 'user', provider: null, content: { text: input.text, attachments: input.images?.map(image => ({ media_type: image.mimeType, content_ref: `data:${image.mimeType};base64,${image.data}`, source: 'user-upload' })) } });
+    f.view.history.push({ id: 'accepted-image', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', provider: null, content: { text: input.text, attachments: input.images?.map(image => ({ media_type: image.mimeType, content_ref: `data:${image.mimeType};base64,${image.data}`, source: 'user-upload' })) } });
     return { thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'ui-run', input_id: 'sent', cursor: 1 };
   });
   const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhC0AAAAASUVORK5CYII=';
@@ -274,7 +274,7 @@ it('shared file picker previews image-only input, retains bytes/key on failure, 
 
 it('loads earlier images under a pinned head while live controls continue, then returns to latest messages', async () => {
   const f = fixture(true);
-  const item = (id: string, text: string) => ({ id, thread_id: identity.threadId, parent: null, source: 'assistant' as const, content: { text }, provider: null });
+  const item = (id: string, text: string) => ({ id, thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'assistant' as const, content: { text }, provider: null });
   f.view.history = [item('message-2', 'middle message'), item('message-3', 'pinned newest message')];
   f.view.historyPage = { head: 'message-3', previous: 'message-2' };
   f.view.thread.branches[0]!.head = 'message-3';
@@ -314,7 +314,7 @@ it('discards an earlier-page response after the selected branch changes', async 
   f.view.thread.branches = [{ branch_id: next.branchId, head: null, active_run_id: null, latest_run: null }];
   f.view.historyPage = { head: null, previous: null };
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={next} />); });
-  await act(async () => { resolvePage({ head: 'old-head', previous: null, items: [{ id: 'old-message', thread_id: identity.threadId, parent: null, source: 'user', content: { text: 'history from the previous branch' }, provider: null }] }); });
+  await act(async () => { resolvePage({ head: 'old-head', previous: null, items: [{ id: 'old-message', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', content: { text: 'history from the previous branch' }, provider: null }] }); });
   expect(container.textContent).not.toContain('history from the previous branch');
   expect(container.textContent).not.toContain('Viewing saved history');
   expect(container.textContent).not.toContain('Loading earlier history');
@@ -322,7 +322,7 @@ it('discards an earlier-page response after the selected branch changes', async 
 
 it('retries a conversation fork with the same request key and opens only the accepted branch', async () => {
   const f = fixture();
-  f.view.history = [{ id: 'selected-message', thread_id: identity.threadId, parent: null, source: 'user', content: { text: 'branch point' }, provider: null }];
+  f.view.history = [{ id: 'selected-message', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', content: { text: 'branch point' }, provider: null }];
   f.view.historyPage = { head: 'selected-message', previous: null };
   const created = { ...identity, branchId: 'accepted-fork' };
   const fork = vi.fn<ThreadsAPI['fork']>().mockRejectedValueOnce(new Error('uncertain transport')).mockResolvedValue(created);
@@ -341,7 +341,7 @@ it('retries a conversation fork with the same request key and opens only the acc
 
 it('does not navigate to a late fork result after the user selects another branch', async () => {
   const f = fixture();
-  f.view.history = [{ id: 'selected-message', thread_id: identity.threadId, parent: null, source: 'user', content: { text: 'branch point' }, provider: null }];
+  f.view.history = [{ id: 'selected-message', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', content: { text: 'branch point' }, provider: null }];
   let resolveFork!: (value: ThreadIdentity) => void;
   f.api.fork = () => new Promise(resolve => { resolveFork = resolve; });
   const open = vi.fn();
@@ -456,7 +456,7 @@ it('projects frozen skill metadata separately from original history and editable
   const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhC0AAAAASUVORK5CYII=';
   const attachments = [{ media_type: 'image/png', content_ref: `data:image/png;base64,${data}`, source: 'user-upload' }];
   const content = { text, attachments, skillInvocations: [invocation] };
-  f.view.history = [{ id: 'skill-history', thread_id: identity.threadId, parent: null, source: 'user', provider: null, content }];
+  f.view.history = [{ id: 'skill-history', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', provider: null, content }];
   f.view.inputs = [{ id: 'skill-queued', thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'ui-run',
     mode: 'boundary', state: 'queued', revision: 1, content, cursor: 1 }];
   // Resource refresh does not rewrite the material already accepted with each input.
@@ -546,7 +546,7 @@ it('keeps frozen resource metadata on conflict and refreshes once with the curre
 
 it('retries summary generation without duplicating the job and applies its completed checkpoint without hiding history', async () => {
   const f = fixture();
-  f.view.history = [{ id: 'summary-cut', thread_id: identity.threadId, parent: null, source: 'user', content: { text: 'original full message' }, provider: null }];
+  f.view.history = [{ id: 'summary-cut', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', content: { text: 'original full message' }, provider: null }];
   f.view.historyPage = { head: 'summary-cut', previous: null };
   const run = { ...initialSnapshot(true).activeRun!, id: 'summary-run', state: 'completed' as const };
   const compact = vi.fn<ThreadsAPI['compact']>().mockRejectedValueOnce(new Error('uncertain summary acceptance')).mockImplementation(async input => {
