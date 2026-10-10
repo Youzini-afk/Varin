@@ -263,7 +263,7 @@ fn child_context(
     varin_runtime::catalog::context::ContextProposal,
     varin_runtime::catalog::personalization::PersonalizationBasis,
 ) {
-    let mut source = child.source_pin.source.clone();
+    let mut source = child.source.pin().unwrap().source.clone();
     source.branch_id = Some(format!("child-source:{}", child.operation_id));
     source.revision = Some(0);
     let proposal = varin_runtime::catalog::context::ContextProposal {

@@ -25,7 +25,7 @@ export type HostToolCompletion =
   | {
       kind: 'result';
       outcome: 'succeeded' | 'failed' | 'cancelled' | 'indeterminate';
-      effect: 'none' | 'confirmed' | 'unknown';
+      effect: 'none' | 'partial' | 'confirmed' | 'unknown';
       content: unknown;
     };
 /** Trusted adapter evidence; never accepted from the extension's ToolCompletion JSON. */

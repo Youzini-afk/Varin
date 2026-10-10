@@ -18,6 +18,31 @@ fn overlaps(left: &CanonicalFileLeaseResource, right: &CanonicalFileLeaseResourc
         || (right.subtree && left.absolute.starts_with(&right.absolute))
 }
 
+/// Parent components have already passed the shared path resolver. Preserve a symlink leaf:
+/// file replacement changes the link itself, rather than its target.
+pub(super) fn canonical_lease_path(resolved: PathBuf) -> Result<PathBuf, KernelError> {
+    // Parent components are canonicalized by resolve_file_resource.
+    // Preserve a symlink leaf: mutations replace the link, not its target.
+    let absolute = match fs::symlink_metadata(&resolved) {
+        Ok(metadata) if !metadata.file_type().is_symlink() => {
+            fs::canonicalize(&resolved)?
+        }
+        Ok(_) => resolved,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => resolved,
+        Err(error) => return Err(error.into()),
+    };
+    #[cfg(windows)]
+    let absolute = PathBuf::from(
+        absolute
+            .to_str()
+            .ok_or_else(|| {
+                KernelError::Authorization("file lease path is not UTF-8".to_string())
+            })?
+            .to_lowercase(),
+    );
+    Ok(absolute)
+}
+
 pub(super) struct RetainedFileLease {
     pub release_requested: bool,
 }
@@ -49,25 +74,7 @@ impl Storage {
             .iter()
             .map(|resource| {
                 let resolved = self.resolve_file_resource(root_id, &resource.path, grant, true)?;
-                // Parent components are canonicalized by resolve_file_resource.
-                // Preserve a symlink leaf: mutations replace the link, not its target.
-                let absolute = match fs::symlink_metadata(&resolved.absolute) {
-                    Ok(metadata) if !metadata.file_type().is_symlink() => {
-                        fs::canonicalize(&resolved.absolute)?
-                    }
-                    Ok(_) => resolved.absolute,
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => resolved.absolute,
-                    Err(error) => return Err(error.into()),
-                };
-                #[cfg(windows)]
-                let absolute = PathBuf::from(
-                    absolute
-                        .to_str()
-                        .ok_or_else(|| {
-                            KernelError::Authorization("file lease path is not UTF-8".to_string())
-                        })?
-                        .to_lowercase(),
-                );
+                let absolute = canonical_lease_path(resolved.absolute)?;
                 Ok(CanonicalFileLeaseResource {
                     absolute,
                     subtree: resource.subtree,

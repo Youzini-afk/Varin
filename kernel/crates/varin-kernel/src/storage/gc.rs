@@ -183,7 +183,7 @@ impl Storage {
         }
         for row in self
             .conn
-            .prepare("SELECT root_hash FROM revisions UNION SELECT root_hash FROM pins")?
+            .prepare("SELECT root_hash FROM revisions UNION SELECT root_hash FROM pins UNION SELECT json_extract(payload_json,'$.root') FROM domain_records WHERE record_type='working.result' UNION SELECT json_extract(payload_json,'$.baseRoot') FROM domain_records WHERE record_type='working.result'")?
             .query_map([], |row| row.get::<_, String>(0))?
         {
             roots.insert(row?);

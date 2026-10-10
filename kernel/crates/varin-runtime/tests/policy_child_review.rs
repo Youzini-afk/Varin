@@ -353,7 +353,7 @@ fn graph_cancel_fences_new_child_and_wait_publication_but_keeps_accepted_child()
             .load()
             .unwrap();
     let prepared =
-        f.db.prepare_child_admission(&f.context, f.input.clone(), f.pin.clone(), launch)
+        f.db.prepare_child_admission(&f.context, f.input.clone(), varin_runtime::catalog::collaboration::ChildSourceHandoff::fixed(&f.context.operation_id,f.pin.clone()), launch)
             .unwrap()
             .load()
             .unwrap();

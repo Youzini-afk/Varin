@@ -104,12 +104,22 @@ export interface DurableRecoveryChangeSelection {
   changes: Array<{ after: RecoveryState; before: RecoveryState; checkpointId: string; executionId: string; mutationId: string; path: string; sequence: number; toolName: string }>;
   turns: Array<{ activeWriterScopes: string[]; checkpointId: string; executionId: string; failure?: Record<string, unknown>; sequence: number; status: string; unrecordedResourceIds: string[] }>;
 }
+export interface RecoveryOperationConflict {
+  operationId: string; workspaceId: string; state: string; revision: number; canonicalRoot: string; paths: string[];
+}
+export interface RecoveryOperationConflictQuery {
+  workspaceId: string; canonicalRoot: string; paths: string[]; exceptOperationId?: string;
+}
 export interface RecoveryDurableOperationPort {
+  /** Register an already-owned candidate for transfer into the existing journal refs. */
+  registerObjectOwner?(workspaceId: string, hash: string, ownerId: string): void;
   createOperation(input: { operationId: string; workspaceId: string; kind: string; state: string; data: Record<string, unknown>; targets: Record<string, { expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState }>; surfacePaths?: readonly string[]; sessionId?: string; threadId?: string; runId?: string }): Promise<Record<string, unknown>>;
   updateOperationFile(input: { operationId: string; workspaceId: string; path: string; expectedRevision: number; expectedPhase: string; phase: string; observedFingerprint?: string; expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState; sessionId?: string }): Promise<Record<string, unknown>>;
   completeOperation(input: { operationId: string; workspaceId: string; expectedRevision: number; state: string; result?: Record<string, unknown>; failure?: Record<string, unknown>; sessionId?: string }): Promise<Record<string, unknown>>;
   getOperation(workspaceId: string, operationId: string, sessionId?: string): Promise<Record<string, unknown> | null>;
   listOperations(workspaceId: string, kind?: string): Promise<Record<string, unknown>[]>;
+  /** Original journal reservations across physical root aliases, restricted to the admitted target. */
+  listOperationConflicts(input: RecoveryOperationConflictQuery): Promise<RecoveryOperationConflict[]>;
   releaseOperation(workspaceId: string, operationId: string): Promise<Record<string, unknown>>;
   listChanges?(input: { workspaceId: string; sessionId?: string; executionId?: string; entryIds?: string[] }): Promise<DurableRecoveryChangeSelection>;
   /** Internal Host-only binding of a completed Integration into an active recovery turn. */
@@ -176,6 +186,8 @@ export interface WorkspaceRecoveryEngine {
   setStorageLocation(input: SetRecoveryStorageLocationInput): Promise<RecoveryStorageMoveResult>;
   status(workspaceId: string): Promise<WorkspaceRecoveryStatusResult>;
   storageStatus(workspaceId?: string): Promise<RecoveryStorageStatusResult>;
+  /** Coordinates a compound metadata step without minting a storage authority. */
+  coordinateWorkspaceStorage<T>(workspaceId: string, options: { mode: "exclusive" | "shared"; purpose: string }, operation: () => Promise<T> | T): Promise<T>;
   withWorkspaceStorage<T>(workspaceId: string, options: { mode: "exclusive" | "shared"; purpose: string; create?: boolean }, operation: (context: WorkspaceRecoveryStorageContext) => Promise<T> | T): Promise<T>;
   dispose(): Promise<void>;
 }
@@ -320,8 +332,17 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     resolveDirectoryApplyContext,
   } = options;
   const queues = new Map<string, Promise<unknown>>();
+  const inFlight = new Set<Promise<unknown>>();
   const startupFailures = new Map<string, WorkspaceRecoveryFailure[]>();
   let disposed = false;
+
+  const track = <T>(callback: () => Promise<T> | T): Promise<T> => {
+    if (disposed) return Promise.reject(new RecoveryPrimitiveError("unavailable", "Workspace recovery engine is disposed", { origin: "internal", retryable: true }));
+    const current = Promise.resolve().then(callback);
+    inFlight.add(current);
+    void current.finally(() => inFlight.delete(current)).catch(() => undefined);
+    return current;
+  };
 
   const runWorkspace = <T>(workspaceId: string, callback: () => Promise<T> | T): Promise<T> => {
     const previous = queues.get(workspaceId) ?? Promise.resolve();
@@ -335,6 +356,9 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     }).catch(() => undefined);
     return current;
   };
+  const coordinateWorkspaceStorage: WorkspaceRecoveryEngine["coordinateWorkspaceStorage"] = (workspaceId, access, callback) => (
+    access.mode === "shared" ? track(callback) : track(() => runWorkspace(workspaceId, callback))
+  );
   const identityFor = async (workspaceId: string): Promise<RecoveryIdentity> => {
     const workspace = await documents.inspectWorkspace(workspaceId);
     return {
@@ -1039,7 +1063,9 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
       };
     }),
     storageStatus: (workspaceId) => safe(async () => ({ status: "ready", storage: await storage(workspaceId) })),
-    withWorkspaceStorage: (workspaceId, _access, callback) => runWorkspace(workspaceId, async () => {
+    coordinateWorkspaceStorage,
+    withWorkspaceStorage: (workspaceId, access, callback) => {
+      const execute = async () => {
       const identity = await identityFor(workspaceId);
       return callback({
         durableRecoveryStore: durable,
@@ -1050,11 +1076,15 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
         ...(resolveDirectoryApplyContext ? { resolveDirectoryApplyContext } : {}),
         ...(durable.collectUnreachableObjects ? { collectUnreachableObjects: () => durable.collectUnreachableObjects!(workspaceId) } : {}),
       });
-    }),
+      };
+      // Shared callers rely on their resource leases and Rust CAS. Only a
+      // compound Host metadata read/modify/write occupies this serial section.
+      return coordinateWorkspaceStorage(workspaceId, access, execute);
+    },
     dispose: async () => {
       if (disposed) return;
       disposed = true;
-      await Promise.allSettled([...queues.values()]);
+      await Promise.allSettled([...queues.values(), ...inFlight]);
     },
   } as WorkspaceRecoveryEngine;
 };

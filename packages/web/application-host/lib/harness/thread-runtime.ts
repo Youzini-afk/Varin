@@ -51,8 +51,10 @@ import { sameFrozenRunConfig, ThreadAdmissionError, type CreateThreadInput, type
 import type { ThreadWorktreeRuntime } from "./thread-worktree.js";
 import type { IntegrationCoordinator, IntegrationPlanInput } from "./working-state/integration-coordinator.js";
 import { projectThreadResultHistory, type RetentionThreadSnapshot } from "./working-state/thread-history.js";
-import type { RecoveryState, WorkingStatePin, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
-import { createBranchWithDraftBaseline } from "./working-state/draft-baseline.js";
+import type { RecoveryState, WorkingResult, WorkingStatePin, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
+import { captureStableDirectoryBaseline, createCapturedSourceBranch } from "./working-state/source-preparation.js";
+import type { CaptureToken } from "../documents/mutation-authority.js";
+import type { DirtyStateBarrierHandle } from "../documents/authority.js";
 import { rebaseBranchOntoParentRevision } from "./working-state/baseline-rebase.js";
 import { updateMaterializedBaseline } from "./working-state/materialized-baseline-update.js";
 import type { ThreadExecutionViewRegistry } from "./working-state/execution-view.js";
@@ -67,15 +69,13 @@ import { encodeDocumentText } from "../documents/inspect.js";
 import type { SurfaceSnapshotCloneResult } from "../documents/surface-snapshot-store.js";
 import type { createSourceViewStore } from "./source-view-store.js";
 import { normalizePathIdentity } from "../workspace/path-safety.js";
-import { sameState } from "../recovery/journal-files.js";
 import { createCodeSubmissionRuntime, submittedCodeBaseline } from "./working-state/code-submission.js";
 import type { VerificationCoordinator } from "./verification-coordinator.js";
 import { runNeedsMaterializedDirectory, runUsesLanguageService } from "./working-state/path-requirement.js";
 import {
-  directoryBaselineFingerprint,
   gitBaselineFingerprint,
-  withAncestorDirectories,
   type GitBaselineInventory,
+  type BaselineInventory,
 } from "./working-state/workspace-baseline.js";
 
 export interface ThreadSessionAdapter {
@@ -144,11 +144,9 @@ export interface ThreadRuntimeOptions {
   /** Production R3 measurement of a managed execution directory through the kernel. */
   measureManagedDirectory?(workspaceId: string, worktree: NonNullable<Thread["worktree"]>): Promise<ThreadSpaceMeasurement>;
   inspectBaselineWriters?(workspaceId: string, root: string): Promise<Array<{ id: string; purpose?: string; owner?: { kind: string; id: string }; startedAt?: string }>>;
-  beginBaselineCapture?(workspaceId: string, ignoredWriterIds?: readonly string[], signal?: AbortSignal): Promise<unknown>;
-  completeBaselineCapture?(capture: unknown, signal?: AbortSignal): Promise<{ stable: boolean; reasons: string[] }>;
-  beginDirtyStateBarrier?(workspaceId: string, paths: string[], signal?: AbortSignal): Promise<{
-    release(): Promise<void>;
-  }>;
+  beginBaselineCapture?(workspaceId: string, ignoredWriterIds?: readonly string[], signal?: AbortSignal): Promise<CaptureToken>;
+  completeBaselineCapture?(capture: CaptureToken, signal?: AbortSignal): Promise<{ stable: boolean; reasons: string[] }>;
+  beginDirtyStateBarrier?(workspaceId: string, paths: string[], signal?: AbortSignal): Promise<DirtyStateBarrierHandle>;
   readBlocks?(sessionId: string): Promise<Array<{ label: string; content: string }> | null>;
   resolveBaselineApplyContext?: import("../recovery/durable-file-operation.js").ResolveDirectoryApplyContext;
   withMergeWriter?<T>(workspaceId: string, threadId: string, operation: () => Promise<T>): Promise<T>;
@@ -1525,6 +1523,39 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     ])].sort();
   };
 
+  const materializedResultValidator = async (
+    store: WorkingStateRootStore,
+    branchId: string,
+    directory: string,
+    paths: string[] | undefined,
+    inventory: BaselineInventory | undefined,
+  ): Promise<(() => Promise<boolean>) | undefined> => {
+    const branch = await store.getBranchRoot(branchId);
+    if (!branch) throw new Error(`Working branch not found: ${branchId}`);
+    const scopes = branch.captureScopes;
+    const scopePaths = scopes.length ? (await store.listCaptureScopePaths(directory, scopes)).sort() : [];
+    if (paths && scopePaths.some(file => !paths.includes(file))) throw new Error("Working-state capture scope changed before result capture");
+    if ((!inventory || !options.worktrees.inspectGitBaselineInventory) && !scopes.length) return undefined;
+    return async () => {
+      if (inventory && options.worktrees.inspectGitBaselineInventory) {
+        const after = await options.worktrees.inspectGitBaselineInventory(directory);
+        if (inventory.kind !== after.kind || (inventory.kind === "git" && after.kind === "git"
+          && gitBaselineFingerprint(inventory) !== gitBaselineFingerprint(after))) return false;
+      }
+      // Git omits ignored files. Compare the physical scope inventory, not a
+      // union containing prior paths that would conceal a concurrent deletion.
+      if (scopes.length && JSON.stringify((await store.listCaptureScopePaths(directory, scopes)).sort()) !== JSON.stringify(scopePaths)) return false;
+      return true;
+    };
+  };
+
+  const resumeWorkingPublication = async (store: WorkingStateRootStore, branchId: string, publicationId: string): Promise<WorkingResult | null> => {
+    const result = await store.resumeResultPublication(branchId, publicationId);
+    if (result) return result;
+    const candidate = await store.readResultCandidate(branchId, publicationId);
+    return candidate ? store.publishPreparedResult(publicationId, candidate) : null;
+  };
+
   const publishPartialResult = async (workspaceId: string, parent: ThreadParent, threadId: string): Promise<void> => {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (thread?.preset === "retrieval") return;
@@ -1532,9 +1563,15 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (thread.worktree.baselineUpdate) {
       throw new ThreadRuntimeError("unavailable", `Finish baseline update ${thread.worktree.baselineUpdate.operationId} before publishing a partial result`);
     }
-    const result = isVirtualWorktree(thread.worktree)
-      ? await options.workingStates.withBranchStore(workspaceId, "thread-partial-result-publish", (store) => store.publishHeadResult(thread.workBranchId!))
+    const publicationRun = await options.registry.getActiveRun(workspaceId, threadId);
+    if (!publicationRun) throw new ThreadRuntimeError("unavailable", "Partial result has no owning Run identity");
+    const publicationId = `pi-partial-result:${workspaceId}:${threadId}:${publicationRun.id}`;
+    const resumed = await options.workingStates.withBranchStore(workspaceId, "thread-partial-result-resume",
+      store => resumeWorkingPublication(store, thread.workBranchId!, publicationId), "shared");
+    const result = resumed ?? (isVirtualWorktree(thread.worktree)
+      ? await options.workingStates.withBranchStore(workspaceId, "thread-partial-result-publish", (store) => store.publishHeadResult(thread.workBranchId!, { publicationId }))
       : await (async () => {
+        const inventory = await options.worktrees.inspectGitBaselineInventory?.(thread.worktree!.path);
         const inspected = thread.worktree!.base === "zero-commit"
           ? null
           : await options.worktrees.inspect(thread.worktree!, "live");
@@ -1549,17 +1586,18 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
               thread.worktree!.path,
               inspected?.changedFiles,
             );
+            const validateFixedSource = await materializedResultValidator(store, thread.workBranchId!, thread.worktree!.path, paths, inventory);
             return store.publishDirectoryResult(
               thread.workBranchId!,
               thread.worktree!.path,
               paths,
-              indexModes === undefined ? {} : { indexModes },
+              { publicationId, ...(indexModes === undefined ? {} : { indexModes }), ...(validateFixedSource ? { validateFixedSource } : {}) },
             );
           },
           "exclusive",
           { executionWorkspace: await options.resolveRuntimeWorkspaceId(thread.worktree!.path) },
         );
-      })();
+      })());
     let worktree = thread.worktree;
     if (!result.root) {
       try {
@@ -1809,29 +1847,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       states: Record<string, RecoveryState>,
       baseRef: string,
     ): Promise<void> => {
-      if (!draftBaselineId) {
-        await store.createBranch(input.scopeId, branchId, states, baseRef, [], captureScopes);
-        return;
-      }
-      const draftBaseline = await store.getDraftBaseline(draftBaselineId);
-      if (!draftBaseline) throw new Error(`Thread draft baseline not found: ${draftBaselineId}`);
-      const drafts = await Promise.all(Object.entries(draftBaseline.pathStates).map(async ([file, state]) => {
-        if (state.kind !== "regular-file") throw new Error(`Thread draft baseline contains a non-file state: ${file}`);
-        const content = await store.getObject(state.objectHash);
-        if (!content) throw new Error(`Thread draft baseline content is missing: ${file}`);
-        return { path: file, content, ...(state.mode === undefined ? {} : { mode: state.mode }) };
-      }));
-      await createBranchWithDraftBaseline(
-        store,
-        input.scopeId,
-        branchId,
-        states,
-        drafts,
-        baseRef,
-        captureScopes,
-      );
+      await createCapturedSourceBranch(store, input.scopeId, branchId, states, baseRef, captureScopes, draftBaselineId ?? undefined);
     };
-    let baselineCapture: unknown;
+    let baselineCapture: CaptureToken | undefined;
     let dirtyBarrier: Awaited<ReturnType<NonNullable<ThreadRuntimeOptions["beginDirtyStateBarrier"]>>> | undefined;
     try {
       if (typeof options.beginDirtyStateBarrier === "function") {
@@ -1850,6 +1868,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           const beforeRevision = parentBranch.writeRevision;
           const baseRef = `thread-${input.parent.id}@${beforeRevision}`;
           worktree!.base = baseRef;
+          await dirtyBarrier?.settle();
           if (typeof options.completeBaselineCapture === "function" && baselineCapture !== undefined) {
             const completed = await options.completeBaselineCapture(baselineCapture, preparationSignal);
             baselineCapture = undefined;
@@ -1873,21 +1892,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           await assertNoActiveBaselineWriters();
           return;
         }
-        const beforeInventory = await inspectInventory();
-        let relativePaths: string[] | undefined;
-        let baseRef = worktree!.base;
+        const beforeInventory = await inspectInventory() ?? { kind: "directory" as const };
         let gitWindow: string | null = null;
-        let directoryBefore: string | null = null;
-        let frozenCaptureScopePaths: string[] = [];
-        const canListCaptureScopes = typeof store.listCaptureScopePaths === "function";
-        if (beforeInventory?.kind === "git") {
+        if (beforeInventory.kind === "git") {
           rejectGitlinks(beforeInventory.gitlinks);
-          const scopePaths = captureScopes.length > 0 && canListCaptureScopes
-            ? await store.listCaptureScopePaths(sourceRoot, captureScopes, preparationSignal)
-            : [];
-          frozenCaptureScopePaths = [...new Set(scopePaths)].sort();
-          relativePaths = withAncestorDirectories([...beforeInventory.paths, ...scopePaths]);
-          baseRef = beforeInventory.baseRef;
           worktree!.base = beforeInventory.baseRef;
           gitWindow = gitBaselineFingerprint(beforeInventory);
           if (!draftBaselineId && !captureScopes.length && beforeInventory.rawFileHashes) {
@@ -1902,11 +1910,12 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
                     const afterInventory = await inspectInventory();
                     if (afterInventory?.kind !== "git" || gitBaselineFingerprint(afterInventory) !== gitWindow) throw baselineChanged("Git identity during baseline reuse");
                     await assertNoActiveBaselineWriters();
+                    await dirtyBarrier?.settle();
                     if (typeof options.completeBaselineCapture === "function" && baselineCapture !== undefined) {
                       const completed = await options.completeBaselineCapture(baselineCapture, preparationSignal); baselineCapture = undefined;
                       if (!completed.stable) throw baselineChanged(`documents capture ${completed.reasons.join(",") || "unstable"}`);
                     }
-                    await store.createBranchFromPin(input.scopeId, branchId, pin, baseRef, null, captureScopes);
+                    await store.createBranchFromPin(input.scopeId, branchId, pin, beforeInventory.baseRef, null, captureScopes);
                     return;
                   }
                 } finally { await pin.release(); }
@@ -1914,78 +1923,33 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
               baselineRoots.delete(key);
             }
           }
-        } else {
-          if (captureScopes.length > 0 && canListCaptureScopes) {
-            frozenCaptureScopePaths = [...new Set(await store.listCaptureScopePaths(sourceRoot, captureScopes, preparationSignal))].sort();
-          }
-          if (typeof store.listWorkspaceBaselinePaths === "function") {
-            relativePaths = await store.listWorkspaceBaselinePaths(sourceRoot, preparationSignal);
-            directoryBefore = directoryBaselineFingerprint(relativePaths);
-          }
         }
-        const baseline = await store.captureDirectory(sourceRoot, relativePaths, {
-          signal: preparationSignal,
-          ...(beforeInventory?.kind === "git" ? { indexModes: beforeInventory.indexModes } : {}),
-          onProgress: (done, total) => {
-            worktree!.retentionReason = `Capturing baseline ${done}/${total}`;
-          },
+        const captured = await captureStableDirectoryBaseline({
+          store, directory: sourceRoot, captureScopes, inventory: beforeInventory, baseRef: worktree!.base,
+          inspectInventory: async () => await inspectInventory() ?? { kind: "directory" },
+          signal: preparationSignal, changed: baselineChanged,
+          onProgress: (done, total) => { worktree!.retentionReason = `Capturing baseline ${done}/${total}`; },
         });
         delete worktree!.retentionReason;
-        if (gitWindow !== null) {
-          const afterInventory = await inspectInventory();
-          if (afterInventory?.kind !== "git") throw baselineChanged("git workspace identity");
-          rejectGitlinks(afterInventory.gitlinks);
-          if (gitBaselineFingerprint(afterInventory) !== gitWindow) throw baselineChanged("git inventory");
-        } else {
-          if (directoryBefore !== null && typeof store.listWorkspaceBaselinePaths === "function") {
-            const directoryAfter = await store.listWorkspaceBaselinePaths(sourceRoot, preparationSignal);
-            if (directoryBefore !== directoryBaselineFingerprint(directoryAfter)) throw baselineChanged("directory paths");
+        try {
+          await dirtyBarrier?.settle();
+          await assertNoActiveBaselineWriters();
+          if (typeof options.completeBaselineCapture === "function" && baselineCapture !== undefined) {
+            const completed = await options.completeBaselineCapture(baselineCapture, preparationSignal);
+            baselineCapture = undefined;
+            if (!completed.stable) {
+              throw baselineChanged(`documents capture ${completed.reasons.join(",") || "unstable"}`);
+            }
           }
-        }
-        const capturedPaths = Object.keys(baseline).sort();
-        if (capturedPaths.length > 0) {
-          const afterStates = await store.captureDirectory(sourceRoot, capturedPaths, {
-            signal: preparationSignal,
-            store: false,
-            ...(beforeInventory?.kind === "git" ? { indexModes: beforeInventory.indexModes } : {}),
-          });
-          const changedPaths = capturedPaths.filter((file) => !sameState(
-            baseline[file] ?? { kind: "missing" },
-            afterStates[file] ?? { kind: "missing" },
-          ));
-          if (changedPaths.length > 0) {
-            throw baselineChanged(`captured content or metadata: ${changedPaths.slice(0, 8).join(",")}`);
+          preparationSignal.throwIfAborted();
+          await createFromStates(store, captured.states, captured.baseRef);
+          if (gitWindow !== null && beforeInventory?.kind === "git" && beforeInventory.rawFileHashes && !draftBaselineId && !captureScopes.length) {
+            const branch = await store.getBranchRoot(branchId);
+            if (branch) baselineRoots.set(`${input.scopeId}:${sourceRoot}`, { fingerprint: createHash("sha256").update(gitWindow).digest("hex"), branchId, root: branch.baseRoot });
           }
-        }
-        if (canListCaptureScopes && (frozenCaptureScopePaths.length > 0 || captureScopes.length > 0)) {
-          const afterScopePaths = [...new Set(await store.listCaptureScopePaths(sourceRoot, captureScopes, preparationSignal))].sort();
-          if (afterScopePaths.length !== frozenCaptureScopePaths.length
-            || afterScopePaths.some((file, index) => file !== frozenCaptureScopePaths[index])) {
-            throw baselineChanged("captureScopes paths");
-          }
-          const afterScopeStates = await store.captureDirectory(sourceRoot, afterScopePaths, {
-            signal: preparationSignal,
-            ...(beforeInventory?.kind === "git" ? { indexModes: beforeInventory.indexModes } : {}),
-            store: false,
-          });
-          const changedScopePaths = afterScopePaths.filter((file) => !sameState(
-            baseline[file] ?? { kind: "missing" },
-            afterScopeStates[file] ?? { kind: "missing" },
-          ));
-          if (changedScopePaths.length > 0) throw baselineChanged("captureScopes content or metadata");
-        }
-        await assertNoActiveBaselineWriters();
-        if (typeof options.completeBaselineCapture === "function" && baselineCapture !== undefined) {
-          const completed = await options.completeBaselineCapture(baselineCapture, preparationSignal);
-          baselineCapture = undefined;
-          if (!completed.stable) {
-            throw baselineChanged(`documents capture ${completed.reasons.join(",") || "unstable"}`);
-          }
-        }
-        await createFromStates(store, baseline, baseRef);
-        if (gitWindow !== null && beforeInventory?.kind === "git" && beforeInventory.rawFileHashes && !draftBaselineId && !captureScopes.length) {
-          const branch = await store.getBranchRoot(branchId);
-          if (branch) baselineRoots.set(`${input.scopeId}:${sourceRoot}`, { fingerprint: createHash("sha256").update(gitWindow).digest("hex"), branchId, root: branch.baseRoot });
+        } catch (error) {
+          await store.releaseCapturedStates(captured.states);
+          throw error;
         }
       }, "exclusive", { executionWorkspace: captureWorkspaceId });
       const setupPending = existing.manifest.tools.includes("bash")
@@ -2029,7 +1993,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       throw error;
     } finally {
       if (typeof options.completeBaselineCapture === "function" && baselineCapture !== undefined) {
-        await options.completeBaselineCapture(baselineCapture, preparationSignal).catch(() => undefined);
+        await options.completeBaselineCapture(baselineCapture).catch(() => undefined);
       }
       await dirtyBarrier?.release().catch(() => undefined);
     }
@@ -2644,14 +2608,27 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     let currentWorktree = thread.worktree;
     let publishedResultRevision: number | undefined;
     let nativeResultUnavailable = Boolean(thread.workBranchId && (!options.workingStates || !currentWorktree));
+    const publicationId = `pi-result:${binding.scopeId}:${binding.threadId}:${binding.runId}`;
+    let resumedResult: WorkingResult | null = null;
+    if (options.workingStates && thread.workBranchId) {
+      try {
+        resumedResult = await options.workingStates.withBranchStore(binding.scopeId, "thread-result-resume",
+          store => resumeWorkingPublication(store, thread.workBranchId!, publicationId), "shared");
+      } catch (error) {
+        nativeResultUnavailable = true;
+        unresolved.push(`Unable to resume the original working result: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     if (currentWorktree) {
       let inspected: Awaited<ReturnType<ThreadWorktreeRuntime["inspect"]>> | null = null;
+      let publicationInventory: BaselineInventory | undefined;
       let fixedSnapshotReady = false;
       const inspectVirtualWithoutBranch = isVirtualWorktree(currentWorktree)
         && (!options.workingStates || !thread.workBranchId);
       const nativeMaterializedResult = Boolean(options.workingStates && thread.workBranchId && !isVirtualWorktree(currentWorktree));
-      if (nativeMaterializedResult && currentWorktree.base !== "zero-commit") {
+      if (nativeMaterializedResult && !resumedResult && !nativeResultUnavailable && currentWorktree.base !== "zero-commit") {
         try {
+          publicationInventory = await options.worktrees.inspectGitBaselineInventory?.(currentWorktree.path);
           inspected = await options.worktrees.inspect(currentWorktree, "live");
           changedFiles = inspected.changedFiles;
           diffStats = inspected.diffStats;
@@ -2685,25 +2662,26 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       }
       if (options.workingStates && thread.workBranchId && !nativeResultUnavailable) {
         try {
-          const publishedIndexModes = !isVirtualWorktree(currentWorktree)
+          const publishedIndexModes = !resumedResult && !isVirtualWorktree(currentWorktree)
             ? await options.worktrees.inspectIndexModes?.(currentWorktree!.path)
             : undefined;
-          const published = await options.workingStates.withBranchStore(
+          const published = resumedResult ?? await options.workingStates.withBranchStore(
             binding.scopeId,
             "thread-result-publish",
             async (store) => {
-              if (isVirtualWorktree(currentWorktree)) return store.publishHeadResult(thread.workBranchId!);
+              if (isVirtualWorktree(currentWorktree)) return store.publishHeadResult(thread.workBranchId!, { publicationId });
               const paths = await materializedPublishPaths(
                 store,
                 thread.workBranchId!,
                 currentWorktree!.path,
                 currentWorktree!.base === "zero-commit" ? undefined : inspected!.changedFiles,
               );
+              const validateFixedSource = await materializedResultValidator(store, thread.workBranchId!, currentWorktree!.path, paths, publicationInventory);
               return store.publishDirectoryResult(
                 thread.workBranchId!,
                 currentWorktree!.path,
                 paths,
-                publishedIndexModes === undefined ? {} : { indexModes: publishedIndexModes },
+                { publicationId, ...(publishedIndexModes === undefined ? {} : { indexModes: publishedIndexModes }), ...(validateFixedSource ? { validateFixedSource } : {}) },
               );
             },
             "exclusive",

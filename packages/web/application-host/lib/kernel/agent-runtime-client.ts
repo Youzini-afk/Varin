@@ -42,6 +42,7 @@ import type {
   UnacceptedChildSource,
   ChildTask,
   ChildPrepareParams,
+  ChildSourceReadyParams, ChildSettleParams, ChildResultCandidateParams, ChildResultPublishedParams, HostToolReconcileParams,
   ChildWait,
   ContextRefreshParams,
   ContextJobCreateParams,
@@ -507,6 +508,21 @@ export class AgentRuntimeClient {
       { threadId },
       signal,
     );
+  }
+  reconcileHostTool(input: HostToolReconcileParams, signal?: AbortSignal): Promise<RunReconcileResult> {
+    return this.kernel.agentRuntimeRequest('runtime.host_tool.reconcile', input, signal);
+  }
+  readyChildSource(input: ChildSourceReadyParams, signal?: AbortSignal): Promise<ChildTask> {
+    return this.kernel.agentRuntimeRequest('runtime.child.source.ready', input, signal);
+  }
+  settleChild(input: ChildSettleParams, signal?: AbortSignal): Promise<ChildTask> {
+    return this.kernel.agentRuntimeRequest('runtime.child.settle', input, signal);
+  }
+  attachChildCandidate(input: ChildResultCandidateParams, signal?: AbortSignal): Promise<ChildTask> {
+    return this.kernel.agentRuntimeRequest('runtime.child.result.candidate', input, signal);
+  }
+  attachChildResult(input: ChildResultPublishedParams, signal?: AbortSignal): Promise<ChildTask> {
+    return this.kernel.agentRuntimeRequest('runtime.child.result.published', input, signal);
   }
   prepareChild(
     input: ChildPrepareParams,

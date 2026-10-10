@@ -86,7 +86,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
     },
     rebindModel: async () => owner,
   }, async source => { await documents.inspectWorkspace(source.workspaceId); await documents.inspectWorkspace(source.executionWorkspaceId); }, (_runId, error) => { launchErrors.push(error); }, prepare, context.prepareContext);
-  const collaboration = new ThreadCollaboration({ runtime: adapter.runtime, workingStates,
+  const collaboration = new ThreadCollaboration({ kernel, storageAdapter: storage, resolveLiveSource: async () => { throw new Error("No live child expected"); }, sourceCaptureOwners: { documents, inspectInventory: async () => { throw new Error("No child capture expected"); } }, runtime: adapter.runtime, workingStates,
     continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal),
     prepareContext: context.prepareContext,
     onError: (_operation, error) => { launchErrors.push(error); } });
@@ -100,7 +100,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const hostUrl = await listen(createServer(app));
   configureRuntimeUrlResolver({ apiBaseUrl: hostUrl, realtimeBaseUrl: hostUrl });
   setRuntimeExtraHeaders({ 'x-fixture-auth': 'fixture-client' });
-  return { adapter, workspace, documents, workingStates, close, kernel, grants, collaboration, owner, configuration, context, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel };
+  return { adapter, workspace, documents, storage, workingStates, close, kernel, grants, collaboration, owner, configuration, context, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel };
 }
 
 function tool(response: ServerResponse, name: string, args: Record<string, unknown>, serial: number) {
@@ -241,7 +241,7 @@ it('reopens a parked wait after kernel shutdown and delivers the original stoppe
       { resolveModel: async () => ({ configuration: f.configuration, credentialOwner: f.owner }), rebindModel: async () => f.owner },
       async source => { await f.documents.inspectWorkspace(source.workspaceId); await f.documents.inspectWorkspace(source.executionWorkspaceId); },
       (_runId, error) => { errors.push(error); }, undefined, context.prepareContext);
-    collaboration = new ThreadCollaboration({ runtime, workingStates,
+    collaboration = new ThreadCollaboration({ kernel: reopened, storageAdapter: reopenedStorage, resolveLiveSource: async () => { throw new Error("No live child expected"); }, sourceCaptureOwners: { documents: f.documents, inspectInventory: async () => { throw new Error("No child capture expected"); } }, runtime, workingStates,
       continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal),
       prepareContext: context.prepareContext,
       onError: (_operation, error) => { errors.push(error); } });
@@ -297,7 +297,7 @@ it('rebuilds only Host continuation service while its kernel keeps the original 
     const waitId = (await f.runtime.run(receipt.run_id)).waiting_on;
     f.collaboration.stop();
     const errors: unknown[] = [];
-    replacement = new ThreadCollaboration({ runtime: f.runtime, workingStates: f.workingStates,
+    replacement = new ThreadCollaboration({ kernel: f.kernel, storageAdapter: f.storage, resolveLiveSource: async () => { throw new Error("No live child expected"); }, sourceCaptureOwners: { documents: f.documents, inspectInventory: async () => { throw new Error("No child capture expected"); } }, runtime: f.runtime, workingStates: f.workingStates,
       continueRun: (runId, signal) => f.adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => f.adapter.recover(signal),
       prepareContext: f.context.prepareContext,
       onError: (_operation, error) => { errors.push(error); } });

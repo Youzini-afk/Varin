@@ -20,9 +20,9 @@ pub struct DispatchInput {
 }
 impl DispatchInput {
     pub fn validate(&self) -> Result<()> {
-        if self.task.trim().is_empty() || self.model != "parent" || self.profile != "read_only" {
+        if self.task.trim().is_empty() || self.model != "parent" || !matches!(self.profile.as_str(), "read_only" | "isolated_write") {
             return Err(RuntimeError::Invalid(
-                "dispatch requires a task, explicit parent model and read_only profile".into(),
+                "dispatch requires a task, explicit parent model and a supported child profile".into(),
             ));
         }
         Ok(())
@@ -36,6 +36,68 @@ pub struct ChildSourcePin {
     pub source: launches::SourceSelection,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag="consistency",deny_unknown_fields)]
+pub enum ChildSourceProvenance {
+    #[serde(rename="fixed-root")]
+    FixedRoot {root:String},
+    #[serde(rename="stable-capture")]
+    StableCapture {#[serde(rename="contentMode")] content_mode:ChildSourceContentMode,#[serde(rename="captureScopes")]capture_scopes:Vec<String>,#[serde(rename="omittedDraftPaths")]omitted_draft_paths:Vec<String>},
+    #[serde(rename="git-base-with-overlay")]
+    GitBaseWithOverlay {#[serde(rename="contentMode")] content_mode:ChildSourceContentMode,#[serde(rename="captureScopes")]capture_scopes:Vec<String>,#[serde(rename="omittedDraftPaths")]omitted_draft_paths:Vec<String>},
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all="kebab-case")]
+pub enum ChildSourceContentMode {SavedFiles,FixedDraftBaseline}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]
+pub enum ChildSourceRoot {
+    Fixed { pin: ChildSourcePin },
+    Physical { root: launches::LiveRoot },
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ChildSourceHandoff {
+    pub operation_id: String,
+    pub source: launches::SourceSelection,
+    pub root: ChildSourceRoot,
+}
+impl ChildSourceHandoff {
+    pub fn fixed(operation_id:&str,pin:ChildSourcePin)->Self {
+        Self {operation_id:format!("child-source-handoff:{operation_id}"),source:pin.source.clone(),root:ChildSourceRoot::Fixed{pin}}
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]
+pub enum ChildSource {
+    Pending { handoff: ChildSourceHandoff },
+    Ready { handoff: ChildSourceHandoff, pin: ChildSourcePin, selection: launches::SourceSelection, provenance_ref: Value },
+}
+impl ChildSource {
+    pub fn handoff(&self)->&ChildSourceHandoff {match self{Self::Pending{handoff}|Self::Ready{handoff,..}=>handoff}}
+    pub fn pin(&self)->Option<&ChildSourcePin> {match self{Self::Ready{pin,..}=>Some(pin),Self::Pending{handoff}=>match &handoff.root{ChildSourceRoot::Fixed{pin}=>Some(pin),_=>None}}}
+    pub fn selection(&self)->Option<&launches::SourceSelection>{match self{Self::Ready{selection,..}=>Some(selection),_=>None}}
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ChildWorkingResultRef {
+    pub publication_id:String,pub workspace_id:String,pub branch_id:String,pub result_revision:u64,
+    pub root:String,pub base_root:String,pub record_id:String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]
+pub enum ChildCodeResult {
+    Pending,
+    Settling {publication_id:String},
+    Candidate {candidate:crate::KernelWorkingResultCandidate},
+    Published {result:ChildWorkingResultRef,effect:Effect},
+    NoChanges,
+    Unavailable {code:String,effect:Effect},
+}
+impl ChildCodeResult {
+    pub fn settled(&self)->bool {matches!(self,Self::Published{..}|Self::NoChanges|Self::Unavailable{..})}
+    pub fn effect(&self)->Effect {match self{Self::Published{effect,..}|Self::Unavailable{effect,..}=>*effect,_=>Effect::None}}
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildReport {
     pub outcome: Outcome,
@@ -43,7 +105,6 @@ pub struct ChildReport {
     pub run_id: Option<String>,
     pub history_ids: Vec<String>,
     pub detail: Option<String>,
-    pub code_result: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -60,7 +121,8 @@ pub struct ChildTask {
     pub input_ref: Value,
     pub configuration_ref: Value,
     pub launch: launch_content::LaunchSelectionMetadata,
-    pub source_pin: ChildSourcePin,
+    pub source: ChildSource,
+    pub code_result: ChildCodeResult,
     pub state: String,
     pub revision: u64,
     pub cursor: u64,
@@ -142,20 +204,20 @@ impl Catalog {
     }
     pub fn accept_prepared_child(&mut self, context: &ToolExecutionContext, input: DispatchInput,
         pin: ChildSourcePin, prepared: launch_content::PreparedChildLaunch) -> Result<ChildTask> {
-        let prepared = self.prepare_child_admission(context,input,pin,prepared)?.load()?;
+        let prepared = self.prepare_child_admission(context,input,ChildSourceHandoff::fixed(&context.operation_id,pin),prepared)?.load()?;
         self.accept_child_references(prepared)
     }
     pub fn accept_child_references(&mut self, prepared: child_content::PreparedChildAdmission) -> Result<ChildTask> {
         let context = &prepared.context;
         let child_launch = &prepared.launch;
-        let pin = &prepared.pin;
+        let handoff = &prepared.handoff;
         if let Some(old) =
             optional_record::<ChildTask>(&self.db, "child_tasks", &context.operation_id)?
         {
             if old.parent_run_id == context.run_id
                 && old.origin == context.origin
                 && old.input_ref == prepared.input_ref
-                && &old.source_pin == pin
+                && old.source.handoff() == handoff
                 && &old.launch == child_launch
             {
                 return Ok(old);
@@ -181,7 +243,7 @@ impl Catalog {
             ));
         }
         let parent: launch_content::LaunchMetadata = record(&tx, "run_launches", &run.id)?;
-        if parent.selection.source.as_ref() != Some(&pin.source)
+        if parent.selection.source.as_ref() != Some(&handoff.source)
             || parent.selection.connection_identity != child_launch.connection_identity
             || parent.selection.credential_scope != child_launch.credential_scope
             || parent.selection.model != child_launch.model
@@ -214,7 +276,8 @@ impl Catalog {
             input_ref: prepared.input_ref,
             configuration_ref: prepared.configuration_ref,
             launch: prepared.launch,
-            source_pin: prepared.pin,
+            source: ChildSource::Pending { handoff: prepared.handoff },
+            code_result: if prepared.profile == "read_only" { ChildCodeResult::NoChanges } else { ChildCodeResult::Pending },
             state: "preparing".into(),
             revision: 1,
             cursor: 0,
@@ -402,7 +465,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             .collect::<std::result::Result<_, _>>()?;
         rows
     };
-    if version != Some(2)
+    if version != Some(3)
         || columns
             != vec![
                 ("id".into(), "TEXT".into(), 0, 1),
@@ -506,7 +569,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
     Ok(())
 }
 pub(super) fn initialize_new(db: &Connection) -> Result<()> {
-    db.execute_batch("CREATE TABLE child_tasks(id TEXT PRIMARY KEY REFERENCES operations(id),child_thread_id TEXT NOT NULL UNIQUE REFERENCES threads(id),body TEXT NOT NULL); INSERT INTO runtime_domains(name,version) VALUES('collaboration',2);")?;
+    db.execute_batch("CREATE TABLE child_tasks(id TEXT PRIMARY KEY REFERENCES operations(id),child_thread_id TEXT NOT NULL UNIQUE REFERENCES threads(id),body TEXT NOT NULL); INSERT INTO runtime_domains(name,version) VALUES('collaboration',3);")?;
     Ok(())
 }
 
@@ -619,9 +682,7 @@ impl ChildPreparation {
             ));
         }
         source.validate()?;
-        let mut expected = child.source_pin.source.clone();
-        expected.branch_id = Some(format!("child-source:{}", child.operation_id));
-        expected.revision = Some(0);
+        let expected = child.source.selection().cloned().ok_or_else(|| RuntimeError::Conflict("child source is not ready".into()))?;
         if source != expected {
             return Err(RuntimeError::Conflict(
                 "prepared source does not match child baseline identity".into(),
@@ -704,13 +765,13 @@ impl Catalog {
             self.transition_run(&run.id, run.epoch, run.revision, RunState::Failed)?;
         }
         child.state = "failed".into();
+        if !child.code_result.settled() { child.code_result=ChildCodeResult::Unavailable{code:reason.into(),effect:Effect::None}; }
         child.report = Some(ChildReport {
             outcome: Outcome::Failed,
             sender_thread_id: child.child_thread_id.clone(),
             run_id: child.receipt.as_ref().map(|r| r.run_id.clone()),
             history_ids: vec![],
             detail: Some(reason.into()),
-            code_result: "no_changes".into(),
         });
         self.publish_child_report(child)
     }
@@ -726,13 +787,13 @@ impl Catalog {
         }
         let mut child = child;
         child.state = "cancelled".into();
+        if !child.code_result.settled() { child.code_result=ChildCodeResult::Unavailable{code:"cancelled_before_launch".into(),effect:Effect::None}; }
         child.report = Some(ChildReport {
             outcome: Outcome::Cancelled,
             sender_thread_id: child.child_thread_id.clone(),
             run_id: None,
             history_ids: vec![],
             detail: Some("Child preparation was cancelled before launch.".into()),
-            code_result: "no_changes".into(),
         });
         self.publish_child_report(child)
     }
@@ -1035,5 +1096,99 @@ impl Catalog {
         event(&tx, operation_id, 1, "child.source_released", Value::Null)?;
         tx.commit()?;
         Ok(())
+    }
+}
+
+
+pub struct ChildSourcePreparation {
+    child:ChildTask,pin:ChildSourcePin,selection:launches::SourceSelection,provenance:ChildSourceProvenance,
+    epoch:u64,content:crate::content::ContentStore,publication:crate::content::ContentPublication,
+}
+pub struct PreparedChildSource {child:ChildTask,source:ChildSource,epoch:u64,_publication:crate::content::ContentPublication}
+impl ChildSourcePreparation {
+    pub fn load(self)->Result<PreparedChildSource> {
+        self.pin.source.validate()?;self.selection.validate()?;
+        let handoff=self.child.source.handoff().clone();
+        let branch=format!("child-source:{}",self.child.operation_id);
+        let mode=if matches!(self.child.code_result,ChildCodeResult::NoChanges){SourceMode::FixedBranch}else{SourceMode::Materialized};
+        if self.selection.mode!=mode || self.selection.branch_id.as_deref()!=Some(&branch) || self.selection.revision!=Some(0)
+            || self.selection.environment_run_id.is_some() || self.selection.workspace_id!=handoff.source.workspace_id
+            || self.selection.execution_workspace_id!=handoff.source.execution_workspace_id
+            || self.pin.source.mode!=SourceMode::FixedBranch || self.pin.source.branch_id.as_deref()!=Some(&branch)
+            || self.pin.source.revision!=Some(0) || self.pin.source.workspace_id!=self.selection.workspace_id
+            || self.pin.source.execution_workspace_id!=self.selection.execution_workspace_id || self.pin.root.is_empty() || self.pin.pin_id.is_empty()
+        {return Err(RuntimeError::Conflict("prepared child source identity changed".into()));}
+        if let ChildSourceRoot::Fixed{pin}=&handoff.root {
+            if pin.root!=self.pin.root || self.provenance!=(ChildSourceProvenance::FixedRoot{root:pin.root.clone()}) {
+                return Err(RuntimeError::Conflict("fixed child source differs from its handoff".into()));
+            }
+        } else if matches!(self.provenance,ChildSourceProvenance::FixedRoot{..}) {
+            return Err(RuntimeError::Conflict("physical capture cannot claim a fixed-root source".into()));
+        }
+        let provenance_ref=self.content.save(&serde_json::to_value(self.provenance)?)?;
+        let source=ChildSource::Ready{handoff,pin:self.pin,selection:self.selection,provenance_ref};
+        Ok(PreparedChildSource{child:self.child,source,epoch:self.epoch,_publication:self.publication})
+    }
+}
+impl Catalog {
+    pub fn prepare_child_source(&self,operation_id:&str,pin:ChildSourcePin,selection:launches::SourceSelection,provenance:ChildSourceProvenance)->Result<ChildSourcePreparation> {
+        Ok(ChildSourcePreparation {child:self.child_task(operation_id)?,pin,selection,provenance,epoch:self.epoch,content:self.content.clone(),publication:self.content.begin_publication()})
+    }
+    pub fn attach_child_source(&mut self,prepared:PreparedChildSource)->Result<ChildTask> {
+        let mut child=self.child_task(&prepared.child.operation_id)?;
+        if child.source==prepared.source {return Ok(child);}
+        if prepared.epoch!=self.epoch || child.revision!=prepared.child.revision || child.state!="preparing"
+            || child.receipt.is_some() || child.report.is_some() || self.operation(&child.operation_id)?.cancel_requested
+            || matches!(child.source,ChildSource::Ready{..})
+        {return Err(RuntimeError::Conflict("child source preparation was cancelled or superseded".into()));}
+        child.source=prepared.source;self.commit_child_metadata(child,"child.source_ready")
+    }
+    pub fn begin_child_settlement(&mut self,operation_id:&str)->Result<ChildTask> {
+        let mut child=self.child_task(operation_id)?;
+        let receipt=child.receipt.as_ref().ok_or_else(||RuntimeError::Conflict("child has no admitted Run".into()))?;
+        if !self.run(&receipt.run_id)?.state.terminal(){return Err(RuntimeError::Conflict("child execution is still active".into()));}
+        if !matches!(child.code_result,ChildCodeResult::Pending){return Ok(child);}
+        child.code_result=ChildCodeResult::Settling{publication_id:format!("child-result:{operation_id}")};
+        child.state="settling".into();self.commit_child_metadata(child,"child.settling")
+    }
+    pub fn attach_child_candidate(&mut self,operation_id:&str,candidate:crate::KernelWorkingResultCandidate)->Result<ChildTask> {
+        let mut child=self.child_task(operation_id)?;
+        let publication_id=format!("child-result:{operation_id}");
+        if candidate.publication_id!=publication_id || candidate.candidate_operation_id!=format!("result-prepare:{publication_id}")
+            || candidate.branch_id!=format!("child-source:{operation_id}") || candidate.workspace_id!=child.source.handoff().source.workspace_id
+        {return Err(RuntimeError::Conflict("result candidate does not belong to this child".into()));}
+        if let ChildCodeResult::Candidate{candidate:old}=&child.code_result {return if old==&candidate{Ok(child)}else{Err(RuntimeError::Conflict("child result candidate changed".into()))};}
+        if child.code_result!=(ChildCodeResult::Settling{publication_id}){return Err(RuntimeError::Conflict("child is not ready to attach a result candidate".into()));}
+        child.code_result=ChildCodeResult::Candidate{candidate};self.commit_child_metadata(child,"child.result_candidate")
+    }
+    pub fn attach_child_result(&mut self,operation_id:&str,result:ChildWorkingResultRef,effect:Effect)->Result<ChildTask> {
+        let mut child=self.child_task(operation_id)?;
+        match &child.code_result {
+            ChildCodeResult::Candidate{candidate} if candidate.publication_id==result.publication_id && candidate.workspace_id==result.workspace_id
+                && candidate.branch_id==result.branch_id && candidate.root==result.root && candidate.base_root==result.base_root=>(),
+            ChildCodeResult::Published{result:old,effect:old_effect} if old==&result && (*old_effect==effect || *old_effect==Effect::Unknown)=>(),
+            _=>return Err(RuntimeError::Conflict("WorkingResult does not match the original child candidate".into()))
+        }
+        if child.code_result==(ChildCodeResult::Published{result:result.clone(),effect}){return Ok(child);}
+        child.code_result=ChildCodeResult::Published{result,effect};
+        if let Some(report)=&child.report {child.state=match report.outcome{Outcome::Succeeded=>"completed",Outcome::Cancelled=>"cancelled",_=>"failed"}.into();}
+        self.commit_child_metadata(child,"child.result_ready")
+    }
+    pub fn child_file_effect(&self,operation_id:&str)->Result<Effect> {
+        let child=self.child_task(operation_id)?;
+        let Some(receipt)=&child.receipt else{return Ok(Effect::None);};
+        let mut confirmed=false;let mut partial=false;
+        let mut statement=self.db.prepare("SELECT json_extract(body,'$.effect') FROM operations WHERE run_id=?1 AND json_extract(body,'$.executor') IN ('file_write','file_edit')")?;
+        let effects=statement.query_map([&receipt.run_id],|row|row.get::<_,String>(0))?;
+        for effect in effects {
+            let effect:Effect=serde_json::from_value(Value::String(effect?))?;
+            match effect {Effect::Unknown|Effect::Dispatched=>return Ok(Effect::Unknown),Effect::Confirmed=>confirmed=true,Effect::Partial=>partial=true,_=>()}
+        }
+        if partial || (confirmed && self.run(&receipt.run_id)?.state!=RunState::Completed){Ok(Effect::Partial)}
+        else if confirmed {Ok(Effect::Confirmed)} else {Ok(Effect::None)}
+    }
+    fn commit_child_metadata(&mut self,mut child:ChildTask,kind:&str)->Result<ChildTask> {
+        let tx=self.db.transaction()?;child.revision+=1;put(&tx,"child_tasks",&child.operation_id,&child)?;
+        event(&tx,&child.operation_id,child.revision,kind,Value::Null)?;tx.commit()?;Ok(child)
     }
 }

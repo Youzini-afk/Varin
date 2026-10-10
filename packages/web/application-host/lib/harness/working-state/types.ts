@@ -1,3 +1,4 @@
+import type { ChildSourceProvenance, KernelWorkingResultCandidate } from "../../kernel/protocol.generated.js";
 import type { ThreadDiffStats } from "@varin/protocol";
 import type {
   RecoveryState,
@@ -127,6 +128,31 @@ export interface WorkingStatePin extends WorkingStatePinnedRoot {
  * Branch roots and paths are asynchronous because the Rust kernel owns them.
  * Implementations must not retain an expanded workspace tree between operations.
  */
+/** The protocol owns candidate identity; both runtimes use the same Storage receipt. */
+export type WorkingResultCandidate = KernelWorkingResultCandidate;
+export interface WorkingSourcePreparation {
+  branch: WorkingBranchRoot;
+  provenance: ChildSourceProvenance;
+}
+export interface WorkingBranchCreateOptions {
+  sourceProvenance?: ChildSourceProvenance;
+}
+export interface WorkingResultPublicationOptions {
+  /** Durable lifecycle callers provide their original logical publication identity. */
+  publicationId?: string;
+  signal?: AbortSignal;
+}
+export interface WorkingResultDirectoryOptions extends WorkingResultPublicationOptions {
+  indexModes?: Map<string, string> | Record<string, string>;
+  validateFixedSource?: () => Promise<boolean>;
+}
+export interface PrepareWorkingResultCandidate {
+  publicationId: string;
+  branchId: string;
+  source: { kind: "head" } | ({ kind: "directory"; directory: string; changedPaths?: string[] } & Omit<WorkingResultDirectoryOptions, "publicationId" | "signal">);
+  signal?: AbortSignal;
+}
+
 export interface WorkingStateRootStore {
   queryFiles(pin: WorkingStatePinnedRoot, request: import("./query-contract.js").WorkingStateFileQuery, options?: import("./query-contract.js").WorkingStateQueryOptions): Promise<import("./query-contract.js").WorkingStateQueryResult>;
   getBranchRoot(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingBranchRoot | null>;
@@ -150,9 +176,12 @@ export interface WorkingStateRootStore {
   createDraftBaseline(workspaceId: string, paths: readonly { path: string; content: string | Buffer; mode?: number; provenance: DraftBaselinePathProvenance }[]): Promise<DraftBaseline>;
   getDraftBaseline(id: string): Promise<DraftBaseline | null>;
   deleteDraftBaseline(id: string): Promise<void>;
-  createBranch(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, baseRef?: string, draftBasePaths?: string[], captureScopes?: string[]): Promise<WorkingBranchRoot>;
+  createBranch(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, baseRef?: string, draftBasePaths?: string[], captureScopes?: string[], options?: WorkingBranchCreateOptions): Promise<WorkingBranchRoot>;
+  readSourcePreparation(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingSourcePreparation | null>;
   createBranchFromPin(workspaceId: string, branchId: string, pin: WorkingStatePin, parentRef: string, draftBaselineId?: string | null, captureScopes?: string[]): Promise<WorkingBranchRoot>;
   captureDirectory(directory: string, relativePaths?: string[], options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; store?: boolean; indexModes?: Map<string, string> | Record<string, string> }): Promise<Record<string, RecoveryState>>;
+  /** Release only transient capture owners; retained branch/result objects remain owned. */
+  releaseCapturedStates(states: Record<string, RecoveryState>): Promise<void>;
   listCaptureScopePaths(directory: string, scopes: readonly string[], signal?: AbortSignal): Promise<string[]>;
   listWorkspaceBaselinePaths(directory: string, signal?: AbortSignal): Promise<string[]>;
   commitVirtualWrites(
@@ -188,8 +217,12 @@ export interface WorkingStateRootStore {
   directoryMatchesResult(branchId: string, revision: number, directory: string): Promise<boolean>;
   captureBranchCandidateIdentity(branchId: string, directory: string, changedPaths: string[]): Promise<string | null>;
   captureSeededPathIdentity(directory: string, changedPaths: string[], seed: string): Promise<string>;
-  publishHeadResult(branchId: string): Promise<WorkingResult>;
-  publishDirectoryResult(branchId: string, directory: string, changedPaths?: string[], options?: { indexModes?: Map<string, string> | Record<string, string>; validateFixedSource?: () => Promise<boolean> }): Promise<WorkingResult>;
+  readResultCandidate(branchId: string, publicationId: string, options?: { signal?: AbortSignal }): Promise<WorkingResultCandidate | null>;
+  prepareResultCandidate(input: PrepareWorkingResultCandidate): Promise<WorkingResultCandidate>;
+  publishPreparedResult(publicationId: string, candidate: WorkingResultCandidate, options?: { signal?: AbortSignal }): Promise<WorkingResult>;
+  resumeResultPublication(branchId: string, publicationId: string, options?: { signal?: AbortSignal }): Promise<WorkingResult | null>;
+  publishHeadResult(branchId: string, options?: WorkingResultPublicationOptions): Promise<WorkingResult>;
+  publishDirectoryResult(branchId: string, directory: string, changedPaths?: string[], options?: WorkingResultDirectoryOptions): Promise<WorkingResult>;
   resultTreeIdentity(branchId: string, revision: number): Promise<string | null>;
   listResults(branchId?: string): Promise<WorkingResult[]>;
   deleteResults(branchId: string, revisions: readonly number[]): Promise<number[]>;
@@ -250,6 +283,8 @@ export interface WorkingResult {
   baseRevision?: number;
   /** Rust-kernel root bound to resultRevision when the kernel is authoritative. */
   root?: string;
+  /** Immutable publication baseline, independent of a later revision-0 rebase. */
+  baseRoot?: string;
 }
 
 export type ThreeWayPathDecision =

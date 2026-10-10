@@ -73,6 +73,61 @@ export async function startRunFromSource(
       ...(selection.environmentRunId ? { environmentRunId: selection.environmentRunId } : {}) },
     enabledTools: tools, ...(credentialScope ? { credentialScope } : {}),
   }, signal);
+  const authority = await admitRunSourceAuthority(kernel, runtime, selection, { ...options, allowMaterialization: true });
+  try {
+    await runtime.reconcileRun(run.id, authority.toolBinding, signal);
+    await runtime.prepareMcp(run.id, selection, authority.canonicalRoot, signal);
+    return options.credentialOwner
+      ? await runtime.startRunWithCredentialOwner(run.id, options.credentialOwner, signal, authority.toolBinding)
+      : await runtime.startRun(run.id, signal, authority.toolBinding);
+  } catch (error) {
+    await authority.release().catch(() => undefined);
+    throw error;
+  }
+}
+
+/** Rebinds the original durable source under a fresh permit. This never starts a Run.
+ * Existing environments are only registered; materialization is reserved for initial launch. */
+export async function admitRunSourceAuthority(
+  kernel: KernelClient,
+  runtime: AgentRuntimeClient,
+  selection: SourceLaunch,
+  options: { signal?: AbortSignal; resolveLiveSource?: LiveSourceResolver; allowMaterialization?: boolean; purpose?: 'source' | 'integration' | 'result'; operationId?: string } = {},
+) {
+  const signal = options.signal;
+  signal?.throwIfAborted();
+  const run = await runtime.run(selection.runId, signal);
+  const saved = await runtime.launch(run.id, signal);
+  const sourceSelection = saved?.selection.source;
+  if (!sourceSelection || sourceSelection.workspace_id !== selection.workspaceId
+    || sourceSelection.execution_workspace_id !== selection.executionWorkspaceId
+    || sourceSelection.mode !== selection.mode
+    || sourceSelection.branch_id !== (selection.branchId ?? null)
+    || sourceSelection.revision !== (selection.revision ?? null)
+    || (sourceSelection.environment_run_id ?? undefined) !== selection.environmentRunId
+    || sourceSelection.live_root?.hostId !== selection.liveRoot?.hostId
+    || sourceSelection.live_root?.rootId !== selection.liveRoot?.rootId
+    || sourceSelection.live_root?.canonicalRoot !== selection.liveRoot?.canonicalRoot) throw new Error('Source authority must match the original durable Run source');
+  const tools = [...new Set(selection.tools)];
+  if (JSON.stringify([...tools].sort()) !== JSON.stringify(sourceToolSchemas(saved.selection).map(tool => tool.name).sort())) throw new Error('Source authority cannot change the admitted tools');
+  if (selection.mode === 'live_root') {
+    if (!options.resolveLiveSource) throw new Error('Live source requires its Documents resource owner');
+    await options.resolveLiveSource(selection, signal);
+  }
+  const resultOnly = options.purpose === 'result';
+  if (resultOnly) {
+    const child = await runtime.childForThread(run.thread_id, signal);
+    if (!child || child.receipt?.run_id !== run.id || child.source.kind !== 'ready'
+      || !['settling', 'candidate', 'published'].includes(child.code_result.kind)
+      || !['completed', 'failed', 'cancelled'].includes(run.state)) throw new Error('Fixed result authority requires the original stopped child settlement');
+  }
+  const integration = options.purpose === 'integration';
+  if (integration) {
+    if (selection.mode === 'fixed_branch' || !options.operationId) throw new Error('Integration requires an admitted physical target Operation');
+    const operation = await runtime.operation(options.operationId, signal);
+    if (operation.run_id !== run.id || operation.phase !== 'running' || operation.executor !== 'integrate_child'
+      || operation.execution_owner?.kind !== 'external' || operation.cancel_requested) throw new Error('Integration target authority requires its original active Host tool Operation');
+  }
   // Do not use old grants from the durable selection. Each Host lifetime issues its own permit.
   const grant = await kernel.issueGrant({
     grantId: `source:${randomUUID()}`,
@@ -80,9 +135,10 @@ export async function startRunFromSource(
     executionWorkspace: selection.executionWorkspaceId,
     threadId: run.thread_id,
     runId: run.id,
-    capabilities: ['storage.read', 'storage.write', ...(tools.some(tool => tool.startsWith('process_')) ? ['process'] : [])],
+    capabilities: ['storage.read', 'storage.write', ...(integration ? ['recovery'] : []), ...(tools.some(tool => tool.startsWith('process_')) ? ['process'] : [])],
     pathScopes: [''],
   }, signal);
+
   runtime.retainSourceGrant(run.id, grant.grantId);
   const actor = kernel.scoped(grant);
   try {
@@ -91,7 +147,7 @@ export async function startRunFromSource(
     const source = selection.mode === 'live_root' ? undefined : await actor.readBranch({ branchId: selection.branchId, revision: selection.revision, includeEntries: false }, signal);
     if (source && (source.workspaceId !== selection.workspaceId || source.branchId !== selection.branchId
       || source.view !== 'revision' || source.revision !== selection.revision)) throw new Error('Launch source returned a different fixed revision');
-    if (selection.mode === 'live_root') {
+    if (!resultOnly && selection.mode === 'live_root') {
       // Fresh authority is mandatory even when the durable root identity is unchanged.
       const registered = await actor.fileRootRegister({ workspaceId: selection.workspaceId,
         executionWorkspaceId: selection.executionWorkspaceId, canonicalRoot: selection.liveRoot.canonicalRoot }, signal);
@@ -100,13 +156,13 @@ export async function startRunFromSource(
       rootId = selection.liveRoot.rootId;
       executionCwd = selection.liveRoot.canonicalRoot;
     }
-    if (selection.mode === 'materialized') {
+    if (!resultOnly && selection.mode === 'materialized') {
       const handshake = kernel.handshake ?? await kernel.start();
       const storageRoot = await canonicalizePathIdentity(handshake.storageRoot);
       const key = createHash('sha256').update(JSON.stringify([selection.workspaceId, selection.environmentRunId ?? run.id])).digest('hex');
       const relativeTarget = `managed/runs/${key}`;
       const targetPath = path.resolve(storageRoot, relativeTarget);
-      if (!selection.environmentRunId) {
+      if (options.allowMaterialization && !selection.environmentRunId) {
       const container = await actor.fileRootRegister({ workspaceId: selection.workspaceId, executionWorkspaceId: selection.executionWorkspaceId, canonicalRoot: storageRoot }, signal);
       if (typeof container.rootId !== 'string') throw new Error('Materialization root registration failed');
       const result = await actor.fileMaterialize({
@@ -134,13 +190,9 @@ export async function startRunFromSource(
       ...(selection.mode === 'fixed_branch' ? { fileSource: fixed }
         : selection.mode === 'materialized' ? { rootId, materializedSource: fixed } : { rootId, liveRoot: selection.liveRoot }),
     };
-    await runtime.reconcileRun(run.id, toolBinding, signal);
-    await runtime.prepareMcp(run.id, selection, executionCwd, signal);
-    return options.credentialOwner
-      ? await runtime.startRunWithCredentialOwner(run.id, options.credentialOwner, signal, toolBinding)
-      : await runtime.startRun(run.id, signal, toolBinding);
+    return { grant, client: actor, rootId, canonicalRoot: executionCwd, toolBinding,
+      release: () => runtime.releaseSourceGrant(run.id, grant.grantId) };
   } catch (error) {
-    // Revocation is a control request, not a claim that an already accepted effect stopped.
     await runtime.releaseSourceGrant(run.id, grant.grantId).catch(() => undefined);
     throw error;
   }

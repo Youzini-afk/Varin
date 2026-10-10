@@ -3,15 +3,15 @@ import type { WorkingStateFileQuery, WorkingStateQueryOptions, WorkingStateQuery
 import { randomUUID, createHash } from "node:crypto";
 import path from "node:path";
 import { canonicalizePathIdentity } from "../workspace/path-safety.js";
-import type { KernelBranchReadResult, KernelBranchState, KernelEntry, KernelRecordResult, KernelWorkingDraftDocument } from "./protocol.generated.js";
+import type { ChildSourceProvenance, KernelBranchReadResult, KernelBranchState, KernelEntry, KernelRecordResult, KernelWorkingDraftDocument } from "./protocol.generated.js";
 import type { KernelClient, KernelGrantHandle, KernelScopedClient } from "./kernel-client.js";
 import type { WorkspaceRecoveryEngine } from "../recovery/engine.js";
 import type { RecoveryDurableOperationPort } from "../recovery/journal-engine.js";
-import type { HostFileResourceBackend } from "../recovery/durable-file-operation.js";
+import type { HostFileResourceBackend, HostResourceOperationGate } from "../recovery/durable-file-operation.js";
 import { type RecoveryFileStore, type RecoveryIdentity } from "../recovery/journal-files.js";
 import type { MaterializeResult } from "../harness/working-state/materializer.js";
 import { applyIndexModes } from "../harness/working-state/git-index-mode.js";
-import { parseRecoveryState, sameState } from "../recovery/journal-files.js";
+import { parseRecoveryState, sameState, stateIdentity } from "../recovery/journal-files.js";
 import type {
   DraftBaseline,
   DraftBaselinePathProvenance,
@@ -20,7 +20,13 @@ import type {
   ResultReviewRecord,
   ResultVerificationBundle,
   WorkingBranchRoot,
+  WorkingBranchCreateOptions,
+  WorkingSourcePreparation,
   WorkingResult,
+  WorkingResultCandidate,
+  PrepareWorkingResultCandidate,
+  WorkingResultPublicationOptions,
+  WorkingResultDirectoryOptions,
   WorkingStatePin,
   WorkingStatePinnedRoot,
   WorkingStateContentSource,
@@ -30,6 +36,7 @@ import type {
   WorkingStateTreeRead,
   WorkspaceWorkingStateRootAccess,
 } from "../harness/working-state/types.js";
+import { withAncestorDirectories } from "../harness/working-state/workspace-baseline.js";
 import { assertVirtualWriteTree } from "../harness/working-state/virtual-write-tree.js";
 
 type Mode = "exclusive" | "shared";
@@ -87,7 +94,7 @@ export interface KernelStorageContext {
   }>;
   fileStore: RecoveryFileStore;
   fileResources?: HostFileResourceBackend;
-  resourceOperationGate: { run<T>(resources: readonly unknown[], operation: () => Promise<T>): Promise<T> };
+  resourceOperationGate: HostResourceOperationGate;
   collectUnreachableObjects?: () => Promise<{ byteLengthReclaimed: number; objectsDeleted: number }>;
   durableRecoveryStore?: RecoveryDurableOperationPort;
   records: {
@@ -164,6 +171,21 @@ const fromKernelState = (state: KernelBranchState): RecoveryState => {
 const asRecord = (value: unknown): Record<string, unknown> => (
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
 );
+
+const parseSourceProvenance = (value: unknown): ChildSourceProvenance => {
+  const source = asRecord(value);
+  if (source.consistency === "fixed-root" && typeof source.root === "string" && source.root) {
+    return { consistency: source.consistency, root: source.root };
+  }
+  if ((source.consistency === "stable-capture" || source.consistency === "git-base-with-overlay")
+    && (source.contentMode === "saved-files" || source.contentMode === "fixed-draft-baseline")
+    && Array.isArray(source.captureScopes) && source.captureScopes.every((item): item is string => typeof item === "string")
+    && Array.isArray(source.omittedDraftPaths) && source.omittedDraftPaths.every((item): item is string => typeof item === "string")) {
+    return { consistency: source.consistency, contentMode: source.contentMode,
+      captureScopes: [...source.captureScopes], omittedDraftPaths: [...source.omittedDraftPaths] };
+  }
+  throw new Error("Working source provenance body is malformed");
+};
 
 const parsePendingFileOperation = (value: unknown): KernelPendingFileOperation => {
   const record = asRecord(value);
@@ -245,6 +267,7 @@ const parsePinTreeRead = (value: Record<string, unknown>): KernelPinTreeRead => 
 /** Rust-kernel root/path authority. It retains no expanded branch or result tree. */
 export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   private readonly ownerByHash = new Map<string, string>();
+  private readonly captureOwners = new WeakMap<Record<string, RecoveryState>, Map<string, string>>();
   private readonly sourceByHash = new Map<string, { branchId?: string; pinId?: string; path?: string; revision?: number; recordId?: string; slot?: string; ownerId?: string }>();
 
   constructor(private readonly context: KernelStorageContext) {}
@@ -453,56 +476,39 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     const record = await this.context.working.resultGet(`working-result:${branchId}@${revision}`);
     if (!record) return null;
     const document = asRecord(record.record);
-    if (document.branchId !== branchId || Number(document.resultRevision) !== revision || typeof document.root !== "string") return null;
-    const changedPaths = Array.isArray(document.changedPaths) ? document.changedPaths.filter((value): value is string => typeof value === "string") : [];
-    // Results published after baseline-rebase support carry their own frozen
-    // base/path states, so a later baseline switch cannot rewrite the
-    // provenance of an older revision. Documents predating that field fall
-    // back to the live revision-0 base read.
-    const storedStates = (key: "baseStates" | "pathStates"): Record<string, RecoveryState> | null => {
-      const raw = asRecord(document[key]);
-      const entries = Object.entries(raw ?? {});
-      if (!entries.length) return null;
-      try {
-        return Object.fromEntries(entries.map(([file, state]) => [normalize(file), parseRecoveryState(state)]));
-      } catch {
-        return null;
-      }
+    if (document.branchId !== branchId || Number(document.resultRevision) !== revision || typeof document.root !== "string"
+      || typeof document.baseRoot !== "string" || typeof document.createdAt !== "string"
+      || !Array.isArray(document.changedPaths) || document.changedPaths.some(file => typeof file !== "string")) {
+      throw new Error(`Working result ${branchId}@${revision} has malformed provenance`);
+    }
+    const changedPaths = document.changedPaths.map(file => normalize(String(file))).sort();
+    if (new Set(changedPaths).size !== changedPaths.length) throw new Error("Working result has duplicate changed paths");
+    const storedStates = (key: "baseStates" | "pathStates"): Record<string, RecoveryState> => {
+      const raw = document[key];
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`Working result has no fixed ${key}`);
+      const states = Object.fromEntries(Object.entries(raw).map(([file, state]) => [normalize(file), parseRecoveryState(state)]));
+      if (JSON.stringify(Object.keys(states).sort()) !== JSON.stringify(changedPaths)) throw new Error(`Working result ${key} does not cover its changed paths`);
+      return states;
     };
-    const storedBaseStates = storedStates("baseStates");
-    const storedPathStates = storedStates("pathStates");
-    const [base, fixed] = await Promise.all([
-      storedBaseStates
-        ? null
-        : this.context.client.readBranch({ branchId, revision: 0, paths: changedPaths, includeEntries: true }, options?.signal),
-      this.context.client.readBranch({ branchId, revision, paths: changedPaths, includeEntries: true }, options?.signal),
-    ]);
-    if (fixed.branchId !== branchId || fixed.workspaceId !== this.context.identity.workspaceId
-      || fixed.view !== "revision" || fixed.revision !== revision
-      || fixed.root !== document.root
-      || (base !== null && (base.branchId !== branchId || base.workspaceId !== fixed.workspaceId
-        || base.view !== "revision" || base.revision !== 0))) {
+    const baseStates = storedStates("baseStates");
+    const pathStates = storedStates("pathStates");
+    const fixed = await this.selected(branchId, changedPaths, revision, options?.signal);
+    if (!fixed || fixed.branchId !== branchId || fixed.workspaceId !== this.context.identity.workspaceId
+      || fixed.view !== "revision" || fixed.revision !== revision || fixed.root !== document.root) {
       throw new Error(`Working result ${branchId}@${revision} returned inconsistent provenance`);
     }
-    const states = (page: KernelBranchReadResult): Record<string, RecoveryState> => {
-      const byPath = new Map(page.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
-      return Object.fromEntries(changedPaths.map((file) => [file, byPath.get(file) ?? { kind: "missing" as const }]));
-    };
-    const baseStates = storedBaseStates ?? states(base!);
+    const byPath = new Map(fixed.entries.map(entry => [normalize(entry.path), fromKernelState(entry.state)]));
+    if (changedPaths.some(file => !sameState(pathStates[file]!, byPath.get(file) ?? { kind: "missing" }))) {
+      throw new Error(`Working result ${branchId}@${revision} differs from its fixed root`);
+    }
     const resultRecordId = `working-result:${branchId}@${revision}`;
-    for (const [file, state] of Object.entries(states(fixed))) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { recordId: resultRecordId, slot: `result:${file}`, branchId, path: file, revision });
-    for (const [file, state] of Object.entries(baseStates)) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { recordId: resultRecordId, slot: `base:${file}`, branchId, path: file, revision: 0 });
-    return {
-      resultRevision: revision,
-      branchId,
-      ...(typeof document.parentRef === "string" ? { parentRef: document.parentRef } : {}),
-      changedPaths,
-      baseStates,
-      pathStates: storedPathStates ?? states(fixed),
-      diffStats: asRecord(document.diffStats) as unknown as WorkingResult["diffStats"],
-      createdAt: typeof document.createdAt === "string" ? document.createdAt : nowIso(),
-      root: document.root,
-    };
+    for (const [file, state] of Object.entries(pathStates)) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { recordId: resultRecordId, slot: `result:${file}`, branchId, path: file, revision });
+    for (const [file, state] of Object.entries(baseStates)) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { recordId: resultRecordId, slot: `base:${file}` });
+    const stats = asRecord(document.diffStats);
+    if (stats.files !== changedPaths.length || typeof stats.insertions !== "number" || typeof stats.deletions !== "number") throw new Error("Working result has malformed diff stats");
+    return { resultRevision: revision, branchId, ...(typeof document.parentRef === "string" ? { parentRef: document.parentRef } : {}),
+      changedPaths, baseStates, pathStates, diffStats: { files: changedPaths.length, insertions: stats.insertions, deletions: stats.deletions },
+      createdAt: document.createdAt, root: document.root, baseRoot: document.baseRoot };
   }
 
   async resultTreeIdentity(branchId: string, revision: number): Promise<string | null> {
@@ -917,7 +923,46 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     };
   }
 
-  async createBranch(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, baseRef?: string, draftBasePaths: string[] = [], captureScopes: string[] = []): Promise<WorkingBranchRoot> {
+  async readSourcePreparation(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingSourcePreparation | null> {
+    const operation = await this.context.client.getOperation(`branch-create:${branchId}`, options?.signal);
+    if (operation === null) {
+      if (await this.getBranchRoot(branchId, options)) throw new Error("Working source branch has no preparation receipt");
+      return null;
+    }
+    if (operation.kind !== "branch.create" || operation.state !== "committed") {
+      throw new Error("Working source preparation is not committed");
+    }
+    const receipt = asRecord(operation.result);
+    const reference = asRecord(receipt.sourceProvenance);
+    if (receipt.branchId !== branchId || receipt.workspaceId !== this.context.identity.workspaceId
+      || typeof receipt.root !== "string" || !receipt.root || receipt.writeRevision !== 0 || receipt.headRevision !== 0
+      || typeof reference.objectHash !== "string" || !reference.objectHash
+      || reference.recordId !== `working-source:${branchId}` || reference.slot !== "source-provenance") {
+      throw new Error("Working source preparation receipt has inconsistent provenance");
+    }
+    const branch = await this.getBranchRoot(branchId, options);
+    if (!branch || branch.root !== receipt.root || branch.baseRoot !== receipt.root || branch.writeRevision !== 0 || branch.headRevision !== 0) {
+      throw new Error("Working source branch changed after preparation");
+    }
+    const chunks: Buffer[] = [];
+    let offset = 0;
+    for (;;) {
+      const slice = await this.context.client.getBlob(reference.objectHash, { recordId: reference.recordId, slot: reference.slot },
+        { offset, length: 256 * 1024, ...(options?.signal ? { signal: options.signal } : {}) });
+      chunks.push(Buffer.from(slice.bytesBase64, "base64"));
+      if (slice.eof) break;
+      if (slice.nextOffset <= offset) throw new Error("Working source provenance cursor did not advance");
+      offset = slice.nextOffset;
+    }
+    const provenance = parseSourceProvenance(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    if (provenance.consistency === "fixed-root" ? provenance.root !== branch.root
+      : JSON.stringify(provenance.captureScopes) !== JSON.stringify(branch.captureScopes)) {
+      throw new Error("Working source provenance differs from its prepared branch");
+    }
+    return { branch, provenance };
+  }
+
+  async createBranch(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, baseRef?: string, draftBasePaths: string[] = [], captureScopes: string[] = [], options?: WorkingBranchCreateOptions): Promise<WorkingBranchRoot> {
     if (workspaceId !== this.context.identity.workspaceId) throw new Error("Working-state workspace mismatch");
     const kernelBaseRef = baseRef && (/^sha256-[a-f0-9]+$/i.test(baseRef) || baseRef.startsWith("pin:") || /^.+@\d+$/.test(baseRef)) ? baseRef : undefined;
     const normalizedDraftPaths = [...new Set(draftBasePaths.map(normalize))].sort();
@@ -938,6 +983,11 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       forgetPendingOwners();
     };
     let created: Record<string, unknown>;
+    // The upload is transient until the original branch-create transaction
+    // transfers it to its working.source record. No separate source snapshot.
+    const provenanceUpload = options?.sourceProvenance
+      ? await this.context.client.putBlob(Buffer.from(JSON.stringify(parseSourceProvenance(options.sourceProvenance)), "utf8"), `source-provenance:${branchId}:${randomUUID()}`)
+      : undefined;
     try {
       created = await this.context.client.createBranch({
         operationId: `branch-create:${branchId}`,
@@ -948,13 +998,18 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         ...(baseRef ? { parentRef: baseRef } : {}),
         draftBasePaths: normalizedDraftPaths,
         captureScopes: normalizedCaptureScopes,
+        ...(provenanceUpload ? { sourceProvenance: { objectHash: provenanceUpload.hash, ownerId: provenanceUpload.ownerId } } : {}),
       });
     } catch (error) {
       await releasePendingOwners(true);
+      if (provenanceUpload) await this.context.client.releaseBlob(provenanceUpload.ownerId).catch(() => undefined);
       throw error;
     }
     if (created.created === true) forgetPendingOwners();
-    else await releasePendingOwners();
+    else {
+      await releasePendingOwners();
+      if (provenanceUpload) await this.context.client.releaseBlob(provenanceUpload.ownerId);
+    }
     try {
       for (const [file, state] of Object.entries(baseState)) if (state.kind === "regular-file") {
         this.sourceByHash.set(state.objectHash, { branchId, path: normalize(file), revision: 0 });
@@ -1284,57 +1339,83 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     const files = relativePaths?.map(normalize) ?? await this.kernelScanPaths(directory, undefined, options?.signal);
     const root = await this.kernelFileRoot(directory);
     const result: Record<string, RecoveryState> = {};
+    const acquired = new Map<string, string>();
+    this.captureOwners.set(result, acquired);
     let done = 0;
     // Keep each response comfortably below the 16 MiB transport frame, allowing
     // metadata (including symlink targets) for each entry. This is a batching
     // granularity, not a limit on the directory or a per-file RPC loop.
     const batchSize = 256;
     const uniqueFiles = [...new Set(files)];
-    for (let offset = 0; offset < uniqueFiles.length; offset += batchSize) {
-      options?.signal?.throwIfAborted();
-      const batch = uniqueFiles.slice(offset, offset + batchSize);
-      const paths = batch.map(file => root.basePath ? `${root.basePath}/${file}` : file);
-      const leaseId = `capture-lease:${randomUUID()}`;
-      for (;;) {
+    try {
+      for (let offset = 0; offset < uniqueFiles.length; offset += batchSize) {
         options?.signal?.throwIfAborted();
-        // Admission receipts are not abandoned on cancellation. The kernel also
-        // retains exclusion if release arrives before a capture actually stops.
-        const lease = await this.context.client.fileLeaseAcquire({
+        const batch = uniqueFiles.slice(offset, offset + batchSize);
+        const paths = batch.map(file => root.basePath ? `${root.basePath}/${file}` : file);
+        const leaseId = `capture-lease:${randomUUID()}`;
+        for (;;) {
+          options?.signal?.throwIfAborted();
+          // Admission receipts are not abandoned on cancellation. The kernel also
+          // retains exclusion if release arrives before a capture actually stops.
+          const lease = await this.context.client.fileLeaseAcquire({
+            workspaceId: this.context.identity.workspaceId, rootId: root.rootId, leaseId,
+            resources: paths.map(path => ({ path, scope: "exact" })),
+          });
+          if (lease.status === "acquired") break;
+          if (lease.status !== "busy") throw new Error("Kernel returned an invalid capture lease result");
+          await new Promise(resolve => setTimeout(resolve, 5));
+        }
+        const value = await this.context.client.fileCaptureBatch({
+          operationId: `working-capture:${randomUUID()}`,
+          workspaceId: this.context.identity.workspaceId,
+          rootId: root.rootId, paths, leaseId, store: options?.store !== false,
+        }, options?.signal).finally(() => this.context.client.fileLeaseRelease({
           workspaceId: this.context.identity.workspaceId, rootId: root.rootId, leaseId,
-          resources: paths.map(path => ({ path, scope: "exact" })),
-        });
-        if (lease.status === "acquired") break;
-        if (lease.status !== "busy") throw new Error("Kernel returned an invalid capture lease result");
-        await new Promise(resolve => setTimeout(resolve, 5));
-      }
-      const value = await this.context.client.fileCaptureBatch({
-        operationId: `working-capture:${randomUUID()}`,
-        workspaceId: this.context.identity.workspaceId,
-        rootId: root.rootId, paths, leaseId, store: options?.store !== false,
-      }, options?.signal).finally(() => this.context.client.fileLeaseRelease({
-        workspaceId: this.context.identity.workspaceId, rootId: root.rootId, leaseId,
-      }));
-      if (!Array.isArray(value.entries) || value.entries.length !== batch.length) {
-        throw new Error("Kernel returned an invalid capture batch");
-      }
-      for (const [index, raw] of value.entries.entries()) {
-        const entry = raw as { path?: unknown; stateJson?: unknown; ownerId?: unknown };
-        const file = batch[index]!;
-        if (entry.path !== paths[index] || typeof entry.stateJson !== "string") {
-          throw new Error(`Kernel returned an invalid baseline state for ${file}`);
+        }));
+        if (!Array.isArray(value.entries) || value.entries.length !== batch.length) {
+          throw new Error("Kernel returned an invalid capture batch");
         }
-        const state = parseRecoveryState(JSON.parse(entry.stateJson));
-        if (state.kind === "regular-file" && options?.store !== false && typeof entry.ownerId === "string") {
-          const existingOwner = this.ownerByHash.get(state.objectHash);
-          if (existingOwner && existingOwner !== entry.ownerId) await this.context.client.releaseBlob(entry.ownerId);
-          else this.ownerByHash.set(state.objectHash, entry.ownerId);
+        for (const [index, raw] of value.entries.entries()) {
+          const entry = raw as { path?: unknown; stateJson?: unknown; ownerId?: unknown };
+          const file = batch[index]!;
+          if (entry.path !== paths[index] || typeof entry.stateJson !== "string") {
+            throw new Error(`Kernel returned an invalid baseline state for ${file}`);
+          }
+          const state = parseRecoveryState(JSON.parse(entry.stateJson));
+          if (state.kind === "regular-file" && options?.store !== false && typeof entry.ownerId === "string") {
+            const existingOwner = this.ownerByHash.get(state.objectHash);
+            if (existingOwner && existingOwner !== entry.ownerId) await this.context.client.releaseBlob(entry.ownerId);
+            else if (!existingOwner) {
+              this.ownerByHash.set(state.objectHash, entry.ownerId);
+              acquired.set(state.objectHash, entry.ownerId);
+            }
+          }
+          result[file] = state;
+          done += 1;
+          options?.onProgress?.(done, uniqueFiles.length);
         }
-        result[file] = state;
-        done += 1;
-        options?.onProgress?.(done, uniqueFiles.length);
       }
+      const states = applyIndexModes(result, options?.indexModes);
+      this.captureOwners.set(states, acquired);
+      return states;
+    } catch (error) {
+      await this.releaseCapturedStates(result);
+      throw error;
     }
-    return applyIndexModes(result, options?.indexModes);
+  }
+
+  async releaseCapturedStates(states: Record<string, RecoveryState>): Promise<void> {
+    const owners = this.captureOwners.get(states);
+    if (!owners) return;
+    await Promise.all([...owners].map(async ([hash, owner]) => {
+      // Branch commit may already have consumed this owner. Another capture's
+      // owner for identical bytes is not ours to release.
+      if (this.ownerByHash.get(hash) !== owner) { owners.delete(hash); return; }
+      await this.context.client.releaseBlob(owner);
+      if (this.ownerByHash.get(hash) === owner) this.ownerByHash.delete(hash);
+      owners.delete(hash);
+    }));
+    this.captureOwners.delete(states);
   }
 
   async listCaptureScopePaths(directory: string, scopes: readonly string[], signal?: AbortSignal): Promise<string[]> {
@@ -1345,152 +1426,145 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     return this.kernelScanPaths(directory, undefined, signal);
   }
 
-  private async publishCaptured(branchId: string, captured: Record<string, RecoveryState>, changedPaths?: string[], fixedPin?: WorkingStatePin): Promise<WorkingResult> {
-    const branch = await this.getBranchRoot(branchId);
-    if (!branch) throw new Error(`Working branch not found: ${branchId}`);
-    const currentDiff = changedPaths
-      ? null
-      : asRecord(await this.context.client.diffRoots({ leftRoot: branch.baseRoot, rightRoot: fixedPin?.root ?? branch.root }));
-    const candidates = [...new Set([
-      ...(changedPaths?.map(normalize) ?? Object.keys(captured).map(normalize)),
-      ...(currentDiff
-        ? [
-            ...(Array.isArray(currentDiff.added) ? currentDiff.added : []),
-            ...(Array.isArray(currentDiff.removed) ? currentDiff.removed : []),
-            ...(Array.isArray(currentDiff.changed) ? currentDiff.changed : []),
-          ].filter((value): value is string => typeof value === "string").map(normalize)
-        : []),
-    ])].sort();
-    const base = await this.context.client.readBranch({ branchId, revision: 0, paths: candidates, includeEntries: true });
-    const current = fixedPin ? undefined : await this.context.client.readBranch({ branchId, paths: candidates, includeEntries: true });
-    const states = (page: KernelBranchReadResult): Record<string, RecoveryState> => Object.fromEntries(page.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
-    const baseStates = states(base);
-    const currentStates = current ? states(current) : {};
-    const writes = fixedPin ? {} : Object.fromEntries(candidates.filter((file) => !sameState(currentStates[file] ?? { kind: "missing" }, captured[file] ?? { kind: "missing" })).map((file) => [file, captured[file] ?? { kind: "missing" as const}]));
-    const requiredOwnerHashes = new Set(Object.entries(writes).flatMap(([file, state]) => (
-      state.kind === "regular-file" && !sameState(state, baseStates[file] ?? { kind: "missing" }) ? [state.objectHash] : []
-    )));
-    for (const [file, state] of Object.entries(captured)) {
-      if (state.kind !== "regular-file" || requiredOwnerHashes.has(state.objectHash)) continue;
-      const ownerId = this.ownerByHash.get(state.objectHash);
-      if (ownerId) {
-        await this.context.client.releaseBlob(ownerId);
-        this.ownerByHash.delete(state.objectHash);
-      }
-      if (sameState(state, baseStates[file] ?? { kind: "missing" })) {
-        this.sourceByHash.set(state.objectHash, { branchId, path: file, revision: 0 });
-      }
+  private resultCandidate(value: unknown, branchId: string, publicationId: string): WorkingResultCandidate {
+    const candidate = asRecord(value);
+    if (candidate.publicationId !== publicationId || candidate.candidateOperationId !== `result-prepare:${publicationId}`
+      || candidate.workspaceId !== this.context.identity.workspaceId || candidate.branchId !== branchId
+      || typeof candidate.root !== "string" || !candidate.root || typeof candidate.baseRoot !== "string" || !candidate.baseRoot
+      || typeof candidate.pinId !== "string" || !candidate.pinId || typeof candidate.basePinId !== "string" || !candidate.basePinId
+      || !Number.isSafeInteger(candidate.writeRevision) || Number(candidate.writeRevision) < 0) {
+      throw new Error("Working result candidate returned inconsistent provenance");
     }
-    let fixedRoot = fixedPin?.root ?? current!.root;
-    let fixedWriteRevision = fixedPin?.writeRevision ?? current!.writeRevision;
-    if (Object.keys(writes).length > 0) {
-      const committed = await this.commitVirtualWrites(branchId, branch.writeRevision, writes);
-      if (committed.status === "conflict") throw new Error(`Working branch changed while publishing result: ${branchId}`);
-      if (!committed.root) throw new Error(`Kernel did not return the published working root for ${branchId}`);
-      fixedRoot = committed.root;
-      fixedWriteRevision = committed.writeRevision;
-    }
-    const pin = fixedPin ?? await this.pinBranch(branchId);
-    try {
-      if (pin.root !== fixedRoot || pin.writeRevision !== fixedWriteRevision) {
-        throw new Error(`Working branch changed while pinning result ${branchId}`);
-      }
-      const rootDiff = asRecord(await this.context.client.diffRoots({ leftRoot: branch.baseRoot, rightRoot: pin.root }));
-      const changed = [
-        ...(Array.isArray(rootDiff.added) ? rootDiff.added : []),
-        ...(Array.isArray(rootDiff.removed) ? rootDiff.removed : []),
-        ...(Array.isArray(rootDiff.changed) ? rootDiff.changed : []),
-      ].filter((value): value is string => typeof value === "string").map(normalize).sort();
-      const fixed = await this.selectedPin(pin, changed);
-      const pathStates = Object.fromEntries(fixed.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
-      const resultBase = Object.fromEntries(changed.map((file) => [file, baseStates[file] ?? { kind: "missing" as const }]));
-      const published = await this.context.client.publishBranch({ operationId: `branch-publish:${branchId}:${branch.headRevision + 1}`, branchId, expectedWriteRevision: pin.writeRevision, expectedRoot: pin.root });
-      if (published.status === "conflict") throw new Error(`Working branch changed while publishing result: ${branchId}`);
-      const revision = Number(published.revision);
-      const root = String(published.root ?? "");
-      if (!Number.isSafeInteger(revision) || revision <= 0 || !root || root !== pin.root) throw new Error("Kernel returned an invalid published result identity");
-      const result: WorkingResult = { resultRevision: revision, branchId, changedPaths: changed, baseStates: resultBase, pathStates, diffStats: { files: changed.length, insertions: 0, deletions: 0 }, createdAt: nowIso(), root };
-      const references = [
-        ...Object.entries(result.baseStates).flatMap(([file, state]) => state.kind === "regular-file" ? [{ slot: `base:${file}`, objectHash: state.objectHash }] : []),
-        ...Object.entries(result.pathStates).flatMap(([file, state]) => state.kind === "regular-file" ? [{ slot: `result:${file}`, objectHash: state.objectHash }] : []),
-      ];
-      const resultRecordId = `working-result:${branchId}@${revision}`;
-      await this.context.working.resultPut({ operationId: `result:${branchId}:${revision}`, recordId: resultRecordId, branchId, resultRevision: revision, root, changedPaths: changed, diffStats: result.diffStats, createdAt: result.createdAt, document: { resultRevision: revision, branchId, changedPaths: changed, diffStats: result.diffStats, createdAt: result.createdAt, root, baseRoot: branch.baseRoot, baseStates: result.baseStates, pathStates: result.pathStates }, ownerIds: [], references });
-      // Publishing consumes transient blob owners. Keep immediate readers on
-      // the immutable result record rather than on the branch head, which may
-      // already have advanced concurrently.
-      for (const [file, state] of Object.entries(result.baseStates)) if (state.kind === "regular-file") {
-        this.sourceByHash.set(state.objectHash, { recordId: resultRecordId, slot: `base:${file}`, branchId, path: file, revision: 0 });
-      }
-      for (const [file, state] of Object.entries(result.pathStates)) if (state.kind === "regular-file") {
-        this.sourceByHash.set(state.objectHash, { recordId: resultRecordId, slot: `result:${file}`, branchId, path: file, revision });
-      }
-      return result;
-    } finally {
-      if (!fixedPin) await pin.release();
-    }
+    return { publicationId, candidateOperationId: `result-prepare:${publicationId}`, workspaceId: this.context.identity.workspaceId,
+      branchId, root: candidate.root, baseRoot: candidate.baseRoot, writeRevision: Number(candidate.writeRevision),
+      pinId: candidate.pinId, basePinId: candidate.basePinId };
   }
 
-  async publishHeadResult(branchId: string): Promise<WorkingResult> {
-    const branch = await this.getBranchRoot(branchId);
-    if (!branch) throw new Error(`Working branch not found: ${branchId}`);
-    const pin = await this.pinBranch(branchId);
-    try {
-      if (pin.root !== branch.root || pin.writeRevision !== branch.writeRevision) throw new Error(`Working branch changed while pinning result ${branchId}`);
-      const diff = asRecord(await this.context.client.diffRoots({ leftRoot: branch.baseRoot, rightRoot: pin.root }));
-      const changedPaths = [
-        ...(Array.isArray(diff.added) ? diff.added : []),
-        ...(Array.isArray(diff.removed) ? diff.removed : []),
-        ...(Array.isArray(diff.changed) ? diff.changed : []),
-      ].filter((value): value is string => typeof value === "string").map(normalize);
-      const read = await this.selectedPin(pin, changedPaths);
-      return await this.publishCaptured(branchId, Object.fromEntries(read.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)])), changedPaths, pin);
-    } finally {
-      await pin.release();
+  async readResultCandidate(branchId: string, publicationId: string, options?: { signal?: AbortSignal }): Promise<WorkingResultCandidate | null> {
+    if (!publicationId || !branchId) throw new Error("Working result requires a publication and branch identity");
+    const previous = await this.context.client.getOperation(`result-prepare:${publicationId}`, options?.signal);
+    if (previous === null) return null;
+    if (previous.kind !== "working.result.prepare" || previous.state !== "committed") {
+      throw new Error(`Working result candidate is not committed: ${publicationId}`);
     }
+    return this.resultCandidate(previous.result, branchId, publicationId);
   }
 
-  async publishDirectoryResult(branchId: string, directory: string, changedPaths?: string[], options?: { indexModes?: Map<string, string> | Record<string, string>; validateFixedSource?: () => Promise<boolean> }): Promise<WorkingResult> {
-    const ownersBefore = new Map(this.ownerByHash);
-    const normalizedPaths = changedPaths?.map(normalize);
-    const captured = await this.captureDirectory(directory, normalizedPaths, options);
-    const releaseNewOwners = async (): Promise<void> => {
-      const releases: Promise<unknown>[] = [];
-      for (const state of Object.values(captured)) {
-        if (state.kind !== "regular-file") continue;
-        const ownerId = this.ownerByHash.get(state.objectHash);
-        if (!ownerId || ownersBefore.get(state.objectHash) === ownerId) continue;
-        this.ownerByHash.delete(state.objectHash);
-        releases.push(this.context.client.releaseBlob(ownerId));
-      }
-      await Promise.allSettled(releases);
-    };
+  async prepareResultCandidate(input: PrepareWorkingResultCandidate): Promise<WorkingResultCandidate> {
+    const { publicationId, branchId, signal } = input;
+    const previous = await this.readResultCandidate(branchId, publicationId, signal ? { signal } : undefined);
+    if (previous) return previous;
+    const branch = await this.getBranchRoot(branchId, signal ? { signal } : undefined);
+    if (!branch) throw new Error(`Working branch not found: ${branchId}`);
+    if (input.source.kind === "head") {
+      return this.resultCandidate(await this.context.client.prepareResultCandidate({ publicationId, branchId,
+        expectedWriteRevision: branch.writeRevision, expectedRoot: branch.root, changes: [] }, signal), branchId, publicationId);
+    }
+    const source = input.source;
+    const selectedPaths = source.changedPaths ? withAncestorDirectories(source.changedPaths.map(normalize)) : undefined;
+    const options = { ...(signal ? { signal } : {}), ...(source.indexModes ? { indexModes: source.indexModes } : {}) };
+    const captured = await this.captureDirectory(source.directory, selectedPaths, options);
     try {
-      const initialPaths = (normalizedPaths ?? Object.keys(captured)).sort();
-      const observedPaths = normalizedPaths ?? await this.kernelScanPaths(directory);
-      if (initialPaths.length !== observedPaths.length
-        || initialPaths.some((file, index) => file !== observedPaths[index])) {
-        throw new Error("Working-state directory inventory changed while it was being captured");
+      const paths = Object.keys(captured).sort();
+      const observed = paths.length ? await this.captureDirectory(source.directory, paths, { ...options, store: false }) : {};
+      if (paths.some(file => stateIdentity(captured[file] ?? { kind: "missing" }) !== stateIdentity(observed[file] ?? { kind: "missing" }))) {
+        throw new Error("Working-state directory changed while it was being captured");
       }
-      const observed = await this.captureDirectory(directory, observedPaths, {
-        ...options,
-        store: false,
-      });
-      const changed = observedPaths.filter((file) => !sameState(
-        captured[file] ?? { kind: "missing" },
-        observed[file] ?? { kind: "missing" },
-      ));
-      if (changed.length > 0) {
-        throw new Error(`Working-state directory changed while it was being captured: ${changed.slice(0, 8).join(",")}`);
+      if (!selectedPaths) {
+        const inventory = (await this.kernelScanPaths(source.directory, undefined, signal)).sort();
+        if (inventory.length !== paths.length || inventory.some((file, index) => file !== paths[index])) {
+          throw new Error("Working-state directory inventory changed while it was being captured");
+        }
       }
-      if (options?.validateFixedSource && !await options.validateFixedSource()) {
+      if (source.validateFixedSource && !await source.validateFixedSource()) {
         throw new Error("Working-state source changed while it was being captured");
       }
-      return await this.publishCaptured(branchId, captured, normalizedPaths);
-    } catch (error) {
-      await releaseNewOwners();
-      throw error;
+      // Full directory capture must include prior paths too, otherwise a disk
+      // deletion from an unchanged base would never enter the branch delta.
+      const selected = selectedPaths ? await this.selected(branchId, selectedPaths, undefined, signal) : null;
+      const current = selectedPaths ? (selected ? { read: selected, entries: selected.entries } : null)
+        : await this.pagedEntries(branchId, undefined, [""], signal ? { signal } : undefined);
+      if (!current || current.read.root !== branch.root || current.read.writeRevision !== branch.writeRevision) {
+        throw new Error(`Working branch changed while preparing result: ${branchId}`);
+      }
+      const { entries } = current;
+      const currentStates = Object.fromEntries(entries.map(entry => [normalize(entry.path), fromKernelState(entry.state)]));
+      const candidates = [...new Set([...paths, ...Object.keys(currentStates)])];
+      const writes = Object.fromEntries(candidates.filter(file => !sameState(currentStates[file] ?? { kind: "missing" }, captured[file] ?? { kind: "missing" }))
+        .map(file => [file, captured[file] ?? { kind: "missing" as const }]));
+      const compacted = compactTreeWrites(writes);
+      assertVirtualWriteTree(currentStates, compacted);
+      const changes = Object.entries(compacted).map(([file, state]) => this.kernelEntry(file, state));
+      signal?.throwIfAborted();
+      const candidate = this.resultCandidate(await this.context.client.prepareResultCandidate({ publicationId, branchId,
+        expectedWriteRevision: branch.writeRevision, expectedRoot: branch.root, changes }, signal), branchId, publicationId);
+      // The atomic candidate owns all changed objects now. Capture owners for
+      // unchanged bytes remain transient and are released below.
+      for (const change of changes) if (change.state.kind === "regular-file") this.ownerByHash.delete(change.state.objectHash);
+      return candidate;
+    } finally {
+      await this.releaseCapturedStates(captured);
     }
+  }
+
+  private async releasePublishedCandidate(publicationId: string, branchId: string): Promise<void> {
+    await this.context.client.releaseResultCandidate({ operationId: `result-candidate-release:${publicationId}`,
+      workspaceId: this.context.identity.workspaceId, branchId, candidateOperationId: `result-prepare:${publicationId}` });
+  }
+
+  async resumeResultPublication(branchId: string, publicationId: string, options?: { signal?: AbortSignal }): Promise<WorkingResult | null> {
+    const operation = await this.context.client.getOperation(publicationId, options?.signal);
+    if (operation === null) return null;
+    if (operation.kind !== "working.result.publish" || operation.state !== "committed") {
+      throw new Error(`Working result publication is not committed: ${publicationId}`);
+    }
+    const receipt = asRecord(operation.result);
+    if (receipt.publicationId !== publicationId || receipt.workspaceId !== this.context.identity.workspaceId
+      || receipt.branchId !== branchId || !Number.isSafeInteger(receipt.resultRevision) || Number(receipt.resultRevision) <= 0
+      || receipt.recordId !== `working-result:${branchId}@${receipt.resultRevision}`
+      || typeof receipt.root !== "string" || typeof receipt.baseRoot !== "string") {
+      throw new Error("Working result publication returned inconsistent provenance");
+    }
+    const result = await this.getResult(branchId, Number(receipt.resultRevision), options);
+    if (!result || result.root !== receipt.root || result.baseRoot !== receipt.baseRoot) {
+      throw new Error(`Published working result is unavailable: ${branchId}@${receipt.resultRevision}`);
+    }
+    await this.releasePublishedCandidate(publicationId, branchId);
+    return result;
+  }
+
+  async publishPreparedResult(publicationId: string, candidate: WorkingResultCandidate, options?: { signal?: AbortSignal }): Promise<WorkingResult> {
+    const supplied = this.resultCandidate(candidate, candidate.branchId, publicationId);
+    const operation = await this.context.client.getOperation(candidate.candidateOperationId, options?.signal);
+    if (!operation || operation.kind !== "working.result.prepare" || operation.state !== "committed"
+      || JSON.stringify(this.resultCandidate(operation.result, candidate.branchId, publicationId)) !== JSON.stringify(supplied)) {
+      throw new Error("Working result candidate no longer matches its original preparation receipt");
+    }
+    const previous = await this.resumeResultPublication(candidate.branchId, publicationId, options);
+    if (previous) return previous;
+    await this.context.client.publishResultCandidate({ operationId: publicationId, workspaceId: candidate.workspaceId,
+      branchId: candidate.branchId, candidateOperationId: candidate.candidateOperationId }, options?.signal);
+    const result = await this.resumeResultPublication(candidate.branchId, publicationId, options);
+    if (!result) throw new Error(`Working result publication has no receipt: ${publicationId}`);
+    return result;
+  }
+
+  async publishHeadResult(branchId: string, options: WorkingResultPublicationOptions = {}): Promise<WorkingResult> {
+    const publicationId = options.publicationId ?? `working-result:${randomUUID()}`;
+    const previous = await this.resumeResultPublication(branchId, publicationId, options);
+    if (previous) return previous;
+    const candidate = await this.prepareResultCandidate({ publicationId, branchId, source: { kind: "head" }, ...(options.signal ? { signal: options.signal } : {}) });
+    return this.publishPreparedResult(publicationId, candidate, options);
+  }
+
+  async publishDirectoryResult(branchId: string, directory: string, changedPaths?: string[], options: WorkingResultDirectoryOptions = {}): Promise<WorkingResult> {
+    const publicationId = options.publicationId ?? `working-result:${randomUUID()}`;
+    const previous = await this.resumeResultPublication(branchId, publicationId, options);
+    if (previous) return previous;
+    const candidate = await this.prepareResultCandidate({ publicationId, branchId, source: { kind: "directory", directory,
+      ...(changedPaths ? { changedPaths } : {}), ...(options.indexModes ? { indexModes: options.indexModes } : {}),
+      ...(options.validateFixedSource ? { validateFixedSource: options.validateFixedSource } : {}) }, ...(options.signal ? { signal: options.signal } : {}) });
+    return this.publishPreparedResult(publicationId, candidate, options);
   }
 
   async captureBranchCandidateIdentity(branchId: string, directory: string, changedPaths: string[]): Promise<string | null> {
@@ -1624,6 +1698,27 @@ export interface KernelStorageAdapterOptions {
   durableRecoveryStore?: RecoveryDurableOperationPort;
 }
 
+/** Explicit existing authority and its already-scoped effect ports. No grant is minted. */
+export interface KernelAdmittedStorageContextInput {
+  grant: KernelGrantHandle;
+  owningWorkspaceId: string;
+  executionWorkspaceId: string;
+  rootId: string;
+  canonicalRoot: string;
+  fileStore: RecoveryFileStore;
+  resourceOperationGate: KernelStorageContext["resourceOperationGate"];
+  fileResources?: HostFileResourceBackend;
+  durableRecoveryStore?: RecoveryDurableOperationPort;
+}
+
+export type KernelBranchStorageContextInput = Pick<KernelAdmittedStorageContextInput,
+  "grant" | "owningWorkspaceId" | "executionWorkspaceId">;
+
+const unavailableFileStore = (message: string): RecoveryFileStore => {
+  const deny = async (): Promise<never> => { throw new Error(message); };
+  return { applyState: deny, captureState: deny, hashFile: deny, relativePathFor: deny, verifyObject: deny };
+};
+
 export type KernelFileRootResolver = (
   canonicalRoot: string,
   owningWorkspaceId: string,
@@ -1693,13 +1788,23 @@ export class KernelStorageAdapter {
       pathScopes: [""],
       capabilities: input.capabilities ?? ["storage.maintenance"],
     });
+    return this.fileAuthorityContextFromGrant({ ...input, grant });
+  }
+
+  async fileAuthorityContextFromGrant(input: KernelBranchStorageContextInput & {
+    canonicalRoot: string;
+  }): Promise<KernelFileAuthorityContext> {
+    const { grant } = input;
+    this.assertAdmittedWorkspace(input);
+    const canonicalRoot = await canonicalizePathIdentity(input.canonicalRoot);
+    if (canonicalRoot !== input.canonicalRoot) throw new Error("Admitted file root is no longer canonical");
     const client = this.client.scoped(grant);
     const registered = await client.fileRootRegister({
       workspaceId: input.owningWorkspaceId,
       executionWorkspaceId: input.executionWorkspaceId,
-      canonicalRoot: input.canonicalRoot,
+      canonicalRoot,
     });
-    if (typeof registered.rootId !== "string" || typeof registered.canonicalRoot !== "string") {
+    if (typeof registered.rootId !== "string" || registered.canonicalRoot !== canonicalRoot) {
       throw new Error("Kernel returned an invalid file root registration");
     }
     const rootId = registered.rootId;
@@ -1711,7 +1816,11 @@ export class KernelStorageAdapter {
           workspaceId: input.owningWorkspaceId, rootId, ...(cursor === undefined ? {} : { cursor }), pageSize: 128,
         });
         if (!Array.isArray(page.operations)) throw new Error("Kernel returned an invalid pending file operation page");
-        pendingFileOperations.push(...page.operations.map(parsePendingFileOperation));
+        pendingFileOperations.push(...page.operations.map(value => {
+          const operation = parsePendingFileOperation(value);
+          if (operation.rootId !== rootId) throw new Error("Kernel pending file operation belongs to another root");
+          return operation;
+        }));
         cursor = typeof page.nextCursor === "number" ? page.nextCursor : undefined;
       } while (cursor !== undefined);
     }
@@ -1747,9 +1856,50 @@ export class KernelStorageAdapter {
     this.grants.set(key, grant); return grant;
   }
   async context(workspaceId: string, purpose: string, actorOverride?: KernelActorIdentity): Promise<KernelStorageContext & { client: KernelScopedClient }> {
-    const root = this.options.storageRoot;
     const identity: RecoveryIdentity = { authorityId: this.options.hostId, canonicalRoot: await this.options.resolveWorkspaceRoot(workspaceId), filesystemProfile: process.platform === "win32" ? "windows-local" : `${process.platform}-local`, workspaceId };
     const grant = await this.grantFor(workspaceId, purpose, actorOverride);
+    return this.contextUsingGrant(grant, identity);
+  }
+
+  async contextFromGrant(input: KernelAdmittedStorageContextInput): Promise<KernelStorageContext> {
+    const { grant } = input;
+    this.assertAdmittedWorkspace(input);
+    const canonicalRoot = await canonicalizePathIdentity(input.canonicalRoot);
+    if (canonicalRoot !== input.canonicalRoot) throw new Error("Admitted storage root is no longer canonical");
+    const registered = await this.client.scoped(grant).fileRootRegister({ workspaceId: input.owningWorkspaceId,
+      executionWorkspaceId: input.executionWorkspaceId, canonicalRoot });
+    if (registered.rootId !== input.rootId || registered.canonicalRoot !== canonicalRoot) {
+      throw new Error("Admitted storage resource root changed");
+    }
+    return this.contextUsingGrant(grant, { authorityId: this.options.hostId, canonicalRoot,
+      filesystemProfile: process.platform === "win32" ? "windows-local" : `${process.platform}-local`, workspaceId: input.owningWorkspaceId }, input);
+  }
+
+  /** Capture uses the original Kernel file owner; Host apply/recovery is not admitted. */
+  async contextFromSourceGrant(input: KernelBranchStorageContextInput & { rootId: string; canonicalRoot: string }): Promise<KernelStorageContext> {
+    return this.contextFromGrant({ ...input,
+      fileStore: unavailableFileStore("Source storage context has no Host file-effect authority"),
+      resourceOperationGate: { run: async () => { throw new Error("Source storage context has no Host file-effect authority"); } },
+    });
+  }
+
+  /** Fixed sources have branch authority and no physical file root. */
+  async contextFromBranchGrant(input: KernelBranchStorageContextInput): Promise<KernelStorageContext> {
+    this.assertAdmittedWorkspace(input);
+    return this.contextUsingGrant(input.grant, { authorityId: this.options.hostId,
+      canonicalRoot: "", filesystemProfile: process.platform === "win32" ? "windows-local" : `${process.platform}-local`,
+      workspaceId: input.owningWorkspaceId }, undefined, true);
+  }
+
+  private assertAdmittedWorkspace(input: KernelBranchStorageContextInput): void {
+    if (input.grant.owningWorkspace !== input.owningWorkspaceId || input.grant.executionWorkspace !== input.executionWorkspaceId) {
+      throw new Error("Admitted storage grant belongs to a different workspace identity");
+    }
+  }
+
+  private contextUsingGrant(grant: KernelGrantHandle, identity: RecoveryIdentity, admitted?: KernelAdmittedStorageContextInput, branchOnly = false): KernelStorageContext {
+    const root = this.options.storageRoot;
+    const workspaceId = identity.workspaceId;
     const scoped = this.client.scoped(grant);
     const records = {
       get: (recordId: string) => scoped.getRecord(workspaceId, recordId),
@@ -1786,6 +1936,7 @@ export class KernelStorageAdapter {
       reviewRelease: (operationId: string, recordId: string) => scoped.workingReviewRelease({ operationId, workspaceId, recordId }),
     };
     const resolveMaterializationRoot = async (directory: string) => {
+      if (admitted || branchOnly) throw new Error("Managed materialization requires its separately admitted destination authority");
       if (!this.managedRootResolver || !grant.capabilities.some((capability) => capability === "storage.maintenance" || capability === "storage.admin")) {
         throw new Error("Kernel managed materialization requires explicit Host ownership admission");
       }
@@ -1806,10 +1957,19 @@ export class KernelStorageAdapter {
       return { ...authority, basePath };
     };
     const resolveFileRoot = async (directory: string) => {
+      if (branchOnly) throw new Error("Branch-only storage context has no physical file authority");
       // Windows runners can expose the same directory through an 8.3 alias
       // while Documents returns its long canonical path. Compare and register
       // one real identity so an alias cannot be rejected as an unrelated root.
       const requestedRoot = await canonicalizePathIdentity(directory);
+      if (admitted) {
+        const relative = path.relative(admitted.canonicalRoot, requestedRoot);
+        if (path.isAbsolute(relative) || relative === ".." || relative.startsWith(`..${path.sep}`)) {
+          throw new Error("WorkingState directory is outside the admitted source root");
+        }
+        return { rootId: admitted.rootId, canonicalRoot: admitted.canonicalRoot,
+          basePath: relative.replace(/\\/g, "/"), executionWorkspaceId: admitted.executionWorkspaceId };
+      }
       const resolved = this.fileRootResolver
         ? await this.fileRootResolver(requestedRoot, workspaceId)
         : {
@@ -1857,12 +2017,13 @@ export class KernelStorageAdapter {
         pathScopes: [...grant.pathScopes],
         capabilities: [...grant.capabilities],
       },
-      fileStore: this.fileStoreProxy,
-      ...(this.boundFileResources ? { fileResources: this.boundFileResources } : {}),
-      resourceOperationGate: {
+      fileStore: branchOnly ? unavailableFileStore("Branch-only storage context has no physical file authority") : admitted ? admitted.fileStore : this.fileStoreProxy,
+      ...(branchOnly ? {} : admitted ? (admitted.fileResources ? { fileResources: admitted.fileResources } : {})
+        : this.boundFileResources ? { fileResources: this.boundFileResources } : {}),
+      resourceOperationGate: admitted?.resourceOperationGate ?? {
         run: async () => { throw new Error("Kernel resource operation gate is not bound"); },
       },
-      collectUnreachableObjects: async () => {
+      ...(!admitted && !branchOnly ? { collectUnreachableObjects: async () => {
         const maintenance = await this.context(workspaceId, "recovery-maintenance", { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""], capabilities: ["recovery.maintenance", "storage.gc"] });
         const result = await maintenance.client.gc(`kernel-gc:${workspaceId}:${randomUUID()}`);
         if (Array.isArray(result.cleanupFailures) && result.cleanupFailures.length > 0) {
@@ -1872,8 +2033,9 @@ export class KernelStorageAdapter {
           throw new Error('Kernel object cleanup returned no reclaimed-byte or deletion receipt');
         }
         return { byteLengthReclaimed: result.byteLengthReclaimed, objectsDeleted: result.deletedBlobs };
-      },
-      ...(this.options.durableRecoveryStore ? { durableRecoveryStore: this.options.durableRecoveryStore } : {}),
+      } } : {}),
+      ...(branchOnly ? {} : admitted ? (admitted.durableRecoveryStore ? { durableRecoveryStore: admitted.durableRecoveryStore } : {})
+        : this.options.durableRecoveryStore ? { durableRecoveryStore: this.options.durableRecoveryStore } : {}),
       records,
       working,
       client: scoped,

@@ -1937,3 +1937,26 @@ impl Storage {
         Ok(json!({"records": records, "nextCursor": value.get("nextCursor")}))
     }
 }
+
+impl Storage {
+    pub(super) fn insert_prepared_working_result(&mut self, prepared:&super::result_publication::PreparedWorkingResult)->Result<(),KernelError> {
+        self.conn.execute("INSERT INTO domain_records(record_id,workspace_id,record_type,state,branch_id,result_revision,record_revision,payload_json,created_at,updated_at) VALUES(?1,?2,'working.result','published',?3,?4,1,?5,?6,?6)",
+            params![prepared.record_id,prepared.workspace,prepared.branch_id,prepared.revision,prepared.payload,now_ms()])?;
+        let mut statement=self.conn.prepare("INSERT INTO domain_record_refs(workspace_id,record_id,slot,object_hash) VALUES(?1,?2,?3,?4)")?;
+        for (slot,hash) in &prepared.references {statement.execute(params![prepared.workspace,prepared.record_id,slot,hash])?;}
+        Ok(())
+    }
+}
+
+impl Storage {
+    /// The original branch creation transaction owns this short provenance reference.
+    pub(super) fn insert_source_provenance(&mut self,workspace:&str,branch:&str,root:&str,reference:&Value)->Result<Value,KernelError>{
+        let record_id=format!("working-source:{branch}");
+        let hash=reference["objectHash"].as_str().ok_or_else(||KernelError::Operation("source provenance hash missing".into()))?;
+        let result=json!({"objectHash":hash,"recordId":record_id,"slot":"source-provenance"});
+        let payload=serde_json::to_string(&json!({"branchId":branch,"root":root,"provenance":result}))?;
+        self.conn.execute("INSERT INTO domain_records(record_id,workspace_id,record_type,state,branch_id,revision,record_revision,payload_json,created_at,updated_at) VALUES(?1,?2,'working.source','captured',?3,0,1,?4,?5,?5)",params![record_id,workspace,branch,payload,now_ms()])?;
+        self.conn.execute("INSERT INTO domain_record_refs(workspace_id,record_id,slot,object_hash) VALUES(?1,?2,'source-provenance',?3)",params![workspace,record_id,hash])?;
+        Ok(result)
+    }
+}

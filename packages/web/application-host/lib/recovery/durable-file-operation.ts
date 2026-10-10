@@ -2,6 +2,61 @@ import type { CapturedState, CaptureStateOptions, RecoveryFileStore, RecoveryIde
 import type { RecoveryDurableOperationPort } from "./journal-engine.js";
 import { parseRecoveryState, sameState } from "./journal-files.js";
 import type { WorkingStateRootStore } from "../harness/working-state/types.js";
+import { isDeepStrictEqual } from "node:util";
+import { createHash } from "node:crypto";
+import type { LaunchSource, ToolOrigin } from "../kernel/protocol.generated.js";
+
+export interface IntegrationOperationBinding {
+  kind: "runtime_operation";
+  operationId: string;
+  parentRunId: string;
+  parentThreadId: string;
+  parentBranchId: string;
+  origin: ToolOrigin;
+  callId: string;
+  childOperationId: string;
+  childThreadId: string;
+  result: { workspaceId: string; branchId: string; resultRevision: number; root: string; publicationId: string };
+  target: LaunchSource;
+}
+
+/** A failed response is not proof that the durable transition failed. */
+export class UnconfirmedIntegrationCommitError extends Error {
+  constructor(message: string, readonly operationId: string, readonly executorStopped: boolean, options?: ErrorOptions) { super(message, options); }
+}
+
+const completeDurableOperation = async (
+  durable: RecoveryDurableOperationPort,
+  input: Parameters<RecoveryDurableOperationPort["completeOperation"]>[0],
+): Promise<Record<string, unknown>> => {
+  if (input.result && Array.isArray(input.result.appliedPaths)) {
+    const applied = input.result.appliedPaths as string[];
+    const compensated = Array.isArray(input.result.compensatedPaths) ? input.result.compensatedPaths as string[] : [];
+    const remaining = applied.filter(file => !compensated.includes(file));
+    const terminal = ["complete", "conflict", "compensated", "undone", "aborted"].includes(input.state);
+    const effect = !terminal ? "unknown" : remaining.length === 0
+      ? compensated.length > 0 ? "confirmed" : "none" : input.state === "complete" ? "confirmed" : "partial";
+    input = { ...input, result: { ...input.result, effect } };
+  }
+  try {
+    return await durable.completeOperation(input);
+  } catch (error) {
+    let observed: Record<string, unknown> | null;
+    try {
+      observed = await durable.getOperation(input.workspaceId, input.operationId);
+    } catch (inspectionError) {
+      throw new UnconfirmedIntegrationCommitError(`Integration ${input.operationId} commit outcome could not be inspected`, input.operationId, input.result?.executorStopped === true, { cause: inspectionError });
+    }
+    if (observed?.state === input.state
+      && (!input.result || isDeepStrictEqual(observed.result, input.result))
+      && (!input.failure || isDeepStrictEqual(observed.failure, input.failure))) return observed;
+    if (!observed || Number(observed.revision) !== input.expectedRevision
+      || ["complete", "conflict", "compensated", "undone", "aborted", "needs-attention"].includes(String(observed.state))) {
+      throw new UnconfirmedIntegrationCommitError(`Integration ${input.operationId} commit outcome changed before inspection`, input.operationId, input.result?.executorStopped === true, { cause: error });
+    }
+    throw error;
+  }
+};
 
 export interface DurableFileTarget {
   expected: RecoveryState;
@@ -21,6 +76,11 @@ export interface DurableFileOperationSpec {
   diffStats: { files: number; insertions: number; deletions: number };
   executionId?: string;
   requireTurnBinding?: boolean;
+  operationBinding?: IntegrationOperationBinding;
+  /** This original journal row already reserves its affected resources. */
+  reserved?: boolean;
+  /** Transient cancellation; never part of the durable intent or file.apply RPC. */
+  signal?: AbortSignal;
   retryBinding?: DurableFileRetryBinding;
   /** Parent materialized directory when apply identity is not the owning workspace root. */
   applyCanonicalRoot?: string;
@@ -161,6 +221,9 @@ interface PersistedIntegrationData extends Record<string, unknown> {
   failure?: string;
   executionId?: string;
   requireTurnBinding?: boolean;
+  operationBinding?: IntegrationOperationBinding;
+  reservedResources?: { canonicalRoot: string; paths: string[] };
+  executorStopped?: boolean;
   retryBinding?: DurableFileRetryBinding;
   applyCanonicalRoot?: string;
   applyExecutionWorkspaceId?: string;
@@ -251,7 +314,7 @@ const kernelComplete = async (
   failure?: string,
 ): Promise<KernelRecoveryOperation> => {
   const operation = await kernelOperation(context, operationId);
-  return context.durableRecoveryStore!.completeOperation({
+  return completeDurableOperation(context.durableRecoveryStore, {
     operationId,
     workspaceId: context.identity.workspaceId,
     expectedRevision: Number(operation.revision ?? 1),
@@ -280,7 +343,7 @@ const kernelCompensateDisk = async (context: DurableFileOperationContext, operat
         return;
       }
       await kernelTransition(context, operationId, file, "compensate-intent");
-      await context.fileStore.applyState(context.identity, context.root, file, safety);
+      await applyFile(context, operationId, file, safety, target, "compensate");
       const restored = (await capture(context, file, false)).state;
       if (!sameState(restored, safety)) throw new Error(`Compensation did not restore ${file}`);
       await kernelTransition(context, operationId, file, "safety-observed");
@@ -331,12 +394,31 @@ const capture = (
   store: boolean,
 ) => context.fileStore.captureState(context.identity, context.root, file, { store });
 
+/** Constructed only after a typed file-resource completion was received. */
+class AcknowledgedIntegrationFileFailure extends Error {
+  constructor(message: string, readonly effect: "none" | "unknown") { super(message); }
+}
+
+const applyFile = async (context: DurableFileOperationContext, operationId: string, file: string,
+  target: RecoveryState, expected: RecoveryState, phase: "apply" | "compensate" | "undo"): Promise<void> => {
+  if (!context.fileResources) return context.fileStore.applyState(context.identity, context.root, file, target);
+  const identity = createHash("sha256").update(JSON.stringify([operationId, file, phase])).digest("hex");
+  const applied = await context.fileResources.applyStateDetailed(context.identity, file, target, {
+    expected, operationId: `integration-file:${identity}`,
+  });
+  if (applied.status === "conflict" || (applied.status === "applied" && !sameState(applied.state, target))) {
+    throw new AcknowledgedIntegrationFileFailure(`Integration ${phase} conflicted: ${file}`, applied.status === "conflict" ? "none" : "unknown");
+  }
+  if (applied.status !== "applied") throw new Error(`Integration ${phase} returned no valid completion: ${file}`);
+};
+
 const runPathOperation = <Result>(
   context: DurableFileOperationContext,
   file: string,
   scope: HostResourceOperation["scope"],
   operation: () => Promise<Result>,
-): Promise<Result> => context.resourceOperationGate.run([{ resourceId: file, scope }], operation);
+  signal?: AbortSignal,
+): Promise<Result> => context.resourceOperationGate.run([{ resourceId: file, scope }], operation, signal ? { signal } : {});
 
 /** Production path: persist intent and every file transition through the Rust recovery port. */
 const applyKernelDurableFileOperation = async (
@@ -345,6 +427,7 @@ const applyKernelDurableFileOperation = async (
 ): Promise<DurableFileOperationResult> => {
   const durable = context.durableRecoveryStore;
   if (!durable) throw new Error("Rust recovery operation port is unavailable");
+  if (spec.operationBinding && (spec.executionId || spec.requireTurnBinding)) throw new Error("Runtime Integration cannot use a Pi turn binding");
   if (spec.requireTurnBinding && !spec.executionId) throw new Error("Parent turn recovery binding is required for integration");
   if (spec.executionId) {
     if (!durable.listChanges) throw new Error("Rust recovery turn reader is unavailable");
@@ -373,19 +456,32 @@ const applyKernelDurableFileOperation = async (
     if (!sameState(current.state, states.expected)) drift.push(file);
   }
   for (const [file, states] of Object.entries(externalTargets)) safety[file] = states.expected;
-  if (drift.length > 0) {
-    return { operationId: spec.id, status: "conflict", appliedPaths: [], conflictPaths: [...new Set([...spec.conflictPaths, ...drift])], diffStats: spec.diffStats, text: `Parent workspace changed before integration: ${drift.join(", ")}` };
-  }
   const data: PersistedIntegrationData = {
     operationId: spec.id, threadId: spec.threadId, resultRevision: spec.resultRevision,
-    targets: allTargets, targetKinds, externalBindings: structuredClone(spec.externalBindings ?? {}), safety,
+    targets: allTargets, targetKinds, externalBindings: structuredClone(spec.externalBindings ?? {}), safety, executorStopped: false,
     conflictPaths: [...spec.conflictPaths], appliedPaths: [], compensatedPaths: [], needsAttentionPaths: [], diffStats: spec.diffStats,
     ...(spec.executionId ? { executionId: spec.executionId } : {}), ...(spec.requireTurnBinding ? { requireTurnBinding: true } : {}),
+    ...(spec.operationBinding ? { operationBinding: structuredClone(spec.operationBinding) } : {}),
     ...(spec.retryBinding ? { retryBinding: structuredClone(spec.retryBinding) } : {}),
     ...(spec.applyCanonicalRoot ? { applyCanonicalRoot: spec.applyCanonicalRoot } : {}),
     ...(spec.applyExecutionWorkspaceId ? { applyExecutionWorkspaceId: spec.applyExecutionWorkspaceId } : {}),
   };
-  const created = await durable.createOperation({ operationId: spec.id, workspaceId: spec.workspaceId, kind: "integration", state: "applying", data, targets: allTargets, surfacePaths: externalPaths });
+  const reserved = spec.reserved ? await durable.getOperation(spec.workspaceId, spec.id) : null;
+  if (spec.reserved && (!reserved || reserved.state !== "planned"
+    || !isDeepStrictEqual(kernelOperationData(reserved).operationBinding, spec.operationBinding))) {
+    throw new Error("Integration reservation changed before apply");
+  }
+  const reservedResources = reserved ? kernelOperationData(reserved).reservedResources : undefined;
+  if (reservedResources) data.reservedResources = reservedResources;
+  if (drift.length > 0) {
+    data.executorStopped = true;
+    data.conflictPaths = [...new Set([...spec.conflictPaths, ...drift])];
+    if (reserved) await completeDurableOperation(durable, { operationId: spec.id, workspaceId: spec.workspaceId,
+      expectedRevision: Number(reserved.revision), state: "conflict", result: data });
+    return { operationId: spec.id, status: "conflict", appliedPaths: [], conflictPaths: data.conflictPaths, diffStats: spec.diffStats, text: `Parent workspace changed before integration: ${drift.join(", ")}` };
+  }
+  const created = reserved ?? await durable.createOperation({ operationId: spec.id, workspaceId: spec.workspaceId, kind: "integration", state: "applying", data, targets: allTargets, surfacePaths: externalPaths,
+    ...(spec.operationBinding ? { threadId: spec.operationBinding.parentThreadId, runId: spec.operationBinding.parentRunId } : {}) });
   let operationRevision = Number(created.revision ?? 1);
   const phases = new Map<string, { revision: number; phase: string }>(
     (Array.isArray(created.files) ? created.files : []).flatMap((value) => {
@@ -401,44 +497,91 @@ const applyKernelDurableFileOperation = async (
     const next = await durable.updateOperationFile({ operationId: spec.id, workspaceId: spec.workspaceId, path: file, expectedRevision: current.revision, expectedPhase: current.phase, phase, ...extra });
     phases.set(file, { revision: Number(next.revision ?? current.revision + 1), phase });
   };
-  for (const [file, state] of Object.entries(safety)) await transition(file, targetKinds[file] === "surface" ? "external-intent" : "apply-intent", { safety: state });
+  for (const [file, state] of Object.entries(safety)) await transition(file, targetKinds[file] === "surface" ? "external-intent" : "pending", {
+    safety: state, ...(reserved ? { expected: allTargets[file]!.expected, target: allTargets[file]!.target } : {}),
+  });
+  if (reserved) {
+    const prepared = await completeDurableOperation(durable, { operationId: spec.id, workspaceId: spec.workspaceId,
+      expectedRevision: operationRevision, state: "applying-files", result: data });
+    operationRevision = Number(prepared.revision);
+  }
+  const unacknowledgedWrites = new Set<string>();
+  const possiblyWrittenPaths = new Set<string>();
+  const applyTracked = async (file: string, target: RecoveryState, expected: RecoveryState, phase: "apply" | "compensate"): Promise<void> => {
+    const request = `${phase}\0${file}`;
+    unacknowledgedWrites.add(request);
+    if (phase === "apply") possiblyWrittenPaths.add(file);
+    try {
+      await applyFile(context, spec.id, file, target, expected, phase);
+      unacknowledgedWrites.delete(request);
+    } catch (error) {
+      if (error instanceof AcknowledgedIntegrationFileFailure) {
+        unacknowledgedWrites.delete(request);
+        if (phase === "apply" && error.effect === "none") possiblyWrittenPaths.delete(file);
+      }
+      throw error;
+    }
+  };
   const compensateKernel = async (): Promise<void> => {
     for (const { path: file, states } of orderForStates(Object.entries(spec.targets).map(([path, states]) => ({ path, states })), (entry) => safety[entry.path]!)) {
+      if (!possiblyWrittenPaths.has(file)) {
+        // No write was dispatched, or its exact CAS-conflict ACK proves no
+        // effect. Do not read/wait on or undo another writer's later content.
+        if (phases.get(file)?.phase !== "pending") await transition(file, "pending");
+        continue;
+      }
       try {
         const current = (await capture(context, file, false)).state;
-        if (sameState(current, safety[file]!)) continue;
+        if (sameState(current, safety[file]!)) {
+          await transition(file, "safety-observed");
+          if (data.appliedPaths.includes(file) && !data.compensatedPaths.includes(file)) data.compensatedPaths.push(file);
+          continue;
+        }
         if (!sameState(current, states.target)) { data.needsAttentionPaths.push(file); await transition(file, "needs-attention"); continue; }
         await transition(file, "compensate-intent");
-        await context.fileStore.applyState(context.identity, context.root, file, safety[file]!);
+        await applyTracked(file, safety[file]!, states.target, "compensate");
         const restored = (await capture(context, file, false)).state;
         if (!sameState(restored, safety[file]!)) throw new Error(`Compensation did not restore ${file}`);
         data.compensatedPaths.push(file);
         await transition(file, "safety-observed", { safety: safety[file]! });
       } catch { data.needsAttentionPaths.push(file); await transition(file, "needs-attention").catch(() => undefined); }
     }
+    // This path runs before Surface dispatch. Unattempted targets are safe;
+    // every actual disk request must have its own completion, including CAS
+    // conflicts and compensation. A generic rejection remains unacknowledged.
+    for (const file of externalPaths) await transition(file, "external-safety-observed");
+    data.executorStopped = unacknowledgedWrites.size === 0;
   };
   try {
     for (const { path: file, states } of orderForStates(Object.entries(spec.targets).map(([path, states]) => ({ path, states })), (entry) => entry.states.target)) {
+      spec.signal?.throwIfAborted();
       await runPathOperation(context, file, "subtree", async () => {
         const current = (await capture(context, file, false)).state;
         if (!sameState(current, safety[file]!)) throw new Error(`Parent workspace changed during integration: ${file}`);
-        await context.fileStore.applyState(context.identity, context.root, file, states.target);
+        spec.signal?.throwIfAborted();
+        await transition(file, "apply-intent");
+        spec.signal?.throwIfAborted();
+        await applyTracked(file, states.target, safety[file]!, "apply");
         const observed = (await capture(context, file, false)).state;
         if (!sameState(observed, states.target)) throw new Error(`Integrated path did not match target: ${file}`);
         await transition(file, "target-observed", { target: states.target });
         data.appliedPaths.push(file);
-      });
+      }, spec.signal);
     }
+    spec.signal?.throwIfAborted();
   } catch (error) {
     data.failure = error instanceof Error ? error.message : String(error);
     await compensateKernel();
     const status = data.needsAttentionPaths.length > 0 ? "needs-attention" : "compensated";
-    await durable.completeOperation({ operationId: spec.id, workspaceId: spec.workspaceId, expectedRevision: operationRevision, state: status, result: data, failure: { message: data.failure } });
+    await completeDurableOperation(durable, { operationId: spec.id, workspaceId: spec.workspaceId, expectedRevision: operationRevision, state: status, result: data, failure: { message: data.failure } });
     return { operationId: spec.id, status, appliedPaths: [], conflictPaths: spec.conflictPaths, compensatedPaths: data.compensatedPaths, needsAttentionPaths: data.needsAttentionPaths, diffStats: spec.diffStats, text: `Integration failed (${data.failure}); ${status}.` };
   }
+  // Every dispatched disk call has now acknowledged completion. An external
+  // surface, if present, has its own later receipt and stop evidence.
+  data.executorStopped = externalPaths.length === 0;
   const persistTerminalOrCompensate = async (state: "awaiting-surface" | "conflict" | "complete"): Promise<DurableFileOperationResult | null> => {
     if (state !== "awaiting-surface" && spec.requireTurnBinding && spec.executionId) {
-      const awaiting = await durable.completeOperation({
+      const awaiting = await completeDurableOperation(durable, {
         operationId: spec.id,
         workspaceId: spec.workspaceId,
         expectedRevision: operationRevision,
@@ -453,7 +596,7 @@ const applyKernelDurableFileOperation = async (
       // Once the turn checkpoint contains this merge, a lost terminal response
       // is retried from awaiting-turn-binding. Compensating disk state here
       // would contradict the already durable checkpoint change.
-      await durable.completeOperation({
+      await completeDurableOperation(durable, {
         operationId: spec.id,
         workspaceId: spec.workspaceId,
         expectedRevision: operationRevision,
@@ -463,14 +606,15 @@ const applyKernelDurableFileOperation = async (
       return null;
     }
     try {
-      await durable.completeOperation({ operationId: spec.id, workspaceId: spec.workspaceId, expectedRevision: operationRevision, state, result: data });
+      await completeDurableOperation(durable, { operationId: spec.id, workspaceId: spec.workspaceId, expectedRevision: operationRevision, state, result: data });
       return null;
     } catch (error) {
+      if (error instanceof UnconfirmedIntegrationCommitError) throw error;
       data.failure = `Durable integration terminal commit failed: ${error instanceof Error ? error.message : String(error)}`;
       await compensateKernel();
       const compensationState = data.needsAttentionPaths.length > 0 ? "needs-attention" : "compensated";
       try {
-        await durable.completeOperation({
+        await completeDurableOperation(durable, {
           operationId: spec.id, workspaceId: spec.workspaceId, expectedRevision: operationRevision,
           state: compensationState, result: data, failure: { message: data.failure },
         });
@@ -517,6 +661,10 @@ export const applyDurableFileOperation = async (
 export interface DurableIntegrationInspection {
   operationId: string;
   state: string;
+  revision: number;
+  executorStopped: boolean;
+  operationBinding?: IntegrationOperationBinding;
+  reservedResources?: { canonicalRoot: string; paths: string[] };
   threadId: string;
   resultRevision: number | string;
   targets: Record<string, DurableFileTarget>;
@@ -546,6 +694,10 @@ export const inspectDurableIntegrationOperation = async (
     return {
       operationId,
       state: String(operation.state ?? "unknown"),
+      revision: Number(operation.revision ?? 0),
+      executorStopped: data.executorStopped === true,
+      ...(data.operationBinding ? { operationBinding: structuredClone(data.operationBinding) } : {}),
+      ...(data.reservedResources ? { reservedResources: structuredClone(data.reservedResources) } : {}),
       threadId: String(data.threadId ?? operation.threadId ?? ""),
       resultRevision: data.resultRevision ?? 0,
       targets: structuredClone(data.targets ?? {}),
@@ -576,7 +728,9 @@ export const markDurableExternalDispatched = async (
     if (String(operation.state) !== "awaiting-surface") throw new Error(`Integration ${operationId} is not waiting for a surface`);
     const expected = Object.entries(data.targetKinds ?? {}).filter(([, kind]) => kind === "surface").map(([file]) => file).sort();
     const supplied = [...new Set(paths)].sort();
-    if (expected.length !== supplied.length || expected.some((file, index) => file !== supplied[index])) throw new Error(`Integration ${operationId} surface path set changed before dispatch`);
+    if (supplied.length !== paths.length || supplied.some(file => !expected.includes(file) || kernelFile(operation, file).phase !== "external-intent")) {
+      throw new Error(`Integration ${operationId} surface path set changed before dispatch`);
+    }
     for (const file of supplied) await kernelTransition(context, operationId, file, "external-dispatched");
     return;
 };
@@ -688,6 +842,12 @@ export const finalizeDurableExternalOperation = async (
   input: {
     operationId: string;
     results: Record<string, "applied" | "unchanged" | "needs-attention">;
+    /** Internal owner fact derived from exact ACKs or verified no-dispatch phases, never UI input. */
+    executorStopped?: boolean;
+    /** Original validated apply/undo ACK facts, retained even when the net result is unchanged. */
+    undispatchedSurfacePaths?: readonly string[];
+    appliedSurfacePaths?: readonly string[];
+    compensatedSurfacePaths?: readonly string[];
     receipts?: Record<string, { afterLocalEditRevision: number; afterHash: string }>;
     failure?: string;
   },
@@ -700,9 +860,12 @@ export const finalizeDurableExternalOperation = async (
     if (externalPaths.length !== resultPaths.length || externalPaths.some((file, index) => file !== resultPaths[index])) throw new Error(`Integration ${input.operationId} surface result path set is incomplete`);
     for (const file of externalPaths) {
       const result = input.results[file]!;
-      await kernelTransition(context, input.operationId, file, result === "applied" ? "external-target-observed" : result === "unchanged" ? "external-safety-observed" : "needs-attention");
-      if (result === "applied" && !data.appliedPaths.includes(file)) data.appliedPaths.push(file);
-      if (result === "applied") {
+      await kernelTransition(context, input.operationId, file, input.undispatchedSurfacePaths?.includes(file) ? "external-intent"
+        : result === "applied" ? "external-target-observed" : result === "unchanged" ? "external-safety-observed" : "needs-attention");
+      const applied = result === "applied" || input.appliedSurfacePaths?.includes(file);
+      if (applied && !data.appliedPaths.includes(file)) data.appliedPaths.push(file);
+      if (result === "unchanged" && input.compensatedSurfacePaths?.includes(file) && !data.compensatedPaths.includes(file)) data.compensatedPaths.push(file);
+      if (applied) {
         const receipt = input.receipts?.[file];
         const binding = data.externalBindings?.[file];
         if (!receipt || !binding) throw new Error(`Integration ${input.operationId} surface receipt is missing: ${file}`);
@@ -712,6 +875,7 @@ export const finalizeDurableExternalOperation = async (
       if (result === "needs-attention" && !data.needsAttentionPaths.includes(file)) data.needsAttentionPaths.push(file);
     }
     const values = Object.values(input.results);
+    data.executorStopped = input.executorStopped ?? values.every(result => result !== "needs-attention");
     if (values.every((result) => result === "applied")) {
       const status = data.conflictPaths.length > 0 ? "conflict" : "complete";
       if (data.requireTurnBinding && data.executionId) {
@@ -732,6 +896,33 @@ export const finalizeDurableExternalOperation = async (
     data.failure = input.failure ?? "The editor surface result could not be determined atomically";
     await kernelComplete(context, input.operationId, "needs-attention", data, data.failure);
     return { operationId: input.operationId, status: "needs-attention", appliedPaths: [...data.appliedPaths], conflictPaths: [...data.conflictPaths], needsAttentionPaths: [...data.needsAttentionPaths], diffStats: data.diffStats, text: `Integration requires attention (${data.failure}).` };
+};
+
+/** The live owner may cancel only before any Surface request was dispatched. */
+export const cancelUndispatchedDurableExternalOperation = async (
+  context: DurableFileOperationContext,
+  operationId: string,
+): Promise<DurableFileOperationResult> => {
+  const operation = await kernelOperation(context, operationId);
+  const data = kernelOperationData(operation);
+  if (!data.operationBinding || operation.state !== "awaiting-surface") {
+    throw new Error("Integration is not awaiting its undispatched runtime Surface operation");
+  }
+  const surfaces: string[] = [];
+  for (const [file, kind] of Object.entries(data.targetKinds)) {
+    const phase = kernelFile(operation, file).phase;
+    if (kind === "surface" && phase === "external-intent") surfaces.push(file);
+    else if (kind !== "disk" || phase !== "target-observed") {
+      throw new Error("Integration cancellation cannot prove its original writers stopped before Surface dispatch");
+    }
+  }
+  if (!surfaces.length) throw new Error("Integration has no undispatched Surface targets");
+  // Disk phases were recorded after their real file.apply ACKs; Surface never
+  // dispatched. Conditional compensation must also finish before this stop
+  // fact can be persisted. If its call fails, the original unknown row remains.
+  return finalizeDurableExternalOperation(context, { operationId,
+    results: Object.fromEntries(surfaces.map(file => [file, "unchanged" as const])), undispatchedSurfacePaths: surfaces, executorStopped: true,
+    failure: "Integration was cancelled before Surface dispatch" });
 };
 
 export const undoDurableIntegrationOperation = async (
@@ -876,7 +1067,7 @@ export const undoBranchIntegrationOnDirectory = async (
           });
         }
         await kernelTransition(context, input.operationId, file, "compensate-intent");
-        await context.fileStore.applyState(context.identity, context.root, file, missingState(file));
+        await applyFile(context, input.operationId, file, missingState(file), targetState(file), "undo");
         const observed = await captureCurrent(file);
         if (!sameState(observed, missingState(file))) {
           driftPath = file;
@@ -912,16 +1103,28 @@ export const undoBranchIntegrationOnDirectory = async (
 
 export const reconcileInterruptedIntegrationOperations = async (
   context: DurableFileOperationContext,
-  options?: { operationId?: string },
+  options?: { operationId?: string; executorStopped?: boolean },
 ): Promise<{ compensated: string[]; needsAttention: string[]; aborted: string[]; completed: string[] }> => {
     const result = { compensated: [] as string[], needsAttention: [] as string[], aborted: [] as string[], completed: [] as string[] };
-    for (const summary of await context.durableRecoveryStore.listOperations(context.identity.workspaceId, "integration")) {
+    const summaries = options?.operationId
+      ? [await context.durableRecoveryStore.getOperation(context.identity.workspaceId, options.operationId)].filter((value): value is Record<string, unknown> => value !== null)
+      : await context.durableRecoveryStore.listOperations(context.identity.workspaceId, "integration");
+    for (const summary of summaries) {
       const operationId = typeof summary.operationId === "string" ? summary.operationId : "";
       if (options?.operationId && operationId !== options.operationId) continue;
       if (!operationId || ["complete", "aborted", "compensated", "needs-attention", "conflict", "undone"].includes(String(summary.state))) continue;
       const operation = await kernelOperation(context, operationId);
       const data = kernelOperationData(operation);
       if (isBranchIntegration(data)) continue;
+      // The runtime owner must establish that its original worker stopped.
+      // A journal scan is not proof that a current executor is interrupted.
+      if (data.operationBinding && !options?.executorStopped) continue;
+      if (String(operation.state) === "planned") {
+        data.executorStopped = true;
+        await kernelComplete(context, operationId, "aborted", data);
+        result.aborted.push(operationId);
+        continue;
+      }
       const applyContext = await resolvePersistedApplyContext(context, data);
       if (applyContext === "unresolved") {
         await kernelComplete(context, operationId, "needs-attention", data, "Execution directory could not be resolved for directory apply");
@@ -933,9 +1136,12 @@ export const reconcileInterruptedIntegrationOperations = async (
       for (const file of files) {
         const path = String(file.path ?? "");
         const phase = String(file.phase ?? "pending");
+        if (!data.targetKinds[path] && (phase === "pending" || phase === "safety-observed")) continue;
         if (data.targetKinds?.[path] === "surface") {
           const awaitingTurn = String(operation.state) === "awaiting-turn-binding";
-          const proven = awaitingTurn ? phase === "external-target-observed" : phase === "external-safety-observed";
+          const proven = data.operationBinding
+            ? phase === "external-target-observed" || phase === "external-safety-observed"
+            : awaitingTurn ? phase === "external-target-observed" : phase === "external-safety-observed";
           if (!proven) { await kernelTransition(context, operationId, path, "needs-attention"); unknown = true; }
           continue;
         }
@@ -949,7 +1155,8 @@ export const reconcileInterruptedIntegrationOperations = async (
         else if (!sameState(current, safety) && !sameState(current, target)) { await kernelTransition(context, operationId, path, "needs-attention"); unknown = true; }
       }
       const latest = await kernelOperation(context, operationId);
-      const latestFiles = Array.isArray(latest.files) ? latest.files : [];
+      const latestFiles = Array.isArray(latest.files) ? latest.files.filter(entry => entry && typeof entry === "object"
+        && Boolean(data.targetKinds[String((entry as Record<string, unknown>).path)])) : [];
       const appliedPhases = new Set(["target-observed", "external-target-observed"]);
       const provenAppliedPaths = latestFiles
         .filter((entry) => entry && typeof entry === "object" && appliedPhases.has(String((entry as Record<string, unknown>).phase)))
@@ -959,7 +1166,13 @@ export const reconcileInterruptedIntegrationOperations = async (
       // target observation but before result_json/appliedPaths is refreshed.
       data.appliedPaths = [...new Set([...(data.appliedPaths ?? []), ...provenAppliedPaths])].sort();
       const hasApplied = provenAppliedPaths.length > 0;
-      const allApplied = latestFiles.length > 0 && latestFiles.every((entry) => entry && typeof entry === "object" && appliedPhases.has(String((entry as Record<string, unknown>).phase)));
+      const allApplied = (latestFiles.length > 0 || (data.operationBinding && Object.keys(data.targetKinds).length === 0)) && latestFiles.every((entry) => entry && typeof entry === "object" && appliedPhases.has(String((entry as Record<string, unknown>).phase)));
+      if (options?.executorStopped) data.executorStopped = true;
+      if (!unknown && allApplied && data.operationBinding && options?.executorStopped) {
+        await kernelComplete(context, operationId, data.conflictPaths.length > 0 ? "conflict" : "complete", data);
+        result.completed.push(operationId);
+        continue;
+      }
       if (!unknown && data.requireTurnBinding && data.executionId && String(operation.state) !== "awaiting-turn-binding") {
         const selection = context.durableRecoveryStore.listChanges
           ? await context.durableRecoveryStore.listChanges({ workspaceId: context.identity.workspaceId, executionId: data.executionId })
@@ -1018,12 +1231,17 @@ export interface BranchIntegrationView {
 export const reconcileInterruptedKernelBranchIntegrations = async (
   context: DurableFileOperationContext,
   store: WorkingStateRootStore,
+  options?: { operationId?: string },
 ): Promise<{ aborted: string[]; completed: string[]; needsAttention: string[] }> => {
   const result = { aborted: [] as string[], completed: [] as string[], needsAttention: [] as string[] };
   const durable = context.durableRecoveryStore;
   if (!durable) return result;
-  for (const summary of await durable.listOperations(context.identity.workspaceId, "integration")) {
+  const summaries = options?.operationId
+    ? [await durable.getOperation(context.identity.workspaceId, options.operationId)].filter((value): value is Record<string, unknown> => value !== null)
+    : await durable.listOperations(context.identity.workspaceId, "integration");
+  for (const summary of summaries) {
     const operationId = typeof summary.operationId === "string" ? summary.operationId : "";
+    if (options?.operationId && operationId !== options.operationId) continue;
     if (!operationId || ["complete", "conflict", "compensated", "aborted", "undone", "needs-attention"].includes(String(summary.state))) continue;
     const operation = await durable.getOperation(context.identity.workspaceId, operationId);
     if (!operation) continue;

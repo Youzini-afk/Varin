@@ -406,7 +406,9 @@ fn combined(ending: Ending) {
         let cancel = cancel.clone();
         std::thread::spawn(move || engine.run(input, cancel))
     };
-    wait_for(|| admission.summary().queued == 1 || worker.is_finished());
+    wait_for(|| (admission.summary().queued == 1
+        && registrations.load(Ordering::SeqCst) == 1
+        && watched.lock().unwrap().is_some()) || worker.is_finished());
     assert!(!worker.is_finished(), "engine ended before search queue");
     assert_eq!(admission.summary().queued, 1);
     assert_eq!(registrations.load(Ordering::SeqCst), 1);

@@ -1436,6 +1436,9 @@ impl Storage {
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| KernelError::Operation("operationId is required".to_string()))?;
+        self.read_recovery_operation(&workspace_id,operation_id,Some(grant_id))
+    }
+    pub(super) fn read_recovery_operation(&self,workspace_id:&str,operation_id:&str,grant_id:Option<&str>)->Result<Value,KernelError>{
         let typed: Option<(String, String, String, Option<String>, Option<String>, Option<String>, String, Option<String>, Option<String>, i64)> = self.conn.query_row(
             "SELECT kind, state, data_json, session_id, thread_id, run_id, created_at, result_json, failure_json, revision FROM recovery_operations WHERE workspace_id = ?1 AND operation_id = ?2",
             params![workspace_id, operation_id],
@@ -1456,12 +1459,14 @@ impl Storage {
         else {
             return Ok(Value::Null);
         };
+        if let Some(grant_id)=grant_id {
         self.require_recovery_owner(
             grant_id,
             session_id.as_deref(),
             thread_id.as_deref(),
             run_id.as_deref(),
         )?;
+        }
         let mut files = Vec::new();
         let mut files_statement = self.conn.prepare("SELECT path, expected_json, target_json, safety_json, phase, observed_fingerprint, revision FROM recovery_operation_files WHERE workspace_id = ?1 AND operation_id = ?2 ORDER BY ordinal")?;
         let mut rows = files_statement.query(params![workspace_id, operation_id])?;
@@ -1492,4 +1497,43 @@ impl Storage {
             "files": files,
         }))
     }
+}
+
+impl Storage {
+    /// A scoped physical overlap query. It discloses only reservations intersecting the
+    /// caller's authorized target, including aliases owned by another workspace identity.
+    pub(super) fn recovery_operation_conflicts(&self,params_value:&Value,grant:&Grant)->Result<Value,KernelError>{
+        let workspace=self.recovery_workspace(params_value,&grant.grant_id)?;
+        let root_id=params_value["rootId"].as_str().ok_or_else(||KernelError::Authorization("reservation root missing".into()))?;
+        let paths=params_value["paths"].as_array().ok_or_else(||KernelError::Operation("reservation paths missing".into()))?.iter().map(|value|{
+            let path=value.as_str().ok_or_else(||KernelError::Operation("reservation path malformed".into()))?;
+            Ok(FileLeaseResource{path:path.into(),subtree:true})
+        }).collect::<Result<Vec<_>,KernelError>>()?;
+        let requested=self.canonical_lease_resources(root_id,&paths,grant)?;
+        let except=params_value.get("exceptOperationId").and_then(Value::as_str);
+        let mut statement=self.conn.prepare("SELECT workspace_id,operation_id,state,revision,COALESCE(json_extract(result_json,'$.reservedResources.canonicalRoot'),json_extract(data_json,'$.reservedResources.canonicalRoot'),json_extract(result_json,'$.applyCanonicalRoot'),json_extract(data_json,'$.applyCanonicalRoot')),COALESCE(json_extract(result_json,'$.reservedResources.paths'),json_extract(data_json,'$.reservedResources.paths')),COALESCE(json_extract(result_json,'$.targets'),json_extract(data_json,'$.targets')) FROM recovery_operations WHERE kind='integration' AND COALESCE(json_extract(result_json,'$.parentBranchId'),json_extract(data_json,'$.parentBranchId')) IS NULL AND state NOT IN ('complete','conflict','compensated','aborted','undone') ORDER BY workspace_id,operation_id")?;
+        let mut rows=statement.query([])?;let mut operations=Vec::new();
+        while let Some(row)=rows.next()? {
+            let owning:String=row.get(0)?;let operation:String=row.get(1)?;
+            if owning==workspace && except==Some(operation.as_str()){continue;}
+            let directory=row.get::<_,Option<String>>(4)?.ok_or_else(||KernelError::Operation(format!("unresolved Integration reservation root: {owning}/{operation}")))?;
+            let paths:Vec<String>=if let Some(raw)=row.get::<_,Option<String>>(5)?{serde_json::from_str(&raw)?}
+                else if let Some(raw)=row.get::<_,Option<String>>(6)?{serde_json::from_str::<Value>(&raw)?.as_object().ok_or_else(||KernelError::Storage("Integration targets are malformed".into()))?.keys().cloned().collect()}
+                else{return Err(KernelError::Operation(format!("unresolved Integration reservation paths: {owning}/{operation}")));};
+            let directory_path=PathBuf::from(&directory);
+            if !directory_path.is_absolute(){return Err(KernelError::Storage("Integration reservation root is not canonical".into()));}
+            let physical=paths.iter().map(|path|{
+                let resolved=super::file_resources::resolve_scoped_resource(&directory_path,path,true,true,|_|true)?;
+                super::file_resource_leases::canonical_lease_path(resolved.absolute)
+            }).collect::<Result<Vec<_>,KernelError>>()?;
+            let overlap=requested.iter().any(|left|physical.iter().any(|right|physical_paths_overlap(&left.absolute,right)));
+            if overlap{operations.push(json!({"operationId":operation,"workspaceId":owning,"state":row.get::<_,String>(2)?,"revision":row.get::<_,i64>(3)?,"canonicalRoot":directory,"paths":paths}));}
+        }
+        Ok(json!({"operations":operations}))
+    }
+}
+fn physical_paths_overlap(left:&Path,right:&Path)->bool{
+    #[cfg(windows)]
+    let (left,right)=(PathBuf::from(left.to_string_lossy().to_lowercase()),PathBuf::from(right.to_string_lossy().to_lowercase()));
+    left.starts_with(right)||right.starts_with(left)
 }

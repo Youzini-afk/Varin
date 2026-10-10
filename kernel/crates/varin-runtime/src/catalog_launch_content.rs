@@ -228,7 +228,7 @@ impl ChildLaunchPreparation {
                 .content
                 .load(&self.read.metadata.selection.tools_ref)?,
         )?;
-        if self.child.tools.iter().any(|tool| !tools.contains(tool)) {
+        if self.child.tools.iter().any(|tool| !tools.contains(tool) && !matches!(tool.name.as_str(),"file_write"|"file_edit")) {
             return Err(RuntimeError::Conflict("child exceeds parent tools".into()));
         }
         self.child.mcp_binding = None;

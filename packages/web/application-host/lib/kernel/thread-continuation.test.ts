@@ -135,7 +135,7 @@ it('slow startup launch cannot block the existing child/process pump or a later 
     status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
   const continues = vi.fn(async (runId: string, signal: AbortSignal) => { if (runId === f.run.id) await f.adapter.continueLaunch(runId, { signal }); });
-  const collaboration = new ThreadCollaboration({ runtime: runtime as unknown as AgentRuntimeClient,
+  const collaboration = new ThreadCollaboration({ kernel: {} as never, storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error("No source expected"); }, sourceCaptureOwners: {} as never, runtime: runtime as unknown as AgentRuntimeClient,
     workingStates: {} as never, prepareContext: (async () => { throw new Error('No child preparation expected'); }) as never,
     continueRun: continues, recoverLaunches: signal => f.adapter.recover(signal), onError: (_id, error) => { f.errors.push(error); } });
   try {
@@ -294,4 +294,63 @@ it('policy HTTP controls require the displayed selection and branch, reject priv
   expect(controls.restartPolicy).toHaveBeenCalledOnce();
   expect(f.run.waiting_on).toBe('wait:one'); expect(f.runtime.resumeRun).not.toHaveBeenCalled();
   expect(f.runtime.rebindLaunch).not.toHaveBeenCalled();
+});
+
+it('a child fact observed during an active launch is rechecked once after that launch releases', async () => {
+  const f = fixture();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let listener!: (event: AgentRuntimeStreamEvent) => void;
+  const child = { operation_id: 'child-operation', parent_run_id: 'parent', parent_thread_id: 'parent-thread', parent_branch_id: 'parent-branch',
+    child_thread_id: 'child-thread', child_branch_id: 'child-branch', origin: {}, call_id: 'dispatch', project_id: null,
+    input: { task: 'Read source', model: 'parent', profile: 'read_only' }, configuration: {}, launch: f.launch.selection,
+    state: 'ready', revision: 1, cursor: 1, receipt: { key: 'child-input', run_id: f.run.id, input_id: 'child-input', branch_id: 'child-branch', thread_id: 'child-thread', cursor: 1 },
+    report: null, resources_released: true, code_result: { kind: 'no_changes' },
+    source: { kind: 'pending', handoff: { operation_id: 'handoff', source: { mode: 'fixed_branch', workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null }, root: { kind: 'fixed', pin: { pin_id: 'pin', root: 'root', source: { mode: 'fixed_branch', workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null } } } } },
+  } as import('./protocol.generated.js').ChildTask;
+  const children = vi.fn(async () => [structuredClone(child)]);
+  const runtime = Object.assign(f.runtime, {
+    onEvent: (handler: typeof listener) => { listener = handler; return () => {}; }, onExit: () => () => {}, onReady: () => () => {},
+    reconcileChildren: async () => [], reconcileProcessWaits: async () => [], children, unacceptedChildSources: async () => [],
+    child: async () => structuredClone(child), releaseSourceGrants: vi.fn(async () => {}),
+    status: async () => ({ eventCursor: 0 }), events: async () => [],
+  });
+  const continueRun = vi.fn(async () => { await gate; });
+  const collaboration = new ThreadCollaboration({ kernel: {} as never, storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
+    runtime: runtime as unknown as AgentRuntimeClient, workingStates: {} as never, prepareContext: {} as never,
+    continueRun, recoverLaunches: async () => {}, onError: (_id, error) => { f.errors.push(error); } });
+  try {
+    await collaboration.recover(); expect(continueRun).toHaveBeenCalledOnce();
+    child.revision = 2; child.state = 'completed';
+    child.report = { outcome: 'succeeded', sender_thread_id: child.child_thread_id, run_id: f.run.id, history_ids: [], detail: null };
+    listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 2 });
+    await vi.waitFor(() => expect(children).toHaveBeenCalledTimes(2));
+    release();
+    await vi.waitFor(() => expect(children).toHaveBeenCalledTimes(3));
+    await tick(); expect(children).toHaveBeenCalledTimes(3);
+    expect(continueRun).toHaveBeenCalledOnce(); expect(f.errors).toEqual([]);
+  } finally { release(); collaboration.stop(); }
+});
+
+it('domain receipt discovery keeps the new epoch wake while an aborted old discovery drains', async () => {
+  const f = fixture();
+  let exit!: () => void; let ready!: () => void; let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const runtime = Object.assign(f.runtime, {
+    onEvent: () => () => {}, onExit: (handler: () => void) => { exit = handler; return () => {}; }, onReady: (handler: () => void) => { ready = handler; return () => {}; },
+    reconcileChildren: async () => [], reconcileProcessWaits: async () => [], children: async () => [], unacceptedChildSources: async () => [],
+    status: async () => ({ eventCursor: 0 }), events: async () => [],
+  });
+  const reconcileDomainReceipts = vi.fn(async (_signal: AbortSignal) => {}).mockImplementationOnce(async () => { await gate; });
+  const collaboration = new ThreadCollaboration({ kernel: {} as never, storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
+    runtime: runtime as unknown as AgentRuntimeClient, workingStates: {} as never, prepareContext: {} as never,
+    continueRun: async () => {}, recoverLaunches: async () => {}, reconcileDomainReceipts, onError: (_id, error) => { f.errors.push(error); } });
+  try {
+    await collaboration.recover(); expect(reconcileDomainReceipts).toHaveBeenCalledOnce();
+    exit(); ready(); await tick(); expect(reconcileDomainReceipts).toHaveBeenCalledOnce();
+    expect(reconcileDomainReceipts.mock.calls[0]![0].aborted).toBe(true);
+    release(); await vi.waitFor(() => expect(reconcileDomainReceipts).toHaveBeenCalledTimes(2));
+    expect(reconcileDomainReceipts.mock.calls[1]![0].aborted).toBe(false);
+    expect(f.errors).toEqual([]);
+  } finally { release(); collaboration.stop(); }
 });

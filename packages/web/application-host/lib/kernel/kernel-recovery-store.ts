@@ -21,10 +21,21 @@ import type {
   DurableRecoveryChangeSelection,
   WorkspaceRecoveryEngine,
   WorkspaceRecoveryStorageContext,
+  RecoveryDurableOperationPort,
 } from "../recovery/journal-engine.js";
 import type { HostResourceOperationGate, ResolveDirectoryApplyContext } from "../recovery/durable-file-operation.js";
 import { KernelFileResourceBackend } from "./file-resource-backend.js";
-import type { KernelStorageAdapter, KernelStorageReference } from "./storage-adapter.js";
+import type { KernelFileAuthorityContext, KernelStorageAdapter, KernelStorageContext, KernelStorageReference } from "./storage-adapter.js";
+import type { KernelScopedClient } from "./kernel-client.js";
+
+interface ScopedRecoveryActor {
+  client: KernelScopedClient;
+  identity: RecoveryIdentity;
+  root: string;
+  threadId: string;
+  runId?: string;
+  metadataReader?: Pick<RecoveryDurableOperationPort, "listOperations">;
+}
 
 const asObject = (value: unknown): Record<string, unknown> => (
   value && typeof value === "object" && !Array.isArray(value)
@@ -47,6 +58,7 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
   constructor(
     private readonly adapter: KernelStorageAdapter,
     fileResourcesOrLegacyCacheRoot?: KernelFileResourceBackend | string,
+    private readonly scopedActor?: ScopedRecoveryActor,
   ) {
     this.fileResources = fileResourcesOrLegacyCacheRoot instanceof KernelFileResourceBackend
       ? fileResourcesOrLegacyCacheRoot
@@ -73,6 +85,16 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
     return this.owners.get(this.key(workspaceId, hash))?.values().next().value;
   }
 
+  registerObjectOwner(workspaceId: string, hash: string, ownerId: string): void {
+    if (this.scopedActor && workspaceId !== this.scopedActor.identity.workspaceId) {
+      throw new Error("Recovery object owner belongs to another admitted workspace");
+    }
+    const key = this.key(workspaceId, hash);
+    const owners = this.owners.get(key) ?? new Set<string>();
+    owners.add(ownerId);
+    this.owners.set(key, owners);
+  }
+
   consumeOwner(ownerId: string): void {
     for (const [key, owners] of this.owners) {
       if (!owners.delete(ownerId)) continue;
@@ -82,7 +104,10 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
   }
 
   private async objectBytes(workspaceId: string, hash: string, sessionId?: string): Promise<Buffer> {
-    const context = await this.adapter.context(
+    if (this.scopedActor && (workspaceId !== this.scopedActor.identity.workspaceId || sessionId)) {
+      throw new Error("Recovery object access does not match its admitted actor");
+    }
+    const context = this.scopedActor ?? await this.adapter.context(
       workspaceId,
       sessionId ? "recovery-actor" : "recovery-maintenance",
       sessionId
@@ -119,6 +144,9 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
     options: CaptureStateOptions = {},
     _sessionId?: string,
   ): Promise<CapturedState> {
+    if (this.scopedActor && (identity.workspaceId !== this.scopedActor.identity.workspaceId || _sessionId)) {
+      throw new Error("Recovery capture does not match its admitted actor");
+    }
     const captured = await this.fileResources.captureDetailed(
       identity,
       inputPath,
@@ -129,14 +157,14 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
       // File capture can belong to a nested execution-directory grant. Recovery
       // metadata still belongs to the owning workspace's record writer: transfer
       // the transient owner to that exact grant, also for maintenance operations.
-      const recordWriter = await this.adapter.context(identity.workspaceId,
+      const recordWriter = this.scopedActor ?? await this.adapter.context(identity.workspaceId,
         _sessionId ? "recovery-actor" : "recovery-maintenance", {
           owningWorkspace: identity.workspaceId,
           executionWorkspace: identity.workspaceId,
           ...(_sessionId ? { sessionId: _sessionId } : { capabilities: ["recovery.maintenance"] }),
           pathScopes: [""],
         });
-      await recordWriter.client.rebindObjectOwner(identity.workspaceId, captured.ownerId);
+      if (!this.scopedActor) await recordWriter.client.rebindObjectOwner(identity.workspaceId, captured.ownerId);
       const key = this.key(identity.workspaceId, captured.state.objectHash);
       const owners = this.owners.get(key) ?? new Set<string>();
       owners.add(captured.ownerId);
@@ -159,6 +187,9 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
   relativePathFor(identity: RecoveryIdentity, inputPath: string) {
     return this.fileResources.relativePathFor(identity, inputPath);
   }
+
+  integrationConflicts: RecoveryDurableOperationPort["listOperationConflicts"] = input => this.fileResources.integrationConflicts(
+    recoveryIdentity(input.workspaceId, input.canonicalRoot), input.paths, input.exceptOperationId);
 
   resourceOperationGate(identity: RecoveryIdentity): HostResourceOperationGate {
     return this.fileResources.gateFor(identity);
@@ -191,6 +222,7 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
 }
 
 export interface KernelRecoveryContentStoreLike {
+  registerObjectOwner?(workspaceId: string, hash: string, ownerId: string): void;
   captureState(
     identity: RecoveryIdentity,
     root: string,
@@ -202,15 +234,28 @@ export interface KernelRecoveryContentStoreLike {
   ownerIdForHash(workspaceId: string, hash: string): string | undefined;
   consumeOwner(ownerId: string): void;
   resourceOperationGate?(identity: RecoveryIdentity): HostResourceOperationGate;
+  integrationConflicts?: RecoveryDurableOperationPort["listOperationConflicts"];
 }
 
 export class KernelRecoveryStore {
   constructor(
     private readonly adapter: KernelStorageAdapter,
     readonly content: KernelRecoveryContentStoreLike,
+    private readonly scopedActor?: ScopedRecoveryActor,
   ) {}
 
-  private context(workspaceId: string, sessionId?: string, maintenance = false) {
+  registerObjectOwner(workspaceId: string, hash: string, ownerId: string): void {
+    if (!this.content.registerObjectOwner) throw new Error("Recovery candidate object registration is unavailable");
+    this.content.registerObjectOwner(workspaceId, hash, ownerId);
+  }
+
+  private context(workspaceId: string, sessionId?: string, maintenance = false): Promise<Pick<KernelStorageContext, "client" | "identity" | "root">> {
+    if (this.scopedActor) {
+      if (workspaceId !== this.scopedActor.identity.workspaceId || sessionId) {
+        throw new Error("Recovery operation does not match its admitted actor");
+      }
+      return Promise.resolve(this.scopedActor);
+    }
     return this.adapter.context(
       workspaceId,
       maintenance ? "recovery-maintenance" : "recovery-actor",
@@ -639,6 +684,14 @@ export class KernelRecoveryStore {
     runId?: string;
     surfacePaths?: readonly string[];
   }): Promise<Record<string, unknown>> {
+    if (this.scopedActor) {
+      if (input.sessionId || (input.threadId && input.threadId !== this.scopedActor.threadId)
+        || (input.runId && input.runId !== this.scopedActor.runId)) {
+        throw new Error("Recovery operation owner does not match its admitted actor");
+      }
+      input = { ...input, threadId: this.scopedActor.threadId,
+        ...(this.scopedActor.runId ? { runId: this.scopedActor.runId } : {}) };
+    }
     const context = await this.context(input.workspaceId, undefined, true);
     const surfacePaths = new Set(input.surfacePaths ?? []);
     const files = Object.entries(input.targets).map(([filePath, states]) => ({
@@ -769,6 +822,12 @@ export class KernelRecoveryStore {
   }
 
   async listOperations(workspaceId: string, kind?: string): Promise<Record<string, unknown>[]> {
+    if (this.scopedActor) {
+      if (workspaceId !== this.scopedActor.identity.workspaceId || !this.scopedActor.metadataReader) {
+        throw new Error("Workspace operation inspection requires its explicit metadata reader");
+      }
+      return this.scopedActor.metadataReader.listOperations(workspaceId, kind);
+    }
     const context = await this.context(workspaceId, undefined, true);
     const output: Record<string, unknown>[] = [];
     let cursor: number | undefined;
@@ -787,6 +846,11 @@ export class KernelRecoveryStore {
     return output;
   }
 
+  listOperationConflicts: RecoveryDurableOperationPort["listOperationConflicts"] = input => {
+    if (!this.content.integrationConflicts) throw new Error("Recovery physical reservation inspection is unavailable");
+    return this.content.integrationConflicts(input);
+  };
+
   async releaseOperation(workspaceId: string, operationId: string): Promise<Record<string, unknown>> {
     const context = await this.context(workspaceId, undefined, true);
     return context.client.recoveryOperationRelease({
@@ -803,6 +867,16 @@ export class KernelRecoveryStore {
       resolveDirectoryApplyContext?: ResolveDirectoryApplyContext;
     } = {},
   ): Promise<WorkspaceRecoveryStorageContext> {
+    if (this.scopedActor) {
+      if (workspaceId !== this.scopedActor.identity.workspaceId || options.resolveDirectoryApplyContext) {
+        throw new Error("Scoped recovery cannot resolve another execution directory");
+      }
+      const content = this.content;
+      if (!(content instanceof KernelRecoveryContentStore)) throw new Error("Scoped recovery content store is unavailable");
+      return { ...this.scopedActor, fileStore: content, fileResources: content.fileResources,
+        resourceOperationGate: options.resourceOperationGate ?? content.resourceOperationGate(this.scopedActor.identity),
+        durableRecoveryStore: this };
+    }
     const context = await this.adapter.context(workspaceId, "recovery-maintenance", {
       owningWorkspace: workspaceId,
       executionWorkspace: workspaceId,
@@ -831,6 +905,35 @@ export class KernelRecoveryStore {
   }
 }
 
+/** Reuses the original file/journal implementations with one admitted source authority. */
+export const createScopedKernelRecoveryBindings = (
+  adapter: KernelStorageAdapter,
+  input: {
+    authority: KernelFileAuthorityContext;
+    threadId: string;
+    runId?: string;
+    storageRoot: string;
+    /** Only an independent Host coordinator; never pass a second kernel gate for these same paths. */
+    resourceOperationGate?: HostResourceOperationGate;
+    metadataReader?: Pick<RecoveryDurableOperationPort, "listOperations">;
+  },
+) => {
+  if (!input.threadId) throw new Error("Scoped recovery requires its real Thread owner");
+  const identity = recoveryIdentity(input.authority.owningWorkspaceId, input.authority.canonicalRoot);
+  const actor: ScopedRecoveryActor = { client: input.authority.client, identity, root: input.storageRoot,
+    threadId: input.threadId, ...(input.runId ? { runId: input.runId } : {}),
+    ...(input.metadataReader ? { metadataReader: input.metadataReader } : {}) };
+  const fileResources = new KernelFileResourceBackend(adapter, { authority: input.authority });
+  const fileStore = new KernelRecoveryContentStore(adapter, fileResources, actor);
+  const durableRecoveryStore = new KernelRecoveryStore(adapter, fileStore, actor);
+  const kernelGate = fileResources.gateFor(identity);
+  const resourceOperationGate: HostResourceOperationGate = input.resourceOperationGate
+    ? { run: (resources, operation, options) => input.resourceOperationGate!.run(resources,
+      () => kernelGate.run(resources, operation, options), options) }
+    : kernelGate;
+  return { fileStore, fileResources, resourceOperationGate, durableRecoveryStore };
+};
+
 export const createKernelRecoveryDirectFacade = (
   base: WorkspaceRecoveryEngine,
   store: KernelRecoveryStore,
@@ -842,12 +945,12 @@ export const createKernelRecoveryDirectFacade = (
   } = {},
 ): WorkspaceRecoveryEngine => {
   const facade = { ...base } as WorkspaceRecoveryEngine;
-  facade.withWorkspaceStorage = async (workspaceId, _accessOptions, operation) => operation(
+  facade.withWorkspaceStorage = (workspaceId, accessOptions, operation) => base.withWorkspaceStorage(workspaceId, accessOptions, async () => operation(
     await store.workspaceStorageContext(workspaceId, {
       ...(options.resourceOperationGateFor ? { resourceOperationGate: options.resourceOperationGateFor(workspaceId) } : {}),
       ...(options.resolveDirectoryApplyContext ? { resolveDirectoryApplyContext: options.resolveDirectoryApplyContext } : {}),
     }),
-  );
+  ));
   facade.recordTurnStart = async (input) => ({ binding: await store.recordTurnStart(input), status: "ready" });
   facade.recordMutationBefore = async (input) => ({ recorded: await store.recordMutationBefore(input), status: "ready" });
   facade.recordMutationAfter = async (input) => ({ recorded: await store.recordMutationAfter(input), status: "ready" });

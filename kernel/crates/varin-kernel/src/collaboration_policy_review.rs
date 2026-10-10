@@ -392,7 +392,7 @@ fn run_sequence(cancel_before_park: bool, pause_before_observation: bool) {
                 );
                 if result
                     .as_ref()
-                    .is_ok_and(|value| value.get("pinId").is_some())
+                    .is_ok_and(|value| value["root"]["pin"].get("pin_id").is_some())
                 {
                     pins.fetch_add(1, Ordering::SeqCst);
                 }
@@ -462,14 +462,14 @@ fn run_sequence(cancel_before_park: bool, pause_before_observation: bool) {
         .unwrap();
     let child = db.lock().unwrap().child_task(&operation).unwrap();
     assert!(matches!(child.origin, ToolOrigin::PolicyAction { .. }));
-    assert_eq!(child.source_pin.pin_id, format!("child-pin:{operation}"));
+    assert_eq!(child.source.pin().unwrap().pin_id, format!("child-pin:{operation}"));
     assert!(child.receipt.is_none());
     setup_call(
         &mut storage.lock().unwrap(),
         "branch.create.begin",
         json!({
             "builderId":"child-source-builder","operationId":format!("create-child-source:{operation}"),"branchId":format!("child-source:{operation}"),
-            "workspaceId":"workspace-A","baseRef":child.source_pin.root,
+            "workspaceId":"workspace-A","baseRef":child.source.pin().unwrap().root,
             "parentRef":"fixed-parent@0","draftBasePaths":[],"captureScopes":[],
         }),
     );
@@ -480,9 +480,13 @@ fn run_sequence(cancel_before_park: bool, pause_before_observation: bool) {
             "builderId":"child-source-builder","operationId":format!("create-child-source:{operation}"),
         }),
     );
-    let mut source = child.source_pin.source.clone();
+    let mut source = child.source.pin().unwrap().source.clone();
     source.branch_id = Some(format!("child-source:{operation}"));
     source.revision = Some(0);
+    let source_preparation=db.lock().unwrap().prepare_child_source(&operation,
+        varin_runtime::catalog::collaboration::ChildSourcePin {pin_id:format!("child-source-pin:{operation}"),root:child.source.pin().unwrap().root.clone(),source:source.clone()},
+        source.clone(),varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot{root:child.source.pin().unwrap().root.clone()}).unwrap().load().unwrap();
+    db.lock().unwrap().attach_child_source(source_preparation).unwrap();
     let proposal = ContextProposal {
         key: format!("context:{operation}"),
         branch_id: child.child_branch_id.clone(),

@@ -32,3 +32,12 @@ release is explicitly approved.
   inspect its committed bounded plan, then choose an evidence graph and main-model answer.
 
 Both use the ordinary installed brokered Host extension and project service-routing paths.
+
+
+## Ordinary Agent tool examples
+
+- [Stored material snapshot reader](material-snapshot-tool/README.md): bounded reads through the original material owner.
+- [Fixed child result integration](child-integration-tool/README.md): explicitly apply a published child result through the original Integration journal.
+
+Both use ordinary installed services and their reviewed Host capabilities. Their manifests supply the
+same tool declarations used by model/policy admission and inspection.

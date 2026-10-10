@@ -1,3 +1,4 @@
+import type { KernelRecoveryOperationConflictsResult } from './protocol.generated.js';
 import { PlanBridge, type PrivatePlanResponse } from './plan-bridge.js';
 import type { PlanOwner } from './plan-owner.js';
 import { MemoryBridge, type PrivateMemoryResponse } from './memory-bridge.js';
@@ -23,6 +24,9 @@ import {
   KERNEL_REQUEST_WINDOW,
   type KernelBranchReadResult,
   type KernelBranchChange,
+  type KernelWorkingResultCandidate,
+  type KernelWorkingResultPublication,
+  type KernelWorkingResultCandidateReleased,
   type KernelCreateEntry,
   type KernelError,
   type KernelHandshakeResult,
@@ -78,6 +82,7 @@ export type KernelBlobReadSource =
   | { ownerId: string };
 
 export interface KernelCreateBranchInput {
+  sourceProvenance?: { objectHash: string; ownerId: string };
   operationId: string;
   branchId: string;
   workspaceId: string;
@@ -297,6 +302,18 @@ export class KernelScopedClient {
     return this.owner.writeBranch(params, this.grant, signal);
   }
 
+  prepareResultCandidate(params: { publicationId: string; branchId: string; expectedWriteRevision: number; expectedRoot: string; changes: KernelBranchChange[] }, signal?: AbortSignal): Promise<KernelWorkingResultCandidate> {
+    return this.owner.prepareResultCandidate(params, this.grant, signal);
+  }
+
+  publishResultCandidate(params: KernelMethodParams["working.result.publish"], signal?: AbortSignal): Promise<KernelWorkingResultPublication> {
+    return this.owner.publishResultCandidate(params, this.grant, signal);
+  }
+
+  releaseResultCandidate(params: KernelMethodParams["working.result.candidate.release"], signal?: AbortSignal): Promise<KernelWorkingResultCandidateReleased> {
+    return this.owner.releaseResultCandidate(params, this.grant, signal);
+  }
+
   publishBranch(params: { operationId: string; branchId: string; expectedWriteRevision: number; expectedRoot: string }, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.publishBranch(params, this.grant, signal);
   }
@@ -389,6 +406,9 @@ export class KernelScopedClient {
     return this.owner.recoveryOperationComplete(params, this.grant, signal);
   }
 
+  recoveryOperationConflicts(params: KernelMethodParams["recovery.operation.conflicts"], signal?: AbortSignal): Promise<KernelRecoveryOperationConflictsResult> {
+    return this.owner.recoveryOperationConflicts(params, this.grant, signal);
+  }
   recoveryOperationList(params: KernelMethodParams["recovery.operation.list"], signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.recoveryOperationList(params, this.grant, signal);
   }
@@ -1330,6 +1350,7 @@ export class KernelClient {
         ...(params.parentRef === undefined ? {} : { parentRef: params.parentRef }),
         draftBasePaths: params.draftBasePaths,
         captureScopes: params.captureScopes,
+        ...(params.sourceProvenance === undefined ? {} : { sourceProvenance: params.sourceProvenance }),
       }, { signal, grant: scoped });
       let sequence = 0;
       for (const batch of batchForKernelTransport(params.entries)) {
@@ -1372,6 +1393,36 @@ export class KernelClient {
       await this.requestRaw<Record<string, unknown>>("branch.write.abort", { builderId }, { grant: scoped }).catch(() => undefined);
       throw error;
     }
+  }
+
+  async prepareResultCandidate(params: { publicationId: string; branchId: string; expectedWriteRevision: number; expectedRoot: string; changes: KernelBranchChange[] }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelWorkingResultCandidate> {
+    const scoped = this.assertGrant(grant);
+    const operationId = `result-prepare:${params.publicationId}`;
+    const builderId = `result-candidate-${randomUUID()}`;
+    try {
+      await this.requestRaw<Record<string, unknown>>("branch.write.begin", {
+        operationId, builderId, branchId: params.branchId, expectedWriteRevision: params.expectedWriteRevision,
+      }, { signal, grant: scoped });
+      let sequence = 0;
+      for (const changes of batchForKernelTransport(params.changes)) {
+        await this.requestRaw<Record<string, unknown>>("branch.write.append", { builderId, sequence, changes }, { signal, grant: scoped });
+        sequence += 1;
+      }
+      return await this.requestRaw<KernelWorkingResultCandidate>("working.result.prepare", {
+        operationId, publicationId: params.publicationId, builderId, expectedRoot: params.expectedRoot,
+      }, { signal, grant: scoped });
+    } catch (error) {
+      await this.requestRaw<Record<string, unknown>>("branch.write.abort", { builderId }, { grant: scoped }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async publishResultCandidate(params: KernelMethodParams["working.result.publish"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelWorkingResultPublication> {
+    return this.requestRaw<KernelWorkingResultPublication>("working.result.publish", params, { signal, grant });
+  }
+
+  async releaseResultCandidate(params: KernelMethodParams["working.result.candidate.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelWorkingResultCandidateReleased> {
+    return this.requestRaw<KernelWorkingResultCandidateReleased>("working.result.candidate.release", params, { signal, grant });
   }
 
   async publishBranch(params: { operationId: string; branchId: string; expectedWriteRevision: number; expectedRoot: string }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -1466,12 +1517,23 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown>>("recovery.operation.complete", params, { signal, grant });
   }
 
+  async recoveryOperationConflicts(params: KernelMethodParams["recovery.operation.conflicts"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelRecoveryOperationConflictsResult> {
+    return this.requestRaw<KernelRecoveryOperationConflictsResult>("recovery.operation.conflicts", params, { signal, grant });
+  }
   async recoveryOperationList(params: KernelMethodParams["recovery.operation.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("recovery.operation.list", params, { signal, grant });
   }
 
   async recoveryOperationRelease(params: KernelMethodParams["recovery.operation.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("recovery.operation.release", params, { signal, grant });
+  }
+
+  async claimChildSource(params: KernelMethodParams["source.handoff.claim"], signal?: AbortSignal): Promise<KernelGrantHandle> {
+    if (!this.handshakeResult) await this.start();
+    const result = await this.requestRaw<Record<string, unknown>>("source.handoff.claim", params, { signal });
+    const handle = this.grantFromResponse(result);
+    this.revokedGrants.delete(handle.grantId); this.issuedGrants.set(handle.grantId, handle);
+    return handle;
   }
 
   async issueGrant(params: KernelGrantIssueInput, signal?: AbortSignal): Promise<KernelGrantHandle> {

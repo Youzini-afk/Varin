@@ -13,6 +13,7 @@ import type {
 } from "../recovery/journal-files.js";
 import { createRecoveryFileReader, normalizeResourceId, parseRecoveryState } from "../recovery/journal-files.js";
 import type { HostResourceOperation, HostResourceOperationGate } from "../recovery/durable-file-operation.js";
+import type { RecoveryOperationConflict } from "../recovery/journal-engine.js";
 import { canonicalizePathIdentity } from "../workspace/path-safety.js";
 import type { KernelFileAuthorityContext, KernelStorageAdapter } from "./storage-adapter.js";
 
@@ -22,6 +23,8 @@ export interface KernelExecutionRoot {
 }
 
 export interface KernelFileResourceBackendOptions {
+  /** Already admitted authority. This backend never mints or widens its grant. */
+  authority?: KernelFileAuthorityContext;
   resolveExecutionRoot?: (canonicalRoot: string, owningWorkspaceId: string) => Promise<KernelExecutionRoot>;
   authorityPurpose?: string;
   authorityCapabilities?: string[];
@@ -79,10 +82,26 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     private readonly adapter: KernelStorageAdapter,
     private readonly options: KernelFileResourceBackendOptions = {},
   ) {
+    if (options.authority && (options.resolveExecutionRoot || options.authorityPurpose || options.authorityCapabilities)) {
+      throw new Error("A scoped file backend cannot also resolve a different authority");
+    }
     this.busyRetryMs = options.busyRetryMs ?? 5;
   }
 
   private async bind(identity: RecoveryIdentity): Promise<BoundFileContext> {
+    if (this.options.authority) {
+      const authority = this.options.authority;
+      if (identity.workspaceId !== authority.owningWorkspaceId) {
+        throw new Error("File operation belongs to a different admitted workspace");
+      }
+      const canonicalRoot = await canonicalizePathIdentity(authority.canonicalRoot);
+      if (!sameFsPath(canonicalRoot, authority.canonicalRoot)) {
+        throw new Error("Admitted file root changed");
+      }
+      const requestedRoot = await canonicalizePathIdentity(identity.canonicalRoot, { allowMissing: true });
+      const basePath = sameFsPath(canonicalRoot, requestedRoot) ? "" : relativeInside(canonicalRoot, requestedRoot);
+      return { ...authority, basePath };
+    }
     const execution = this.options.resolveExecutionRoot
       ? await this.options.resolveExecutionRoot(identity.canonicalRoot, identity.workspaceId)
       : { workspaceId: identity.workspaceId, canonicalRoot: identity.canonicalRoot };
@@ -211,6 +230,14 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     };
     lease.observed.set(relative, result.state);
     return result;
+  }
+
+  async integrationConflicts(identity: RecoveryIdentity, paths: string[], exceptOperationId?: string): Promise<RecoveryOperationConflict[]> {
+    const context = await this.bind(identity);
+    const result = await context.client.recoveryOperationConflicts({ workspaceId: context.owningWorkspaceId,
+      rootId: context.rootId, paths: paths.map(file => this.translated(context, file)),
+      ...(exceptOperationId ? { exceptOperationId } : {}) });
+    return result.operations;
   }
 
   async captureState(

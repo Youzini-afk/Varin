@@ -644,6 +644,10 @@ impl RunSupervisor {
         self.quiesce_run(&parent, |run| run.state == RunState::Waiting && run.waiting_on.as_deref() == Some(&wait_id))
     }
     /// Each waiter shares its Run's teardown. No Catalog or global worker lock crosses join.
+    /// Joins the terminal Run worker. Storage file leases must also be drained separately.
+    pub fn quiesce_terminal(&self, run_id: &str) -> Result<()> {
+        self.quiesce_run(run_id, |run| matches!(run.state, RunState::Completed | RunState::Failed | RunState::Cancelled))
+    }
     fn quiesce_run(&self, run_id: &str, waiting: impl Fn(&Run) -> bool) -> Result<()> {
         let serial = self.quiescence.lock().map_err(error)?.entry(run_id.into())
             .or_insert_with(||Arc::new(RunDrain { serial: Mutex::new(()), active: AtomicBool::new(true) })).clone();

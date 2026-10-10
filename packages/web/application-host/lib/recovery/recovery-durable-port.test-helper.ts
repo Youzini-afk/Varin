@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { WorkspaceRecoveryTurnProvenance } from "@varin/extension-contract";
 import type { DurableRecoveryChangeSelection, RecoveryDurableMetadataPort } from "./journal-engine.js";
 import { sameState } from "./journal-files.js";
@@ -187,6 +188,24 @@ export const createInMemoryRecoveryDurablePort = (
     async getOperation(workspaceId, operationId) { return get(workspaceId, operationId); },
     async listOperations(workspaceId, kind) {
       return [...operations.values()].filter((operation) => operation.workspaceId === workspaceId && (!kind || operation.kind === kind)).map(clone);
+    },
+    async listOperationConflicts(input) {
+      const requested = input.paths.map(file => path.resolve(input.canonicalRoot, file));
+      const overlap = (a: string, b: string) => a === b || a.startsWith(`${b}${path.sep}`) || b.startsWith(`${a}${path.sep}`);
+      return [...operations.values()].flatMap(operation => {
+        if (operation.kind !== "integration" || ["complete", "conflict", "compensated", "aborted", "undone"].includes(operation.state)
+          || (operation.workspaceId === input.workspaceId && operation.operationId === input.exceptOperationId)) return [];
+        const data = { ...operation.data, ...operation.result };
+        if (data.parentBranchId) return [];
+        const reservation = data.reservedResources as { canonicalRoot: string; paths: string[] } | undefined;
+        const canonicalRoot = reservation?.canonicalRoot ?? (typeof data.applyCanonicalRoot === "string" ? data.applyCanonicalRoot
+          : operation.workspaceId === input.workspaceId ? input.canonicalRoot : undefined);
+        if (!canonicalRoot) throw new Error("Unresolved integration resource metadata is unavailable");
+        const paths = reservation?.paths ?? Object.keys((data.targets ?? {}) as Record<string, unknown>);
+        if (!paths.some(file => requested.some(resource => overlap(resource, path.resolve(canonicalRoot, file))))) return [];
+        return [{ operationId: operation.operationId, workspaceId: operation.workspaceId, state: operation.state,
+          revision: operation.revision, canonicalRoot, paths }];
+      });
     },
     async releaseOperation(workspaceId, operationId) {
       const id = key(workspaceId, operationId);

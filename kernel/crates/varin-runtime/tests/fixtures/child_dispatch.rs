@@ -46,14 +46,14 @@ impl Fixture {
         )
     }
     pub(crate) fn new_with_schemas(revision: i64, read: ToolSchema, dispatch: ToolSchema) -> Self {
-        Self::new_parent(revision, read, dispatch, false)
+        Self::new_parent(revision, read, dispatch, false, false, false)
     }
     pub(crate) fn new_policy_parent_with_schemas(
         revision: i64,
         read: ToolSchema,
         dispatch: ToolSchema,
     ) -> Self {
-        Self::new_parent(revision, read, dispatch, true)
+        Self::new_parent(revision, read, dispatch, true, false, false)
     }
     pub(crate) fn new_policy() -> Self {
         let mut fixture = Self::new_parent(
@@ -68,6 +68,8 @@ impl Fixture {
                 schema: json!({"type":"object"}),
             },
             true,
+            false,
+            false,
         );
         fixture.context = fixture.admit_policy_call(ToolCall {
             call_id: "dispatch-call".into(),
@@ -77,7 +79,19 @@ impl Fixture {
         });
         fixture
     }
-    fn new_parent(revision: i64, read: ToolSchema, dispatch: ToolSchema, policy: bool) -> Self {
+    pub(crate) fn new_isolated() -> Self {
+        Self::new_parent(7, read_schema(), ToolSchema {
+            description:String::new(), output_schema:None, metadata:None,
+            name:DISPATCH_TOOL.into(), version:"1".into(), schema:json!({"type":"object"}),
+        }, false, true, false)
+    }
+    pub(crate) fn new_parent_extension() -> Self {
+        Self::new_parent(7, read_schema(), ToolSchema {
+            description:String::new(), output_schema:None, metadata:None,
+            name:DISPATCH_TOOL.into(), version:"1".into(), schema:json!({"type":"object"}),
+        }, false, false, true)
+    }
+    fn new_parent(revision: i64, read: ToolSchema, dispatch: ToolSchema, policy: bool, isolated: bool, parent_extension: bool) -> Self {
         let root = std::env::temp_dir().join(format!(
             "varin-child-catalog-review-{}",
             uuid::Uuid::new_v4()
@@ -87,14 +101,20 @@ impl Fixture {
         let input = DispatchInput {
             task: "Read the fixed file and report".into(),
             model: "parent".into(),
-            profile: "read_only".into(),
+            profile: if isolated { "isolated_write" } else { "read_only" }.into(),
         };
         let source: SourceSelection = serde_json::from_value(json!({"mode":"fixed_branch","live_root":null,
             "workspace_id":"workspace-A","execution_workspace_id":"workspace-A","branch_id":"fixed-parent","revision":revision})).unwrap();
-        let launch: LaunchSelection = serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"frozen-connection",
+        let mut launch: LaunchSelection = serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"frozen-connection",
             "provider_family":"fixture","model":"fixture-model","configuration_generation":2,"tool_schema_generation":1,
             "tools":[read.clone(),dispatch,{"name":WAIT_TOOL,"version":"1","description":"Wait for fixture operation","output_schema":null,"metadata":null,"schema":{"type":"object"}}],"policy":{"name":"fixture","version":"1"},"source":source,
             "credential_scope":{"reference":"credential-ref","authority":"credential-owner","account":"account-A","generation":3}})).unwrap();
+        if parent_extension {
+            let extension:varin_runtime::catalog::launches::ExtensionToolBinding=serde_json::from_value(json!({"providerKey":"example:host:helper@1","extensionId":"example","extensionVersion":"1.0.0","serviceId":"helper","serviceVersion":1,
+                "artifactIntegrity":"sha256-original","declarationHash":"declaration","configurationIdentity":null,
+                "tool":{"name":"helper","version":"declaration","description":"Parent extension","schema":{"type":"object"},"output_schema":null,"metadata":{"service_id":"helper","service_version":1,"completion":"result","operation":"read"}}})).unwrap();
+            launch.tools.push(extension.tool.clone());launch.extension_bindings.push(extension);
+        }
         let receipt = db.submit_with_launch(&SubmitInput { key: "parent-input".into(), thread_id: "thread:parent".into(),
             branch_id: "branch:parent".into(), expected_head: None, input: json!("Delegate a read"),
             configuration: json!({"providerFamily":"fixture","model":"fixture-model","configurationGeneration":2}) }, Some(launch.clone())).unwrap();

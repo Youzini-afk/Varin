@@ -62,10 +62,13 @@ export function createThreadSourceAdmission({ documents, workingStates, liveSour
     await documents.inspectWorkspace(source.workspaceId);
     await documents.inspectWorkspace(source.executionWorkspaceId);
     const child = await runtime.childForThread(identity.threadId);
-    if (child && source.mode === 'fixed_branch') {
+    if (child) {
+      if (child.source.kind !== 'ready' || child.source.selection.branch_id !== source.branchId
+        || child.source.selection.revision !== source.revision || child.source.selection.mode !== source.mode) throw new Error('Child source differs from its admitted private baseline');
+      const admittedPin = child.source.pin;
       await workingStates.withBranchStore(source.workspaceId, 'child-source-check', async store => {
         const pin = await store.pinBranch(source.branchId, { revision: source.revision });
-        try { if (pin.root !== child.source_pin.root) throw new Error('Child fixed source no longer matches its admitted root'); }
+        try { if (pin.root !== admittedPin.root) throw new Error('Child fixed source no longer matches its admitted root'); }
         finally { await pin.release(); }
       }, 'shared', { threadId: identity.threadId });
     }

@@ -21,6 +21,7 @@ import { McpAuthority, McpCompositions, type McpCompositionScope, mcpHostAgentDi
 import { createMcpLease } from './lib/kernel/mcp-owner.js';
 import { createExtensionTools } from './lib/kernel/extension-tool-owner.js';
 import { createMaterialToolOwner, MATERIAL_SNAPSHOT_CAPABILITY } from './lib/kernel/material-tool-owner.js';
+import { createIntegrationToolOwner, createIntegrationTargetOpener, createIntegrationReceiptReconciler, CHILD_INTEGRATION_CAPABILITY } from './lib/kernel/integration-tool-owner.js';
 import { createMcpHarnessServices } from './lib/harness/mcp-service.js';
 import { sharedHostCredentialAuthority } from '@varin/runtime-broker';
 import { AgentRuntimeClient } from './lib/kernel/agent-runtime-client.js';
@@ -2986,6 +2987,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }, createThreadSourcePreparer({ documents: documentsAuthority, liveSources: liveSources, workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter) }),
     threadContext, new PlanService(agentRuntime, getUserKnowledgeStore));
   const collaboration = new ThreadCollaboration({ runtime: agentRuntime,
+    kernel: kernelClient, storageAdapter: kernelStorageAdapter, resolveLiveSource: liveSources.validate,
+    sourceCaptureOwners: { documents: documentsAuthority, inspectInventory: (directory, signal) => threadWorktreeRuntime.inspectGitBaselineInventory(directory, signal) },
+    reconcileDomainReceipts: createIntegrationReceiptReconciler({ runtime: agentRuntime,
+      onError: (_operationId, _error) => console.error('[Integration] Original effect receipt requires attention') }),
     continueRun: (runId, signal) => threads.continueLaunch(runId, { signal }), recoverLaunches: signal => threads.recover(signal),
     workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter), prepareContext: threadContext,
     onError: (operationId, _error) => console.error('[Collaboration] Preparation or delivery requires attention:', operationId ?? 'discovery'),
@@ -4102,6 +4107,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   const unregisterMaterialToolCapability=extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY,createMaterialToolOwner(webMaterials));
+  const unregisterChildIntegrationCapability = extensionRuntime.capabilities.register(CHILD_INTEGRATION_CAPABILITY,
+    createIntegrationToolOwner({ runtime: agentRuntime, coordinator: threadIntegrationCoordinator,
+      onCleanupError: (_operationId, _error) => console.error('[Integration] Source grant cleanup requires attention'),
+      openTarget: createIntegrationTargetOpener({ kernel: kernelClient, runtime: agentRuntime, storage: kernelStorageAdapter,
+        recovery: foundationalRecoveryEngine, metadataReader: kernelRecoveryStore, resolveLiveSource: liveSources.validate,
+        documents: documentsAuthority }) }));
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(
     'workspace.documents',
     createDocumentsCapabilityHandler(documentsAuthority),
@@ -4632,6 +4643,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (ownsExtensionRuntime) await extensionRuntime.stop();
       unregisterPiRuntimeCapability();
       unregisterMaterialToolCapability();
+      unregisterChildIntegrationCapability();
       unregisterDocumentsCapability();
       unregisterWorkspaceRecoveryCapability();
       unregisterSearchCapability();

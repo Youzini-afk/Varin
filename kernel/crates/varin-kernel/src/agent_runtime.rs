@@ -49,6 +49,21 @@ struct AgentOwner {
     resources: crate::tools::KernelResourceClient,
 }
 impl AgentControl {
+    pub(crate) fn child_handoff(&self,params:&Value)->Result<varin_runtime::catalog::collaboration::ChildSourceHandoff,KernelError> {
+        let p:KernelSourceHandoffClaimParams=serde_json::from_value(params.clone())?;
+        let id=p.handoff_operation_id.strip_prefix("child-source-handoff:").ok_or_else(||KernelError::Authorization("invalid child handoff identity".into()))?;
+        let owner=self.owner.lock().map_err(|_|KernelError::Storage("Agent owner failed".into()))?;
+        let runtime=&owner.as_ref().ok_or_else(||KernelError::Storage("Agent is not ready".into()))?.runtime;
+        let catalog=runtime.catalog();let catalog=catalog.lock().map_err(|_|KernelError::Storage("Catalog owner failed".into()))?;
+        let child=catalog.child_task(id).map_err(domain)?;
+        if child.resources_released {return Err(KernelError::Authorization("child source handoff was already released".into()));}
+        if child.child_thread_id!=p.child_thread_id || child.child_branch_id!=p.child_branch_id
+            || child.source.handoff().operation_id!=p.handoff_operation_id {
+            return Err(KernelError::Authorization("source claim does not identify an accepted child".into()));
+        }
+        Ok(child.source.handoff().clone())
+    }
+
     pub(crate) fn reserve_input(
         &self,
         meta: &Value,
@@ -472,6 +487,7 @@ pub(crate) fn spawn(
                                 | "runtime.input.enqueue"
                                 | "runtime.input.edit"
                                 | "runtime.child.prepare"
+                                | "runtime.child.source.ready"
                                 | "runtime.tools.ready"
                                 | "runtime.launch.mcp.prepare"
                                 | "runtime.launch.policy.prepare"
@@ -618,8 +634,14 @@ pub(crate) fn spawn(
                                 | "runtime.child.release"
                                 | "runtime.child.fail"
                                 | "runtime.child.report.read"
+                                | "runtime.child.source.ready"
+                                | "runtime.child.settle"
+                                | "runtime.child.result.candidate"
+                                | "runtime.child.result.published"
+                                | "runtime.host_tool.reconcile"
                         ) {
                             let runtime = runtime.clone();
+                            let resources = resources.clone();
                             let method = method.to_owned();
                             let response_id = id.clone();
                             let response_sender = responses.clone();
@@ -627,7 +649,7 @@ pub(crate) fn spawn(
                             let cancelled = cancellation.clone();
                             thread::spawn(move || {
                                 let result =
-                                    child_commands::execute(runtime, &method, params, &cancelled);
+                                    child_commands::execute(runtime, resources, &method, params, &cancelled);
                                 let response = match result {
                                     Ok(value) => response_ok(&response_id, value),
                                     Err(error) => response_error(&response_id, &error),
@@ -1434,7 +1456,7 @@ pub(crate) fn spawn(
                                     .filter(|operation| {
                                         matches!(
                                             operation.executor.as_deref(),
-                                            Some("file_write" | "file_edit")
+                                            Some("file_write" | "file_edit" | "integrate_child")
                                         )
                                     })
                                     .collect::<Vec<_>>()

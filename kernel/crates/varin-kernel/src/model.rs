@@ -92,6 +92,8 @@ pub(crate) struct Grant {
     pub(crate) path_scopes: Vec<String>,
     pub(crate) kernel_epoch: String,
     pub(crate) revoked: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) handoff_operation_id: Option<String>,
 }
 
 pub(crate) struct BlobStream {
@@ -106,6 +108,7 @@ pub(crate) struct BlobStream {
 }
 
 pub(crate) struct BranchBuilder {
+    pub(crate) source_provenance: Option<Value>,
     pub(crate) operation_id: String,
     pub(crate) branch_id: String,
     pub(crate) workspace_id: String,

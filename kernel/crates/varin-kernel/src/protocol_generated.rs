@@ -155,6 +155,13 @@ pub(crate) struct ThreadOperationsParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct HostToolReconcileParams {
+    pub(crate) operation_id: String,
+    pub(crate) execution_owner: varin_runtime::ExecutorOwner,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RunReconcileParams {
     pub(crate) run_id: String,
     pub(crate) tool_binding: Value,
@@ -516,6 +523,15 @@ pub(crate) struct KernelHealthParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelSourceHandoffClaimParams {
+    pub(crate) handoff_operation_id: String,
+    pub(crate) grant_id: String,
+    pub(crate) child_thread_id: String,
+    pub(crate) child_branch_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelGrantIssueParams {
     pub(crate) grant_id: String,
     pub(crate) host_generation: String,
@@ -817,6 +833,33 @@ pub(crate) struct KernelRecordReleaseParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingResultPrepareParams {
+    pub(crate) operation_id: String,
+    pub(crate) publication_id: String,
+    pub(crate) builder_id: String,
+    pub(crate) expected_root: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingResultPublishParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) candidate_operation_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingResultCandidateReleaseParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) candidate_operation_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelWorkingResultPutParams {
     pub(crate) operation_id: String,
     pub(crate) record_id: String,
@@ -977,6 +1020,7 @@ pub(crate) struct KernelCreateBranchBeginParams {
     pub(crate) parent_ref: Option<String>,
     pub(crate) draft_base_paths: Vec<String>,
     pub(crate) capture_scopes: Vec<String>,
+    pub(crate) source_provenance: Option<KernelSourceProvenanceReference>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1270,6 +1314,15 @@ pub(crate) struct KernelRecoveryOperationCompleteParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryOperationConflictsParams {
+    pub(crate) workspace_id: String,
+    pub(crate) root_id: String,
+    pub(crate) paths: Vec<String>,
+    pub(crate) except_operation_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelRecoveryOperationListParams {
     pub(crate) workspace_id: String,
     pub(crate) kind: Option<String>,
@@ -1379,6 +1432,38 @@ pub(crate) struct ChildReportReadParams {
     pub(crate) item_id: String,
     pub(crate) offset: Option<i64>,
     pub(crate) max_bytes: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ChildSourceReadyParams {
+    pub(crate) operation_id: String,
+    pub(crate) pin: varin_runtime::catalog::collaboration::ChildSourcePin,
+    pub(crate) source: LaunchSourceParams,
+    pub(crate) provenance: varin_runtime::catalog::collaboration::ChildSourceProvenance,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ChildSettleParams {
+    pub(crate) operation_id: String,
+    pub(crate) tool_binding: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ChildResultCandidateParams {
+    pub(crate) operation_id: String,
+    pub(crate) tool_binding: Value,
+    pub(crate) candidate_operation_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ChildResultPublishedParams {
+    pub(crate) operation_id: String,
+    pub(crate) tool_binding: Value,
+    pub(crate) publication_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1622,6 +1707,13 @@ pub(crate) struct KernelWorkingReviewDocument {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelSourceProvenanceReference {
+    pub(crate) object_hash: String,
+    pub(crate) owner_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelCreateEntry {
     pub(crate) path: String,
     pub(crate) state: PathState,
@@ -1855,6 +1947,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "runtime.host_tool.reconcile" => {
+            serde_json::from_value::<HostToolReconcileParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.run.reconcile" => serde_json::from_value::<RunReconcileParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -2044,6 +2141,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "storage.health" => serde_json::from_value::<KernelHealthParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "source.handoff.claim" => {
+            serde_json::from_value::<KernelSourceHandoffClaimParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "authority.grant.issue" => serde_json::from_value::<KernelGrantIssueParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -2164,6 +2266,21 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "storage.record.release" => {
             serde_json::from_value::<KernelRecordReleaseParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.result.prepare" => {
+            serde_json::from_value::<KernelWorkingResultPrepareParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.result.publish" => {
+            serde_json::from_value::<KernelWorkingResultPublishParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.result.candidate.release" => {
+            serde_json::from_value::<KernelWorkingResultCandidateReleaseParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
@@ -2371,6 +2488,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "recovery.operation.conflicts" => {
+            serde_json::from_value::<KernelRecoveryOperationConflictsParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "recovery.operation.list" => {
             serde_json::from_value::<KernelRecoveryOperationListParams>(params.clone())
                 .map(|_| ())
@@ -2433,6 +2555,24 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.child.for_thread" => serde_json::from_value::<ThreadParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.child.source.ready" => {
+            serde_json::from_value::<ChildSourceReadyParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.child.settle" => serde_json::from_value::<ChildSettleParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.child.result.candidate" => {
+            serde_json::from_value::<ChildResultCandidateParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.child.result.published" => {
+            serde_json::from_value::<ChildResultPublishedParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.child.prepare" => serde_json::from_value::<ChildPrepareParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

@@ -1,5 +1,6 @@
 import { createMemoryOwner, type MemoryQuery } from './memory-owner.js';
 import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
 import express from 'express';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
@@ -56,6 +57,10 @@ function gate() {
 }
 type RecordedRequest = { body: Record<string, unknown>; response: ServerResponse };
 const model = { providerId: 'child-review-provider', modelId: 'child-review-model' };
+function originalSourcePin(child: import('./protocol.generated.js').ChildTask) {
+  if (child.source.handoff.root.kind !== 'fixed') throw new Error('Fixture expects its original fixed source');
+  return child.source.handoff.root.pin;
+}
 function complete(response: ServerResponse, output: unknown[]) {
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output } })}\n\n`);
@@ -176,7 +181,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
       return { configuration, credentialOwner };
     }, rebindModel: async () => credentialOwner };
     const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, workingStates, runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ documents, workingStates }), prepareContext);
-    const collaboration = options.collaboration === false ? undefined : new ThreadCollaboration({ runtime, workingStates, prepareContext, continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal), onError: (_operation, error) => { errors.push(error); } });
+    const collaboration = options.collaboration === false ? undefined : new ThreadCollaboration({ kernel, storageAdapter: storage, resolveLiveSource: async () => { throw new Error("Fixed source fixture"); }, sourceCaptureOwners: { documents, inspectInventory: async () => { throw new Error("Fixed source fixture"); } }, runtime, workingStates, prepareContext, continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal), onError: (_operation, error) => { errors.push(error); } });
     const app = express();
     registerCommonRequestMiddleware(app, { express });
     registerThreadRoutes(app, adapter, (request, response, next) => {
@@ -268,7 +273,8 @@ it('real dispatch returns before child preparation; parent reads, waits, and rec
   release.release();
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   const child = await h.runtime.child(operationId);
-  expect(child.report).toMatchObject({ outcome: 'succeeded', sender_thread_id: child.child_thread_id, code_result: 'no_changes' });
+  expect(child.report).toMatchObject({ outcome: 'succeeded', sender_thread_id: child.child_thread_id });
+  expect(child.code_result).toEqual({ kind: 'no_changes' });
   expect((await h.runtime.readChildReport(operationId, child.report!.history_ids.at(-1)!)).text).toContain('CHILD_REPORT');
   expect(child.launch.tools.map(item => item.name)).toEqual(['file_read']);
   const childBodies = f.requests.filter(request => !isParent(request.body));
@@ -293,6 +299,69 @@ it('real dispatch returns before child preparation; parent reads, waits, and rec
   expect(parentSteps).toBe(3); expect(childSteps).toBe(2);
 }, 30_000);
 
+it('a fixed read-only parent dispatches a private writable child, waits for its fixed result and reopens without replay', async () => {
+  let parentSteps = 0; let childSteps = 0; let operationId = '';
+  const finalText = 'alpha\ngamma\n';
+  const f = await fixture(({ body, response }) => {
+    assertPairing(body);
+    if (isParent(body)) {
+      if (++parentSteps === 1) complete(response, [tool('dispatch', { task: 'Read source.txt, write alpha/beta, edit beta to gamma, and report', model: 'parent', profile: 'isolated_write' }, 'dispatch-write')]);
+      else if (parentSteps === 2) { operationId = job(body); complete(response, [tool('wait_child', { operationId }, 'wait-written-child')]); }
+      else {
+        expect(JSON.stringify(body.input)).toContain('child-result:');
+        expect(JSON.stringify(body.input)).toContain('published');
+        complete(response, [answer('Parent received fixed private changes', 'parent-result')]);
+      }
+      return;
+    }
+    const receipt = result(body) as { outcome?: string; effect?: string; content?: { readVersion?: string; content?: { text?: string } } } | undefined;
+    childSteps++;
+    if (childSteps === 1) {
+      expect((body.tools as Array<{ name: string }>).map(item => item.name)).toEqual(expect.arrayContaining(['file_read', 'file_write', 'file_edit']));
+      complete(response, [tool('file_read', { path: 'source.txt' }, 'child-read-original')]);
+    } else if (childSteps === 2) {
+      expect(receipt?.content?.readVersion).toBeTypeOf('string');
+      complete(response, [tool('file_write', { path: 'source.txt', readVersion: receipt!.content!.readVersion, content: 'alpha\nbeta\n' }, 'child-write')]);
+    } else if (childSteps === 3) {
+      expect(receipt).toMatchObject({ outcome: 'succeeded', effect: 'confirmed' });
+      complete(response, [tool('file_edit', { path: 'source.txt', readVersion: receipt!.content!.readVersion, edits: [{ oldText: 'beta', newText: 'gamma' }] }, 'child-edit')]);
+    } else if (childSteps === 4) {
+      expect(receipt).toMatchObject({ outcome: 'succeeded', effect: 'confirmed' });
+      complete(response, [tool('file_read', { path: 'source.txt' }, 'child-read-final')]);
+    } else {
+      expect(receipt?.content?.content?.text).toBe(finalText);
+      complete(response, [answer('PRIVATE_WRITABLE_RESULT: source.txt updated', 'child-result')]);
+    }
+  });
+  const h = await f.openHost();
+  const identity = await h.api.create('isolated-write-review');
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  prepared.source.tools = ['file_read'];
+  const parent = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'Delegate isolated edits and wait', model, source: prepared.source });
+  await expect.poll(async () => (await h.runtime.run(parent.run_id)).state, { timeout: 15_000 }).toBe('completed');
+  const child = await h.runtime.child(operationId);
+  expect(child.source).toMatchObject({ kind: 'ready', selection: { mode: 'materialized', revision: 0 }, provenance: { consistency: 'fixed-root' } });
+  expect(child.code_result.kind).toBe('published');
+  if (child.code_result.kind !== 'published') throw new Error('Expected the original fixed WorkingResult');
+  const resultRef = child.code_result.result;
+  expect(child.code_result.effect).toBe('confirmed');
+  expect(child.report?.outcome).toBe('succeeded');
+  expect(await fs.readFile(path.join(f.workspace, 'source.txt'), 'utf8')).toBe('fixed child source before parent changes');
+  const fixedResult = await h.workingStates.withBranchStore(resultRef.workspace_id, 'inspect-isolated-result', store => store.getResult(resultRef.branch_id, resultRef.result_revision), 'shared', { threadId: child.child_thread_id });
+  expect(fixedResult).toMatchObject({ root: resultRef.root, baseRoot: resultRef.base_root, changedPaths: ['source.txt'],
+    pathStates: { 'source.txt': { kind: 'regular-file', objectHash: `sha256-${createHash('sha256').update(finalText).digest('hex')}` } } });
+  const history = (await h.api.snapshot(identity)).history;
+  expect(history.filter(item => item.source === 'agent')).toHaveLength(1);
+  expect(JSON.stringify(history)).toContain(resultRef.publication_id);
+  expect(parentSteps).toBe(3); expect(childSteps).toBe(5); expect(h.errors.map(String)).toEqual([]);
+  await h.close();
+  const reopened = await f.openHost();
+  await reopened.collaboration!.recover(); await reopened.adapter.recover();
+  expect((await reopened.runtime.child(operationId)).code_result).toEqual(child.code_result);
+  expect((await reopened.api.snapshot(identity)).history).toEqual(history);
+  expect(parentSteps).toBe(3); expect(childSteps).toBe(5);
+}, 30_000);
+
 it('parent final survives independently; cancelling preparing child fences late context and releases its real pin', async () => {
   const entered = gate(); const release = gate();
   let parentSteps = 0; let childSteps = 0; let operationId = '';
@@ -315,8 +384,8 @@ it('parent final survives independently; cancelling preparing child fences late 
   expect(child.receipt).toBeNull(); expect(child.report?.outcome).toBe('cancelled'); expect(childSteps).toBe(0);
   await h.workingStates.withBranchStore(prepared.source.workspaceId, 'review-cleanup-evidence', async store => {
     expect(await store.getBranchRoot(`child-source:${operationId}`)).toBeNull();
-    await expect(store.openBranchHandoffPin!(child.source_pin.source.branch_id!, child.source_pin.pin_id,
-      { root: child.source_pin.root, revision: child.source_pin.source.revision!, writeRevision: child.source_pin.source.revision! })).rejects.toThrow();
+    await expect(store.openBranchHandoffPin!(originalSourcePin(child).source.branch_id!, originalSourcePin(child).pin_id,
+      { root: originalSourcePin(child).root, revision: originalSourcePin(child).source.revision!, writeRevision: originalSourcePin(child).source.revision! })).rejects.toThrow();
   }, 'shared', { threadId: child.child_thread_id });
   expect((await h.runtime.run(receipt.run_id)).state).toBe('completed');
   expect(parentSteps).toBe(2);
@@ -1098,7 +1167,7 @@ it('installed collaboration policy accepts a child and reads before any parent M
       { node_id: 'dispatch', completion: { kind: 'job_accepted', operation_id: child.operation_id, phase: 'preparing_child', effect: 'none', lifetime: 'thread' } },
       { node_id: 'parent-read', completion: { kind: 'result', outcome: 'succeeded', effect: 'none', output: expect.any(Object) } },
     ]);
-    expect(childSourcePins(f.root)).toEqual([child.source_pin.pin_id]);
+    expect(childSourcePins(f.root)).toEqual([originalSourcePin(child).pin_id]);
     const acceptedCall = (await h.runtime.operation(child.operation_id)).call_completion;
     expect(acceptedCall).toMatchObject({ kind: 'job_accepted', operation_id: child.operation_id, phase: 'preparing_child' });
     await fs.writeFile(path.join(f.workspace, 'source.txt'), 'live source changed after policy admission');
@@ -1106,7 +1175,7 @@ it('installed collaboration policy accepts a child and reads before any parent M
     await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
     const finished = await h.runtime.child(child.operation_id);
     expect(finished.launch.tools.map(item => item.name)).toEqual(['file_read']);
-    expect(finished.report).toMatchObject({ outcome: 'succeeded', sender_thread_id: child.child_thread_id, code_result: 'no_changes' });
+    expect(finished.report).toMatchObject({ outcome: 'succeeded', sender_thread_id: child.child_thread_id });
     expect((await h.runtime.operation(child.operation_id)).call_completion).toEqual(acceptedCall);
     expect(policyReceipts(h).filter(item => item.node_id === 'wait-child')).toHaveLength(1);
     const reports = (await h.api.snapshot(identity)).history.filter(item => item.source === 'agent');
@@ -1139,7 +1208,7 @@ it('installed collaboration policy reopens its pending Wait without duplicating 
   const originalWait = (await h.runtime.run(receipt.run_id)).waiting_on;
   const children = await h.runtime.children(); expect(children).toHaveLength(1);
   const child = children[0]!;
-  expect(childSourcePins(f.root)).toEqual([child.source_pin.pin_id]);
+  expect(childSourcePins(f.root)).toEqual([originalSourcePin(child).pin_id]);
   const acceptedCall = (await h.runtime.operation(child.operation_id)).call_completion;
   const launch = await h.runtime.launch(receipt.run_id);
   expect(await durableRequests(f.root, receipt.run_id)).toEqual([]);
@@ -1151,8 +1220,8 @@ it('installed collaboration policy reopens its pending Wait without duplicating 
   try {
     await reopened.collaboration!.recover(); await reopened.adapter.recover();
     await entered.promise;
-    expect((await reopened.runtime.child(child.operation_id)).source_pin).toEqual(child.source_pin);
-    expect(childSourcePins(f.root)).toEqual([child.source_pin.pin_id]);
+    expect(originalSourcePin(await reopened.runtime.child(child.operation_id))).toEqual(originalSourcePin(child));
+    expect(childSourcePins(f.root)).toEqual([originalSourcePin(child).pin_id]);
     expect((await reopened.runtime.run(receipt.run_id)).waiting_on).toBe(originalWait);
     expect((await reopened.runtime.launch(receipt.run_id))?.selection.policy).toEqual(launch?.selection.policy);
     expect(parentSteps).toBe(0); expect(childSteps).toBe(0);

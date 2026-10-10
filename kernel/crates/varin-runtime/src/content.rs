@@ -317,7 +317,11 @@ impl ContentStore {
             " UNION ALL SELECT json_extract(body,'$.input_ref') FROM child_tasks
             UNION ALL SELECT json_extract(body,'$.configuration_ref') FROM child_tasks
             UNION ALL SELECT json_extract(body,'$.launch.tools_ref') FROM child_tasks
-            UNION ALL SELECT json_extract(body,'$.launch.base_tools_ref') FROM child_tasks",
+            UNION ALL SELECT json_extract(body,'$.launch.base_tools_ref') FROM child_tasks
+            UNION ALL SELECT json_extract(body,'$.launch.extension_bindings_ref') FROM child_tasks
+            UNION ALL SELECT json_extract(body,'$.launch.mcp_binding_ref') FROM child_tasks WHERE json_extract(body,'$.launch.mcp_binding_ref') IS NOT NULL
+            UNION ALL SELECT json_extract(p.value,'$.body') FROM child_tasks c,json_each(c.body,'$.launch.policy_models') p
+            UNION ALL SELECT json_extract(body,'$.source.provenance_ref') FROM child_tasks WHERE json_extract(body,'$.source.kind')='ready'",
         );
         roots.push_str(&format!(" UNION ALL SELECT json_extract(body,'$.intent.body_ref') FROM operations WHERE json_extract(body,'$.intent.kind') IN ({})", crate::catalog::policy_body::ACTION_KINDS));
         roots.push_str("
