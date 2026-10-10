@@ -6,6 +6,15 @@
 
 目标是完整实现[完整运行时设计](../design/agent-runtime-design.md)和[能力组合设计](../design/runtime-extensibility-design.md)共同定义的长期运行底座：及时交互、低开销执行、按真实资源调度、深层能力组合和可替换策略。完成聊天循环、迁移已有工具或删除 Pi 都不是单独的完成标准；Pi 退出是这套设计落地后的一个结果。当前生产仍使用 Pi session worker、TypeScript Host 协调和 Rust 资源内核；现有权威见[架构](../architecture.md)。
 
+## 2026-10-10 增量：策略直接派生与观察子任务
+
+- 已安装策略可在父 ModelStep 之前通过普通 `tool_graph` 调用 `dispatch`，继续自己的独立读取，再用 `wait_child` 观察原任务。核心核对真实 PolicyAction/node、原 ToolIntent、父 Run/Thread、源授权及冻结调用；沿原 ChildTask、独立 Thread、源 pin 与模型/凭据 owner 受理。没有伪造模型调用，也没有增加第二套子任务动作或状态表。子任务仍限定已实现的 `model: parent`、`read_only` 与固定源合同。
+- Child/Wait 受理原子保存 canonical JobAccepted；模型调用才写原 `tool_calls` 配对投影，策略图消费同一原始调用事实。快速子任务可在父图消费前发布真实终态，原受理不被覆盖；崩溃恢复只补消费，不重复准备、源 pin、派发或模型请求。Wait 参数/来源在 worker 读取，提交核对原调用与图取消。
+- collaboration wrapper 在调用策略之前检查真实待处理观察，保留原私有 checkpoint，避免把一个未执行的新动作的状态提前记账。报告与取消观察沿原 Wait/head 交付，然后续接原图事件。整合还复现并修复了“Wait 已注册、父尚未停靠时取消”的窗口：仅由原 child owner 认证的待交付取消观察可完成停靠，既有交付路径提交一次真实取消事实；其他 cancelled Wait 仍不能进入执行。观察结束或父 Run 结束后，只释放该观察自己的 occupancy/admission，独立 child 的寿命不受影响。
+- 新增普通 SDK 示例 `examples/extensions/collaboration-policy`，展示派发、独立读取、显式观察、报告后父回答及 broker 重开后的原身份。Catalog 仍为格式 16、collaboration 域仍为 2；本阶段不改变持久形状，也没有旧格式兼容分支。 独立审查复核真实执行链，并验证迟到原受理不覆盖早到终态、同图多观察中一项取消不消费另一项报告，以及多次重开后的原策略续接；本阶段未留源码行为阻断。
+- 最终完整 `varin-runtime` **238 passed、0 failed、2 个既有手动诊断 ignored**。Kernel 聚焦 **5/5** 覆盖真实 Engine/Catalog/Storage 的 source pin、受理后独立推进、原 checkpoint 停靠、报告/取消后续接与观察释放；模拟模型仅证明执行接线，不证明模型质量。真实安装 SDK/broker **3/3**、Host 全测试类型、示例窄类型及定点 lint 通过。 协议生成一致性和文档链接检查通过；实际 Linux 开发内核 identity `0.9.25` 构建通过，SHA-256 `40ec7950ca95d472d24bca5da1c122efe59d9da5247e2b999f6780dea3ee84eb`。
+- **真实 Host 纵切继续保留未验边界**：新增的固定源/阻塞准备、SIGKILL 重开、取消观察后三条 Host/kernel 场景尚未执行，原因仍为此前确认的 Unix socket 环境限制。Portable broker 提供事件的检查与原生 Engine/Storage 检查不拼接成端到端通过。独立结果交付、显式暂停/恢复、安全策略切换及其余领域仍继续推进，两份设计与默认产品迁移均未完成。
+
 ## 2026-10-10 增量：一般策略工具图与原始调用完成
 
 - `varin.agent.policy@2` 的 `tool_graph` 直接替换旧只读图；Rust、合同/parser、SDK、安装示例和 Host 消费一起更新。节点保留真实 action/node 来源、冻结 schema/源视图/执行端世代和显式依赖，不制造 ModelStep 或 provider 工具交换。合法新图边界可激活已准备工具候选；已受理图恢复仍使用原绑定。

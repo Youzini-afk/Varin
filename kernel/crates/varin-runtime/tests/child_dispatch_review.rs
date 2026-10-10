@@ -125,8 +125,11 @@ fn preparation_failure_before_dispatch_exchange_commit_preserves_the_real_receip
         f.db.operation(&child.operation_id).unwrap().phase,
         OperationPhase::Terminal
     );
-    f.settle_exchange();
+    let original_completion = f.db.operation(&child.operation_id).unwrap().call_completion;
     f.db.settle_child_receipts().unwrap();
+    assert_eq!(f.db.operation(&child.operation_id).unwrap().outcome, Some(Outcome::Failed));
+    f.settle_exchange();
+    assert_eq!(f.db.operation(&child.operation_id).unwrap().call_completion, original_completion);
     assert_eq!(
         f.db.operation(&child.operation_id).unwrap().outcome,
         Some(Outcome::Failed)

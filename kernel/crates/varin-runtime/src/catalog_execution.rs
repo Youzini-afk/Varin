@@ -615,7 +615,7 @@ impl Catalog {
                 if *state == RunState::Waiting {
                     if let Some(key) = waiting_on {
                         let wait: Wait = super::record(&tx, "waits", key)?;
-                        if wait.run_id != run.id || wait.cancelled {
+                        if wait.run_id != run.id || (wait.cancelled && !super::collaboration::pending_cancelled_observation(&tx, &run, &wait)?) {
                             return Err(RuntimeError::Conflict(
                                 "wait ownership or status changed".into(),
                             ));
@@ -1051,7 +1051,7 @@ impl Catalog {
                 if matches!(action, PolicyAction::ToolGraph { .. }) { return Err(RuntimeError::Invalid("graph checkpoint requires atomic graph admission".into())); }
                 if let PolicyAction::Wait { wait_id } = action {
                     let wait: Wait = super::record(&tx, "waits", wait_id)?;
-                    if wait.run_id != run_id || wait.cancelled {
+                    if wait.run_id != run_id || (wait.cancelled && !super::collaboration::pending_cancelled_observation(&tx, &run, &wait)?) {
                         return Err(RuntimeError::Conflict("policy wait unavailable".into()));
                     }
                 }

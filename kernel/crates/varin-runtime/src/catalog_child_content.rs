@@ -33,7 +33,9 @@ impl ChildAdmissionPreparation {
         )?;
         let operation: Operation = record(&database, "operations", &self.context.operation_id)?;
         let admitted=super::tool_content::ToolIntent::from_operation(&operation)?.load(&self.content)?;
-        if admitted.call.name != collaboration::DISPATCH_TOOL
+        if admitted.origin != self.context.origin
+            || operation.run_id != self.context.run_id
+            || admitted.call.name != collaboration::DISPATCH_TOOL
             || admitted.call.arguments != serde_json::to_value(&self.input)?
         {
             return Err(RuntimeError::Conflict(
@@ -247,6 +249,59 @@ impl ChildReportRead {
             next_offset: (end < text.len()).then_some(end),
             total_bytes: text.len(),
             text: text[offset..end].into(),
+        })
+    }
+}
+
+/// The wait target is checked against the admitted argument body outside Catalog's lock.
+pub struct ChildWaitRegistrationPreparation {
+    context: ToolExecutionContext,
+    child_operation_id: String,
+    operation: Operation,
+    content: crate::content::ContentStore,
+    publication: crate::content::ContentPublication,
+}
+pub struct PreparedChildWaitRegistration {
+    pub(super) context: ToolExecutionContext,
+    pub(super) child_operation_id: String,
+    pub(super) operation_revision: u64,
+    pub(super) intent: super::tool_content::ToolIntent,
+    _publication: crate::content::ContentPublication,
+}
+impl ChildWaitRegistrationPreparation {
+    pub fn load(self) -> Result<PreparedChildWaitRegistration> {
+        let intent = super::tool_content::ToolIntent::from_operation(&self.operation)?;
+        let admitted = intent.clone().load(&self.content)?;
+        if self.operation.run_id != self.context.run_id
+            || admitted.origin != self.context.origin
+            || admitted.call.name != collaboration::WAIT_TOOL
+            || admitted.call.arguments != json!({"operationId": self.child_operation_id})
+        {
+            return Err(RuntimeError::Conflict(
+                "child wait differs from its admitted call".into(),
+            ));
+        }
+        Ok(PreparedChildWaitRegistration {
+            context: self.context,
+            child_operation_id: self.child_operation_id,
+            operation_revision: self.operation.revision,
+            intent,
+            _publication: self.publication,
+        })
+    }
+}
+impl Catalog {
+    pub fn prepare_child_wait_registration(
+        &self,
+        context: &ToolExecutionContext,
+        child_operation_id: &str,
+    ) -> Result<ChildWaitRegistrationPreparation> {
+        Ok(ChildWaitRegistrationPreparation {
+            context: context.clone(),
+            child_operation_id: child_operation_id.into(),
+            operation: self.operation(&context.operation_id)?,
+            content: self.content.clone(),
+            publication: self.content.begin_publication(),
         })
     }
 }

@@ -251,10 +251,12 @@ The publication reference protects uncommitted objects until the short receipt t
 Graph definition preparation validates all nodes on the worker before atomic admission. Worker reads
 restore the exact definition and receipts; cancellation and admission queries require only metadata.
 Private policy state and actions are immutable references, loaded outside Catalog when continuing.
-Memory mutations use the existing domain writer and receipt recovery. MCP permissions, plan tools,
-child dispatch, process observation and questions retain their explicit origin restrictions until
-their own policy-origin consumers are connected. Direct child actions, delivery and pause remain
-separate unfinished PolicyAction work; a general graph alone does not complete the design.
+Memory mutations and fixed-source child dispatch/observation use their existing domain writers and
+receipt recovery. A policy can dispatch a child, continue independent work and later observe it through
+`wait_child`, using ordinary graph nodes rather than a second child-action API. MCP permissions, plan
+tools, process observation and questions retain their explicit origin restrictions until their own
+policy-origin consumers are connected. Independent delivery and pause remain unfinished PolicyAction
+work; a general graph and child collaboration alone do not complete the design.
 
 ## Policy-originated planning models
 
@@ -353,7 +355,7 @@ key and revision uniqueness contracts. Older or malformed formats are preserved 
 ## Fixed-source child tasks
 
 `catalog_collaboration` is the Catalog's parent/child domain. A dispatch binds the committed
-ModelStep/tool origin, parent Run/Thread/branch, exact model configuration and credential scope,
+ModelStep/tool or PolicyAction/node origin, parent Run/Thread/branch, exact model configuration and credential scope,
 admission project, explicit `read_only` profile and fixed source. Model arguments cannot select
 parent identity, project, workspace, source or grants. The initial implementation accepts explicit
 `model: parent` and inherits only the parent's selected file read/list/search subset. Child Runs do
@@ -387,8 +389,10 @@ write-capable children, code integration or a complete collaboration product mig
 Completion retains actual child history references and a separate `no_changes` code result. A
 read-only textual report is a successful result, not an empty code merge. Failed/cancelled tools
 and empty textual completion are not converted to empty success. A very fast child may publish
-its report before the parent's accepted tool exchange is committed; terminal operation settlement
-waits for that original exchange, using the existing external receipt owner.
+its report before the parent's accepted call is consumed by its model exchange or policy graph.
+The canonical `call_completion` retains the original acceptance while the existing external receipt
+owner independently settles the child outcome. Recovery fills an unconsumed graph receipt from that
+acceptance without another source pin, dispatch, preparation or model request.
 
 `wait_child` registers the original durable Wait and its Job receipt together, including a
 retrospective terminal-event check. A parked parent's worker is quiesced before the report is
@@ -399,7 +403,16 @@ idempotent. Cancelling observation delivers an environment fact, leaves the chil
 does not consume a later child report. Ordinary model dispatch recovery continues to refuse
 replaying a dispatched request whose completion is unknown.
 
-Collaboration domain version 1 is required by the read-only existing-catalog preflight. An older,
+The collaboration policy checks a pending observation before invoking the selected strategy. It
+parks with the unchanged strategy checkpoint rather than silently advancing private state for an
+action it did not execute. Report delivery resumes the original graph completion boundary. If the
+observation was cancelled after registration but before parking, the same domain owner permits the
+pending cancellation delivery to park; no other cancelled Wait gains permission to resume. The
+original cancelled fact is delivered once, and the child remains independent. Wait arguments and
+their original tool origin are loaded on a worker; registration rechecks the same operation and graph
+admission before committing only metadata.
+
+Collaboration domain version 2 is required by the read-only existing-catalog preflight. An older,
 missing or malformed domain is rejected before writable SQLite access or epoch advancement;
 there is no schema upgrade, fallback registry, or asset reset. New empty catalogs create the domain
 explicitly. Context scope uses the separate context domain version 3 contract.
