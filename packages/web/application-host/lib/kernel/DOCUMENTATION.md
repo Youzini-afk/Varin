@@ -332,7 +332,7 @@ Host/kernel acceptance and its current environment limitations are recorded in t
 
 ## Selected native policy planning models
 
-The installed `varin.agent.policy` service may declare `capabilities: ['agentPlanning']` in its
+The installed `varin.agent.policy@3` service declares `modelRoles: ['agentPlanning']` in its
 pinned description. Only that selected policy triggers planning preparation. The Host reads the
 existing authenticated `settings.get` catalog path, validates `harness.models.agentPlanning` using
 `parseHarnessModelSlots`, and resolves it with `resolveHarnessModelSlot(..., null)`. The role has an
@@ -345,11 +345,15 @@ tool-free request binding and retains the selection with the launch. Policies re
 IDs and availability descriptors, never endpoints, provider selectors or credentials. Rebinding
 verifies both the selected role and original configuration/account scope; it cannot select a replacement.
 
-The existing private credential bridge keys owners by Run and frozen binding ID. The main owner has
+The existing private credential bridge keys owners by Run and frozen binding ID. Planning binding IDs
+include the strategy generation; candidates cannot replace the active strategy's credential entry.
+The main owner has
 its own empty binding slot; auxiliary registration cannot replace it. Requests retain their exact
 scope, kernel epoch and optional endpoint/payload digest for signing. Run cancellation, release and
-transport shutdown retire every bound owner. Parked Run resumption re-prepares the pinned policy and
-all its owners. Tokens remain transient private replies, never launch or policy data. Production Pi,
+transport shutdown retire every bound owner. Parked Run resumption retains an available exact policy
+pin, or restores its committed artifact and saved planning configuration. It does not select today's
+model settings as a replacement for a saved role. Tokens remain transient private replies, never launch
+or policy data. Production Pi,
 the default native policy, and policies without declared planning duties do not prepare this role.
 
 ## Native live workspace selection

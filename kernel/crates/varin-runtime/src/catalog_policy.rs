@@ -260,6 +260,9 @@ impl Catalog {
             self.head(&run.branch_id)?,
             model,
             previous,
+            self.launch_metadata(run_id)?
+                .map(|l| l.policy_generation)
+                .unwrap_or(0),
         ))?));
         let source = self
             .launch_metadata(run_id)?

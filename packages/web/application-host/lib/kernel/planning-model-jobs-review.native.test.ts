@@ -162,7 +162,7 @@ async function fixture(options: { main?: Reply; planner?: Reply; planningAuth?: 
     } };
   };
   const runtime = new AgentRuntimeClient(kernel, undefined,
-    ({ threadId }, signal) => createAgentPolicy(extensions)({ sessionId: threadId, projectId: 'planning-review' }, signal), prepareModels);
+    { prepare: ({ threadId, requiredBinding }, signal) => createAgentPolicy(extensions)({ sessionId: threadId, projectId: 'planning-review', ...(requiredBinding ? { requiredBinding } : {}) }, signal), observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({sessionId:threadId,projectId:'planning-review'}, changed, signal) }, prepareModels);
   const launchErrors: unknown[] = [];
   const adapter = new ThreadAdapter(runtime, models, async source => {
     if (!documents) throw new Error('No workspace is admitted');
@@ -196,15 +196,15 @@ async function install(f: Fixture, decision: string, capabilities: string[] = ['
   await fs.writeFile(path.join(folder, 'package.json'), JSON.stringify({ name: id, version: '1.0.0' }));
   await fs.writeFile(path.join(folder, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id, version: '1.0.0', engines: { varin: '*' },
     entrypoints: { host: { file: 'host.cjs', mode: 'brokered', activation: ['service-request'] } },
-    provides: { services: [{ id: 'varin.agent.policy', version: 2, multiple: true }] } }));
-  await fs.writeFile(path.join(folder, 'host.cjs'), `module.exports={activate(context){context.services.provide({id:'varin.agent.policy',version:2,multiple:true},{
-    describe(){return {identity:{name:'planning-review',version:'1'},configuration:{},capabilities:${JSON.stringify(capabilities)}}},
+    provides: { services: [{ id: 'varin.agent.policy', version: 3, multiple: true }] } }));
+  await fs.writeFile(path.join(folder, 'host.cjs'), `module.exports={activate(context){context.services.provide({id:'varin.agent.policy',version:3,multiple:true},{
+    describe(){return {identity:{name:'planning-review',version:'1'},configuration:{},modelRoles:${JSON.stringify(capabilities)},stateTransition:'unsupported'}},
     decide([input]){${decision}}
   })}}`);
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision,
     source: { kind: 'local', display: id, specifier: folder } });
   await f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
-    rule: { serviceId: 'varin.agent.policy', version: 2, providerKey: `${id}:host:varin.agent.policy@2`, scope: { projectId: 'planning-review' }, allowFallback: false } });
+    rule: { serviceId: 'varin.agent.policy', version: 3, providerKey: `${id}:host:varin.agent.policy@3`, scope: { projectId: 'planning-review' }, allowFallback: false } });
 }
 async function installBundledExample(f: Fixture) {
   const folder = path.join(f.root, 'bundled-planning-policy'); await fs.mkdir(folder);
@@ -216,7 +216,7 @@ async function installBundledExample(f: Fixture) {
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision,
     source: { kind: 'local', display: 'Bundled planning example', specifier: folder } });
   await f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
-    rule: { serviceId: 'varin.agent.policy', version: 2, providerKey: 'example.planning-policy:host:varin.agent.policy@2',
+    rule: { serviceId: 'varin.agent.policy', version: 3, providerKey: 'example.planning-policy:host:varin.agent.policy@3',
       scope: { projectId: 'planning-review' }, allowFallback: false } });
 }
 async function submitBundledExample(f: Fixture, key: string) {
@@ -530,17 +530,17 @@ it('rebinds an unchanged frozen planning capability but rejects changed model li
     [{ ...original[0]!, binding: null, credential_scope: { ...original[0]!.credential_scope!, generation: 2 } }],
   ]) {
     await expect(f.kernel.agentRuntimeRequest('runtime.launch.policy.prepare', {
-      runId: run.run_id, identity: policyIdentity, policyModels: changed,
+      runId: run.run_id, identity: policyIdentity, target: (await f.runtime.launch(run.run_id))!.policy_target, policyModels: changed,
     })).rejects.toThrow();
     expect((await f.runtime.launch(run.run_id))!.selection.policy_models).toEqual(original);
   }
-  const release = () => { f.kernel.unregisterPolicyOwner(run.run_id); f.kernel.unregisterCredentialOwner(run.run_id); };
+  const release = () => { f.kernel.releaseRunPolicyOwners(run.run_id); f.kernel.unregisterCredentialOwner(run.run_id); };
   release(); await f.runtime.preparePolicy(run.run_id);
   expect((await f.runtime.launch(run.run_id))!.selection.policy_models).toEqual(original);
   release(); f.mutable.planningMaxTokens++;
-  await expect(f.runtime.preparePolicy(run.run_id)).rejects.toThrow('selection-changed');
+  await expect(f.runtime.preparePolicy(run.run_id)).rejects.toThrow('model-configuration-changed');
   f.mutable.planningMaxTokens--; f.scope.account = 'relinked-account';
-  await expect(f.runtime.preparePolicy(run.run_id)).rejects.toThrow('selection-changed');
+  await expect(f.runtime.preparePolicy(run.run_id)).rejects.toThrow('credential-scope-changed');
   expect((await f.runtime.launch(run.run_id))!.selection.policy_models).toEqual(original);
   expect(f.main.requests).toHaveLength(0); expect(f.planner.requests).toHaveLength(0);
   await f.runtime.cancelRun(run.run_id); await expect.poll(() => f.pins()).toBe(0);
@@ -558,7 +558,7 @@ it('preserves a planning configuration identity when equivalent owner metadata k
     ? Object.fromEntries(Object.entries(configuration).reverse()) as unknown as ModelSessionConfiguration : configuration, credentialOwner: owner }),
     rebindModel: async () => owner };
   const prepare = createPolicyModelPreparer({ settings: async () => configuredSettings(), models });
-  const input = { threadId: 'semantic-key-order', requestedModelRoles: ['agentPlanning'] as const };
+  const input = { threadId: 'semantic-key-order', generation: 0, requestedModelRoles: ['agentPlanning'] as const };
   const [first] = await prepare(input); reordered = true;
   await expect(prepare({ ...input, savedCapabilities: [first!.capability] })).resolves.toEqual([expect.objectContaining({ capability: first!.capability })]);
 });

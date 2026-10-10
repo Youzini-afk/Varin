@@ -74,9 +74,14 @@ callback, or DOM access. `@varin/extension-sdk/testing` also exports
 `runEditorExtensionConformance` and a real mock document controller covering incremental failures and
 mount abort/disposal.
 
-`provideAgentPolicy` implements `varin.agent.policy@2` at committed execution boundaries. Its
+`provideAgentPolicy` implements `varin.agent.policy@3` at committed execution boundaries. Its
 immutable declared configuration and versioned private JSON state are distinct from core history;
-the Host pins exact package/configuration identity for the Run. Return a permitted action rather
+the Host pins exact package/configuration identity for each committed policy generation. Declare auxiliary
+model duties with `modelRoles`. Optional `transitionState` returns only compatible private state or an
+incompatibility reason; omitting it rejects cross-implementation preservation, including null state.
+The SDK freezes inputs and checks the result shape, but compatibility semantics belong to the author.
+Core captures the original checkpoint, waits for a real closed boundary and commits activation. An
+explicit restart clears only policy state and never resumes a Pause. Return a permitted action rather
 than calling models or tools in the decision handler. Core validates exchanges, permissions,
 registered waits and cancellation. [The bounded evidence example](../../examples/extensions/evidence-policy/README.md)
 shows bounded evidence, [the collaboration example](../../examples/extensions/collaboration-policy/README.md)

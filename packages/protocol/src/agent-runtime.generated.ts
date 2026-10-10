@@ -193,9 +193,85 @@ export interface LaunchPolicy {
   version: string;
 }
 
+export interface AgentPolicyArtifactBinding {
+  providerKey: string;
+  extensionId: string;
+  extensionVersion: string;
+  serviceId: 'varin.agent.policy';
+  serviceVersion: 3;
+  artifactIntegrity: string;
+  configurationIdentity: string;
+  declaredIdentity: LaunchPolicy;
+  identity: LaunchPolicy;
+  modelRoles: 'agentPlanning'[];
+  stateTransition: 'unsupported' | 'explicit';
+}
+
+export type PolicyTarget = {kind: 'default'} | {kind: 'extension'; artifact: AgentPolicyArtifactBinding};
+
+export type PolicyStateMode = 'preserve' | 'restart_state';
+
+export type PolicySelectionStatus = 'preparing' | 'ready' | 'active' | 'failed' | 'superseded' | 'cancelled';
+
+export interface PolicySelection {
+  expected_selection_id: string | null;
+  selection_id: string;
+  run_id: string;
+  generation: number;
+  expected_generation: number;
+  target: PolicyTarget;
+  state_mode: PolicyStateMode;
+  status: PolicySelectionStatus;
+  failure: string | null;
+  activation_cursor: number | null;
+}
+
+export interface ActivePolicySelection {
+  generation: number;
+  target: PolicyTarget;
+  identity: LaunchPolicy;
+  activation_cursor: number | null;
+}
+
+export interface PolicySelections {
+  active: ActivePolicySelection;
+  desired: PolicySelection | null;
+}
+
+export interface PolicySelectParams {
+  expectedSelectionId: string | null;
+  runId: string;
+  selectionId: string;
+  expectedGeneration: number;
+  target: PolicyTarget;
+  stateMode: PolicyStateMode;
+}
+
+export interface PolicyReadyParams {
+  runId: string;
+  selectionId: string;
+  generation: number;
+  binding: AgentPolicyBinding | null;
+  policyModels: PolicyModelCapability[];
+}
+
+export interface PolicyCancelParams {
+  runId: string;
+  selectionId: string;
+}
+
+export type PolicyPreparationFailure = 'policy_preparation_failed' | 'policy_preparation_cancelled' | 'policy_binding_revoked';
+
+export interface PolicyFailParams {
+  runId: string;
+  selectionId: string;
+  code: PolicyPreparationFailure;
+}
+
 export interface AgentPolicyBinding {
   reference: string;
-  identity: LaunchPolicy;
+  generation: number;
+  artifact: AgentPolicyArtifactBinding;
 }
 
 export interface PolicyModelCapability {
@@ -215,7 +291,8 @@ export type PolicyModelStatus = 'available' | 'disabled' | 'unconfigured' | 'inv
 export interface PolicyPrepareParams {
   runId: string;
   identity: LaunchPolicy;
-  policyModels?: unknown;
+  target: PolicyTarget;
+  policyModels: PolicyModelCapability[];
 }
 
 export interface McpBinding {
@@ -263,6 +340,9 @@ export interface LaunchSelection {
 }
 
 export interface LaunchIntent {
+  policy_preparable: boolean;
+  policy_generation: number;
+  policy_target: PolicyTarget;
   preparation_failure: string | null;
   run_id: string;
   revision: number;

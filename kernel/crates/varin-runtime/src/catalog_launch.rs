@@ -320,7 +320,10 @@ pub(super) fn validate_policy_models(models: &[PolicyModelCapability]) -> Result
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LaunchIntent {
+    pub policy_generation: u64,
+    pub policy_target: super::policy_switch::PolicyTarget,
     pub startable: bool,
+    pub policy_preparable: bool,
     pub pause: Option<super::policy_control::PolicyPauseInfo>,
     #[serde(default)]
     pub preparation_failure: Option<String>,
@@ -418,7 +421,8 @@ impl Catalog {
         fence(&run, self.epoch)?;
         let mut launch: LaunchMetadata = record(&tx, "run_launches", run_id)?;
         launch.requires_rebind = launch.bound_epoch != Some(self.epoch);
-        if launch.selection == prepared.selection {
+        if launch.selection == prepared.selection && launch.policy_target == prepared.policy_target
+        {
             drop(tx);
             return self.launch_read(launch);
         }
@@ -442,7 +446,8 @@ impl Catalog {
             || launch.bound_epoch.is_some()
             || steps != 0
             || (prepared.kind == "run.policy_prepared"
-                && (checkpoints != 0
+                && (!policy_preparable(&tx, &run, &launch)?
+                    || checkpoints != 0
                     || !launch.selection.policy_models.is_empty()
                     || launch.selection.policy == prepared.selection.policy))
         {
@@ -451,6 +456,7 @@ impl Catalog {
             ));
         }
         launch.selection = prepared.selection;
+        launch.policy_target = prepared.policy_target;
         launch.revision += 1;
         put(&tx, "run_launches", run_id, &launch)?;
         event(
@@ -556,6 +562,8 @@ impl Catalog {
             }
             None => {
                 let intent = LaunchMetadata {
+                    policy_generation: 0,
+                    policy_target: super::policy_switch::PolicyTarget::Default,
                     preparation_failure: None,
                     run_id: run_id.into(),
                     revision: 1,
@@ -679,4 +687,22 @@ impl Catalog {
             .map(LaunchRead::load)
             .collect()
     }
+}
+
+pub(super) fn policy_preparable(
+    db: &Connection,
+    run: &Run,
+    launch: &LaunchMetadata,
+) -> Result<bool> {
+    if run.cancel_requested
+        || run.state.terminal()
+        || launch.bound_epoch.is_some()
+        || launch.policy_generation != 0
+        || launch.policy_target != super::policy_switch::PolicyTarget::Default
+        || !launch.selection.policy_models.is_empty()
+    {
+        return Ok(false);
+    }
+    let used:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1) OR EXISTS(SELECT 1 FROM policy_checkpoints WHERE run_id=?1) OR EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='run.launch_bound')",[&run.id],|r|r.get(0))?;
+    Ok(!used)
 }

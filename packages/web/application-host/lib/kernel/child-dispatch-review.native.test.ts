@@ -158,18 +158,18 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
         await extensions.installOrStage({ expectedRevision: (await extensions.state()).catalog.revision,
           source: { kind: 'local', display: 'Collaboration policy example', specifier: folder } });
         await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
-          rule: { serviceId: 'varin.agent.policy', version: 2, providerKey: 'example.collaboration-policy:host:varin.agent.policy@2',
+          rule: { serviceId: 'varin.agent.policy', version: 3, providerKey: 'example.collaboration-policy:host:varin.agent.policy@3',
             scope: { projectId }, allowFallback: false } });
       }
     }
     const policyDecisions: VarinAgentPolicyInput[] = [];
-    const runtime = new AgentRuntimeClient(kernel, undefined, extensions ? async ({ threadId }, signal) => {
-      const lease = await createAgentPolicy(extensions)({ sessionId: threadId, projectId }, signal);
+    const runtime = new AgentRuntimeClient(kernel, undefined, extensions ? { prepare: async ({ threadId, requiredBinding }, signal) => {
+      const lease = await createAgentPolicy(extensions)({ sessionId: threadId, projectId, ...(requiredBinding ? { requiredBinding } : {}) }, signal);
       return lease && { ...lease, decide: async (input, signal) => {
         policyDecisions.push(structuredClone(input));
         return lease.decide(input, signal);
       } };
-    } : undefined);
+    }, observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({sessionId:threadId,projectId}, changed, signal) } : undefined);
     const errors: unknown[] = [];
     const models = { resolveModel: async (selection: typeof model) => {
       if (selection.providerId !== model.providerId || selection.modelId !== model.modelId) throw new Error('Unknown fixture model');

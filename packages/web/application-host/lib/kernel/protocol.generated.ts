@@ -6,8 +6,8 @@
 export const KERNEL_PROTOCOL_VERSION = 1 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
-export const KERNEL_CONTROL_METHODS = ["kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
-export const KERNEL_CONTROL_RESPONSE_METHODS = ["kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
+export const KERNEL_CONTROL_METHODS = ["runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
+export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.history.body"] as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
@@ -38,6 +38,11 @@ export type KernelMethod =
   | "runtime.tools.select"
   | "runtime.tools.ready"
   | "runtime.launch.policy.prepare"
+  | "runtime.policy.select"
+  | "runtime.policy.ready"
+  | "runtime.policy.cancel"
+  | "runtime.policy.fail"
+  | "runtime.policy.inspect"
   | "runtime.observer.read"
   | "runtime.observer.delivery"
   | "runtime.launch.inspect"
@@ -382,9 +387,85 @@ export interface LaunchPolicy {
   version: string;
 }
 
+export interface AgentPolicyArtifactBinding {
+  providerKey: string;
+  extensionId: string;
+  extensionVersion: string;
+  serviceId: 'varin.agent.policy';
+  serviceVersion: 3;
+  artifactIntegrity: string;
+  configurationIdentity: string;
+  declaredIdentity: LaunchPolicy;
+  identity: LaunchPolicy;
+  modelRoles: 'agentPlanning'[];
+  stateTransition: 'unsupported' | 'explicit';
+}
+
+export type PolicyTarget = {kind: 'default'} | {kind: 'extension'; artifact: AgentPolicyArtifactBinding};
+
+export type PolicyStateMode = 'preserve' | 'restart_state';
+
+export type PolicySelectionStatus = 'preparing' | 'ready' | 'active' | 'failed' | 'superseded' | 'cancelled';
+
+export interface PolicySelection {
+  expected_selection_id: string | null;
+  selection_id: string;
+  run_id: string;
+  generation: number;
+  expected_generation: number;
+  target: PolicyTarget;
+  state_mode: PolicyStateMode;
+  status: PolicySelectionStatus;
+  failure: string | null;
+  activation_cursor: number | null;
+}
+
+export interface ActivePolicySelection {
+  generation: number;
+  target: PolicyTarget;
+  identity: LaunchPolicy;
+  activation_cursor: number | null;
+}
+
+export interface PolicySelections {
+  active: ActivePolicySelection;
+  desired: PolicySelection | null;
+}
+
+export interface PolicySelectParams {
+  expectedSelectionId: string | null;
+  runId: string;
+  selectionId: string;
+  expectedGeneration: number;
+  target: PolicyTarget;
+  stateMode: PolicyStateMode;
+}
+
+export interface PolicyReadyParams {
+  runId: string;
+  selectionId: string;
+  generation: number;
+  binding: AgentPolicyBinding | null;
+  policyModels: PolicyModelCapability[];
+}
+
+export interface PolicyCancelParams {
+  runId: string;
+  selectionId: string;
+}
+
+export type PolicyPreparationFailure = 'policy_preparation_failed' | 'policy_preparation_cancelled' | 'policy_binding_revoked';
+
+export interface PolicyFailParams {
+  runId: string;
+  selectionId: string;
+  code: PolicyPreparationFailure;
+}
+
 export interface AgentPolicyBinding {
   reference: string;
-  identity: LaunchPolicy;
+  generation: number;
+  artifact: AgentPolicyArtifactBinding;
 }
 
 export interface PolicyModelCapability {
@@ -404,7 +485,8 @@ export type PolicyModelStatus = 'available' | 'disabled' | 'unconfigured' | 'inv
 export interface PolicyPrepareParams {
   runId: string;
   identity: LaunchPolicy;
-  policyModels?: unknown;
+  target: PolicyTarget;
+  policyModels: PolicyModelCapability[];
 }
 
 export interface McpBinding {
@@ -452,6 +534,9 @@ export interface LaunchSelection {
 }
 
 export interface LaunchIntent {
+  policy_preparable: boolean;
+  policy_generation: number;
+  policy_target: PolicyTarget;
   preparation_failure: string | null;
   run_id: string;
   revision: number;
@@ -2186,6 +2271,11 @@ export type KernelMethodParams = {
   "runtime.tools.select": ToolSelectParams;
   "runtime.tools.ready": ToolReadyParams;
   "runtime.launch.policy.prepare": PolicyPrepareParams;
+  "runtime.policy.select": PolicySelectParams;
+  "runtime.policy.ready": PolicyReadyParams;
+  "runtime.policy.cancel": PolicyCancelParams;
+  "runtime.policy.fail": PolicyFailParams;
+  "runtime.policy.inspect": RunParams;
   "runtime.launch.inspect": RunParams;
   "runtime.launch.list": KernelEmptyParams;
   "runtime.run.start": RunStartParams;
@@ -2591,6 +2681,51 @@ export type KernelRequest =
       id: string;
       method: "runtime.launch.policy.prepare";
       params: PolicyPrepareParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.policy.select";
+      params: PolicySelectParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.policy.ready";
+      params: PolicyReadyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.policy.cancel";
+      params: PolicyCancelParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.policy.fail";
+      params: PolicyFailParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.policy.inspect";
+      params: RunParams;
       epoch?: string;
       grantId?: string;
     }

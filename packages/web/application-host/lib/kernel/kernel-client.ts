@@ -617,7 +617,7 @@ export class KernelClient {
     signal?.throwIfAborted();
     return this.credentialBridge.register(runId, owner, signal, bindingId);
   }
-  unregisterCredentialOwner(runId: string, bindingId?: string): void { this.credentialBridge.unregister(runId, bindingId); }
+  unregisterCredentialOwner(runId: string, bindingId?: string | null): void { this.credentialBridge.unregister(runId, bindingId); }
   async registerMcpOwner(runId: string, lease: HostToolLease): Promise<HostToolBinding> {
     if (!this.handshakeResult) await this.start();
     return this.toolBridge.register(runId, lease).binding;
@@ -679,12 +679,13 @@ export class KernelClient {
     this.runPreparations.delete(runId);
     for (const controller of registrations) controller.abort(new DOMException('Run preparation cancelled', 'AbortError'));
   }
-  async registerPolicyOwner(runId: string, lease: AgentPolicyLease): Promise<AgentPolicyBinding> {
+  async registerPolicyOwner(runId: string, generation: number, lease: AgentPolicyLease): Promise<AgentPolicyBinding> {
     if (!this.handshakeResult) await this.start();
-    return this.policyBridge.register(runId, lease);
+    return this.policyBridge.register(runId, generation, lease);
   }
-  policyBinding(runId: string): AgentPolicyBinding | undefined { return this.policyBridge.binding(runId); }
-  unregisterPolicyOwner(runId: string): void { this.policyBridge.unregister(runId); }
+  policyBinding(runId: string, generation: number): AgentPolicyBinding | undefined { return this.policyBridge.binding(runId, generation); }
+  unregisterPolicyOwner(runId: string, generation: number): void { this.policyBridge.unregister(runId, generation); }
+  releaseRunPolicyOwners(runId: string): void { this.policyBridge.releaseRun(runId); }
 
   get kernelEpoch(): string | null { return this.epoch; }
   get handshake(): KernelHandshakeResult | null { return this.handshakeResult; }

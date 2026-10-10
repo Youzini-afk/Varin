@@ -30,7 +30,7 @@ export class CredentialBridge {
     this.#owners.set(key, { runId, owner, scope, epoch, abort: new AbortController(), active: new Set() });
     return { ...scope };
   }
-  unregister(runId: string, bindingId?: string): void {
+  unregister(runId: string, bindingId?: string | null): void {
     for (const [key, entry] of this.#owners) {
       if (entry.runId === runId && (bindingId === undefined || key === ownerKey(runId, bindingId))) {
         this.#owners.delete(key); entry.abort.abort();

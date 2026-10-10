@@ -16,7 +16,7 @@ const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:pause', b
 function fixture(prepareContext?: ContextPreparer) {
   const run: Run = { id: 'run:pause', thread_id: identity.threadId, branch_id: identity.branchId, state: 'waiting',
     revision: 1, epoch: 1, configuration: {}, cancel_requested: false, waiting_on: 'wait:one' };
-  const launch: LaunchIntent = { run_id: run.id, revision: 1, startable: false, requires_rebind: true, bound_epoch: null,
+  const launch: LaunchIntent = { policy_preparable: false, policy_generation: 0, policy_target: { kind: 'default' }, run_id: run.id, revision: 1, startable: false, requires_rebind: true, bound_epoch: null,
     pause: { action_id: 'pause:one', wait_id: 'wait:one', reason: 'Review before proceeding' }, preparation_failure: null,
     selection: { credential_scope: { reference: 'scope', authority: 'fixture', account: 'account', generation: 1 },
       policy_models: [], mcp_binding: null, extension_bindings:[], connection_identity: 'fixture', provider_family: 'fixture', model: 'fixture',
@@ -41,7 +41,7 @@ function fixture(prepareContext?: ContextPreparer) {
     enqueue: vi.fn(async () => ({ input_id: 'queued', run_id: run.id, mode: 'boundary' as const, cursor: 6 })),
     rebindLaunch: vi.fn<AgentRuntimeClient['rebindLaunch']>(async () => { launch.startable = false; return { runId: run.id, epoch: 1 }; }),
     context: vi.fn<AgentRuntimeClient['context']>(async () => null), refreshContext: vi.fn<AgentRuntimeClient['refreshContext']>(),
-    releaseRunCredentialOwner: vi.fn(), failLaunch: vi.fn(async () => launch),
+    releaseMainModelCredentials: vi.fn(), failLaunch: vi.fn(async () => launch),
   };
   const models = { resolveModel: vi.fn(), rebindModel: vi.fn(async () => ({}) as ExistingHostCredentialOwner) };
   const errors: unknown[] = [];
@@ -59,7 +59,7 @@ it('queued input, startup discovery and generic continuation leave an explicit P
   expect(f.runtime.resumeRun).not.toHaveBeenCalled();
   expect(f.runtime.rebindLaunch).not.toHaveBeenCalled();
   expect(f.models.rebindModel).not.toHaveBeenCalled();
-  expect(f.runtime.releaseRunCredentialOwner).not.toHaveBeenCalled();
+  expect(f.runtime.releaseMainModelCredentials).not.toHaveBeenCalled();
   await expect(f.adapter.retryPreparation(f.run.id)).rejects.toThrow('not eligible');
 });
 
@@ -73,21 +73,21 @@ it('resume returns its durable receipt before cold assembly and all callers shar
   expect(await f.adapter.resume(f.run.id, 'wait:one')).toEqual(f.receipt);
   const joined = f.adapter.continueLaunch(f.run.id);
   await f.adapter.recover();
-  expect(f.runtime.releaseRunCredentialOwner).toHaveBeenCalledOnce();
+  expect(f.runtime.releaseMainModelCredentials).toHaveBeenCalledOnce();
   release(); await joined;
   // Start ack leaves assembly owned in the supervisor although its launch still requires rebind.
   f.launch.requires_rebind = true;
   expect(await f.adapter.resume(f.run.id, 'wait:one')).toEqual(f.receipt);
   await f.adapter.recover(); await tick();
   expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce();
-  expect(f.runtime.releaseRunCredentialOwner).toHaveBeenCalledOnce();
+  expect(f.runtime.releaseMainModelCredentials).toHaveBeenCalledOnce();
   // A later Pause has a different Wait; an old receipt retry cannot clear or relaunch it.
   f.run.state = 'waiting'; f.run.waiting_on = 'wait:two';
   f.launch.pause = { action_id: 'pause:two', wait_id: 'wait:two', reason: 'Second review' };
   expect(await f.adapter.resume(f.run.id, 'wait:one')).toEqual(f.receipt);
   await tick();
   expect(f.run.waiting_on).toBe('wait:two');
-  expect(f.runtime.releaseRunCredentialOwner).toHaveBeenCalledOnce();
+  expect(f.runtime.releaseMainModelCredentials).toHaveBeenCalledOnce();
   expect(f.errors).toEqual([]);
 });
 
@@ -163,7 +163,7 @@ it('Run or epoch cancellation detaches cold credential preparation before it can
   await f.adapter.continueLaunch(f.run.id);
   resolve({} as ExistingHostCredentialOwner); await tick();
   expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce();
-  expect(f.runtime.releaseRunCredentialOwner).toHaveBeenCalledOnce();
+  expect(f.runtime.releaseMainModelCredentials).toHaveBeenCalledOnce();
   expect(f.runtime.failLaunch).not.toHaveBeenCalled();
   expect(f.errors).toEqual([]);
 });
@@ -183,7 +183,7 @@ it('cancelled launch context refresh cannot publish its late proposal or bind th
   resolve({ effectiveSystemPrompt: 'Late old-owner context', instructionSources: [], memoryCheckpoint: null });
   await tick();
   expect(f.runtime.refreshContext).not.toHaveBeenCalled();
-  expect(f.runtime.releaseRunCredentialOwner).not.toHaveBeenCalled();
+  expect(f.runtime.releaseMainModelCredentials).not.toHaveBeenCalled();
   expect(f.runtime.rebindLaunch).not.toHaveBeenCalled();
   expect(f.runtime.failLaunch).not.toHaveBeenCalled();
 });
@@ -220,7 +220,7 @@ it('resume during a delayed previous start acknowledgement schedules one fresh c
   releaseCancelledOwner({} as ExistingHostCredentialOwner);
   expect(f.models.rebindModel).toHaveBeenCalledTimes(3);
   expect(notificationSettled).toBe(false);
-  expect(f.runtime.releaseRunCredentialOwner).toHaveBeenCalledTimes(2);
+  expect(f.runtime.releaseMainModelCredentials).toHaveBeenCalledTimes(2);
   releaseSecond(); await Promise.all([first, notification]);
   expect(notificationSettled).toBe(true);
   expect(starts).toBe(2);
@@ -251,4 +251,47 @@ it('a new epoch wake keeps its exact credential owner when the previous launch i
   expect(f.runtime.rebindLaunch).toHaveBeenCalledTimes(2);
   expect(f.runtime.failLaunch).not.toHaveBeenCalled();
   expect(f.errors).toEqual([]);
+});
+
+it('policy HTTP controls require the displayed selection and branch, reject private state and do not resume a Pause', async () => {
+  const f = fixture();
+  const desired = { selection_id: 'candidate-one', run_id: f.run.id, generation: 1, expected_generation: 0, expected_selection_id: null, target: { kind: 'default' as const },
+    state_mode: 'preserve' as const, status: 'failed' as const, failure: 'policy_state_incompatible', activation_cursor: null };
+  const inspection = { active: { generation: 0, target: { kind: 'default' as const }, identity: { name: 'old', version: '1' }, activation_cursor: null },
+    desired, preparation: null };
+  const controls = Object.assign(f.runtime, {
+    inspectPolicy: vi.fn(async () => inspection),
+    restartPolicy: vi.fn(async (_runId: string, selectionId: string) => {
+      if (selectionId !== desired.selection_id) throw new Error('policy_selection_changed');
+      return { ...desired, selection_id: 'restart-command', state_mode: 'restart_state' as const, status: 'ready' as const, failure: null };
+    }),
+    cancelPolicyUpdate: vi.fn(async (_runId: string, selectionId: string) => {
+      if (selectionId !== desired.selection_id) throw new Error('policy_selection_changed');
+      return { ...desired, status: 'cancelled' as const };
+    }),
+  });
+  const handlers = new Map<string, RequestHandler>();
+  const app = { post: (path: string, ...chain: RequestHandler[]) => handlers.set(path, chain.at(-1)!), get() {} } as unknown as Express;
+  registerThreadRoutes(app, f.adapter, (_request, _response, next) => next());
+  const request = async (path: string, body: unknown) => {
+    let status = 200; let output: unknown;
+    const response = Object.assign(new EventEmitter(), { writableEnded: false,
+      status(value: number) { status = value; return this; }, json(value: unknown) { output = value; this.writableEnded = true; return this; } });
+    await handlers.get(path)!({ body } as Request, response as unknown as ExpressResponse, () => {});
+    return Response.json(output, { status });
+  };
+  vi.stubGlobal('fetch', (url: string, init: RequestInit) => request(new URL(url, 'http://fixture.invalid').pathname, JSON.parse(String(init.body))));
+  const api = createThreadsHttpAPI();
+  expect(await api.inspectPolicy(identity, f.run.id)).toEqual(inspection);
+  expect((await api.restartPolicy(identity, f.run.id, desired.selection_id)).state_mode).toBe('restart_state');
+  expect((await api.cancelPolicyUpdate(identity, f.run.id, desired.selection_id)).status).toBe('cancelled');
+  for (const body of [
+    { ...identity, runId: f.run.id },
+    { ...identity, runId: f.run.id, selectionId: desired.selection_id, state: null },
+    { ...identity, runId: f.run.id, selectionId: desired.selection_id, target: { kind: 'default' } },
+    { ...identity, branchId: 'foreign-branch', runId: f.run.id, selectionId: desired.selection_id },
+  ]) expect((await request('/api/threads/policy/restart', body)).status).toBe(400);
+  expect(controls.restartPolicy).toHaveBeenCalledOnce();
+  expect(f.run.waiting_on).toBe('wait:one'); expect(f.runtime.resumeRun).not.toHaveBeenCalled();
+  expect(f.runtime.rebindLaunch).not.toHaveBeenCalled();
 });

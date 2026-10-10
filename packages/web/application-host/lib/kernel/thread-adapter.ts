@@ -404,8 +404,9 @@ export class ThreadAdapter {
     const shownRun = activeRun ?? latest;
     const launch = shownRun ? await this.runtime.launch(shownRun.id) : null;
     const modelSelection = shownRun ? await this.runtime.modelSelections(shownRun.id) : {desired:null,active:null};
+    const policySelection = shownRun && launch ? await this.runtime.inspectPolicy(shownRun.id) : null;
     return { identity, eventCursor, thread, activeRun, history, historyPage: { head: page.head, previous: page.previous }, inputs,
-      operations: [...operations.values()], launch, modelSelection, context, children: await this.children(identity) };
+      operations: [...operations.values()], launch, modelSelection, policySelection, context, children: await this.children(identity) };
   }
 
   private async recordLaunchFailure(runId: string, error: unknown): Promise<void> {
@@ -440,6 +441,21 @@ export class ThreadAdapter {
     const receipt = await this.runtime.resumeRun(runId, waitId);
     void this.continueLaunch(runId).catch(() => undefined);
     return receipt;
+  }
+
+  async inspectPolicy(identity: ThreadIdentity, runId: string) {
+    await this.requireIdentity(identity);
+    const run = await this.requireRun(runId);
+    if (run.thread_id !== identity.threadId || run.branch_id !== identity.branchId) throw new Error('Run does not belong to the selected branch');
+    return this.runtime.inspectPolicy(runId);
+  }
+  async restartPolicy(identity: ThreadIdentity, runId: string, selectionId: string, signal?: AbortSignal) {
+    await this.inspectPolicy(identity, runId);
+    return this.runtime.restartPolicy(runId, selectionId, signal);
+  }
+  async cancelPolicyUpdate(identity: ThreadIdentity, runId: string, selectionId: string, signal?: AbortSignal) {
+    await this.inspectPolicy(identity, runId);
+    return this.runtime.cancelPolicyUpdate(runId, selectionId, signal);
   }
 
   async retryPreparation(runId: string): Promise<void> {
@@ -478,7 +494,7 @@ export class ThreadAdapter {
       signal?.throwIfAborted();
       launch = await this.runtime.launch(runId, signal);
       if (!launch?.startable || !launch.requires_rebind) return;
-      this.runtime.releaseRunCredentialOwner(runId);
+      this.runtime.releaseMainModelCredentials(runId, selected);
       if (desired && desiredOwner) await this.runtime.selectModel(runId, desired.id, desired.configuration, desiredOwner, signal);
       if (run.thread_id.startsWith('context-job-thread:')) {
         if (owner) await this.runtime.startRunWithCredentialOwner(runId, owner, signal);

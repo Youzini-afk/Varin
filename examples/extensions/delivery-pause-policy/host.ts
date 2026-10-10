@@ -7,6 +7,18 @@ export default defineHostExtension({
     provideAgentPolicy(context, {
       identity: { name: 'delivery-pause', version: '1' },
       configuration: null,
+      transitionState({ from, event, state }, signal) {
+        signal.throwIfAborted();
+        if (from.declaredIdentity?.name !== 'delivery-pause' || from.declaredIdentity.version !== '1') {
+          return { kind: 'incompatible', reason: 'Only delivery-pause version 1 state is supported' };
+        }
+        const compatible = state === null && (event.kind === 'started' || event.kind === 'input_delivered')
+          || state === 'first_delivery' && event.kind === 'delivered'
+          || state === 'awaiting_resume' && event.kind === 'resumed'
+          || state === 'second_delivery' && event.kind === 'delivered';
+        return compatible ? { kind: 'compatible', state }
+          : { kind: 'incompatible', reason: 'Unknown state or unconsumed delivery/resume boundary' };
+      },
       decide({ event, state }, signal) {
         signal.throwIfAborted();
         if (state === null) return {

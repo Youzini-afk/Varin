@@ -25,7 +25,7 @@ const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:ui-fixtur
 function initialSnapshot(active = false): ThreadSnapshot {
   const run = { id: 'ui-run', thread_id: identity.threadId, branch_id: identity.branchId, state: 'generating' as const, revision: 1, epoch: 1, configuration: { providerId: 'fixture-provider', model: 'fixture-model' }, cancel_requested: false, waiting_on: null };
   return { identity, eventCursor: 0, thread: { thread_id: identity.threadId, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: null, active_run_id: active ? run.id : null, latest_run: active ? run : null }] }, activeRun: active ? run : null,
-    history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], launch: null, modelSelection: {desired:null,active:null}, context: { checkpoint: null, jobs: [] } };
+    history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], launch: null, modelSelection: {desired:null,active:null}, policySelection: null, context: { checkpoint: null, jobs: [] } };
 }
 function fixture(active = false) {
   const view = initialSnapshot(active);
@@ -45,7 +45,7 @@ function fixture(active = false) {
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
   const api: ThreadsAPI = { listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
-    inspectTools: unused, selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, retryPreparation: unused, events: async () => [],
+    inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, retryPreparation: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
   };
   return { api, view, submit, enqueue, editInput, cancelInput, cancelRun, emit: (event: Parameters<ThreadsAPI['observe']>[1] extends (value: infer T) => void ? T : never) => listener?.(event) };
@@ -489,7 +489,7 @@ it.each(['fixed_branch', 'materialized'] as const)('reprepares %s from a live la
 
 function pauseView(view: ThreadSnapshot, waitId = 'wait:policy-one') {
   view.activeRun!.state = 'waiting'; view.activeRun!.waiting_on = waitId;
-  view.launch = { run_id: view.activeRun!.id, revision: 1, startable: false, requires_rebind: true, bound_epoch: null, preparation_failure: null,
+  view.launch = { run_id: view.activeRun!.id, revision: 1, policy_generation: 0, policy_preparable: false, policy_target: { kind: 'default' }, startable: false, requires_rebind: true, bound_epoch: null, preparation_failure: null,
     pause: { action_id: `action:${waitId}`, wait_id: waitId, reason: 'Review the first delivered result.' },
     selection: { extension_bindings: [], policy_models: [], mcp_binding: null, credential_scope: null, connection_identity: 'fixture', provider_family: 'fixture', model: 'fixture',
       configuration_generation: 1, tool_schema_generation: 1, tools: [], policy: { name: 'fixture', version: '1' }, source: null } };
@@ -497,6 +497,39 @@ function pauseView(view: ThreadSnapshot, waitId = 'wait:policy-one') {
     phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'run', handed_off: false,
     executor: 'policy.pause', waiting_on: waitId, intent: {}, result: null, external_receipt: null, call_completion: null, execution_owner: null }];
 }
+
+it('targets the displayed strategy candidate without clearing Pause or submitting twice', async () => {
+  const f = fixture(true); pauseView(f.view);
+  const original = { expected_selection_id: null, selection_id: 'policy:incompatible', run_id: 'ui-run', generation: 2, expected_generation: 0,
+    target: { kind: 'default' as const }, state_mode: 'preserve' as const, status: 'failed' as const,
+    failure: 'policy_state_incompatible', activation_cursor: null };
+  f.view.policySelection = { active: { generation: 0, target: { kind: 'default' }, identity: { name: 'default', version: '1' }, activation_cursor: null }, desired: original, preparation: null };
+  const resume = vi.fn<ThreadsAPI['resume']>(); f.api.resume = resume;
+  let finish!: (receipt: Awaited<ReturnType<ThreadsAPI['restartPolicy']>>) => void;
+  const restart = vi.fn<ThreadsAPI['restartPolicy']>(() => new Promise(resolve => { finish = resolve; }));
+  f.api.restartPolicy = restart;
+  const cancel = vi.fn<ThreadsAPI['cancelPolicyUpdate']>(async () => {
+    const selected = f.view.policySelection!.desired!;
+    selected.status = 'cancelled'; return selected;
+  });
+  f.api.cancelPolicyUpdate = cancel;
+  await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  expect(container.textContent).toContain('keeps conversation history and independent tasks');
+  await act(async () => { button('Restart strategy state').click(); button('Restart strategy state').click(); });
+  expect(restart).toHaveBeenCalledExactlyOnceWith(identity, 'ui-run', 'policy:incompatible');
+  expect(resume).not.toHaveBeenCalled();
+  await act(async () => {
+    const selected = { ...original, selection_id: 'policy:restart', generation: 3, state_mode: 'restart_state' as const,
+      status: 'ready' as const, failure: null };
+    f.view.policySelection!.desired = selected; finish(selected);
+  });
+  expect(container.querySelector('[aria-label="Policy update"]')?.textContent).toContain('remains paused');
+  expect(f.view.activeRun?.waiting_on).toBe('wait:policy-one');
+  expect(button('Resume run')).toBeDefined();
+  await act(async () => { button('Cancel strategy update').click(); });
+  expect(cancel).toHaveBeenCalledExactlyOnceWith(identity, 'ui-run', 'policy:restart');
+  expect(f.cancelRun).not.toHaveBeenCalled(); expect(resume).not.toHaveBeenCalled();
+});
 
 it('shows the core Pause reason and exact resume control while input remains queued', async () => {
   const f = fixture(true); pauseView(f.view);

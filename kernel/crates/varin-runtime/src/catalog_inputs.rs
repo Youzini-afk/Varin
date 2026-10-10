@@ -413,6 +413,7 @@ impl Catalog {
         write_input(&tx, &input)?;
         if input.mode == InputMode::NextRun {
             let mut run: Run = record(&tx, "runs", &input.run_id)?;
+            super::policy_switch::close_run_candidate(&tx, &run.id, run.revision + 1)?;
             run.state = RunState::Cancelled;
             run.cancel_requested = true;
             run.revision += 1;
@@ -555,7 +556,7 @@ pub(super) fn promote_next(tx: &Transaction<'_>, branch: &str) -> Result<Option<
     }
 }
 
-pub(super) fn has_boundary_inputs(tx: &Transaction<'_>, run_id: &str) -> Result<bool> {
+pub(super) fn has_boundary_inputs(tx: &Connection, run_id: &str) -> Result<bool> {
     Ok(tx.query_row("SELECT EXISTS(SELECT 1 FROM input_queue WHERE run_id=?1 AND state='queued' AND mode!='next_run')",[run_id],|row|row.get(0))?)
 }
 pub(super) fn cancel_current(tx: &Transaction<'_>, run_id: &str) -> Result<()> {

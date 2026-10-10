@@ -6,6 +6,18 @@
 
 目标是完整实现[完整运行时设计](../design/agent-runtime-design.md)和[能力组合设计](../design/runtime-extensibility-design.md)共同定义的长期运行底座：及时交互、低开销执行、按真实资源调度、深层能力组合和可替换策略。完成聊天循环、迁移已有工具或删除 Pi 都不是单独的完成标准；Pi 退出是这套设计落地后的一个结果。当前生产仍使用 Pi session worker、TypeScript Host 协调和 Rust 资源内核；现有权威见[架构](../architecture.md)。
 
+## 2026-10-10 增量：运行中策略安全换绑
+
+- 原 Catalog 保存策略选择命令、候选与激活回执，原 Launch 保存实际 generation 和完整 target。选择同时核对当前活动代与用户看到的 desired selection ID；原命令重投返回原回执。候选描述/依赖/规划模型准备独立执行，ready 不等于 active，失败或被取代候选不撤掉仍有效的活动代。首次准备使用原 launch-bound/checkpoint 事实派生 `policy_preparable`，已经使用的默认策略不会在恢复时被当成未选择策略。
+- Run worker 只在真正的新决定边界换绑。旧 decide、已存待执行决定、ModelStep/工具配对、策略图/规划动作和原观察先按原绑定收尾；独立 JobAccepted 不形成整棵任务树的终态屏障。新代的策略和 planning provider 在同一 live slot 发布，主模型、工具和 source 沿各自原权威。原子激活保存新代、私有状态、真实未消费 continuation 与事件，不伪造 Started、模型请求或历史输入。
+- `varin.agent.policy@3` 的描述明确 `modelRoles` 与 `stateTransition`。同一完整 target 可保留状态；跨 target 通过显式 `transitionState` 返回 compatible 或 incompatible。没有钩子不猜兼容，也不默默清空状态。不兼容时保留旧代；用户明确的 `restart_state` 只重置策略私有状态，保留会话历史和独立工作。示例、SDK、合同、Host 与 Rust 同步替换旧内部合同，不增加 @2 兼容翻译。
+- 原 checkpoint 区分 decision 与 activation，并记录 pending/consumed 和真实续事件引用；同一记录分别保留已提交状态与待执行决定的提议状态。正文在 worker 写入 ContentStore，发布保护与 GC 根覆盖候选 planning 配置、状态、动作和 continuation。激活已提交但下一决定/动作未完成时，重开恢复已提交代及原动作；已读取 ResultChunk 不被较旧图完成事件覆盖。真实 Catalog 重开将未激活候选记为 interrupted，保留 active；原终态 writer 在同一事务结束待选候选，live release 只释放持有者。Catalog 现为格式 **19**，旧内部格式拒绝。
+- Host 精确恢复原启用 artifact/配置，不按当前 route 偷换；新 route 只准备下一候选。私有 decide/transition/取消/release 均携带 generation 与 transport epoch，规划模型按原配置/账户重绑并拥有分代凭据。整合修复了旧取消 ACK 迟到中断新候选，以及跨 epoch 旧异步清理删除同一已提交代新凭据的真实窗口；清理只作用于原 attempt/epoch。实际 callback 继续由原 service pin 排空，abort 不是停止证据。
+- 认证的策略 inspect/restart/cancel 入口及 `ThreadsAPI`、Thread snapshot/UI 已接通。展示实际 active、持久候选及尚未形成持久 target 的 Host 准备失败。后一类临时诊断随 inspect/snapshot 刷新可见，暂停且无其他事件时尚无独立主动推送。重启/取消使用当前显示的原 selection ID；Pause 期间可准备，但没有候选更新、child 完成或 Host 重连能替代显式 resume。固定 child/context profile 不被策略更新扩大权限。
+- 冻结验证：完整 runtime **250 passed、0 failed、2 个既有 ignored**；kernel policy 聚焦 **8/8**，包含旧模型/工具/独立作业受理到下一代、Pause/child 原组合和真实两代规划 HTTP/私有凭据接线。主模型未在规划组合中被误调用；模拟 HTTP 只证明请求/身份/次数，不证明模型质量或真实账号认证。合同/SDK **118/118**，Host 五文件 **42/42**（含真实安装 broker 11 项，其余为明确的管理接口 fixture），UI/投影 **24/24**，application-client **5/5**。完整 Host 测试与 UI 类型、定点 lint、协议一致性及实际 Host bundle 通过。Linux 开发内核 identity `0.9.25` 构建通过，SHA-256 `1eafa000321167cdfba011c89f8a7319052a4a817417001a2968792172aad36e`。
+- 独立审查复现并修复了激活后旧 Complete 决定败给新输入、输入已交付却随即崩溃时，恢复跳过新决定并错误采用未生效状态的问题。同一原探针精确核对 InputPending，完成修前失败/修后通过；Started、Delivered、Resumed 在 live 与崩溃/GC 后都保留已提交状态，仅重新决定一次。当前本阶段无剩余已证实行为阻断。
+- **实际 Host/kernel IPC 端到端仍未验收**：Unix socket `EPERM` 与官方提升入口初始化失败未解除，本轮 native fixtures 只做类型检查。组件、真实安装 broker 和原生 Engine 证据不拼接成未运行的完整端到端成功。可写子任务/条件集成、其余领域出口、GC 控制隔离、跨平台和默认 Pi 产品迁移继续推进；两份设计尚未整体完成。
+
 ## 2026-10-10 增量：普通工具目录、执行回执与材料入口
 
 - 已安装普通 service 的单份 `tool` 声明进入与 ModelStep、PolicyAction 共用的 ToolDirectory。说明、输入/输出 schema、示例和 source 元数据沿同一声明保存；共享既有 Ajv 编译器，不新增 schema 引擎。公开协议由原 schema 生成，内部执行类型仍归 Rust。原 MCP 权威作为专用 adapter 接入通用 Host tool bridge，不用伪 MCP 服务包装普通扩展。

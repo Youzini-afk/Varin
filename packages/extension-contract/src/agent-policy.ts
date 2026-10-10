@@ -1,7 +1,7 @@
 import type { JsonValue } from './types.js';
 
 export const VARIN_AGENT_POLICY_SERVICE_ID = 'varin.agent.policy';
-export const VARIN_AGENT_POLICY_VERSION = 2 as const;
+export const VARIN_AGENT_POLICY_VERSION = 3 as const;
 export interface VarinAgentPolicyIdentity { name: string; version: string }
 /** A capability-scoped association. A content hash alone never authorizes a read. */
 export interface VarinAgentPolicyEvidenceRef { action_id: string; node_id: string; content_ref: string }
@@ -68,6 +68,20 @@ export type VarinAgentPolicyAction = { kind: 'request_model' | 'execute_tools' |
   | { kind: 'deliver'; text: string } | { kind: 'pause'; reason: string }
   | { kind: 'fail'; reason: string } | { kind: 'wait'; wait_id: string };
 export interface VarinAgentPolicyDecision { action: VarinAgentPolicyAction; state: JsonValue }
+export interface VarinAgentPolicyDescription {
+  identity: VarinAgentPolicyIdentity;
+  configuration: JsonValue;
+  modelRoles: 'agentPlanning'[];
+  stateTransition: 'unsupported' | 'explicit';
+}
+/** Core captures the checkpoint and commit fence. This is only the source implementation's data. */
+export interface VarinAgentPolicyTransitionInput extends VarinAgentPolicyInput {
+  from: { identity: VarinAgentPolicyIdentity; declaredIdentity: VarinAgentPolicyIdentity | null };
+}
+/** Compatibility is asserted by the implementation, never automatically proven by JSON validation. */
+export type VarinAgentPolicyTransition =
+  | { kind: 'compatible'; state: JsonValue }
+  | { kind: 'incompatible'; reason: string };
 const stringSchema = { type: 'string', minLength: 1 } as const;
 const integerSchema = { type: 'integer', minimum: 0 } as const;
 const objectSchema = (properties: Record<string, unknown>) => ({ type: 'object', additionalProperties: false, required: Object.keys(properties), properties });
@@ -115,12 +129,22 @@ const actionSchema = { oneOf: [
   objectSchema({ kind: { const: 'fail' }, reason: stringSchema }),
   objectSchema({ kind: { const: 'wait' }, wait_id: stringSchema }),
 ] };
+const identitySchema = objectSchema({ name: stringSchema, version: stringSchema });
+const viewSchema = objectSchema({ run_id: stringSchema, state: stringSchema, history_count: integerSchema, history_head_id: { type: ['string', 'null'] }, pending_tool_calls: integerSchema, model_capabilities: arraySchema(capabilitySchema) });
+const transitionSchema = { oneOf: [
+  objectSchema({ kind: { const: 'compatible' }, state: {} }),
+  objectSchema({ kind: { const: 'incompatible' }, reason: stringSchema }),
+] };
 export const VARIN_AGENT_POLICY_CONTRACT = {
-  id: VARIN_AGENT_POLICY_SERVICE_ID, version: VARIN_AGENT_POLICY_VERSION, participation: 'decision', methods: ['describe', 'decide'],
-  describe: { inputSchema: { type: 'array', maxItems: 0 }, outputSchema: { ...objectSchema({ identity: objectSchema({ name: stringSchema, version: stringSchema }), configuration: {}, capabilities: { type: 'array', uniqueItems: true, items: { const: 'agentPlanning' } } }), required: ['identity', 'configuration'] } },
+  id: VARIN_AGENT_POLICY_SERVICE_ID, version: VARIN_AGENT_POLICY_VERSION, participation: 'decision', methods: ['describe', 'decide', 'transitionState'],
+  describe: { inputSchema: { type: 'array', maxItems: 0 }, outputSchema: objectSchema({ identity: identitySchema, configuration: {}, modelRoles: { type: 'array', uniqueItems: true, items: { const: 'agentPlanning' } }, stateTransition: { enum: ['unsupported', 'explicit'] } }) },
   decide: { inputSchema: { type: 'array', minItems: 1, maxItems: 1, items: objectSchema({
-    view: objectSchema({ run_id: stringSchema, state: stringSchema, history_count: integerSchema, history_head_id: { type: ['string', 'null'] }, pending_tool_calls: integerSchema, model_capabilities: arraySchema(capabilitySchema) }), event: eventSchema, state: {},
+    view: viewSchema, event: eventSchema, state: {},
   }) }, outputSchema: objectSchema({ action: actionSchema, state: {} }) },
+  transitionState: { inputSchema: { type: 'array', minItems: 1, maxItems: 1, items: objectSchema({
+    from: objectSchema({ identity: identitySchema, declaredIdentity: { anyOf: [identitySchema, { type: 'null' }] } }),
+    view: viewSchema, event: eventSchema, state: {},
+  }) }, outputSchema: transitionSchema },
   boundary: 'between_committed_execution_events',
   actions: ['request_model', 'request_model_job', 'execute_tools', 'tool_graph', 'read_result', 'request_model_with_evidence', 'wait', 'deliver', 'pause', 'complete', 'fail'],
   outputAccess: 'own_run_action_node_committed_content_chunks',
@@ -230,4 +254,31 @@ export function parseVarinAgentPolicyInput(value: unknown): VarinAgentPolicyInpu
   }
   json(value);
   return structuredClone(value) as unknown as VarinAgentPolicyInput;
+}
+
+export function parseVarinAgentPolicyDescription(value: unknown): VarinAgentPolicyDescription {
+  if (!object(value) || !exact(value, ['identity', 'configuration', 'modelRoles', 'stateTransition'])
+    || !Array.isArray(value.modelRoles) || value.modelRoles.some(role => role !== 'agentPlanning')
+    || new Set(value.modelRoles).size !== value.modelRoles.length
+    || !['unsupported', 'explicit'].includes(String(value.stateTransition))) throw new Error('Invalid agent policy description');
+  parseVarinAgentPolicyIdentity(value.identity);
+  json(value.configuration);
+  return structuredClone(value) as unknown as VarinAgentPolicyDescription;
+}
+export function parseVarinAgentPolicyTransitionInput(value: unknown): VarinAgentPolicyTransitionInput {
+  if (!object(value) || !exact(value, ['from', 'view', 'event', 'state']) || !object(value.from)
+    || !exact(value.from, ['identity', 'declaredIdentity'])) throw new Error('Invalid agent policy transition input');
+  const identity = parseVarinAgentPolicyIdentity(value.from.identity);
+  const declaredIdentity = value.from.declaredIdentity === null ? null : parseVarinAgentPolicyIdentity(value.from.declaredIdentity);
+  const input = parseVarinAgentPolicyInput({ view: value.view, event: value.event, state: value.state });
+  return { from: { identity, declaredIdentity }, ...input };
+}
+export function parseVarinAgentPolicyTransition(value: unknown): VarinAgentPolicyTransition {
+  if (!object(value)) throw new Error('Invalid agent policy transition');
+  if (value.kind === 'compatible' && exact(value, ['kind', 'state'])) {
+    json(value.state);
+    return { kind: 'compatible', state: structuredClone(value.state) };
+  }
+  if (value.kind === 'incompatible' && exact(value, ['kind', 'reason']) && text(value.reason)) return { kind: 'incompatible', reason: value.reason };
+  throw new Error('Invalid agent policy transition');
 }

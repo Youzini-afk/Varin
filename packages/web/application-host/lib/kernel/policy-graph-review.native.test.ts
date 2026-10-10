@@ -102,7 +102,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const close = async () => { if (closed) return; closed = true; await extensions.stop(); if (!crashed) await storage.dispose(); await documents.dispose(); await kernel.close(); };
   cleanups.push(close);
 
-  const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel, undefined, ({threadId}, signal) => createAgentPolicy(extensions)({sessionId:threadId,projectId:'selected-project'}, signal)), {
+  const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel, undefined, { prepare: ({threadId, requiredBinding}, signal) => createAgentPolicy(extensions)({sessionId:threadId,projectId:'selected-project', ...(requiredBinding ? { requiredBinding } : {})}, signal), observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({sessionId:threadId,projectId:'selected-project'}, changed, signal) }), {
     resolveModel: async selection => {
       if (selection.providerId !== 'fixture-provider' || selection.modelId !== 'fixture-model') throw new Error('unselected model');
       return { configuration, credentialOwner: owner };
@@ -136,15 +136,15 @@ async function installExample(f: Awaited<ReturnType<typeof fixture>>) {
 }
 async function route(f: Awaited<ReturnType<typeof fixture>>, providerKey: string, scope: {projectId?: string; sessionId?: string}) {
   return f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
-    rule: { allowFallback: false, providerKey, scope, serviceId: 'varin.agent.policy', version: 2 } });
+    rule: { allowFallback: false, providerKey, scope, serviceId: 'varin.agent.policy', version: 3 } });
 }
 async function installCustom(f: Awaited<ReturnType<typeof fixture>>, id: string, handlers: string) {
   const folder=path.join(f.root,id); await fs.mkdir(folder);
   await fs.writeFile(path.join(folder,'package.json'), JSON.stringify({name:id,version:'1.0.0'}));
-  await fs.writeFile(path.join(folder,'varin.extension.json'),JSON.stringify({schemaVersion:1,id,version:'1.0.0',engines:{varin:'*'},entrypoints:{host:{file:'host.cjs',mode:'brokered',activation:['service-request']}},provides:{services:[{id:'varin.agent.policy',version:2,multiple:true}]}}));
-  await fs.writeFile(path.join(folder,'host.cjs'),`module.exports={activate(context){context.services.provide({id:'varin.agent.policy',version:2,multiple:true},{${handlers}})}}`);
+  await fs.writeFile(path.join(folder,'varin.extension.json'),JSON.stringify({schemaVersion:1,id,version:'1.0.0',engines:{varin:'*'},entrypoints:{host:{file:'host.cjs',mode:'brokered',activation:['service-request']}},provides:{services:[{id:'varin.agent.policy',version:3,multiple:true}]}}));
+  await fs.writeFile(path.join(folder,'host.cjs'),`module.exports={activate(context){context.services.provide({id:'varin.agent.policy',version:3,multiple:true},{${handlers}})}}`);
   await f.extensions.installOrStage({expectedRevision:(await f.extensions.state()).catalog.revision,source:{kind:'local',display:id,specifier:folder}});
-  await route(f,`${id}:host:varin.agent.policy@2`,{projectId:'selected-project'});
+  await route(f,`${id}:host:varin.agent.policy@3`,{projectId:'selected-project'});
 }
 
 // Exercise the installed broker, framed policy bridge, immutable source owner, and
@@ -152,7 +152,7 @@ async function installCustom(f: Awaited<ReturnType<typeof fixture>>, id: string,
 const readGraph = (name = 'file_read', schema = '1', args: Record<string, unknown> = { path: 'evidence.txt' }) => ({
   kind: 'tool_graph', nodes: [{ id: 'read', depends_on: [], call: { call_id: 'read', name, schema_version: schema, arguments: args } }],
 });
-const policy = (decision: string) => `describe(){return {identity:{name:'graph-review',version:'1'},configuration:{}}},decide([input]){${decision}}`;
+const policy = (decision: string) => `describe(){return {identity:{name:'graph-review',version:'1'},configuration:{},modelRoles:[],stateTransition:'unsupported'}},decide([input]){${decision}}`;
 const graphEvents = (f: Awaited<ReturnType<typeof fixture>>) => f.decisions as VarinAgentPolicyInput[];
 const graphReceipts = (f: Awaited<ReturnType<typeof fixture>>): VarinAgentPolicyNodeReceipt[] => graphEvents(f).flatMap(input => input.event.kind === 'tool_graph_completed' ? input.event.receipts : []);
 async function submitSource(f: Awaited<ReturnType<typeof fixture>>, name: string, mode: 'fixed_branch' | 'materialized' = 'fixed_branch') {
@@ -170,7 +170,7 @@ it('installed evidence policy reads content-dependent immutable graphs before th
     complete(response, 'answer', 'Evidence reviewed');
   });
   await installExample(f);
-  await route(f, 'example.evidence-policy:host:varin.agent.policy@2', { projectId: 'selected-project' });
+  await route(f, 'example.evidence-policy:host:varin.agent.policy@3', { projectId: 'selected-project' });
   const identity = await f.api.create('graph-example');
   const followOn = `selected-${path.basename(f.root)}.txt`;
   await fs.writeFile(path.join(f.workspace, 'evidence-index.json'), JSON.stringify({ nextFile: followOn }));
@@ -202,7 +202,7 @@ it('installed evidence policy reads content-dependent immutable graphs before th
   expect(JSON.stringify(input)).not.toMatch(/MUTATED_LIVE_EVIDENCE|UNSELECTED_DECOY_EVIDENCE/);
   expect(f.launchErrors).toEqual([]);
   await expect.poll(() => f.pins()).toBe(0);
-  expect(f.kernel.policyBinding(run.run_id)).toBeUndefined();
+  expect(f.kernel.policyBinding(run.run_id, 0)).toBeUndefined();
 });
 
 it.each(['action_id', 'node_id', 'content_ref'] as const)('rejects evidence with a foreign %s before provider inference', async field => {
@@ -264,7 +264,7 @@ it.each(['cancel', 'revoke'] as const)('%s during graph-output policy decision p
   await expect.poll(async () => (await f.runtime.run(run.run_id)).state).toBe(stop === 'cancel' ? 'cancelled' : 'failed');
   await expect.poll(() => f.pins()).toBe(0);
   expect(f.requests).toHaveLength(0);
-  expect(f.kernel.policyBinding(run.run_id)).toBeUndefined();
+  expect(f.kernel.policyBinding(run.run_id, 0)).toBeUndefined();
 });
 
 it('cannot reuse a genuine output reference from a different run', async () => {
@@ -343,7 +343,7 @@ async function installMemoryPolicy(f: Awaited<ReturnType<typeof fixture>>, id: s
   const folder = path.join(f.root, id); await fs.mkdir(folder);
   await fs.writeFile(path.join(folder, 'package.json'), JSON.stringify({ name: id, version: '1.0.0' }));
   await fs.writeFile(path.join(folder, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id, version: '1.0.0', engines: { varin: '*' },
-    entrypoints: { host: { file: 'host.cjs', mode: 'brokered', activation: ['service-request'] } }, provides: { services: [{ id: 'varin.agent.policy', version: 2, multiple: true }] } }));
+    entrypoints: { host: { file: 'host.cjs', mode: 'brokered', activation: ['service-request'] } }, provides: { services: [{ id: 'varin.agent.policy', version: 3, multiple: true }] } }));
   await build({ stdin: { loader: 'ts', resolveDir: repository, contents: `
     import { defineHostExtension, provideAgentPolicy } from '@varin/extension-sdk';
     const handlers = { ${memoryGraphPolicy(content, includeMemoryEvidence)} };
@@ -352,7 +352,7 @@ async function installMemoryPolicy(f: Awaited<ReturnType<typeof fixture>>, id: s
     } });` }, bundle: true, platform: 'node', format: 'cjs', outfile: path.join(folder, 'host.cjs'),
     alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision, source: { kind: 'local', display: id, specifier: folder } });
-  await route(f, `${id}:host:varin.agent.policy@2`, { projectId: 'selected-project' });
+  await route(f, `${id}:host:varin.agent.policy@3`, { projectId: 'selected-project' });
 }
 function holdMutation(f: Awaited<ReturnType<typeof fixture>>) {
   let entered = false; let release!: () => void;

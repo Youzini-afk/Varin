@@ -36,7 +36,7 @@ async function fixture() {
   await runtime.installOrStage({ expectedRevision: (await runtime.state()).catalog.revision,
     source: { kind: 'local', display: 'Collaboration policy example', specifier: source } });
   await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
-    rule: { serviceId: 'varin.agent.policy', version: 2, providerKey: 'example.collaboration-policy:host:varin.agent.policy@2',
+    rule: { serviceId: 'varin.agent.policy', version: 3, providerKey: 'example.collaboration-policy:host:varin.agent.policy@3',
       scope: { sessionId: 'parent-thread' }, allowFallback: false } });
   const prepare = async (owner = runtime) => {
     const lease = await createAgentPolicy(owner)({ sessionId: 'parent-thread' });
@@ -75,16 +75,16 @@ async function waitingCheckpoint(lease: AgentPolicyLease): Promise<VarinAgentPol
 it('installed SDK collaboration policy keeps original handles and artifact identity across broker reopen', async () => {
   const f = await fixture();
   const lease = await f.prepare();
-  expect(lease.binding.identity.name).toBe('example.collaboration-policy:host:varin.agent.policy@2:fixed-source-collaboration');
+  expect(lease.binding.artifact.identity.name).toBe('example.collaboration-policy:host:varin.agent.policy@3:fixed-source-collaboration');
   const wait = await waitingCheckpoint(lease);
-  const binding = lease.binding.identity;
+  const binding = lease.binding.artifact.identity;
   lease.release();
   await f.runtime.stop();
   // Reopening uses the selected immutable installed package, not live source-folder contents.
   await fs.writeFile(path.join(f.source, 'host.cjs'), "throw new Error('uninstalled source changes must not execute');\n");
   const reopened = await f.open();
   const resumed = await f.prepare(reopened);
-  expect(resumed.binding.identity).toEqual(binding);
+  expect(resumed.binding.artifact.identity).toEqual(binding);
   // Native core, not this fixture, decides when this event may reach the inner policy.
   const answer = await decide(resumed, graph('wait-action', 'wait-child', accepted('original-observation-operation', 'awaiting_child')), wait.state);
   expect(answer.action).toEqual({ kind: 'request_model_with_evidence', evidence: [reference] });

@@ -1,6 +1,6 @@
 # Fixed-source collaboration policy
 
-An ordinary installed `varin.agent.policy@2` extension that dispatches a read-only child before
+An ordinary installed `varin.agent.policy@3` extension that dispatches a read-only child before
 requesting the parent model, performs an independent parent read, then explicitly waits for the
 child report. It uses the existing `tool_graph` action and tagged call receipts; it adds no child
 state store or special dispatch API.
@@ -25,8 +25,8 @@ Select the provider through existing service routing, using the routing document
 ```json
 {
   "serviceId": "varin.agent.policy",
-  "version": 2,
-  "providerKey": "example.collaboration-policy:host:varin.agent.policy@2",
+  "version": 3,
+  "providerKey": "example.collaboration-policy:host:varin.agent.policy@3",
   "scope": { "sessionId": "YOUR_NATIVE_THREAD_ID" },
   "allowFallback": false
 }

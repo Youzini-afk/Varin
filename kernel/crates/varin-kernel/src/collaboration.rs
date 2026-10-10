@@ -389,6 +389,27 @@ impl AgentPolicy for CollaborationPolicy {
     fn identity(&self) -> PolicyIdentity {
         policy_identity(self.inner.identity())
     }
+    fn select_for_decision(
+        &self,
+        view: &PolicyView<'_>,
+        event: &PolicyEvent,
+        state: &Value,
+        epoch: u64,
+        cancel: &CancellationToken,
+    ) -> Result<Option<Value>, ExecutionError> {
+        if self
+            .catalog
+            .lock()
+            .map_err(error)?
+            .pending_child_wait(view.run_id)
+            .map_err(error)?
+            .is_some()
+        {
+            return Ok(None);
+        }
+        self.inner
+            .select_for_decision(view, event, state, epoch, cancel)
+    }
     fn decide(
         &self,
         view: &PolicyView<'_>,
