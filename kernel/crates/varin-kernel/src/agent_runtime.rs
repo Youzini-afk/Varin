@@ -22,6 +22,9 @@ mod policy_commands;
 #[path = "agent_followups.rs"]
 mod followup_commands;
 
+#[path = "agent_calendar.rs"]
+mod calendar_commands;
+
 #[path = "agent_inputs.rs"]
 mod input_commands;
 
@@ -198,6 +201,9 @@ pub(crate) enum Command {
 pub(crate) fn domain(error: varin_runtime::RuntimeError) -> KernelError {
     match error {
         varin_runtime::RuntimeError::DispatchCancelled => KernelError::Cancelled,
+        varin_runtime::RuntimeError::RequestActivationHeld => {
+            KernelError::ActivationHeld("original ingress is held by its current owner".into())
+        }
         varin_runtime::RuntimeError::Conflict(message) => {
             KernelError::Operation(format!("conflict: {message}"))
         }
@@ -582,6 +588,9 @@ pub(crate) fn spawn(
                                 | "runtime.input.edit"
                                 | "runtime.messages.send"
                                 | "runtime.followup.register"
+                                | "runtime.calendar.sync"
+                                | "runtime.calendar.admit"
+                                | "runtime.calendar.prepare"
                                 | "runtime.child.continuation.accept"
                                 | "runtime.child.prepare"
                                 | "runtime.child.source.ready"
@@ -645,6 +654,40 @@ pub(crate) fn spawn(
                                     return Ok(Value::Null);
                                 }
                             }
+                        }
+                        if method.starts_with("runtime.calendar.") {
+                            if matches!(
+                                method,
+                                "runtime.calendar.sync"
+                                    | "runtime.calendar.admit"
+                                    | "runtime.calendar.prepare"
+                            ) {
+                                let runtime = runtime.clone();
+                                let method = method.to_owned();
+                                let response_id = id.clone();
+                                let response_sender = responses.clone();
+                                let done = finished.clone();
+                                let cancelled = cancellation.clone();
+                                thread::spawn(move || {
+                                    let result = calendar_commands::execute(
+                                        runtime, &method, params, &cancelled,
+                                    );
+                                    let response = match result {
+                                        Ok(value) => response_ok(&response_id, value),
+                                        Err(error) => response_error(&response_id, &error),
+                                    };
+                                    done(&response_id);
+                                    let _ = response_sender.send(response);
+                                });
+                                deferred = true;
+                                return Ok(Value::Null);
+                            }
+                            return calendar_commands::execute(
+                                runtime.clone(),
+                                method,
+                                params,
+                                &cancellation,
+                            );
                         }
                         if matches!(method, "runtime.followup.register" | "runtime.followup.get") {
                             let runtime = runtime.clone();

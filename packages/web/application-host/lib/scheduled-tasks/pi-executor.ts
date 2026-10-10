@@ -42,6 +42,7 @@ export const createPiScheduledTaskExecutor = ({ broker, awaitCompletion, forgetC
     task: ScheduledExecutionTask;
     title: string;
   }) => {
+    if (!task.execution.modelID || !task.execution.providerID) throw new Error('Pi scheduled execution requires its own model selection');
     const snapshot = await broker.createSession(projectPath, title);
     const sessionID = snapshot.sessionId;
     try {

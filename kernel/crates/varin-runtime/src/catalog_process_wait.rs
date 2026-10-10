@@ -70,6 +70,11 @@ pub(super) fn delegated_source_lineage(
                 previous_run_id,
                 ..
             }
+            | delegated::DelegatedTrigger::Calendar {
+                previous_execution_id,
+                previous_run_id,
+                ..
+            }
             | delegated::DelegatedTrigger::MessageRequest {
                 previous_execution_id,
                 previous_run_id,

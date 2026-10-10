@@ -8,6 +8,14 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-11 增量：日历资产与真实发生项
+
+- GUI/Markdown 仍由原项目资产 owner 管理；逐定义明确 `runtime: agent`，原 Pi 默认保留。Catalog **33**、input **6**、collaboration **7** 持有定义世代、UTC slot、游标和发生项，ContentStore 保存原指令。共享原 native deadline、typed ingress、Run/Goal 和 child execution；无 Host 原生 timer/执行状态库、假 Pi session 或假前轮 Run。
+- once/daily/weekly/cron、IANA 时区、skip/coalesce_once 以实际发生时刻恢复；冷新工作经真实 Thread/source/model/context/显式 skill 原子进入 Run 和可选 Goal。既有工作保原项目/来源/模型/权限，原 Goal 和 child fixed WorkingResult 继续守卫。取消未交付发生项、停当前工作、禁用和删除定义的作用范围分开，旧结果保留。
+- 原 GUI/API、认证 routes、shared application-client、普通 SDK installed broker 示例、原始 Markdown CAS、实际 Run/Goal 导航已接线。跨 owner once 交接只携原受理事实，不把改 executor 当 Run-now；Agent→Pi 的原 generation pending 引用覆盖“读取后、tombstone 前”迟到受理。旧 Pi timer/session/终态写回沿原资产锁核准确被受理意图，不得禁用新定义或重放旧副作用。
+- 独审已实证并修复 once DST 依赖 ambient offset、`H` cron 随机换槽、坏项目阻断健康冷启动、native 零预算误拒和 once 跨 owner 重放；旧 Pi 晚结算误写新定义的原反例也已同源码复验通过。默认切换和全面迁移仍交用户验收后负责；两设计整体仍未完成。
+- 最终 runtime **391/0、2 ignored**，kernel **91/0、11 ignored**，准确 fresh binary 的原 guardian/Storage **3/3**；Host **89/89**、UI **40/40**，all-targets、类型/lint/协议与实际 Host bundle 通过。独审六个确认问题均闭合，同源证据及用户入口见[本切片验收](../reviews/runtime-calendar-2026-10-11.md)。完整 Host IPC 场景已补、类型检查，当前未执行。继续通用事件条件及其余领域能力。
+
 ## 2026-10-11 增量：一次时间/进程意图与真实来源接续
 
 - 普通 `follow_up` **版本1** 支持真实 ModelStep/PolicyAction 的 register/list/get/control；明确原指令与 At/ProcessStopped 条件持久保存。注册不隐式停车，只有显式 wait 才进入原 Job/Operation/共同观察屏障；取消观察保登记，取消定义只取消未交付 ingress。User API、认证 route、原正文按需读取及时间/进程 UI 同步接线，未知响应保原 key/trigger/body/source。Catalog **32**、input **5**、collaboration **6**，旧内部格式拒绝。

@@ -1,3 +1,9 @@
+import { createScheduledTasksHttpAPI } from '@varin/application-client';
+import { createProjectConfigRuntime } from '../projects/project-config.js';
+import { createScheduledTasksRuntime } from '../scheduled-tasks/runtime.js';
+import { createScheduledTaskService } from '../scheduled-tasks/service.js';
+import { CalendarOwner } from '../scheduled-tasks/calendar-owner.js';
+import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createMemoryOwner } from './memory-owner.js';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
@@ -58,7 +64,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
     currentScope: async () => ({ reference: 'fixture-reference', authority: 'fixture-existing-owner', account: 'fixture-local-handle', generation: 1 }),
     runtime: { getAuth: async () => ({ auth: { apiKey: secret } }) },
   });
-  const configuration = { providerFamily: 'openai-responses', model: 'fixture-model', endpoint, credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 64 };
+  const configuration = { providerId: 'fixture-provider', providerFamily: 'openai-responses', model: 'fixture-model', endpoint, credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 64 };
   const launchErrors: unknown[] = [];
   const workspace = path.join(root, 'workspace'); await fs.mkdir(workspace, { recursive: true });
   const documents = createDocumentAuthority({ hostId: 'http-review', dataDir: path.join(root, 'documents'), isAllowedRoot: async () => true, isTrusted: async () => true });
@@ -97,7 +103,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const hostUrl = await listen(createServer(app));
   configureRuntimeUrlResolver({ apiBaseUrl: hostUrl, realtimeBaseUrl: hostUrl });
   setRuntimeExtraHeaders({ 'x-fixture-auth': 'fixture-client' });
-  return { extensions, composition, adapter, flushRefreshes, endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
+  return { app, extensions, composition, adapter, flushRefreshes, endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
 }
 
 const model = { providerId: 'fixture-provider', modelId: 'fixture-model' };
@@ -246,3 +252,48 @@ it('selected describe failure preserves the checkpoint and data fragments stay o
   expect(JSON.stringify(wire)).toContain('EXTERNAL QUOTED EVIDENCE');
   expect(system(wire)).not.toContain('EXTERNAL QUOTED EVIDENCE');
 });
+
+
+it('calendar GUI assets reach original source/model/context owners, consume a genuine cold Environment input and survive same-key restart', async () => {
+  let completedRequests = 0;
+  const reply = (_body: Record<string, unknown>, response: ServerResponse) => {
+    completedRequests++;
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `calendar-answer-${completedRequests}`, type: 'message', content: [{ type: 'output_text', text: 'Original calendar result' }] }] } })}\n\n`);
+  };
+  const install = async (f: Awaited<ReturnType<typeof fixture>>) => {
+    const projects = async () => [{ id: 'selected-project', path: f.workspace }];
+    const config = createProjectConfigRuntime({ fsPromises: fs, path, projectsDirPath: path.join(f.root, 'project-config') });
+    const scheduler = createScheduledTasksRuntime({ projectConfigRuntime: config, listProjects: projects, executeTask: async () => { throw new Error('Native calendar cannot dispatch Pi'); } });
+    const errors: unknown[] = [];
+    scheduler.setCalendarOwner(new CalendarOwner({ runtime: f.runtime, projects, hasPiWork: scheduler.hasPiWork,
+      prepare: (work, project, signal) => f.adapter.prepareCalendarWork(work, project, signal), onChanged() {}, onError: error => errors.push(error) }));
+    const service = createScheduledTaskService({ projectConfigRuntime: config, scheduledTasksRuntime: scheduler, readSettingsFromDisk: async () => ({ projects: await projects() }), sanitizeProjects: value => value as Awaited<ReturnType<typeof projects>> });
+    registerScheduledTaskRoutes(f.app, { scheduledTaskService: service, projectConfigRuntime: config, scheduledTasksRuntime: scheduler,
+      readSettingsFromDisk: async () => ({ projects: await projects() }), sanitizeProjects: value => value as Awaited<ReturnType<typeof projects>>,
+      requireAuth: (req, res, next) => { if (req.headers['x-fixture-auth'] !== 'fixture-client') { res.status(401).json({ error: 'Sign in required' }); return; } next(); } });
+    cleanups.push(async () => scheduler.stop()); await scheduler.start();
+    return { scheduler, errors, api: createScheduledTasksHttpAPI() };
+  };
+  const f = await fixture(reply), host = await install(f);
+  const instruction = '  Original calendar Environment input\nwith preserved whitespace  ';
+  await host.api.upsert('selected-project', { id: 'calendar-task', runtime: 'agent', name: 'Cold project work', enabled: false,
+    schedule: { kind: 'once', date: '2020-01-01', time: '09:00', timezone: 'UTC' }, execution: { prompt: instruction },
+    missedPolicy: 'coalesce_once', target: { kind: 'new_work', model: { providerId: 'fixture-provider', modelId: 'fixture-model' }, sourceMode: 'fixed_branch', goal: null } });
+  const accepted = await host.api.run('selected-project', 'calendar-task', 'original-manual-key');
+  if (accepted.runtime !== 'agent') throw new Error('Native calendar returned a Pi receipt');
+  expect(accepted).not.toHaveProperty('sessionId');
+  await expect.poll(async () => (await host.api.list('selected-project'))[0]?.calendar?.occurrences[0]?.state, { timeout: 15_000 }).toBe('completed');
+  const occurrence = (await host.api.list('selected-project'))[0]!.calendar!.occurrences[0]!;
+  expect(occurrence.id).toBe(accepted.occurrence.id); expect(occurrence.run_id).toBeTruthy();
+  expect((await f.runtime.launch(occurrence.run_id!))?.selection.source?.mode).toBe('fixed_branch');
+  expect(JSON.stringify(await f.runtime.history(occurrence.branch_id))).toContain('Original calendar Environment input');
+  expect(f.requests).toHaveLength(1); expect(JSON.stringify(f.requests[0]!.body)).toContain(instruction.replaceAll('\n', '\\n'));
+  expect(host.errors).toEqual([]); expect(f.launchErrors).toEqual([]);
+  host.scheduler.stop(); await f.close();
+  const reopened = await fixture(reply, f.root, f.endpoint), resumed = await install(reopened);
+  const same = await resumed.api.run('selected-project', 'calendar-task', 'original-manual-key');
+  if (same.runtime !== 'agent') throw new Error('Native calendar returned a Pi receipt');
+  expect(same.occurrence.id).toBe(occurrence.id); expect(same.occurrence.run_id).toBe(occurrence.run_id);
+  expect(completedRequests).toBe(1); expect(resumed.errors).toEqual([]);
+}, 45_000);

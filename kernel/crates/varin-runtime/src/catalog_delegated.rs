@@ -34,6 +34,15 @@ pub enum DelegatedTrigger {
         previous_run_revision: u64,
         expected_head: Option<String>,
     },
+    Calendar {
+        definition_id: String,
+        occurrence_id: String,
+        input_id: String,
+        previous_execution_id: String,
+        previous_run_id: String,
+        previous_run_revision: u64,
+        expected_head: Option<String>,
+    },
     MessageRequest {
         message_id: String,
         previous_execution_id: String,
@@ -316,7 +325,9 @@ impl DelegatedExecutionRead {
             state: execution.state().into(),
             input: if matches!(
                 execution.trigger,
-                DelegatedTrigger::MessageRequest { .. } | DelegatedTrigger::Followup { .. }
+                DelegatedTrigger::MessageRequest { .. }
+                    | DelegatedTrigger::Followup { .. }
+                    | DelegatedTrigger::Calendar { .. }
             ) {
                 self.content.load_history_payload(&execution.input_ref)?.0
             } else {
@@ -608,7 +619,7 @@ impl Catalog {
         }
         if let Some(row) = &prepared.ingress {
             activation::validate_pending(&self.db, row)?;
-            if followups::ingress_hold(&self.db, row, None)?.is_some() {
+            if ingress::hold(&self.db, row, None)?.is_some() {
                 return Err(RuntimeError::RequestActivationHeld);
             }
         }
@@ -741,6 +752,19 @@ impl Catalog {
                         ..
                     } => DelegatedTrigger::Followup {
                         followup_id: followup_id.clone(),
+                        occurrence_id: occurrence_id.clone(),
+                        input_id: row.id.clone(),
+                        previous_execution_id: previous.execution_id.clone(),
+                        previous_run_id: run.id.clone(),
+                        previous_run_revision: run.revision,
+                        expected_head: head.clone(),
+                    },
+                    inputs::InputOrigin::Calendar {
+                        definition_id,
+                        occurrence_id,
+                        ..
+                    } => DelegatedTrigger::Calendar {
+                        definition_id: definition_id.clone(),
                         occurrence_id: occurrence_id.clone(),
                         input_id: row.id.clone(),
                         previous_execution_id: previous.execution_id.clone(),
@@ -902,7 +926,8 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             DelegatedTrigger::Dispatch => None,
             DelegatedTrigger::UserContinuation { key, .. } => Some(key.as_str()),
             DelegatedTrigger::MessageRequest { message_id, .. } => Some(message_id.as_str()),
-            DelegatedTrigger::Followup { input_id, .. } => Some(input_id.as_str()),
+            DelegatedTrigger::Followup { input_id, .. }
+            | DelegatedTrigger::Calendar { input_id, .. } => Some(input_id.as_str()),
         };
         let family = relation(db, &child)?;
         if let Some(receipt) = &execution.receipt {

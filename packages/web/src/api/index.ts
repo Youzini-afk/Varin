@@ -1,3 +1,4 @@
+import { createScheduledTasksHttpAPI } from '@varin/application-client';
 import { createThreadsHttpAPI } from '@varin/application-client';
 import type { RuntimeAPIs } from '@varin/application-client';
 import {
@@ -53,6 +54,7 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
     runtime: { platform: 'web', isDesktop: false, label: 'web' },
     piRuntime: createWebPiRuntimeAPI(),
     threads: createThreadsHttpAPI(),
+    schedules: createScheduledTasksHttpAPI(),
     terminal: createWebTerminalAPI(),
     git: createWebGitAPI(),
     workspace: createWebWorkspaceAPI(),

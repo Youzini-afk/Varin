@@ -515,3 +515,117 @@ fn followup_get_list_and_control_consume_real_retained_user_instruction_from_bot
         f.finish();
     }
 }
+
+#[test]
+#[cfg(target_os = "linux")]
+fn native_calendar_deadline_observes_one_true_cold_thread_without_host_timer_or_model() {
+    use varin_runtime::catalog::calendar::*;
+    let f = Fixture::with_tools(
+        false,
+        vec![crate::followup_tools::schema()],
+        vec!["follow_up".into()],
+    );
+    let owner = f.catalog();
+    let input = DefinitionInput {
+        task_id: "native-calendar".into(),
+        asset_revision: "asset:1".into(),
+        asset_kind: AssetKind::Gui,
+        name: "Native calendar".into(),
+        enabled: true,
+        activation_hold: None,
+        once_acceptance: None,
+        timezone: "UTC".into(),
+        rule: Rule::Once {
+            date: "2026-10-10".into(),
+            time: "09:00".into(),
+        },
+        missed_policy: MissedPolicy::CoalesceOnce,
+        target: Target::NewWork {
+            model: ModelSelection {
+                provider_id: "fixture".into(),
+                model_id: "fixture".into(),
+                thinking_level: None,
+                temperature: None,
+            },
+            source_mode: varin_runtime::SourceMode::LiveRoot,
+            goal: None,
+        },
+        instruction: "Prepare real cold work when due".into(),
+    };
+    let prepared = owner
+        .lock()
+        .unwrap()
+        .prepare_calendar_sync("project-fixture".into(), None, vec![input])
+        .unwrap()
+        .load()
+        .unwrap();
+    let definition = owner
+        .lock()
+        .unwrap()
+        .admit_calendar_sync(prepared)
+        .unwrap()
+        .definitions
+        .remove(0);
+    let calculation = owner
+        .lock()
+        .unwrap()
+        .calendar_pending()
+        .unwrap()
+        .calculations
+        .pop()
+        .unwrap();
+    let deadline = varin_runtime::catalog::observations::wall_time_ms().unwrap() + 200;
+    let slot = Slot {
+        at_ms: deadline,
+        following_at_ms: None,
+    };
+    owner
+        .lock()
+        .unwrap()
+        .admit_calendar_calculation(
+            calculation,
+            Some(CalculationResult {
+                next: Some(slot.clone()),
+                latest_due: None,
+                next_future: Some(slot),
+            }),
+            None,
+        )
+        .unwrap();
+    let (signal, wakes) = crate::continuation_wake::channel().unwrap();
+    let (events, rx) = mpsc::sync_channel(1);
+    owner.lock().unwrap().set_event_notifier(events).unwrap();
+    let runtime = Arc::downgrade(&f.assembly.runtime);
+    let worker = std::thread::spawn(move || crate::continuation_wake::drive(runtime, wakes));
+    let guard = crate::continuation_wake::StopGuard(signal.clone());
+    signal.notify();
+    let end = Instant::now() + Duration::from_secs(5);
+    loop {
+        rx.recv_timeout(end.saturating_duration_since(Instant::now()))
+            .expect("native calendar event");
+        signal.notify();
+        let db = owner.lock().unwrap();
+        let occurrences = db.calendar_occurrences(&definition.id).unwrap();
+        if let Some(occurrence) = occurrences.first() {
+            assert_eq!(occurrences.len(), 1);
+            assert_eq!(
+                occurrence.reason,
+                OccurrenceReason::Scheduled { at_ms: deadline }
+            );
+            assert!(occurrence.observed_at_ms >= deadline);
+            assert!(occurrence.thread_id.starts_with("thread:"));
+            assert!(occurrence.run_id.is_none() && occurrence.input_id.is_none());
+            assert!(db.history(&occurrence.branch_id).unwrap().is_empty());
+            assert_eq!(
+                db.calendar_pending().unwrap().preparations[0].id,
+                occurrence.id
+            );
+            assert_eq!(db.nearest_wait_deadline().unwrap(), None);
+            break;
+        }
+    }
+    drop(guard);
+    worker.join().unwrap();
+    drop(owner);
+    f.finish();
+}

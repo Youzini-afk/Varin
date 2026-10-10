@@ -1,10 +1,11 @@
+import type { CalendarTarget, CalendarMissedPolicy, CalendarDefinition, CalendarOccurrence } from './agent-runtime.generated.js';
 /**
  * Scheduled (calendar) task management over the harness (Stage W / D-307).
  *
  * These methods expose the same scheduled-task authority the GUI, CLI, and
- * Markdown `.agents/loops` files already use. A calendar task creates NEW work
- * — a fresh session on each fire — which is a different target type than a
- * follow-up, whose occurrence continues an existing session/thread.
+ * Markdown `.agents/loops` files already use. Pi creates a fresh session; an Agent
+ * definition explicitly selects new or existing work and returns a durable
+ * occurrence receipt. Follow-ups retain their original continuation intent.
  *
  * Scope: the caller's workspace resolves to one project; agents manage that
  * project's tasks. Loop-backed tasks stay file-owned — enable/disable and
@@ -31,8 +32,8 @@ export interface ScheduledTaskScheduleView {
 }
 
 export interface ScheduledTaskExecutionView {
-  providerID: string;
-  modelID: string;
+  providerID?: string;
+  modelID?: string;
   thinkingLevel?: string;
   agent?: string;
   prompt: string;
@@ -45,7 +46,7 @@ export type ScheduledTaskStatusValue = "error" | "idle" | "running" | "success";
 export interface ScheduledTaskStateView {
   createdAt: number;
   updatedAt: number;
-  lastStatus: ScheduledTaskStatusValue;
+  lastStatus?: ScheduledTaskStatusValue;
   lastRunAt?: number;
   lastDurationMs?: number;
   lastError?: string;
@@ -55,6 +56,10 @@ export interface ScheduledTaskStateView {
 }
 
 export interface ScheduledTaskView {
+  runtime?: "pi" | "agent";
+  target?: CalendarTarget;
+  missedPolicy?: CalendarMissedPolicy;
+  calendar?: { definition: CalendarDefinition; occurrences: CalendarOccurrence[] };
   id: string;
   name: string;
   enabled: boolean;
@@ -71,6 +76,9 @@ export interface ScheduledTaskView {
 
 /** Editable fields for a JSON-owned task; loop metadata is never accepted. */
 export interface ScheduledTaskUpsertInput {
+  runtime?: "pi" | "agent";
+  target?: CalendarTarget;
+  missedPolicy?: CalendarMissedPolicy;
   id?: string;
   name?: string;
   enabled?: boolean;
@@ -115,12 +123,11 @@ export interface ScheduleRemoveResult {
 
 export interface ScheduleRunParams {
   taskId: string;
+  key?: string;
 }
 
-export interface ScheduleRunResult {
-  sessionId?: string;
-  task: ScheduledTaskView;
-}
+export type ScheduleRunResult = { runtime: 'pi'; sessionId: string; task: ScheduledTaskView }
+  | { runtime: 'agent'; occurrence: CalendarOccurrence; task: ScheduledTaskView };
 
 export interface ScheduleSetEnabledParams {
   taskId: string;

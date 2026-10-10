@@ -1423,14 +1423,11 @@ export function registerHarnessServices(
     });
     router.register("schedule.run", {
       handle: async (params, ctx) => call(ctx, async (projectId) => {
-        const result = await scheduled.run(projectId, params.taskId);
+        const result = await scheduled.run(projectId, params.taskId, params.key);
         if (!result.task) {
           throw new HarnessServiceError("not-found", `scheduled task not found: ${params.taskId}`);
         }
-        return {
-          task: result.task,
-          ...(result.sessionId !== undefined ? { sessionId: result.sessionId } : {}),
-        };
+        return { ...result, task: result.task };
       }),
     });
     router.register("schedule.setEnabled", {

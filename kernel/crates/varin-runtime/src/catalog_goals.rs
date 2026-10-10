@@ -285,7 +285,7 @@ pub(super) fn for_run(db: &Connection, run_id: &str) -> Result<Option<Definition
     }
 }
 fn continuation_predecessor(db: &Connection, run_id: &str) -> Result<Option<String>> {
-    Ok(db.query_row("SELECT json_extract(body,'$.trigger.previous_run_id') FROM delegated_executions WHERE run_id=?1 AND json_extract(body,'$.trigger.kind') IN ('user_continuation','message_request','followup')",[run_id],|row|row.get(0)).optional()?)
+    Ok(db.query_row("SELECT json_extract(body,'$.trigger.previous_run_id') FROM delegated_executions WHERE run_id=?1 AND json_extract(body,'$.trigger.kind') IN ('user_continuation','message_request','followup','calendar')",[run_id],|row|row.get(0)).optional()?)
 }
 pub(super) fn bind_admission(tx: &Transaction<'_>, run: &Run) -> Result<()> {
     if let Some(previous) = continuation_predecessor(tx, &run.id)? {
@@ -335,7 +335,7 @@ pub(super) fn bind_child(tx: &Transaction<'_>, operation: &str, parent: &str) ->
     Ok(())
 }
 fn adopt_descendants(tx: &Transaction<'_>, run: &str, goal: &str) -> Result<()> {
-    tx.execute("WITH RECURSIVE descendants(id) AS (SELECT ?1 UNION SELECT j.run_id FROM context_jobs j JOIN descendants d ON j.owner_run_id=d.id UNION SELECT r.id FROM child_tasks c JOIN descendants d ON json_extract(c.body,'$.parent_run_id')=d.id JOIN runs r ON r.branch_id=json_extract(c.body,'$.child_branch_id') WHERE NOT EXISTS(SELECT 1 FROM delegated_executions e WHERE e.run_id=r.id AND json_extract(e.body,'$.trigger.kind') IN ('user_continuation','message_request','followup'))) INSERT INTO goal_runs(id,goal_id,primary_run) SELECT id,?2,0 FROM descendants WHERE id!=?1 ON CONFLICT(id) DO NOTHING",params![run,goal])?;
+    tx.execute("WITH RECURSIVE descendants(id) AS (SELECT ?1 UNION SELECT j.run_id FROM context_jobs j JOIN descendants d ON j.owner_run_id=d.id UNION SELECT r.id FROM child_tasks c JOIN descendants d ON json_extract(c.body,'$.parent_run_id')=d.id JOIN runs r ON r.branch_id=json_extract(c.body,'$.child_branch_id') WHERE NOT EXISTS(SELECT 1 FROM delegated_executions e WHERE e.run_id=r.id AND json_extract(e.body,'$.trigger.kind') IN ('user_continuation','message_request','followup','calendar'))) INSERT INTO goal_runs(id,goal_id,primary_run) SELECT id,?2,0 FROM descendants WHERE id!=?1 ON CONFLICT(id) DO NOTHING",params![run,goal])?;
     tx.execute("INSERT INTO goal_children(id,goal_id) SELECT c.id,?1 FROM child_tasks c JOIN goal_runs g ON json_extract(c.body,'$.parent_run_id')=g.id WHERE g.goal_id=?1 ON CONFLICT(id) DO NOTHING",[goal])?;
     Ok(())
 }
@@ -402,15 +402,15 @@ pub struct GoalMutationPreparation {
     _publication: crate::content::ContentPublication,
 }
 pub struct PreparedGoalMutation {
-    scope: GoalScope,
-    key: String,
-    run_id: Option<String>,
-    expected_revision: Option<u64>,
-    objective_ref: Value,
-    intent: Value,
-    budget: Option<GoalBudget>,
-    epoch: u64,
-    _publication: crate::content::ContentPublication,
+    pub(super) scope: GoalScope,
+    pub(super) key: String,
+    pub(super) run_id: Option<String>,
+    pub(super) expected_revision: Option<u64>,
+    pub(super) objective_ref: Value,
+    pub(super) intent: Value,
+    pub(super) budget: Option<GoalBudget>,
+    pub(super) epoch: u64,
+    pub(super) _publication: crate::content::ContentPublication,
 }
 impl GoalMutationPreparation {
     pub fn load(self) -> Result<PreparedGoalMutation> {
@@ -489,92 +489,7 @@ impl Catalog {
             ));
         }
         let tx = self.db.transaction()?;
-        if let Some(run_id) = &p.run_id {
-            if let Some(old) = optional_record::<Definition>(&tx, "goals", &p.key)? {
-                old.require_scope(&p.scope)?;
-                if old.start_intent != p.intent {
-                    return Err(RuntimeError::Conflict(
-                        "Goal key has different input".into(),
-                    ));
-                }
-                return Ok(old.receipt());
-            }
-            let run: Run = record(&tx, "runs", run_id)?;
-            context_jobs::require_regular_branch(&tx, &run.branch_id)?;
-            let delegated: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM child_tasks WHERE child_thread_id=?1)",
-                [&run.thread_id],
-                |r| r.get(0),
-            )?;
-            let latest:String=tx.query_row("SELECT coalesce(active_run,(SELECT id FROM runs WHERE branch_id=?1 ORDER BY rowid DESC LIMIT 1)) FROM branches WHERE id=?1",[&run.branch_id],|r|r.get(0))?;
-            if run.thread_id != p.scope.thread_id
-                || run.branch_id != p.scope.branch_id
-                || delegated
-                || latest != run.id
-                || active_for_branch(&tx, &run.branch_id)?.is_some()
-            {
-                return Err(RuntimeError::Conflict(
-                    "Goal requires the latest primary Run and no unfinished Goal on this branch"
-                        .into(),
-                ));
-            }
-            let d = Definition {
-                id: p.key.clone(),
-                revision: 1,
-                generation: 1,
-                thread_id: run.thread_id.clone(),
-                branch_id: run.branch_id.clone(),
-                source_run_id: run.id.clone(),
-                objective_ref: p.objective_ref,
-                control: GoalControl::Active,
-                budget: p.budget,
-                blocked: None,
-                reason_ref: None,
-                dependency_operation_id: None,
-                start_intent: p.intent,
-            };
-            tx.execute(
-                "INSERT INTO goals(id,thread_id,branch_id,body) VALUES(?1,?2,?3,?4)",
-                params![d.id, d.thread_id, d.branch_id, encode(&d)?],
-            )?;
-            tx.execute(
-                "INSERT INTO goal_usage(id,body) VALUES(?1,?2)",
-                params![d.id, encode(&GoalUsage::default())?],
-            )?;
-            tx.execute("INSERT INTO goal_runs(id,goal_id,primary_run) VALUES(?1,?2,1) ON CONFLICT(id) DO UPDATE SET goal_id=excluded.goal_id,primary_run=1",params![run.id,d.id])?;
-            adopt_descendants(&tx, &run.id, &d.id)?;
-            let cursor = event(
-                &tx,
-                &d.id,
-                1,
-                "goal.created",
-                json!({"run_id":run.id,"thread_id":run.thread_id}),
-            )?;
-            if run.state.terminal() {
-                followups::register_goal_continuation(&tx, &d, &run, Some(cursor))?;
-            }
-        } else {
-            let mut d: Definition = record(&tx, "goals", &p.key)?;
-            d.require_scope(&p.scope)?;
-            if Some(d.revision) != p.expected_revision || d.ended() {
-                return Err(RuntimeError::Conflict(
-                    "Goal revision changed or ended".into(),
-                ));
-            }
-            d.objective_ref = p.objective_ref;
-            d.budget = p.budget;
-            d.revision += 1;
-            d.generation += 1;
-            put(&tx, "goals", &d.id, &d)?;
-            event(
-                &tx,
-                &d.id,
-                d.revision,
-                "goal.changed",
-                json!({"generation":d.generation}),
-            )?;
-        }
-        let receipt = record::<Definition>(&tx, "goals", &p.key)?.receipt();
+        let receipt = admit_mutation_tx(&tx, &p)?;
         tx.commit()?;
         Ok(receipt)
     }
@@ -625,6 +540,97 @@ impl Catalog {
         tx.commit()?;
         Ok(d.receipt())
     }
+}
+
+pub(super) fn admit_mutation_tx(
+    tx: &Transaction<'_>,
+    p: &PreparedGoalMutation,
+) -> Result<GoalControlReceipt> {
+    if let Some(run_id) = &p.run_id {
+        if let Some(old) = optional_record::<Definition>(tx, "goals", &p.key)? {
+            old.require_scope(&p.scope)?;
+            if old.start_intent != p.intent {
+                return Err(RuntimeError::Conflict(
+                    "Goal key has different input".into(),
+                ));
+            }
+            return Ok(old.receipt());
+        }
+        let run: Run = record(tx, "runs", run_id)?;
+        context_jobs::require_regular_branch(tx, &run.branch_id)?;
+        let delegated: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM child_tasks WHERE child_thread_id=?1)",
+            [&run.thread_id],
+            |r| r.get(0),
+        )?;
+        let latest:String=tx.query_row("SELECT coalesce(active_run,(SELECT id FROM runs WHERE branch_id=?1 ORDER BY rowid DESC LIMIT 1)) FROM branches WHERE id=?1",[&run.branch_id],|r|r.get(0))?;
+        if run.thread_id != p.scope.thread_id
+            || run.branch_id != p.scope.branch_id
+            || delegated
+            || latest != run.id
+            || active_for_branch(tx, &run.branch_id)?.is_some()
+        {
+            return Err(RuntimeError::Conflict(
+                "Goal requires the latest primary Run and no unfinished Goal on this branch".into(),
+            ));
+        }
+        let d = Definition {
+            id: p.key.clone(),
+            revision: 1,
+            generation: 1,
+            thread_id: run.thread_id.clone(),
+            branch_id: run.branch_id.clone(),
+            source_run_id: run.id.clone(),
+            objective_ref: p.objective_ref.clone(),
+            control: GoalControl::Active,
+            budget: p.budget.clone(),
+            blocked: None,
+            reason_ref: None,
+            dependency_operation_id: None,
+            start_intent: p.intent.clone(),
+        };
+        tx.execute(
+            "INSERT INTO goals(id,thread_id,branch_id,body) VALUES(?1,?2,?3,?4)",
+            params![d.id, d.thread_id, d.branch_id, encode(&d)?],
+        )?;
+        tx.execute(
+            "INSERT INTO goal_usage(id,body) VALUES(?1,?2)",
+            params![d.id, encode(&GoalUsage::default())?],
+        )?;
+        tx.execute("INSERT INTO goal_runs(id,goal_id,primary_run) VALUES(?1,?2,1) ON CONFLICT(id) DO UPDATE SET goal_id=excluded.goal_id,primary_run=1",params![run.id,d.id])?;
+        adopt_descendants(tx, &run.id, &d.id)?;
+        let cursor = event(
+            tx,
+            &d.id,
+            1,
+            "goal.created",
+            json!({"run_id":run.id,"thread_id":run.thread_id}),
+        )?;
+        if run.state.terminal() {
+            followups::register_goal_continuation(tx, &d, &run, Some(cursor))?;
+        }
+    } else {
+        let mut d: Definition = record(tx, "goals", &p.key)?;
+        d.require_scope(&p.scope)?;
+        if Some(d.revision) != p.expected_revision || d.ended() {
+            return Err(RuntimeError::Conflict(
+                "Goal revision changed or ended".into(),
+            ));
+        }
+        d.objective_ref = p.objective_ref.clone();
+        d.budget = p.budget.clone();
+        d.revision += 1;
+        d.generation += 1;
+        put(tx, "goals", &d.id, &d)?;
+        event(
+            tx,
+            &d.id,
+            d.revision,
+            "goal.changed",
+            json!({"generation":d.generation}),
+        )?;
+    }
+    Ok(record::<Definition>(tx, "goals", &p.key)?.receipt())
 }
 
 /// These aggregate values are projections of original inference receipts. They are changed only

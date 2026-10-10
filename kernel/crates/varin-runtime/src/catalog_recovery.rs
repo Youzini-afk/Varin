@@ -109,14 +109,11 @@ impl ExecutionPreparation {
         };
         let mut items = Vec::new();
         for item in history {
-            if item.source == HistorySource::User {
-                items.extend(super::execution_persistence::user_input_items(
-                    &item.id,
-                    &item.content,
-                )?);
-            } else {
-                items.push(serde_json::from_value(item.content)?);
-            }
+            items.extend(super::execution_persistence::history_input_items(
+                &item.id,
+                item.source,
+                &item.content,
+            )?);
         }
         Ok(ExecutionInput {
             run_id: self.run.id.clone(),
@@ -771,7 +768,8 @@ impl Catalog {
                         "SELECT coalesce(max(cursor),0) > ?2
                          FROM events WHERE subject=?1 AND kind='execution.committed'
                             AND json_extract(data,'$.kind')='policy_checkpoint'",
-                        params![run_id, sql_number(work)?], |row| row.get::<_, bool>(0),
+                        params![run_id, sql_number(work)?],
+                        |row| row.get::<_, bool>(0),
                     )?
                 } else {
                     false
@@ -833,12 +831,20 @@ impl Catalog {
                 && step.superseded_by_input.is_none()
         });
         let kind = if let Some(step) = undispatched {
-            if step.run_id != run.id || (step.state == ModelStepState::Prepared && step.epoch != self.epoch) {
-                return Err(RuntimeError::Conflict("undispatched request owner changed".into()));
+            if step.run_id != run.id
+                || (step.state == ModelStepState::Prepared && step.epoch != self.epoch)
+            {
+                return Err(RuntimeError::Conflict(
+                    "undispatched request owner changed".into(),
+                ));
             }
             if let Some(saved) = &checkpoint {
-                if saved.identity != policy || saved.kind != super::policy_checkpoint::PolicyCheckpointKind::Decision {
-                    return Err(RuntimeError::Conflict("undispatched policy checkpoint changed".into()));
+                if saved.identity != policy
+                    || saved.kind != super::policy_checkpoint::PolicyCheckpointKind::Decision
+                {
+                    return Err(RuntimeError::Conflict(
+                        "undispatched policy checkpoint changed".into(),
+                    ));
                 }
             }
             self.recovery_wait(&run)?;
@@ -905,7 +911,14 @@ impl Catalog {
             completed_tools,
             recovering_wait,
             allow_cancelled,
-            match &kind { RecoveryKind::Undispatched { step, .. } if step.state == ModelStepState::Prepared => Some(step.id.as_str()), _ => None },
+            match &kind {
+                RecoveryKind::Undispatched { step, .. }
+                    if step.state == ModelStepState::Prepared =>
+                {
+                    Some(step.id.as_str())
+                }
+                _ => None,
+            },
         )?;
         let cancellation_requires_recovery: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.phase')!='terminal' AND json_extract(body,'$.handed_off')=0) OR EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0)", [run_id], |row| row.get(0))?;
         Ok(RecoveryPreparation {
@@ -1157,9 +1170,16 @@ impl Catalog {
             put(&tx, "runs", &run.id, &run)?;
             if let RecoveryKind::Undispatched { step, .. } = &preparation.kind {
                 let current: ModelStep = record(&tx, "model_steps", &step.id)?;
-                if current != *step { return Ok(None); }
+                if current != *step {
+                    return Ok(None);
+                }
                 if step.state == ModelStepState::Prepared {
-                    super::execution_persistence::close_prepared_request(&tx, &run, &step.id, NonDispatchReason::Recovery)?;
+                    super::execution_persistence::close_prepared_request(
+                        &tx,
+                        &run,
+                        &step.id,
+                        NonDispatchReason::Recovery,
+                    )?;
                 }
             }
             if let RecoveryKind::Model { mut step, .. } = preparation.kind {
@@ -1225,11 +1245,20 @@ impl Catalog {
         let run = self.request_cancel_run(run_id)?;
         {
             let tx = self.db.transaction()?;
-            let prepared: Option<String> = tx.query_row(
-                "SELECT id FROM model_steps WHERE run_id=?1 AND state='prepared'", [run_id], |row| row.get(0),
-            ).optional()?;
+            let prepared: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM model_steps WHERE run_id=?1 AND state='prepared'",
+                    [run_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
             if let Some(request) = prepared {
-                super::execution_persistence::close_prepared_request(&tx, &run, &request, NonDispatchReason::Cancelled)?;
+                super::execution_persistence::close_prepared_request(
+                    &tx,
+                    &run,
+                    &request,
+                    NonDispatchReason::Cancelled,
+                )?;
             }
             tx.commit()?;
         }

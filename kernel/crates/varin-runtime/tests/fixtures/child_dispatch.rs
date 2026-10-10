@@ -90,10 +90,21 @@ impl Fixture {
         fixture
     }
     pub(crate) fn new_isolated() -> Self {
-        Self::new_parent(7, read_schema(), ToolSchema {
-            description:String::new(), output_schema:None, metadata:None,
-            name:DISPATCH_TOOL.into(), version:"1".into(), schema:json!({"type":"object"}),
-        }, false, true, false)
+        Self::new_parent(
+            7,
+            read_schema(),
+            ToolSchema {
+                description: String::new(),
+                output_schema: None,
+                metadata: None,
+                name: DISPATCH_TOOL.into(),
+                version: "1".into(),
+                schema: json!({"type":"object"}),
+            },
+            false,
+            true,
+            false,
+        )
     }
     pub(crate) fn new_isolated_process() -> Self {
         let process = ToolSchema {
@@ -128,10 +139,21 @@ impl Fixture {
         fixture
     }
     pub(crate) fn new_parent_extension() -> Self {
-        Self::new_parent(7, read_schema(), ToolSchema {
-            description:String::new(), output_schema:None, metadata:None,
-            name:DISPATCH_TOOL.into(), version:"1".into(), schema:json!({"type":"object"}),
-        }, false, false, true)
+        Self::new_parent(
+            7,
+            read_schema(),
+            ToolSchema {
+                description: String::new(),
+                output_schema: None,
+                metadata: None,
+                name: DISPATCH_TOOL.into(),
+                version: "1".into(),
+                schema: json!({"type":"object"}),
+            },
+            false,
+            false,
+            true,
+        )
     }
     fn new_parent(
         revision: i64,
@@ -231,6 +253,46 @@ impl Fixture {
         parent_extension: bool,
         customize: impl FnOnce(&mut DispatchInput, &mut LaunchSelection),
     ) -> Self {
+        Self::new_parent_scoped(
+            revision,
+            read,
+            dispatch,
+            policy,
+            isolated,
+            parent_extension,
+            customize,
+            None,
+        )
+    }
+    pub(crate) fn new_in_project() -> Self {
+        Self::new_parent_scoped(
+            7,
+            read_schema(),
+            ToolSchema {
+                description: String::new(),
+                output_schema: None,
+                metadata: None,
+                name: DISPATCH_TOOL.into(),
+                version: "1".into(),
+                schema: json!({"type":"object"}),
+            },
+            false,
+            false,
+            false,
+            |_, _| {},
+            Some("project-A"),
+        )
+    }
+    fn new_parent_scoped(
+        revision: i64,
+        read: ToolSchema,
+        dispatch: ToolSchema,
+        policy: bool,
+        isolated: bool,
+        parent_extension: bool,
+        customize: impl FnOnce(&mut DispatchInput, &mut LaunchSelection),
+        project: Option<&str>,
+    ) -> Self {
         let root = std::env::temp_dir().join(format!(
             "varin-child-catalog-review-{}",
             uuid::Uuid::new_v4()
@@ -240,8 +302,16 @@ impl Fixture {
         let mut input = DispatchInput {
             task: "Read the fixed file and report".into(),
             preset: None,
-            work_mode: Some(if isolated { varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite } else { varin_runtime::catalog::dispatch::ChildWorkMode::ReadOnly }),
-            tools: Some(if isolated { vec!["file_read".into(), "file_write".into(), "file_edit".into()] } else { vec!["file_read".into()] }),
+            work_mode: Some(if isolated {
+                varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite
+            } else {
+                varin_runtime::catalog::dispatch::ChildWorkMode::ReadOnly
+            }),
+            tools: Some(if isolated {
+                vec!["file_read".into(), "file_write".into(), "file_edit".into()]
+            } else {
+                vec!["file_read".into()]
+            }),
         };
         let source: SourceSelection = serde_json::from_value(json!({"mode":"fixed_branch","live_root":null,
             "workspace_id":"workspace-A","execution_workspace_id":"workspace-A","branch_id":"fixed-parent","revision":revision})).unwrap();
@@ -253,11 +323,15 @@ impl Fixture {
             let extension:varin_runtime::catalog::launches::ExtensionToolBinding=serde_json::from_value(json!({"providerKey":"example:host:helper@1","extensionId":"example","extensionVersion":"1.0.0","serviceId":"helper","serviceVersion":1,
                 "artifactIntegrity":"sha256-original","declarationHash":"declaration","configurationIdentity":null,
                 "tool":{"name":"helper","version":"declaration","description":"Parent extension","schema":{"type":"object"},"output_schema":null,"metadata":{"service_id":"helper","service_version":1,"completion":"result","operation":"read"}}})).unwrap();
-            launch.tools.push(extension.tool.clone());launch.extension_bindings.push(extension);
+            launch.tools.push(extension.tool.clone());
+            launch.extension_bindings.push(extension);
         }
         customize(&mut input, &mut launch);
         let configuration = json!({"providerFamily":"openai-responses","endpoint":"http://127.0.0.1:1/model","allowAnonymous":false,"model":"fixture-model","configurationGeneration":2});
-        let model = varin_runtime::catalog::dispatch::ChildModelBinding { configuration: serde_json::from_value(configuration.clone()).unwrap(), credential_scope: launch.credential_scope.clone() };
+        let model = varin_runtime::catalog::dispatch::ChildModelBinding {
+            configuration: serde_json::from_value(configuration.clone()).unwrap(),
+            credential_scope: launch.credential_scope.clone(),
+        };
         launch.connection_identity = model.connection_identity().unwrap();
         launch.child_dispatch = Some(varin_runtime::catalog::dispatch::ChildDispatchCatalog {
             native_capabilities: Vec::new(),
@@ -273,7 +347,7 @@ impl Fixture {
             .version
             .clone();
         let receipt = db
-            .submit_with_launch(
+            .submit_with_context_snapshot(
                 &SubmitInput {
                     key: "parent-input".into(),
                     thread_id: "thread:parent".into(),
@@ -282,7 +356,13 @@ impl Fixture {
                     input: json!("Delegate a read"),
                     configuration,
                 },
-                Some(launch.clone()),
+                Some(launch.clone()), false,
+                project.map(|_| varin_runtime::catalog::context::ContextProposal {
+                    key:"fixture-project-context".into(), branch_id:"branch:parent".into(), through_id:None,
+                    expected_revision:0, summary:String::new(), effective_system_prompt:"Project main".into(),
+                    instruction_sources:vec![], memory_checkpoint:None,
+                }),
+                project.map(|project| serde_json::from_value(json!({"mode":"agent","threadRole":"main","revision":1,"configurationDigest":"fixture-project","memorySnapshot":{"revision":0,"memories":[]},"sessionId":"thread:parent","projectId":project,"originalSections":[{"name":"system","content":"Project main"}],"instructionSources":[]})).unwrap()),
             )
             .unwrap();
         let prepared = db
@@ -314,8 +394,21 @@ impl Fixture {
             };
             let mut child_launch = launch;
             child_launch.tools = vec![read];
-            child_launch.extension_bindings.clear(); child_launch.mcp_binding = None; child_launch.policy_models.clear();
-            if isolated { for name in ["file_write", "file_edit"] { child_launch.tools.push(ToolSchema { name: name.into(), version: "1".into(), description: String::new(), schema: json!({"type":"object"}), output_schema: None, metadata: None }); } }
+            child_launch.extension_bindings.clear();
+            child_launch.mcp_binding = None;
+            child_launch.policy_models.clear();
+            if isolated {
+                for name in ["file_write", "file_edit"] {
+                    child_launch.tools.push(ToolSchema {
+                        name: name.into(),
+                        version: "1".into(),
+                        description: String::new(),
+                        schema: json!({"type":"object"}),
+                        output_schema: None,
+                        metadata: None,
+                    });
+                }
+            }
             child_launch.policy = PolicyIdentity {
                 name: "default".into(),
                 version: "1".into(),
@@ -344,7 +437,8 @@ impl Fixture {
                 },
                 binding: RequestBinding {
                     child_dispatch: dispatch_context.clone(),
-                    goal: None, resource_activations: Vec::new(),
+                    goal: None,
+                    resource_activations: Vec::new(),
                     resource_checkpoint_id: None,
                     connection_identity: launch.connection_identity.clone(),
                     provider_family: launch.provider_family.clone(),
@@ -465,8 +559,21 @@ impl Fixture {
         };
         let mut child_launch = launch;
         child_launch.tools = vec![read];
-            child_launch.extension_bindings.clear(); child_launch.mcp_binding = None; child_launch.policy_models.clear();
-            if isolated { for name in ["file_write", "file_edit"] { child_launch.tools.push(ToolSchema { name: name.into(), version: "1".into(), description: String::new(), schema: json!({"type":"object"}), output_schema: None, metadata: None }); } }
+        child_launch.extension_bindings.clear();
+        child_launch.mcp_binding = None;
+        child_launch.policy_models.clear();
+        if isolated {
+            for name in ["file_write", "file_edit"] {
+                child_launch.tools.push(ToolSchema {
+                    name: name.into(),
+                    version: "1".into(),
+                    description: String::new(),
+                    schema: json!({"type":"object"}),
+                    output_schema: None,
+                    metadata: None,
+                });
+            }
+        }
         child_launch.policy = PolicyIdentity {
             name: "default".into(),
             version: "1".into(),
@@ -715,7 +822,12 @@ impl Fixture {
             state: json!({"stage": 1}),
             nodes: vec![PolicyAdmittedNode {
                 context: FrozenToolContext {
-                    child_dispatch: self.db.launch_metadata(&run_id).unwrap().unwrap().dispatch_context_ref,
+                    child_dispatch: self
+                        .db
+                        .launch_metadata(&run_id)
+                        .unwrap()
+                        .unwrap()
+                        .dispatch_context_ref,
                     resource_activations: Vec::new(),
                     resource_checkpoint_id: checkpoint,
                     run_id: run_id.clone(),

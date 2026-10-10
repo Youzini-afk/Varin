@@ -1215,3 +1215,235 @@ fn request_child_respects_active_goal_but_never_reinherits_ended_goal_from_the_f
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+fn calendar_definition(
+    child: &ChildTask,
+    task: &str,
+) -> varin_runtime::catalog::calendar::DefinitionInput {
+    use varin_runtime::catalog::calendar::*;
+    DefinitionInput {
+        task_id: task.into(),
+        asset_revision: "asset:1".into(),
+        asset_kind: AssetKind::Gui,
+        name: task.into(),
+        enabled: true,
+        activation_hold: None,
+        once_acceptance: None,
+        timezone: "UTC".into(),
+        rule: Rule::Once {
+            date: "2026-10-10".into(),
+            time: "09:00".into(),
+        },
+        missed_policy: MissedPolicy::CoalesceOnce,
+        target: Target::ExistingWork {
+            thread_id: child.child_thread_id.clone(),
+            branch_id: child.child_branch_id.clone(),
+        },
+        instruction: "Calendar continuation of this worker".into(),
+    }
+}
+fn sync_calendars(
+    db: &mut Catalog,
+    inputs: Vec<varin_runtime::catalog::calendar::DefinitionInput>,
+) -> varin_runtime::catalog::calendar::ProjectView {
+    let revision = db.calendar_project("project-A").unwrap().revision;
+    let prepared = db
+        .prepare_calendar_sync(
+            "project-A".into(),
+            (revision != 0).then_some(revision),
+            inputs,
+        )
+        .unwrap()
+        .load()
+        .unwrap();
+    db.admit_calendar_sync(prepared).unwrap()
+}
+fn reconcile_calendar(db: Catalog) -> Catalog {
+    let db = std::sync::Mutex::new(db);
+    varin_runtime::catalog::calendar::reconcile(&db).unwrap();
+    db.into_inner().unwrap()
+}
+fn calendar_execution(db: &mut Catalog) -> DelegatedExecution {
+    let prepared = db
+        .capture_request_activations()
+        .unwrap()
+        .pop()
+        .unwrap()
+        .load()
+        .unwrap();
+    let varin_runtime::catalog::activation::RequestActivationAdmission::Delegated(id) =
+        db.admit_request_activation(prepared).unwrap()
+    else {
+        panic!("expected delegated calendar ingress")
+    };
+    db.delegated_execution(&id).unwrap()
+}
+#[test]
+fn calendar_child_hold_reopen_and_resume_preserve_original_execution_source_and_environment_input()
+{
+    use varin_runtime::catalog::calendar::*;
+    let mut f = Fixture::new_in_project();
+    let initial = first(&mut f);
+    finish(&mut f.db, &initial, Some("First completed"));
+    let mut input = calendar_definition(&initial, "calendar");
+    let definition = sync_calendars(&mut f.db, vec![input.clone()])
+        .definitions
+        .remove(0);
+    let calculation = f.db.calendar_pending().unwrap().calculations.pop().unwrap();
+    let slot = Slot {
+        at_ms: 0,
+        following_at_ms: None,
+    };
+    f.db.admit_calendar_calculation(
+        calculation,
+        Some(CalculationResult {
+            next: Some(slot.clone()),
+            latest_due: Some(slot),
+            next_future: None,
+        }),
+        None,
+    )
+    .unwrap();
+    f.db.reconcile_calendar_facts_at(1).unwrap();
+    let occurrence =
+        f.db.calendar_occurrences(&definition.id)
+            .unwrap()
+            .pop()
+            .unwrap();
+    f.db = reconcile_calendar(f.db);
+    let execution = calendar_execution(&mut f.db);
+    assert!(
+        matches!(execution.trigger, DelegatedTrigger::Calendar { ref occurrence_id, .. } if occurrence_id == &occurrence.id)
+    );
+    let source = ready_source(&mut f.db, &execution);
+    let (proposal, basis) = context(&initial, "held-calendar-context");
+    let prepared =
+        f.db.capture_child_preparation(&execution.execution_id, source.clone(), proposal, basis)
+            .unwrap()
+            .load()
+            .unwrap();
+    input.enabled = false;
+    input.asset_revision = "asset:2".into();
+    sync_calendars(&mut f.db, vec![input.clone()]);
+    let cursor = f.db.events_after(0, 10000).unwrap().last().unwrap().cursor;
+    assert!(matches!(
+        f.db.admit_child(prepared),
+        Err(RuntimeError::RequestActivationHeld)
+    ));
+    assert!(f.db.events_after(cursor, 10000).unwrap().is_empty());
+    let same = f.db.delegated_execution(&execution.execution_id).unwrap();
+    assert!(same.receipt.is_none() && same.report.is_none() && !same.cancel_requested);
+    assert_eq!(same.source.as_ref().unwrap().selection(), Some(&source));
+    let root = f.root.clone();
+    drop(f.db);
+    f.db = Catalog::open(&root).unwrap();
+    assert_eq!(
+        f.db.calendar_occurrence(&occurrence.id)
+            .unwrap()
+            .hold_reason
+            .as_deref(),
+        Some("asset_revalidation")
+    );
+    input.enabled = true;
+    input.asset_revision = "asset:3".into();
+    sync_calendars(&mut f.db, vec![input]);
+    let child = prepare(&mut f.db, &same, source);
+    let delivered = f.db.calendar_occurrence(&occurrence.id).unwrap();
+    assert_eq!(
+        delivered.execution_id.as_deref(),
+        Some(execution.execution_id.as_str())
+    );
+    assert_eq!(
+        delivered.run_id.as_deref(),
+        Some(child.receipt.as_ref().unwrap().run_id.as_str())
+    );
+    let history = f.db.history(&initial.child_branch_id).unwrap();
+    assert_eq!(
+        history
+            .iter()
+            .filter(|h| h.run_id == child.receipt.as_ref().unwrap().run_id)
+            .count(),
+        1
+    );
+    assert_eq!(history.last().unwrap().source, HistorySource::Environment);
+    assert!(
+        serde_json::to_string(&f.db.execution_history(&initial.child_branch_id).unwrap())
+            .unwrap()
+            .contains("Calendar continuation of this worker")
+    );
+    drop(f);
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn cancelled_calendar_trigger_releases_other_ingress_without_cancelling_thread_or_reusing_dead_source(
+) {
+    use varin_runtime::catalog::calendar::*;
+    let mut f = Fixture::new_in_project();
+    let initial = first(&mut f);
+    finish(&mut f.db, &initial, Some("First completed"));
+    let definitions = sync_calendars(
+        &mut f.db,
+        vec![
+            calendar_definition(&initial, "a"),
+            calendar_definition(&initial, "b"),
+        ],
+    )
+    .definitions;
+    let a =
+        f.db.run_calendar_now(&definitions[0].id, definitions[0].revision, "a")
+            .unwrap();
+    f.db = reconcile_calendar(f.db);
+    let old = calendar_execution(&mut f.db);
+    let source = ready_source(&mut f.db, &old);
+    let (proposal, basis) = context(&initial, "cancel-late-context");
+    let late =
+        f.db.capture_child_preparation(&old.execution_id, source, proposal, basis)
+            .unwrap()
+            .load()
+            .unwrap();
+    let b =
+        f.db.run_calendar_now(&definitions[1].id, definitions[1].revision, "b")
+            .unwrap();
+    f.db = reconcile_calendar(f.db);
+    assert_eq!(
+        f.db.calendar_occurrence(&b.id)
+            .unwrap()
+            .execution_id
+            .as_deref(),
+        Some(old.execution_id.as_str())
+    );
+    let a = f.db.calendar_occurrence(&a.id).unwrap();
+    f.db.control_calendar_occurrence(&a.id, a.revision, OccurrenceControlAction::Cancel)
+        .unwrap();
+    assert!(matches!(
+        f.db.admit_child(late),
+        Err(RuntimeError::DispatchCancelled)
+    ));
+    let cancelled = f.db.delegated_execution(&old.execution_id).unwrap();
+    assert!(cancelled.cancel_requested && cancelled.receipt.is_none());
+    assert_eq!(cancelled.report.unwrap().outcome, Outcome::Cancelled);
+    assert!(f
+        .db
+        .calendar_occurrence(&b.id)
+        .unwrap()
+        .execution_id
+        .is_none());
+    let next = calendar_execution(&mut f.db);
+    assert_ne!(next.execution_id, old.execution_id);
+    let source = ready_source(&mut f.db, &next);
+    let child = prepare(&mut f.db, &next, source);
+    assert_eq!(child.child_thread_id, initial.child_thread_id);
+    assert_eq!(
+        f.db.calendar_occurrence(&b.id).unwrap().run_id,
+        child.receipt.map(|r| r.run_id)
+    );
+    assert!(
+        !f.db
+            .operation(&initial.operation_id)
+            .unwrap()
+            .cancel_requested
+    );
+    let root = f.root.clone();
+    drop(f);
+    std::fs::remove_dir_all(root).unwrap();
+}

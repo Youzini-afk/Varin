@@ -493,7 +493,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             .collect::<std::result::Result<_, _>>()?;
         rows
     };
-    if version != Some(6)
+    if version != Some(7)
         || columns
             != vec![
                 ("id".into(), "TEXT".into(), 0, 1),
@@ -598,7 +598,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
     Ok(())
 }
 pub(super) fn initialize_new(db: &Connection) -> Result<()> {
-    db.execute_batch("CREATE TABLE child_tasks(id TEXT PRIMARY KEY REFERENCES operations(id),child_thread_id TEXT NOT NULL UNIQUE REFERENCES threads(id),body TEXT NOT NULL); CREATE TABLE delegated_executions(id TEXT PRIMARY KEY,child_operation_id TEXT NOT NULL REFERENCES child_tasks(id),command_key TEXT UNIQUE,run_id TEXT UNIQUE REFERENCES runs(id),body TEXT NOT NULL); CREATE INDEX delegated_executions_child ON delegated_executions(child_operation_id); INSERT INTO runtime_domains(name,version) VALUES('collaboration',6);")?;
+    db.execute_batch("CREATE TABLE child_tasks(id TEXT PRIMARY KEY REFERENCES operations(id),child_thread_id TEXT NOT NULL UNIQUE REFERENCES threads(id),body TEXT NOT NULL); CREATE TABLE delegated_executions(id TEXT PRIMARY KEY,child_operation_id TEXT NOT NULL REFERENCES child_tasks(id),command_key TEXT UNIQUE,run_id TEXT UNIQUE REFERENCES runs(id),body TEXT NOT NULL); CREATE INDEX delegated_executions_child ON delegated_executions(child_operation_id); INSERT INTO runtime_domains(name,version) VALUES('collaboration',7);")?;
     Ok(())
 }
 
@@ -625,7 +625,8 @@ impl Catalog {
         let execution = self.delegated_execution(operation_id)?;
         let ingress_id = match &execution.trigger {
             delegated::DelegatedTrigger::MessageRequest { message_id, .. } => Some(message_id),
-            delegated::DelegatedTrigger::Followup { input_id, .. } => Some(input_id),
+            delegated::DelegatedTrigger::Followup { input_id, .. }
+            | delegated::DelegatedTrigger::Calendar { input_id, .. } => Some(input_id),
             _ => None,
         };
         let ingress = ingress_id
@@ -859,7 +860,8 @@ impl ChildPreparation {
                 expected_head: match &execution.trigger {
                     delegated::DelegatedTrigger::UserContinuation { expected_head, .. }
                     | delegated::DelegatedTrigger::MessageRequest { expected_head, .. }
-                    | delegated::DelegatedTrigger::Followup { expected_head, .. } => {
+                    | delegated::DelegatedTrigger::Followup { expected_head, .. }
+                    | delegated::DelegatedTrigger::Calendar { expected_head, .. } => {
                         expected_head.clone()
                     }
                     _ => None,

@@ -3,7 +3,7 @@
 use super::*;
 use crate::execution::{Content, ConversationItem, Provenance, ToolOrigin};
 use activation::IngressActivationFact;
-use inputs::{InputActivation, InputOrigin, QueuedInputMetadata};
+use inputs::{InputOrigin, QueuedInputMetadata};
 use serde::Deserialize;
 use std::sync::{atomic::Ordering, Mutex};
 type Result<T> = std::result::Result<T, RuntimeError>;
@@ -1311,29 +1311,20 @@ impl Catalog {
             "followup.input_accepted",
             json!({"occurrence_id":v.id,"input_id":input_id}),
         )?;
-        let row = QueuedInputMetadata {
-            id: input_id.clone(),
-            thread_id: d.thread_id.clone(),
-            branch_id: d.branch_id.clone(),
-            run_id: activation.run_id().map(str::to_owned),
-            mode: InputMode::Boundary,
-            state: InputState::Queued,
-            revision: 1,
+        ingress::insert_occurrence(
+            &tx,
+            input_id.clone(),
+            d.thread_id.clone(),
+            d.branch_id.clone(),
             cursor,
-            origin: InputOrigin::Followup {
+            InputOrigin::Followup {
                 followup_id: d.id.clone(),
                 occurrence_id: v.id.clone(),
                 generation: d.generation,
                 activation,
                 goal: c.goal,
             },
-            activation: InputActivation::Activating,
-            delivered_cursor: None,
-        };
-        tx.execute("INSERT INTO input_queue(id,branch_id,run_id,mode,state,cursor,origin,activation,sender_thread_id,sender_branch_id,body) VALUES(?1,?2,?3,'boundary','queued',?4,'followup','activating',NULL,NULL,?5)",params![input_id,row.branch_id,row.run_id,sql_number(cursor)?,encode(&row)?])?;
-        tx.execute(
-            "INSERT INTO input_history_content(input_id,body) VALUES(?1,?2)",
-            params![input_id, encode(&history)?],
+            &history,
         )?;
         v.input_id = Some(input_id.clone());
         tx.execute(

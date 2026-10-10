@@ -3,7 +3,7 @@ import type { Express, Request, RequestHandler, Response as ExpressResponse } fr
 import { afterEach, expect, it, vi } from 'vitest';
 import { createThreadsHttpAPI, type ThreadIdentity } from '@varin/application-client';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
-import type { KernelClient } from './kernel-client.js';
+import { KernelClientError, type KernelClient } from './kernel-client.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { ThreadCollaboration } from './thread-collaboration.js';
 import { registerThreadRoutes } from './thread-routes.js';
@@ -85,11 +85,14 @@ it('public User continuation preserves exact predecessor and input without selec
   // Durable exactly-once acceptance remains the Rust owner's independently tested responsibility.
 });
 
-it.each(['user_continuation', 'message_request', 'followup'] as const)('startup %s re-admits the exact fixed result and context without claiming the old handoff or promoting Agent input', async kind => {
+it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as const)('startup %s re-admits the exact fixed result and context without claiming the old handoff or promoting Agent input', async kind => {
   const child = execution();
   if (kind === 'message_request') child.trigger = { kind, message_id: 'message:original', previous_execution_id: 'original-dispatch', previous_run_id: 'old-run', previous_run_revision: 9, expected_head: 'old-head' };
+  if (kind === 'calendar') child.trigger = { kind, definition_id: 'calendar:original', occurrence_id: 'occurrence:original', input_id: 'input:original', previous_execution_id: 'original-dispatch', previous_run_id: 'old-run', previous_run_revision: 9, expected_head: 'old-head' };
   if (kind === 'followup') child.trigger = { kind, followup_id: 'followup:original', occurrence_id: 'occurrence:original', input_id: 'input:original', previous_execution_id: 'original-dispatch', previous_run_id: 'old-run', previous_run_revision: 9, expected_head: 'old-head' };
   const errors: unknown[] = [];
+  let emit = (_event: import('./protocol.generated.js').AgentRuntimeStreamEvent) => {};
+  let calendarHeld = kind === 'calendar';
   const checkpoint = { id: 'checkpoint:original', revision: 4, proposal: { through_id: 'compacted-head', summary: 'Original summary' } };
   const context = { effectiveSystemPrompt: 'Original child role', instructionSources: [], memoryCheckpoint: 'old-memory', resources: { snapshot: { id: 'new-fixed-resources' } } };
   const skill = { command: 'fixture-original-command' };
@@ -100,7 +103,7 @@ it.each(['user_continuation', 'message_request', 'followup'] as const)('startup 
     pinBranchHandoff: vi.fn(async () => ({ pinId: 'child-source-pin:execution:new', root: 'fixed-result-root' })),
   };
   const runtime = {
-    onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {}, reconcileObservations: async () => [],
+    onEvent: (listener: typeof emit) => { emit = listener; return () => {}; }, onExit: () => () => {}, onReady: () => () => {}, reconcileObservations: async () => [],
     children: async () => [], childExecutions: async () => [structuredClone(child)], unacceptedChildSources: async () => [], status: async () => ({ eventCursor: 7 }), events: async () => [],
     context: vi.fn(async () => checkpoint), childExecution: async () => structuredClone(child),
     readyChildSource: vi.fn(async (input: Parameters<AgentRuntimeClient['readyChildSource']>[0]) => {
@@ -109,10 +112,12 @@ it.each(['user_continuation', 'message_request', 'followup'] as const)('startup 
       return structuredClone(child);
     }),
     prepareChild: vi.fn(async (_input: Parameters<AgentRuntimeClient['prepareChild']>[0]) => {
+      if (calendarHeld) throw new KernelClientError({ code: 'activation-held', message: 'Definition paused', retryable: true });
       child.receipt = { run_id: 'new-run', input_id: 'new-input', thread_id: identity.threadId, branch_id: identity.branchId, cursor: 9 };
       child.state = 'ready'; return structuredClone(child);
     }),
     releaseChildResources: vi.fn(async () => { child.resources_released = true; return structuredClone(child); }),
+    failChild: vi.fn(async () => { throw new Error('A temporary hold must not fail preparation'); }),
   };
   const kernel = { reconcileChildToolHandoffs() {}, claimChildSource: vi.fn(), releaseChildToolHandoff: vi.fn() };
   const prepareContext = Object.assign(vi.fn(async () => { throw new Error('Initial context must not replace the old checkpoint'); }), { forSource: vi.fn(async () => context) });
@@ -122,7 +127,14 @@ it.each(['user_continuation', 'message_request', 'followup'] as const)('startup 
     runtime: runtime as unknown as AgentRuntimeClient, workingStates: { withBranchStore: async (_workspace, _purpose, work) => work(store as never, {} as never) },
     prepareContext: prepareContext as never, prepareSkillInput: prepareSkillInput as never, continueRun, recoverLaunches: async () => {}, onError: (_id, error) => errors.push(error) });
   try {
-    await collaboration.recover(); await vi.waitFor(() => expect(continueRun).toHaveBeenCalledOnce());
+    await collaboration.recover();
+    if (kind === 'calendar') {
+      await vi.waitFor(() => expect(runtime.prepareChild).toHaveBeenCalledOnce());
+      expect(runtime.releaseChildResources).not.toHaveBeenCalled(); expect(runtime.failChild).not.toHaveBeenCalled();
+      calendarHeld = false;
+      emit({ v: 1, kind: 'runtime-event', kernelEpoch: 'same-epoch', stream: 'durable', cursor: 8 });
+    }
+    await vi.waitFor(() => expect(continueRun).toHaveBeenCalledOnce());
     expect(store.pinBranch).toHaveBeenCalledWith('old-result', { revision: 7, signal: expect.any(AbortSignal) });
     expect(store.createBranchFromPin.mock.calls[0]![1]).toBe('child-source:execution:new');
     expect(runtime.prepareChild).toHaveBeenCalledWith(expect.objectContaining({ executionId: child.execution_id,

@@ -401,7 +401,9 @@ impl Catalog {
             .expected_revision
             .checked_add(1)
             .ok_or_else(|| RuntimeError::Invalid("context revision exhausted".into()))?;
-        let resources = self.active_context(&proposal.branch_id)?.and_then(|context| context.resources);
+        let resources = self
+            .active_context(&proposal.branch_id)?
+            .and_then(|context| context.resources);
         let personalization = match personalization {
             Some(basis) => Some(basis),
             None => self
@@ -561,7 +563,9 @@ impl CheckpointRead {
             ));
         }
         if let Some(resources) = &checkpoint.resources {
-            resources.validate(checkpoint.personalization.as_ref().ok_or_else(|| RuntimeError::Invalid("resource checkpoint has no owned scope".into()))?)?;
+            resources.validate(checkpoint.personalization.as_ref().ok_or_else(|| {
+                RuntimeError::Invalid("resource checkpoint has no owned scope".into())
+            })?)?;
         }
         Ok(checkpoint)
     }
@@ -751,17 +755,19 @@ impl ContextRead {
                 opaque: None,
             });
         }
-        history.extend(checkpoint.resource_activations.iter().map(resources::ResourceActivation::summary_reference));
+        history.extend(
+            checkpoint
+                .resource_activations
+                .iter()
+                .map(resources::ResourceActivation::summary_reference),
+        );
         for metadata in suffix {
             let item = content.hydrate_history(metadata)?;
-            if item.source == HistorySource::User {
-                history.extend(super::execution_persistence::user_input_items(
-                    &item.id,
-                    &item.content,
-                )?);
-            } else {
-                history.push(serde_json::from_value(item.content)?);
-            }
+            history.extend(super::execution_persistence::history_input_items(
+                &item.id,
+                item.source,
+                &item.content,
+            )?);
         }
         history.extend(super::memory::project(
             memory.as_ref(),

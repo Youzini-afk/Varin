@@ -357,6 +357,38 @@ export class ThreadAdapter {
     }
   }
 
+  /** Cold calendar work is prepared by the same source/model/context owners as User submission.
+   * Catalog supplies the occurrence identity and original instruction; this cannot forge User input. */
+  async prepareCalendarWork(preparation: import('./protocol.generated.js').CalendarPreparation, path: string, signal: AbortSignal) {
+    const { occurrence, definition } = preparation;
+    if (definition.target.kind !== 'new_work') throw new Error('Calendar work is not a cold submission');
+    const identity: ThreadIdentity = { runtime: 'agent', threadId: occurrence.thread_id, branchId: occurrence.branch_id };
+    await this.requireIdentity(identity);
+    signal.throwIfAborted();
+    const { source } = await this.prepareSource({ ...identity, key: occurrence.id, path, mode: definition.target.sourceMode });
+    signal.throwIfAborted();
+    await this.admitSource(source, identity);
+    const model = await this.models.resolveModel(definition.target.model as ThreadModel);
+    if (!this.prepareContext) throw new Error('Calendar context preparation is unavailable');
+    const initialContext = await this.prepareContext.main(identity, source);
+    const skill = await this.skillInput(identity, initialContext.resources, preparation.instruction, signal);
+    const childDispatch = this.prepareChildProfiles ? await this.prepareChildProfiles({ parent: {
+      configuration: model.configuration, credential_scope: await model.credentialOwner.scope(),
+    } }) : undefined;
+    signal.throwIfAborted();
+    const receipt = await this.runtime.admitCalendar({ occurrenceId: occurrence.id, expectedRevision: occurrence.revision,
+      ownerEpoch: preparation.owner_epoch, configuration: model.configuration, initialContext,
+      ...(skill ? { inputPreparation: { expectedContextCheckpoint: null, skill } } : {}),
+      launch: { inheritSource: false, source: { workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId,
+        branchId: source.branchId ?? null, revision: source.revision ?? null, mode: source.mode, liveRoot: source.liveRoot ?? null },
+        enabledTools: source.tools, credentialScope: await model.credentialOwner.scope(), ...(childDispatch ? { childDispatch } : {}) },
+    }, signal);
+    // Admission transfers ownership to the Run. Retiring this preparation must not
+    // cancel its newly admitted launch; withRunPreparation owns actual Run/epoch stop.
+    if (receipt.run_id) void this.continueLaunch(receipt.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
+    return receipt;
+  }
+
   async submit(input: ThreadSubmit) {
     const thread = await this.requireIdentity(input);
     await this.refreshContext(input);

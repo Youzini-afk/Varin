@@ -21,3 +21,6 @@ export * from "./threads.js";
 export * from "./threads-http.js";
 
 export { TERMINAL_PROTOCOL_VERSION } from './terminal-protocol.js';
+
+export * from "./schedules.js";
+export * from "./schedules-http.js";

@@ -12,6 +12,8 @@ pub(crate) enum KernelError {
     Authorization(String),
     #[error("operation error: {0}")]
     Operation(String),
+    #[error("activation held: {0}")]
+    ActivationHeld(String),
     #[error("operation cancelled")]
     Cancelled,
 }
@@ -39,9 +41,25 @@ pub(crate) fn error_code(error: &KernelError) -> &'static str {
         KernelError::Authorization(_) => "unauthorized",
         KernelError::Operation(_) => "operation-error",
         KernelError::Cancelled => "cancelled",
+        KernelError::ActivationHeld(_) => "activation-held",
     }
 }
 
 pub(crate) fn response_error(id: &str, error: &KernelError) -> Value {
-    serde_json::json!({"v": 1, "kind": "response", "id": id, "ok": false, "error": {"code": error_code(error), "message": error.to_string(), "retryable": matches!(error, KernelError::Cancelled)}})
+    serde_json::json!({"v": 1, "kind": "response", "id": id, "ok": false, "error": {"code": error_code(error), "message": error.to_string(), "retryable": matches!(error, KernelError::Cancelled | KernelError::ActivationHeld(_))}})
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn original_ingress_hold_has_its_own_retryable_wire_code() {
+        let held = crate::agent_runtime::domain(varin_runtime::RuntimeError::RequestActivationHeld);
+        let value = super::response_error("same-execution", &held);
+        assert_eq!(value["error"]["code"], "activation-held");
+        assert_eq!(value["error"]["retryable"], true);
+        assert_eq!(
+            super::error_code(&super::KernelError::Cancelled),
+            "cancelled"
+        );
+    }
 }

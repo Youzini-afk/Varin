@@ -13,18 +13,36 @@ fn submit_input(
     }
     let mut params = params;
     if !receipt_only {
-        let object = params.as_object_mut().ok_or_else(|| KernelError::Protocol("input command must be an object".into()))?;
+        let object = params
+            .as_object_mut()
+            .ok_or_else(|| KernelError::Protocol("input command must be an object".into()))?;
         let initial = object.remove("initialContext");
         let prepared = object.remove("inputPreparation");
         let expected = object.remove("expectedContextCheckpoint");
-        let receipt = submit_input(catalog.clone(), params.clone(), cancelled.clone(), None, true)?;
-        if !receipt.is_null() { return Ok(receipt); }
+        let receipt = submit_input(
+            catalog.clone(),
+            params.clone(),
+            cancelled.clone(),
+            None,
+            true,
+        )?;
+        if !receipt.is_null() {
+            return Ok(receipt);
+        }
         let object = params.as_object_mut().expect("validated input object");
-        if let Some(value) = initial { object.insert("initialContext".into(), value); }
-        if let Some(value) = prepared { object.insert("inputPreparation".into(), value); }
-        if let Some(value) = expected { object.insert("expectedContextCheckpoint".into(), value); }
+        if let Some(value) = initial {
+            object.insert("initialContext".into(), value);
+        }
+        if let Some(value) = prepared {
+            object.insert("inputPreparation".into(), value);
+        }
+        if let Some(value) = expected {
+            object.insert("expectedContextCheckpoint".into(), value);
+        }
     } else if let Some(params) = params.as_object_mut() {
-        params.remove("initialContext"); params.remove("inputPreparation"); params.remove("expectedContextCheckpoint");
+        params.remove("initialContext");
+        params.remove("inputPreparation");
+        params.remove("expectedContextCheckpoint");
     }
     let p: InputSubmitParams = serde_json::from_value(params)?;
     validate_configuration(&p.configuration)?;
@@ -33,7 +51,10 @@ fn submit_input(
             "input idempotency key cannot be empty".into(),
         ));
     }
-    let initial_resources = p.initial_context.as_ref().and_then(|context| context.resources.clone());
+    let initial_resources = p
+        .initial_context
+        .as_ref()
+        .and_then(|context| context.resources.clone());
     let initial_personalization = p
         .initial_context
         .as_ref()
@@ -81,103 +102,15 @@ fn submit_input(
         .unwrap_or(false);
     let launch = p
         .launch
-        .map(|selected| {
-            let configuration: varin_runtime::ModelSessionConfiguration =
-                serde_json::from_value(configuration.clone())?;
-            let scope = selected
-                .credential_scope
-                .map(|scope| {
-                    Ok::<_, KernelError>(varin_runtime::providers::auth::CredentialScope {
-                        reference: scope.reference,
-                        authority: scope.authority,
-                        account: scope.account,
-                        generation: u64::try_from(scope.generation).map_err(|_| {
-                            KernelError::Protocol(
-                                "credential generation must be nonnegative".into(),
-                            )
-                        })?,
-                    })
-                })
-                .transpose()?;
-            let identity = if let Some(scope) = scope.as_ref() {
-                model_session::connection_identity_with_scope(&configuration, scope)
-            } else {
-                model_session::connection_identity(&configuration)
-            }
-            .map_err(|error| KernelError::Protocol(error.to_string()))?;
-            let kinds: std::collections::BTreeSet<crate::tools::ToolKind> = selected
-                .enabled_tools
-                .into_iter()
-                .map(|kind| serde_json::from_value(Value::String(kind)))
-                .collect::<std::result::Result<_, _>>()?;
-            let source = selected
-                .source
-                .0
-                .map(|source| {
-                    Ok::<_, KernelError>(varin_runtime::catalog::launches::SourceSelection {
-                        environment_run_id: source.environment_run_id,
-                        mode: source.mode,
-                        live_root: source.live_root.and_then(|root| root.0).map(|root| {
-                            varin_runtime::catalog::launches::LiveRoot {
-                                host_id: root.host_id,
-                                canonical_root: root.canonical_root,
-                                root_id: root.root_id,
-                            }
-                        }),
-                        workspace_id: source.workspace_id,
-                        execution_workspace_id: source.execution_workspace_id,
-                        branch_id: source.branch_id.0,
-                        revision: source.revision.0.map(u64::try_from).transpose().map_err(
-                            |_| KernelError::Protocol("source revision must be nonnegative".into()),
-                        )?,
-                    })
-                })
-                .transpose()?;
-            if source.is_none() && !kinds.is_empty() {
-                return Err(KernelError::Protocol(
-                    "selected tools require a source owner".into(),
-                ));
-            }
-            Ok::<_, KernelError>(varin_runtime::catalog::launches::LaunchSelection {
-                child_dispatch: selected.child_dispatch,
-                extension_bindings: Vec::new(),
-                policy_models: Vec::new(),
-                mcp_binding: None,
-                credential_scope: scope,
-                connection_identity: identity,
-                provider_family: configuration.provider_family,
-                model: configuration.model,
-                configuration_generation: configuration.configuration_generation,
-                tool_schema_generation: if source.is_some() {
-                    configuration.configuration_generation
-                } else {
-                    0
-                },
-                tools: {
-                    let mut tools = crate::collaboration::schemas(
-                        crate::questions::schemas(
-                            crate::tools::KernelToolExecutor::selected_schemas(&kinds),
-                        ),
-                        source.is_some(),
-                    );
-                    tools = crate::process_wait::schemas(tools);
-                    tools.push(crate::memory::schema(true));
-                    tools.push(crate::agent_resources::schema());
-                    tools.push(crate::agent_goals::schema());
-                    if plan_eligible {
-                        tools.push(crate::plan::schema());
-                    }
-                    tools.sort_by(|left, right| left.name.cmp(&right.name));
-                    tools
-                },
-                policy: crate::observations::default_policy_identity(),
-                source,
-            })
-        })
+        .map(|selected| selected_launch(&configuration, selected, plan_eligible))
         .transpose()?;
     if receipt_only {
-        let receipt = preparation.existing_receipt(&launch, inherit_source).map_err(domain)?;
-        if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+        let receipt = preparation
+            .existing_receipt(&launch, inherit_source)
+            .map_err(domain)?;
+        if cancelled.load(Ordering::Acquire) {
+            return Err(KernelError::Cancelled);
+        }
         return Ok(serde_json::to_value(receipt)?);
     }
     let prepared = preparation.load(launch, inherit_source).map_err(domain)?;
@@ -195,6 +128,107 @@ fn submit_input(
         owner.admit_submission(prepared).map_err(domain)?
     };
     Ok(serde_json::to_value(receipt)?)
+}
+
+pub(super) fn selected_launch(
+    configuration: &Value,
+    selected: SubmitLaunch,
+    plan_eligible: bool,
+) -> Result<varin_runtime::catalog::launches::LaunchSelection, KernelError> {
+    let configuration: varin_runtime::ModelSessionConfiguration =
+        serde_json::from_value(configuration.clone())?;
+    let scope = selected
+        .credential_scope
+        .map(|scope| {
+            Ok::<_, KernelError>(varin_runtime::providers::auth::CredentialScope {
+                reference: scope.reference,
+                authority: scope.authority,
+                account: scope.account,
+                generation: u64::try_from(scope.generation).map_err(|_| {
+                    KernelError::Protocol("credential generation must be nonnegative".into())
+                })?,
+            })
+        })
+        .transpose()?;
+    let identity = if let Some(scope) = scope.as_ref() {
+        model_session::connection_identity_with_scope(&configuration, scope)
+    } else {
+        model_session::connection_identity(&configuration)
+    }
+    .map_err(|error| KernelError::Protocol(error.to_string()))?;
+    let kinds: std::collections::BTreeSet<crate::tools::ToolKind> = selected
+        .enabled_tools
+        .into_iter()
+        .map(|kind| serde_json::from_value(Value::String(kind)))
+        .collect::<std::result::Result<_, _>>()?;
+    let source = selected
+        .source
+        .0
+        .map(|source| {
+            Ok::<_, KernelError>(varin_runtime::catalog::launches::SourceSelection {
+                environment_run_id: source.environment_run_id,
+                mode: source.mode,
+                live_root: source.live_root.and_then(|root| root.0).map(|root| {
+                    varin_runtime::catalog::launches::LiveRoot {
+                        host_id: root.host_id,
+                        canonical_root: root.canonical_root,
+                        root_id: root.root_id,
+                    }
+                }),
+                workspace_id: source.workspace_id,
+                execution_workspace_id: source.execution_workspace_id,
+                branch_id: source.branch_id.0,
+                revision: source
+                    .revision
+                    .0
+                    .map(u64::try_from)
+                    .transpose()
+                    .map_err(|_| {
+                        KernelError::Protocol("source revision must be nonnegative".into())
+                    })?,
+            })
+        })
+        .transpose()?;
+    if source.is_none() && !kinds.is_empty() {
+        return Err(KernelError::Protocol(
+            "selected tools require a source owner".into(),
+        ));
+    }
+    Ok::<_, KernelError>(varin_runtime::catalog::launches::LaunchSelection {
+        child_dispatch: selected.child_dispatch,
+        extension_bindings: Vec::new(),
+        policy_models: Vec::new(),
+        mcp_binding: None,
+        credential_scope: scope,
+        connection_identity: identity,
+        provider_family: configuration.provider_family,
+        model: configuration.model,
+        configuration_generation: configuration.configuration_generation,
+        tool_schema_generation: if source.is_some() {
+            configuration.configuration_generation
+        } else {
+            0
+        },
+        tools: {
+            let mut tools = crate::collaboration::schemas(
+                crate::questions::schemas(crate::tools::KernelToolExecutor::selected_schemas(
+                    &kinds,
+                )),
+                source.is_some(),
+            );
+            tools = crate::process_wait::schemas(tools);
+            tools.push(crate::memory::schema(true));
+            tools.push(crate::agent_resources::schema());
+            tools.push(crate::agent_goals::schema());
+            if plan_eligible {
+                tools.push(crate::plan::schema());
+            }
+            tools.sort_by(|left, right| left.name.cmp(&right.name));
+            tools
+        },
+        policy: crate::observations::default_policy_identity(),
+        source,
+    })
 }
 
 pub(super) fn await_input_order(
@@ -224,25 +258,58 @@ pub(super) fn execute(
     match method {
         "runtime.messages.send" => {
             let p: MessageSendParams = serde_json::from_value(params)?;
-            let input = varin_runtime::catalog::messages::MessageInput { wait:None,target_thread_id:p.target_thread_id,target_branch_id:p.target_branch_id,reply_to:p.reply_to,kind:p.kind,text:p.text };
+            let input = varin_runtime::catalog::messages::MessageInput {
+                wait: None,
+                target_thread_id: p.target_thread_id,
+                target_branch_id: p.target_branch_id,
+                reply_to: p.reply_to,
+                kind: p.kind,
+                text: p.text,
+            };
             input.validate().map_err(domain)?;
-            let preparation = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.prepare_user_message(p.key,p.sender_thread_id,p.sender_branch_id,input).map_err(domain)?;
+            let preparation = catalog
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .prepare_user_message(p.key, p.sender_thread_id, p.sender_branch_id, input)
+                .map_err(domain)?;
             let prepared = preparation.load().map_err(domain)?;
-            let mut owner = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-            if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
-            Ok(serde_json::to_value(owner.admit_message(prepared).map_err(domain)?.receipt)?)
+            let mut owner = catalog
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            if cancelled.load(Ordering::Acquire) {
+                return Err(KernelError::Cancelled);
+            }
+            Ok(serde_json::to_value(
+                owner.admit_message(prepared).map_err(domain)?.receipt,
+            )?)
         }
         "runtime.messages.list" => {
             let p: MessageListParams = serde_json::from_value(params)?;
-            let limit = p.limit.map(usize::try_from).transpose().map_err(|_| KernelError::Protocol("message page size must be positive".into()))?;
-            let read = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.capture_message_list(p.thread_id,p.branch_id,p.direction,p.cursor,limit).map_err(domain)?;
-            Ok(serde_json::to_value(read.load(&|| cancelled.load(Ordering::Acquire)).map_err(domain)?)?)
+            let limit =
+                p.limit.map(usize::try_from).transpose().map_err(|_| {
+                    KernelError::Protocol("message page size must be positive".into())
+                })?;
+            let read = catalog
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .capture_message_list(p.thread_id, p.branch_id, p.direction, p.cursor, limit)
+                .map_err(domain)?;
+            Ok(serde_json::to_value(
+                read.load(&|| cancelled.load(Ordering::Acquire))
+                    .map_err(domain)?,
+            )?)
         }
         "runtime.messages.get" => {
             let p: MessageGetParams = serde_json::from_value(params)?;
-            let read = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.capture_message(&p.thread_id,&p.branch_id,&p.message_id).map_err(domain)?;
+            let read = catalog
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .capture_message(&p.thread_id, &p.branch_id, &p.message_id)
+                .map_err(domain)?;
             let message = read.load().map_err(domain)?;
-            if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+            if cancelled.load(Ordering::Acquire) {
+                return Err(KernelError::Cancelled);
+            }
             Ok(serde_json::to_value(message)?)
         }
         "runtime.thread.create" => {
@@ -270,7 +337,9 @@ pub(super) fn execute(
         "runtime.input.enqueue" | "runtime.input.enqueueReceipt" => {
             let receipt_only = method == "runtime.input.enqueueReceipt";
             let mut params = params;
-            let preparation_value = params.as_object_mut().and_then(|object| object.remove("inputPreparation"));
+            let preparation_value = params
+                .as_object_mut()
+                .and_then(|object| object.remove("inputPreparation"));
             let p: InputEnqueueParams = serde_json::from_value(params)?;
             if let Some(configuration) = &p.configuration {
                 validate_configuration(configuration)?;
@@ -285,14 +354,20 @@ pub(super) fn execute(
                     mode: p.mode,
                     input: p.input,
                     configuration: p.configuration,
-                }).map_err(domain)?;
+                })
+                .map_err(domain)?;
             let existing = preparation.existing_receipt().map_err(domain)?;
             if receipt_only || existing.is_some() {
-                if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                if cancelled.load(Ordering::Acquire) {
+                    return Err(KernelError::Cancelled);
+                }
                 return Ok(serde_json::to_value(existing)?);
             }
             let derived = preparation_value.map(serde_json::from_value).transpose()?;
-            let prepared = preparation.with_input_preparation(derived).load().map_err(domain)?;
+            let prepared = preparation
+                .with_input_preparation(derived)
+                .load()
+                .map_err(domain)?;
             if cancelled.load(Ordering::Acquire) {
                 return Err(KernelError::Cancelled);
             }
@@ -319,7 +394,8 @@ pub(super) fn execute(
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                 .prepare_input_edit(&p.input_id, revision, p.content)
-                .map_err(domain)?.with_input_preparation(p.input_preparation);
+                .map_err(domain)?
+                .with_input_preparation(p.input_preparation);
             let prepared = preparation.load().map_err(domain)?;
             if cancelled.load(Ordering::Acquire) {
                 return Err(KernelError::Cancelled);
@@ -394,7 +470,11 @@ fn prepare_child_input(
         .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
         .delegated_execution(&p.execution_id)
         .map_err(domain)?;
-    let relation=catalog.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?.child_task(&child.child_operation_id).map_err(domain)?;
+    let relation = catalog
+        .lock()
+        .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+        .child_task(&child.child_operation_id)
+        .map_err(domain)?;
     let source = varin_runtime::catalog::launches::SourceSelection {
         environment_run_id: p.source.environment_run_id,
         mode: p.source.mode,
@@ -447,8 +527,12 @@ fn prepare_child_input(
             return Err(KernelError::Cancelled);
         }
         let child = owner.admit_child(prepared).map_err(domain)?;
-        let execution=owner.delegated_execution(&child.execution_id).map_err(domain)?;
-        owner.capture_delegated_execution(execution).map_err(domain)?
+        let execution = owner
+            .delegated_execution(&child.execution_id)
+            .map_err(domain)?;
+        owner
+            .capture_delegated_execution(execution)
+            .map_err(domain)?
     };
     Ok(serde_json::to_value(result.load().map_err(domain)?)?)
 }
@@ -458,37 +542,68 @@ mod resource_receipt_tests {
     use super::*;
     #[test]
     fn receipt_read_reuses_submit_identity_without_consuming_context_or_admitting_a_run() {
-        let root=std::env::temp_dir().join(format!("varin-input-receipt-{}",uuid::Uuid::new_v4()));
-        let mut catalog=Catalog::open(&root).unwrap();catalog.create_thread("thread","branch").unwrap();
-        let catalog=Arc::new(Mutex::new(catalog));
-        let cancel=Arc::new(AtomicBool::new(false));
-        let mut input=json!({"key":"input","threadId":"thread","branchId":"branch","expectedHead":null,"input":"hello",
+        let root =
+            std::env::temp_dir().join(format!("varin-input-receipt-{}", uuid::Uuid::new_v4()));
+        let mut catalog = Catalog::open(&root).unwrap();
+        catalog.create_thread("thread", "branch").unwrap();
+        let catalog = Arc::new(Mutex::new(catalog));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut input = json!({"key":"input","threadId":"thread","branchId":"branch","expectedHead":null,"input":"hello",
             "configuration":{"providerFamily":"openai-responses","model":"fixture","endpoint":"https://fixture.invalid","credentialEnvironment":null,"allowAnonymous":true,"configurationGeneration":1},
             "launch":{"source":null,"enabledTools":[],"inheritSource":false},
             "initialContext":{"effectiveSystemPrompt":"old","instructionSources":[],"memoryCheckpoint":null,
                 "personalization":{"mode":"agent","threadRole":"main","revision":1,"configurationDigest":"fixture","memorySnapshot":{"revision":0,"memories":[]},
                     "sessionId":"thread","projectId":null,"originalSections":[{"name":"system","content":"old"}],"instructionSources":[]}}});
-        assert_eq!(submit_input(catalog.clone(),input.clone(),cancel.clone(),None,true).unwrap(),Value::Null);
+        assert_eq!(
+            submit_input(catalog.clone(), input.clone(), cancel.clone(), None, true).unwrap(),
+            Value::Null
+        );
         assert!(catalog.lock().unwrap().head("branch").unwrap().is_none());
-        let receipt=submit_input(catalog.clone(),input.clone(),cancel.clone(),None,false).unwrap();
-        input["initialContext"]=json!("not a prepared context");
-        input["inputPreparation"]=json!({"skill":"malformed derived candidate"});
-        input["expectedContextCheckpoint"]=json!(42);
-        assert_eq!(submit_input(catalog.clone(),input.clone(),cancel.clone(),None,true).unwrap(),receipt);
-        assert_eq!(submit_input(catalog.clone(),input.clone(),cancel.clone(),None,false).unwrap(),receipt);
+        let receipt =
+            submit_input(catalog.clone(), input.clone(), cancel.clone(), None, false).unwrap();
+        input["initialContext"] = json!("not a prepared context");
+        input["inputPreparation"] = json!({"skill":"malformed derived candidate"});
+        input["expectedContextCheckpoint"] = json!(42);
+        assert_eq!(
+            submit_input(catalog.clone(), input.clone(), cancel.clone(), None, true).unwrap(),
+            receipt
+        );
+        assert_eq!(
+            submit_input(catalog.clone(), input.clone(), cancel.clone(), None, false).unwrap(),
+            receipt
+        );
         input.as_object_mut().unwrap().remove("initialContext");
-        assert_eq!(submit_input(catalog.clone(),input.clone(),cancel.clone(),None,true).unwrap(),receipt);
-        let mut different=input.clone();different["input"]=json!("changed command");
-        assert!(submit_input(catalog.clone(),different,cancel.clone(),None,true).is_err());
-        let mut different=input.clone();different["launch"]["source"]=json!({"mode":"fixed_branch","workspaceId":"workspace","executionWorkspaceId":"workspace","branchId":"source","revision":1,"liveRoot":null});
-        assert!(submit_input(catalog.clone(),different,cancel.clone(),None,true).is_err());
-        input["key"]=json!("not-yet-accepted");
-        assert_eq!(submit_input(catalog.clone(),input.clone(),cancel.clone(),None,true).unwrap(),Value::Null);
-        assert!(submit_input(catalog.clone(),input,cancel,None,false).is_err());
-        let sql=rusqlite::Connection::open(root.join("conversation.sqlite")).unwrap();
-        assert_eq!(sql.query_row("SELECT count(*) FROM runs",[],|row|row.get::<_,i64>(0)).unwrap(),1);
-        assert_eq!(sql.query_row("SELECT count(*) FROM commands",[],|row|row.get::<_,i64>(0)).unwrap(),1);
-        drop(sql);drop(catalog);std::fs::remove_dir_all(root).unwrap();
+        assert_eq!(
+            submit_input(catalog.clone(), input.clone(), cancel.clone(), None, true).unwrap(),
+            receipt
+        );
+        let mut different = input.clone();
+        different["input"] = json!("changed command");
+        assert!(submit_input(catalog.clone(), different, cancel.clone(), None, true).is_err());
+        let mut different = input.clone();
+        different["launch"]["source"] = json!({"mode":"fixed_branch","workspaceId":"workspace","executionWorkspaceId":"workspace","branchId":"source","revision":1,"liveRoot":null});
+        assert!(submit_input(catalog.clone(), different, cancel.clone(), None, true).is_err());
+        input["key"] = json!("not-yet-accepted");
+        assert_eq!(
+            submit_input(catalog.clone(), input.clone(), cancel.clone(), None, true).unwrap(),
+            Value::Null
+        );
+        assert!(submit_input(catalog.clone(), input, cancel, None, false).is_err());
+        let sql = rusqlite::Connection::open(root.join("conversation.sqlite")).unwrap();
+        assert_eq!(
+            sql.query_row("SELECT count(*) FROM runs", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            sql.query_row("SELECT count(*) FROM commands", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        drop(sql);
+        drop(catalog);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
 

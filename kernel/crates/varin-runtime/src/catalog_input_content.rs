@@ -390,14 +390,11 @@ impl InputDeliveryPreparation {
             if provider.is_some() {
                 return Err(RuntimeError::Invalid("input has provider original".into()));
             }
-            if read.metadata.origin.history_source() == HistorySource::User {
-                items.extend(execution_persistence::user_input_items(
-                    &read.metadata.id,
-                    &content,
-                )?);
-            } else {
-                items.push(serde_json::from_value(content)?);
-            }
+            items.extend(execution_persistence::history_input_items(
+                &read.metadata.id,
+                read.metadata.origin.history_source(),
+                &content,
+            )?);
         }
         Ok(PreparedInputDelivery {
             run: self.run,
@@ -430,9 +427,7 @@ impl Catalog {
         let mut reads = Vec::new();
         for id in ids {
             let read = self.capture_input_row(&id)?;
-            if super::super::followups::ingress_hold(&self.db, &read.metadata, Some(&run))?
-                .is_none()
-            {
+            if super::super::ingress::hold(&self.db, &read.metadata, Some(&run))?.is_none() {
                 reads.push(read);
             }
         }

@@ -38,7 +38,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 32;
+pub(crate) const FORMAT: i64 = 33;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -122,6 +122,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
         db.prepare("SELECT id,thread_id,parent,run_id,body FROM history")?;
         inputs::check_format(db)?;
         followups::check_format(db)?;
+        calendar::check_format(db)?;
         goals::check_format(db)?;
         db.prepare("SELECT run_id,identity,kind,state_ref,pending_state_ref,action_ref,continuation_ref,activation_cursor,pending,wait_id FROM policy_checkpoints")?;
         db.prepare("SELECT action_id,node_id,call_id,position,call,receipt,outcome FROM policy_graph_nodes")?;
@@ -168,6 +169,7 @@ fn initialize_metadata(
     if version == 0 {
         collaboration::initialize_new(&tx)?;
         followups::initialize_new(&tx)?;
+        calendar::initialize_new(&tx)?;
         goals::initialize_new(&tx)?;
     }
     let epoch = tx.query_row(
@@ -359,6 +361,15 @@ impl Catalog {
                 ));
             }
             return Ok(serde_json::from_str(&receipt)?);
+        }
+        if let submissions::SubmissionOrigin::Ingress { input, .. } = origin {
+            let current: inputs::QueuedInputMetadata = record(tx, "input_queue", &input.id)?;
+            if current.state == InputState::Cancelled {
+                return Err(RuntimeError::DispatchCancelled);
+            }
+            if ingress::hold(tx, &current, None)?.is_some() {
+                return Err(RuntimeError::RequestActivationHeld);
+            }
         }
         context_jobs::require_regular_branch(&tx, &command.branch_id)?;
         if let Some(operation_id) = child_operation {
@@ -1727,6 +1738,7 @@ pub(super) fn request_cancel_run_in(tx: &Transaction<'_>, id: &str) -> Result<Ru
     }
     run.cancel_requested = true;
     activation::cancel_run(tx, id)?;
+    calendar::cancel_branch_pending(tx, &run.thread_id, &run.branch_id)?;
     followups::cancel_source_run(tx, id)?;
     goals::cancel_run(tx, id)?;
     if run.state == RunState::Waiting {
@@ -1784,3 +1796,8 @@ pub(super) fn request_cancel_operation_in(tx: &Transaction<'_>, key: &str) -> Re
 
 #[path = "catalog_activation.rs"]
 pub mod activation;
+
+#[path = "catalog_calendar.rs"]
+pub mod calendar;
+#[path = "catalog_ingress.rs"]
+mod ingress;

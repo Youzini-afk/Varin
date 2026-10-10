@@ -1,4 +1,5 @@
 import fsPromises from 'node:fs/promises';
+import type { ScheduledTaskRunReceipt } from '@varin/application-client';
 import path from 'node:path';
 import {
   deleteLoopFile,
@@ -11,7 +12,7 @@ import {
 import type { createProjectConfigRuntime, ScheduledTask } from '../projects/project-config.js';
 import type { createScheduledTasksRuntime } from './runtime.js';
 
-class ScheduledTaskError extends Error {
+export class ScheduledTaskError extends Error {
   statusCode: number;
   task?: ScheduledTask | null | undefined;
   constructor(message: string, statusCode = 500, details: { task?: ScheduledTask | null | undefined } = {}) {
@@ -49,6 +50,16 @@ const asNonEmptyString = (value: unknown): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
+/** A malformed project selection cannot become an authoritative empty calendar scan. */
+export async function readScheduledProjects(read: () => Promise<Record<string, unknown>>, sanitize: (value: unknown) => ProjectRecord[] | undefined): Promise<ProjectRecord[]> {
+  const value = (await read()).projects;
+  if (value !== undefined && !Array.isArray(value)) throw new Error('Project settings are invalid');
+  const entries = value ?? [];
+  const projects = sanitize(entries);
+  if (!projects || projects.length !== (entries as unknown[]).length) throw new Error('Project settings could not be completely resolved');
+  return projects;
+}
+
 export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDependencies) => {
   const {
     readSettingsFromDisk,
@@ -58,8 +69,7 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
   } = dependencies;
 
   const listProjects = async (): Promise<ProjectRecord[]> => {
-    const settings = await readSettingsFromDisk();
-    return sanitizeProjects(settings?.projects || []) ?? [];
+    return readScheduledProjects(readSettingsFromDisk, sanitizeProjects);
   };
 
   const findProjectByID = async (projectID: unknown): Promise<ProjectRecord> => {
@@ -185,12 +195,16 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
 
   const upsert = async (projectID: unknown, taskInput: unknown) => {
     const project = await findProjectByID(projectID);
+    await scheduledTasksRuntime.syncProject(project.id);
     const input = asRecord(taskInput);
     if (!input) {
       throw new ScheduledTaskError('task payload is required', 400);
     }
     if (
-      Object.prototype.hasOwnProperty.call(input, 'loopFile')
+      Object.prototype.hasOwnProperty.call(input, 'onceAcceptance')
+      || Object.prototype.hasOwnProperty.call(input, 'pendingCalendarHandoff')
+      || Object.prototype.hasOwnProperty.call(input, 'calendar')
+      || Object.prototype.hasOwnProperty.call(input, 'loopFile')
       || Object.prototype.hasOwnProperty.call(input, 'loopScope')
       || Object.prototype.hasOwnProperty.call(input, 'loopRevision')
       || Object.prototype.hasOwnProperty.call(input, 'loopError')
@@ -215,8 +229,7 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
         || message.toLowerCase().includes('must be');
       throw new ScheduledTaskError(message, invalid ? 400 : 500);
     }
-    await scheduledTasksRuntime.syncProject(project.id);
-    const tasks = await projectConfigRuntime.listScheduledTasks(project.id);
+    const tasks = await scheduledTasksRuntime.syncProject(project.id);
     return {
       tasks,
       task: tasks.find((task) => task.id === upserted.task.id) || upserted.task,
@@ -241,14 +254,22 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
     }
     const result = await projectConfigRuntime.deleteScheduledTask(project.id, normalizedTaskID);
     if (!result.deleted) throw new ScheduledTaskError('Task not found', 404);
-    await scheduledTasksRuntime.syncProject(project.id);
-    return projectConfigRuntime.listScheduledTasks(project.id);
+    return scheduledTasksRuntime.syncProject(project.id);
   };
 
-  const run = async (projectID: unknown, taskID: unknown) => {
+  const run = async (projectID: unknown, taskID: unknown, key?: unknown): Promise<ScheduledTaskRunReceipt> => {
     const project = await findProjectByID(projectID);
     const normalizedTaskID = asNonEmptyString(taskID);
     if (!normalizedTaskID) throw new ScheduledTaskError('taskId is required', 400);
+    const task = (await scheduledTasksRuntime.syncProject(project.id)).find(value => value.id === normalizedTaskID);
+    if (!task) throw new ScheduledTaskError('Task not found', 404);
+    if (task.runtime === 'agent') {
+      const requestKey = asNonEmptyString(key);
+      if (!requestKey) throw new ScheduledTaskError('A stable run-now key is required', 400);
+      const owner = scheduledTasksRuntime.calendarOwner();
+      if (!owner) throw new ScheduledTaskError('Calendar owner is unavailable', 503);
+      return { runtime: 'agent', task, occurrence: await owner.run(project.id, task.id, requestKey) };
+    }
     const result = await scheduledTasksRuntime.runNow(project.id, normalizedTaskID);
     if (result.running || result.queued) {
       throw new ScheduledTaskError(result.error || 'Task already running', 409);
@@ -257,7 +278,8 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
     if (!result.ok) {
       throw new ScheduledTaskError(result.error || 'Task run failed', 500, { task: result.task });
     }
-    return { task: result.task, sessionId: result.sessionID };
+    if (!result.sessionID) throw new ScheduledTaskError('Pi session receipt is unavailable', 500);
+    return { runtime: 'pi', task: result.task ?? null, sessionId: result.sessionID };
   };
 
   const setEnabled = async (projectID: unknown, taskID: unknown, enabled: boolean, expectedRevision?: unknown) => {
@@ -268,56 +290,33 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
     if (task.loopFile) {
       return setLoopEnabled(projectID, taskID, enabled, asNonEmptyString(expectedRevision) || task.loopRevision);
     }
-    const result = await upsert(projectID, { ...task, enabled });
+    const result = await upsert(projectID, { id: task.id, enabled });
     return result.task;
   };
 
+  const calendarOwner = () => {
+    const owner = scheduledTasksRuntime.calendarOwner();
+    if (!owner) throw new ScheduledTaskError('Calendar owner is unavailable', 503);
+    return owner;
+  };
+  const controlOccurrence = async (projectID: unknown, taskID: unknown, occurrenceId: unknown, expectedRevision: unknown, action: unknown) => {
+    const project = await findProjectByID(projectID);
+    const task = asNonEmptyString(taskID), occurrence = asNonEmptyString(occurrenceId);
+    if (!task || !occurrence || typeof expectedRevision !== 'number' || !Number.isSafeInteger(expectedRevision) || (action !== 'cancel' && action !== 'retry')) throw new ScheduledTaskError('Invalid calendar occurrence control', 400);
+    return calendarOwner().control(project.id, task, occurrence, expectedRevision, action);
+  };
+  const retryCalculation = async (projectID: unknown, taskID: unknown, expectedRevision: unknown) => {
+    const project = await findProjectByID(projectID);
+    const task = asNonEmptyString(taskID);
+    if (!task || typeof expectedRevision !== 'number' || !Number.isSafeInteger(expectedRevision)) throw new ScheduledTaskError('Invalid calendar calculation revision', 400);
+    return calendarOwner().retryCalculation(project.id, task, expectedRevision);
+  };
   const status = async (projectID: unknown) => {
     const project = await findProjectByID(projectID);
     await scheduledTasksRuntime.syncProject(project.id);
-    if (typeof scheduledTasksRuntime.getProjectStatus === 'function') {
-      return scheduledTasksRuntime.getProjectStatus(project.id);
-    }
-    const tasks = await projectConfigRuntime.listScheduledTasks(project.id);
-    let enabledCount = 0;
-    let runningCount = 0;
-    for (const task of tasks) {
-      if (task?.enabled) enabledCount += 1;
-      if (task?.state?.lastStatus === 'running') runningCount += 1;
-    }
-    return {
-      hasEnabledScheduledTasks: enabledCount > 0,
-      hasRunningScheduledTasks: runningCount > 0,
-      enabledScheduledTasksCount: enabledCount,
-      runningScheduledTasksCount: runningCount,
-    };
+    return scheduledTasksRuntime.getProjectStatus(project.id);
   };
-
-  const globalStatus = async () => {
-    if (typeof scheduledTasksRuntime.getStatus === 'function') {
-      return scheduledTasksRuntime.getStatus();
-    }
-    const projects = await listProjects();
-    let enabledCount = 0;
-    let runningCount = 0;
-    for (const project of projects) {
-      try {
-        const tasks = await projectConfigRuntime.listScheduledTasks(project.id);
-        for (const task of tasks) {
-          if (task?.enabled) enabledCount += 1;
-          if (task?.state?.lastStatus === 'running') runningCount += 1;
-        }
-      } catch {
-        // One unreadable project must not hide global scheduler status.
-      }
-    }
-    return {
-      hasEnabledScheduledTasks: enabledCount > 0,
-      hasRunningScheduledTasks: runningCount > 0,
-      enabledScheduledTasksCount: enabledCount,
-      runningScheduledTasksCount: runningCount,
-    };
-  };
+  const globalStatus = async () => scheduledTasksRuntime.getStatus();
 
   return {
     listProjects,
@@ -333,6 +332,8 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
     removeLoopFile,
     status,
     globalStatus,
+    controlOccurrence,
+    retryCalculation,
   };
 };
 

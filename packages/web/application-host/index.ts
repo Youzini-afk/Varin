@@ -1,3 +1,5 @@
+import { createScheduleToolOwner, SCHEDULE_CAPABILITY } from './lib/kernel/schedule-tool-owner.js';
+import { CalendarOwner } from './lib/scheduled-tasks/calendar-owner.js';
 import { createChildProfilePreparer } from './lib/kernel/child-profiles.js';
 import { createPlanOwner } from './lib/kernel/plan-owner.js';
 import { PlanService } from './lib/kernel/plan-service.js';
@@ -283,7 +285,7 @@ import {
 } from './lib/pi-runtime/broker.js';
 import { createPiRuntimeGateway } from './lib/pi-runtime/gateway.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
-import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
+import { createScheduledTaskService, readScheduledProjects } from './lib/scheduled-tasks/service.js';
 import { createPiScheduledTaskExecutor } from './lib/scheduled-tasks/pi-executor.js';
 import { createSessionSettleTracker } from './lib/scheduled-tasks/session-settle.js';
 import { createPiSessionAutomationRuntime } from './lib/pi-session-automation/runtime.js';
@@ -640,7 +642,7 @@ const projectConfigRuntime = createProjectConfigRuntime({
 });
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
-  listProjects: async () => sanitizeProjects((await readSettingsFromDisk()).projects || []) ?? [],
+  listProjects: () => readScheduledProjects(readSettingsFromDisk, sanitizeProjects),
   emitTaskRunEvent: (event) => {
     for (const client of uiVarinEventClients) {
       try {
@@ -3029,6 +3031,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const refreshThreadPersonalization = () => threads.refreshPersonalization();
   void refreshThreadPersonalization().catch(() => console.error('[Thread] Personalization refresh requires attention'));
   void contextService.recover().catch(() => console.error('[Thread] Saved context job discovery requires attention'));
+  const calendarOwner = new CalendarOwner({ runtime: agentRuntime,
+    projects: () => readScheduledProjects(readSettingsFromDisk, sanitizeProjects),
+    hasPiWork: scheduledTasksRuntime.hasPiWork,
+    prepare: (work, projectPath, signal) => threads.prepareCalendarWork(work, projectPath, signal),
+    onChanged: () => { for (const client of uiVarinEventClients) { try { writeSseEvent(client, { type: 'varin:scheduled-task-changed', properties: {} }); } catch { uiVarinEventClients.delete(client); } } },
+    onError: () => console.warn('[Calendar] preparation or asset synchronization requires attention'),
+  });
+  scheduledTasksRuntime.setCalendarOwner(calendarOwner);
   registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerRuntimeMaintenanceRoutes(app, agentRuntime, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerHarnessThreadRoutes(app, {
@@ -4138,6 +4148,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   const unregisterMaterialToolCapability=extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY,createMaterialToolOwner(webMaterials));
+  const unregisterScheduleCapability = extensionRuntime.capabilities.register(SCHEDULE_CAPABILITY,
+    createScheduleToolOwner({ service: scheduledTaskService, workspaceRoot: async workspaceId => (await documentsAuthority.inspectWorkspace(workspaceId)).root }));
   const unregisterChildIntegrationCapability = extensionRuntime.capabilities.register(CHILD_INTEGRATION_CAPABILITY,
     createIntegrationToolOwner({ runtime: agentRuntime, coordinator: threadIntegrationCoordinator,
       onCleanupError: (_operationId, _error) => console.error('[Integration] Source grant cleanup requires attention'),
@@ -4651,9 +4663,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     httpServer: server,
     getPort: () => tunnelRuntimeContext.getActivePort(),
     getTunnelUrl: () => tunnelService.getPublicUrl(),
-    getQuitRiskStatus: () => ({
+    getQuitRiskStatus: async () => ({
       tunnel: { active: Boolean(tunnelService.getPublicUrl()) },
-      scheduledTasks: scheduledTasksRuntime.getStatus(),
+      scheduledTasks: await scheduledTasksRuntime.getStatus(),
     }),
     isReady: () => Boolean(currentPiRuntimeHandshake()),
     stop: async (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => {
@@ -4675,6 +4687,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       unregisterPiRuntimeCapability();
       unregisterMaterialToolCapability();
       unregisterChildIntegrationCapability();
+      unregisterScheduleCapability();
       unregisterDocumentsCapability();
       unregisterWorkspaceRecoveryCapability();
       unregisterSearchCapability();

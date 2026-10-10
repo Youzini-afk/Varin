@@ -18,7 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { usePiProviderStore } from '@/stores/usePiProviderStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
-import type { ScheduledTask } from '@/lib/scheduledTasksApi';
+import type { ScheduledTask } from '@varin/application-client';
 import { useI18n } from '@/lib/i18n';
 import { isValidCronExpression, getNextRuns, CRON_EXAMPLES } from '@/lib/cron';
 import { canonicalizeTimezone } from '@/lib/timezones';
@@ -562,8 +562,8 @@ const toDraft = (
     },
     execution: {
       prompt: task.execution.prompt,
-      providerID: task.execution.providerID,
-      modelID: task.execution.modelID,
+      providerID: task.execution.providerID ?? '',
+      modelID: task.execution.modelID ?? '',
       thinkingLevel: task.execution.thinkingLevel ?? defaults.thinkingLevel,
       runAsGoal: task.execution.runAsGoal === true,
     },

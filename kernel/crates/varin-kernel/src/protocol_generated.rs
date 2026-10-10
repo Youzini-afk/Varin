@@ -43,6 +43,8 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "process.release",
     "process.subscription.ack",
     "process.subscription.unsubscribe",
+    "runtime.calendar.occurrence.control",
+    "runtime.calendar.calculation.retry",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "runtime.operation.status",
@@ -73,6 +75,8 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "process.release",
     "process.subscription.ack",
     "process.subscription.unsubscribe",
+    "runtime.calendar.occurrence.control",
+    "runtime.calendar.calculation.retry",
 ];
 pub(crate) const KERNEL_DEFERRED_RESPONSE_METHODS: &[&str] = &["process.write", "process.resize"];
 pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
@@ -87,6 +91,89 @@ pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &["runtime.history.body"
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelEmptyParams {}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CalendarSyncParams {
+    pub(crate) project_id: String,
+    pub(crate) expected_revision: RequiredNullable<i64>,
+    pub(crate) definitions: Vec<varin_runtime::catalog::calendar::DefinitionInput>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CalendarProjectParams {
+    pub(crate) project_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CalendarDefinitionParams {
+    pub(crate) definition_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CalendarRunParams {
+    pub(crate) definition_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) key: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CalendarOccurrenceParams {
+    pub(crate) occurrence_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CalendarOccurrenceControlParams {
+    pub(crate) occurrence_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) action: varin_runtime::catalog::calendar::OccurrenceControlAction,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CalendarCalculatedParams {
+    pub(crate) calculation: varin_runtime::catalog::calendar::Calculation,
+    pub(crate) result: RequiredNullable<varin_runtime::catalog::calendar::CalculationResult>,
+    pub(crate) failure_code: RequiredNullable<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CalendarAdmitParams {
+    pub(crate) occurrence_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) owner_epoch: i64,
+    pub(crate) configuration: Value,
+    pub(crate) launch: SubmitLaunch,
+    pub(crate) initial_context: InitialContext,
+    pub(crate) input_preparation:
+        Option<varin_runtime::catalog::resources::InputResourcePreparation>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CalendarPreparationFailedParams {
+    pub(crate) occurrence_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) owner_epoch: i64,
+    pub(crate) failure_code: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CalendarCalculationRetryParams {
+    pub(crate) definition_id: String,
+    pub(crate) expected_revision: i64,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -272,10 +359,6 @@ pub(crate) struct LaunchFailedParams {
     pub(crate) run_id: String,
     pub(crate) code: String,
 }
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct KernelEmptyParams {}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1736,6 +1819,16 @@ pub(crate) struct MessageGetParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SubmitLaunch {
+    pub(crate) inherit_source: Option<bool>,
+    pub(crate) source: RequiredNullable<LaunchSourceParams>,
+    pub(crate) enabled_tools: Vec<String>,
+    pub(crate) credential_scope: Option<CredentialScope>,
+    pub(crate) child_dispatch: Option<varin_runtime::catalog::dispatch::ChildDispatchCatalog>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct InitialContext {
     pub(crate) resources: Option<varin_runtime::catalog::resources::ContextResources>,
     pub(crate) personalization: Option<ContextPersonalization>,
@@ -1843,16 +1936,6 @@ pub(crate) struct AgentPolicyBinding {
     pub(crate) reference: String,
     pub(crate) generation: i64,
     pub(crate) artifact: varin_runtime::catalog::policy_switch::AgentPolicyArtifactBinding,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct SubmitLaunch {
-    pub(crate) inherit_source: Option<bool>,
-    pub(crate) source: RequiredNullable<LaunchSourceParams>,
-    pub(crate) enabled_tools: Vec<String>,
-    pub(crate) credential_scope: Option<CredentialScope>,
-    pub(crate) child_dispatch: Option<varin_runtime::catalog::dispatch::ChildDispatchCatalog>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2177,6 +2260,54 @@ pub(crate) struct KernelVerificationInputIdentity {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.calendar.projects" => serde_json::from_value::<KernelEmptyParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.calendar.sync" => serde_json::from_value::<CalendarSyncParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.calendar.list" => serde_json::from_value::<CalendarProjectParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.calendar.occurrences" => {
+            serde_json::from_value::<CalendarDefinitionParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.calendar.run" => serde_json::from_value::<CalendarRunParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.calendar.prepare" => {
+            serde_json::from_value::<CalendarOccurrenceParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.calendar.occurrence.control" => {
+            serde_json::from_value::<CalendarOccurrenceControlParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.calendar.calculated" => {
+            serde_json::from_value::<CalendarCalculatedParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.calendar.admit" => serde_json::from_value::<CalendarAdmitParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.calendar.preparation.failed" => {
+            serde_json::from_value::<CalendarPreparationFailedParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.calendar.pending" => serde_json::from_value::<KernelEmptyParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.calendar.calculation.retry" => {
+            serde_json::from_value::<CalendarCalculationRetryParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.goal.start" => serde_json::from_value::<GoalStartParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
