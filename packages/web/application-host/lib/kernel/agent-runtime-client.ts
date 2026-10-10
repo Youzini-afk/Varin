@@ -1,3 +1,4 @@
+import type * as CalendarProtocol from './protocol.generated.js';
 import type { ChildContinuationAcceptParams, DelegatedExecution } from './protocol.generated.js';
 import type { MessageSendParams, MessageListParams, MessageGetParams, MessageReceipt, MessagePage, MessageView } from './protocol.generated.js';
 import type { FamilyListParams, FamilyRunsParams, FamilyReadParams, FamilyItemParams, FamilyList, FamilyRuns, FamilyRead, FamilyItem } from './protocol.generated.js';
@@ -619,6 +620,39 @@ export class AgentRuntimeClient {
   reconcileObservations(signal?: AbortSignal): Promise<string[]> {
     return this.kernel.agentRuntimeRequest('runtime.observations.reconcile', {}, signal);
   }
+  syncCalendar(input: CalendarProtocol.CalendarSyncParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarProject> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.sync', input, signal);
+  }
+  calendar(input: CalendarProtocol.CalendarProjectParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarProject> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.list', input, signal);
+  }
+  calendarOccurrences(input: CalendarProtocol.CalendarDefinitionParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarOccurrence[]> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.occurrences', input, signal);
+  }
+  runCalendar(input: CalendarProtocol.CalendarRunParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarOccurrence> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.run', input, signal);
+  }
+  prepareCalendar(input: CalendarProtocol.CalendarOccurrenceParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarPreparation> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.prepare', input, signal);
+  }
+  controlCalendarOccurrence(input: CalendarProtocol.CalendarOccurrenceControlParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarOccurrence> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.occurrence.control', input, signal);
+  }
+  calculatedCalendar(input: CalendarProtocol.CalendarCalculatedParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarDefinition> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.calculated', input, signal);
+  }
+  admitCalendar(input: CalendarProtocol.CalendarAdmitParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarOccurrence> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.admit', input, signal);
+  }
+  failCalendarPreparation(input: CalendarProtocol.CalendarPreparationFailedParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarOccurrence> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.preparation.failed', input, signal);
+  }
+  retryCalendarCalculation(input: CalendarProtocol.CalendarCalculationRetryParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarDefinition> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.calculation.retry', input, signal);
+  }
+  calendarProjects(signal?: AbortSignal): Promise<string[]> { return this.kernel.agentRuntimeRequest('runtime.calendar.projects', {}, signal); }
+  calendarPending(signal?: AbortSignal): Promise<CalendarProtocol.CalendarPending> { return this.kernel.agentRuntimeRequest('runtime.calendar.pending', {}, signal); }
+
   registerFollowup(input: FollowupRegisterParams, signal?: AbortSignal): Promise<Followup> {
     return this.kernel.agentRuntimeRequest('runtime.followup.register', input, signal);
   }

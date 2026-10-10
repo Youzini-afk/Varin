@@ -901,11 +901,7 @@ impl Catalog {
     pub fn execution_history(&self, branch: &str) -> Result<Vec<ConversationItem>> {
         let mut result = Vec::new();
         for item in self.history(branch)? {
-            if item.source == HistorySource::User {
-                result.extend(user_input_items(&item.id, &item.content)?);
-            } else {
-                result.push(serde_json::from_value(item.content)?);
-            }
+            result.extend(history_input_items(&item.id, item.source, &item.content)?);
         }
         Ok(result)
     }
@@ -1924,6 +1920,22 @@ impl Catalog {
         )?
         .load()
     }
+}
+
+pub(super) fn history_input_items(
+    id: &str,
+    source: HistorySource,
+    content: &Value,
+) -> Result<Vec<ConversationItem>> {
+    if source == HistorySource::User {
+        return user_input_items(id, content);
+    }
+    if source == HistorySource::Environment {
+        if let Some(items) = calendar::history_items(id, content)? {
+            return Ok(items);
+        }
+    }
+    Ok(vec![serde_json::from_value(content.clone())?])
 }
 
 /// A user record may project several typed parts; the final projected part retains the

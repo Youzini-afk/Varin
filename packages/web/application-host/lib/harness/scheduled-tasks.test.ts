@@ -166,6 +166,8 @@ describe('harness scheduled task services', () => {
     await request('schedule.setEnabled', { taskId, enabled: true });
     const ran = await request('schedule.run', { taskId });
     if (!ran.ok) throw new Error(ran.error.message);
+    expect(ran.result.runtime).toBe('pi');
+    if (ran.result.runtime !== 'pi') throw new Error('Expected original Pi execution');
     expect(ran.result.sessionId).toBe('sess-2');
     expect(ran.result.task.state.lastStatus).toBe('success');
     expect(ran.result.task.state.lastSessionId).toBe('sess-2');

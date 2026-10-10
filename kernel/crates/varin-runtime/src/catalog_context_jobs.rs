@@ -24,7 +24,9 @@ impl ContextJobAdmission {
     ) -> Result<()> {
         tx.execute("INSERT INTO context_jobs(run_id,job_key,branch_id,through_id,expected_revision,owner_run_id,recipe,parts) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
             params![run_id,self.key,self.branch_id,self.through_id,sql_number(self.expected_revision)?,self.owner_run_id,encode(&self.recipe)?,sql_number(self.parts)?])?;
-        if let Some(parent)=&self.owner_run_id{goals::bind_inherited(tx,run_id,parent)?;}
+        if let Some(parent) = &self.owner_run_id {
+            goals::bind_inherited(tx, run_id, parent)?;
+        }
         let mut insert =
             tx.prepare("INSERT INTO context_job_parts(run_id,part_index,body) VALUES(?1,?2,?3)")?;
         for (index, reference) in parts.iter().enumerate() {
@@ -508,14 +510,11 @@ pub(super) fn hydrate_source(
     let mut history = Vec::new();
     for item in metadata {
         let item = content.hydrate_history(item)?;
-        if item.source == HistorySource::User {
-            history.extend(super::execution_persistence::user_input_items(
-                &item.id,
-                &item.content,
-            )?);
-        } else {
-            history.push(serde_json::from_value(item.content)?);
-        }
+        history.extend(super::execution_persistence::history_input_items(
+            &item.id,
+            item.source,
+            &item.content,
+        )?);
     }
     Ok(history)
 }
@@ -695,7 +694,10 @@ impl ContextJobPreparation {
             )?;
             let history = hydrate_source(&self.content, source)?;
             if self.source.through_id.is_some() {
-                resource_activations = active_checkpoint.as_ref().map(|checkpoint| checkpoint.resource_activations.clone()).unwrap_or_default();
+                resource_activations = active_checkpoint
+                    .as_ref()
+                    .map(|checkpoint| checkpoint.resource_activations.clone())
+                    .unwrap_or_default();
             }
             resource_activations.extend(resources::retained_activations(&history));
             crate::execution::validate_history_pairs(&history)
@@ -739,14 +741,29 @@ impl ContextJobPreparation {
         };
         let submission = submissions::PreparedSubmission::stage(submissions::SubmissionBody {
             input_preparation: None,
-                command:SubmitInput {key:format!("context-job:{}",self.request.key),
-                    thread_id:format!("context-job-thread:{}",self.request.key),
-                    branch_id:format!("context-job-branch:{}",self.request.key),expected_head:None,
-                    input:Value::String(crate::context_job::SUMMARY_REQUEST.into()),configuration:self.configuration.clone()},
-                launch:Some(self.launch.clone()),inherit_source:false,initial:None,current:None,personalization:None,resources:None,
-                origin:submissions::SubmissionOrigin::Summary,epoch:self.epoch,content:self.content,publication:self.publication,
-            })?;
-        let launch = submission.launch.clone().ok_or_else(||RuntimeError::Invalid("context job launch is missing".into()))?;
+            command: SubmitInput {
+                key: format!("context-job:{}", self.request.key),
+                thread_id: format!("context-job-thread:{}", self.request.key),
+                branch_id: format!("context-job-branch:{}", self.request.key),
+                expected_head: None,
+                input: Value::String(crate::context_job::SUMMARY_REQUEST.into()),
+                configuration: self.configuration.clone(),
+            },
+            launch: Some(self.launch.clone()),
+            inherit_source: false,
+            initial: None,
+            current: None,
+            personalization: None,
+            resources: None,
+            origin: submissions::SubmissionOrigin::Summary,
+            epoch: self.epoch,
+            content: self.content,
+            publication: self.publication,
+        })?;
+        let launch = submission
+            .launch
+            .clone()
+            .ok_or_else(|| RuntimeError::Invalid("context job launch is missing".into()))?;
         Ok(PreparedContextJob {
             submission,
             request: self.request,
@@ -777,10 +794,14 @@ impl ContextJobPublication {
     pub fn load(self) -> Result<PreparedContextCheckpoint> {
         let recipe = self.job.recipe()?;
         let resource_checkpoint = recipe.source.checkpoint;
-        let resources = resource_checkpoint.map(|reference| -> Result<_> {
-            let checkpoint: context::ContextCheckpoint = serde_json::from_value(self.content.load(&reference)?)?;
-            Ok(checkpoint.resources)
-        }).transpose()?.flatten();
+        let resources = resource_checkpoint
+            .map(|reference| -> Result<_> {
+                let checkpoint: context::ContextCheckpoint =
+                    serde_json::from_value(self.content.load(&reference)?)?;
+                Ok(checkpoint.resources)
+            })
+            .transpose()?
+            .flatten();
         let job = self.job.load()?;
         let database = Connection::open_with_flags(
             &self.database,

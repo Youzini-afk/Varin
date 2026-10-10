@@ -1,3 +1,4 @@
+import { CalendarTaskStatus } from './CalendarTaskStatus';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -18,16 +19,12 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import type { ProjectEntry } from '@varin/application-client';
-import {
-  deleteScheduledTask,
-  deleteScheduledTaskLoopFile,
-  fetchScheduledTasks,
-  runScheduledTaskNow,
-  setScheduledTaskLoopEnabled,
-  upsertScheduledTask,
-  type ScheduledTask,
-  type ScheduledTaskStatus,
-} from '@/lib/scheduledTasksApi';
+import { createScheduledTasksHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange, type ScheduledTask, type ScheduledTaskStatus, type ThreadIdentity } from '@varin/application-client';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { ThreadConversation } from '@/components/thread/ThreadConversation';
+import { CalendarTaskEditorDialog } from './CalendarTaskEditorDialog';
+const schedules = createScheduledTasksHttpAPI();
 import { ScheduledTaskEditorDialog } from './ScheduledTaskEditorDialog';
 import { ScheduledTaskLoopEditorDialog } from './ScheduledTaskLoopEditorDialog';
 import { canonicalizeTimezone } from '@/lib/timezones';
@@ -173,6 +170,12 @@ const toneStyle = (tone: StatusTone): React.CSSProperties => {
 
 export function ScheduledTasksDialog() {
   const { t } = useI18n();
+  const { threads } = useRuntimeAPIs();
+  const [calendarEditorOpen, setCalendarEditorOpen] = React.useState(false);
+  const [calendarEditorTask, setCalendarEditorTask] = React.useState<ScheduledTask | null>(null);
+  const [calendarWork, setCalendarWork] = React.useState<ThreadIdentity | null>(null);
+  const runKeys = React.useRef(new Map<string, string>());
+  React.useEffect(() => subscribeRuntimeEndpointWillChange(() => { runKeys.current.clear(); setCalendarWork(null); setCalendarEditorOpen(false); }), []);
   const open = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const setOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
   const isMobile = useUIStore((state) => state.isMobile);
@@ -246,7 +249,7 @@ export function ScheduledTasksDialog() {
       setLoading(true);
     }
     try {
-      const nextTasks = await fetchScheduledTasks(projectID);
+      const nextTasks = await schedules.list(projectID);
       if (generation !== reloadGeneration.current) return;
       nextTasks.sort((a, b) => {
         if (a.enabled !== b.enabled) {
@@ -295,10 +298,10 @@ export function ScheduledTasksDialog() {
     }
     let timeoutID: ReturnType<typeof setTimeout> | null = null;
     const unsubscribe = subscribeVarinEvents((event) => {
-      if (event.type !== 'scheduled-task-ran') {
+      if (event.type !== 'scheduled-task-ran' && event.type !== 'scheduled-task-changed' && event.type !== 'stream-ready') {
         return;
       }
-      if (event.projectId !== selectedProjectID) {
+      if (event.type === 'scheduled-task-ran' && event.projectId !== selectedProjectID) {
         return;
       }
       if (timeoutID) {
@@ -320,7 +323,7 @@ export function ScheduledTasksDialog() {
     if (!selectedProjectID) {
       throw new Error(t('sessions.scheduledTasks.dialog.error.chooseProjectFirst'));
     }
-    await upsertScheduledTask(selectedProjectID, taskDraft);
+    await schedules.upsert(selectedProjectID, taskDraft);
     await reloadTasks(selectedProjectID);
     toast.success(t('sessions.scheduledTasks.dialog.toast.saved'));
   }, [selectedProjectID, reloadTasks, t]);
@@ -333,9 +336,10 @@ export function ScheduledTasksDialog() {
     setTasks((prev) => prev.map((item) => (item.id === task.id ? { ...item, enabled } : item)));
     try {
       if (task.loopFile) {
-        await setScheduledTaskLoopEnabled(selectedProjectID, task.id, enabled, task.loopRevision);
+        if (!task.loopRevision) throw new Error('Loop revision is unavailable');
+        await schedules.setLoopEnabled(selectedProjectID, task.id, enabled, task.loopRevision);
       } else {
-        await upsertScheduledTask(selectedProjectID, { ...task, enabled });
+        await schedules.upsert(selectedProjectID, { id: task.id, enabled });
       }
       await reloadTasks(selectedProjectID, { silent: true });
     } catch (error) {
@@ -360,9 +364,10 @@ export function ScheduledTasksDialog() {
     setMutatingTaskID(task.id);
     try {
       if (task.loopFile) {
-        await deleteScheduledTaskLoopFile(selectedProjectID, task.id, task.loopRevision);
+        if (!task.loopRevision) throw new Error('Loop revision is unavailable');
+        await schedules.removeLoop(selectedProjectID, task.id, task.loopRevision);
       } else {
-        await deleteScheduledTask(selectedProjectID, task.id);
+        await schedules.remove(selectedProjectID, task.id);
       }
       await reloadTasks(selectedProjectID, { silent: true });
       toast.success(t('sessions.scheduledTasks.dialog.toast.deleted'));
@@ -378,6 +383,7 @@ export function ScheduledTasksDialog() {
       setLoopEditorTask(task);
       return;
     }
+    if (task.runtime === 'agent') { setCalendarEditorTask(task); setCalendarEditorOpen(true); return; }
     setEditorTask(task);
     setEditorOpen(true);
   }, []);
@@ -388,7 +394,14 @@ export function ScheduledTasksDialog() {
     }
     setMutatingTaskID(task.id);
     try {
-      const { sessionId } = await runScheduledTaskNow(selectedProjectID, task.id);
+      const identity = `${selectedProjectID}:${task.id}`;
+      const key = runKeys.current.get(identity) ?? crypto.randomUUID(); runKeys.current.set(identity, key);
+      const host = getRuntimeEndpointGeneration();
+      const receipt = await schedules.run(selectedProjectID, task.id, key);
+      if (host !== getRuntimeEndpointGeneration()) return;
+      runKeys.current.delete(identity);
+      const sessionId = receipt.runtime === 'pi' ? receipt.sessionId : undefined;
+      if (receipt.runtime === 'agent') setCalendarWork({ runtime: 'agent', threadId: receipt.occurrence.thread_id, branchId: receipt.occurrence.branch_id });
       await reloadTasks(selectedProjectID, { silent: true });
       toast.success(t('sessions.scheduledTasks.dialog.toast.started'));
       if (sessionId) {
@@ -444,7 +457,9 @@ export function ScheduledTasksDialog() {
     setEditorOpen(true);
   };
 
-  const completed = (task: ScheduledTask) => task.schedule.kind === 'once' && task.state.lastStatus === 'success' && !task.state.nextRunAt;
+  const completed = (task: ScheduledTask) => task.runtime === 'agent'
+    ? task.schedule.kind === 'once' && Boolean(task.calendar && !task.calendar.definition.calculation_pending && task.calendar.definition.next_at_ms === null && task.calendar.occurrences.some(value => value.reason.kind === 'scheduled') && task.calendar.occurrences.every(value => ['completed', 'failed', 'cancelled'].includes(value.state)))
+    : task.schedule.kind === 'once' && task.state.lastStatus === 'success' && !task.state.nextRunAt;
   const visibleTasks = tasks.filter((task) => {
     const state = completed(task) ? 'completed' : task.enabled ? 'enabled' : 'paused';
     return (filter === 'all' || filter === state)
@@ -498,6 +513,8 @@ export function ScheduledTasksDialog() {
                     </div>
                   ) : null}
 
+                {task.runtime !== 'agent' && task.onceAcceptance && <p className="text-sm">Once slot already accepted by {task.onceAcceptance.owner}. Automatic execution will not be repeated. Receipt: {task.onceAcceptance.acceptanceId}</p>}
+                {task.runtime === 'agent' ? <CalendarTaskStatus projectId={selectedProjectID} task={task} onChanged={() => reloadTasks(selectedProjectID, { silent: true })} onOpenWork={setCalendarWork} /> : <>
                 <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 typography-micro text-muted-foreground">
                   <span className="inline-flex items-center gap-1.5">
                     <Icon name="timer" className="h-3.5 w-3.5" />
@@ -552,6 +569,7 @@ export function ScheduledTasksDialog() {
                     <span className="min-w-0 break-words">{task.state.lastError}</span>
                   </div>
                 ) : null}
+                </>}
                 {task.loopError ? (
                   <div
                     className="mt-3 flex items-start gap-2 rounded-md border p-2 typography-micro"
@@ -628,6 +646,7 @@ export function ScheduledTasksDialog() {
   const createButton = <DropdownMenu>
     <DropdownMenuTrigger asChild><Button size="sm" className="shrink-0 gap-1 rounded-full px-3">{t('tasksHub.create')}<Icon name="arrow-down-s" className="size-3.5" /></Button></DropdownMenuTrigger>
     <DropdownMenuContent align="end">
+      <DropdownMenuItem disabled={projects.length === 0 || !threads} onSelect={() => { setCalendarEditorTask(null); setCalendarEditorOpen(true); }}>Agent calendar</DropdownMenuItem>
       <DropdownMenuItem disabled={projects.length === 0} onSelect={openNewTaskEditor}><Icon name="calendar-schedule" className="mr-2 size-4" />{t('tasksHub.scheduled')}</DropdownMenuItem>
       <DropdownMenuItem onSelect={() => { setView('followups'); setCreateFollowUp(true); }}><Icon name="timer" className="mr-2 size-4" />{t('tasksHub.followUps')}</DropdownMenuItem>
     </DropdownMenuContent>
@@ -675,6 +694,10 @@ export function ScheduledTasksDialog() {
         </div>
       ) : null}
 
+      <CalendarTaskEditorDialog open={calendarEditorOpen} task={calendarEditorTask} onOpenChange={setCalendarEditorOpen} onSave={handleSaveTask} />
+      <Dialog open={calendarWork !== null} onOpenChange={value => { if (!value) setCalendarWork(null); }}><DialogContent className="h-[85vh] max-w-5xl overflow-hidden"><DialogTitle>Calendar work</DialogTitle>
+        {calendarWork && threads && <ThreadConversation api={threads} identity={calendarWork} onBranchCreated={setCalendarWork} />}
+      </DialogContent></Dialog>
       <ScheduledTaskEditorDialog
         open={editorOpen}
         projectDirectory={projects.find((project) => project.id === selectedProjectID)?.path ?? null}

@@ -67,6 +67,7 @@ type SessionCreatedEvent = {
 export type VarinEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreatedEvent | HarnessThreadChangedEvent | HarnessBlocksChangedEvent | HarnessKnowledgeChangedEvent | HarnessExperimentChangedEvent | SettingsChangedEvent
   | { type: 'plan-changed'; threadId: string; branchId: string; ref: string }
   | { type: 'agent-personalization-changed' }
+  | { type: 'scheduled-task-changed' }
   | { type: 'ssh-instance-status'; status: unknown }
   | { type: 'bot-changed'; botId: string }
   | ({ type: 'computer-activity' } & ComputerActivityEntry)
@@ -338,6 +339,8 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     }
     return;
   }
+
+  if (envelope.type === 'varin:scheduled-task-changed') { for (const listener of listeners) listener({ type: 'scheduled-task-changed' }); return; }
 
   if (envelope.type !== 'varin:scheduled-task-ran') {
     return;

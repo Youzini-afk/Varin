@@ -1,5 +1,180 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export type CalendarRule =
+  | { kind: 'once'; date: string; time: string }
+  | { kind: 'daily'; times: string[] }
+  | { kind: 'weekly'; times: string[]; weekdays: number[] }
+  | { kind: 'cron'; expression: string };
+
+export type CalendarMissedPolicy = 'skip' | 'coalesce_once';
+
+export interface CalendarModel { providerId: string; modelId: string; thinkingLevel?: string; temperature?: number }
+
+export type CalendarTarget =
+  | { kind: 'new_work'; model: CalendarModel; sourceMode: SourceMode; goal: { budget: GoalBudget | null } | null }
+  | { kind: 'existing_work'; threadId: string; branchId: string };
+
+export type CalendarOnceAcceptanceOwner = 'pi' | 'agent';
+
+export interface CalendarOnceAcceptance { owner: CalendarOnceAcceptanceOwner; acceptanceId: string; scheduledAtMs: number; acceptedAtMs: number; }
+
+export interface CalendarDefinitionInput {
+  taskId: string;
+  assetRevision: string;
+  assetKind: 'gui' | 'loop';
+  name: string;
+  enabled: boolean;
+  onceAcceptance: CalendarOnceAcceptance | null;
+  activationHold: 'previous_runtime_active' | 'asset_invalid' | null;
+  timezone: string;
+  rule: CalendarRule;
+  missedPolicy: CalendarMissedPolicy;
+  target: CalendarTarget;
+  instruction: string;
+}
+
+export interface CalendarDefinition {
+  id: string;
+  project_id: string;
+  task_id: string;
+  asset_revision: string;
+  asset_kind: 'gui' | 'loop';
+  revision: number;
+  generation: number;
+  name: string;
+  enabled: boolean;
+  deleted: boolean;
+  timezone: string;
+  rule: CalendarRule;
+  missed_policy: CalendarMissedPolicy;
+  target: CalendarTarget;
+  synchronized: boolean;
+  once_acceptance: CalendarOnceAcceptance | null;
+  activation_hold: 'previous_runtime_active' | 'asset_invalid' | null;
+  next_at_ms: number | null;
+  calculation_pending: boolean;
+  calculation_failure: string | null;
+}
+
+export type CalendarOccurrenceReason = { kind: 'scheduled'; at_ms: number } | { kind: 'manual'; key: string };
+
+export type CalendarOccurrenceState = 'observed' | 'preparing' | 'held' | 'queued' | 'delivered' | 'completed' | 'failed' | 'cancelled';
+
+export interface CalendarOccurrence {
+  id: string;
+  definition_id: string;
+  generation: number;
+  revision: number;
+  reason: CalendarOccurrenceReason;
+  observed_at_ms: number;
+  thread_id: string;
+  branch_id: string;
+  input_id: string | null;
+  run_id: string | null;
+  execution_id: string | null;
+  goal_id: string | null;
+  state: CalendarOccurrenceState;
+  hold_reason: string | null;
+  failure_code: string | null;
+}
+
+export interface CalendarProject {
+  project_id: string;
+  revision: number;
+  definitions: CalendarDefinition[];
+}
+
+export interface CalendarCalculation {
+  definition_id: string;
+  generation: number;
+  revision: number; // exact cursor calculation revision
+  owner_epoch: number;
+  rule: CalendarRule;
+  timezone: string;
+  after_ms: number;
+  now_ms: number;
+}
+
+export interface CalendarSlot { at_ms: number; following_at_ms: number | null }
+
+export interface CalendarCalculationResult {
+  next: CalendarSlot | null; // first strictly after request.after_ms; once fixed instant is special
+  latest_due: CalendarSlot | null; // latest real slot <= request.now_ms and > after_ms; never synthetic now
+  next_future: CalendarSlot | null; // first real slot strictly > request.now_ms and >= after_ms
+}
+
+export interface CalendarPending {
+  calculations: CalendarCalculation[];
+  preparations: CalendarOccurrence[];
+}
+
+export interface CalendarPreparation {
+  occurrence: CalendarOccurrence;
+  definition: CalendarDefinition;
+  instruction: string;
+  owner_epoch: number;
+}
+
+export interface CalendarSyncParams {
+  projectId: string;
+  expectedRevision: number | null;
+  definitions: CalendarDefinitionInput[];
+}
+
+export interface CalendarProjectParams {
+  projectId: string;
+}
+
+export interface CalendarDefinitionParams {
+  definitionId: string;
+}
+
+export interface CalendarRunParams {
+  definitionId: string;
+  expectedRevision: number;
+  key: string;
+}
+
+export interface CalendarOccurrenceParams {
+  occurrenceId: string;
+}
+
+export interface CalendarOccurrenceControlParams {
+  occurrenceId: string;
+  expectedRevision: number;
+  action: CalendarOccurrenceControlAction;
+}
+
+export interface CalendarCalculatedParams {
+  calculation: CalendarCalculation;
+  result: CalendarCalculationResult | null;
+  failureCode: string | null;
+}
+
+export interface CalendarAdmitParams {
+  occurrenceId: string;
+  expectedRevision: number;
+  ownerEpoch: number;
+  configuration: unknown;
+  launch: SubmitLaunch;
+  initialContext: InitialContext;
+  inputPreparation?: InputResourcePreparation;
+}
+
+export interface CalendarPreparationFailedParams {
+  occurrenceId: string;
+  expectedRevision: number;
+  ownerEpoch: number;
+  failureCode: string;
+}
+
+export type CalendarOccurrenceControlAction = 'cancel' | 'retry';
+
+export interface CalendarCalculationRetryParams {
+  definitionId: string;
+  expectedRevision: number;
+}
+
 export type MessageKind = 'inform' | 'request';
 
 export type MessageActivationHold = 'manual_pause' | 'question' | 'goal_blocked' | 'dependency_wait' | 'preparing' | 'source_unsettled';
@@ -1523,7 +1698,7 @@ export interface ChildExecutionReportReadParams {
   maxBytes?: number;
 }
 
-export type DelegatedExecutionTrigger = { kind: 'dispatch' } | { kind: 'user_continuation'; key: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'message_request'; message_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'followup'; followup_id: string; occurrence_id: string; input_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null };
+export type DelegatedExecutionTrigger = { kind: 'dispatch' } | { kind: 'user_continuation'; key: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'message_request'; message_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'followup'; followup_id: string; occurrence_id: string; input_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'calendar'; definition_id: string; occurrence_id: string; input_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null };
 
 export type ChildSourceBasis = { kind: 'working_result'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; result: ChildWorkingResultRef } | { kind: 'immutable_source'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; pin: ChildSourcePin };
 

@@ -157,10 +157,20 @@ pub enum ResourceRequest {
 }
 impl ResourceRequest {
     pub fn activation_id(&self) -> Option<&str> {
-        match self { Self::Skill { activation_id, .. } | Self::SkillResource { activation_id, .. } => activation_id.as_deref(), _ => None }
+        match self {
+            Self::Skill { activation_id, .. } | Self::SkillResource { activation_id, .. } => {
+                activation_id.as_deref()
+            }
+            _ => None,
+        }
     }
     pub fn resource_id(&self) -> Option<&str> {
-        match self { Self::Skill { resource_id, .. } | Self::SkillResource { resource_id, .. } => Some(resource_id), _ => None }
+        match self {
+            Self::Skill { resource_id, .. } | Self::SkillResource { resource_id, .. } => {
+                Some(resource_id)
+            }
+            _ => None,
+        }
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -551,7 +561,11 @@ impl Catalog {
         };
         Ok(ResourceSnapshotRead {
             activation_id: activation_id.map(str::to_owned),
-            database: self.db.path().ok_or_else(|| RuntimeError::Invalid("Catalog has no database".into()))?.into(),
+            database: self
+                .db
+                .path()
+                .ok_or_else(|| RuntimeError::Invalid("Catalog has no database".into()))?
+                .into(),
             head: self.head(&run.branch_id)?,
             epoch: self.epoch,
             run,
@@ -569,72 +583,154 @@ impl ResourceSnapshotRead {
             ResourceCallRead::Model { request, call } => {
                 let request_id = request.metadata.id.clone();
                 let snapshot: RequestSnapshot = serde_json::from_value(request.load_request()?)?;
-                if snapshot.view.run_id != self.run.id || snapshot.view.request_id != request_id
+                if snapshot.view.run_id != self.run.id
+                    || snapshot.view.request_id != request_id
                     || call.schema_version != "2"
-                    || !snapshot.view.binding.tools.iter().any(|schema| schema.name == call.name && schema.version == call.schema_version)
-                    || snapshot.view.binding.resource_activations != retained_activations(&snapshot.view.history)
+                    || !snapshot.view.binding.tools.iter().any(|schema| {
+                        schema.name == call.name && schema.version == call.schema_version
+                    })
+                    || snapshot.view.binding.resource_activations
+                        != retained_activations(&snapshot.view.history)
                 {
-                    return Err(RuntimeError::Conflict("resource snapshot differs from the frozen ModelStep".into()));
+                    return Err(RuntimeError::Conflict(
+                        "resource snapshot differs from the frozen ModelStep".into(),
+                    ));
                 }
                 let call = call.load(&self.content)?;
-                (snapshot.view.binding.resource_checkpoint_id, snapshot.view.binding.resource_activations,
-                    serde_json::from_value::<ResourceRequest>(call.arguments)?)
+                (
+                    snapshot.view.binding.resource_checkpoint_id,
+                    snapshot.view.binding.resource_activations,
+                    serde_json::from_value::<ResourceRequest>(call.arguments)?,
+                )
             }
-            ResourceCallRead::Policy { metadata, node_id, call_id } => {
+            ResourceCallRead::Policy {
+                metadata,
+                node_id,
+                call_id,
+            } => {
                 let graph = metadata.load_graph(&self.content, &self.run.id)?;
-                let node = graph.nodes().iter().find(|node| node.node.id == node_id)
+                let node = graph
+                    .nodes()
+                    .iter()
+                    .find(|node| node.node.id == node_id)
                     .ok_or_else(|| RuntimeError::NotFound(node_id))?;
-                if node.node.call.name != "resource_read" || node.node.call.call_id != call_id
+                if node.node.call.name != "resource_read"
+                    || node.node.call.call_id != call_id
                     || node.node.call.schema_version != "2"
-                    || !node.context.tools.iter().any(|schema| schema.name == node.node.call.name && schema.version == node.node.call.schema_version)
+                    || !node.context.tools.iter().any(|schema| {
+                        schema.name == node.node.call.name
+                            && schema.version == node.node.call.schema_version
+                    })
                 {
-                    return Err(RuntimeError::Conflict("resource snapshot differs from the frozen policy call".into()));
+                    return Err(RuntimeError::Conflict(
+                        "resource snapshot differs from the frozen policy call".into(),
+                    ));
                 }
-                (node.context.resource_checkpoint_id.clone(), node.context.resource_activations.clone(),
-                    serde_json::from_value::<ResourceRequest>(node.node.call.arguments.clone())?)
+                (
+                    node.context.resource_checkpoint_id.clone(),
+                    node.context.resource_activations.clone(),
+                    serde_json::from_value::<ResourceRequest>(node.node.call.arguments.clone())?,
+                )
             }
         };
         if request.activation_id() != self.activation_id.as_deref() {
-            return Err(RuntimeError::Conflict("resource selector differs from the original tool call".into()));
+            return Err(RuntimeError::Conflict(
+                "resource selector differs from the original tool call".into(),
+            ));
         }
         let activation = if let Some(id) = self.activation_id.as_deref() {
-            let binding = bindings.iter().find(|binding| binding.activation_id == id)
-                .ok_or_else(|| RuntimeError::Conflict("resource activation is not retained by this invocation".into()))?;
-            if binding.resource_checkpoint_id != checkpoint_id || Some(binding.resource_id.as_str()) != request.resource_id()
-                || bindings.iter().filter(|binding| binding.activation_id == id).count() != 1 {
-                return Err(RuntimeError::Conflict("resource activation differs from its frozen selection".into()));
+            let binding = bindings
+                .iter()
+                .find(|binding| binding.activation_id == id)
+                .ok_or_else(|| {
+                    RuntimeError::Conflict(
+                        "resource activation is not retained by this invocation".into(),
+                    )
+                })?;
+            if binding.resource_checkpoint_id != checkpoint_id
+                || Some(binding.resource_id.as_str()) != request.resource_id()
+                || bindings
+                    .iter()
+                    .filter(|binding| binding.activation_id == id)
+                    .count()
+                    != 1
+            {
+                return Err(RuntimeError::Conflict(
+                    "resource activation differs from its frozen selection".into(),
+                ));
             }
-            let database = Connection::open_with_flags(&self.database,
-                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+            let database = Connection::open_with_flags(
+                &self.database,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                    | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )?;
             let visible: bool = database.query_row("WITH RECURSIVE ancestors(id,parent) AS (SELECT id,parent FROM history WHERE id=?1 UNION ALL SELECT h.id,h.parent FROM history h JOIN ancestors a ON h.id=a.parent) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=?2)",
                 params![self.head, binding.input_id], |row| row.get(0))?;
-            if !visible { return Err(RuntimeError::Conflict("resource activation input is not a branch ancestor".into())); }
+            if !visible {
+                return Err(RuntimeError::Conflict(
+                    "resource activation input is not a branch ancestor".into(),
+                ));
+            }
             let input: HistoryItem = record(&database, "history", &binding.input_id)?;
-            if input.thread_id != self.run.thread_id || input.source != HistorySource::User {
-                return Err(RuntimeError::Conflict("resource activation belongs to another input owner".into()));
+            if input.thread_id != self.run.thread_id {
+                return Err(RuntimeError::Conflict(
+                    "resource activation belongs to another input owner".into(),
+                ));
             }
             let input = self.content.hydrate_history(input)?;
-            if !invocations(&input.content)?.iter().any(|entry| entry.binding(&binding.input_id) == *binding) {
-                return Err(RuntimeError::Conflict("resource activation is not proved by its original input".into()));
+            let input_content = if input.source == HistorySource::User {
+                input.content.clone()
+            } else if input.source == HistorySource::Environment {
+                calendar::original_input(&input.content)?.ok_or_else(|| {
+                    RuntimeError::Invalid("activation has no original typed input".into())
+                })?
+            } else {
+                return Err(RuntimeError::Invalid(
+                    "activation has no original typed input".into(),
+                ));
+            };
+            if !invocations(&input_content)?
+                .iter()
+                .any(|entry| entry.binding(&binding.input_id) == *binding)
+            {
+                return Err(RuntimeError::Conflict(
+                    "resource activation is not proved by its original input".into(),
+                ));
             }
             Some(binding)
         } else {
             if default_checkpoint.as_deref() != Some(&checkpoint_id) {
-                return Err(RuntimeError::Conflict("resource snapshot differs from the frozen invocation".into()));
+                return Err(RuntimeError::Conflict(
+                    "resource snapshot differs from the frozen invocation".into(),
+                ));
             }
             None
         };
         let checkpoint = self.checkpoint.load()?;
         if (activation.is_none() && checkpoint.proposal.branch_id != self.run.branch_id)
-            || checkpoint.personalization.as_ref().map(context::ContextScope::from).as_ref() != Some(&self.scope)
+            || checkpoint
+                .personalization
+                .as_ref()
+                .map(context::ContextScope::from)
+                .as_ref()
+                != Some(&self.scope)
         {
-            return Err(RuntimeError::Conflict("resource checkpoint belongs to another admitted scope".into()));
+            return Err(RuntimeError::Conflict(
+                "resource checkpoint belongs to another admitted scope".into(),
+            ));
         }
-        let resources = checkpoint.resources.ok_or_else(|| RuntimeError::NotFound("resource snapshot is not bound".into()))?;
+        let resources = checkpoint
+            .resources
+            .ok_or_else(|| RuntimeError::NotFound("resource snapshot is not bound".into()))?;
         if let Some(binding) = activation {
-            if resources.snapshot.id != binding.snapshot_id || !resources.snapshot.skills.iter().any(|skill|
-                skill.id == binding.resource_id && skill.reference == binding.reference) {
-                return Err(RuntimeError::Conflict("resource activation source differs from its checkpoint".into()));
+            if resources.snapshot.id != binding.snapshot_id
+                || !resources.snapshot.skills.iter().any(|skill| {
+                    skill.id == binding.resource_id && skill.reference == binding.reference
+                })
+            {
+                return Err(RuntimeError::Conflict(
+                    "resource activation source differs from its checkpoint".into(),
+                ));
             }
         }
         Ok(resources)
@@ -643,5 +739,7 @@ impl ResourceSnapshotRead {
 
 #[path = "catalog_input_resources.rs"]
 mod inputs;
-pub use inputs::{InputResourcePreparation, PreparedExplicitSkill, ResourceActivation, retained_activations};
 pub(super) use inputs::{bind_input, input_text, invocations, preserve, validate_raw_input};
+pub use inputs::{
+    retained_activations, InputResourcePreparation, PreparedExplicitSkill, ResourceActivation,
+};

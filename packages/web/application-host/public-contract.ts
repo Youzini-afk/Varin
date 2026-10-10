@@ -77,7 +77,7 @@ export interface WebUiServerController {
   connections: import('./lib/connections/ssh-manager.js').HostSshManager;
   expressApp: Express;
   getPort(): number;
-  getQuitRiskStatus(): QuitRiskStatus;
+  getQuitRiskStatus(): Promise<QuitRiskStatus>;
   getTunnelUrl(): string | null;
   httpServer: Server;
   isReady(): boolean;

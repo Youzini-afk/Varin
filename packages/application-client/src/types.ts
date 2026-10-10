@@ -2499,6 +2499,7 @@ export interface WorkspaceTestAPI {
 }
 
 export interface RuntimeAPIs {
+  schedules?: import("./schedules.js").ScheduledTasksAPI;
   threads?: import("./threads.js").ThreadsAPI;
   runtime: RuntimeDescriptor;
   piRuntime?: PiRuntimeManagementAPI;

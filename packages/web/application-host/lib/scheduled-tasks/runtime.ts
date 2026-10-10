@@ -1,5 +1,7 @@
-import { DateTime, type Zone } from 'luxon';
-import { CronExpressionParser } from 'cron-parser';
+import type { CalendarOwner } from './calendar-owner.js';
+import { DateTime } from 'luxon';
+import { computeNextRunAt, computeOnceDueAt, isMissedRecurringSlot } from './recurrence.js';
+export { computeNextRunAt, isMissedRecurringSlot } from './recurrence.js';
 import { watch } from 'node:fs';
 import { dirname as pathDirname } from 'node:path';
 import { discoverLoops, loopDirectoriesFor } from './loops.js';
@@ -10,7 +12,6 @@ const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
 const JITTER_MAX_MS = 2_000;
 const TASK_TITLE_MAX_LENGTH = 120;
-const TASK_DUE_SLACK_MS = 5_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 type RunReason = 'manual' | 'scheduled';
@@ -70,67 +71,6 @@ export interface ScheduledTaskRunResult {
 
 const buildTaskKey = (projectID: string, taskID: string): string => `${projectID}:${taskID}`;
 
-const parseTimeParts = (time: unknown): { hour: number; minute: number } | null => {
-  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(typeof time === 'string' ? time : '');
-  if (!match) {
-    return null;
-  }
-  return {
-    hour: Number(match[1]),
-    minute: Number(match[2]),
-  };
-};
-
-const applyTimeToDate = (baseDateTime: DateTime, time: unknown): DateTime | null => {
-  const parsed = parseTimeParts(time);
-  if (!parsed) {
-    return null;
-  }
-  return baseDateTime.set({
-    hour: parsed.hour,
-    minute: parsed.minute,
-    second: 0,
-    millisecond: 0,
-  });
-};
-
-const resolveScheduleTimes = (schedule: ScheduledTask['schedule']): string[] => {
-  const times: string[] = [];
-  if (Array.isArray(schedule?.times)) {
-    for (const candidate of schedule.times) {
-      if (typeof candidate === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(candidate)) {
-        times.push(candidate);
-      }
-    }
-  }
-  if (times.length === 0 && typeof schedule?.time === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(schedule.time)) {
-    times.push(schedule.time);
-  }
-  return Array.from(new Set(times)).sort((a, b) => a.localeCompare(b));
-};
-
-const computeOnceDueAt = (
-  schedule: Partial<ScheduledTask['schedule']> | undefined,
-  zone: string | Zone,
-): number | null => {
-  if (!schedule || typeof schedule.date !== 'string' || typeof schedule.time !== 'string') {
-    return null;
-  }
-  const parsed = DateTime.fromFormat(
-    `${schedule.date} ${schedule.time}`,
-    'yyyy-LL-dd HH:mm',
-    { zone },
-  );
-  return parsed.isValid ? parsed.toMillis() : null;
-};
-
-const weekdayAsZeroBased = (dateTime: DateTime): number | null => {
-  if (!dateTime || typeof dateTime.weekday !== 'number') {
-    return null;
-  }
-  return dateTime.weekday % 7;
-};
-
 const safeErrorMessage = (error: unknown, maxLength = 2_000): string => {
   const raw = error instanceof Error
     ? (error.message || String(error))
@@ -140,106 +80,6 @@ const safeErrorMessage = (error: unknown, maxLength = 2_000): string => {
     return 'Unknown error';
   }
   return trimmed.length > maxLength ? trimmed.slice(0, maxLength) : trimmed;
-};
-
-export const computeNextRunAt = (task: {
-  enabled?: boolean;
-  schedule?: Partial<ScheduledTask['schedule']>;
-} | null | undefined, nowMs = Date.now()): number | null => {
-  if (!task?.enabled) {
-    return null;
-  }
-
-  const schedule = task.schedule;
-  if (!schedule || typeof schedule !== 'object') {
-    return null;
-  }
-
-  const zone = typeof schedule.timezone === 'string' && schedule.timezone.trim().length > 0
-    ? schedule.timezone.trim()
-    : DateTime.local().zoneName;
-
-  const now = DateTime.fromMillis(nowMs, { zone });
-  if (!now.isValid) {
-    return null;
-  }
-
-  if (schedule.kind === 'daily') {
-    const times = resolveScheduleTimes(schedule as ScheduledTask['schedule']);
-    if (times.length === 0) {
-      return null;
-    }
-    const minAllowed = now.plus({ milliseconds: TASK_DUE_SLACK_MS });
-
-    for (const time of times) {
-      const candidateToday = applyTimeToDate(now, time);
-      if (!candidateToday || !candidateToday.isValid) {
-        continue;
-      }
-      if (candidateToday > minAllowed) {
-        return candidateToday.toMillis();
-      }
-    }
-
-    const tomorrow = now.plus({ days: 1 });
-    const firstTomorrow = applyTimeToDate(tomorrow, times[0]);
-    return firstTomorrow?.isValid ? firstTomorrow.toMillis() : null;
-  }
-
-  if (schedule.kind === 'weekly') {
-    if (!Array.isArray(schedule.weekdays) || schedule.weekdays.length === 0) {
-      return null;
-    }
-    const times = resolveScheduleTimes(schedule as ScheduledTask['schedule']);
-    if (times.length === 0) {
-      return null;
-    }
-    const weekdaysSet = new Set(schedule.weekdays);
-    const minAllowed = now.plus({ milliseconds: TASK_DUE_SLACK_MS });
-
-    for (let dayOffset = 0; dayOffset <= 14; dayOffset += 1) {
-      const dayCandidate = now.plus({ days: dayOffset });
-      const zeroBasedWeekday = weekdayAsZeroBased(dayCandidate);
-      if (zeroBasedWeekday === null || !weekdaysSet.has(zeroBasedWeekday)) {
-        continue;
-      }
-      for (const time of times) {
-        const withTime = applyTimeToDate(dayCandidate, time);
-        if (!withTime || !withTime.isValid) {
-          continue;
-        }
-        if (withTime > minAllowed) {
-          return withTime.toMillis();
-        }
-      }
-    }
-    return null;
-  }
-
-  if (schedule.kind === 'once') {
-    const dueAt = computeOnceDueAt(schedule as ScheduledTask['schedule'], zone);
-    if (dueAt === null) {
-      return null;
-    }
-    const minAllowed = now.plus({ milliseconds: TASK_DUE_SLACK_MS });
-    return dueAt > minAllowed.toMillis() ? dueAt : null;
-  }
-
-  if (schedule.kind === 'cron') {
-    if (typeof schedule.cron !== 'string' || !schedule.cron) return null;
-    try {
-      const iterator = CronExpressionParser.parse(schedule.cron, {
-        tz: zone,
-        currentDate: new Date(nowMs),
-      });
-      return iterator.next().getTime();
-    } catch {
-      // Missing project metadata makes the task temporarily unrunnable.
-      return null;
-    }
-  }
-
-  return null;
 };
 
 export const formatScheduledSessionTitle = (task: {
@@ -261,19 +101,6 @@ export const formatScheduledSessionTitle = (task: {
   return `${trimmedName}${suffix}`;
 };
 
-export const isMissedRecurringSlot = (
-  task: Pick<ScheduledTask, 'schedule'>,
-  scheduledFor: number,
-  wokeAt: number,
-): boolean => {
-  if (task.schedule.kind === 'once') return false;
-  const followingOccurrence = computeNextRunAt({
-    enabled: true,
-    schedule: task.schedule,
-  }, scheduledFor);
-  return followingOccurrence !== null && wokeAt > followingOccurrence;
-};
-
 export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependencies) => {
   const {
     projectConfigRuntime,
@@ -286,6 +113,8 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
   } = deps;
 
   let executeTask = initialExecuteTask;
+  let calendarOwner: CalendarOwner | undefined;
+  const projectSyncs = new Map<string, Promise<ScheduledTask[]>>();
   let started = false;
   let lifecycleGeneration = 0;
   const tasksByProject = new Map<string, Map<string, ScheduledTask>>();
@@ -349,7 +178,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
       clearTimerForKey(taskKey);
       const taskMap = tasksByProject.get(projectID);
       const task = taskMap?.get(taskID);
-      if (!task || !task.enabled) {
+      if (!task || task.runtime === 'agent' || !task.enabled) {
         return;
       }
       // A timer belongs to one persisted schedule slot. If a resync replaced
@@ -393,7 +222,8 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     if (!task) {
       return task;
     }
-    const nextRunAt = computeNextRunAt(task, Date.now());
+    if (task.runtime === 'agent') return task;
+    const nextRunAt = task.schedule.kind === 'once' && task.onceAcceptance ? null : computeNextRunAt(task, Date.now());
     const statePatch = {
       nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
       updatedAt: Date.now(),
@@ -428,7 +258,8 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     return null;
   };
 
-  const syncProject = async (projectID: string): Promise<ScheduledTask[]> => {
+  const synchronizeProject = async (projectID: string): Promise<ScheduledTask[]> => {
+    let complete = true;
     const projectPath = await ensureProjectPath(projectID);
 
     let tasks = await projectConfigRuntime.listScheduledTasks(projectID);
@@ -439,8 +270,19 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
         // A discovery failure must not make existing scheduled tasks disappear
         // or prevent the task list from opening. Keep the last persisted state
         // and retry on the next sync.
+        complete = false;
         logger.warn?.('[ScheduledTasks] failed to reconcile Markdown loops:', error);
       }
+    }
+    if (calendarOwner) {
+      if (!complete) throw new Error('Calendar asset discovery failed; existing definitions were retained');
+      tasks = await calendarOwner.sync(projectID, tasks);
+      const settled = await projectConfigRuntime.settleCalendarHandoffs(projectID);
+      tasks = tasks.map(task => {
+        if (task.runtime === 'agent') return task;
+        const current = settled.find(value => value.id === task.id);
+        return current ?? task;
+      });
     }
     const activeTasks = tasks.filter((task) => task.loopShadowed !== true);
     setProjectTasks(projectID, activeTasks);
@@ -458,6 +300,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     // freshly computed nextRunAt.
     const nowMs = Date.now();
     for (const task of Array.from(tasksByProject.get(projectID)?.values() || [])) {
+      if (task.runtime === 'agent') continue;
       const taskKey = buildTaskKey(projectID, task.id);
       const inFlight = runningTaskKeys.has(taskKey) || queuedTaskKeys.has(taskKey);
       if (task.state?.lastStatus === 'running' && !inFlight) {
@@ -472,7 +315,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
           logger.warn?.('[ScheduledTasks] failed to reconcile interrupted run:', error);
         }
       }
-      if (started && task.enabled && !inFlight && task.schedule?.kind === 'once') {
+      if (started && task.enabled && !inFlight && task.schedule?.kind === 'once' && !task.onceAcceptance && !task.pendingCalendarHandoff) {
         const dueAt = computeOnceDueAt(task.schedule, task.schedule.timezone);
         const lastRunAt = task.state?.lastRunAt;
         if (dueAt !== null && dueAt <= nowMs && (lastRunAt === undefined || lastRunAt < dueAt)) {
@@ -484,6 +327,14 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
 
     await refreshLoopWatchers();
     return Array.from(tasksByProject.get(projectID)?.values() || []);
+  };
+
+  const syncProject = (projectID: string): Promise<ScheduledTask[]> => {
+    const previous = projectSyncs.get(projectID) ?? Promise.resolve([]);
+    const work = previous.catch(() => []).then(() => synchronizeProject(projectID));
+    projectSyncs.set(projectID, work);
+    void work.finally(() => { if (projectSyncs.get(projectID) === work) projectSyncs.delete(projectID); }).catch(() => undefined);
+    return work;
   };
 
   const syncAllProjects = async (): Promise<void> => {
@@ -505,10 +356,13 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
       }
     }
 
+    const errors: unknown[] = [];
+    try { await calendarOwner?.removeMissingProjects(activeProjectIDs); } catch (error) { errors.push(error); }
     for (const projectID of activeProjectIDs) {
-      await syncProject(projectID);
+      try { await syncProject(projectID); } catch (error) { errors.push(error); }
     }
     await refreshLoopWatchers();
+    if (errors.length) throw new AggregateError(errors, 'Some calendar project assets require attention');
   };
 
   // Markdown loop files are an authority surface: edits must reach the
@@ -587,7 +441,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     return projectRunning < maxProjectConcurrency;
   };
 
-  const executeScheduledTask = async (projectID: string, task: ScheduledTask, reason: RunReason) => {
+  const executeScheduledTask = async (projectID: string, task: ScheduledTask, reason: RunReason, acceptedAtMs: number) => {
     const startedAt = Date.now();
     const title = formatScheduledSessionTitle(task, startedAt);
     const projectPath = projectPathByID.get(projectID);
@@ -612,7 +466,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
         void projectConfigRuntime.updateScheduledTaskState(projectID, task.id, {
           lastSessionId: sessionID,
           updatedAt: Date.now(),
-        }).then((patchResult) => {
+        }, { kind: 'settle', task, acceptedAtMs }).then((patchResult) => {
           if (patchResult.task) updateInMemoryTask(projectID, patchResult.task);
         }).catch((error) => {
           logger.warn?.('[ScheduledTasks] failed to persist run session id:', error);
@@ -646,7 +500,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
   const runTask = async (projectID: string, taskID: string, reason: RunReason): Promise<ScheduledTaskRunResult> => {
     const taskMap = tasksByProject.get(projectID);
     const task = taskMap?.get(taskID);
-    if (!task || (reason === 'scheduled' && !task.enabled)) {
+    if (!task || task.runtime === 'agent' || (reason === 'scheduled' && !task.enabled)) {
       return { ok: false, skipped: true };
     }
 
@@ -661,17 +515,19 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     runningCountByProject.set(projectID, (runningCountByProject.get(projectID) || 0) + 1);
 
     try {
+      // Reserve the original Pi owner before awaiting a native query. A concurrent asset
+      // switch then keeps the new calendar generation held until this owner truly settles.
+      if (calendarOwner && await calendarOwner.hasActiveWork(projectID, taskID)) return { ok: false, running: true, error: 'An earlier Agent occurrence is still active' };
+      if (tasksByProject.get(projectID)?.get(taskID)?.runtime === 'agent') return { ok: false, skipped: true };
       const runStartedAt = Date.now();
-      await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, {
+      const admission = await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, {
         lastRunAt: runStartedAt,
         lastStatus: 'running',
         lastError: undefined,
         updatedAt: runStartedAt,
-      }).then((result) => {
-        if (result.task) {
-          updateInMemoryTask(projectID, result.task);
-        }
-      });
+      }, { kind: 'admit', task, scheduled: reason === 'scheduled' });
+      if (!admission.task) return { ok: false, skipped: true };
+      updateInMemoryTask(projectID, admission.task);
 
       let status: 'error' | 'success' = 'success';
       let sessionID: string | undefined;
@@ -682,7 +538,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
         // The executor observes the real Pi session/Goal terminal state. Releasing
         // the scheduler slot on an arbitrary wall-clock watchdog would permit a
         // second run while the first session is still doing legitimate work.
-        const result = await executeScheduledTask(projectID, task, reason);
+        const result = await executeScheduledTask(projectID, admission.task, reason, runStartedAt);
         sessionID = result.sessionID;
         durationMs = result.durationMs;
         status = 'success';
@@ -707,26 +563,9 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
       if (!durationMs) {
         durationMs = Math.max(0, finishedAt - runStartedAt);
       }
-      let latestTask = (tasksByProject.get(projectID)?.get(taskID)) || task;
-      const shouldConsumeOneTimeTask = latestTask?.schedule?.kind === 'once' && reason === 'scheduled';
-      if (shouldConsumeOneTimeTask && latestTask?.enabled) {
-        try {
-          const consumed = await projectConfigRuntime.upsertScheduledTask(projectID, {
-            ...latestTask,
-            enabled: false,
-          });
-          latestTask = consumed.task || latestTask;
-          updateInMemoryTask(projectID, latestTask);
-        } catch (consumeError) {
-          logger.warn?.('[ScheduledTasks] failed to consume one-time task', {
-            projectID,
-            taskID,
-            error: safeErrorMessage(consumeError),
-          });
-        }
-      }
-
-      const nextRunAt = computeNextRunAt(latestTask, finishedAt);
+      const consumeOnce = task.schedule.kind === 'once' && reason === 'scheduled';
+      const latestTask = tasksByProject.get(projectID)?.get(taskID) || task;
+      const nextRunAt = computeNextRunAt(consumeOnce ? { ...task, enabled: false } : latestTask, finishedAt);
 
       const statePatch = {
         lastStatus: status,
@@ -737,7 +576,10 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
         updatedAt: finishedAt,
       };
 
-      const stateResult = await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, statePatch);
+      // A late Pi completion can settle only its own original accepted asset intent.
+      // Owner/definition changes remain untouched, including their enablement.
+      const stateResult = await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, statePatch,
+        { kind: 'settle', task, acceptedAtMs: runStartedAt, consumeOnce });
       if (stateResult.task) {
         updateInMemoryTask(projectID, stateResult.task);
         if (
@@ -781,6 +623,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
       } else {
         runningCountByProject.set(projectID, nextProjectCount);
       }
+      if (calendarOwner && started) void syncProject(projectID).catch(error => logger.warn?.('[ScheduledTasks] owner transition sync failed:', error));
     }
   };
 
@@ -850,7 +693,8 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     lifecycleGeneration += 1;
     started = true;
     try {
-      await syncAllProjects();
+      if (calendarOwner) await calendarOwner.start(syncAllProjects);
+      else await syncAllProjects();
     } catch (error) {
       stop();
       throw error;
@@ -863,6 +707,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     }
     lifecycleGeneration += 1;
     started = false;
+    calendarOwner?.stop();
     for (const timer of timersByTaskKey.values()) {
       clearTimeout(timer);
     }
@@ -882,17 +727,19 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     queue.length = 0;
   };
 
-  const getStatus = () => {
+  const getStatus = async () => {
     let enabledCount = 0;
     for (const taskMap of tasksByProject.values()) {
       for (const task of taskMap.values()) {
-        if (task?.enabled) {
+        if (task?.enabled && task.runtime !== 'agent') {
           enabledCount += 1;
         }
       }
     }
 
-    const runningCount = runningTaskKeys.size;
+    const native = await calendarOwner?.status();
+    enabledCount += native?.enabled ?? 0;
+    const runningCount = runningTaskKeys.size + (native?.running ?? 0);
     return {
       hasEnabledScheduledTasks: enabledCount > 0,
       hasRunningScheduledTasks: runningCount > 0,
@@ -901,13 +748,15 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     };
   };
 
-  const getProjectStatus = (projectID: string) => {
+  const getProjectStatus = async (projectID: string) => {
     let enabledCount = 0;
     const tasks = tasksByProject.get(projectID);
     for (const task of tasks?.values() ?? []) {
-      if (task.enabled) enabledCount += 1;
+      if (task.enabled && task.runtime !== 'agent') enabledCount += 1;
     }
-    const runningCount = runningCountByProject.get(projectID) ?? 0;
+    const native = await calendarOwner?.status(projectID);
+    enabledCount += native?.enabled ?? 0;
+    const runningCount = (runningCountByProject.get(projectID) ?? 0) + (native?.running ?? 0);
     return {
       hasEnabledScheduledTasks: enabledCount > 0,
       hasRunningScheduledTasks: runningCount > 0,
@@ -927,6 +776,10 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     syncProject,
     runNow,
     setExecutor,
+    setCalendarOwner(owner: CalendarOwner) { if (calendarOwner) throw new Error('Calendar owner already installed'); calendarOwner = owner;
+      projectConfigRuntime.setCalendarHandoffReader({ capture: (project, task) => owner.captureOnceHandoff(project, task), settle: (project, handoff) => owner.settleOnceHandoff(project, handoff) }); },
+    calendarOwner: () => calendarOwner,
+    hasPiWork: (projectID: string, taskID: string) => runningTaskKeys.has(buildTaskKey(projectID, taskID)),
     getStatus,
     getProjectStatus,
   };

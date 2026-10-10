@@ -1,10 +1,12 @@
 import type { Express, Request, RequestHandler, Response } from 'express';
 import { createHash } from 'node:crypto';
 import { createScheduledTaskService } from './service.js';
+import { KernelClientError } from '../kernel/kernel-client.js';
 
 type ServiceDependencies = Parameters<typeof createScheduledTaskService>[0];
 
 interface ScheduledTaskRouteDependencies extends ServiceDependencies {
+  requireAuth: RequestHandler;
   scheduledTaskService?: ReturnType<typeof createScheduledTaskService>;
 }
 
@@ -46,6 +48,12 @@ const asNonEmptyString = (value: unknown): string | null => {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+};
+
+const calendarErrorStatus = (error: unknown): number => {
+  if (error instanceof KernelClientError && error.code === 'operation-error' && error.message.startsWith('operation error: conflict:')) return 409;
+  const failure = errorRecord(error);
+  return typeof failure.statusCode === 'number' ? failure.statusCode : 500;
 };
 
 const parseProjectID = (req: Request) => asNonEmptyString(req.params.projectId);
@@ -179,9 +187,10 @@ export const registerVarinEventRoutes = (
 export const registerScheduledTaskRoutes = (app: Express, dependencies: ScheduledTaskRouteDependencies): void => {
   const {
     scheduledTaskService = createScheduledTaskService(dependencies),
+    requireAuth,
   } = dependencies;
 
-  app.get('/api/projects/:projectId/scheduled-tasks', async (req, res) => {
+  app.get('/api/projects/:projectId/scheduled-tasks', requireAuth, async (req, res) => {
     const projectID = parseProjectID(req);
     if (!projectID) {
       return res.status(400).json({ error: 'projectId is required' });
@@ -198,7 +207,7 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     }
   });
 
-  app.put('/api/projects/:projectId/scheduled-tasks', async (req, res) => {
+  app.put('/api/projects/:projectId/scheduled-tasks', requireAuth, async (req, res) => {
     const projectID = parseProjectID(req);
     if (!projectID) {
       return res.status(400).json({ error: 'projectId is required' });
@@ -225,7 +234,7 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     }
   });
 
-  app.delete('/api/projects/:projectId/scheduled-tasks/:taskId', async (req, res) => {
+  app.delete('/api/projects/:projectId/scheduled-tasks/:taskId', requireAuth, async (req, res) => {
     const projectID = parseProjectID(req);
     const taskID = parseTaskID(req);
     if (!projectID) {
@@ -245,7 +254,7 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     }
   });
 
-  app.get('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+  app.get('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', requireAuth, async (req, res) => {
     const projectID = parseProjectID(req);
     const taskID = parseTaskID(req);
     if (!projectID) return res.status(400).json({ error: 'projectId is required' });
@@ -260,7 +269,7 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     }
   });
 
-  app.put('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+  app.put('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', requireAuth, async (req, res) => {
     const projectID = parseProjectID(req);
     const taskID = parseTaskID(req);
     if (!projectID) return res.status(400).json({ error: 'projectId is required' });
@@ -275,7 +284,7 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     }
   });
 
-  app.patch('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+  app.patch('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', requireAuth, async (req, res) => {
     const projectID = parseProjectID(req);
     const taskID = parseTaskID(req);
     if (!projectID) return res.status(400).json({ error: 'projectId is required' });
@@ -296,7 +305,7 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     }
   });
 
-  app.delete('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+  app.delete('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', requireAuth, async (req, res) => {
     const projectID = parseProjectID(req);
     const taskID = parseTaskID(req);
     if (!projectID) return res.status(400).json({ error: 'projectId is required' });
@@ -313,7 +322,7 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     }
   });
 
-  app.post('/api/projects/:projectId/scheduled-tasks/:taskId/run', async (req, res) => {
+  app.post('/api/projects/:projectId/scheduled-tasks/:taskId/run', requireAuth, async (req, res) => {
     const projectID = parseProjectID(req);
     const taskID = parseTaskID(req);
     if (!projectID) {
@@ -324,16 +333,25 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     }
 
     try {
-      return res.json({ ok: true, ...await scheduledTaskService.run(projectID, taskID) });
+      return res.json({ ok: true, ...await scheduledTaskService.run(projectID, taskID, req.body?.key) });
     } catch (error) {
       const failure = errorRecord(error);
       if (typeof failure.statusCode === 'number') return res.status(failure.statusCode).json({ error: failure.message, ...(failure.task ? { task: failure.task } : {}) });
       console.error('[ScheduledTasks] failed to run task:', error);
-      return res.status(500).json({ error: 'Failed to run scheduled task' });
+      return res.status(calendarErrorStatus(error)).json({ error: 'Failed to run scheduled task' });
     }
   });
 
-  app.get('/api/varin/scheduled-tasks/status', async (_req, res) => {
+  app.post('/api/projects/:projectId/scheduled-tasks/:taskId/occurrences/:occurrenceId/control', requireAuth, async (req, res) => {
+    try { return res.json(await scheduledTaskService.controlOccurrence(req.params.projectId, req.params.taskId, req.params.occurrenceId, req.body?.expectedRevision, req.body?.action)); }
+    catch (error) { return res.status(calendarErrorStatus(error)).json({ error: error instanceof Error ? error.message : 'Calendar occurrence control failed' }); }
+  });
+  app.post('/api/projects/:projectId/scheduled-tasks/:taskId/calculation/retry', requireAuth, async (req, res) => {
+    try { return res.json(await scheduledTaskService.retryCalculation(req.params.projectId, req.params.taskId, req.body?.expectedRevision)); }
+    catch (error) { return res.status(calendarErrorStatus(error)).json({ error: error instanceof Error ? error.message : 'Calendar calculation retry failed' }); }
+  });
+
+  app.get('/api/varin/scheduled-tasks/status', requireAuth, async (_req, res) => {
     try {
       return res.json(await scheduledTaskService.globalStatus());
     } catch (error) {

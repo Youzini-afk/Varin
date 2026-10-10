@@ -66,7 +66,7 @@ const describeSchedule = (schedule: ScheduledTaskView["schedule"]): string => {
 const describeTask = (task: ScheduledTaskView): string => {
   const parts = [
     `${task.id} [${task.enabled ? "enabled" : "disabled"}] ${task.name} — ${describeSchedule(task.schedule)}`,
-    `  status: ${task.state.lastStatus}`,
+    task.runtime === 'agent' ? `  Agent calendar: ${task.calendar?.definition.calculation_failure ?? (task.calendar?.definition.calculation_pending ? 'calculating' : 'ready')}` : `  status: ${task.state.lastStatus}`,
   ];
   if (task.state.nextRunAt) parts.push(`  next run: ${new Date(task.state.nextRunAt).toISOString()}`);
   if (task.state.lastRunAt) {
@@ -193,11 +193,13 @@ export function createScheduledTaskTool(bridge: HostServicesBridge): ToolDefinit
           case "run": {
             const taskId = needTaskId();
             if (!taskId) return invalidParams("scheduled_task", "run requires taskId");
-            const result = await requestRun({ taskId }) as ScheduleRunResult;
+            const result = await requestRun({ taskId, key: _toolCallId }) as ScheduleRunResult;
             return {
               content: [{
                 type: "text",
-                text: `Run finished: ${describeTask(result.task)}${result.sessionId ? `\n  session: ${result.sessionId}` : ""}`,
+                text: result.runtime === 'agent'
+                  ? `Occurrence accepted: ${result.occurrence.id} (${result.occurrence.state}). Read the task for its actual Run/Goal outcome.`
+                  : `Run finished: ${describeTask(result.task)}\n  session: ${result.sessionId}`,
               }],
               ...(result.task.state.lastStatus === "error" ? { isError: true } : {}),
               details: { result: result as unknown as Record<string, unknown> },

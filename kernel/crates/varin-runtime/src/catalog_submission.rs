@@ -7,7 +7,7 @@ pub struct SubmissionPreparation {
     expected_context_checkpoint: Option<String>,
     current: Option<context::CheckpointRead>,
     scope: Option<context::ContextScope>,
-    command: SubmitInput,
+    pub(super) command: SubmitInput,
     initial: Option<context::ContextProposal>,
     personalization: Option<personalization::PersonalizationBasis>,
     resources: Option<resources::ContextResources>,

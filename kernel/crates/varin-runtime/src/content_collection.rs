@@ -348,6 +348,7 @@ impl ContentCollection {
             UNION ALL SELECT json_extract(body,'$.selection.extension_bindings_ref') FROM run_launches
             UNION ALL SELECT json_extract(body,'$.selection.mcp_binding_ref') FROM run_launches WHERE json_extract(body,'$.selection.mcp_binding_ref') IS NOT NULL
             UNION ALL SELECT json_extract(p.value,'$.body') FROM run_launches l,json_each(l.body,'$.selection.policy_models') p");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.snapshot_ref') FROM calendar_projects UNION ALL SELECT json_extract(body,'$.instruction_ref') FROM calendar_definitions UNION ALL SELECT json_extract(body,'$.input_ref') FROM calendar_definitions UNION ALL SELECT json_extract(body,'$.instruction_ref') FROM calendar_occurrences");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.instruction_ref') FROM followups WHERE json_extract(body,'$.instruction_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(m.value,'$.body') FROM policy_selections p,json_each(p.body,'$.models') m");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.value.answer_ref') FROM operations WHERE json_extract(body,'$.executor')='ask_user' AND json_extract(body,'$.result.value.answer_ref') IS NOT NULL");

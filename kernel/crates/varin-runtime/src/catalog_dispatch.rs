@@ -814,6 +814,7 @@ impl Catalog {
         }
         for thread in &threads {
             super::activation::cancel_thread(&tx, thread)?;
+            super::calendar::cancel_thread_pending(&tx, thread)?;
         }
         let children = children
             .into_iter()

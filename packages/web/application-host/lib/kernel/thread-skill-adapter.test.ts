@@ -52,6 +52,7 @@ async function fixture() {
   const submitReceipt = { thread_id: identity.threadId, branch_id: identity.branchId, run_id: run.id, input_id: 'input:initial', cursor: 2 };
   const enqueueReceipt = { input_id: queued.id, run_id: run.id, mode: 'next_run' as const, cursor: 3 };
   const runtime = {
+    admitCalendar: vi.fn<AgentRuntimeClient['admitCalendar']>(async input => ({ id: input.occurrenceId, run_id: run.id } as import('./protocol.generated.js').CalendarOccurrence)),
     thread: vi.fn<AgentRuntimeClient['thread']>(async () => ({ thread_id: identity.threadId, observer_project_ids: [],
       branches: [{ branch_id: identity.branchId, active_run_id: run.id, head: null, latest_run: run }] })),
     run: vi.fn<AgentRuntimeClient['run']>(async () => run), input: vi.fn<AgentRuntimeClient['input']>(async () => queued),
@@ -169,4 +170,21 @@ describe('ThreadAdapter explicit skill input composition', () => {
     expect(f.continueLaunch).not.toHaveBeenCalled();
     expect(f.unexpectedRead).not.toHaveBeenCalled();
   });
+});
+
+
+it('cold calendar admission preserves explicit skill input and transfers a successful preparation to its original Run owner', async () => {
+  const f = await fixture();
+  const source: ThreadSource = { mode: 'fixed_branch', workspaceId: 'calendar-project', executionWorkspaceId: 'calendar-execution', branchId: 'calendar-source', revision: 1, tools: [] };
+  vi.spyOn(f.adapter, 'prepareSource').mockResolvedValue({ source, path: f.root } as Awaited<ReturnType<ThreadAdapter['prepareSource']>>);
+  const occurrence = { id: 'calendar:occurrence', revision: 3, thread_id: identity.threadId, branch_id: identity.branchId };
+  const work = { occurrence, definition: { target: { kind: 'new_work', model, sourceMode: 'fixed_branch', goal: null } }, instruction: rawText, owner_epoch: 2 } as import('./protocol.generated.js').CalendarPreparation;
+  const preparation = new AbortController();
+  await f.adapter.prepareCalendarWork(work, f.root, preparation.signal);
+  preparation.abort(); // The occurrence leaves the pending preparation scan after admission.
+  expect(f.runtime.admitCalendar.mock.calls[0]?.[0]).toMatchObject({ occurrenceId: occurrence.id, expectedRevision: 3, ownerEpoch: 2,
+    initialContext: f.initial(f.a), inputPreparation: { expectedContextCheckpoint: null, skill: { snapshotId: f.a.snapshot.id, body: 'ORIGINAL A', arguments: 'first\n second' } } });
+  expect(f.prepareSkill.mock.calls[0]?.[2]).toBe(rawText);
+  expect(f.runtime.submit).not.toHaveBeenCalled();
+  expect(f.continueLaunch).toHaveBeenCalledWith(f.run.id, expect.not.objectContaining({ signal: expect.anything() }));
 });

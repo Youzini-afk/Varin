@@ -3,7 +3,7 @@ import { ResourceScopeError } from './thread-resource-scope.js';
 import type { ThreadSkillInputPreparer } from './thread-skill-input.js';
 import { randomUUID } from 'node:crypto';
 import { admitRunSourceAuthority, sourceToolSchemas } from './source-launch.js';
-import type { KernelClient } from './kernel-client.js';
+import { KernelClientError, type KernelClient } from './kernel-client.js';
 import { KernelWorkingStateRootStore, type KernelStorageAdapter } from './storage-adapter.js';
 import type { LiveSourceResolver } from './live-source.js';
 import { captureStableSourceBaseline, type StableSourcePreparationOwners } from '../harness/working-state/source-preparation.js';
@@ -46,6 +46,8 @@ export class ThreadCollaboration {
     const runtime = owners.runtime;
     this.removers = [runtime.onEvent(event => {
       if (event.stream !== 'durable') return;
+      // Definition/Goal controls can release a hold without changing the child execution row.
+      for (const task of this.tasks.values()) if (task.preparing) task.recheck = true;
       this.resumeEpoch(); void this.recover();
     }), runtime.onExit(() => {
       this.suspended = true; this.epoch.abort();
@@ -295,7 +297,7 @@ export class ThreadCollaboration {
     return child;
   }
   private async releaseHandoff(child: DelegatedExecution, signal: AbortSignal): Promise<void> {
-    if (child.resources_released || (child.source?.kind !== 'ready' && !child.report)) return;
+    if (child.resources_released || (!child.receipt && !child.report) || (child.source?.kind !== 'ready' && !child.report)) return;
     const { kernel, runtime } = this.owners;
     if (child.trigger.kind !== 'dispatch') {
       if (!child.receipt && child.source_basis) {
@@ -366,6 +368,9 @@ export class ThreadCollaboration {
       if (child.receipt && child.state === 'ready') await this.owners.continueRun(child.receipt.run_id, signal);
       if (child.report && child.receipt && ['pending', 'settling', 'candidate'].includes(child.code_result.kind)) child = await this.settle(child, signal);
     } catch (error) {
+      // A current definition/Goal pause can arrive after source preparation but before the
+      // original submission transaction. Keep this exact pending execution for its next event.
+      if (error instanceof KernelClientError && error.code === 'activation-held') return;
       if (!signal.aborted) {
         const current = await runtime.childExecution(child.execution_id);
         // An admitted Run's unknown effects remain recoverable; preparation failure cannot erase them.

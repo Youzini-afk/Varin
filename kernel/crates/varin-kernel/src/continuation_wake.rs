@@ -16,7 +16,7 @@ pub(crate) fn drive(
     owner: std::sync::Weak<varin_runtime::supervisor::RunSupervisor>,
     mut wakes: platform::Receiver,
 ) {
-    let mut failed = [false; 3];
+    let mut failed = [false; 4];
     loop {
         let Some(runtime) = owner.upgrade() else {
             break;
@@ -80,7 +80,12 @@ pub(crate) fn drive(
                 .and_then(|now| c.reconcile_followup_facts_at(now))
                 .map_err(|_| ())
         });
-        // All three original owners get this committed-event pass independently. Diagnostics
+        let calendar_facts = runtime.catalog().lock().map_err(|_| ()).and_then(|mut c| {
+            varin_runtime::catalog::observations::wall_time_ms()
+                .and_then(|now| c.reconcile_calendar_facts_at(now))
+                .map_err(|_| ())
+        });
+        // Each domain gets the committed-event pass independently; pure Host arithmetic never blocks it. Diagnostics
         // are edge-triggered per owner, so the error event itself cannot generate a retry loop.
         let results = [
             (
@@ -94,6 +99,12 @@ pub(crate) fn drive(
                     .map(|_| ())
                     .map_err(|_| ())
                     .and(time_facts.map(|_| ())),
+            ),
+            (
+                "calendar",
+                varin_runtime::catalog::calendar::reconcile(&runtime.catalog())
+                    .map_err(|_| ())
+                    .and(calendar_facts.map(|_| ())),
             ),
         ];
         for (index, (source, result)) in results.into_iter().enumerate() {

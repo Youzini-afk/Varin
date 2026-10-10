@@ -12,12 +12,8 @@ import {
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
-import {
-  fetchScheduledTaskLoopDocument,
-  updateScheduledTaskLoopDocument,
-  type ScheduledTask,
-  type ScheduledTaskLoopDocument,
-} from '@/lib/scheduledTasksApi';
+import { createScheduledTasksHttpAPI, type ScheduledTask, type ScheduledTaskLoopDocument } from '@varin/application-client';
+const schedules = createScheduledTasksHttpAPI();
 
 export function ScheduledTaskLoopEditorDialog({
   open,
@@ -49,7 +45,7 @@ export function ScheduledTaskLoopEditorDialog({
     let cancelled = false;
     setLoading(true);
     setLoadError(null);
-    void fetchScheduledTaskLoopDocument(projectID, task.id)
+    void schedules.readLoop(projectID, task.id)
       .then((next) => {
         if (cancelled) return;
         setDocument(next);
@@ -79,10 +75,7 @@ export function ScheduledTaskLoopEditorDialog({
     if (!document || !task) return;
     setSaving(true);
     try {
-      const next = await updateScheduledTaskLoopDocument(projectID, task.id, {
-        content,
-        revision: document.revision,
-      });
+      const { document: next } = await schedules.updateLoop(projectID, task.id, content, document.revision);
       setDocument(next);
       setContent(next.content);
       await onSaved();

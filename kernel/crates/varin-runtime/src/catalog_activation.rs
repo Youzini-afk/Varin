@@ -83,17 +83,18 @@ pub enum MessageActivation {
 }
 pub(in crate::catalog) fn fact(row: &QueuedInputMetadata) -> Result<&IngressActivationFact> {
     match &row.origin {
-        InputOrigin::Message { activation, .. } | InputOrigin::Followup { activation, .. } => {
-            Ok(activation)
-        }
+        InputOrigin::Message { activation, .. }
+        | InputOrigin::Followup { activation, .. }
+        | InputOrigin::Calendar { activation, .. } => Ok(activation),
         _ => Err(RuntimeError::Invalid(
             "ingress activation requires a typed activating input".into(),
         )),
     }
 }
 pub(in crate::catalog) fn set_fact(row: &mut QueuedInputMetadata, next: IngressActivationFact) {
-    if let InputOrigin::Message { activation, .. } | InputOrigin::Followup { activation, .. } =
-        &mut row.origin
+    if let InputOrigin::Message { activation, .. }
+    | InputOrigin::Followup { activation, .. }
+    | InputOrigin::Calendar { activation, .. } = &mut row.origin
     {
         *activation = next;
     }
@@ -122,8 +123,10 @@ fn row_goal_hold(db: &Connection, row: &QueuedInputMetadata, run: &Run) -> Resul
     if !goal_hold(db, run)? {
         return Ok(false);
     }
-    if matches!(row.origin, InputOrigin::Followup { .. })
-        && followups::pending_dependency_check(db, row)?
+    if matches!(
+        row.origin,
+        InputOrigin::Followup { .. } | InputOrigin::Calendar { .. }
+    ) && followups::pending_dependency_check(db, row)?
     {
         return Ok(false);
     }
@@ -286,10 +289,10 @@ pub(in crate::catalog) fn write_changed(
         tx,
         &row.id,
         row.revision,
-        if matches!(row.origin, InputOrigin::Followup { .. }) {
-            "followup.activation_changed"
-        } else {
-            "message.activation_changed"
+        match row.origin {
+            InputOrigin::Followup { .. } => "followup.activation_changed",
+            InputOrigin::Calendar { .. } => "calendar.activation_changed",
+            _ => "message.activation_changed",
         },
         json!({"input_id":row.id}),
     )?;
@@ -302,7 +305,7 @@ pub(in crate::catalog) fn bind_pending(tx: &Transaction<'_>, run: &Run) -> Resul
     }
     let execution_id = execution_for_run(tx, &run.id)?;
     let rows = {
-        let mut q=tx.prepare("SELECT body FROM input_queue WHERE branch_id=?1 AND origin IN ('message','followup') AND state='queued' AND json_extract(body,'$.origin.activation.state')='pending' ORDER BY cursor")?;
+        let mut q=tx.prepare("SELECT body FROM input_queue WHERE branch_id=?1 AND origin IN ('message','followup','calendar') AND state='queued' AND json_extract(body,'$.origin.activation.state')='pending' ORDER BY cursor")?;
         let rows = q.query_map([&run.branch_id], |r| r.get::<_, String>(0))?;
         rows.map(|r| Ok(serde_json::from_str(&r?)?))
             .collect::<Result<Vec<QueuedInputMetadata>>>()?
@@ -312,10 +315,10 @@ pub(in crate::catalog) fn bind_pending(tx: &Transaction<'_>, run: &Run) -> Resul
         if pending.is_some() && pending != execution_id.as_deref() {
             continue;
         }
-        if followups::ingress_hold(tx, &row, Some(run))?.is_some() {
+        if ingress::hold(tx, &row, Some(run))?.is_some() {
             continue;
         }
-        followups::refresh_ingress_goal(tx, &mut row)?;
+        ingress::refresh_goal(tx, &mut row)?;
         row.run_id = Some(run.id.clone());
         write_changed(
             tx,
@@ -334,13 +337,13 @@ pub(in crate::catalog) fn bind_execution(
     execution_id: &str,
 ) -> Result<()> {
     let rows = {
-        let mut q=tx.prepare("SELECT body FROM input_queue WHERE branch_id=?1 AND origin IN ('message','followup') AND state='queued' AND json_extract(body,'$.origin.activation.state')='pending' AND json_extract(body,'$.origin.activation.execution_id') IS NULL ORDER BY cursor")?;
+        let mut q=tx.prepare("SELECT body FROM input_queue WHERE branch_id=?1 AND origin IN ('message','followup','calendar') AND state='queued' AND json_extract(body,'$.origin.activation.state')='pending' AND json_extract(body,'$.origin.activation.execution_id') IS NULL ORDER BY cursor")?;
         let rows = q.query_map([branch], |r| r.get::<_, String>(0))?;
         rows.map(|r| Ok(serde_json::from_str(&r?)?))
             .collect::<Result<Vec<QueuedInputMetadata>>>()?
     };
     for mut row in rows {
-        if followups::ingress_hold(tx, &row, None)?.is_some() {
+        if ingress::hold(tx, &row, None)?.is_some() {
             continue;
         }
         write_changed(
@@ -377,11 +380,76 @@ pub(in crate::catalog) fn cancel_row(
             run_id: current.run_id().map(str::to_owned),
             execution_id: current.execution_id().map(str::to_owned),
         },
-    )
+    )?;
+    if let Some(execution_id) = current.execution_id() {
+        cancel_unlaunched_trigger(tx, row, execution_id)?;
+    }
+    Ok(())
 }
+/// A cancelled trigger cannot retain a prepared child execution with no Run. Other ingress
+/// sharing that preparation returns to its own pending state; a delivered Run is untouched.
+fn cancel_unlaunched_trigger(
+    tx: &Transaction<'_>,
+    row: &QueuedInputMetadata,
+    execution_id: &str,
+) -> Result<()> {
+    use super::collaboration::{ChildCodeResult, ChildReport};
+    use super::delegated::DelegatedTrigger;
+    let mut execution = delegated::execution(tx, execution_id)?;
+    let trigger = match &execution.trigger {
+        DelegatedTrigger::Followup { input_id, .. }
+        | DelegatedTrigger::Calendar { input_id, .. } => input_id,
+        DelegatedTrigger::MessageRequest { message_id, .. } => message_id,
+        _ => return Ok(()),
+    };
+    if trigger != &row.id || execution.receipt.is_some() || execution.cancel_requested {
+        return Ok(());
+    }
+    let child = delegated::relation(tx, &execution.child_operation_id)?;
+    execution.cancel_requested = true;
+    if execution.report.is_none() {
+        if !execution.code_result.settled() {
+            execution.code_result = ChildCodeResult::Unavailable {
+                code: "cancelled_before_launch".into(),
+                effect: Effect::None,
+            };
+        }
+        execution.report = Some(ChildReport {
+            outcome: Outcome::Cancelled,
+            sender_thread_id: child.child_thread_id,
+            run_id: None,
+            history_ids: vec![],
+            detail: Some("The original ingress was cancelled before launch.".into()),
+        });
+    }
+    execution.revision += 1;
+    delegated::write_execution(tx, &execution)?;
+    event(
+        tx,
+        execution_id,
+        execution.revision,
+        "child.cancel_requested",
+        Value::Null,
+    )?;
+    let rows: Vec<QueuedInputMetadata> = {
+        let mut query = tx.prepare("SELECT body FROM input_queue WHERE origin IN ('message','followup','calendar') AND state='queued' AND json_extract(body,'$.origin.activation.state')='pending' AND json_extract(body,'$.origin.activation.execution_id')=?1")?;
+        let rows = query.query_map([execution_id], |r| r.get::<_, String>(0))?;
+        rows.map(|r| Ok(serde_json::from_str(&r?)?))
+            .collect::<Result<_>>()?
+    };
+    for mut other in rows {
+        write_changed(
+            tx,
+            &mut other,
+            IngressActivationFact::Pending { execution_id: None },
+        )?;
+    }
+    Ok(())
+}
+
 pub(in crate::catalog) fn cancel_run(tx: &Transaction<'_>, run: &str) -> Result<()> {
     let rows = {
-        let mut q=tx.prepare("SELECT body FROM input_queue WHERE run_id=?1 AND origin IN ('message','followup') AND state='queued' AND activation='activating'")?;
+        let mut q=tx.prepare("SELECT body FROM input_queue WHERE run_id=?1 AND origin IN ('message','followup','calendar') AND state='queued' AND activation='activating'")?;
         let rows = q.query_map([run], |r| r.get::<_, String>(0))?;
         rows.map(|r| Ok(serde_json::from_str(&r?)?))
             .collect::<Result<Vec<QueuedInputMetadata>>>()?
@@ -393,7 +461,7 @@ pub(in crate::catalog) fn cancel_run(tx: &Transaction<'_>, run: &str) -> Result<
 }
 pub(in crate::catalog) fn cancel_thread(tx: &Transaction<'_>, thread: &str) -> Result<()> {
     let rows = {
-        let mut q=tx.prepare("SELECT q.body FROM input_queue q JOIN branches b ON b.id=q.branch_id WHERE b.thread_id=?1 AND q.origin IN ('message','followup') AND q.state='queued' AND q.activation='activating'")?;
+        let mut q=tx.prepare("SELECT q.body FROM input_queue q JOIN branches b ON b.id=q.branch_id WHERE b.thread_id=?1 AND q.origin IN ('message','followup','calendar') AND q.state='queued' AND q.activation='activating'")?;
         let rows = q.query_map([thread], |r| r.get::<_, String>(0))?;
         rows.map(|r| Ok(serde_json::from_str(&r?)?))
             .collect::<Result<Vec<QueuedInputMetadata>>>()?
@@ -438,7 +506,7 @@ pub(in crate::catalog) fn delivered_submission(
             execution_id,
         },
     )?;
-    followups::delivered(tx, &row)?;
+    ingress::delivered(tx, &row)?;
     event(
         tx,
         &run.id,
@@ -608,7 +676,7 @@ impl Catalog {
             return Ok((Vec::new(), None));
         }
         let rows = {
-            let mut q=self.db.prepare("SELECT body FROM input_queue WHERE origin IN ('message','followup') AND state='queued' AND activation='activating' ORDER BY cursor")?;
+            let mut q=self.db.prepare("SELECT body FROM input_queue WHERE origin IN ('message','followup','calendar') AND state='queued' AND activation='activating' ORDER BY cursor")?;
             let rows = q.query_map([], |r| r.get::<_, String>(0))?;
             rows.map(|r| Ok(serde_json::from_str(&r?)?))
                 .collect::<Result<Vec<QueuedInputMetadata>>>()?
@@ -627,7 +695,10 @@ impl Catalog {
                     if run.cancel_requested || run.state == RunState::Cancelled {
                         cancel_run(&tx, &run_id)?;
                     } else if run.state.terminal()
-                        && matches!(row.origin, InputOrigin::Followup { .. })
+                        && matches!(
+                            row.origin,
+                            InputOrigin::Followup { .. } | InputOrigin::Calendar { .. }
+                        )
                     {
                         row.run_id = None;
                         write_changed(
@@ -635,9 +706,12 @@ impl Catalog {
                             &mut row,
                             IngressActivationFact::Pending { execution_id: None },
                         )?;
-                    } else if matches!(row.origin, InputOrigin::Followup { .. }) {
+                    } else if matches!(
+                        row.origin,
+                        InputOrigin::Followup { .. } | InputOrigin::Calendar { .. }
+                    ) {
                         let old = row.clone();
-                        followups::refresh_ingress_goal(&tx, &mut row)?;
+                        ingress::refresh_goal(&tx, &mut row)?;
                         if row != old {
                             row.revision += 1;
                             inputs::write_input(&tx, &row)?;
@@ -686,7 +760,7 @@ impl Catalog {
                     self.fail_request_activation(&row.id, row.revision, "launch_unavailable")?;
                     return Ok(());
                 };
-                if followups::ingress_hold(&self.db, &row, Some(&run))?.is_some() {
+                if ingress::hold(&self.db, &row, Some(&run))?.is_some() {
                     return Ok(());
                 }
                 if !run.state.terminal() || row_goal_hold(&self.db, &row, &run)? {
@@ -695,10 +769,13 @@ impl Catalog {
                 if !branches.insert(row.branch_id.clone()) {
                     return Ok(());
                 }
-                if matches!(row.origin, InputOrigin::Followup { .. }) {
+                if matches!(
+                    row.origin,
+                    InputOrigin::Followup { .. } | InputOrigin::Calendar { .. }
+                ) {
                     let tx = self.db.transaction()?;
                     let old = row.clone();
-                    followups::refresh_ingress_goal(&tx, &mut row)?;
+                    ingress::refresh_goal(&tx, &mut row)?;
                     if row != old {
                         row.revision += 1;
                         inputs::write_input(&tx, &row)?;
@@ -895,7 +972,7 @@ impl Catalog {
                 {
                     return Ok(RequestActivationAdmission::Stale);
                 }
-                if followups::ingress_hold(&self.db, &row, Some(&actual))?.is_some()
+                if ingress::hold(&self.db, &row, Some(&actual))?.is_some()
                     || row_goal_hold(&self.db, &row, &actual)?
                 {
                     return Ok(RequestActivationAdmission::Held);
@@ -989,6 +1066,11 @@ pub fn reconcile(catalog: &Mutex<Catalog>) -> Result<Vec<String>> {
             let revision = candidate.revision();
             let prepared = match candidate.load() {
                 Ok(p) => p,
+                Err(RuntimeError::RequestActivationHeld) => continue,
+                Err(RuntimeError::RequestActivationStale | RuntimeError::DispatchCancelled) => {
+                    stale = true;
+                    continue;
+                }
                 Err(error) => {
                     stale = true;
                     failure.get_or_insert(error);
@@ -1009,6 +1091,10 @@ pub fn reconcile(catalog: &Mutex<Catalog>) -> Result<Vec<String>> {
                     ()
                 }
                 Ok(RequestActivationAdmission::Stale) => stale = true,
+                Err(RuntimeError::RequestActivationHeld) => (),
+                Err(RuntimeError::RequestActivationStale | RuntimeError::DispatchCancelled) => {
+                    stale = true
+                }
                 Err(error) => {
                     stale = true;
                     failure.get_or_insert(error);

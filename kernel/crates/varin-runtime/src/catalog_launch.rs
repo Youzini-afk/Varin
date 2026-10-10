@@ -829,8 +829,8 @@ pub(super) fn policy_preparable(
     {
         return Ok(false);
     }
-    let continued:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM delegated_executions WHERE run_id=?1 AND json_extract(body,'$.trigger.kind') IN ('user_continuation','message_request','followup'))",[&run.id],|r|r.get(0))?;
-    let message:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM input_queue WHERE run_id=?1 AND origin IN ('message','followup') AND id IN (SELECT json_extract(data,'$.input_id') FROM events WHERE kind='ingress.run_ready'))",[&run.id],|r|r.get(0))?;
+    let continued:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM delegated_executions WHERE run_id=?1 AND json_extract(body,'$.trigger.kind') IN ('user_continuation','message_request','followup','calendar'))",[&run.id],|r|r.get(0))?;
+    let message:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM input_queue WHERE run_id=?1 AND (origin IN ('message','followup') OR (origin='calendar' AND id IN (SELECT input_id FROM calendar_occurrences WHERE json_extract(body,'$.target.kind')='existing_work'))) AND id IN (SELECT json_extract(data,'$.input_id') FROM events WHERE kind='ingress.run_ready'))",[&run.id],|r|r.get(0))?;
     if continued || message {
         return Ok(false);
     }

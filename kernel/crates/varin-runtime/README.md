@@ -293,13 +293,13 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 32, input domain 5 and collaboration domain 6 store input intents/queue bodies and context-job ownership,
+Catalog version 33, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
 history, all model outputs (including rejected output), original command intents, queued-history references, context
 checkpoints, memory projections, summary recipes and source parts, policy action/checkpoint bodies,
-and indexed graph calls/receipts, follow-up instructions, Goal objective/reason/creation-intent references, planning-model request/output references, ordinary tool arguments/results,
+and indexed graph calls/receipts, follow-up and calendar instructions/intents, Goal objective/reason/creation-intent references, planning-model request/output references, ordinary tool arguments/results,
 external executor receipts and permission call/scope bodies, including historical receipt and completed
 permission audit events and original invocation completions. It verifies each distinct live object
 before sweeping and preserves unknown files; it never deletes history or invokes system-kernel GC.
@@ -1167,3 +1167,26 @@ checks then passed without modifying or claiming that unrelated target passed. F
 lint on the independent lane retains the pre-existing index.ts prefer-const error, reproduced on
 its base revision; changed plan files and merged filters add no lint errors. These initial failures
 and the successful scoped reruns are retained separately.
+
+
+### Calendar assets and actual occurrences
+
+`catalog_calendar` projects explicit Agent definitions from the original project/Markdown owner.
+Catalog owns definition generation, actual UTC slot, cursor and occurrence identity. It delegates
+all input/history and cold/root/child activation to `catalog_ingress` and `catalog_activation`;
+original Run/Launch/Goal/child execution records own execution and outcome. A native occurrence is
+not a Pi session, a fabricated previous Run, or an execution success receipt.
+
+The existing native absolute-deadline worker durably observes a due slot and requests pure arithmetic
+for future slots. Host supplies IANA/cron arithmetic but owns no native timer, queue or last status.
+Once catch-up and recurring skip/coalesce preserve the actual slot and generation; identical asset
+sync does not rearm consumed work. External assets must be revalidated after owner-epoch recovery.
+Disabled, invalid or previous-runtime-active definitions hold unconsumed work. Deletion/replacement
+cancels unconsumed inputs, retaining delivered results; Run/tree stop cancels the accepted set while
+leaving future standing calendar slots intact. Native non-overlap reads real Run/Goal lifecycle.
+
+Cold preparation resolves the registered model, actual source and main project context outside the
+control transaction. Atomic admission commits their original Run, Environment input, optional Goal
+and explicit skill activation. Existing work keeps its admitted scope and exact child predecessor /
+WorkingResult. Control paths do not hydrate instruction bodies. ContentStore publication and GC
+include definition and occurrence references, including changed/deleted generations.

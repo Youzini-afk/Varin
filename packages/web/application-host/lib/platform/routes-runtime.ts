@@ -259,6 +259,7 @@ export const createPlatformRoutesRuntime = ({
       fileSearch,
     });
     registerScheduledTaskRoutes(app, {
+      requireAuth: uiAuthController.requireAuth,
       readSettingsFromDisk,
       sanitizeProjects,
       projectConfigRuntime,

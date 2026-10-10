@@ -154,6 +154,9 @@ impl Catalog {
         if let Some(at) = self.nearest_followup_deadline()? {
             deadline = Some(deadline.map_or(at, |previous| previous.min(at)));
         }
+        if let Some(at) = self.nearest_calendar_deadline()? {
+            deadline = Some(deadline.map_or(at, |previous| previous.min(at)));
+        }
         Ok(deadline)
     }
     /// Runs have quiesced before this selection; no model writer is moved underneath a request.

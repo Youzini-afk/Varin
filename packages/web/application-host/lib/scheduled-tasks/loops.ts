@@ -6,12 +6,16 @@ import YAML from 'yaml';
 import { CronExpressionParser } from 'cron-parser';
 import { IANAZone } from 'luxon';
 import { resolveWorktreeTopLevel } from '../git/service.js';
-import type { ScheduledTaskExecution } from '../projects/project-config.js';
+import { normalizeCalendarTarget, type ScheduledTaskExecution } from '../projects/project-config.js';
+import type { CalendarTarget, CalendarMissedPolicy, ThinkingLevel } from '@varin/protocol';
 
 const LOOP_DIRECTORY = 'loops';
 const THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
 export interface LoopDefinition {
+  runtime?: 'pi' | 'agent';
+  target?: CalendarTarget;
+  missedPolicy?: CalendarMissedPolicy;
   enabled: boolean;
   execution: ScheduledTaskExecution;
   name: string;
@@ -160,6 +164,21 @@ export const parseLoopContent = (content: unknown): ParsedLoopContent => {
   const prompt = asNonEmptyString(parts.bodyRaw);
   if (!prompt) return { definition: null, error: 'The markdown body is required', name };
 
+  if (frontmatter.runtime !== undefined && frontmatter.runtime !== 'pi' && frontmatter.runtime !== 'agent') return { definition: null, error: 'Frontmatter runtime is invalid', name };
+  if (frontmatter.runtime === 'agent') {
+    try {
+      if (['model', 'thinking', 'agent', 'run_as_goal', 'goal_token_budget'].some(key => frontmatter[key] !== undefined)) throw new Error('Agent loops select model, source and Goal in target');
+      if (frontmatter.enabled !== undefined && typeof frontmatter.enabled !== 'boolean') throw new Error('Frontmatter enabled must be a boolean');
+      const timezone = asNonEmptyString(frontmatter.timezone);
+      if (!timezone || !IANAZone.isValidZone(timezone)) throw new Error('Agent loops require an explicit IANA timezone');
+      CronExpressionParser.parse(cron, { tz: timezone, currentDate: new Date() }).next();
+      if (frontmatter.missed_policy !== undefined && frontmatter.missed_policy !== 'skip' && frontmatter.missed_policy !== 'coalesce_once') throw new Error('Frontmatter missed_policy is invalid');
+      return { definition: { runtime: 'agent', target: normalizeCalendarTarget(frontmatter.target), name,
+        enabled: frontmatter.enabled === true, execution: { prompt: parts.bodyRaw }, schedule: { kind: 'cron', cron, timezone },
+        missedPolicy: frontmatter.missed_policy === 'coalesce_once' ? 'coalesce_once' : 'skip' }, error: null, name };
+    } catch (error) { return { definition: null, error: error instanceof Error ? error.message : 'Invalid Agent loop', name }; }
+  }
+
   const model = splitProviderModel(frontmatter.model);
   if (!model) {
     return { definition: null, error: 'Frontmatter "model" must be "provider/model"', name };
@@ -220,7 +239,7 @@ export const parseLoopContent = (content: unknown): ParsedLoopContent => {
         ...(agent ? { agent } : {}),
         ...(goalTokenBudget !== undefined ? { goalTokenBudget } : {}),
         ...(runAsGoal ? { runAsGoal: true } : {}),
-        ...(thinking ? { thinkingLevel: thinking } : {}),
+        ...(thinking ? { thinkingLevel: thinking as ThinkingLevel } : {}),
       },
       name,
       schedule: {
