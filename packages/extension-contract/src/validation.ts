@@ -73,6 +73,7 @@ import {
   VarinContextExpressionError,
 } from "./context-expression.js";
 import semver from "semver";
+import { parseVarinExtensionToolDeclaration } from "./tools.js";
 
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 const SEMVER_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
@@ -339,14 +340,28 @@ function parseServices<T extends VarinExtensionServiceRequirement | VarinExtensi
       ? raw.binding
       : undefined;
     if (kind === "require" && raw.binding !== undefined && !binding) issues.push(`${itemPath}.binding must be all, selected, or single`);
+    let tool: VarinExtensionServiceProvision["tool"];
+    if (kind === "provide" && raw.tool !== undefined) {
+      try { tool = parseVarinExtensionToolDeclaration(raw.tool); }
+      catch (error) { issues.push(`${itemPath}: ${error instanceof Error ? error.message : String(error)}`); }
+    }
     result.push({
       id,
       version,
+      ...(tool ? { tool } : {}),
       ...(typeof flag === "boolean" ? { [flagKey]: flag } : {}),
       ...(binding ? { binding } : {}),
     } as T);
   });
   return result;
+}
+
+/** Parse the same declaration used by manifest discovery, activation, inspection and execution. */
+export function parseVarinExtensionServiceProvision(value: unknown): VarinExtensionServiceProvision {
+  const issues: string[] = [];
+  const descriptor = parseServices<VarinExtensionServiceProvision>([value], "service", issues, "provide")?.[0];
+  if (issues.length > 0 || !descriptor) throw new VarinExtensionContractError("Invalid service provision", issues);
+  return descriptor;
 }
 
 function parseContributions(value: unknown, path: string, issues: string[]): VarinExtensionStaticContribution[] | undefined {

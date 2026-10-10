@@ -1,6 +1,8 @@
 import {
   isVarinExtensionId,
   parseVarinExtensionServiceInvocationRequest,
+  parseVarinExtensionServiceProvision,
+  parseVarinToolJson,
   type JsonValue,
   type VarinExtensionServiceCatalogSnapshot,
   type VarinExtensionServiceInvocationRequest,
@@ -16,8 +18,15 @@ export interface HostServiceOwnerIdentity {
   generation: number;
 }
 
+/** Trusted Host-only authority. Only an opaque reference may cross an extension worker boundary. */
+export interface HostInvocationScope {
+  readonly id: string;
+  readonly value: unknown;
+}
+
 export interface HostServiceInvocationContext {
   readonly signal: AbortSignal;
+  readonly invocation?: HostInvocationScope;
 }
 
 export type HostServiceHandler = (
@@ -50,9 +59,11 @@ export interface HostServiceBinding {
 
 export interface HostServicePin {
   readonly providerId: string;
+  /** Explicit disable/revocation/crash, never ordinary generation retirement. */
+  readonly revocationSignal: AbortSignal;
   /** Check revocation without calling the worker; ordinary retirement preserves a held pin. */
   assertAvailable(): void;
-  invoke(method: string, args: JsonValue[], signal?: AbortSignal): Promise<JsonValue>;
+  invoke(method: string, args: JsonValue[], signal?: AbortSignal, invocation?: HostInvocationScope): Promise<JsonValue>;
   release(): void;
 }
 
@@ -61,6 +72,7 @@ interface ActiveProvider {
   handler: HostServiceHandler;
   inFlight: number;
   revoked: boolean;
+  revocation: AbortController;
   pins: Set<() => void>;
   onDrained: Array<() => void>;
   owner: HostServiceOwnerIdentity;
@@ -73,28 +85,18 @@ const ownerKey = (owner: HostServiceOwnerIdentity): string => `${owner.extension
 const exactOwnerKey = (owner: HostServiceOwnerIdentity): string => `${ownerKey(owner)}\0${owner.generation}`;
 const serviceKey = (id: string, version: number): string => `${id}@${version}`;
 
-const validateDescriptor = (descriptor: VarinExtensionServiceProvision): VarinExtensionServiceProvision => {
-  if (!isVarinExtensionId(descriptor.id)) throw new Error(`Invalid Host service ID: ${descriptor.id}`);
-  if (!Number.isSafeInteger(descriptor.version) || descriptor.version <= 0) throw new Error(`Invalid Host service version: ${descriptor.id}`);
-  if (descriptor.multiple !== undefined && typeof descriptor.multiple !== "boolean") throw new Error(`Invalid Host service multiplicity: ${descriptor.id}`);
-  return {
-    id: descriptor.id,
-    version: descriptor.version,
-    ...(descriptor.multiple !== undefined ? { multiple: descriptor.multiple } : {}),
+const freezeDescriptor = (descriptor: VarinExtensionServiceProvision): VarinExtensionServiceProvision => {
+  const freeze = (value: unknown): void => {
+    if (!value || typeof value !== "object") return;
+    Object.freeze(value);
+    for (const item of Object.values(value)) freeze(item);
   };
+  const parsed = parseVarinExtensionServiceProvision(descriptor);
+  freeze(parsed);
+  return parsed;
 };
 
-const assertJsonValue = (value: unknown, path = "result"): JsonValue => {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (Array.isArray(value)) return value.map((item, index) => assertJsonValue(item, `${path}[${index}]`));
-  if (typeof value === "object" && value !== null) {
-    const result: Record<string, JsonValue> = {};
-    for (const [key, item] of Object.entries(value)) result[key] = assertJsonValue(item, `${path}.${key}`);
-    return result;
-  }
-  throw new Error(`${path} is not JSON-safe`);
-};
+const assertJsonValue = (value: unknown): JsonValue => parseVarinToolJson(value, "Host service result");
 
 export class HostServiceRegistry {
   readonly hostId: string;
@@ -207,7 +209,7 @@ export class HostServiceRegistry {
     handler: HostServiceHandler;
   }> {
     const normalized = provisions.map((provision) => ({
-      descriptor: validateDescriptor(provision.descriptor),
+      descriptor: freezeDescriptor(provision.descriptor),
       handler: provision.handler,
     }));
     const ownKeys = new Set<string>();
@@ -257,6 +259,7 @@ export class HostServiceRegistry {
       handler: provision.handler,
       inFlight: 0,
       revoked: false,
+      revocation: new AbortController(),
       pins: new Set(),
       onDrained: [],
       owner: { ...owner },
@@ -381,14 +384,15 @@ export class HostServiceRegistry {
         provider.pins.add(release);
         return Object.freeze({
           providerId: provider.providerId,
+          revocationSignal: provider.revocation.signal,
           assertAvailable: () => {
             if (released) throw new Error("Host service exchange pin has been released");
             available(true);
           },
-          invoke: async (method: string, args: JsonValue[], signal?: AbortSignal) => {
+          invoke: async (method: string, args: JsonValue[], signal?: AbortSignal, invocation?: HostInvocationScope) => {
             if (released) throw new Error("Host service exchange pin has been released");
             available(true);
-            return this.#invokeProvider(provider, method, args, signal);
+            return this.#invokeProvider(provider, method, args, signal, invocation);
           },
           release,
         });
@@ -401,23 +405,24 @@ export class HostServiceRegistry {
     return this.bind(request.serviceId, request.version, request.providerId).invoke(request.method, request.args, signal);
   }
 
-  async #invokeProvider(provider: ActiveProvider, method: string, args: JsonValue[], signal?: AbortSignal): Promise<JsonValue> {
+  async #invokeProvider(provider: ActiveProvider, method: string, args: JsonValue[], signal?: AbortSignal, invocation?: HostInvocationScope): Promise<JsonValue> {
     if (signal?.aborted) throw signal.reason ?? new Error("Host service invocation cancelled");
-    const controller = new AbortController();
-    const abort = () => controller.abort(signal?.reason);
-    signal?.addEventListener("abort", abort, { once: true });
+    const callSignal = signal
+      ? AbortSignal.any([signal, provider.revocation.signal])
+      : provider.revocation.signal;
+    callSignal.throwIfAborted();
     provider.inFlight += 1;
     try {
       // This is the worker boundary. Typed native callers never enter this JSON contract.
-      return assertJsonValue(await provider.handler(method, args, { signal: controller.signal }));
+      return assertJsonValue(await provider.handler(method, args, { signal: callSignal, ...(invocation ? { invocation } : {}) }));
     } finally {
-      signal?.removeEventListener("abort", abort);
       this.#releaseProvider(provider);
     }
   }
 
   #revokeProvider(provider: ActiveProvider): void {
     provider.revoked = true;
+    provider.revocation.abort(new HostServiceBindingError("binding_revoked", `Host service binding was revoked: ${provider.providerId}`));
     for (const release of [...provider.pins]) release();
   }
 

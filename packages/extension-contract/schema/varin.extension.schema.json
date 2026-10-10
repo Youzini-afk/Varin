@@ -90,7 +90,7 @@
           "items": {
             "allOf": [
               { "$ref": "#/$defs/service" },
-              { "type": "object", "properties": { "multiple": { "type": "boolean" } } }
+              { "type": "object", "properties": { "multiple": { "type": "boolean" }, "tool": { "$ref": "#/$defs/tool" } } }
             ]
           }
         }
@@ -261,6 +261,70 @@
     }
   },
   "$defs": {
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "description",
+        "inputSchema",
+        "outputSchema",
+        "completion",
+        "operation"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "description": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "inputSchema": {
+          "type": [
+            "object",
+            "boolean"
+          ]
+        },
+        "outputSchema": {
+          "type": [
+            "object",
+            "boolean"
+          ]
+        },
+        "completion": {
+          "const": "result"
+        },
+        "operation": {
+          "enum": [
+            "read",
+            "effect"
+          ]
+        },
+        "examples": {
+          "type": "array"
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "\\S"
+            },
+            "line": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          }
+        }
+      }
+    },
     "activationList": {
       "type": "array",
       "uniqueItems": true,

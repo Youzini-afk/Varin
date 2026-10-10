@@ -76,3 +76,19 @@ for its actual exit. The existing owner diagnostics record `broker_cleanup_uncon
 exit does not mean the extension's cleanup or any external effect was completed or undone.
 Independent owners still finish shutdown even if another owner reports a failure. Trusted-native
 extensions retain their distinct in-process cleanup/restart contract.
+
+Tool services add `tool` metadata to their existing service provision. The standalone manifest,
+activation declaration, registry snapshot and SDK `inspect` response preserve that same descriptor;
+a mismatched or missing tool activation is rejected before publication. The executing tool Host compiles the declared
+input/output schemas. `operation: read` does not grant permissions or certify side-effect-free code.
+
+Trusted callers attach a Host-only `HostInvocationScope` to an exact service pin. The broker sends
+only a fresh opaque invocation token, resolves it against its exact extension owner/generation, and
+injects the original scope object into nested capability calls. `value` never crosses the worker wire.
+Call-scoped capability clients and async invocation context cannot retain authority after the real
+service callback finishes. Cancellation aborts nested work while retaining callback/drain ownership
+until the real response or process exit. Request-delivery/process/IPC failures revoke and terminate the
+unreliable broker; sending a kill signal alone does not settle pending callbacks. Ordinary unscoped
+capability calls retain owner-grant semantics.
+A pin's `revocationSignal` wakes waiting preparation on explicit disable/crash/revocation; ordinary
+replacement leaves it live, including a frozen pin that has not yet made its first call.

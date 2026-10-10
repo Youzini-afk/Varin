@@ -115,16 +115,16 @@ test('failed owner replacement rollback preserves another owners concurrent sele
   assert.equal(services.getSnapshot().selections['dev.test.one@1'], find('dev.test.a'));
 });
 
-test('drain preserves pinned calls, rejects new calls, and forwards cancellation', async () => {
-  const services = new HostServiceRegistry('test'); const entered = deferred(); const cancelled = deferred();
+test('drain revokes calls immediately but retains ownership until the callback settles', async () => {
+  const services = new HostServiceRegistry('test'); const entered = deferred(); const cancelled = deferred(); const settled = deferred();
   await services.replaceOwner(owner('dev.test.a'), [{ descriptor: { id: 'dev.test.one', version: 1 }, handler: async (_m, _a, {signal}) => {
-    entered.resolve(); await new Promise<void>((resolve) => { signal.addEventListener('abort', () => { cancelled.resolve(); resolve(); }, {once:true}); }); return 'cancelled';
+    entered.resolve(); await new Promise<void>((resolve) => { signal.addEventListener('abort', () => { cancelled.resolve(); resolve(); }, {once:true}); }); await settled.promise; return 'cancelled';
   } }]);
   const controller = new AbortController(); const call = services.invoke({serviceId: 'dev.test.one', version: 1, method: 'run', args: []}, controller.signal); await entered.promise;
   let drained = false; const drain = services.drainOwner(owner('dev.test.a')).then(() => { drained = true; });
   await tick(); assert.equal(drained, false);
   await assert.rejects(services.invoke({serviceId: 'dev.test.one', version: 1, method: 'run', args: []}), /unavailable/);
-  controller.abort(); await bounded(cancelled.promise); assert.equal(await call, 'cancelled'); await drain; assert.equal(drained, true);
+  await bounded(cancelled.promise); controller.abort(); settled.resolve(); assert.equal(await call, 'cancelled'); await drain; assert.equal(drained, true);
 });
 
 test('public runtime activation lets an unrelated extension become callable while another prepares', async () => {

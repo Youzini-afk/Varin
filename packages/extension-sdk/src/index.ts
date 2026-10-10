@@ -303,6 +303,8 @@ export interface VarinHostServiceInvocationContext {
   /** Cooperative cancellation; an aborted signal does not prove an external effect was undone. */
   readonly signal: AbortSignal;
   readonly callId: string;
+  /** Bound to this call; retaining it after completion cannot retain invocation authority. */
+  readonly capabilities: VarinHostCapabilityClient;
 }
 
 export type VarinHostServiceHandler = Record<string, (
@@ -711,3 +713,5 @@ export * from "./agent-policy.js";
 export * from "./run-activity.js";
 
 export * from "./retrieval-plan.js";
+
+export * from "./tools.js";

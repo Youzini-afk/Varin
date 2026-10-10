@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createRequire } from 'node:module';
 import { isAbsolute, relative, resolve } from 'node:path';
 
@@ -5,6 +6,7 @@ const require = createRequire(import.meta.url);
 const pending = new Map();
 const serviceHandlers = new Map();
 const activeCalls = new Map();
+const invocationContext = new AsyncLocalStorage();
 const disposers = [];
 let modulePath = '';
 let loadedModule = null;
@@ -64,6 +66,17 @@ const requestParent = (method, params) => new Promise((resolve, reject) => {
   pending.set(id, { resolve, reject });
   send({ kind: 'request', id, method, params });
 });
+
+const callCapability = (scope, capability, method, params) => {
+  if (scope) {
+    if (!scope.active) return Promise.reject(new Error('Host capability invocation has expired'));
+    if (scope.signal.aborted) return Promise.reject(scope.signal.reason);
+  }
+  return requestParent('capability.call', {
+    capability, method, params,
+    ...(scope?.invocationId !== undefined ? { invocationId: scope.invocationId } : {}),
+  });
+};
 
 const loadExtensionModule = (nextModulePath) => {
   if (loadedModule && modulePath === nextModulePath) return loadedModule;
@@ -126,7 +139,7 @@ const handleParentRequest = async (message, signal) => {
           path: (logicalPath) => packageAssetPath(packageRoot, logicalPath),
         },
         capabilities: {
-          call: (capability, method, params) => requestParent('capability.call', { capability, method, params }),
+          call: (capability, method, params) => callCapability(invocationContext.getStore(), capability, method, params),
         },
         effect: (disposer) => {
           if (typeof disposer !== 'function') throw new Error('Host effect disposer must be a function');
@@ -180,7 +193,15 @@ const handleParentRequest = async (message, signal) => {
       const implementation = handler?.[method];
       if (typeof implementation !== 'function') throw new Error(`Brokered Host service method is unavailable: ${key}.${method}`);
       signal.throwIfAborted();
-      return implementation(Array.isArray(message.params?.args) ? message.params.args : [], { signal, callId: message.id });
+      const scope = { signal, active: true, invocationId: message.params?.invocationId };
+      try {
+        return await invocationContext.run(scope, () => implementation(
+          Array.isArray(message.params?.args) ? message.params.args : [], {
+            signal, callId: message.id,
+            capabilities: { call: (capability, method, params) => callCapability(scope, capability, method, params) },
+          },
+        ));
+      } finally { scope.active = false; }
     }
     case 'storage.sync':
       for (const snapshot of Array.isArray(message.params?.storages)
