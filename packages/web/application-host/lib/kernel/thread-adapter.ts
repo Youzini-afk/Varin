@@ -28,7 +28,8 @@ export class ThreadAdapter {
     private readonly onLaunchError: (runId: string, error: unknown) => void,
     private readonly prepareWorkspace?: (input: ThreadPrepareSource) => Promise<ThreadPreparedSource>,
     private readonly prepareContext?: ContextPreparer, private readonly plans?: PlanService,
-    private readonly prepareSkillInput?: ThreadSkillInputPreparer) {}
+    private readonly prepareSkillInput?: ThreadSkillInputPreparer,
+    private readonly processTerminals?: import('@varin/application-client').ThreadProcessesAPI) {}
 
   private async skillInput(identity: ThreadIdentity, resources: ContextResources | undefined, text: string, signal?: AbortSignal): Promise<PreparedExplicitSkill | null> {
     if (!parseExplicitSkillCommand(text)) return null;
@@ -125,6 +126,11 @@ export class ThreadAdapter {
     if (results.some(result => result.status === 'rejected')) throw new Error('Personalization refresh requires attention');
   }
 
+  async openProcessTerminal(input: ThreadIdentity & { operationId: string }) {
+    await this.requireIdentity(input);
+    if (!this.processTerminals) throw new Error('Process terminals are unavailable');
+    return this.processTerminals.openTerminal(input);
+  }
   async decidePermission(input: ThreadIdentity & { operationId: string; permissionId: string; decision: 'allow_once' | 'deny' }) {
     await this.requireIdentity(input);
     const operation = await this.requireOperation(input.operationId);

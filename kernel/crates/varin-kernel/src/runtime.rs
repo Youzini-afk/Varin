@@ -1,6 +1,6 @@
 use crate::error::{response_error, KernelError};
 use crate::protocol::*;
-use crate::protocol_generated::KERNEL_REQUEST_WINDOW;
+use crate::protocol_generated::{KERNEL_DEFERRED_RESPONSE_METHODS, KERNEL_REQUEST_WINDOW};
 use crate::storage::materialization::{
     Admission as MaterializationAdmission, Control as MaterializationControl,
     Controlled as MaterializationControlled, Task as MaterializationTask,
@@ -30,6 +30,7 @@ struct PendingRootRegistration {
 enum WorkerRequest {
     Wire(Value, Arc<AtomicBool>),
     Resource(crate::tools::ResourceCall),
+    Interaction(crate::storage::process_interactions::Command),
     ReplayProcessTerminals(Vec<String>),
     IntegrationReceipt(crate::tools::IntegrationReceiptRead),
     ResultPublicationDone {
@@ -361,11 +362,24 @@ impl Kernel {
         })?;
         let grant_id = request.get("grantId").and_then(Value::as_str);
         if method == "source.handoff.claim" {
-            if grant_id.is_some(){return Err(KernelError::Authorization("source claim requires current Host authority".into()));}
-            let handoff=self.agent_control.child_handoff(&params_value)?;
-            let identity=storage.root().to_string_lossy().to_string();
-            return Ok(Some(response_ok(id,storage.claim_child_handoff(&params_value,&handoff,host_id,
-                self.host_generation.as_deref().unwrap_or_default(),&identity,&self.epoch)?)));
+            if grant_id.is_some() {
+                return Err(KernelError::Authorization(
+                    "source claim requires current Host authority".into(),
+                ));
+            }
+            let handoff = self.agent_control.child_handoff(&params_value)?;
+            let identity = storage.root().to_string_lossy().to_string();
+            return Ok(Some(response_ok(
+                id,
+                storage.claim_child_handoff(
+                    &params_value,
+                    &handoff,
+                    host_id,
+                    self.host_generation.as_deref().unwrap_or_default(),
+                    &identity,
+                    &self.epoch,
+                )?,
+            )));
         }
         if method == "authority.grant.issue" {
             reject_unknown_fields(
@@ -416,17 +430,44 @@ impl Kernel {
         )?;
         if method == "working.result.publish" {
             use crate::storage::result_publication::ResultPublicationAdmission;
-            match storage.prepare_result_publication(&authorized_params,&authorized_grant.grant_id,cancellation.clone())? {
-                ResultPublicationAdmission::Complete(value)=>return Ok(Some(response_ok(id,value))),
-                ResultPublicationAdmission::Work(task)=>{
-                    let task=Arc::new(task);
-                    let work=task.clone(); let request=request.clone(); let completed=completions.clone();
-                    let spawned=thread::Builder::new().name("result-publication".into()).spawn(move||{
-                        let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||work.run()))
-                            .unwrap_or_else(|_|Err(KernelError::Storage("result publication worker panicked".into())));
-                        let _=completed.send(WorkerRequest::ResultPublicationDone {request,task:work,result});
-                    });
-                    match spawned {Ok(worker)=>self.file_workers.push((cancellation,worker)),Err(error)=>{storage.release_result_publication_worker(&task);return Err(error.into());}}
+            match storage.prepare_result_publication(
+                &authorized_params,
+                &authorized_grant.grant_id,
+                cancellation.clone(),
+            )? {
+                ResultPublicationAdmission::Complete(value) => {
+                    return Ok(Some(response_ok(id, value)))
+                }
+                ResultPublicationAdmission::Work(task) => {
+                    let task = Arc::new(task);
+                    let work = task.clone();
+                    let request = request.clone();
+                    let completed = completions.clone();
+                    let spawned = thread::Builder::new()
+                        .name("result-publication".into())
+                        .spawn(move || {
+                            let result =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    work.run()
+                                }))
+                                .unwrap_or_else(|_| {
+                                    Err(KernelError::Storage(
+                                        "result publication worker panicked".into(),
+                                    ))
+                                });
+                            let _ = completed.send(WorkerRequest::ResultPublicationDone {
+                                request,
+                                task: work,
+                                result,
+                            });
+                        });
+                    match spawned {
+                        Ok(worker) => self.file_workers.push((cancellation, worker)),
+                        Err(error) => {
+                            storage.release_result_publication_worker(&task);
+                            return Err(error.into());
+                        }
+                    }
                     return Ok(None);
                 }
             }
@@ -684,7 +725,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
-    let integration_requests=request_tx.clone();
+    let integration_requests = request_tx.clone();
     let replay_requests = request_tx.clone();
     let agent_cancellations = cancellations.clone();
     let resource_requests = request_tx.clone();
@@ -695,6 +736,60 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let admission_revoked = revoked_grants.clone();
     let admission_cancellations = cancellations.clone();
     let process_controls = crate::process::ProcessControlRegistry::default();
+    let interaction_requests = request_tx.clone();
+    let interaction_active = cancellations.clone();
+    let interaction_revoked = revoked_grants.clone();
+    let interaction_epoch = admission_epoch.clone();
+    let interaction_client = crate::storage::process_interactions::Client::new(move |command| {
+        interaction_requests
+            .send(WorkerRequest::Interaction(command))
+            .map_err(|_| KernelError::Storage("process owner stopped".into()))
+    })
+    .with_watch(move |grants, cancel| {
+        let revoked = interaction_revoked
+            .lock()
+            .map_err(|_| KernelError::Storage("revocation owner failed".into()))?;
+        let epoch = interaction_epoch
+            .lock()
+            .map_err(|_| KernelError::Storage("epoch owner failed".into()))?
+            .clone();
+        let mut active = interaction_active
+            .lock()
+            .map_err(|_| KernelError::Storage("cancellation owner failed".into()))?;
+        let mut keys = Vec::new();
+        for grant in grants {
+            if revoked.contains(grant) {
+                cancel.cancel();
+            }
+            let key = format!("process-input:{}", Uuid::new_v4());
+            active.insert(
+                key.clone(),
+                ActiveRequest {
+                    token: cancel.shared_flag(),
+                    epoch: epoch.clone(),
+                    grant_id: Some(grant.clone()),
+                    runtime_cancel: Some(cancel.clone()),
+                    input_order: None,
+                    wire_lane: None,
+                    pending_body: false,
+                    body_cancel_receipt: false,
+                },
+            );
+            keys.push(key);
+        }
+        drop(active);
+        drop(revoked);
+        let owner = interaction_active.clone();
+        Ok(
+            varin_runtime::execution_capacity::AdmissionControlGuard::new(move || {
+                if let Ok(mut active) = owner.lock() {
+                    for key in keys {
+                        active.remove(&key);
+                    }
+                }
+            }),
+        )
+    });
     let resources = crate::tools::KernelResourceClient::new(
         move |call| {
             let epoch = resource_epoch
@@ -755,7 +850,12 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         },
         process_controls.clone(),
     )
-    .with_integration_receipts(move |read|integration_requests.send(WorkerRequest::IntegrationReceipt(read)).map_err(|_|KernelError::Storage("Storage journal owner stopped".into())))
+    .with_process_interactions(interaction_client.clone())
+    .with_integration_receipts(move |read| {
+        integration_requests
+            .send(WorkerRequest::IntegrationReceipt(read))
+            .map_err(|_| KernelError::Storage("Storage journal owner stopped".into()))
+    })
     .with_admission_control(move |binding, cancel| {
         use varin_runtime::{execution::ExecutionError, execution_capacity::AdmissionControlGuard};
         let failed =
@@ -947,22 +1047,48 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     continue;
                 }
-                WorkerRequest::ResultPublicationDone {request,task,result}=>{
-                    let id=request["id"].as_str().unwrap_or("");
-                    let published=(||{
-                        let storage=kernel.storage.as_mut().ok_or_else(||KernelError::Authorization("kernel stopped".into()))?;
-                        let (grant,_)=storage.authorize(request["grantId"].as_str(),&kernel.epoch,
-                            kernel.host_id.as_deref().unwrap_or(""),kernel.host_generation.as_deref().unwrap_or(""),
-                            "working.result.publish",&request["params"])?;
-                        if worker_revoked_grants.lock().map(|revoked|revoked.contains(&grant.grant_id)).unwrap_or(true) {
+                WorkerRequest::ResultPublicationDone {
+                    request,
+                    task,
+                    result,
+                } => {
+                    let id = request["id"].as_str().unwrap_or("");
+                    let published = (|| {
+                        let storage = kernel
+                            .storage
+                            .as_mut()
+                            .ok_or_else(|| KernelError::Authorization("kernel stopped".into()))?;
+                        let (grant, _) = storage.authorize(
+                            request["grantId"].as_str(),
+                            &kernel.epoch,
+                            kernel.host_id.as_deref().unwrap_or(""),
+                            kernel.host_generation.as_deref().unwrap_or(""),
+                            "working.result.publish",
+                            &request["params"],
+                        )?;
+                        if worker_revoked_grants
+                            .lock()
+                            .map(|revoked| revoked.contains(&grant.grant_id))
+                            .unwrap_or(true)
+                        {
                             return Err(KernelError::Authorization("grant is revoked".into()));
                         }
-                        storage.finish_result_publication(&task,result?,&grant.grant_id)
+                        storage.finish_result_publication(&task, result?, &grant.grant_id)
                     })();
-                    if let Some(storage)=kernel.storage.as_mut(){storage.release_result_publication_worker(&task);}
-                    worker_cancellations.lock().ok().map(|mut active|active.remove(id));
-                    let response=match published {Ok(value)=>response_ok(id,value),Err(error)=>response_error(id,&error)};
-                    if worker_response_tx.send(response).is_err(){break;}
+                    if let Some(storage) = kernel.storage.as_mut() {
+                        storage.release_result_publication_worker(&task);
+                    }
+                    worker_cancellations
+                        .lock()
+                        .ok()
+                        .map(|mut active| active.remove(id));
+                    let response = match published {
+                        Ok(value) => response_ok(id, value),
+                        Err(error) => response_error(id, &error),
+                    };
+                    if worker_response_tx.send(response).is_err() {
+                        break;
+                    }
                     continue;
                 }
                 WorkerRequest::CaptureDone {
@@ -1009,9 +1135,34 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     continue;
                 }
-                WorkerRequest::IntegrationReceipt(read)=>{
-                    let result=kernel.storage.as_ref().ok_or_else(||KernelError::Storage("Storage not ready".into())).and_then(|storage|storage.integration_receipt(&read));
-                    let _=read.reply.send(result);continue;
+                WorkerRequest::Interaction(command) => {
+                    if let Some(storage) = kernel.storage.as_mut() {
+                        if let Some((intent, receipt)) = storage.serve_interaction(
+                            command,
+                            &kernel.epoch,
+                            kernel.host_id.as_deref().unwrap_or_default(),
+                            kernel.host_generation.as_deref().unwrap_or_default(),
+                        ) {
+                            if intent.native.is_some() {
+                                let _ = worker_agent_tx.send(
+                                    crate::agent_runtime::Command::ProcessInteraction {
+                                        intent,
+                                        receipt,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                    continue;
+                }
+                WorkerRequest::IntegrationReceipt(read) => {
+                    let result = kernel
+                        .storage
+                        .as_ref()
+                        .ok_or_else(|| KernelError::Storage("Storage not ready".into()))
+                        .and_then(|storage| storage.integration_receipt(&read));
+                    let _ = read.reply.send(result);
+                    continue;
                 }
                 WorkerRequest::ReplayProcessTerminals(ids) => {
                     let result = kernel
@@ -1442,6 +1593,56 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     body_cancel_receipt: false,
                 },
             );
+        }
+        if request["method"].as_str().is_some_and(|method| {
+            matches!(
+                method,
+                "process.write" | "process.resize" | "process.interaction.inspect"
+            )
+        }) {
+            let request_id = request["id"].as_str().unwrap_or_default().to_string();
+            let cancel = {
+                let mut active = cancellations
+                    .lock()
+                    .map_err(|_| "cancellation owner poisoned")?;
+                let active = active
+                    .get_mut(&request_id)
+                    .ok_or("interaction request lost admission")?;
+                let cancel = active.runtime_cancel.clone().unwrap_or_default();
+                if active.token.load(Ordering::Acquire) {
+                    cancel.cancel();
+                }
+                active.token = cancel.shared_flag();
+                active.runtime_cancel = Some(cancel.clone());
+                if KERNEL_DEFERRED_RESPONSE_METHODS.contains(&request["method"].as_str().unwrap_or_default()) {
+                    // The complete body is owned by this cancellable interaction, not by the
+                    // shared transport window. Its final response remains the effect evidence.
+                    active.wire_lane = None;
+                }
+                cancel
+            };
+            if KERNEL_DEFERRED_RESPONSE_METHODS.contains(&request["method"].as_str().unwrap_or_default()) {
+                let epoch = admission_epoch.lock().map_err(|_| "admission epoch poisoned")?.clone();
+                let _ = response_tx.send_control(json!({
+                    "v": PROTOCOL_VERSION, "kind": "request-credit-released", "id": request_id,
+                    "kernelEpoch": epoch.unwrap_or_default(), "method": request["method"]
+                }));
+            }
+            let client = interaction_client.clone();
+            let responses = response_tx.clone();
+            let active = cancellations.clone();
+            thread::spawn(move || {
+                let result = client.wire(request, cancel);
+                let response = match result {
+                    Ok(value) => response_ok(&request_id, value),
+                    Err(error) => response_error(&request_id, &error),
+                };
+                if let Ok(mut active) = active.lock() {
+                    active.remove(&request_id);
+                }
+                let _ = responses.send(response);
+            });
+            continue;
         }
         if request
             .get("method")

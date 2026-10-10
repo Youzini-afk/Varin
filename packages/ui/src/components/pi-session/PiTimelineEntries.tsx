@@ -16,7 +16,7 @@ import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { renderTerminalOutput } from '@/components/chat/message/parts/toolOutput';
 import { getApplyPatchFileEntries } from '@/components/chat/message/parts/toolDiffUtils';
 import { getToolSummary, groupToolCalls } from '@/components/chat/message/parts/toolSummary';
-import { harnessShellIdFromDetails, openHarnessTerminal } from '@/lib/openHarnessTerminal';
+import { harnessShellIdFromDetails, attachProcessTerminal } from '@/lib/attachProcessTerminal';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   DropdownMenu,
@@ -550,7 +550,7 @@ const PiToolCard: React.FC<{
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              openHarnessTerminal(cwd, harnessShellId, command);
+              attachProcessTerminal(cwd, harnessShellId, command);
             }}
           >
             {t('chat.timeline.tools.openTerminal')}

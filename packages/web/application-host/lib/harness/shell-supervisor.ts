@@ -292,8 +292,8 @@ export interface PtyProcess {
   onData(handler: (data: string) => void): { dispose?(): void };
   onExit(handler: (event: { exitCode: number | null; signal: number }) => void): { dispose?(): void };
   pid?: number;
-  resize(cols: number, rows: number): void;
-  write(data: string): void;
+  resize(cols: number, rows: number): void | Promise<void>;
+  write(data: string): void | Promise<void>;
 }
 
 export interface PtyProvider {
@@ -334,8 +334,8 @@ export function createTerminalSessionApiFromPtyProvider(ptyProvider: PtyProvider
         get id() { return id; },
         get cwd() { return input.cwd; },
         get status() { return status; },
-        write(data: string) { ptyProcess.write(data); },
-        resize(cols: number, rows: number) { ptyProcess.resize(cols, rows); },
+        write(data: string) { return ptyProcess.write(data); },
+        resize(cols: number, rows: number) { return ptyProcess.resize(cols, rows); },
         onData(handler) {
           dataHandlers.add(handler);
           return { dispose: () => { dataHandlers.delete(handler); } };
@@ -858,6 +858,17 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     throw new Error("Terminal runtime is not available");
   };
 
+  const markHandleUnavailable = (handle: TerminalHandle, error: Error): void => {
+    unavailableHandles.set(handle, error);
+    if (sessionHandle === handle) {
+      shellReady = false;
+      shellReadyReject?.(error);
+      if (pendingCommand) { pendingCommand.cancelTimeout(); pendingCommand.reject(error); }
+    }
+    // A failed input acknowledgement cannot prove that the command was unwritten.
+    // Keep the process and its writer protection until its actual exit.
+  };
+
   const bindSessionHandle = (handle: TerminalHandle, initMarker: string): void => {
     let initBuffer = "";
     liveHandles.add(handle);
@@ -900,20 +911,12 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       }
     }));
 
-    if (handle.onError) trackDisposable(handle, handle.onError((error) => {
-      unavailableHandles.set(handle, error);
-      if (isCurrentSession()) {
-        shellReady = false;
-        shellReadyReject?.(error);
-        if (pendingCommand) { pendingCommand.cancelTimeout(); pendingCommand.reject(error); }
-      }
-      // Keep handles and writers until a real exit, not merely a broken pipe.
-    }));
+    if (handle.onError) trackDisposable(handle, handle.onError((error) => markHandleUnavailable(handle, error)));
 
     trackDisposable(handle, handle.onExit((event) => {
       unavailableHandles.delete(handle);
       const wasCurrent = isCurrentSession();
-      const wasInitializing = wasCurrent && !shellReady;
+      const wasInitializing = wasCurrent && !shellReady && pendingCommand?.commandRunId !== handle.id;
       liveHandles.delete(handle);
       if (wasCurrent) {
         sessionHandle = null;
@@ -1001,7 +1004,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       });
       lastCwd = spawnCwd;
       bindSessionHandle(sessionHandle, initMarker);
-      if (interpreter.kind !== "powershell") sessionHandle.write(`echo ${initMarker}\n`);
+      if (interpreter.kind !== "powershell") await sessionHandle.write(`echo ${initMarker}\n`);
       return ready;
     } catch (error) {
       const handle = sessionHandle;
@@ -1333,34 +1336,16 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           resolvePromise({ kind: "spawn-failed", reason: "no-shell", interpreter: interpreter.command, hint: "Shell not initialized" });
           return;
         }
+        timing.sentAt = Date.now();
+        accepted.phase = "running";
+        const inputFailed = (error: unknown): void => {
+          markHandleUnavailable(shell, error instanceof Error ? error : new Error(String(error)));
+        };
         try {
-          timing.sentAt = Date.now();
-          accepted.phase = "running";
-          shell.write(`${wrapped}${interpreter.kind === "powershell" ? "\r\n" : "\n"}`);
+          const written = shell.write(`${wrapped}${interpreter.kind === "powershell" ? "\r\n" : "\n"}`);
+          void Promise.resolve(written).catch(inputFailed);
           notifyShellChanged(executionId);
-        } catch (error) {
-          cancelTimeout();
-          pendingCommand?.abortCleanup?.();
-          pendingCommand = null;
-          commandStarting = false;
-          accepted.phase = "failed";
-          cancelUnwrittenCommand({
-            command,
-            commandRunId,
-            executionId: token,
-            cwd,
-            startedAt,
-            writer,
-            outputPreview: stripControlSequences(outputBuffer),
-            ...(options.toolCallId === undefined ? {} : { toolCallId: options.toolCallId }),
-          });
-          resolvePromise({
-            kind: "spawn-failed",
-            reason: error instanceof Error ? error.message : String(error),
-            interpreter: interpreter.command,
-            hint: "Shell rejected the command",
-          });
-        }
+        } catch (error) { inputFailed(error); }
       });
     } catch (error) {
       commandStarting = false;
@@ -1492,6 +1477,9 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         ...(recovered.exitCode === null ? {} : { exitCode: recovered.exitCode }) };
     }
     if (accepted?.failure !== undefined) {
+      // Dispatch may have written a prefix before its acknowledgement failed.
+      // Preserve uncertainty until the real exit path publishes its result.
+      if (accepted.timing.sentAt !== undefined) throw accepted.failure;
       const reason = accepted.failure instanceof Error ? accepted.failure.message : String(accepted.failure);
       return {
         text: "", offset, length: 0, nextOffset: offset, total: 0, eof: true,
@@ -1607,7 +1595,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     const bg = backgroundShells.get(recovered?.kind === "background" ? recovered.id : id);
     if (!bg || bg.exited) return false;
     try {
-      bg.handle.write(text);
+      await bg.handle.write(text);
       return true;
     } catch {
       return false;

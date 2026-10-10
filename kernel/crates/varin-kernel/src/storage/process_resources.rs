@@ -44,7 +44,10 @@ impl Storage {
     pub(crate) fn set_test_process_worker_executable(&mut self, executable: PathBuf) {
         self.processes.set_test_worker_executable(executable);
     }
-    pub(crate) fn set_process_subscriptions(&mut self, subscriptions: process::subscriptions::ProcessSubscriptions) {
+    pub(crate) fn set_process_subscriptions(
+        &mut self,
+        subscriptions: process::subscriptions::ProcessSubscriptions,
+    ) {
         self.processes.set_subscriptions(subscriptions);
     }
 
@@ -52,14 +55,22 @@ impl Storage {
         self.processes.set_controls(controls);
     }
 
-    pub(crate) fn set_process_terminal_sender(&mut self, sender: std::sync::mpsc::Sender<process::ProcessTerminal>) {
+    pub(crate) fn set_process_terminal_sender(
+        &mut self,
+        sender: std::sync::mpsc::Sender<process::ProcessTerminal>,
+    ) {
         self.processes.set_terminal_sender(sender);
     }
     /// Replay only the native Catalog's unresolved process IDs. Completed Storage rows can
     /// precede Catalog receipt delivery, so this must not filter solely on writerActive.
-    pub(crate) fn replay_process_terminals(&self, process_ids: &[String]) -> Result<(), KernelError> {
+    pub(crate) fn replay_process_terminals(
+        &self,
+        process_ids: &[String],
+    ) -> Result<(), KernelError> {
         for id in process_ids {
-            let Some(record) = self.process_record(id)? else { continue; };
+            let Some(record) = self.process_record(id)? else {
+                continue;
+            };
             let epoch = string(&record, "kernelEpoch")?;
             if let Some(receipt) = process::read_receipt(&self.root, id, epoch)? {
                 self.processes.replay_terminal(id, epoch, receipt);
@@ -68,7 +79,7 @@ impl Storage {
         Ok(())
     }
 
-    fn process_record(&self, id: &str) -> Result<Option<Value>, KernelError> {
+    pub(super) fn process_record(&self, id: &str) -> Result<Option<Value>, KernelError> {
         let raw: Option<String> = self
             .conn
             .query_row(
@@ -88,7 +99,10 @@ impl Storage {
         )?;
         Ok(())
     }
-    fn refresh_process_record(&mut self, id: &str) -> Result<Option<Value>, KernelError> {
+    pub(super) fn refresh_process_record(
+        &mut self,
+        id: &str,
+    ) -> Result<Option<Value>, KernelError> {
         let Some(mut record) = self.process_record(id)? else {
             return Ok(None);
         };
@@ -102,11 +116,19 @@ impl Storage {
         } else {
             // Retained output has its own durability evidence. Reopening bytes never proves
             // that an old process tree stopped; reconcile writer state independently below.
-            let output=match self.processes.restore_output(&self.root,id,string(&record,"kernelEpoch")?) {
-                Ok(output)=>output,
-                Err(error)=>json!({"outputAvailable":false,"outputComplete":false,"outputError":format!("retained output cannot be reopened: {error}")}),
+            let output = match self.processes.restore_output(
+                &self.root,
+                id,
+                string(&record, "kernelEpoch")?,
+            ) {
+                Ok(output) => output,
+                Err(error) => {
+                    json!({"outputAvailable":false,"outputComplete":false,"outputError":format!("retained output cannot be reopened: {error}")})
+                }
             };
-            for (key,value) in output.as_object().into_iter().flatten(){record[key]=value.clone();}
+            for (key, value) in output.as_object().into_iter().flatten() {
+                record[key] = value.clone();
+            }
             if record["writerActive"].as_bool() != Some(false) {
                 let epoch = string(&record, "kernelEpoch")?;
                 let receipt = process::read_receipt(&self.root, id, epoch)?;
@@ -117,7 +139,14 @@ impl Storage {
                 if gone {
                     if let Some(receipt) = receipt {
                         self.processes.replay_terminal(id, epoch, receipt.clone());
-                        for key in ["status", "pid", "exitCode", "signal", "reason", "stopApplied"] {
+                        for key in [
+                            "status",
+                            "pid",
+                            "exitCode",
+                            "signal",
+                            "reason",
+                            "stopApplied",
+                        ] {
                             record[key] = receipt[key].clone();
                         }
                     } else {
@@ -195,6 +224,70 @@ impl Storage {
         self.process_record(id)?
             .ok_or_else(|| KernelError::Operation("process receipt disappeared".into()))
     }
+    /// Native controls use the original and the current exact Run/source grants.
+    /// A Host maintenance grant cannot adopt a native Agent process.
+    pub(super) fn authorize_process_access(
+        &self,
+        id: &str,
+        workspace: &str,
+        grant: &Grant,
+        root_id: Option<&str>,
+        control: bool,
+    ) -> Result<(Value, String), KernelError> {
+        let actor: String = self.conn.query_row(
+            "SELECT grant_id FROM process_records WHERE process_id=?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        let original = self.load_grant(&actor)?;
+        let record = self
+            .process_record(id)?
+            .ok_or_else(|| KernelError::Operation("process not found".into()))?;
+        if original.run_id.is_some() {
+            if original.revoked
+                || grant.revoked
+                || original.run_id != grant.run_id
+                || original.thread_id.is_none()
+                || original.thread_id != grant.thread_id
+                || original.owning_workspace.as_deref() != Some(workspace)
+                || original.owning_workspace != grant.owning_workspace
+                || original.execution_workspace != grant.execution_workspace
+                || original.storage_identity != grant.storage_identity
+                || original.host_id != grant.host_id
+                || original.path_scopes != grant.path_scopes
+                || !original.capabilities.contains("process")
+            {
+                return Err(KernelError::Authorization(
+                    "original process authority was revoked or does not match this Run/source"
+                        .into(),
+                ));
+            }
+            let root = self.registered_file_root(
+                root_id.ok_or_else(|| {
+                    KernelError::Authorization(
+                        "native process access requires its physical source root".into(),
+                    )
+                })?,
+                grant,
+            )?;
+            let cwd = string(&record, "cwd")?;
+            if root.owning_workspace_id != workspace
+                || !contains(&root.canonical_root, Path::new(cwd))
+            {
+                return Err(KernelError::Authorization(
+                    "native process source root changed".into(),
+                ));
+            }
+        } else {
+            self.authorize_process(id, workspace, grant)?;
+        }
+        if control && record["kernelEpoch"].as_str() != Some(grant.kernel_epoch.as_str()) {
+            return Err(KernelError::Authorization(
+                "process handle belongs to a stale kernel epoch".into(),
+            ));
+        }
+        Ok((record, actor))
+    }
     fn spawn_process(&mut self, params_value: &Value, grant: &Grant) -> Result<Value, KernelError> {
         self.check_cancelled()?;
         let id = string(params_value, "processId")?;
@@ -255,7 +348,7 @@ impl Storage {
         }
         let cols = unsigned(params_value, "cols", 80)?;
         let rows = unsigned(params_value, "rows", 24)?;
-        if !(1..=1000).contains(&cols) || !(1..=500).contains(&rows) {
+        if !(1..=u16::MAX as u64).contains(&cols) || !(1..=u16::MAX as u64).contains(&rows) {
             return Err(KernelError::Operation("invalid PTY dimensions".into()));
         }
         let mut identity = params_value.clone();
@@ -322,42 +415,99 @@ impl Storage {
     /// continuation may read only its trigger process; the Catalog supplies source_run_id.
     /// The current grant was authorized by the Storage actor; the original grant is never
     /// revived or substituted as the caller. No persisted observer or control authority exists.
-    pub(crate) fn observe_run_process(&mut self, method: &str, params_value: &Value,
-        grant: &Grant, root_id: Option<&str>, source_run_id: &str, authorize_only: bool) -> Result<Value, KernelError> {
-        if !matches!(method,"process.inspect"|"process.read") {
-            return Err(KernelError::Authorization("process delegation is observation-only".into()));
+    pub(crate) fn observe_run_process(
+        &mut self,
+        method: &str,
+        params_value: &Value,
+        grant: &Grant,
+        root_id: Option<&str>,
+        source_run_id: &str,
+        authorize_only: bool,
+    ) -> Result<Value, KernelError> {
+        if !matches!(method, "process.inspect" | "process.read") {
+            return Err(KernelError::Authorization(
+                "process delegation is observation-only".into(),
+            ));
         }
-        let id=string(params_value,"processId")?;
-        let workspace=string(params_value,"workspaceId")?;
-        let actor:String=self.conn.query_row("SELECT grant_id FROM process_records WHERE process_id=?1",[id],|row|row.get(0))?;
-        let original=self.load_grant(&actor)?;
-        if original.revoked || grant.revoked || original.run_id.is_none() || original.thread_id.is_none()
-            || original.run_id.as_deref() != Some(source_run_id) || original.thread_id != grant.thread_id
+        let id = string(params_value, "processId")?;
+        let workspace = string(params_value, "workspaceId")?;
+        let actor: String = self.conn.query_row(
+            "SELECT grant_id FROM process_records WHERE process_id=?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        let original = self.load_grant(&actor)?;
+        if original.revoked
+            || grant.revoked
+            || original.run_id.is_none()
+            || original.thread_id.is_none()
+            || original.run_id.as_deref() != Some(source_run_id)
+            || original.thread_id != grant.thread_id
             || original.owning_workspace.as_deref() != Some(workspace)
-            || original.owning_workspace != grant.owning_workspace || original.execution_workspace != grant.execution_workspace
-            || original.storage_identity != grant.storage_identity || original.host_id != grant.host_id
-            || original.path_scopes != grant.path_scopes || !original.capabilities.contains("process") {
-            return Err(KernelError::Authorization("original process authority was revoked or does not match this Run/source".into()));
+            || original.owning_workspace != grant.owning_workspace
+            || original.execution_workspace != grant.execution_workspace
+            || original.storage_identity != grant.storage_identity
+            || original.host_id != grant.host_id
+            || original.path_scopes != grant.path_scopes
+            || !original.capabilities.contains("process")
+        {
+            return Err(KernelError::Authorization(
+                "original process authority was revoked or does not match this Run/source".into(),
+            ));
         }
-        let root=self.registered_file_root(root_id.ok_or_else(||KernelError::Authorization("process observation requires its physical source root".into()))?,grant)?;
-        let cwd:String=self.conn.query_row("SELECT cwd FROM process_records WHERE process_id=?1",[id],|row|row.get(0))?;
-        if root.owning_workspace_id!=workspace || !contains(&root.canonical_root,Path::new(&cwd)) {
-            return Err(KernelError::Authorization("process observation physical source changed".into()));
+        let root = self.registered_file_root(
+            root_id.ok_or_else(|| {
+                KernelError::Authorization(
+                    "process observation requires its physical source root".into(),
+                )
+            })?,
+            grant,
+        )?;
+        let cwd: String = self.conn.query_row(
+            "SELECT cwd FROM process_records WHERE process_id=?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        if root.owning_workspace_id != workspace || !contains(&root.canonical_root, Path::new(&cwd))
+        {
+            return Err(KernelError::Authorization(
+                "process observation physical source changed".into(),
+            ));
         }
-        if authorize_only { return Ok(Value::Null); }
-        let record=self.refresh_process_record(id)?.ok_or_else(||KernelError::Operation("process disappeared".into()))?;
-        if method == "process.inspect" { return Ok(record); }
-        self.read_process_output(id,params_value,record)
+        if authorize_only {
+            return Ok(Value::Null);
+        }
+        let record = self
+            .refresh_process_record(id)?
+            .ok_or_else(|| KernelError::Operation("process disappeared".into()))?;
+        if method == "process.inspect" {
+            return Ok(record);
+        }
+        self.read_process_output(id, params_value, record)
     }
-    fn read_process_output(&mut self,id:&str,params_value:&Value,record:Value)->Result<Value,KernelError> {
-        if record["outputAvailable"].as_bool()!=Some(true) {
-            return Err(KernelError::Storage(record["outputError"].as_str().unwrap_or("process output is unavailable").into()));
+    fn read_process_output(
+        &mut self,
+        id: &str,
+        params_value: &Value,
+        record: Value,
+    ) -> Result<Value, KernelError> {
+        if record["outputAvailable"].as_bool() != Some(true) {
+            return Err(KernelError::Storage(
+                record["outputError"]
+                    .as_str()
+                    .unwrap_or("process output is unavailable")
+                    .into(),
+            ));
         }
-        let cursor=unsigned(params_value,"cursor",0)?;
-        let limit=unsigned(params_value,"maxBytes",CHUNK_BYTES as u64)?;
-        if limit==0 || limit>CHUNK_BYTES as u64 { return Err(KernelError::Operation("invalid process read chunk size".into())); }
-        let mut result=self.processes.read(id,cursor,limit as usize)?;
-        result["process"]=record;
+        let cursor = unsigned(params_value, "cursor", 0)?;
+        let limit = unsigned(params_value, "maxBytes", CHUNK_BYTES as u64)?;
+        if limit == 0 || limit > CHUNK_BYTES as u64 {
+            return Err(KernelError::Operation(
+                "invalid process read chunk size".into(),
+            ));
+        }
+        let mut result = self.processes.read(id, cursor, limit as usize)?;
+        result["process"] = record;
         Ok(result)
     }
     pub(super) fn dispatch_process(
@@ -412,17 +562,37 @@ impl Storage {
             return Ok(json!({"processes":visible,"nextCursor":more.then_some(last)}));
         }
         let id = string(params_value, "processId")?;
-        let authorized = self.authorize_process(id, workspace, grant)?;
+        let (authorized, original_actor) = self.authorize_process_access(
+            id,
+            workspace,
+            grant,
+            params_value["rootId"].as_str(),
+            matches!(method, "process.write" | "process.resize" | "process.kill"),
+        )?;
         let record = self.refresh_process_record(id)?.unwrap_or(authorized);
         if method == "process.inspect" {
             return Ok(record);
         }
-        if matches!(method,"process.subscribe"|"process.read") && record["outputAvailable"].as_bool()!=Some(true) {
-            return Err(KernelError::Storage(record["outputError"].as_str().unwrap_or("process output is unavailable").into()));
+        if matches!(method, "process.subscribe" | "process.read")
+            && record["outputAvailable"].as_bool() != Some(true)
+        {
+            return Err(KernelError::Storage(
+                record["outputError"]
+                    .as_str()
+                    .unwrap_or("process output is unavailable")
+                    .into(),
+            ));
         }
         if method == "process.subscribe" {
-            return self.processes.subscribe(string(params_value,"subscriptionId")?,id,&grant.grant_id,&grant.kernel_epoch,
-                unsigned(params_value,"cursor",0)?,record);
+            return self.processes.subscribe(
+                string(params_value, "subscriptionId")?,
+                id,
+                &grant.grant_id,
+                &grant.kernel_epoch,
+                unsigned(params_value, "cursor", 0)?,
+                record,
+                original_actor,
+            );
         }
         if method == "process.release" {
             if record["writerActive"].as_bool() != Some(false) {
@@ -430,12 +600,18 @@ impl Storage {
                     "process is in use or exit is unconfirmed".into(),
                 ));
             }
-            let output_path=process::output_path(&self.root,id);
-            let marker_path=process::output_marker_path(&self.root,id);
-            self.processes.release(id,||{
-                for path in [output_path,marker_path.clone(),marker_path.with_extension("complete.tmp")] {
+            let output_path = process::output_path(&self.root, id);
+            let marker_path = process::output_marker_path(&self.root, id);
+            self.processes.release(id, || {
+                for path in [
+                    output_path,
+                    marker_path.clone(),
+                    marker_path.with_extension("complete.tmp"),
+                ] {
                     match fs::remove_file(path) {
-                        Ok(())=>{},Err(error) if error.kind()==io::ErrorKind::NotFound=>{},Err(error)=>return Err(error.into()),
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error.into()),
                     }
                 }
                 Ok(())
@@ -446,32 +622,18 @@ impl Storage {
             self.persist_process_record(id, &record)?;
             return Ok(record);
         }
-        if record["kernelEpoch"].as_str() != Some(grant.kernel_epoch.as_str()) && method != "process.read" {
+        if record["kernelEpoch"].as_str() != Some(grant.kernel_epoch.as_str())
+            && method != "process.read"
+        {
             return Err(KernelError::Authorization(
                 "process handle belongs to a stale kernel epoch".into(),
             ));
         }
         match method {
-            "process.read" => self.read_process_output(id,params_value,record),
-            "process.write" => self.processes.write(
-                id,
-                unsigned(params_value, "sequence", 0)? as i64,
-                string(params_value, "bytesBase64")?,
-                params_value["eof"].as_bool().unwrap_or(false),
+            "process.read" => self.read_process_output(id, params_value, record),
+            "process.write" | "process.resize" | "process.interaction.inspect" => Err(
+                KernelError::Operation("process interaction requires its owned worker".into()),
             ),
-            "process.resize" => {
-                if record["mode"] != "pty" {
-                    return Err(KernelError::Operation(
-                        "cannot resize a piped process".into(),
-                    ));
-                }
-                let cols = unsigned(params_value, "cols", 0)?;
-                let rows = unsigned(params_value, "rows", 0)?;
-                if !(1..=1000).contains(&cols) || !(1..=500).contains(&rows) {
-                    return Err(KernelError::Operation("invalid PTY dimensions".into()));
-                }
-                self.processes.resize(id, cols as u16, rows as u16)
-            }
             "process.kill" => {
                 if std::env::var("VARIN_KERNEL_FAIL_PROCESS_PHASE")
                     .ok()

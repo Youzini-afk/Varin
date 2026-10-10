@@ -6,8 +6,9 @@
 export const KERNEL_PROTOCOL_VERSION = 1 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
-export const KERNEL_CONTROL_METHODS = ["runtime.goal.control","runtime.followup.control","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
-export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.goal.control","runtime.followup.control","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
+export const KERNEL_CONTROL_METHODS = ["runtime.goal.control","runtime.followup.control","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
+export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.goal.control","runtime.followup.control","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
+export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.history.body"] as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
@@ -83,6 +84,7 @@ export type KernelMethod =
   | "runtime.permission.consume"
   | "runtime.question.answer"
   | "runtime.operation.inspect"
+  | "runtime.process.access"
   | "runtime.operation.cancel"
   | "runtime.events.read"
   | "process.subscribe"
@@ -92,6 +94,7 @@ export type KernelMethod =
   | "process.read"
   | "process.write"
   | "process.resize"
+  | "process.interaction.inspect"
   | "process.kill"
   | "process.inspect"
   | "process.list"
@@ -902,6 +905,7 @@ export interface LaunchIntent {
 export interface KernelProcessSubscribeParams {
   workspaceId: string;
   processId: string;
+  rootId?: string;
   subscriptionId: string;
   cursor: number;
 }
@@ -1464,6 +1468,7 @@ export interface KernelProcessSpawnParams {
 export interface KernelProcessReadParams {
   workspaceId: string;
   processId: string;
+  rootId?: string;
   cursor: number;
   maxBytes?: number;
 }
@@ -1471,7 +1476,8 @@ export interface KernelProcessReadParams {
 export interface KernelProcessWriteParams {
   workspaceId: string;
   processId: string;
-  sequence: number;
+  rootId?: string;
+  operationId: string;
   bytesBase64: string;
   eof?: boolean;
 }
@@ -1479,6 +1485,8 @@ export interface KernelProcessWriteParams {
 export interface KernelProcessResizeParams {
   workspaceId: string;
   processId: string;
+  rootId?: string;
+  operationId: string;
   cols: number;
   rows: number;
 }
@@ -1486,12 +1494,14 @@ export interface KernelProcessResizeParams {
 export interface KernelProcessKillParams {
   workspaceId: string;
   processId: string;
+  rootId?: string;
   force?: boolean;
 }
 
 export interface KernelProcessHandleParams {
   workspaceId: string;
   processId: string;
+  rootId?: string;
 }
 
 export interface KernelProcessListParams {
@@ -1540,9 +1550,43 @@ export interface KernelProcessReadResult {
   outputError: string | null;
 }
 
-export interface KernelProcessWriteResult {
+export interface KernelProcessInteractionBase {
+  processId: string;
+  operationId: string;
+  kernelEpoch: string;
   sequence: number;
-  queued: boolean;
+  state: "applied" | "partial" | "not_applied" | "unknown";
+  reason: string | null;
+  cancelled: boolean;
+}
+
+export type KernelProcessInteractionReceipt = KernelProcessInteractionBase & (
+  | { kind: "write"; requestedBytes: number; confirmedBytes: number; eofRequested: boolean; eofApplied: boolean }
+  | { kind: "resize"; cols: number; rows: number }
+);
+
+export interface KernelProcessInteractionInspectParams {
+  workspaceId: string;
+  processId: string;
+  operationId: string;
+  rootId?: string;
+}
+
+export interface RuntimeProcessAccessParams {
+  threadId: string;
+  branchId: string;
+  operationId: string;
+  toolBinding: unknown;
+}
+
+export interface RuntimeProcessAccess {
+  operationId: string;
+  runId: string;
+  threadId: string;
+  branchId: string;
+  workspaceId: string;
+  rootId: string;
+  process: KernelProcessSnapshot;
 }
 
 export type KernelEmptyParams = Record<string, never>;
@@ -2411,6 +2455,14 @@ export interface KernelError {
   retryable: boolean;
 }
 
+export interface KernelRequestCreditReleased {
+  v: typeof KERNEL_PROTOCOL_VERSION;
+  kind: "request-credit-released";
+  id: string;
+  kernelEpoch: string;
+  method: KernelMethod;
+}
+
 export interface KernelResponse<T = unknown> {
   v: typeof KERNEL_PROTOCOL_VERSION;
   kind: "response";
@@ -2834,6 +2886,7 @@ export type KernelMethodParams = {
   "runtime.question.answer": QuestionAnswerParams;
   "runtime.operation.inspect": OperationParams;
   "runtime.operation.cancel": OperationParams;
+  "runtime.process.access": RuntimeProcessAccessParams;
   "runtime.events.read": EventsParams;
   "runtime.observer.read": ObserverReadParams;
   "runtime.observer.delivery": ObserverDeliveryParams;
@@ -2844,6 +2897,7 @@ export type KernelMethodParams = {
   "process.read": KernelProcessReadParams;
   "process.write": KernelProcessWriteParams;
   "process.resize": KernelProcessResizeParams;
+  "process.interaction.inspect": KernelProcessInteractionInspectParams;
   "process.kill": KernelProcessKillParams;
   "process.inspect": KernelProcessHandleParams;
   "process.list": KernelProcessListParams;
@@ -3569,6 +3623,15 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "runtime.process.access";
+      params: RuntimeProcessAccessParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "runtime.events.read";
       params: EventsParams;
       epoch?: string;
@@ -3652,6 +3715,15 @@ export type KernelRequest =
       id: string;
       method: "process.resize";
       params: KernelProcessResizeParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "process.interaction.inspect";
+      params: KernelProcessInteractionInspectParams;
       epoch?: string;
       grantId?: string;
     }

@@ -2,15 +2,15 @@
 
 This ordinary `varin.agent.policy@3` extension demonstrates a stateful workflow without provider
 inference: read a plan → CAS update → ask the user → read the authentic answer → optionally start and
-observe a fixed process → deliver → explicitly pause/resume → complete. Core owns every action,
+resize and write to a fixed PTY process → observe its actual exit → deliver → explicitly pause/resume → complete. Core owns every action,
 permission, Wait, result and history item. The extension owns only its versioned private state.
 
 ## Try it in a dedicated native Thread
 
 This example replaces that Thread's plan after reading its current reference. Use a new, dedicated
-native Thread. Select an admitted physical execution source with `process_spawn` and
+native Thread. Select an admitted physical execution source with `process_spawn`, `process_resize`, `process_write` and
 `process_inspect`; the example's execution environment must have `node` on its PATH. The process
-prints a fixed message and exits. Its executable/arguments are declared in `host.ts`, not derived from
+waits for input. The policy resizes its original PTY, writes a fixed line, then the process prints it and exits. Its executable/arguments are declared in `host.ts`, not derived from
 the answer or run in the extension broker. A question answer does not authorize a process: ordinary
 source and process permissions are still checked independently by core.
 
@@ -41,6 +41,10 @@ again. Answer exactly `run` to select the fixed probe. Cancelling the question o
 answer ends the example without starting a process. The policy reads `question_status` through the
 ordinary graph/result interface; it cannot mistake the original `JobAccepted` for an answer.
 
+Each resize/write advances only from a successful Confirmed Result; partial or unknown input fails without replaying bytes. The receipt confirms OS input acceptance, not the program’s semantic interpretation.
+
+While an accepted PTY is live, **Open process terminal** opens that same handle in the shared terminal panel. Closing the view leaves the original job and output intact; explicit process cancellation targets its original Operation. No extra interactive shell is launched.
+
 After observing the process, the policy reads `process_inspect` and delivers its actual status. A
 cancelled observation does not stop the process and is not a successful exit. Inspect the delivery,
 then use **Resume run** with the displayed original Run/Wait identity. The final delivery completes
@@ -48,7 +52,7 @@ the example. Do not resend input as a substitute for explicit resume.
 
 The installer pins an immutable artifact. Rebuilding an uninstalled source file does not change a
 running policy. This version deliberately declares no private-state migration hook; changing its
-implementation requires the ordinary policy selection/restart-state controls. Installing it does not
+implementation (policy state version 2) requires the ordinary policy selection/restart-state controls. Installing it does not
 change the product's default Pi runtime.
 
 ## Recovery and evidence

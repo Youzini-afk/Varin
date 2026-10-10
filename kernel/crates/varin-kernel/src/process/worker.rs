@@ -1,5 +1,6 @@
 //! Private native process guardian. It is not a second protocol endpoint: only
 //! the owning kernel supplies its framed stdin, after OS containment admission.
+use super::interaction::{self, Receipt as InteractionReceipt, State as InteractionState};
 use super::platform;
 use crate::protocol::{read_frame, write_frame};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
@@ -188,6 +189,18 @@ fn receipt(config: &Config, value: &Value) -> io::Result<()> {
     }
     Ok(())
 }
+/// A failed durable publication still reports the actual confirmed prefix as unknown.
+fn publish_interaction_receipt(path: &std::path::Path, receipt: &mut InteractionReceipt) {
+    if let Err(error) = interaction::persist(
+        &interaction::path(path, &receipt.identity().operation_id),
+        receipt,
+    ) {
+        *receipt = receipt.unknown(
+            format!("process input receipt could not be persisted: {error}"),
+            receipt.identity().cancelled,
+        );
+    }
+}
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(unix)]
     unsafe {
@@ -218,7 +231,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let Spawned {
         mut child,
-        mut input,
+        input,
         master,
         readers,
     } = match spawn(&config) {
@@ -267,36 +280,158 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     }).collect::<Vec<_>>();
     let (input_tx, input_rx) = mpsc::sync_channel::<Value>(1);
     let input_output = output.clone();
-    thread::spawn(move || {
+    let input_receipt_path = config.receipt_path.clone();
+    let input_worker = thread::spawn(move || {
+        let mut input = Some(input);
+        let mut active: Option<(InteractionReceipt, u64)> = None;
         for value in input_rx {
-            let sequence = value["sequence"].as_u64().unwrap_or(0);
-            let result = BASE64
-                .decode(value["bytesBase64"].as_str().unwrap_or_default())
-                .map_err(io::Error::other)
-                .and_then(|bytes| input.write_all(&bytes))
-                .and_then(|_| input.flush());
-            let error = result.err().map(|error| error.to_string());
-            let eof = value["eof"].as_bool().unwrap_or(false);
-            if eof {
-                drop(input);
-                let _ = send(
-                    &input_output,
-                    json!({"type":"input", "sequence":sequence, "error":error}),
-                );
+            if value["type"] == "finish" {
+                if let Some((mut receipt, chunk)) = active.take() {
+                    // A parent/control-side failure can already have settled this reservation.
+                    // Do not replace its durable final receipt when draining the stopped tree.
+                    if interaction::read(
+                        &interaction::path(&input_receipt_path, &receipt.identity().operation_id),
+                        &receipt,
+                    )
+                    .ok()
+                    .flatten()
+                    .is_some()
+                    {
+                        return;
+                    }
+                    let wrote = matches!(receipt,InteractionReceipt::Write{confirmed_bytes,..} if confirmed_bytes>0);
+                    let id = receipt.identity_mut();
+                    id.state = if wrote {
+                        InteractionState::Partial
+                    } else {
+                        InteractionState::NotApplied
+                    };
+                    id.reason = Some(
+                        "process tree stopped before the remaining input or EOF was sent".into(),
+                    );
+                    publish_interaction_receipt(&input_receipt_path, &mut receipt);
+                    let _ = send(
+                        &input_output,
+                        json!({"type":"interaction","receipt":receipt,"chunk":chunk}),
+                    );
+                }
                 return;
             }
-            if send(
-                &input_output,
-                json!({"type":"input", "sequence":sequence, "error":error}),
-            )
-            .is_err()
-            {
+            let seed: InteractionReceipt = match serde_json::from_value(value["receipt"].clone()) {
+                Ok(value) => value,
+                Err(_) => return,
+            };
+            let chunk = value["chunk"].as_u64().unwrap_or(0);
+            if active.as_ref().is_none_or(|(receipt, _)| {
+                receipt.identity().operation_id != seed.identity().operation_id
+            }) {
+                if chunk != 1 {
+                    return;
+                }
+                active = Some((seed.clone(), 0));
+            }
+            let (receipt, previous) = active.as_mut().expect("input interaction");
+            if !receipt.same_intent(&seed) || chunk != *previous + 1 {
                 return;
+            }
+            *previous = chunk;
+            let cancelled = value["cancelled"].as_bool() == Some(true);
+            let last = value["last"].as_bool() == Some(true);
+            let mut error = None;
+            let bytes = match BASE64.decode(value["bytesBase64"].as_str().unwrap_or_default()) {
+                Ok(bytes) if bytes.len() <= super::CHUNK_BYTES => bytes,
+                _ => {
+                    error = Some("invalid guardian input chunk".to_string());
+                    Vec::new()
+                }
+            };
+            if error.is_none() {
+                match input.as_mut() {
+                    None => error = Some("process stdin is already closed".into()),
+                    Some(writer) => {
+                        let mut offset = 0;
+                        while offset < bytes.len() {
+                            match writer.write(&bytes[offset..]) {
+                                Ok(0) => {
+                                    error = Some("process stdin write made no progress".into());
+                                    break;
+                                }
+                                Ok(n) => {
+                                    offset += n;
+                                    if let InteractionReceipt::Write {
+                                        confirmed_bytes, ..
+                                    } = receipt
+                                    {
+                                        *confirmed_bytes += n as u64;
+                                    }
+                                }
+                                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                                Err(e) => {
+                                    error = Some(e.to_string());
+                                    break;
+                                }
+                            }
+                        }
+                        if error.is_none() {
+                            if let Err(e) = writer.flush() {
+                                error = Some(e.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            if error.is_none() && last && value["eof"].as_bool() == Some(true) {
+                drop(input.take());
+                if let InteractionReceipt::Write { eof_applied, .. } = receipt {
+                    *eof_applied = true;
+                }
+            }
+            let finished = last || error.is_some();
+            if finished {
+                let (written, expected, eof_requested, eof_applied) = match receipt {
+                    InteractionReceipt::Write {
+                        confirmed_bytes,
+                        requested_bytes,
+                        eof_requested,
+                        eof_applied,
+                        ..
+                    } => (
+                        *confirmed_bytes,
+                        *requested_bytes,
+                        *eof_requested,
+                        *eof_applied,
+                    ),
+                    _ => return,
+                };
+                let identity = receipt.identity_mut();
+                identity.cancelled = cancelled;
+                identity.reason = error.or_else(|| {
+                    cancelled
+                        .then(|| "input cancelled before remaining bytes or EOF were sent".into())
+                });
+                identity.state = if !cancelled
+                    && identity.reason.is_none()
+                    && written == expected
+                    && (!eof_requested || eof_applied)
+                {
+                    InteractionState::Applied
+                } else if written > 0 || eof_applied {
+                    InteractionState::Partial
+                } else {
+                    InteractionState::NotApplied
+                };
+                publish_interaction_receipt(&input_receipt_path, receipt);
+            }
+            if send(&input_output,json!({"type":if finished{"interaction"}else{"input-chunk"},"receipt":receipt,"chunk":chunk})).is_err(){return;}
+            if finished {
+                active = None;
             }
         }
     });
+    let control_input = input_tx.clone();
     let control_output = output.clone();
     let control_master = master.clone();
+    let control_receipt_path = config.receipt_path.clone();
     #[cfg(windows)]
     let control_job = job.clone();
     thread::spawn(move || {
@@ -317,34 +452,80 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
                 Some("write") => {
-                    if let Err(error) = input_tx.try_send(value) {
+                    if let Err(error) = control_input.try_send(value) {
                         let value = match error {
                             mpsc::TrySendError::Full(value)
                             | mpsc::TrySendError::Disconnected(value) => value,
                         };
-                        let _ = send(
-                            &control_output,
-                            json!({"type":"input", "sequence":value["sequence"], "error":"process stdin queue is unavailable"}),
-                        );
+                        if let Ok(seed) =
+                            serde_json::from_value::<InteractionReceipt>(value["receipt"].clone())
+                        {
+                            // The chunk did not reach the writer. Prior chunks may already have effects.
+                            let mut receipt = interaction::read(
+                                &interaction::path(
+                                    &control_receipt_path,
+                                    &seed.identity().operation_id,
+                                ),
+                                &seed,
+                            )
+                            .ok()
+                            .flatten()
+                            .unwrap_or_else(|| {
+                                seed.unknown("process stdin queue became unavailable", false)
+                            });
+                            publish_interaction_receipt(&control_receipt_path, &mut receipt);
+                            let _ = send(
+                                &control_output,
+                                json!({"type":"interaction","receipt":receipt}),
+                            );
+                        }
                     }
                 }
                 Some("resize") => {
+                    let Ok(mut receipt) =
+                        serde_json::from_value::<InteractionReceipt>(value["receipt"].clone())
+                    else {
+                        break;
+                    };
+                    let InteractionReceipt::Resize { cols, rows, .. } = &receipt else {
+                        break;
+                    };
                     let size = PtySize {
-                        cols: value["cols"].as_u64().unwrap_or(80) as u16,
-                        rows: value["rows"].as_u64().unwrap_or(24) as u16,
+                        cols: *cols,
+                        rows: *rows,
                         pixel_width: 0,
                         pixel_height: 0,
                     };
-                    if let Ok(master) = control_master.lock() {
-                        if master
-                            .as_ref()
-                            .is_some_and(|master| master.resize(size).is_err())
-                        {
-                            let _ = send(
-                                &control_output,
-                                json!({"type":"control-error", "reason":"PTY resize failed"}),
-                            );
+                    match control_master.lock() {
+                        Ok(master) => match master.as_ref() {
+                            None => {
+                                receipt =
+                                    receipt.no_effect("process has no live PTY master", false);
+                            }
+                            Some(master) => match master.resize(size) {
+                                Ok(()) => {
+                                    let id = receipt.identity_mut();
+                                    id.state = InteractionState::Applied;
+                                    id.reason = None;
+                                }
+                                Err(error) => {
+                                    receipt = receipt
+                                        .no_effect(format!("PTY resize failed: {error}"), false);
+                                }
+                            },
+                        },
+                        Err(_) => {
+                            receipt = receipt.unknown("PTY master owner failed", false);
                         }
+                    }
+                    publish_interaction_receipt(&control_receipt_path, &mut receipt);
+                    if send(
+                        &control_output,
+                        json!({"type":"interaction","receipt":receipt}),
+                    )
+                    .is_err()
+                    {
+                        break;
                     }
                 }
                 _ => break,
@@ -423,6 +604,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         thread::sleep(Duration::from_millis(10));
     }
+    // The stopped tree closes pipe/PTY readers and releases blocked input writes. Keep
+    // the guardian alive through the writer's final durable receipt; process exit itself
+    // must not kill the receipt thread between a successful write and fsync.
+    let _ = input_tx.send(json!({"type":"finish"}));
+    let _ = input_worker.join();
     let value = json!({"processId":config.process_id, "kernelEpoch":config.kernel_epoch,
         "status":"exited", "pid":pid, "exitCode":if exit.signal().is_none() { Some(exit.exit_code()) } else { None },
         "signal":exit.signal(), "reason":null, "treeConfirmed":true,"spawned":true,"stopApplied":stop_applied});

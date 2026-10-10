@@ -18,7 +18,7 @@ rejects and preserves the owner; a rejected launch is not proof that no child ex
 
 | Product owner | Native backend | TypeScript responsibility |
 | --- | --- | --- |
-| Terminal runtime, HTTP/WebSocket and Harness shell | Kernel PTY | Same terminal handle, attachments, UTF-8 display, bounded replay, OSC 633 and command presentation |
+| Terminal runtime, original Agent process views, HTTP/WebSocket and Harness shell | Kernel PTY | Same terminal handle, attachments, UTF-8 display, bounded replay, OSC 633 and command presentation |
 | Thread worktree setup | Kernel pipe process | Setup policy, timeout request and preparation stages |
 | Language supervisor | Kernel pipe process | LSP framing, versions, language views, diagnostics and provider activation |
 | Debug supervisor | Kernel pipe process | DAP framing, breakpoints, generation and adapter selection |
@@ -35,6 +35,11 @@ Documents enrollment, while already-enrolled Threads keep distinct owning/execut
 without a retained record is not admitted by proximity. The service is private to the Host. The authenticated terminal process-inspection route reports
 retained state for an admitted root. Kernel loss becomes terminal status `error` and rejects shell
 and adapter work without inventing an exit code or rerunning the command.
+
+Agent terminal adoption uses the original Catalog process Operation and a fresh same-Run source grant.
+The view cannot launch a replacement shell or release the native spool. User stdin, automatic theme
+responses and resizing all await original interaction receipts; closing a view does not stop the job.
+See [the shared interaction contract](../kernel/DOCUMENTATION.md#acknowledged-interactions-and-original-agent-terminal-views).
 
 ## Scope
 

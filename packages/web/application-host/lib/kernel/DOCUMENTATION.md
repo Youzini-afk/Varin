@@ -346,7 +346,7 @@ truncated-input restart.
 
 `process-service.ts` exposes pipe streams and the sole production PTY provider over generated
 `process.*` DTOs. It holds grant/canonical-root context, not a second PID authority. Binary
-stdout/stderr, input sequence receipts and actual exit codes come from Rust. PTY display uses an
+stdout/stderr, original interaction receipts and actual exit codes come from Rust. PTY display uses an
 incremental UTF-8 decoder. Close follows output drainage; failed native release retains the handle
 for retry rather than suppressing its actual exit/close events.
 
@@ -354,6 +354,57 @@ Kernel transport loss invalidates live handles, rejects completion and keeps wri
 Pending launches participate in shutdown; consumers drain while native grants remain valid.
 Startup errors carrying an owned child cannot trigger another interpreter as a fallback.
 See [process ownership](../process/DOCUMENTATION.md). Web/Electron use the same production injection.
+
+### Acknowledged interactions and original Agent terminal views
+
+`process.write` and `process.resize` require a stable `operationId` and return the actual tagged
+`KernelProcessInteractionReceipt`. ProcessManager allocates their shared sequence; callers no longer
+allocate stdin counters or treat a queue acknowledgement as a completed write. The write receipt keeps
+requested/confirmed bytes and requested/applied EOF, with applied, partial, not_applied or unknown
+states. Confirmed bytes are the OS writer's lower bound, not proof of semantic consumption by the child.
+The process owner keeps separate accepted-order queues for stdin and resize, so later resize workers
+cannot restore an older size and blocked stdin does not hold resize. A long write/resize releases the
+shared wire request credit only after the complete body has an owned cancellation identity in Rust.
+The short `request-credit-released` envelope is not an effect receipt: the original pending request,
+AbortSignal and shutdown drain remain until the final response or disconnect. Ordinary reads/new Run
+input and direct process stop therefore do not wait for another process's stdin; stop uses the control
+response window. This does not enlarge a window or create a new execution queue.
+
+`process.interaction.inspect` reads the original intent/receipt without resending input. A lost reply or
+partial write is never automatically retried under another identity. Pipe EOF closes its writer; PTY
+EOF is explicitly unsupported rather than pretending that dropping a cloned PTY writer sends EOF.
+
+The native `process_write` and `process_resize` tools use the same process-domain worker, original
+ModelStep or PolicyAction intent, permissions and final external receipt. Storage's existing operation
+journal retains the short identity, digest and original/current authority; the guardian persists the final
+receipt before confirmation. Large body encoding and OS waits stay outside Storage/Catalog control.
+Cancellation stops unissued chunks and keeps an already dispatched blocked chunk owned until its
+actual receipt arrives. Reconciliation reads that receipt rather than replaying input.
+
+`POST /api/threads/process/terminal`, through `ThreadsAPI.processes.openTerminal`, validates the selected
+Thread/branch and original process Operation. The Host rebinds the durable source under a fresh same-Run
+grant, and `runtime.process.access` checks the original process authority. `TerminalRuntime` adopts its
+existing PTY through `KernelManagedProcess`; it does not spawn, fabricate a provider call, or maintain
+another process ledger. A completed Run can retain its independent job. A follow-up Run's read relation
+still grants no stdin/resize/stop authority. Original-grant revocation also closes aliased subscriptions.
+
+Shared terminal protocol generation 4 carries an input identity and a `written` acknowledgement only
+after that original native write completes. Renderer `sendInput` waits for it; partial/error or connection
+loss rejects the original Promise and never replays that input on reconnect. The identity is scoped to
+the original terminal before reaching the process journal. Older generation 3 frames are rejected.
+
+The shared terminal's user input, automatic theme responses, HTTP resize, shell supervisor and remote
+shell adapter await actual interaction receipts. Async input failure preserves unknown/partial evidence
+and writer protection; a later real process exit can still settle the original command. An Agent terminal
+view is retained on close and cannot be restarted as another shell. Host shutdown detaches its projection;
+explicit stop cancels the original Catalog Operation and awaits actual tree/output completion. Broken
+views may rebind and replay the same retained output without resending input. These projections do not
+release the native job's spool. Kernel startup/shutdown itself retains its existing process-tree ownership.
+
+Portable consumer evidence lives in `thread-processes.test.ts`, the owning terminal and shell suites,
+and the UI conversation behavior test. Native OS and Catalog evidence lives in the kernel's
+`process_interaction_review.rs` and policy domain review. Supplied framed-resource fixtures and actual
+guardian tests remain separate evidence from the product Host IPC and cross-platform acceptance.
 
 ## Focused native performance observations
 

@@ -152,7 +152,7 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
       const current = f.kernel.scoped(processGrants[1]!);
       // A legal observation rebind does not convey process control or direct actor ownership.
       await expect(current.processKill({ ...identity, force: true })).rejects.toThrow(/another workspace or actor/);
-      await expect(current.processWrite({ ...identity, sequence: 1, bytesBase64: '', eof: true })).rejects.toThrow(/another workspace or actor/);
+      await expect(current.processWrite({ ...identity, operationId: 'foreign-input', bytesBase64: '', eof: true })).rejects.toThrow(/another workspace or actor/);
       if (revoked === 'none') {
         const originalRead = await f.kernel.scoped(processGrants[0]!).processRead({ ...identity, cursor: 0 });
         expect(JSON.stringify(originalRead)).toContain(Buffer.from('process-wait-real-output').toString('base64'));

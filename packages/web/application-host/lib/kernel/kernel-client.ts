@@ -24,6 +24,8 @@ import { fileURLToPath } from "node:url";
 import {
   KERNEL_PROTOCOL_VERSION,
   KERNEL_REQUEST_WINDOW,
+  KERNEL_DEFERRED_RESPONSE_METHODS,
+  type KernelRequestCreditReleased,
   type KernelBranchReadResult,
   type KernelBranchChange,
   type KernelWorkingResultCandidate,
@@ -48,7 +50,7 @@ import {
   type KernelComputeReadResult,
   type KernelProcessListResult,
   type KernelProcessReadResult,
-  type KernelProcessWriteResult,
+  type KernelProcessInteractionReceipt,
   type KernelProcessStreamEvent,
   type AgentRuntimeStreamEvent,
   type KernelProcessSubscribeResult,
@@ -184,12 +186,16 @@ export class KernelScopedClient {
     return this.owner.processSubscribe(params, this.grant, observer);
   }
 
-  processWrite(params: KernelMethodParams["process.write"], signal?: AbortSignal): Promise<KernelProcessWriteResult> {
+  processWrite(params: KernelMethodParams["process.write"], signal?: AbortSignal): Promise<KernelProcessInteractionReceipt> {
     return this.owner.processWrite(params, this.grant, signal);
   }
 
-  processResize(params: KernelMethodParams["process.resize"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+  processResize(params: KernelMethodParams["process.resize"], signal?: AbortSignal): Promise<KernelProcessInteractionReceipt> {
     return this.owner.processResize(params, this.grant, signal);
+  }
+
+  processInteractionInspect(params: KernelMethodParams["process.interaction.inspect"], signal?: AbortSignal): Promise<KernelProcessInteractionReceipt | null> {
+    return this.owner.processInteractionInspect(params, this.grant, signal);
   }
 
   processKill(params: KernelMethodParams["process.kill"], signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -466,6 +472,7 @@ export class KernelScopedClient {
 }
 
 interface PendingRequest {
+  method: KernelMethod;
   release(): void;
   cancel(): void;
   resolve: (value: unknown) => void;
@@ -566,6 +573,16 @@ export class KernelClient {
   private child: ChildProcessWithoutNullStreams | null = null;
   private transport: KernelTransport | undefined;
   private readonly pending = new Map<string, PendingRequest>();
+  private readonly pendingIdle: Array<() => void> = [];
+  private takePending(id: string): PendingRequest | undefined {
+    const pending = this.pending.get(id);
+    if (pending) this.pending.delete(id);
+    if (!this.pending.size) for (const done of this.pendingIdle.splice(0)) done();
+    return pending;
+  }
+  private whenRequestsIdle(): Promise<void> {
+    return this.pending.size ? new Promise(resolve => this.pendingIdle.push(resolve)) : Promise.resolve();
+  }
   private readonly processSubscriptions = new Map<string, ProcessSubscriptionEntry>();
   private readonly agentRuntimeListeners = new Set<(event: AgentRuntimeStreamEvent) => void>();
   onAgentRuntimeEvent(listener: (event: AgentRuntimeStreamEvent) => void): () => void {
@@ -800,8 +817,8 @@ export class KernelClient {
     const transport = await (this.options.transportFactory ?? KernelTransport.prepare)(value => this.consumeFrame(value), error => this.failAll(error, true), id => {
       // Only a cancelled observer discards a response body. Domain effect receipts remain in
       // their durable owner; this releases transport credit after the peer settles that body.
-      const pending = this.pending.get(id);
-      if (pending) { this.pending.delete(id); pending.release(); pending.reject(new KernelClientError({code:'kernel-response-discarded', message:'Kernel response body transfer stopped', retryable:false})); }
+      const pending = this.takePending(id);
+      if (pending) { pending.release(); pending.reject(new KernelClientError({code:'kernel-response-discarded', message:'Kernel response body transfer stopped', retryable:false})); }
     });
     this.transport = transport;
     let child: ChildProcessWithoutNullStreams;
@@ -902,7 +919,20 @@ export class KernelClient {
       this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: "Invalid Rust kernel envelope" }), true);
       return;
     }
-    const response = value as KernelResponse | KernelProcessStreamEvent | AgentRuntimeStreamEvent;
+    const response = value as KernelResponse | KernelProcessStreamEvent | AgentRuntimeStreamEvent | KernelRequestCreditReleased;
+      if (response.kind === "request-credit-released") {
+        const pending = typeof response.id === 'string' ? this.pending.get(response.id) : undefined;
+        if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch
+          || !(KERNEL_DEFERRED_RESPONSE_METHODS as readonly string[]).includes(response.method)
+          || (pending && pending.method !== response.method)) {
+          this.failAll(new KernelClientError({ code: 'kernel-protocol-error', message: 'Invalid deferred request credit receipt' }), true);
+          return;
+        }
+        // Body admission is not effect completion. Cancellation and close still own this
+        // same pending invocation until its original final response or disconnect.
+        pending?.release();
+        return;
+      }
       if (this.credentialBridge.consume(response) || this.resourceBridge.consume(response) || this.contextBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.toolBridge.consume(response) || this.policyBridge.consume(response)) return;
       if (response.kind === "runtime-event") {
         if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch
@@ -928,9 +958,8 @@ export class KernelClient {
         this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: "Rust kernel response envelope is malformed", retryable: false }), true);
         return;
       }
-      const pending = this.pending.get(response.id);
+      const pending = this.takePending(response.id);
       if (!pending) return;
-      this.pending.delete(response.id);
       pending.release();
       if (response.ok) pending.resolve(response.result);
       else {
@@ -986,6 +1015,7 @@ export class KernelClient {
     this.controlWindow.close(error);
     for (const pending of this.pending.values()) { pending.reject(error); pending.release(); }
     this.pending.clear();
+    for (const done of this.pendingIdle.splice(0)) done();
     for (const entry of this.processSubscriptions.values()) { entry.closed = true; entry.reject(error); }
     this.processSubscriptions.clear();
     for (const listener of this.exitListeners) {
@@ -1029,14 +1059,15 @@ export class KernelClient {
         if (!this.pending.has(id) || cancelSent) return;
         cancelSent = true;
         if (!options.settleCancellation) rejectPending(cancelled());
-        // Keep the ledger entry/credit until Rust acknowledges the actual stop.
+        // Keep the invocation until Rust acknowledges its actual stop; body-admitted
+        // process interactions may already have released their separate transfer credit.
         // Control frames bypass the ordinary request window.
         void this.write({ v: KERNEL_PROTOCOL_VERSION, kind: "cancel", id, ...identity }).catch(error => this.failAll(error instanceof Error ? error : new Error(String(error)), true));
         this.transport?.cancelRequest(id, !options.settleCancellation);
       };
       const promise = new Promise<T>((resolve, reject) => {
         rejectPending = reject;
-        this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, release, cancel: abort, grantId: grant?.grantId });
+        this.pending.set(id, { method, resolve: resolve as (value: unknown) => void, reject, release, cancel: abort, grantId: grant?.grantId });
       });
       admitted = true;
       void promise.catch(() => undefined);
@@ -1316,12 +1347,16 @@ export class KernelClient {
     return this.requestRaw<KernelProcessReadResult>("process.read", params, { signal, grant });
   }
 
-  async processWrite(params: KernelMethodParams["process.write"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessWriteResult> {
-    return this.requestRaw<KernelProcessWriteResult>("process.write", params, { signal, grant });
+  async processWrite(params: KernelMethodParams["process.write"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessInteractionReceipt> {
+    return this.requestRaw<KernelProcessInteractionReceipt>("process.write", params, { signal, grant });
   }
 
-  async processResize(params: KernelMethodParams["process.resize"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.requestRaw<Record<string, unknown>>("process.resize", params, { signal, grant });
+  async processResize(params: KernelMethodParams["process.resize"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessInteractionReceipt> {
+    return this.requestRaw<KernelProcessInteractionReceipt>("process.resize", params, { signal, grant });
+  }
+
+  async processInteractionInspect(params: KernelMethodParams["process.interaction.inspect"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessInteractionReceipt | null> {
+    return this.requestRaw<KernelProcessInteractionReceipt | null>("process.interaction.inspect", params, { signal, grant });
   }
 
   async processKill(params: KernelMethodParams["process.kill"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -1668,7 +1703,7 @@ export class KernelClient {
         return await Promise.race([work.then(() => true, () => false), new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 5_000); })]);
       } finally { if (timer) clearTimeout(timer); }
     };
-    if (await bounded(Promise.all([this.window.whenIdle(), this.controlWindow.whenIdle()])) && this.handshakeResult && !child.killed) {
+    if (await bounded(Promise.all([this.window.whenIdle(), this.controlWindow.whenIdle(), this.whenRequestsIdle()])) && this.handshakeResult && !child.killed) {
       await bounded(this.requestRaw("kernel.shutdown", {}, { grant: this.managementGrant ?? undefined }));
     }
     await this.transport?.close();

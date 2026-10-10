@@ -39,6 +39,8 @@ pub(crate) enum ToolKind {
     ProcessInspect,
     ProcessRead,
     ProcessSpawn,
+    ProcessWrite,
+    ProcessResize,
     LanguageDefinition,
     LanguageReferences,
     LanguageDiagnostics,
@@ -55,6 +57,8 @@ impl ToolKind {
             Self::ProcessInspect => "process_inspect",
             Self::ProcessRead => "process_read",
             Self::ProcessSpawn => "process_spawn",
+            Self::ProcessWrite => "process_write",
+            Self::ProcessResize => "process_resize",
             Self::LanguageDefinition => "language_definition",
             Self::LanguageReferences => "language_references",
             Self::LanguageDiagnostics => "language_diagnostics",
@@ -71,6 +75,8 @@ impl ToolKind {
             Self::ProcessInspect=>"Inspect a retained process owned by the admitted execution environment.",
             Self::ProcessRead=>"Read bounded output from a retained process in the admitted execution environment.",
             Self::ProcessSpawn=>"Start a process in the admitted execution environment and return its durable operation handle.",
+            Self::ProcessWrite=>"Write UTF-8 input to the original process and report actual written-byte evidence. Pipe EOF is explicit; a PTY accepts control characters rather than a universal EOF operation.",
+            Self::ProcessResize=>"Resize the original PTY and wait for its actual size-change receipt.",
             Self::LanguageDefinition=>"Find symbol definitions using the admitted source's language provider.",
             Self::LanguageReferences=>"Find symbol references using the admitted source's language provider.",
             Self::LanguageDiagnostics=>"Read diagnostics from the admitted source's language provider.",
@@ -87,6 +93,8 @@ impl ToolKind {
             Self::ProcessInspect,
             Self::ProcessRead,
             Self::ProcessSpawn,
+            Self::ProcessWrite,
+            Self::ProcessResize,
             Self::LanguageDefinition,
             Self::LanguageReferences,
             Self::LanguageDiagnostics,
@@ -170,6 +178,21 @@ struct FileReadArgs {
     offset: u64,
     length: Option<u64>,
 }
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ProcessWriteArgs {
+    pub process_id: String,
+    pub text: String,
+    #[serde(default)]
+    pub eof: bool,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ProcessResizeArgs {
+    pub process_id: String,
+    pub cols: u16,
+    pub rows: u16,
+}
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProcessInspectArgs {
@@ -203,8 +226,13 @@ struct ProcessSpawnArgs {
 }
 #[derive(Debug, Clone)]
 enum ResourceOperation {
-    ChildSourceHandoff {profile:String},
-    ChildStorageReceipt {operation_id:String,kind:String},
+    ChildSourceHandoff {
+        profile: String,
+    },
+    ChildStorageReceipt {
+        operation_id: String,
+        kind: String,
+    },
     ChildRootIdle,
     CollaborationPin {
         release: bool,
@@ -234,6 +262,8 @@ enum ResourceOperation {
     ProcessInspect(ProcessInspectArgs),
     ProcessRead(ProcessReadArgs),
     ProcessSpawn(ProcessSpawnArgs),
+    ProcessWrite(ProcessWriteArgs),
+    ProcessResize(ProcessResizeArgs),
 }
 impl ResourceOperation {
     fn parse(kind: ToolKind, args: &Value) -> Result<Self, ExecutionError> {
@@ -270,6 +300,10 @@ impl ResourceOperation {
                 serde_json::from_value(args.clone()).map(Self::ProcessInspect)
             }
             ToolKind::ProcessRead => serde_json::from_value(args.clone()).map(Self::ProcessRead),
+            ToolKind::ProcessWrite => serde_json::from_value(args.clone()).map(Self::ProcessWrite),
+            ToolKind::ProcessResize => {
+                serde_json::from_value(args.clone()).map(Self::ProcessResize)
+            }
             ToolKind::ProcessSpawn => {
                 let mut arguments = args.clone();
                 if arguments.get("env").is_none() {
@@ -316,8 +350,8 @@ impl ResourceOperation {
                 if !matches!(args.mode.as_str(), "pipe" | "pty")
                     || args.command.is_empty()
                     || args.command.contains('\0')
-                    || args.cols.is_some_and(|value| !(1..=1000).contains(&value))
-                    || args.rows.is_some_and(|value| !(1..=500).contains(&value))
+                    || args.cols.is_some_and(|value| value == 0)
+                    || args.rows.is_some_and(|value| value == 0)
                 {
                     return Err(ExecutionError::new(
                         "invalid_tool_arguments",
@@ -337,6 +371,20 @@ impl ResourceOperation {
                     "invalid process output identity or range",
                 ))
             }
+            Self::ProcessWrite(args) if args.process_id.is_empty() => {
+                return Err(ExecutionError::new(
+                    "invalid_tool_arguments",
+                    "processId required",
+                ))
+            }
+            Self::ProcessResize(args)
+                if args.process_id.is_empty() || args.cols == 0 || args.rows == 0 =>
+            {
+                return Err(ExecutionError::new(
+                    "invalid_tool_arguments",
+                    "invalid PTY dimensions or process identity",
+                ))
+            }
             _ => {}
         }
         Ok(parsed)
@@ -347,8 +395,15 @@ impl ResourceOperation {
         context: &ToolExecutionContext,
     ) -> (&'static str, Value) {
         match self {
-            Self::ChildSourceHandoff{..}|Self::ChildStorageReceipt{..}|Self::ChildRootIdle => ("storage.health",json!({"workspaceId":binding.workspace_id})),
-            Self::ProcessObservation { process_id, read, .. } => {
+            Self::ChildSourceHandoff { .. }
+            | Self::ChildStorageReceipt { .. }
+            | Self::ChildRootIdle => (
+                "storage.health",
+                json!({"workspaceId":binding.workspace_id}),
+            ),
+            Self::ProcessObservation {
+                process_id, read, ..
+            } => {
                 let mut params = json!({"workspaceId":binding.workspace_id,"processId":process_id});
                 if let Some((cursor, limit)) = read {
                     params["cursor"] = json!(cursor);
@@ -447,6 +502,9 @@ impl ResourceOperation {
                 }
                 ("process.read", params)
             }
+            Self::ProcessWrite(_) | Self::ProcessResize(_) => {
+                unreachable!("interactive processes require their Catalog endpoint")
+            }
             Self::ProcessSpawn(args) => {
                 let mut params = json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,
                     "processId":context.operation_id,"__runId":context.run_id,"cwd":args.cwd,"command":args.command,"args":args.args,
@@ -527,14 +585,18 @@ type AdmissionControl = dyn Fn(
     + Sync;
 /// Constructed only after Catalog validated the original native Integration Tool invocation.
 pub(crate) struct IntegrationReceiptRead {
-    pub source:varin_runtime::catalog::launches::SourceSelection,
-    pub run_id:String,pub thread_id:String,pub operation_id:String,
-    pub reply:mpsc::Sender<Result<Value,KernelError>>,
+    pub source: varin_runtime::catalog::launches::SourceSelection,
+    pub run_id: String,
+    pub thread_id: String,
+    pub operation_id: String,
+    pub reply: mpsc::Sender<Result<Value, KernelError>>,
 }
 /// The Kernel actor injects this sender. Sending does not create another resource authority.
 #[derive(Clone)]
 pub(crate) struct KernelResourceClient {
-    integration_receipts:Option<Arc<dyn Fn(IntegrationReceiptRead)->Result<(),KernelError>+Send+Sync>>,
+    pub(crate) interactions: Option<crate::storage::process_interactions::Client>,
+    integration_receipts:
+        Option<Arc<dyn Fn(IntegrationReceiptRead) -> Result<(), KernelError> + Send + Sync>>,
     send: Arc<dyn Fn(ResourceCall) -> Result<(), KernelError> + Send + Sync>,
     replay: Arc<dyn Fn(Vec<String>) -> Result<(), KernelError> + Send + Sync>,
     controls: crate::process::ProcessControlRegistry,
@@ -548,11 +610,19 @@ impl KernelResourceClient {
     ) -> Self {
         Self {
             send: Arc::new(send),
-            integration_receipts:None,
+            interactions: None,
+            integration_receipts: None,
             replay: Arc::new(replay),
             controls,
             admission_control: None,
         }
+    }
+    pub(crate) fn with_process_interactions(
+        mut self,
+        client: crate::storage::process_interactions::Client,
+    ) -> Self {
+        self.interactions = Some(client);
+        self
     }
     pub(crate) fn with_admission_control(
         mut self,
@@ -601,28 +671,98 @@ impl KernelResourceClient {
         process_id: &str,
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
-        self.observe_process(binding, context, process_id, &context.run_id, None, true, cancel)
-            .map(|_| ())
+        self.observe_process(
+            binding,
+            context,
+            process_id,
+            &context.run_id,
+            None,
+            true,
+            cancel,
+        )
+        .map(|_| ())
     }
-    pub(crate) fn with_integration_receipts(mut self,send:impl Fn(IntegrationReceiptRead)->Result<(),KernelError>+Send+Sync+'static)->Self {
-        self.integration_receipts=Some(Arc::new(send));self
+    pub(crate) fn with_integration_receipts(
+        mut self,
+        send: impl Fn(IntegrationReceiptRead) -> Result<(), KernelError> + Send + Sync + 'static,
+    ) -> Self {
+        self.integration_receipts = Some(Arc::new(send));
+        self
     }
-    pub(crate) fn integration_receipt(&self,source:varin_runtime::catalog::launches::SourceSelection,run_id:String,thread_id:String,operation_id:String)->Result<Value,KernelError>{
-        let (reply,receive)=mpsc::channel();
-        self.integration_receipts.as_ref().ok_or_else(||KernelError::Storage("Integration journal reader is unavailable".into()))?(IntegrationReceiptRead{source,run_id,thread_id,operation_id,reply})?;
-        receive.recv().map_err(|_|KernelError::Storage("Integration journal owner stopped".into()))?
+    pub(crate) fn integration_receipt(
+        &self,
+        source: varin_runtime::catalog::launches::SourceSelection,
+        run_id: String,
+        thread_id: String,
+        operation_id: String,
+    ) -> Result<Value, KernelError> {
+        let (reply, receive) = mpsc::channel();
+        self.integration_receipts.as_ref().ok_or_else(|| {
+            KernelError::Storage("Integration journal reader is unavailable".into())
+        })?(IntegrationReceiptRead {
+            source,
+            run_id,
+            thread_id,
+            operation_id,
+            reply,
+        })?;
+        receive
+            .recv()
+            .map_err(|_| KernelError::Storage("Integration journal owner stopped".into()))?
     }
-    pub(crate) fn child_source_handoff(&self,binding:&ToolBinding,context:&ToolExecutionContext,profile:&str,authorize_only:bool,cancel:&CancellationToken)->Result<Value,ExecutionError> {
-        self.call(binding,context,ResourceOperation::ChildSourceHandoff{profile:profile.into()},authorize_only,cancel)
-            .map_err(|failure|ExecutionError::new("collaboration_source",failure.error.to_string()))
+    pub(crate) fn child_source_handoff(
+        &self,
+        binding: &ToolBinding,
+        context: &ToolExecutionContext,
+        profile: &str,
+        authorize_only: bool,
+        cancel: &CancellationToken,
+    ) -> Result<Value, ExecutionError> {
+        self.call(
+            binding,
+            context,
+            ResourceOperation::ChildSourceHandoff {
+                profile: profile.into(),
+            },
+            authorize_only,
+            cancel,
+        )
+        .map_err(|failure| ExecutionError::new("collaboration_source", failure.error.to_string()))
     }
-    pub(crate) fn child_storage_receipt(&self,binding:&ToolBinding,context:&ToolExecutionContext,operation_id:&str,kind:&str,cancel:&CancellationToken)->Result<Value,ExecutionError> {
-        self.call(binding,context,ResourceOperation::ChildStorageReceipt{operation_id:operation_id.into(),kind:kind.into()},false,cancel)
-            .map_err(|failure|ExecutionError::new("collaboration_result",failure.error.to_string()))
+    pub(crate) fn child_storage_receipt(
+        &self,
+        binding: &ToolBinding,
+        context: &ToolExecutionContext,
+        operation_id: &str,
+        kind: &str,
+        cancel: &CancellationToken,
+    ) -> Result<Value, ExecutionError> {
+        self.call(
+            binding,
+            context,
+            ResourceOperation::ChildStorageReceipt {
+                operation_id: operation_id.into(),
+                kind: kind.into(),
+            },
+            false,
+            cancel,
+        )
+        .map_err(|failure| ExecutionError::new("collaboration_result", failure.error.to_string()))
     }
-    pub(crate) fn require_child_root_idle(&self,binding:&ToolBinding,context:&ToolExecutionContext,cancel:&CancellationToken)->Result<Value,ExecutionError> {
-        self.call(binding,context,ResourceOperation::ChildRootIdle,false,cancel)
-            .map_err(|failure|ExecutionError::new("collaboration_writer",failure.error.to_string()))
+    pub(crate) fn require_child_root_idle(
+        &self,
+        binding: &ToolBinding,
+        context: &ToolExecutionContext,
+        cancel: &CancellationToken,
+    ) -> Result<Value, ExecutionError> {
+        self.call(
+            binding,
+            context,
+            ResourceOperation::ChildRootIdle,
+            false,
+            cancel,
+        )
+        .map_err(|failure| ExecutionError::new("collaboration_writer", failure.error.to_string()))
     }
     pub(crate) fn collaboration_pin(
         &self,
@@ -805,7 +945,11 @@ impl KernelToolExecutor {
             && binding.enabled_tools.iter().any(|kind| {
                 matches!(
                     kind,
-                    ToolKind::FileWrite | ToolKind::FileEdit | ToolKind::ProcessSpawn
+                    ToolKind::FileWrite
+                        | ToolKind::FileEdit
+                        | ToolKind::ProcessSpawn
+                        | ToolKind::ProcessWrite
+                        | ToolKind::ProcessResize
                 )
             })
         {
@@ -910,7 +1054,10 @@ impl KernelToolExecutor {
             .iter()
             .filter(|schema| {
                 !managed_process_observation
-                    || !matches!(schema.name.as_str(), "process_inspect" | "process_read")
+                    || !matches!(
+                        schema.name.as_str(),
+                        "process_inspect" | "process_read" | "process_write" | "process_resize"
+                    )
             })
             .cloned()
             .map(|schema| {
@@ -961,7 +1108,10 @@ impl KernelToolExecutor {
         let job = matches!(operation, ResourceOperation::ProcessSpawn(_));
         let read_only = !matches!(
             operation,
-            ResourceOperation::FileMutation(_) | ResourceOperation::ProcessSpawn(_)
+            ResourceOperation::FileMutation(_)
+                | ResourceOperation::ProcessSpawn(_)
+                | ResourceOperation::ProcessWrite(_)
+                | ResourceOperation::ProcessResize(_)
         );
         let key = |value: Value| value.to_string();
         let (resource, access) = match operation {
@@ -1026,6 +1176,22 @@ impl KernelToolExecutor {
             ResourceOperation::ProcessObservation { .. } => {
                 unreachable!("observation is admitted by the Catalog wrapper")
             }
+            ResourceOperation::ProcessWrite(args) => (
+                key(json!([
+                    "process-input",
+                    self.binding.execution_workspace_id,
+                    args.process_id
+                ])),
+                Access::Write,
+            ),
+            ResourceOperation::ProcessResize(args) => (
+                key(json!([
+                    "process-size",
+                    self.binding.execution_workspace_id,
+                    args.process_id
+                ])),
+                Access::Write,
+            ),
             ResourceOperation::ProcessInspect(args) => (
                 key(json!([
                     "process-output",
@@ -1077,7 +1243,10 @@ impl KernelToolExecutor {
         let operation = self.operation(Some(context), call)?;
         if !matches!(
             operation,
-            ResourceOperation::ProcessInspect(_) | ResourceOperation::ProcessRead(_)
+            ResourceOperation::ProcessInspect(_)
+                | ResourceOperation::ProcessRead(_)
+                | ResourceOperation::ProcessWrite(_)
+                | ResourceOperation::ProcessResize(_)
         ) {
             return Err(ExecutionError::new(
                 "process_observation",
@@ -1369,6 +1538,14 @@ impl KernelToolExecutor {
         if let ResourceOperation::LanguageQuery(args) = &operation {
             return self.execute_language(context, args, cancel);
         }
+        if matches!(
+            operation,
+            ResourceOperation::ProcessWrite(_) | ResourceOperation::ProcessResize(_)
+        ) {
+            return ToolCompletion::NotDispatched {
+                reason: "process interaction requires Catalog ownership validation".into(),
+            };
+        }
         let spawn = matches!(operation, ResourceOperation::ProcessSpawn(_));
         let mutation = matches!(operation, ResourceOperation::FileMutation(_));
         let result = if let ResourceOperation::FileQuery(args) = &operation {
@@ -1560,10 +1737,18 @@ fn tool_schema(kind: ToolKind) -> Value {
             json!({"processId":{"type":"string"},"cursor":{"type":"integer","minimum":0},"maxBytes":{"type":"integer","minimum":1}}),
             vec!["processId", "cursor"],
         ),
+        ToolKind::ProcessWrite => (
+            json!({"processId":{"type":"string","minLength":1},"text":{"type":"string"},"eof":{"type":"boolean"}}),
+            vec!["processId", "text"],
+        ),
+        ToolKind::ProcessResize => (
+            json!({"processId":{"type":"string","minLength":1},"cols":{"type":"integer","minimum":1,"maximum":65535},"rows":{"type":"integer","minimum":1,"maximum":65535}}),
+            vec!["processId", "cols", "rows"],
+        ),
         ToolKind::ProcessSpawn => (
             json!({"cwd":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},
             "env":{"type":"array","description":"Complete process environment. Omit to inherit this execution environment; an empty array starts with no environment variables.","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"]}},
-            "mode":{"type":"string","enum":["pipe","pty"]},"cols":{"type":"integer","minimum":1,"maximum":1000},"rows":{"type":"integer","minimum":1,"maximum":500},"windowsRawArguments":{"type":"string"}}),
+            "mode":{"type":"string","enum":["pipe","pty"]},"cols":{"type":"integer","minimum":1,"maximum":65535},"rows":{"type":"integer","minimum":1,"maximum":65535},"windowsRawArguments":{"type":"string"}}),
             vec!["cwd", "command", "args", "mode"],
         ),
     };
@@ -1630,10 +1815,23 @@ pub(crate) fn serve_resource(
             storage.validate_live_root(root, &grant, host_id)?;
         }
         match &request.operation {
-            ResourceOperation::ChildSourceHandoff{profile}=>return storage.child_source_handoff(&request.binding,&request.context,profile,&grant,host_id,request.authorize_only),
-            ResourceOperation::ChildStorageReceipt{operation_id,kind}=>return storage.child_storage_receipt(&request.binding,operation_id,kind,&grant),
-            ResourceOperation::ChildRootIdle=>return storage.require_child_root_idle(&request.binding,&grant),
-            _=>()
+            ResourceOperation::ChildSourceHandoff { profile } => {
+                return storage.child_source_handoff(
+                    &request.binding,
+                    &request.context,
+                    profile,
+                    &grant,
+                    host_id,
+                    request.authorize_only,
+                )
+            }
+            ResourceOperation::ChildStorageReceipt { operation_id, kind } => {
+                return storage.child_storage_receipt(&request.binding, operation_id, kind, &grant)
+            }
+            ResourceOperation::ChildRootIdle => {
+                return storage.require_child_root_idle(&request.binding, &grant)
+            }
+            _ => (),
         }
         if let Some(root) = &request.binding.live_root {
             storage.validate_live_root(root, &grant, host_id)?;

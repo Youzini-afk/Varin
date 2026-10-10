@@ -87,8 +87,16 @@ it('installed domain policy resumes its saved question, reads genuine result sha
   const status = await completed(lease, ask, 'ask_user', accepted('original-question', 'awaiting_user'));
   expect(status.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'question_status', arguments: { operationId: 'original-question' } } }] });
   const spawn = await readResult(lease, status, 'question_status', { operationId: 'original-question', status: 'answered', answer: 'run', historyId: 'original-answer' });
-  expect(spawn.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'process_spawn', arguments: { command: 'node', mode: 'pipe', cwd: '' } } }] });
-  const wait = await completed(lease, spawn, 'process_spawn', accepted('original-process', 'running', 'dispatched'));
+  expect(spawn.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'process_spawn', arguments: { command: 'node', mode: 'pty', cwd: '' } } }] });
+  const resize = await completed(lease, spawn, 'process_spawn', accepted('original-process', 'running', 'dispatched'));
+  expect(resize.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'process_resize', arguments: { processId: 'original-process', cols: 111, rows: 41 } } }] });
+  const applied = (name: string): Extract<VarinAgentPolicyToolCompletion, { kind: 'result' }> => ({ kind: 'result', outcome: 'succeeded', effect: 'confirmed',
+    output: { action_id: `${name}-action`, node_id: name, content_ref: `${name}-receipt` } });
+  const write = await completed(lease, resize, 'process_resize', applied('process_resize'));
+  expect(write.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'process_write', arguments: { processId: 'original-process', text: 'fixed policy input\n' } } }] });
+  const uncertain = await completed(lease, write, 'process_write', { ...applied('process_write'), kind: 'result', outcome: 'indeterminate', effect: 'unknown' });
+  expect(uncertain.action.kind).toBe('fail');
+  const wait = await completed(lease, write, 'process_write', applied('process_write'));
   expect(wait.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'wait_process', arguments: { processId: 'original-process' } } }] });
   const inspect = await completed(lease, wait, 'wait_process', accepted('original-observer', 'awaiting_process'));
   expect(inspect.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'process_inspect', arguments: { processId: 'original-process' } } }] });

@@ -17,7 +17,7 @@ export function harnessShellIdFromDetails(details: unknown): string | null {
     ?? asShellId(record.handle);
 }
 
-export function openHarnessTerminal(directory: string, sessionId: string, command?: string): string | null {
+export function attachProcessTerminal(directory: string, sessionId: string, command?: string): string | null {
   const cwd = directory.trim();
   const id = sessionId.trim();
   if (!cwd || !id) return null;

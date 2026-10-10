@@ -26,6 +26,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     return result;
   };
   return {
+    processes: { openTerminal: input => post('process/terminal', input) },
     plan: { read: identity => post('plan/read', identity), update: input => post('plan/update', input) },
     collaboration: {
       children: identity => post('child/list', identity),

@@ -186,10 +186,14 @@ impl Storage {
         match outcome {
             Ok(()) => {
                 self.conn.execute_batch("COMMIT")?;
+                self.processes.revoke_subscriptions(grant_id);
                 self.file_leases.retain(|id, lease| {
-                    if lease.grant_id != grant_id { return true; }
+                    if lease.grant_id != grant_id {
+                        return true;
+                    }
                     if let Some(retained) = self.retained_file_leases.get_mut(id) {
-                        retained.release_requested = true; return true;
+                        retained.release_requested = true;
+                        return true;
                     }
                     false
                 });
@@ -282,7 +286,7 @@ impl Storage {
             ));
         }
         require_capability(&grant, method)?;
-        self.authorize_child_handoff(&grant,method,params)?;
+        self.authorize_child_handoff(&grant, method, params)?;
         let mut authorized = params.clone();
         let workspace = if let Some(workspace) = params.get("workspaceId").and_then(Value::as_str) {
             Some(workspace.to_string())
@@ -490,7 +494,9 @@ impl Storage {
         ] {
             // Compute traversal intersects requested roots with the grant before
             // candidate selection; a broad root is not itself a file read.
-            if method == "compute.start" && field == "paths" { continue; }
+            if method == "compute.start" && field == "paths" {
+                continue;
+            }
             if let Some(values) = params.get(field).and_then(Value::as_array) {
                 for value in values {
                     let path = value
@@ -502,9 +508,17 @@ impl Storage {
                                 "grant path subject is malformed".to_string(),
                             )
                         })?;
-                    let metadata = field == "paths" && matches!(method,"branch.read"|"pin.read");
-                    let canonical = if metadata && path.is_empty() { String::new() } else { Self::validate_path(path)?.join("/") };
-                    if !(if metadata { path_metadata_allowed_scopes(&grant.path_scopes,&canonical) } else { path_allowed(&grant,&canonical) }) {
+                    let metadata = field == "paths" && matches!(method, "branch.read" | "pin.read");
+                    let canonical = if metadata && path.is_empty() {
+                        String::new()
+                    } else {
+                        Self::validate_path(path)?.join("/")
+                    };
+                    if !(if metadata {
+                        path_metadata_allowed_scopes(&grant.path_scopes, &canonical)
+                    } else {
+                        path_allowed(&grant, &canonical)
+                    }) {
                         return Err(KernelError::Authorization(format!(
                             "path is outside grant scope: {canonical}"
                         )));

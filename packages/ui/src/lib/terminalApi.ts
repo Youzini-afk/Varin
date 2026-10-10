@@ -1,3 +1,4 @@
+import { TERMINAL_PROTOCOL_VERSION } from '@varin/application-client';
 import type { CreateTerminalOptions, TerminalError, TerminalHandlers, TerminalSession, TerminalShellOption, TerminalStreamEvent } from '@varin/application-client';
 import { openRuntimeWebSocket } from './relay/runtime-socket';
 import type { RelayTunnelWebSocket } from './relay/tunnel-client';
@@ -81,6 +82,14 @@ export class TerminalTransport {
   private wakeCleanup: (() => void) | null = null;
   private generation = 0;
   private disposed = false;
+  private pendingWrites = new Map<string, { sessionId: string; socket: RelayTunnelWebSocket; resolve(): void; reject(error: Error): void }>();
+  private rejectWrites(socket: RelayTunnelWebSocket, reason: string): void {
+    for (const [id, pending] of this.pendingWrites) {
+      if (pending.socket !== socket) continue;
+      this.pendingWrites.delete(id);
+      const error = new Error(reason) as TerminalError; error.code = 'INPUT_UNCONFIRMED'; pending.reject(error);
+    }
+  }
 
   constructor(private readonly dependencies: TerminalTransportDependencies = {
     refreshAuth: refreshRuntimeUrlAuthToken,
@@ -100,7 +109,7 @@ export class TerminalTransport {
       handlers.onEvent({ type: 'snapshot', sequence: projection.sequence, data: projection.history, status: projection.status, exitCode: projection.exitCode, signal: projection.signal, runtime: projection.runtime, ptyBackend: projection.ptyBackend });
     }
     const socketWasOpen = this.socket?.readyState === SOCKET_OPEN;
-    this.ensureConnected().then(() => { if (first && socketWasOpen && set.has(subscriber)) this.send({ t: 'attach', v: 3, s: sessionId }); }).catch((error) => {
+    this.ensureConnected().then(() => { if (first && socketWasOpen && set.has(subscriber)) this.send({ t: 'attach', v: TERMINAL_PROTOCOL_VERSION, s: sessionId }); }).catch((error) => {
       handlers.onError?.(error, false);
       this.scheduleReconnect();
     });
@@ -110,7 +119,7 @@ export class TerminalTransport {
       if (current?.size === 0) {
         this.subscribers.delete(sessionId);
         this.projections.delete(sessionId);
-        this.send({ t: 'detach', v: 3, s: sessionId });
+        this.send({ t: 'detach', v: TERMINAL_PROTOCOL_VERSION, s: sessionId });
       }
       if (this.subscribers.size === 0) {
         this.cancelReconnect();
@@ -128,11 +137,18 @@ export class TerminalTransport {
 
   async write(sessionId: string, data: string): Promise<void> {
     if (!data) return;
+    this.cancelIdleClose();
     await this.ensureConnected();
-    if (this.send({ t: 'write', v: 3, s: sessionId, d: data })) return;
-    this.closeSocket();
-    await this.ensureConnected();
-    if (!this.send({ t: 'write', v: 3, s: sessionId, d: data })) throw new Error('Terminal connection is unavailable');
+    const socket = this.socket;
+    if (!socket || socket.readyState !== SOCKET_OPEN) throw new Error('Terminal connection is unavailable');
+    const id = crypto.randomUUID();
+    await new Promise<void>((resolve, reject) => {
+      this.pendingWrites.set(id, { sessionId, socket, resolve, reject });
+      if (!this.send({ t: 'write', v: TERMINAL_PROTOCOL_VERSION, s: sessionId, i: id, d: data })) {
+        this.rejectWrites(socket, 'Terminal input delivery is unconfirmed; input was not retried');
+        this.closeSocket();
+      }
+    }).finally(() => { if (this.subscribers.size === 0) this.scheduleIdleClose(); });
   }
 
   dispose(): void {
@@ -190,21 +206,23 @@ export class TerminalTransport {
         socket.onopen = () => {
           if (generation !== this.generation || this.disposed) { socket.close(); finish(new Error('Terminal runtime changed')); return; }
           this.failures = 0;
-          this.send({ t: 'hello', v: 3 });
-          for (const sessionId of this.subscribers.keys()) this.send({ t: 'attach', v: 3, s: sessionId });
+          this.send({ t: 'hello', v: TERMINAL_PROTOCOL_VERSION });
+          for (const sessionId of this.subscribers.keys()) this.send({ t: 'attach', v: TERMINAL_PROTOCOL_VERSION, s: sessionId });
           this.startKeepalive();
           finish();
         };
-        socket.onmessage = (event) => void this.handleMessage(event.data);
+        socket.onmessage = (event) => { if (this.socket === socket) void this.handleMessage(event.data, socket); };
         socket.onerror = () => {
+          this.rejectWrites(socket, 'Terminal connection failed before its input receipt; input was not retried');
           finish(new Error('Terminal WebSocket failed'));
-          if (!this.disposed && this.subscribers.size > 0) this.scheduleReconnect();
+          if (this.socket === socket && !this.disposed && this.subscribers.size > 0) this.scheduleReconnect();
         };
         socket.onclose = () => {
-          if (this.socket === socket) this.socket = null;
-          this.stopKeepalive();
+          this.rejectWrites(socket, 'Terminal connection closed before its input receipt; input was not retried');
+          const current = this.socket === socket;
+          if (current) { this.socket = null; this.stopKeepalive(); }
           finish(new Error('Terminal WebSocket closed'));
-          if (!this.disposed && this.subscribers.size > 0) this.scheduleReconnect();
+          if (current && !this.disposed && this.subscribers.size > 0) this.scheduleReconnect();
         };
       } catch (error) {
         finish(error instanceof Error ? error : new Error('Terminal WebSocket failed'));
@@ -224,9 +242,26 @@ export class TerminalTransport {
     }
   }
 
-  private async handleMessage(raw: unknown): Promise<void> {
+  private async handleMessage(raw: unknown, socket: RelayTunnelWebSocket): Promise<void> {
     const message = await decode(raw);
-    if (!message || message.t === 'hello' || message.t === 'pong') return;
+    if (!message || this.socket !== socket) return;
+    if (message.v !== TERMINAL_PROTOCOL_VERSION) {
+      this.rejectWrites(socket, 'Terminal protocol changed before input confirmation');
+      this.closeSocket(); return;
+    }
+    if (message.t === 'hello' || message.t === 'pong') return;
+    if ((message.t === 'written' || message.t === 'error') && typeof message.i === 'string') {
+      const pending = this.pendingWrites.get(message.i);
+      if (!pending || pending.socket !== socket || pending.sessionId !== message.s) return;
+      this.pendingWrites.delete(message.i);
+      if (message.t === 'written') pending.resolve();
+      else {
+        const error = new Error(typeof message.message === 'string' ? message.message : 'Terminal input was not confirmed') as TerminalError;
+        if (typeof message.code === 'string') error.code = message.code;
+        pending.reject(error);
+      }
+      return;
+    }
     if (message.t === 'error') {
       const error = new Error(typeof message.message === 'string' ? message.message : 'Terminal error') as TerminalError;
       if (typeof message.code === 'string') error.code = message.code;
@@ -302,7 +337,7 @@ export class TerminalTransport {
     if (this.idleCloseTimer || this.disposed) return;
     this.idleCloseTimer = setTimeout(() => {
       this.idleCloseTimer = null;
-      if (this.disposed || this.subscribers.size > 0) return;
+      if (this.disposed || this.subscribers.size > 0 || this.pendingWrites.size > 0) return;
       this.generation += 1;
       this.closeSocket();
     }, IDLE_SOCKET_GRACE_MS);
@@ -314,10 +349,10 @@ export class TerminalTransport {
     this.idleCloseTimer = null;
   }
 
-  private startKeepalive(): void { this.stopKeepalive(); this.keepaliveTimer = setInterval(() => this.send({ t: 'ping', v: 3 }), 45_000); }
+  private startKeepalive(): void { this.stopKeepalive(); this.keepaliveTimer = setInterval(() => this.send({ t: 'ping', v: TERMINAL_PROTOCOL_VERSION }), 45_000); }
   private stopKeepalive(): void { if (this.keepaliveTimer) clearInterval(this.keepaliveTimer); this.keepaliveTimer = null; }
   private cancelReconnect(): void { if (this.reconnectTimer) clearTimeout(this.reconnectTimer); this.reconnectTimer = null; this.wakeCleanup?.(); this.wakeCleanup = null; }
-  private closeSocket(): void { this.stopKeepalive(); const socket = this.socket; this.socket = null; if (socket && (socket.readyState === SOCKET_CONNECTING || socket.readyState === SOCKET_OPEN)) socket.close(); }
+  private closeSocket(): void { this.stopKeepalive(); const socket = this.socket; this.socket = null; if (socket) { this.rejectWrites(socket, 'Terminal view disconnected before input confirmation; input was not retried'); if (socket.readyState === SOCKET_CONNECTING || socket.readyState === SOCKET_OPEN) socket.close(); } }
 }
 
 let transport = new TerminalTransport();

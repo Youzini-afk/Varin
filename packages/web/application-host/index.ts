@@ -29,6 +29,7 @@ import { createIntegrationToolOwner, createIntegrationTargetOpener, createIntegr
 import { createMcpHarnessServices } from './lib/harness/mcp-service.js';
 import { sharedHostCredentialAuthority } from '@varin/runtime-broker';
 import { AgentRuntimeClient } from './lib/kernel/agent-runtime-client.js';
+import { createThreadProcesses } from './lib/kernel/thread-processes.js';
 import { ThreadAdapter } from './lib/kernel/thread-adapter.js';
 import { registerThreadRoutes } from './lib/kernel/thread-routes.js';
 import { registerRuntimeMaintenanceRoutes } from './lib/kernel/runtime-maintenance-routes.js';
@@ -2998,7 +2999,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // Durable launch remains inspectable/resumable. Never log credentials or provider responses.
       console.error('[Thread] Launch preparation requires attention:', runId);
     }, createThreadSourcePreparer({ documents: documentsAuthority, liveSources, workingStates: threadWorkingStates, prepareResources: threadResources.prepareSourceCapture }),
-    threadContext, new PlanService(agentRuntime, getUserKnowledgeStore), createThreadSkillInputPreparer(threadResources));
+    threadContext, new PlanService(agentRuntime, getUserKnowledgeStore), createThreadSkillInputPreparer(threadResources), createThreadProcesses({ runtime: agentRuntime, kernel: kernelClient,
+      terminal: () => terminalRuntime, resolveLiveSource: liveSources.validate,
+      onError: () => console.error('[Thread] Original process terminal requires attention'),
+    }));
   const collaboration = new ThreadCollaboration({ runtime: agentRuntime,
     kernel: kernelClient, storageAdapter: kernelStorageAdapter, resolveLiveSource: liveSources.validate,
     sourceCaptureOwners: { documents: documentsAuthority, prepareResources: threadResources.prepareSourceCapture, inspectInventory: (directory, signal) => threadWorktreeRuntime.inspectGitBaselineInventory(directory, signal) },

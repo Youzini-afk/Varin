@@ -1,3 +1,4 @@
+import { savedSourceLaunch } from './source-launch.js';
 import type { PlanView, PlanForkCapture } from '@varin/protocol';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -1087,6 +1088,8 @@ export class AgentRuntimeClient {
         process_inspect: 'process_inspect',
         process_read: 'process_read',
         process_spawn: 'process_spawn',
+        process_resize: 'process_resize',
+        process_write: 'process_write',
         language_definition: 'language_definition',
         language_references: 'language_references',
         language_diagnostics: 'language_diagnostics',
@@ -1100,7 +1103,7 @@ export class AgentRuntimeClient {
         return names[tool.name as keyof typeof names];
       });
       return this.startFromSource(
-        this.sourceLaunch(runId, source, tools),
+        savedSourceLaunch(runId, source, tools),
         options,
       );
     });
@@ -1167,6 +1170,8 @@ export class AgentRuntimeClient {
         process_inspect: 'process_inspect',
         process_read: 'process_read',
         process_spawn: 'process_spawn',
+        process_resize: 'process_resize',
+        process_write: 'process_write',
         language_definition: 'language_definition',
         language_references: 'language_references',
         language_diagnostics: 'language_diagnostics',
@@ -1180,49 +1185,10 @@ export class AgentRuntimeClient {
         return names[tool.name as keyof typeof names];
       });
       return this.startFromSource(
-        this.sourceLaunch(runId, source, tools, previousRunId),
+        savedSourceLaunch(runId, source, tools, previousRunId),
         options,
       );
     });
-  }
-  private sourceLaunch(
-    runId: string,
-    source: NonNullable<LaunchIntent['selection']['source']>,
-    tools: SourceLaunch['tools'],
-    previousRunId?: string,
-  ): SourceLaunch {
-    const base = {
-      runId,
-      workspaceId: source.workspace_id,
-      executionWorkspaceId: source.execution_workspace_id,
-      tools,
-    };
-    if (source.mode === 'live_root') {
-      if (
-        !source.live_root ||
-        source.branch_id !== null ||
-        source.revision !== null ||
-        source.environment_run_id
-      )
-        throw new Error('Saved live environment is incomplete');
-      return { ...base, mode: 'live_root', liveRoot: source.live_root };
-    }
-    if (
-      source.branch_id === null ||
-      source.revision === null ||
-      source.live_root
-    )
-      throw new Error('Saved fixed environment is incomplete');
-    const environmentRunId = source.environment_run_id ?? previousRunId;
-    return {
-      ...base,
-      mode: source.mode,
-      branchId: source.branch_id,
-      revision: source.revision,
-      ...(source.mode === 'materialized' && environmentRunId
-        ? { environmentRunId }
-        : {}),
-    };
   }
   launch(runId: string, signal?: AbortSignal): Promise<LaunchIntent | null> {
     return this.kernel.agentRuntimeRequest(
@@ -1652,6 +1618,9 @@ export class AgentRuntimeClient {
       this.kernel.releaseRunPolicyOwners(runId);
     }
     return run;
+  }
+  processAccess(params: import('./protocol.generated.js').RuntimeProcessAccessParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').RuntimeProcessAccess> {
+    return this.kernel.agentRuntimeRequest('runtime.process.access', params, signal);
   }
   operation(operationId: string, signal?: AbortSignal): Promise<Operation> {
     return this.kernel.agentRuntimeRequest(

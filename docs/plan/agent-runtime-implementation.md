@@ -8,6 +8,18 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-10 增量：交互进程回执与原任务终端
+
+- `process_write`、`process_resize` 现在沿真实 ModelStep 或 PolicyAction/node、冻结 schema、原 source/grant 与 Operation 执行。ProcessManager 统一分配进程序号并串行 stdin，resize 不排在阻塞写入后；调用者不再维护独立 sequence。底层 `process.write` / `process.resize` 直接以 operationId 和原始意图取代旧 queued 成功合同，所有现有 shell、远程 shell、LSP/终端与 stream 消费者都等待实际回执，没有旧协议兼容分支。
+- 既有 Storage operations/operation_owners 保存短意图与原授权身份，guardian 原回执保存实际已写字节下界、EOF、尺寸、取消及 applied/partial/not_applied/unknown。正文摘要、块传输和持久 I/O 在执行 worker；没有第二进程执行账本。管道 EOF 真实关闭输入，PTY 不伪造 EOF；尺寸约束来自原生 u16 协议。已写字节不等于子程序已处理命令，unknown 不自动重发。取消停止尚未发送的块，已阻塞写入保留原 owner 等待实际确认，不以取消输入观察杀死进程。
+- `runtime.run.reconcile` 按 Catalog 原 native invocation 和 Storage 原 process/root/grant/intent 私有读取已存 guardian 回执，覆盖原 grant 在写入后撤销、Catalog 尚未结算的恢复；不会复活旧授权或重新发送内容。公共 inspect/input 继续核当前与原 grant，follow-up 的跨 Run 观察关系不授予写入。已知 unknown 仍能从随后出现的原最终回执精化；确认过的相同调用不重复写入。
+- 认证 `ThreadsAPI.processes.openTerminal` → 原 Thread/branch/Operation → 冻结来源重新准入窄 grant → `runtime.process.access` → retained KernelManagedProcess → 既有 TerminalRuntime/UI，展示和输入都是原 PTY。不会再启动替代进程；关闭视图/Host detach 不停止独立 Agent 作业，也不删除其 spool。明确停止仍取消原 Operation 并等待真实停止，错误视图可重新绑定原 spool 而不重发输入。终端 cwd 使用进程真实子目录；自然退出的输出/exit 先交付，再完成 projection。
+- 原终端协议统一为 v4：renderer 发送 inputId，Host 绑定原 session 的 operationId，只有原写入 Promise 获真实回执才返回 written。断连或 partial/unknown 使原 UI 调用保持明确未确认，不把 WebSocket.send 当完成，也不自动重播旧按键/命令。旧 shell supervisor 的异步输入失败保留实际 writer；之后真实退出仍能结算，不能误报为从未启动。安装示例 `domain-policy` 现在实际编排 PTY spawn → resize → write → wait → inspect，并拒绝把不确定输入当作成功继续。
+- 独审复现两条消费缺口并按原失败条件修复：两条阻塞 stdin 原先会占满共享 request window，拖住无关读取/新输入及旧直接 kill；现在完整正文进入原可取消执行 owner 后单独确认释放传输 credit，原效果 Promise 和关闭 drain 仍保留到最终回执，直接 kill 使用原控制 response window。并发 resize 现在有独立于 stdin 的原进程 FIFO；实测先受理 A 并暂停其 worker、先运行 B，B 不再越过 A 把最终尺寸倒退。没有扩大窗口、转堵取消通道或新增全局执行队列。
+- 最终原生验证：完整 runtime **311 passed / 0 failed / 2 既有 ignored**；kernel lib **56 passed / 0 failed / 10 ignored**，其中独立显式执行的真实进程交互 **7/7**、原 ModelStep 输入/撤权恢复 **1/1**、一般策略完整领域链 **1/1** 均通过。实际覆盖 PTY resize/input、blocked pipe 的部分写入取消与可用控制、回执文件发布故障后已写下界、重复/重开、原授权撤销后私有恢复；没有使用付费模型。Linux x64 kernel identity `0.9.25` 已新编译并按 manifest/ELF 校验，SHA-256 `94f268521a6be3ca4e8fc5bb7f231b67b68d90ff150bc238e1c725923ea21d70`。
+- 最终实际 Host 消费组合 **89 passed / 3 skipped**，含两个真实 renderer transport → Host handler 内存帧交互，原 source/client/projection/TerminalRuntime 绑定及已安装策略；UI 行为 **39/39**；实际 KernelClient 传输 credit/取消/drain 与原窗口行为 **5/5**。Host 生产/测试类型、UI/example 类型、实际 Host bundle 与生成协议检查通过。内存帧用例不监听网络；这组证据与真实 Rust OS 用例分别成立，未执行的完整 Host IPC、真实网络 websocket 与跨平台验收仍单独保留，不拼接成产品端到端通过。
+- 独立审查先从两设计建立验收，再追真实消费者；原 credit 失败探针修后通过，真实 PTY 交错独立复跑通过，最终 stage 指纹前后相同。本切片无剩余已知实现阻断。可复跑原生组件入口见 [kernel README](../../kernel/README.md#interactive-process-component-acceptance)；子任务能力/profile/模型选择、递归协作及其进程停止/文件结果边界等设计余项继续推进。
+
 ## 2026-10-10 增量：一般策略的计划、提问与进程观察
 
 - `todo`、`ask_user` 和 `wait_process` 现在接受真实 `PolicyAction`/node，与模型调用共用原 Operation、权限、资源准入、领域 owner 和 canonical 调用回执。只有 ModelStep 写 provider 工具配对；JobAccepted 始终只是受理，图节点消费与领域终态分别保留。共享短 Job 校验替代子任务、问题和进程各自的模型专用分支，没有第二份执行、计划、问题或进程账本。

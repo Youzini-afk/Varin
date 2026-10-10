@@ -5,6 +5,7 @@ import os from "node:os";
 import type { SpawnOptions } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
+import { requireAppliedProcessInteraction } from "./process-interaction.js";
 import { ManagedProcessLaunchError, type ManagedPipedProcessHandle } from "../process/types.js";
 import { canonicalizePathIdentity } from "../workspace/path-safety.js";
 import type { KernelClient, KernelGrantHandle, KernelScopedClient, KernelProcessSubscription } from "./kernel-client.js";
@@ -20,7 +21,9 @@ interface Options {
   resolveIdentity(cwd: string): Promise<NativeProcessIdentity>;
   onError?: (error: Error) => void;
 }
-interface Address { workspaceId: string; processId: string }
+export interface ProcessAddress { workspaceId: string; processId: string; rootId?: string }
+type Address = ProcessAddress;
+interface ProjectionOptions { retainOutput?: boolean; terminate?: (force: boolean) => Promise<void> }
 const asError = (value: unknown): Error => value instanceof Error ? value : new Error(String(value));
 const nativeSignal = (value: string | null): NodeJS.Signals | null => {
   if (!value) return null;
@@ -46,15 +49,11 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
   private rejectCompletion!: (error: Error) => void;
   private current: KernelProcessSnapshot;
   private cursor = 0;
-  private inputSequence = 0;
-  private acknowledgedInput = -1;
-  private inputError: string | null = null;
   private outputFailure: Error | null = null;
   private lost: Error | null = null;
   private subscriptionStart: Promise<void> | undefined;
   private subscription: KernelProcessSubscription | undefined;
   private pendingDataAck: (() => Promise<void>) | null = null;
-  private readonly inputWaiters = new Set<() => void>();
   private endCursor = 0;
   private outputComplete = false;
   private ready = false;
@@ -69,7 +68,8 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
   private readonly epoch: string;
 
   constructor(private readonly scoped: KernelScopedClient, readonly address: Address, initial: KernelProcessSnapshot,
-    private readonly reportError: (error: Error) => void, private readonly released: () => void) {
+    private readonly reportError: (error: Error) => void, private readonly released: () => void,
+    private readonly options: ProjectionOptions = {}) {
     super();
     this.current = initial;
     this.epoch = initial.kernelEpoch;
@@ -113,14 +113,9 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
       if (this.closed || this.lost) await subscription.close().catch((error: unknown) => this.reportError(asError(error)));
     } catch (error) { this.invalidate(asError(error)); throw error; }
   }
-  private wakeInput(): void {
-    for (const resolve of this.inputWaiters) resolve();
-    this.inputWaiters.clear();
-  }
   invalidate(error: Error): void {
     if (this.closed || this.lost || this.exitConfirmed) return;
     this.lost = error;
-    this.wakeInput();
     this.pendingDataAck = null;
     void this.subscription?.close().catch((failure: unknown) => this.reportError(asError(failure)));
     const stopped = !this.current.writerActive;
@@ -140,6 +135,7 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
       this.closed = true;
       this.emit("exit", this.exitCode, this.signalCode);
       this.emit("close", this.exitCode, this.signalCode);
+      if (this.options.retainOutput) this.released();
     }
     // Without prior tree evidence there is no synthetic exit/close or writer release.
   }
@@ -157,16 +153,13 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
         if (result.chunks.length !== 0) throw new Error("Native control event included output bytes");
         validateSnapshot(result.process, this.address, this.epoch);
         this.current = result.process;
-        this.acknowledgedInput = result.inputSequence;
-        this.inputError = result.inputError;
         this.outputComplete = result.outputComplete;
         if (result.outputError !== null && this.outputFailure === null) {
           this.outputFailure = new Error(result.outputError); this.emit("error", this.outputFailure);
         }
-        if (!this.ready && this.current.pid !== null) { this.ready = true; this.readyResolve(); }
+        if (!this.ready && (this.current.pid !== null || (this.options.retainOutput && !this.current.writerActive && this.current.outputAvailable))) { this.ready = true; this.readyResolve(); }
         if (!this.current.writerActive && !this.ready) this.readyReject(new Error(this.current.reason ?? "Native process failed to start"));
-        this.wakeInput();
-        // Control credit is independent of Readable capacity and data acknowledgement.
+            // Control credit is independent of Readable capacity and data acknowledgement.
         void acknowledge().catch((error: unknown) => this.invalidate(asError(error)));
         if (this.current.status === "unknown") throw new Error(this.current.reason ?? "Native process exit remains unknown");
       } else {
@@ -194,33 +187,27 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
   private maybeFinish(): void {
     if (this.finishing || this.closed || this.lost || this.current.writerActive || this.cursor !== this.endCursor
       || (!this.outputComplete && this.outputFailure === null)) return;
-    this.finishing = true; this.pendingDataAck = null; this.wakeInput();
+    this.finishing = true; this.pendingDataAck = null;
     this.stdout.push(null); this.stderr.push(null);
     this.emit("exit", this.exitCode, this.signalCode);
     void (async () => {
       await this.subscription?.close().catch((error: unknown) => this.reportError(asError(error)));
-      await this.release().catch((error: unknown) => this.reportError(asError(error)));
+      if (!this.options.retainOutput) await this.release().catch((error: unknown) => this.reportError(asError(error)));
+      else this.released();
       this.closed = true; this.emit("close", this.exitCode, this.signalCode);
       if (this.outputFailure) this.rejectCompletion(this.outputFailure); else this.resolveCompletion();
     })();
   }
-  private async writeBytes(bytes: Buffer, eof: boolean): Promise<void> {
+  writeInput(data: string, operationId?: string): Promise<void> { return this.writeBytes(Buffer.from(data), false, operationId); }
+  private async writeBytes(bytes: Buffer, eof: boolean, identity?: string): Promise<void> {
     await this.readyPromise;
-    for (let offset = 0; offset < bytes.length || (eof && offset === 0); offset += 64 * 1024) {
-      if (this.lost) throw this.lost;
-      if (this.finishing || this.stopRequested || !this.current.writerActive) throw new Error("Native process input is closed");
-      const sequence = this.inputSequence;
-      const chunk = bytes.subarray(offset, offset + 64 * 1024);
-      await this.scoped.processWrite({ ...this.address, sequence, bytesBase64: chunk.toString("base64"), ...(eof ? { eof: true } : {}) });
-      this.inputSequence += 1;
-      while (this.acknowledgedInput < sequence) {
-        if (this.lost) throw this.lost;
-        if (this.finishing || this.closed || this.stopRequested || !this.current.writerActive) throw new Error("Native process input closed before acknowledging stdin");
-        await new Promise<void>(resolve => { this.inputWaiters.add(resolve); });
-      }
-      if (this.inputError) throw new Error(this.inputError);
-      if (eof) break;
-    }
+    if (this.lost) throw this.lost;
+    if (this.finishing || this.stopRequested || !this.current.writerActive) throw new Error("Native process input is closed");
+    const operationId = identity ?? `process-input:${randomUUID()}`;
+    const receipt = await this.scoped.processWrite({ ...this.address, operationId,
+      bytesBase64: bytes.toString("base64"), ...(eof ? { eof: true } : {}) });
+    requireAppliedProcessInteraction(receipt, { ...this.address, operationId, kernelEpoch: this.epoch,
+      kind: 'write', requestedBytes: bytes.length, eofRequested: eof });
   }
   kill(signal?: NodeJS.Signals | number): boolean {
     if (this.lost) { this.emit("error", this.lost); return false; }
@@ -231,15 +218,18 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
   async requestTermination(force = false): Promise<void> {
     if (this.lost) throw this.lost;
     if (this.exitConfirmed) return;
-    await this.scoped.processKill({ ...this.address, force });
+    if (this.options.terminate) await this.options.terminate(force);
+    else await this.scoped.processKill({ ...this.address, force });
     this.stopRequested = true;
-    this.wakeInput();
   }
   async resize(cols: number, rows: number): Promise<void> {
     if (this.lost) throw this.lost;
-    await this.scoped.processResize({ ...this.address, cols, rows });
+    const operationId = `process-resize:${randomUUID()}`;
+    const receipt = await this.scoped.processResize({ ...this.address, operationId, cols, rows });
+    requireAppliedProcessInteraction(receipt, { ...this.address, operationId, kernelEpoch: this.epoch, kind: 'resize', cols, rows });
   }
   async release(): Promise<void> {
+    if (this.options.retainOutput) throw new Error("Retained Agent process output belongs to its original operation");
     if (!this.exitConfirmed) throw new Error("Native process exit is unconfirmed; handle is retained");
     if (!this.releasePromise) {
       this.releasePromise = this.scoped.processRelease(this.address).then(() => { this.released(); });
@@ -247,10 +237,81 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
     }
     await this.releasePromise;
   }
+  /** Disposes a retained viewing projection without stopping the original job or deleting its output. */
+  async detach(): Promise<void> {
+    if (!this.options.retainOutput) throw new Error("Only retained process projections can detach");
+    this.closed = true;
+    this.pendingDataAck = null;
+    const detached = new Error("Retained process view detached; the original job is unchanged");
+    this.readyReject(detached); this.rejectCompletion(detached);
+    try { await this.subscription?.close(); }
+    finally { this.stdout.destroy(); this.stderr.destroy(); this.stdin.destroy(); this.released(); }
+  }
   discardOutput(): void {
     this.ignoreOutput = true;
     this.stdout.resume(); this.stderr.resume();
   }
+}
+
+/** Terminal projection of the same process handle; no shell is launched here. */
+export function projectProcessTerminal(child: KernelManagedProcess) {
+  const decoder = new StringDecoder("utf8");
+  const events = new EventEmitter();
+  const pending: string[] = [];
+  let attached = false;
+  let outputEnded = child.stdout.readableEnded;
+  let exited: { exitCode: number | null; signal: number } | undefined = child.exitConfirmed
+    ? { exitCode: child.exitCode, signal: child.signalCode ? os.constants.signals[child.signalCode] : 0 } : undefined;
+  let resolveExit!: () => void;
+  const delivered = new Promise<void>(resolve => { resolveExit = resolve; });
+  const completion = Promise.all([child.completion, delivered]).then(() => undefined);
+  void completion.catch(() => undefined);
+  let exitDelivered = false;
+  const deliverExit = () => {
+    if (!outputEnded || !exited || exitDelivered) return;
+    exitDelivered = true;
+    const remaining = decoder.end();
+    if (remaining) { if (attached) events.emit("data", remaining); else pending.push(remaining); }
+    events.emit("exit", exited);
+    resolveExit();
+  };
+  child.stdout.on("data", (bytes: Buffer) => {
+    const data = decoder.write(bytes);
+    if (!data) return;
+    if (!attached) pending.push(data); else events.emit("data", data);
+  });
+  child.stdout.on("end", () => {
+    outputEnded = true;
+    deliverExit();
+  });
+  child.stderr.resume();
+  child.on("exit", (code: number | null, signal: NodeJS.Signals | null) => {
+    exited = { exitCode: code, signal: signal ? os.constants.signals[signal] : 0 };
+    deliverExit();
+  });
+  deliverExit();
+  return {
+    native: true as const,
+    get pid() { return child.pid; },
+    kill: (signal?: NodeJS.Signals) => { child.kill(signal); },
+    terminate: (force = false) => child.requestTermination(force),
+    completion,
+    resize: (cols: number, rows: number) => child.resize(cols, rows),
+    write: (data: string, operationId?: string) => child.writeInput(data, operationId),
+    detach: () => child.detach(),
+    onData(handler: (data: string) => void) {
+      events.on("data", handler);
+      attached = true;
+      for (const data of pending.splice(0)) handler(data);
+      return { dispose: () => { events.off("data", handler); } };
+    },
+    onExit(handler: (event: { exitCode: number | null; signal: number }) => void) {
+      events.on("exit", handler);
+      let active = true;
+      if (exitDelivered && exited) queueMicrotask(() => { if (active) handler(exited!); });
+      return { dispose: () => { active = false; events.off("exit", handler); } };
+    },
+  };
 }
 
 export function createKernelProcessService(options: Options) {
@@ -343,55 +404,7 @@ export function createKernelProcessService(options: Options) {
       backend: "rust-kernel",
       async spawn(command: string, args: string[], input: Record<string, unknown>) {
         const child = await trackedLaunch(command, args, { cwd: String(input.cwd ?? ""), env: input.env as NodeJS.ProcessEnv }, "pty", Number(input.cols ?? 80), Number(input.rows ?? 24));
-        const decoder = new StringDecoder("utf8");
-        const events = new EventEmitter();
-        const pending: string[] = [];
-        let attached = false;
-        let outputEnded = false;
-        let exited: { exitCode: number | null; signal: number } | undefined;
-        let exitDelivered = false;
-        const deliverExit = () => {
-          if (!outputEnded || !exited || exitDelivered) return;
-          exitDelivered = true;
-          const remaining = decoder.end();
-          if (remaining) { if (attached) events.emit("data", remaining); else pending.push(remaining); }
-          events.emit("exit", exited);
-        };
-        child.stdout.on("data", (bytes: Buffer) => {
-          const data = decoder.write(bytes);
-          if (!data) return;
-          if (!attached) pending.push(data); else events.emit("data", data);
-        });
-        child.stdout.on("end", () => {
-          outputEnded = true;
-          deliverExit();
-        });
-        child.stderr.resume();
-        child.on("exit", (code: number | null, signal: NodeJS.Signals | null) => {
-          exited = { exitCode: code, signal: signal ? os.constants.signals[signal] : 0 };
-          deliverExit();
-        });
-        return {
-          native: true as const,
-          get pid() { return child.pid; },
-          kill: (signal?: NodeJS.Signals) => { child.kill(signal); },
-          terminate: (force = false) => child.requestTermination(force),
-          completion: child.completion,
-          resize: (cols: number, rows: number) => { void child.resize(cols, rows).catch(report); },
-          write: (data: string) => { child.stdin.write(data); },
-          onData(handler: (data: string) => void) {
-            events.on("data", handler);
-            attached = true;
-            for (const data of pending.splice(0)) handler(data);
-            return { dispose: () => { events.off("data", handler); } };
-          },
-          onExit(handler: (event: { exitCode: number | null; signal: number }) => void) {
-            events.on("exit", handler);
-            let active = true;
-            if (exitDelivered && exited) queueMicrotask(() => { if (active) handler(exited!); });
-            return { dispose: () => { active = false; events.off("exit", handler); } };
-          },
-        };
+        return projectProcessTerminal(child);
       },
     },
     async list(cwd: string): Promise<KernelProcessSnapshot[]> {
