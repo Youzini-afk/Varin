@@ -151,8 +151,9 @@ it('slow startup launch cannot block the existing child/process pump or a later 
   } finally { release(); collaboration.stop(); await tick(); }
 });
 
-it('a committed follow-up uses the same cold launch owner, while unrelated and repeated durable events cannot relaunch it', async () => {
+it.each(['followup.admitted', 'goal.run_ready'] as const)('%s uses the same cold launch owner, while unrelated and repeated durable events cannot relaunch it', async kind => {
   const f = fixture();
+  const subject = kind === 'goal.run_ready' ? 'goal:one' : 'followup:process';
   const events: RuntimeEvent[] = [];
   let listener!: (event: AgentRuntimeStreamEvent) => void;
   const runtime = Object.assign(f.runtime, {
@@ -169,19 +170,23 @@ it('a committed follow-up uses the same cold launch owner, while unrelated and r
   try {
     await collaboration.recover();
     // A prior manual Pause is still authoritative even if an old admitted notification replays.
-    events.push({ cursor: 1, subject: 'followup:old', revision: 2, kind: 'followup.admitted', data: { run_id: f.run.id } });
+    events.push({ cursor: 1, subject, revision: 2, kind, data: { run_id: f.run.id } });
     notify(); await vi.waitFor(() => expect(continues).toHaveBeenCalledOnce()); await tick();
     expect(f.run.waiting_on).toBe('wait:one'); expect(f.runtime.resumeRun).not.toHaveBeenCalled();
     expect(f.runtime.rebindLaunch).not.toHaveBeenCalled();
-    // Only the exact follow-up admission wakes cold preparation. Generic accepted Runs may be children.
+    // Only the exact continuation admission wakes cold preparation. Generic accepted Runs may be children.
     f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable'; f.run.waiting_on = null;
     events.push({ cursor: 2, subject: 'run:unprepared-child', revision: 1, kind: 'run.accepted', data: { run_id: 'run:unprepared-child' } });
-    events.push({ cursor: 3, subject: 'followup:process', revision: 1, kind: 'followup.registered', data: { run_id: f.run.id } });
+    events.push({ cursor: 3, subject, revision: 1, kind: kind === 'goal.run_ready' ? 'goal.started' : 'followup.registered', data: { run_id: f.run.id } });
     notify(); await tick(); await tick(); expect(continues).toHaveBeenCalledOnce();
-    events.push({ cursor: 4, subject: 'followup:process', revision: 2, kind: 'followup.admitted', data: {
-      run_id: f.run.id, followup_id: 'followup:process', occurrence_id: 'occurrence:process', source_run_id: 'run:source', operation_id: 'operation:process',
+    events.push({ cursor: 4, subject, revision: 2, kind, data: {
+      run_id: f.run.id, ...(kind === 'goal.run_ready' ? { goal_id: subject } : {
+        followup_id: subject, occurrence_id: 'occurrence:process', source_run_id: 'run:source', operation_id: 'operation:process',
+      }),
     } });
     notify(); await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());
+    expect(continues).toHaveBeenLastCalledWith(f.run.id, expect.any(AbortSignal));
+    expect(f.runtime.rebindLaunch).toHaveBeenLastCalledWith(f.run.id, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(f.models.rebindModel).toHaveBeenCalledWith(f.run.configuration, f.launch.selection.credential_scope);
     notify(); await tick(); await tick();
     expect(continues).toHaveBeenCalledTimes(2); expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce();
@@ -189,7 +194,7 @@ it('a committed follow-up uses the same cold launch owner, while unrelated and r
   } finally { collaboration.stop(); }
 });
 
-it('startup cursor discovery retains a follow-up admitted during the saved-launch scan and discovers saved work after an epoch change', async () => {
+it.each(['followup.admitted', 'goal.run_ready'] as const)('startup discovery retains %s during the saved-launch scan and discovers saved work after an epoch change', async kind => {
   const f = fixture(); f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable'; f.run.waiting_on = null;
   let release!: () => void; const scanned = new Promise<void>(resolve => { release = resolve; });
   f.runtime.pendingLaunches.mockImplementationOnce(async () => { await scanned; return []; });
@@ -209,7 +214,7 @@ it('startup cursor discovery retains a follow-up admitted during the saved-launc
   try {
     const discovery = collaboration.recover();
     await vi.waitFor(() => expect(f.runtime.pendingLaunches).toHaveBeenCalledOnce());
-    events.push({ cursor: 1, subject: 'followup:process', revision: 2, kind: 'followup.admitted', data: { run_id: f.run.id } });
+    events.push({ cursor: 1, subject: kind === 'goal.run_ready' ? 'goal:one' : 'followup:process', revision: 2, kind, data: { run_id: f.run.id } });
     listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 1 });
     release(); await discovery;
     await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());
@@ -217,6 +222,7 @@ it('startup cursor discovery retains a follow-up admitted during the saved-launc
     exit(); f.launch.startable = true; ready();
     await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledTimes(2));
     expect(f.runtime.pendingLaunches).toHaveBeenCalledTimes(2);
+    expect(f.runtime.rebindLaunch).toHaveBeenLastCalledWith(f.run.id, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(f.runtime.resumeRun).not.toHaveBeenCalled(); expect(f.errors).toEqual([]);
   } finally { release(); collaboration.stop(); }
 });

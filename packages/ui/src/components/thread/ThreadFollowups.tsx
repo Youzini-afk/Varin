@@ -10,6 +10,11 @@ const heldReason: Record<NonNullable<NonNullable<Followup['occurrence']>['hold_r
   branch_active: 'Waiting for current work and queued input',
   context_scope_changed: 'Context scope changed; cancel and register from the intended work',
   preparation_failed: 'Preparation failed; resume to retry',
+  goal_paused: 'The goal is paused',
+  goal_budget: 'The goal output budget is exhausted',
+  goal_blocked: 'The goal is blocked',
+  goal_ended: 'The goal has ended',
+  goal_superseded: 'Newer goal or run work replaced this source; it cannot continue automatically',
 };
 
 /** These controls authorize one new Run. They never resume a policy Pause or decide a trigger. */
@@ -22,14 +27,15 @@ export function ThreadFollowups({ api, identity, operations, followups, pending,
   act(work: () => Promise<unknown>): Promise<void>;
 }) {
   const registrationKeys = React.useRef(new Map<string, string>());
-  const current = followups.filter(item => item.state !== 'cancelled' && !item.occurrence?.receipt);
-  const finished = followups.filter(item => item.state === 'cancelled' || item.occurrence?.receipt);
+  const independent = followups.filter(item => item.goal_id === null);
+  const current = independent.filter(item => item.state !== 'cancelled' && !item.occurrence?.receipt);
+  const finished = independent.filter(item => item.state === 'cancelled' || item.occurrence?.receipt);
   const available = operations.filter(operation => operation.executor === 'process_spawn'
     && ((operation.call_completion?.kind === 'job_accepted' && operation.call_completion.operation_id === operation.id)
       || operation.external_receipt !== null)
-    && !current.some(item => item.operation_id === operation.id)
+    && !followups.some(item => item.operation_id === operation.id && item.state !== 'cancelled')
     && !followups.some(item => item.operation_id === operation.id && item.occurrence?.receipt));
-  if (!available.length && !followups.length) return null;
+  if (!available.length && !independent.length) return null;
   const register = (operation: Operation) => {
     const previous = followups.filter(item => item.operation_id === operation.id).map(item => item.id).sort().join(',');
     const fingerprint = `${operation.id}:${previous}`;

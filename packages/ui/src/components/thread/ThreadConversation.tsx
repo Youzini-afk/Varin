@@ -1,4 +1,5 @@
 import { ThreadPlan } from './ThreadPlan';
+import { ThreadGoal } from './ThreadGoal';
 import { ThreadFollowups } from './ThreadFollowups';
 import { ThreadMemory } from './ThreadMemory';
 import { ThreadResources } from './ThreadResources';
@@ -172,6 +173,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         {historyView && <Button variant="outline" size="sm" onClick={returnToLatest}>{historyView.head !== snapshot?.historyPage.head ? 'Show latest messages' : 'Return to latest view'}</Button>}
         {historyView && <span className="text-xs text-muted-foreground">Viewing saved history</span>}
       </div>
+      {snapshot && <ThreadGoal api={api.goals} identity={identity} goals={snapshot.goals} sourceRunId={run?.id} refresh={async () => { await projection.current?.refresh(); }} />}
       {api.plan && <ThreadPlan api={api.plan} identity={identity} contextRevision={snapshot?.context.checkpoint?.revision} />}
       {visibleHistory.map(item => <article key={item.id} className="mx-auto max-w-3xl">
         <div className="mb-1 text-xs text-muted-foreground">{item.source}</div>

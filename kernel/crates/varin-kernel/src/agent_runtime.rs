@@ -365,7 +365,8 @@ pub(crate) fn spawn(
                             let mut failed = false;
                             while continuation_wakes.recv().is_ok() {
                                 let Some(owner) = continuation_owner.upgrade() else { break; };
-                                match varin_runtime::catalog::followups::reconcile(&owner.catalog()) {
+                                let result = owner.reconcile_goal_waits().map_err(|_| ()).and_then(|_| varin_runtime::catalog::followups::reconcile(&owner.catalog()).map(|_| ()).map_err(|_| ()));
+                                match result {
                                     Ok(_) => failed = false,
                                     Err(_) if !failed => {
                                         failed = true;
@@ -652,6 +653,7 @@ pub(crate) fn spawn(
                                 | "runtime.child.wait.cancel"
                                 | "runtime.process.wait.reconcile"
                                 | "runtime.followup.control"
+                                | "runtime.goal.control"
                         ) {
                             let commands = control_commands::ControlCommands {
                                 runtime: runtime.clone(),
@@ -665,7 +667,7 @@ pub(crate) fn spawn(
                                     .expect("initialized runtime tools")
                                     .clone(),
                             };
-                            commands.admit_cancellation(method, &params)?;
+                            if let Some(receipt)=commands.admit_control(method, &params)? {return Ok(receipt);}
                             let method = method.to_owned();
                             let response_id = id.clone();
                             let response_sender = responses.clone();
@@ -1197,6 +1199,11 @@ pub(crate) fn spawn(
                             let receipt = json!({"runId":handle.run_id,"epoch":handle.epoch});
                             assembly.observe_completion(handle);
                             return Ok(receipt);
+                        }
+                        if matches!(method,"runtime.goal.start"|"runtime.goal.update"|"runtime.goal.list") {
+                            let catalog=runtime.catalog();let response_id=id.clone();let response_sender=responses.clone();let done=finished.clone();let cancelled=cancellation.clone();let goal_method=method.to_owned();
+                            thread::spawn(move ||{let result=crate::agent_goals::execute_rpc(catalog,&goal_method,params,cancelled);let response=match result{Ok(v)=>response_ok(&response_id,v),Err(e)=>response_error(&response_id,&e)};done(&response_id);let _=response_sender.send(response);});
+                            deferred=true;return Ok(Value::Null);
                         }
                         if method == "runtime.resources.refresh" || method == "runtime.resources.snapshot" {
                             let catalog = runtime.catalog();

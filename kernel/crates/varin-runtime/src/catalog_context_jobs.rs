@@ -24,6 +24,7 @@ impl ContextJobAdmission {
     ) -> Result<()> {
         tx.execute("INSERT INTO context_jobs(run_id,job_key,branch_id,through_id,expected_revision,owner_run_id,recipe,parts) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
             params![run_id,self.key,self.branch_id,self.through_id,sql_number(self.expected_revision)?,self.owner_run_id,encode(&self.recipe)?,sql_number(self.parts)?])?;
+        if let Some(parent)=&self.owner_run_id{goals::bind_inherited(tx,run_id,parent)?;}
         let mut insert =
             tx.prepare("INSERT INTO context_job_parts(run_id,part_index,body) VALUES(?1,?2,?3)")?;
         for (index, reference) in parts.iter().enumerate() {

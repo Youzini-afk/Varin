@@ -1,6 +1,7 @@
 //! Varin's private system kernel library. The binary target only starts this runtime.
 mod agent_runtime;
 mod agent_resources;
+mod agent_goals;
 mod authority;
 mod collaboration;
 mod compute;

@@ -9,6 +9,7 @@ pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 1;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
+    "runtime.goal.control",
     "runtime.followup.control",
     "runtime.policy.select",
     "runtime.policy.cancel",
@@ -37,6 +38,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "process.subscription.unsubscribe",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "runtime.goal.control",
     "runtime.followup.control",
     "runtime.policy.select",
     "runtime.policy.cancel",
@@ -72,6 +74,44 @@ pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct GoalStartParams {
+    pub(crate) key: String,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) run_id: String,
+    pub(crate) objective: String,
+    pub(crate) budget: RequiredNullable<varin_runtime::catalog::goals::GoalBudget>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct GoalUpdateParams {
+    pub(crate) goal_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) objective: String,
+    pub(crate) budget: RequiredNullable<varin_runtime::catalog::goals::GoalBudget>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct GoalControlParams {
+    pub(crate) goal_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) action: varin_runtime::catalog::goals::GoalControlAction,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ThreadParams {
+    pub(crate) thread_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ResourceRefreshParams {
     pub(crate) branch_id: String,
     pub(crate) expected_revision: i64,
@@ -94,12 +134,6 @@ pub(crate) struct FollowupRegisterParams {
     pub(crate) key: String,
     pub(crate) run_id: String,
     pub(crate) operation_id: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct ThreadParams {
-    pub(crate) thread_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1942,6 +1976,18 @@ pub(crate) struct KernelVerificationInputIdentity {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.goal.start" => serde_json::from_value::<GoalStartParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.goal.update" => serde_json::from_value::<GoalUpdateParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.goal.control" => serde_json::from_value::<GoalControlParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.goal.list" => serde_json::from_value::<ThreadParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.resources.refresh" => {
             serde_json::from_value::<ResourceRefreshParams>(params.clone())
                 .map(|_| ())

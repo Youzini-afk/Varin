@@ -124,7 +124,7 @@ fn view(family: &str) -> RequestView {
             },
         },
         binding: RequestBinding {
-            resource_activations: Vec::new(),
+            goal: None, resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "fixture-connection".into(),
             provider_family: family.into(),

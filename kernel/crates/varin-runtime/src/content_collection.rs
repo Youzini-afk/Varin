@@ -268,6 +268,7 @@ impl ContentCollection {
              UNION ALL SELECT body FROM model_outputs
              UNION ALL SELECT body FROM input_history_content
              UNION ALL SELECT intent FROM commands".to_string();
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.objective_ref') FROM goals UNION ALL SELECT json_extract(body,'$.start_intent') FROM goals UNION ALL SELECT json_extract(body,'$.reason_ref') FROM goals WHERE json_extract(body,'$.reason_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT body FROM context_checkpoints UNION ALL SELECT body FROM memory_states");
         roots.push_str(" UNION ALL SELECT recipe FROM context_jobs UNION ALL SELECT body FROM context_job_parts");
         roots.push_str(" UNION ALL SELECT json_extract(data,'$.composition') FROM events WHERE kind='run.tools_activated'");

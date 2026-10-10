@@ -13,9 +13,25 @@ type Result<T> = std::result::Result<T, RuntimeError>;
 
 #[allow(dead_code)]
 pub trait InputAdmission {
-    fn settle_operation(&mut self, key: &str, epoch: u64, outcome: varin_runtime::Outcome, effect: varin_runtime::Effect, result: Value) -> Result<varin_runtime::OperationMetadata>;
-    fn record_external_receipt(&mut self, key: &str, receipt: varin_runtime::ExternalReceipt) -> Result<varin_runtime::OperationMetadata>;
-    fn record_external_receipt_with_stop(&mut self, key: &str, receipt: varin_runtime::ExternalReceipt, stopped: bool) -> Result<varin_runtime::OperationMetadata>;
+    fn settle_operation(
+        &mut self,
+        key: &str,
+        epoch: u64,
+        outcome: varin_runtime::Outcome,
+        effect: varin_runtime::Effect,
+        result: Value,
+    ) -> Result<varin_runtime::OperationMetadata>;
+    fn record_external_receipt(
+        &mut self,
+        key: &str,
+        receipt: varin_runtime::ExternalReceipt,
+    ) -> Result<varin_runtime::OperationMetadata>;
+    fn record_external_receipt_with_stop(
+        &mut self,
+        key: &str,
+        receipt: varin_runtime::ExternalReceipt,
+        stopped: bool,
+    ) -> Result<varin_runtime::OperationMetadata>;
     fn deliver_process_waits(&mut self) -> Result<Vec<String>>;
     fn reconcile_child_reports(&mut self) -> Result<()>;
     fn settle_child_receipts(&mut self) -> Result<()>;
@@ -70,24 +86,46 @@ pub trait InputAdmission {
     ) -> Result<ChildTask>;
 }
 impl InputAdmission for Catalog {
-    fn settle_operation(&mut self, key: &str, epoch: u64, outcome: varin_runtime::Outcome, effect: varin_runtime::Effect, result: Value) -> Result<varin_runtime::OperationMetadata> {
+    fn settle_operation(
+        &mut self,
+        key: &str,
+        epoch: u64,
+        outcome: varin_runtime::Outcome,
+        effect: varin_runtime::Effect,
+        result: Value,
+    ) -> Result<varin_runtime::OperationMetadata> {
         let prepared = self.prepare_result_content().write_result(&result)?;
         self.settle_operation_prepared(key, epoch, outcome, effect, prepared)
     }
-    fn record_external_receipt(&mut self, key: &str, receipt: varin_runtime::ExternalReceipt) -> Result<varin_runtime::OperationMetadata> {
+    fn record_external_receipt(
+        &mut self,
+        key: &str,
+        receipt: varin_runtime::ExternalReceipt,
+    ) -> Result<varin_runtime::OperationMetadata> {
         let stopped = receipt.outcome != varin_runtime::Outcome::Indeterminate;
         self.record_external_receipt_with_stop(key, receipt, stopped)
     }
-    fn record_external_receipt_with_stop(&mut self, key: &str, receipt: varin_runtime::ExternalReceipt, stopped: bool) -> Result<varin_runtime::OperationMetadata> {
-        let prepared = self.prepare_result_content().write_external_receipt(receipt)?;
+    fn record_external_receipt_with_stop(
+        &mut self,
+        key: &str,
+        receipt: varin_runtime::ExternalReceipt,
+        stopped: bool,
+    ) -> Result<varin_runtime::OperationMetadata> {
+        let prepared = self
+            .prepare_result_content()
+            .write_external_receipt(receipt)?;
         self.record_external_receipt_prepared(key, prepared, stopped)
     }
     fn deliver_process_waits(&mut self) -> Result<Vec<String>> {
-        for read in self.capture_process_waits()? { self.admit_process_wait(read.load()?)?; }
+        for read in self.capture_process_waits()? {
+            self.admit_process_wait(read.load()?)?;
+        }
         self.pending_process_continuations()
     }
     fn reconcile_child_reports(&mut self) -> Result<()> {
-        for report in self.capture_child_reports()?.load()? { self.admit_child_report(report)?; }
+        for report in self.capture_child_reports()?.load()? {
+            self.admit_child_report(report)?;
+        }
         self.settle_child_receipts()
     }
     fn settle_child_receipts(&mut self) -> Result<()> {
@@ -99,7 +137,9 @@ impl InputAdmission for Catalog {
     }
     fn deliver_child_waits(&mut self) -> Result<Vec<String>> {
         self.reconcile_child_reports()?;
-        for read in self.capture_child_waits()? { self.admit_child_wait(read.load()?)?; }
+        for read in self.capture_child_waits()? {
+            self.admit_child_wait(read.load()?)?;
+        }
         self.pending_child_continuations()
     }
     fn cancel_child_wait(&mut self, id: &str) -> Result<varin_runtime::Wait> {
@@ -154,7 +194,8 @@ impl InputAdmission for Catalog {
     }
     fn enqueue_input(&mut self, command: &EnqueueInput) -> Result<InputReceipt> {
         let prepared = self.prepare_enqueue(command.clone())?.load()?;
-        self.admit_queued_input(prepared).map(|admission| admission.receipt)
+        self.admit_queued_input(prepared)
+            .map(|admission| admission.receipt)
     }
     fn queued_input(&self, id: &str) -> Result<QueuedInput> {
         self.capture_queued_input(id)?.load()
@@ -197,13 +238,29 @@ impl InputAdmission for Catalog {
         proposal: ContextProposal,
         basis: PersonalizationBasis,
     ) -> Result<ChildTask> {
-        let child=self.child_task(operation)?;
-        if matches!(child.source,varin_runtime::catalog::collaboration::ChildSource::Pending{..}) {
-            let root=child.source.pin().unwrap().root.clone();
-            let mut pin_source=source.clone();pin_source.mode=varin_runtime::SourceMode::FixedBranch;
-            let prepared=self.prepare_child_source(operation,varin_runtime::catalog::collaboration::ChildSourcePin {
-                pin_id:format!("child-source-pin:{operation}"),root:root.clone(),source:pin_source},source.clone(),
-                varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot{root,resources:None})?.load()?;
+        let child = self.child_task(operation)?;
+        if matches!(
+            child.source,
+            varin_runtime::catalog::collaboration::ChildSource::Pending { .. }
+        ) {
+            let root = child.source.pin().unwrap().root.clone();
+            let mut pin_source = source.clone();
+            pin_source.mode = varin_runtime::SourceMode::FixedBranch;
+            let prepared = self
+                .prepare_child_source(
+                    operation,
+                    varin_runtime::catalog::collaboration::ChildSourcePin {
+                        pin_id: format!("child-source-pin:{operation}"),
+                        root: root.clone(),
+                        source: pin_source,
+                    },
+                    source.clone(),
+                    varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot {
+                        root,
+                        resources: None,
+                    },
+                )?
+                .load()?;
             self.attach_child_source(prepared)?;
         }
         let prepared = self

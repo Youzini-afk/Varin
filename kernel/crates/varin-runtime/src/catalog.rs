@@ -16,6 +16,8 @@ pub enum RuntimeError {
     InputPending,
     #[error("tool dispatch cancelled before executor entry")]
     DispatchCancelled,
+    #[error("Goal authorization or constraints changed at this boundary")]
+    GoalChanged,
     #[error("catalog I/O: {0}")]
     Io(#[from] std::io::Error),
     #[error("catalog storage: {0}")]
@@ -32,7 +34,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 21;
+pub(crate) const FORMAT: i64 = 22;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -115,6 +117,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
     if version == FORMAT {
         inputs::check_format(db)?;
         followups::check_format(db)?;
+        goals::check_format(db)?;
         db.prepare("SELECT run_id,identity,kind,state_ref,pending_state_ref,action_ref,continuation_ref,activation_cursor,pending,wait_id FROM policy_checkpoints")?;
         db.prepare("SELECT action_id,node_id,call_id,position,call,receipt,outcome FROM policy_graph_nodes")?;
         db.prepare("SELECT action_id,node_id,dependency_id FROM policy_graph_dependencies")?;
@@ -160,6 +163,7 @@ fn initialize_metadata(
     if version == 0 {
         collaboration::initialize_new(&tx)?;
         followups::initialize_new(&tx)?;
+        goals::initialize_new(&tx)?;
     }
     let epoch = tx.query_row(
         "UPDATE runtime_meta SET epoch=epoch+1 WHERE id=1 RETURNING epoch",
@@ -459,6 +463,7 @@ impl Catalog {
             "INSERT INTO runs(id,branch_id,body,context_checkpoint_id) VALUES(?1,?2,?3,(SELECT checkpoint_id FROM active_contexts WHERE branch_id=?2))",
             params![run_id, command.branch_id, encode(&run)?],
         )?;
+        goals::bind_admission(tx, &run)?;
         tx.execute(
             "UPDATE branches SET head=?2,active_run=?3 WHERE id=?1",
             params![command.branch_id, input_id, run_id],
@@ -610,6 +615,7 @@ impl Catalog {
             "run.changed",
             serde_json::to_value(&run)?,
         )?;
+        if run.state.terminal(){goals::settle_run(&tx,&run)?;}
         tx.commit()?;
         Ok(run)
     }
@@ -621,6 +627,7 @@ impl Catalog {
         }
         run.cancel_requested = true;
         followups::cancel_source_run(&tx, id)?;
+        goals::cancel_run(&tx,id)?;
         if run.state == RunState::Waiting {
             questions::cancel_run_questions(&tx, id)?;
             policy_control::cancel_run_pause(&tx, &run)?;
@@ -993,7 +1000,7 @@ impl Catalog {
             return Err(RuntimeError::Conflict("model step identity reused".into()));
         }
         let mut step = ModelStep {
-            superseded_by_input: None,
+            goal: None, superseded_by_input: None,
             id: key.into(),
             run_id: run_id.into(),
             epoch,
@@ -1374,6 +1381,7 @@ impl Catalog {
         let steps: Vec<ModelStep> = read_all(&tx, "model_steps")?;
         for mut step in steps {
             if step.state == ModelStepState::Dispatched {
+                if step.usage.is_none(){let usage=crate::execution::UsageReceipt::default();goals::measured(&tx,step.goal.as_ref(),&usage)?;step.usage=Some(serde_json::to_value(usage)?);}
                 step.state = ModelStepState::Interrupted;
                 put(&tx, "model_steps", &step.id, &step)?;
                 tx.execute(
@@ -1403,6 +1411,7 @@ impl Catalog {
                         })
                         .transpose()?
                         .unwrap_or_default();
+                    goals::measured(&tx,result.goal.as_ref(),&output.usage)?;
                     result.dispatch = crate::execution::PolicyModelDispatch::Interrupted;
                     result.receipt=Some(crate::execution::PolicyModelReceipt{dispatch:crate::execution::PolicyModelDispatch::Interrupted,outcome:Outcome::Indeterminate,output:None,usage:output.usage,finish_reason:None,failure:Some(crate::execution::ModelFailure{code:"planning_interrupted".into(),message:"dispatch intent was durable; completion is unknown and request will not replay".into(),retry_after_ms:None,provider_request_id:None}),usable:false});
                     op.phase = OperationPhase::Terminal;
@@ -1562,6 +1571,9 @@ mod execution_persistence;
 
 #[path = "catalog_inputs.rs"]
 pub mod inputs;
+
+#[path = "catalog_goals.rs"]
+pub mod goals;
 
 #[path = "catalog_followups.rs"]
 pub mod followups;

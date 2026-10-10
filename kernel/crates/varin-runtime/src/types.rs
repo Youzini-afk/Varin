@@ -143,6 +143,8 @@ pub struct ProviderOriginal {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModelStep {
     #[serde(default)]
+    pub goal: Option<crate::catalog::goals::FrozenGoal>,
+    #[serde(default)]
     pub superseded_by_input: Option<String>,
     pub id: String,
     pub run_id: String,

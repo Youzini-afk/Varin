@@ -110,7 +110,7 @@ fn replay_scenario(tail_phase: Option<&str>) {
         leaf_id: Some(run.input_id.clone()),
     };
     let binding = RequestBinding {
-        resource_activations: Vec::new(),
+        goal: None, resource_activations: Vec::new(),
         resource_checkpoint_id: None,
         connection_identity: launch.connection_identity,
         provider_family: launch.provider_family,

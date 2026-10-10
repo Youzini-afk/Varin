@@ -683,3 +683,33 @@ fn fixed_parent_can_admit_private_writable_child_and_cancelled_empty_report_keep
     assert_eq!(db.child_task(&child.operation_id).unwrap().code_result,ChildCodeResult::Published{result,effect:Effect::Partial});
     drop(db);std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn ended_goal_detaches_new_primary_input_but_retains_admitted_child_attribution() {
+    use varin_runtime::catalog::goals::*;
+    for prepare_late in [false,true] {
+    let mut f=Fixture::new();
+    let scope=GoalScope{thread_id:"thread:parent".into(),branch_id:"branch:parent".into()};
+    let p=f.db.prepare_goal_start("goal",&f.context.run_id,scope.clone(),"Finish parent objective".into(),None).unwrap().load().unwrap();
+    f.db.admit_goal_mutation(p).unwrap();
+    let mut child=f.accept();
+    if !prepare_late {
+        let (source,proposal,basis)=child_context(&child);child=f.db.prepare_child(&child.operation_id,source,proposal,basis).unwrap();
+        let run=&child.receipt.as_ref().unwrap().run_id;
+        f.db.commit_execution(run,f.db.epoch(),&ExecutionRecord::StateChanged{state:RunState::Runnable,waiting_on:None}).unwrap();
+        f.db.register_wait("child-dependency",run,"dependency","finished",0).unwrap();
+        f.db.commit_execution(run,f.db.epoch(),&ExecutionRecord::StateChanged{state:RunState::Waiting,waiting_on:Some("child-dependency".into())}).unwrap();
+        assert_eq!(f.db.capture_goal("goal").unwrap().load().unwrap().state,GoalState::Active,"an independently waiting child does not block its still-active primary");
+    }
+    f.settle_exchange();
+    f.db.control_goal("goal",1,&scope,GoalControlAction::Complete).unwrap();
+    f.db.enqueue_input(&varin_runtime::catalog::inputs::EnqueueInput{key:"new-user-input".into(),thread_id:scope.thread_id.clone(),branch_id:scope.branch_id.clone(),mode:InputMode::Boundary,input:json!("new ordinary task"),configuration:None}).unwrap();
+    let head=f.db.head(&scope.branch_id).unwrap();f.db.consume_inputs(&f.context.run_id,f.db.epoch(),head.as_deref()).unwrap();
+    assert!(f.db.goal_binding(&f.context.run_id).unwrap().is_none());
+    if prepare_late {let (source,proposal,basis)=child_context(&child);child=f.db.prepare_child(&child.operation_id,source,proposal,basis).unwrap();}
+    let child_run=&child.receipt.as_ref().unwrap().run_id;
+    assert_eq!(f.db.goal_binding(child_run).unwrap().unwrap().id,"goal");
+    assert!(matches!(f.db.goal_boundary(child_run,f.db.epoch()).unwrap(),GoalBoundary::Finish{state:RunState::Cancelled}));
+    let root=f.root.clone();drop(f);std::fs::remove_dir_all(root).unwrap();
+    }
+}

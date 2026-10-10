@@ -25,7 +25,7 @@ const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:ui-fixtur
 function initialSnapshot(active = false): ThreadSnapshot {
   const run = { id: 'ui-run', thread_id: identity.threadId, branch_id: identity.branchId, state: 'generating' as const, revision: 1, epoch: 1, configuration: { providerId: 'fixture-provider', model: 'fixture-model' }, cancel_requested: false, waiting_on: null };
   return { identity, eventCursor: 0, thread: { thread_id: identity.threadId, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: null, active_run_id: active ? run.id : null, latest_run: active ? run : null }] }, activeRun: active ? run : null,
-    history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], followups: [], launch: null, modelSelection: {desired:null,active:null}, policySelection: null, context: { checkpoint: null, jobs: [] } };
+    history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], followups: [], goals: [], launch: null, modelSelection: {desired:null,active:null}, policySelection: null, context: { checkpoint: null, jobs: [] } };
 }
 function fixture(active = false) {
   const view = initialSnapshot(active);
@@ -43,7 +43,7 @@ function fixture(active = false) {
   });
   let listener: Parameters<ThreadsAPI['observe']>[1] | undefined;
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
-  const api: ThreadsAPI = { resources: { refresh: unused }, followups: { register: unused, list: unused, control: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
+  const api: ThreadsAPI = { goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused }, followups: { register: unused, list: unused, control: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, retryPreparation: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
@@ -117,6 +117,7 @@ it('renders the composer and retries an uncertain send with the same request ide
   expect(f.submit.mock.calls[0]![0]).toMatchObject({ ...identity, text: 'keep this user message', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')?.value).toBe('');
   expect(f.enqueue).not.toHaveBeenCalled();
+  expect(f.api.goals.start).not.toHaveBeenCalled();
 });
 
 it('active-thread controls queue the chosen mode, save/cancel queued text, and stop the selected Run', async () => {
@@ -148,7 +149,7 @@ it('registers one process follow-up through an uncertain reply and controls only
       kind: 'job_accepted', operation_id: 'process:original', phase: 'running', effect: 'dispatched', lifetime: 'environment',
     }, execution_owner: null }];
   const followup: ThreadSnapshot['followups'][number] = { id: 'followup:one', revision: 1, generation: 1,
-    thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', operation_id: 'process:original', state: 'active',
+    thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', operation_id: 'process:original', state: 'active', goal_id: null, trigger: { kind: 'process_stopped', operation_id: 'process:original' },
     wait: { id: 'wait:process', kind: 'process_stopped', after_cursor: 1, trigger_cursor: null, state: 'waiting' }, occurrence: null };
   const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValueOnce(new Error('uncertain follow-up reply'))
     .mockImplementation(async () => { f.view.followups = [followup]; return followup; });
@@ -172,7 +173,7 @@ it('registers one process follow-up through an uncertain reply and controls only
   expect(control.mock.calls.map(([input]) => [input.action, input.expectedRevision])).toEqual([['pause', 1], ['resume', 2]]);
   expect(resumeRun).not.toHaveBeenCalled();
   followup.wait = { ...followup.wait, state: 'consumed', trigger_cursor: 4 };
-  followup.occurrence = { id: 'occurrence:one', generation: 1, trigger_cursor: 4, receipt_identity: 'receipt:process', receipt_epoch: 'kernel:original',
+  followup.occurrence = { id: 'occurrence:one', generation: 1, trigger_cursor: 4, evidence: { kind: 'process_stopped', receipt_identity: 'receipt:process', receipt_epoch: 'kernel:original' },
     state: 'admitted', hold_reason: null, receipt: { thread_id: identity.threadId, branch_id: identity.branchId,
       run_id: 'continuation:run', input_id: 'environment:input', cursor: 5 } };
   await act(async () => f.emit({ cursor: 5, subject: followup.id, revision: 4, kind: 'followup.admitted', data: { run_id: 'continuation:run' } }));
@@ -180,6 +181,11 @@ it('registers one process follow-up through an uncertain reply and controls only
   expect(button('Cancel follow-up')).toBeUndefined();
   expect(container.textContent).toContain('continuation run continuation:run');
   expect(f.cancelRun).not.toHaveBeenCalled();
+  f.view.followups = [{ ...followup, goal_id: 'goal-owner', occurrence: null }];
+  await act(async () => f.emit({ cursor: 6, subject: followup.id, revision: 5, kind: 'followup.changed', data: {} }));
+  expect(container.querySelector('[aria-label="Process follow-ups"]')).toBeNull();
+  expect(button('Continue once when process ends')).toBeUndefined();
+  expect(button('Pause follow-up')).toBeUndefined();
 });
 
 
@@ -844,4 +850,27 @@ it('Stop run remains reachable during a blocked preparation retry and its late r
   expect(container.textContent).not.toContain('old cold preparation failed after cancellation');
   expect(button('Retry preparation')).toBeUndefined();
   expect(button('Send').disabled).toBe(true); // Empty composer, rather than the old pending request.
+});
+
+
+it('starts an explicit goal from the latest finished Run and keeps Stop run available during a pending Goal write', async () => {
+  const f = fixture(true);
+  const source = { ...f.view.activeRun!, state: 'completed' as const };
+  f.view.activeRun = null; f.view.thread.branches[0]!.active_run_id = null; f.view.thread.branches[0]!.latest_run = source;
+  let finish!: (value: Awaited<ReturnType<ThreadsAPI['goals']['start']>>) => void;
+  const start = vi.fn<ThreadsAPI['goals']['start']>(() => new Promise(resolve => { finish = resolve; }));
+  f.api.goals.start = start;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Create goal').click());
+  await edit('[aria-label="New goal objective"]', 'Continue the finished work');
+  await act(async () => button('Start goal').click());
+  expect(start.mock.calls[0]![0]).toMatchObject({ ...identity, runId: source.id, objective: 'Continue the finished work', budget: null });
+  const next = { ...source, id: 'new-running-work', state: 'generating' as const };
+  f.view.activeRun = next; f.view.thread.branches[0]!.active_run_id = next.id; f.view.thread.branches[0]!.latest_run = next;
+  await act(async () => f.emit({ cursor: 1, subject: next.id, revision: 1, kind: 'run.changed', data: {} }));
+  expect(button('Stop run').disabled).toBe(false);
+  await act(async () => button('Stop run').click());
+  expect(f.cancelRun).toHaveBeenCalledWith(next.id);
+  await act(async () => finish({ id: start.mock.calls[0]![0].key, revision: 1, generation: 1, thread_id: identity.threadId, branch_id: identity.branchId, control: 'active' }));
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
 });

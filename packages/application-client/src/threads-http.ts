@@ -40,6 +40,12 @@ export function createThreadsHttpAPI(): ThreadsAPI {
       list: identity => post('followup/list', identity),
       control: input => post('followup/control', input),
     },
+    goals: {
+      start: input => post('goal/start', input),
+      update: input => post('goal/update', input),
+      control: input => post('goal/control', input),
+      list: identity => post('goal/list', identity),
+    },
     list: () => post('list', {}), listModels: () => post('models', {}),
     selectModel: input => post('model/select',input),
     create: key => post('create', { key }), fork: input => post('fork', input), submit: input => post('submit', input), enqueue: input => post('enqueue', input),

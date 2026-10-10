@@ -132,7 +132,7 @@ impl ModelProvider for Provider {
 }
 fn binding() -> RequestBinding {
     RequestBinding {
-        resource_activations: Vec::new(),
+        goal: None, resource_activations: Vec::new(),
         resource_checkpoint_id: None,
         connection_identity: "fixture".into(),
         provider_family: "fixture".into(),
@@ -395,4 +395,34 @@ fn exercise(mode: Mode) {
         assert!(projection.history.iter().any(|item| matches!(&item.content,Content::Text{text} if text=="NEW TAIL DURING SECOND SUMMARY")));
     }
     supervisor.shutdown().unwrap();
+}
+
+#[test]
+fn automatic_summary_is_charged_to_goal_without_turning_objective_into_summary_instructions() {
+    use varin_runtime::catalog::goals::*;
+    struct Paid(Provider);
+    impl ModelProvider for Paid {
+        fn serialize(&self,v:&RequestView)->Result<Value,ExecutionError>{self.0.serialize(v)}
+        fn generate(&self,r:&RequestSnapshot,c:&CancellationToken,e:&mut dyn FnMut(ProviderEvent)->Result<(),ExecutionError>)->Result<FinishReason,ModelFailure>{
+            let finish=self.0.generate(r,c,e)?;
+            e(ProviderEvent::Usage{receipt:UsageReceipt{measurement:UsageMeasurement::Actual,output_tokens:Some(4),..Default::default()}}).unwrap();Ok(finish)
+        }
+    }
+    for end_before_start in [false,true] {
+        let f=Fixture::new();let mut db=Catalog::open(&f.0).unwrap();db.create_thread("thread","main").unwrap();
+        let launch=LaunchSelection::from_binding(&binding(),DefaultAgentPolicy.identity(),None);
+        let source=db.submit_with_launch(&SubmitInput{key:"source".into(),thread_id:"thread".into(),branch_id:"main".into(),expected_head:None,input:json!("original task context"),configuration:json!({})},Some(launch.clone())).unwrap();
+        let scope=GoalScope{thread_id:"thread".into(),branch_id:"main".into()};
+        let p=db.prepare_goal_start("goal",&source.run_id,scope.clone(),"GOAL_OBJECTIVE_MUST_NOT_INSTRUCT_SUMMARY".into(),None).unwrap().load().unwrap();db.admit_goal_mutation(p).unwrap();
+        let job=db.create_context_job(ContextJobRequest{owner_run_id:Some(source.run_id.clone()),personalization:None,key:"compact".into(),branch_id:"main".into(),through_id:source.input_id,expected_revision:0,effective_system_prompt:"Summarize safely".into(),instruction_sources:vec![],memory_checkpoint:None},launch,json!({})).unwrap();
+        assert_eq!(db.goal_binding(&job.receipt.run_id).unwrap().unwrap().id,"goal");assert!(db.capture_goal_context(&job.receipt.run_id,db.epoch()).unwrap().unwrap().load().unwrap().item.is_none());
+        if end_before_start{db.control_goal("goal",1,&scope,GoalControlAction::Complete).unwrap();}
+        let seen=Arc::new(Mutex::new(vec![]));let (entered,_receiver)=mpsc::channel();let supervisor=RunSupervisor::new(db);
+        let start=configure_compaction_start(RunStart{context_preparation:Arc::new(NoopContextPreparation),binding:binding(),policy_state:Value::Null,provider:Arc::new(Paid(Provider{mode:Mode::Text,seen:seen.clone(),entered})),tools:Arc::new(NoTools),policy:Arc::new(DefaultAgentPolicy),progress:ProgressSink::default()},1);
+        let report=supervisor.start(&job.receipt.run_id,start).unwrap().wait().unwrap();
+        assert_eq!(report.state,if end_before_start{RunState::Cancelled}else{RunState::Completed},"{:?}",report.failure);
+        let catalog=supervisor.catalog();let mut db=catalog.lock().unwrap();let goal=db.capture_goal("goal").unwrap().load().unwrap();
+        if end_before_start{assert!(seen.lock().unwrap().is_empty());assert_eq!(goal.usage.actual.inferences,0);assert!(db.publish_context_job(&job.receipt.run_id).is_err());}
+        else{let seen=seen.lock().unwrap();assert_eq!(seen.len(),1);assert!(!serde_json::to_string(&seen[0]).unwrap().contains("GOAL_OBJECTIVE_MUST_NOT_INSTRUCT_SUMMARY"));assert_eq!(goal.usage.actual.inferences,1);assert_eq!(goal.usage.actual.output_tokens.known,4);assert_eq!(goal.usage.pending_inferences,0);db.publish_context_job(&job.receipt.run_id).unwrap();}
+    }
 }

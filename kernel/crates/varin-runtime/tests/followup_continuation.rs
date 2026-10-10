@@ -58,7 +58,7 @@ impl Fixture {
             leaf_id: fixture.db.head("branch").unwrap(),
         };
         let binding = RequestBinding {
-            resource_activations: Vec::new(),
+            goal: None, resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "original-connection".into(),
             provider_family: "fixture".into(),
@@ -659,4 +659,17 @@ fn materialized_source_inheritance_preserves_the_original_environment_owner() {
     );
     assert!(f.db.require_process_observation(&next, &f.process).is_ok());
     f.cleanup();
+}
+
+#[test]
+fn goal_owned_process_occurrence_honors_goal_pause_and_actual_stop_after_reopen() {
+    use varin_runtime::catalog::goals::*;
+    let mut f=Fixture::new();
+    let scope=GoalScope{thread_id:"thread".into(),branch_id:"branch".into()};
+    let p=f.db.prepare_goal_start("goal",&f.run,scope.clone(),"Process the actual result".into(),None).unwrap().load().unwrap();
+    f.db.admit_goal_mutation(p).unwrap();
+    let followup=f.register();assert_eq!(followup.goal_id.as_deref(),Some("goal"));
+    assert!(f.db.control_followup("authorization",1,FollowupControlAction::Pause).is_err());
+    f.db.control_goal("goal",1,&scope,GoalControlAction::Pause).unwrap();f.state(RunState::Completed);f.terminal(true);assert!(f.reconcile().is_empty());
+    let mut f=f.reopen();assert!(f.reconcile().is_empty());f.db.control_goal("goal",2,&scope,GoalControlAction::Resume).unwrap();let runs=f.reconcile();assert_eq!(runs.len(),1);assert_eq!(f.db.followup_process_source(&runs[0],&f.process).unwrap().as_deref(),Some(f.run.as_str()));assert!(f.reconcile().is_empty());f.cleanup();
 }

@@ -310,6 +310,7 @@ impl Catalog {
             "INSERT INTO child_tasks(id,child_thread_id,body) VALUES(?1,?2,?3)",
             params![op.id, child.child_thread_id, encode(&child)?],
         )?;
+        super::goals::bind_child(&tx,&op.id,&run.id)?;
         tx.commit()?;
         Ok(child)
     }

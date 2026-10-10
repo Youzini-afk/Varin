@@ -6,6 +6,13 @@ use crate::execution::*;
 use std::sync::Mutex;
 
 impl Persistence for Mutex<Catalog> {
+    fn goal_tool_allowed(&self,c:&ToolExecutionContext)->std::result::Result<bool,ExecutionError>{goals::tool_allowed(&self.lock().map_err(catalog_lock_error)?.db,c).map_err(policy_error)}
+    fn goal_context(&self,run:&str,epoch:u64)->std::result::Result<Option<goals::GoalContext>,ExecutionError>{
+        let read=self.lock().map_err(catalog_lock_error)?.capture_goal_context(run,epoch).map_err(policy_error)?;
+        read.map(|r|r.load()).transpose().map_err(policy_error)
+    }
+    fn goal_boundary(&self,run:&str,epoch:u64)->std::result::Result<goals::GoalBoundary,ExecutionError>{self.lock().map_err(catalog_lock_error)?.goal_boundary(run,epoch).map_err(policy_error)}
+
     fn resume_tool(
         &self,
         context: &ToolExecutionContext,
@@ -478,6 +485,7 @@ impl Persistence for Mutex<Catalog> {
         });
         match result {
             Ok(()) => Ok(()),
+            Err(RuntimeError::GoalChanged) => Err(ExecutionError::new("goal_changed","Goal authorization or constraints changed")),
             Err(RuntimeError::DispatchCancelled) => Err(ExecutionError::new(
                 "dispatch_cancelled",
                 "tool dispatch cancelled before executor entry",
@@ -518,7 +526,7 @@ impl Persistence for Mutex<Catalog> {
 }
 fn policy_error(error: RuntimeError) -> ExecutionError {
     ExecutionError::new(
-        if matches!(error, RuntimeError::InputPending) {
+        if matches!(error,RuntimeError::GoalChanged){"goal_changed"} else if matches!(error, RuntimeError::InputPending) {
             "input_pending"
         } else {
             "policy_graph"
@@ -649,6 +657,7 @@ struct PreparedExecutionBodies {
     calls: std::collections::HashMap<String, ToolCallMetadata>,
     admitted: std::collections::HashMap<String, ToolIntent>,
     frozen_history_range: Option<HistoryRange>,
+    frozen_goal: Option<goals::FrozenGoal>,
     memory_deliveries: Option<super::memory::PreparedMemoryDeliveries>,
     history: std::collections::HashMap<String, Value>,
     originals: Option<Vec<ProviderOriginal>>,
@@ -837,6 +846,7 @@ impl ExecutionBodyPreparation {
             policy_continuation,
             calls,
             admitted,
+            frozen_goal:snapshot.as_ref().and_then(|s|s.view.binding.goal.clone()),
             frozen_history_range,
             memory_deliveries,
             history,
@@ -904,6 +914,7 @@ impl Catalog {
             calls: prepared_calls,
             admitted: prepared_admitted,
             frozen_history_range,
+            frozen_goal,
             memory_deliveries,
             history: prepared_history,
             originals: prepared_originals,
@@ -1091,7 +1102,7 @@ impl Catalog {
                     && matches!(
                         state,
                         RunState::Waiting | RunState::Completed | RunState::Failed
-                    )
+                    ) && !waiting_on.as_deref().is_some_and(|id|id.starts_with("goal-wait:"))
                 {
                     super::policy_checkpoint::consume(&tx, run_id)?;
                 }
@@ -1103,6 +1114,7 @@ impl Catalog {
                 put(&tx, "runs", run_id, &run)?;
             }
             ExecutionRecord::RequestPrepared { snapshot } => {
+                goals::check_dispatch(&tx,run_id,snapshot.view.binding.goal.as_ref())?;
                 if let Some(launch) = optional_record::<super::launch_content::LaunchMetadata>(
                     &tx,
                     "run_launches",
@@ -1150,7 +1162,7 @@ impl Catalog {
                     ));
                 }
                 let step = ModelStep {
-                    superseded_by_input: None,
+                    goal: None, superseded_by_input: None,
                     id: snapshot.view.request_id.clone(),
                     run_id: run_id.into(),
                     epoch,
@@ -1188,6 +1200,8 @@ impl Catalog {
                 {
                     return Err(RuntimeError::Conflict("model cannot dispatch".into()));
                 }
+                step.goal=goals::check_dispatch(&tx,run_id,frozen_goal.as_ref())?;
+                if let Some(goal)=&step.goal{goals::dispatched(&tx,goal)?;}
                 step.state = ModelStepState::Dispatched;
                 put(&tx, "model_steps", request_id, &step)?;
                 tx.execute(
@@ -1236,6 +1250,7 @@ impl Catalog {
                 step.original = prepared_originals.ok_or_else(|| {
                     RuntimeError::Invalid("prepared model originals missing".into())
                 })?;
+                goals::measured(&tx,step.goal.as_ref(),usage)?;
                 step.usage = Some(serde_json::to_value(usage)?);
                 put(&tx, "model_steps", request_id, &step)?;
                 tx.execute(
@@ -1371,7 +1386,7 @@ impl Catalog {
                 {
                     return Err(RuntimeError::Conflict("tool no longer admitted".into()));
                 }
-                if op.cancel_requested || run.cancel_requested {
+                if op.cancel_requested || run.cancel_requested || !goals::tool_allowed(&tx,context)? {
                     return Err(RuntimeError::DispatchCancelled);
                 }
                 let tool: ToolIntent = serde_json::from_value(op.intent.clone())?;
@@ -1750,6 +1765,9 @@ impl Catalog {
                 ExecutionRecord::PolicyDecisionConsumed { .. } => "policy_decision_consumed",
             }}),
         )?;
+        if matches!(record,ExecutionRecord::StateChanged{..}|ExecutionRecord::ContextPreparationFailed{..}) {
+            if run.state.terminal(){goals::settle_run(&tx,&run)?;}
+        }
         tx.commit()?;
         if let ExecutionRecord::ToolSettled { context, .. } = record {
             self.release_stopped_resource_owner(&context.operation_id)?;
@@ -1941,6 +1959,11 @@ impl Catalog {
             out
         };
         for mut step in steps {
+            if step.state == ModelStepState::Dispatched && step.usage.is_none() {
+                let usage = UsageReceipt::default();
+                super::goals::measured(&tx, step.goal.as_ref(), &usage)?;
+                step.usage = Some(serde_json::to_value(usage)?);
+            }
             step.state = if step.state == ModelStepState::Dispatched {
                 ModelStepState::Interrupted
             } else {
@@ -1992,6 +2015,12 @@ impl Catalog {
         {
             return Ok(());
         }
+        let previous:Option<String>=tx.query_row("SELECT body FROM model_outputs WHERE request_id=?1",[request_id],|r|r.get(0)).optional()?;
+        if let Some(previous)=previous {
+            if serde_json::from_str::<Value>(&previous)?!=output||step.usage.as_ref()!=Some(&serde_json::to_value(usage)?){return Err(RuntimeError::Conflict("original rejected model receipt changed".into()));}
+            return Ok(());
+        }
+        goals::measured(&tx,step.goal.as_ref(),usage)?;
         step.original = originals;
         step.usage = Some(serde_json::to_value(usage)?);
         put(&tx, "model_steps", request_id, &step)?;
