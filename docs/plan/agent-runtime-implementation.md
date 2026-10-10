@@ -8,6 +8,15 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-11 增量：关联回复、实际期限与共同观察屏障
+
+- 普通 `send` **版本3** 支持显式无期限或带 `timeoutMs` 的关联回复观察。消息、Confirmed 效果、原 JobAccepted、Operation/Wait 同事务受理，两实际调用来源保留原回执。`acceptedAtMs` 与绝对期限重试/重开不变；早于期限受理的原关联回复获胜，截止及之后为迟到消息，已确定事实不被时钟回拨或取消重写。Catalog **31**、input **4**、collaboration **5**，旧内部格式拒绝。
+- 原 child/process/reply 共用观察选择、停车和消费边界；已就绪项可交付，最后一项原观察及原调用消费闭合后才继续模型。question/manual Pause/Goal 仍独立守卫。新输入可结束观察而不撤消息、不杀观察对象；Run 终止与实际历史交付分开。回复正文沿原 input_queue/ContentStore/history 一次进入，观察只保存原 ID 和生命周期事实。
+- 原 native continuation worker 使用真实事件与最近绝对期限。Linux timerfd/eventfd 已实际运行；Windows/macOS 后端目前仅源码核查。无每 Wait 线程、Host timer、系统唤醒权限或模型轮询。先解析期限短事实，再推进各原域；某个 Goal/followup 错误不会撤掉正常 future timer。
+- 独立原反例闭合未观察 child 坏报告阻塞其他回复期限及健康 child 的门槛：逐 report/receipt/Wait 在锁外加载、原 owner 短提交，坏项保原错误，健康项继续；固定点只跟随实际进展。原 child 命令已提交后的 ACK 不再被全 Catalog 报告对账绑住。Host 对账错误仍可见，原 saved launch/event 继续消费；没有第二调度器、伪造成功或正文重试层。
+- 最终 runtime **363/0、2 ignored**，kernel **85/0、11 ignored**，fresh guardian/Storage **1/1**；准确 binary 与冻结输入证据见[本切片验收与复跑](../reviews/runtime-reply-waits-2026-10-11.md)。Host **70/70**，UI **37/37**，措辞修正后其中 owning 6 项另复跑。独审七组原反例/基础检查及一次真实历史/模型消费增强通过。完整 Host 双回复重开用例已补并类型检查，当前未运行；分层证据不合称 E2E。
+- 下一步继续通用事件/时间续接和日历发生项，并推进其余领域与最终用户验收准备。两设计整体未完成，全面迁移和默认切换仍交用户验收后执行。
+
 ## 2026-10-11 增量：定向请求与真实执行接续
 
 - 普通 `send` **版本2** 与公开 User 入口支持 inform/request，真实两调用来源与家系/replyTo 身份不变。受理、原历史投递和执行激活分开；原 input_queue、ContentStore、Run/Launch 和 delegated execution 继续各自唯一拥有事实。Catalog **30**、input **4**、collaboration **5**，旧内部格式拒绝。关联 Wait/期限尚不接受，避免把未实现字段默默吞掉。

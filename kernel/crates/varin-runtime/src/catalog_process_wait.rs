@@ -86,6 +86,7 @@ impl Catalog {
                 subject: process_id.into(),
                 kind: "operation.settled".into(),
                 after_cursor: 0,
+                deadline_at_ms: None,
                 trigger_cursor,
                 cancelled: false,
             };

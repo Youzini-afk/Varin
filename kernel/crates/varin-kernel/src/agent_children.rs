@@ -141,9 +141,8 @@ pub(super) fn execute(
                 .capture_delegated_execution(execution)
                 .map_err(domain)?
         };
-        if method == "runtime.child.fail" {
-            varin_runtime::catalog::child_delivery::reconcile_reports(&owner).map_err(domain)?;
-        }
+        // This command already committed its own result. The committed event drives the
+        // original continuation owner; unrelated report bodies cannot block this command's ACK.
         return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
     }
     if method == "runtime.child.execution.report.read" {
@@ -396,7 +395,8 @@ pub(super) fn execute(
                 )
                 .map_err(domain)?
         };
-        varin_runtime::catalog::child_delivery::reconcile_reports(&owner).map_err(domain)?;
+        // Report/receipt reconciliation follows this real commit on the continuation worker.
+        // Return this operation's already captured result without awaiting unrelated children.
         return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
     }
     if method == "runtime.child.report.read" {

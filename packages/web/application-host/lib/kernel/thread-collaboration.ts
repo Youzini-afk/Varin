@@ -82,7 +82,14 @@ export class ThreadCollaboration {
           });
           this.domainRecovery = work;
         }
-        const resumed = [...new Set([...await this.owners.runtime.reconcileChildren(epoch.signal), ...await this.owners.runtime.reconcileProcessWaits(epoch.signal)])];
+        let resumed: string[] | undefined;
+        try { resumed = await this.owners.runtime.reconcileObservations(epoch.signal); }
+        catch (error) {
+          // The native owner can commit independent ready work while preserving another
+          // observation's error. Original saved launches/events still require discovery.
+          if (!epoch.signal.aborted) this.owners.onError(undefined, error);
+        }
+        epoch.signal.throwIfAborted();
         const children = await this.owners.runtime.children(epoch.signal);
         this.owners.kernel.reconcileChildToolHandoffs(children);
         const executions = await this.owners.runtime.childExecutions(undefined, epoch.signal);
@@ -121,7 +128,7 @@ export class ThreadCollaboration {
           }
         }
         await this.discoverLaunches(epoch.signal);
-        for (const runId of resumed) void this.owners.continueRun(runId, epoch.signal).catch(error => {
+        for (const runId of resumed ?? []) void this.owners.continueRun(runId, epoch.signal).catch(error => {
           if (!epoch.signal.aborted) this.owners.onError(undefined, error);
         });
       }
@@ -154,7 +161,7 @@ export class ThreadCollaboration {
         }
         if (event.kind === 'run.cancel_requested') this.owners.kernel.cancelRunPreparation(event.subject);
         const data = event.data as { run_id?: unknown } | null;
-        if ((event.kind === 'policy.resumed' || event.kind === 'followup.admitted' || event.kind === 'goal.run_ready' || event.kind === 'message.run_ready') && data && typeof data.run_id === 'string') {
+        if ((event.kind === 'policy.resumed' || event.kind === 'followup.admitted' || event.kind === 'goal.run_ready' || event.kind === 'message.run_ready' || event.kind === 'observation.run_ready') && data && typeof data.run_id === 'string') {
           void this.owners.continueRun(data.run_id, signal).catch(error => {
             if (!signal.aborted) this.owners.onError(undefined, error);
           });

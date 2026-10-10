@@ -2,12 +2,13 @@
 //! model arguments never select a parent, project, source path or grant.
 use crate::tools::{KernelResourceClient, ToolBinding};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::json;
+#[cfg(test)]
+use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use varin_runtime::catalog::collaboration::{self, ChildSourceHandoff, DispatchInput};
 use varin_runtime::catalog::dispatch::{ChildWorkMode, ChildDispatchSelection};
 use varin_runtime::execution::*;
-use varin_runtime::supervisor::RunStart;
 use varin_runtime::{Catalog, Effect, Lifetime, Outcome};
 
 #[derive(Deserialize)]
@@ -44,22 +45,6 @@ pub(crate) fn schemas(mut tools: Vec<ToolSchema>, fixed: bool) -> Vec<ToolSchema
         tools.push(ToolSchema { description: "Delegate an independent child from this request's frozen delegation or an explicitly selected configured preset. read_only fixes the source; isolated_write uses a private materialized working copy and permits controlled text changes. A process working directory is not an OS sandbox. Presets with unavailable capabilities are rejected without fallback. Returns the durable operation handle before source preparation.".into(), output_schema: None, metadata: None,name:collaboration::DISPATCH_TOOL.into(),version:"2".into(),schema: json!({"type":"object","properties":{"task":{"type":"string","minLength":1},"preset":{"type":"string","minLength":1},"workMode":{"type":"string","enum":["read_only","isolated_write"]},"tools":{"type":"array","items":{"type":"string","minLength":1},"uniqueItems":true}},"required":["task"],"additionalProperties":false})});
     }
     tools
-}
-pub(crate) fn policy_identity(inner: PolicyIdentity) -> PolicyIdentity {
-    PolicyIdentity {
-        name: format!("{}+collaboration", inner.name),
-        version: format!("{}+1", inner.version),
-    }
-}
-pub(crate) fn default_policy_identity() -> PolicyIdentity {
-    policy_identity(crate::questions::default_policy_identity())
-}
-pub(crate) fn configure(mut start: RunStart, catalog: Arc<Mutex<Catalog>>) -> RunStart {
-    start.policy = Arc::new(CollaborationPolicy {
-        inner: start.policy,
-        catalog,
-    });
-    start
 }
 pub(crate) fn declarations(
     catalog: Arc<Mutex<Catalog>>,
@@ -286,7 +271,7 @@ impl ToolExecutor for CollaborationTools {
                             .configuration_generation,
                         tool_schema_generation: resolved.tool_schema_generation,
                         tools: schemas,
-                        policy: crate::process_wait::default_policy_identity(),
+                        policy: crate::observations::default_policy_identity(),
                         source: Some(handoff.source.clone()),
                     };
                     let preparation = self.catalog.lock().map_err(error)?.prepare_child_launch(&c.run_id, launch, resolved).map_err(error)?;
@@ -439,63 +424,6 @@ fn accepted(c: &ToolExecutionContext, phase: &str) -> ToolCompletion {
         lifetime: Lifetime::Thread,
     }
 }
-struct CollaborationPolicy {
-    inner: Arc<dyn AgentPolicy>,
-    catalog: Arc<Mutex<Catalog>>,
-}
-impl AgentPolicy for CollaborationPolicy {
-    fn identity(&self) -> PolicyIdentity {
-        policy_identity(self.inner.identity())
-    }
-    fn select_for_decision(
-        &self,
-        view: &PolicyView<'_>,
-        event: &PolicyEvent,
-        state: &Value,
-        epoch: u64,
-        cancel: &CancellationToken,
-    ) -> Result<Option<Value>, ExecutionError> {
-        if self
-            .catalog
-            .lock()
-            .map_err(error)?
-            .pending_child_wait(view.run_id)
-            .map_err(error)?
-            .is_some()
-        {
-            return Ok(None);
-        }
-        self.inner
-            .select_for_decision(view, event, state, epoch, cancel)
-    }
-    fn decide(
-        &self,
-        view: &PolicyView<'_>,
-        event: &PolicyEvent,
-        state: &Value,
-        cancel: &CancellationToken,
-    ) -> Result<PolicyDecision, ExecutionError> {
-        let wait = if view.pending_tool_calls == 0 {
-            self.catalog.lock().map_err(error)?.pending_child_wait(view.run_id).map_err(error)?
-        } else { None };
-        if let Some(wait_id) = &wait {
-            if !event.has_execution_failure() {
-                return Ok(PolicyDecision { action: PolicyAction::Wait { wait_id: wait_id.clone() }, state: state.clone() });
-            }
-        }
-        let decision = self.inner.decide(view, event, state, cancel)?;
-        if matches!(decision.action, PolicyAction::Fail { .. } | PolicyAction::Wait { .. }) {
-            return Ok(decision);
-        }
-        if let Some(wait_id) = wait {
-            // This proposal did not execute. Keep the committed private baseline and let the
-            // core checkpoint retain the original event for the resumed, newly informed decision.
-            return Ok(PolicyDecision { action: PolicyAction::Wait { wait_id }, state: state.clone() });
-        }
-        Ok(decision)
-    }
-}
-
 #[cfg(test)]
 #[path = "collaboration_policy_review.rs"]
 mod policy_review;

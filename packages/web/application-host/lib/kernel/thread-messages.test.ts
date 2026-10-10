@@ -7,6 +7,7 @@ import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClientError, type KernelClient } from './kernel-client.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { registerThreadRoutes } from './thread-routes.js';
+import type { MessageReceipt, MessageView } from './protocol.generated.js';
 
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:caller', branchId: 'branch:caller' };
 const target = { targetThreadId: 'thread:sibling', targetBranchId: 'branch:sibling' };
@@ -17,6 +18,7 @@ function fixture() {
   const requests = vi.fn(async (method: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> => {
     if (method === 'runtime.thread.inspect') return { thread_id: params.threadId, observer_project_ids: [],
       branches: [{ branch_id: identity.branchId, active_run_id: null, head: null, latest_run: null }] };
+    if (method === 'runtime.observations.reconcile') return facts.reply;
     if (method.startsWith('runtime.messages.')) {
       if (facts.fail) throw new KernelClientError({ code: 'operation-error', message: 'operation error: conflict: private upstream detail' });
       if (facts.block) return new Promise((_resolve, reject) => {
@@ -62,8 +64,9 @@ afterEach(() => vi.unstubAllGlobals());
 it.each(['inform', 'request'] as const)('carries exact User %s acceptance through public consumers without making Host the activation owner', async kind => {
   const f = fixture();
   const request = { key: 'stable-user-intent', ...target, kind, text: '路径 C:\\work\\原文\nunchanged' };
-  f.facts.reply = { messageId: 'message:original', senderThreadId: identity.threadId, senderBranchId: identity.branchId,
-    ...target, actor: { kind: 'user' }, kind, replyTo: null, acceptedCursor: 41 };
+  const accepted: MessageReceipt = { messageId: 'message:original', senderThreadId: identity.threadId, senderBranchId: identity.branchId,
+    ...target, actor: { kind: 'user' }, kind, replyTo: null, acceptedCursor: 41, acceptedAtMs: 1000 };
+  f.facts.reply = accepted;
   expect(await f.api.send(identity, request)).toEqual(f.facts.reply);
   expect(f.requests.mock.calls.at(-1)!.slice(0, 2)).toEqual(['runtime.messages.send', { ...request, senderThreadId: identity.threadId, senderBranchId: identity.branchId }]);
   await f.api.send(identity, { key: 'reply-key', kind: 'inform', text: 'reply without a guessed target', replyTo: 'received-message' });
@@ -71,7 +74,14 @@ it.each(['inform', 'request'] as const)('carries exact User %s acceptance throug
   f.facts.reply = { messages: [], nextCursor: 'fixed-received-cursor' };
   expect(await f.api.list(identity, { direction: 'incoming', cursor: 'fixed-received-cursor', limit: 2 })).toEqual(f.facts.reply);
   expect(f.requests.mock.calls.at(-1)!.slice(0, 2)).toEqual(['runtime.messages.list', { direction: 'incoming', cursor: 'fixed-received-cursor', limit: 2, threadId: identity.threadId, branchId: identity.branchId }]);
-  f.facts.reply = { messageId: 'received-message', actor: { kind: 'agent', runId: 'sender-run' }, state: 'queued', deliveredRunId: null, text: 'original received body' };
+  const original: MessageView = { ...accepted, messageId: 'received-message', senderThreadId: target.targetThreadId, senderBranchId: target.targetBranchId,
+    targetThreadId: identity.threadId, targetBranchId: identity.branchId,
+    actor: { kind: 'agent', runId: 'sender-run', operationId: 'sender-operation', origin: { kind: 'policy_action', action_id: 'sender-action', node_id: 'sender-node' } },
+    state: 'queued', activation: kind === 'inform' ? { state: 'passive' } : { state: 'pending', executionId: null, holdReason: 'preparing' },
+    deliveredRunId: null, deliveredCursor: null, text: 'original received body',
+    replyWait: { waitId: 'reply-wait:sender-operation', operationId: 'sender-operation', runId: 'sender-run', deadlineAtMs: 2000,
+      state: 'expired', replyMessageId: null, delivered: false } };
+  f.facts.reply = original;
   expect(await f.api.get(identity, 'received-message')).toEqual(f.facts.reply);
   expect(f.requests.mock.calls.at(-1)!.slice(0, 2)).toEqual(['runtime.messages.get', { threadId: identity.threadId, branchId: identity.branchId, messageId: 'received-message' }]);
   expect(f.requests.mock.calls.every(([method]) => method === 'runtime.thread.inspect' || method.startsWith('runtime.messages.'))).toBe(true);
@@ -82,7 +92,7 @@ it('requires Host authentication and preserves User ingress against forged actor
   const f = fixture(); const request = { key: 'k', ...target, kind: 'inform', text: 'body' };
   for (const method of ['send', 'list', 'get']) expect((await f.request(`/api/threads/messages/${method}`, identity, false)).status).toBe(401);
   expect(f.requests).not.toHaveBeenCalled();
-  for (const extra of [{ actor: { kind: 'agent', runId: 'forged' } }, { senderThreadId: 'forged' }, { senderBranchId: 'forged' }, { kind: 'unknown' }, { wait: true }]) {
+  for (const extra of [{ actor: { kind: 'agent', runId: 'forged' } }, { senderThreadId: 'forged' }, { senderBranchId: 'forged' }, { kind: 'unknown' }, { wait: true }, { wait: {} }, { wait: { timeoutMs: 0 } }]) {
     expect((await f.request('/api/threads/messages/send', { ...identity, request: { ...request, ...extra } })).status).toBe(400);
   }
   expect((await f.request('/api/threads/messages/list', { ...identity, request: { direction: 'incoming', threadId: 'foreign' } })).status).toBe(400);
@@ -111,4 +121,8 @@ it('aborts only the original read when the view closes and preserves uncertain m
   const sends = f.requests.mock.calls.filter(([method]) => method === 'runtime.messages.send');
   expect(sends).toHaveLength(2); expect(sends[0]![1]).toEqual(sends[1]![1]);
   // Exactly-once acceptance is owned and tested by Rust, not simulated by this RPC fixture.
+  f.facts.reply = ['original-waiter-run'];
+  const observationSignal = new AbortController().signal;
+  expect(await f.runtime.reconcileObservations(observationSignal)).toEqual(['original-waiter-run']);
+  expect(f.requests.mock.calls.at(-1)).toEqual(['runtime.observations.reconcile', {}, observationSignal]);
 });

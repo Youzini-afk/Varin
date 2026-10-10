@@ -170,7 +170,7 @@ fn submit_input(
                     tools.sort_by(|left, right| left.name.cmp(&right.name));
                     tools
                 },
-                policy: crate::process_wait::default_policy_identity(),
+                policy: crate::observations::default_policy_identity(),
                 source,
             })
         })
@@ -224,7 +224,7 @@ pub(super) fn execute(
     match method {
         "runtime.messages.send" => {
             let p: MessageSendParams = serde_json::from_value(params)?;
-            let input = varin_runtime::catalog::messages::MessageInput { target_thread_id:p.target_thread_id,target_branch_id:p.target_branch_id,reply_to:p.reply_to,kind:p.kind,text:p.text };
+            let input = varin_runtime::catalog::messages::MessageInput { wait:None,target_thread_id:p.target_thread_id,target_branch_id:p.target_branch_id,reply_to:p.reply_to,kind:p.kind,text:p.text };
             input.validate().map_err(domain)?;
             let preparation = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.prepare_user_message(p.key,p.sender_thread_id,p.sender_branch_id,input).map_err(domain)?;
             let prepared = preparation.load().map_err(domain)?;

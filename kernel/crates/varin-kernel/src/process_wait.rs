@@ -5,7 +5,6 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use varin_runtime::catalog::process_wait::WAIT_TOOL;
 use varin_runtime::execution::*;
-use varin_runtime::supervisor::RunStart;
 use varin_runtime::{Catalog, Effect, Lifetime, Outcome};
 
 #[derive(Deserialize)]
@@ -37,22 +36,6 @@ pub(crate) fn schemas(mut tools: Vec<ToolSchema>) -> Vec<ToolSchema> {
         }) });
     }
     tools
-}
-pub(crate) fn policy_identity(inner: PolicyIdentity) -> PolicyIdentity {
-    PolicyIdentity {
-        name: format!("{}+process-wait", inner.name),
-        version: format!("{}+1", inner.version),
-    }
-}
-pub(crate) fn default_policy_identity() -> PolicyIdentity {
-    policy_identity(crate::collaboration::default_policy_identity())
-}
-pub(crate) fn configure(mut start: RunStart, catalog: Arc<Mutex<Catalog>>) -> RunStart {
-    start.policy = Arc::new(ProcessWaitPolicy {
-        inner: start.policy,
-        catalog,
-    });
-    start
 }
 pub(crate) fn declarations(
     catalog: Arc<Mutex<Catalog>>,
@@ -448,78 +431,5 @@ impl ToolExecutor for ProcessWaitTools {
             effect: Effect::None,
             content: json!({"error":e.code,"message":e.message}),
         })
-    }
-}
-struct ProcessWaitPolicy {
-    inner: Arc<dyn AgentPolicy>,
-    catalog: Arc<Mutex<Catalog>>,
-}
-impl AgentPolicy for ProcessWaitPolicy {
-    fn identity(&self) -> PolicyIdentity {
-        policy_identity(self.inner.identity())
-    }
-    fn select_for_decision(
-        &self,
-        view: &PolicyView<'_>,
-        event: &PolicyEvent,
-        state: &Value,
-        epoch: u64,
-        cancel: &CancellationToken,
-    ) -> Result<Option<Value>, ExecutionError> {
-        if self
-            .catalog
-            .lock()
-            .map_err(error)?
-            .pending_process_wait(view.run_id)
-            .map_err(error)?
-            .is_some()
-        {
-            return Ok(None);
-        }
-        self.inner
-            .select_for_decision(view, event, state, epoch, cancel)
-    }
-    fn decide(
-        &self,
-        view: &PolicyView<'_>,
-        event: &PolicyEvent,
-        state: &Value,
-        cancel: &CancellationToken,
-    ) -> Result<PolicyDecision, ExecutionError> {
-        let wait = if view.pending_tool_calls == 0 {
-            self.catalog
-                .lock()
-                .map_err(error)?
-                .pending_process_wait(view.run_id)
-                .map_err(error)?
-        } else {
-            None
-        };
-        if let Some(wait_id) = &wait {
-            if !event.has_execution_failure() {
-                return Ok(PolicyDecision {
-                    action: PolicyAction::Wait {
-                        wait_id: wait_id.clone(),
-                    },
-                    state: state.clone(),
-                });
-            }
-        }
-        let decision = self.inner.decide(view, event, state, cancel)?;
-        if matches!(
-            decision.action,
-            PolicyAction::Fail { .. } | PolicyAction::Wait { .. }
-        ) {
-            return Ok(decision);
-        }
-        if let Some(wait_id) = wait {
-            // This proposal did not execute. Keep the committed private baseline and let the
-            // core checkpoint retain the original event for the resumed, newly informed decision.
-            return Ok(PolicyDecision {
-                action: PolicyAction::Wait { wait_id },
-                state: state.clone(),
-            });
-        }
-        Ok(decision)
     }
 }

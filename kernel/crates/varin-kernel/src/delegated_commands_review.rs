@@ -22,7 +22,7 @@ fn public_continuation_source_prepare_and_exact_run_assembly_share_one_execution
             .filter(|tool| matches!(tool.name.as_str(), "child_status" | "child_report"))
             .collect(),
     );
-    f.launch.policy = crate::process_wait::default_policy_identity();
+    f.launch.policy = crate::observations::default_policy_identity();
     f.launch
         .tools
         .sort_by(|left, right| left.name.cmp(&right.name));

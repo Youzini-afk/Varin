@@ -18,71 +18,54 @@ pub struct PreparedChildReport {
 }
 impl ChildReportPreparation {
     pub fn load(self) -> Result<Vec<PreparedChildReport>> {
+        let mut reports = Vec::new();
+        self.visit(|prepared| { reports.push(prepared?); Ok(()) })?;
+        Ok(reports)
+    }
+    /// Walk the original snapshot once, handing each independently loaded report straight to
+    /// its original admission owner. A failed body must not discard other healthy candidates.
+    fn visit(self, mut receive: impl FnMut(Result<PreparedChildReport>) -> Result<()>) -> Result<()> {
         let mut database = Connection::open_with_flags(
             &self.database,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         let snapshot = database.transaction()?;
         let mut statement=snapshot.prepare("SELECT c.id FROM delegated_executions c JOIN runs r ON r.id=c.run_id WHERE json_extract(c.body,'$.report') IS NULL AND json_extract(r.body,'$.state') IN ('completed','failed','cancelled')")?;
-        let mut reports = Vec::new();
         for row in statement.query_map([], |row| row.get::<_, String>(0))? {
-            let child=delegated::execution_task(&snapshot,&row?)?;
-            let run: Run = record(
-                &snapshot,
-                "runs",
-                &child.receipt.as_ref().expect("selected receipt").run_id,
-            )?;
-            let head: Option<String> = snapshot.query_row(
-                "SELECT head FROM branches WHERE id=?1",
-                [&run.branch_id],
-                |row| row.get(0),
-            )?;
-            let mut ancestor = head.clone();
-            let mut history_ids = Vec::new();
-            while let Some(id) = ancestor {
-                let metadata:HistoryItem=record(&snapshot,"history",&id)?;
-                ancestor=metadata.parent.clone();
-                if metadata.run_id!=run.id {continue;}
-                let item=self.content.hydrate_history(metadata)?;
-                let Ok(conversation) = serde_json::from_value::<ConversationItem>(item.content)
-                else {
-                    continue;
-                };
-                match conversation.content {
-                    Content::Text { text }
-                        if item.run_id==run.id && item.source == HistorySource::Assistant && !text.trim().is_empty() =>
-                    {
-                        history_ids.push(item.id)
+            let child = delegated::execution_task(&snapshot, &row?)?;
+            let run: Run = record(&snapshot, "runs", &child.receipt.as_ref().expect("selected receipt").run_id)?;
+            let head: Option<String> = snapshot.query_row("SELECT head FROM branches WHERE id=?1", [&run.branch_id], |row| row.get(0))?;
+            let prepared = (|| {
+                let mut ancestor = head.clone();
+                let mut history_ids = Vec::new();
+                while let Some(id) = ancestor {
+                    let metadata: HistoryItem = record(&snapshot, "history", &id)?;
+                    ancestor = metadata.parent.clone();
+                    if metadata.run_id != run.id { continue; }
+                    let item = self.content.hydrate_history(metadata)?;
+                    let Ok(conversation) = serde_json::from_value::<ConversationItem>(item.content) else { continue; };
+                    match conversation.content {
+                        Content::Text { text } if item.run_id == run.id && item.source == HistorySource::Assistant && !text.trim().is_empty() => history_ids.push(item.id),
+                        _ => (),
                     }
-                    _ => (),
                 }
-            }
-            history_ids.reverse();
-            let outcome = match run.state {
-                RunState::Cancelled => Outcome::Cancelled,
-                // The report describes the Run's terminal result. Individual tool failures
-                // and uncertain effects retain their own original receipts and file barrier.
-                RunState::Completed if !history_ids.is_empty() => Outcome::Succeeded,
-                _ => Outcome::Failed,
-            };
-            let report = ChildReport {
-                outcome,
-                sender_thread_id: child.child_thread_id.clone(),
-                run_id: Some(run.id.clone()),
-                detail: history_ids
-                    .is_empty()
-                    .then(|| "Child finished without a successful textual report.".into()),
-                history_ids,
-            };
-            reports.push(PreparedChildReport {
-                child,
-                run,
-                head,
-                report,
-                epoch: self.epoch,
-            });
+                history_ids.reverse();
+                let outcome = match run.state {
+                    RunState::Cancelled => Outcome::Cancelled,
+                    // Reports describe terminal Runs, not individual tool effects/receipts.
+                    RunState::Completed if !history_ids.is_empty() => Outcome::Succeeded,
+                    _ => Outcome::Failed,
+                };
+                let report = ChildReport {
+                    outcome, sender_thread_id: child.child_thread_id.clone(), run_id: Some(run.id.clone()),
+                    detail: history_ids.is_empty().then(|| "Child finished without a successful textual report.".into()),
+                    history_ids,
+                };
+                Ok(PreparedChildReport { child, run, head, report, epoch: self.epoch })
+            })();
+            receive(prepared)?;
         }
-        Ok(reports)
+        Ok(())
     }
 }
 impl Catalog {
@@ -132,62 +115,47 @@ impl Catalog {
 }
 
 pub fn reconcile_reports(catalog: &std::sync::Mutex<Catalog>) -> Result<()> {
-    let preparation = catalog
-        .lock()
-        .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?
-        .capture_child_reports()?;
-    for prepared in preparation.load()? {
-        catalog
-            .lock()
-            .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?
-            .admit_child_report(prepared)?;
-    }
-    let candidates = {
-        let owner = catalog
-            .lock()
-            .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?;
-        owner
-            .delegated_executions(None)?
-            .into_iter()
-            .filter_map(|child| {
-                if let collaboration::ChildCodeResult::Published {
-                    result,
-                    effect: Effect::Unknown,
-                } = child.code_result
-                {
-                    Some(
-                        owner
-                            .capture_child_writer_bindings(&child.execution_id)
-                            .map(|read| (child.execution_id, result, read)),
-                    )
-                } else {
-                    None
-                }
-            })
-            .collect::<Result<Vec<_>>>()?
-    };
-    for (operation_id, result, read) in candidates {
-        let bindings = read.load()?;
-        let mut owner = catalog
-            .lock()
-            .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?;
-        let effect = owner.child_file_effect_bound(&bindings)?;
-        if effect != Effect::Unknown {
-            owner.attach_child_result_bound(&operation_id, result, effect, &bindings)?;
+    let lock = || catalog.lock().map_err(|_| RuntimeError::Invalid("catalog owner failed".into()));
+    let mut failure = None;
+    let progress = (|| {
+        let preparation = lock()?.capture_child_reports()?;
+        preparation.visit(|prepared| {
+            if let Err(cause) = prepared.and_then(|prepared| lock()?.admit_child_report(prepared)) {
+                failure.get_or_insert(cause);
+            }
+            Ok(())
+        })?;
+        let candidates = {
+            let owner = lock()?;
+            owner.delegated_executions(None)?.into_iter().filter_map(|child| {
+                if let collaboration::ChildCodeResult::Published { result, effect: Effect::Unknown } = child.code_result {
+                    Some(owner.capture_child_writer_bindings(&child.execution_id).map(|read| (child.execution_id, result, read)))
+                } else { None }
+            }).collect::<Result<Vec<_>>>()?
+        };
+        for (operation_id, result, read) in candidates {
+            let admitted = (|| {
+                let bindings = read.load()?;
+                let mut owner = lock()?;
+                let effect = owner.child_file_effect_bound(&bindings)?;
+                if effect != Effect::Unknown { owner.attach_child_result_bound(&operation_id, result, effect, &bindings)?; }
+                Ok(())
+            })();
+            if let Err(cause) = admitted { failure.get_or_insert(cause); }
         }
-    }
-    let receipts = catalog
-        .lock()
-        .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?
-        .capture_child_receipts()?;
-    for receipt in receipts {
-        let (identity, prepared) = receipt.load()?;
-        catalog
-            .lock()
-            .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?
-            .record_external_receipt_prepared(&identity, prepared, true)?;
-    }
-    Ok(())
+        let receipts = lock()?.capture_child_receipts()?;
+        for receipt in receipts {
+            let admitted = (|| {
+                let (identity, prepared) = receipt.load()?;
+                lock()?.record_external_receipt_prepared(&identity, prepared, true)?;
+                Ok(())
+            })();
+            if let Err(cause) = admitted { failure.get_or_insert(cause); }
+        }
+        Ok(())
+    })();
+    if let Some(failure) = failure { return Err(failure); }
+    progress
 }
 
 pub struct ChildWaitPreparation {
@@ -272,7 +240,7 @@ impl Catalog {
                 continue;
             }
             let unresolved:i64=self.db.query_row("SELECT count(*) FROM tool_calls t JOIN model_steps m ON m.id=t.request_id WHERE m.run_id=?1 AND t.committed=0",[&run.id],|r|r.get(0))?;
-            if unresolved != 0 {
+            if unresolved != 0 || !super::result_content::job_acceptance_consumed(&self.db, &op)? {
                 continue;
             }
             let head = self.head(&run.branch_id)?;
@@ -356,6 +324,7 @@ impl Catalog {
             || current_child.code_result != child.code_result
             || head != capture.head
             || unresolved
+            || !super::result_content::job_acceptance_consumed(&tx, &current_op)?
         {
             return Ok(None);
         }
@@ -440,16 +409,7 @@ impl Catalog {
             "UPDATE resumptions SET claimed=?2,acknowledged=1 WHERE wait_id=?1",
             params![wait.id, sql_number(run.epoch)?],
         )?;
-        let next_wait=super::next_ready_dependency_wait(&tx,&run.id)?;
-        run.state = if next_wait.is_some(){RunState::Waiting}else{RunState::Runnable};
-        run.waiting_on = next_wait;
-        run.revision += 1;
-        put(&tx, "runs", &run.id, &run)?;
-        let mut launch: launch_content::LaunchMetadata = record(&tx, "run_launches", &run.id)?;
-        launch.requires_rebind = run.state==RunState::Runnable;
-        launch.bound_epoch = None;
-        launch.revision += 1;
-        put(&tx, "run_launches", &run.id, &launch)?;
+        super::observations::advance(&tx, &mut run)?;
         event(
             &tx,
             &run.id,
@@ -471,24 +431,19 @@ impl Catalog {
     }
 }
 pub fn deliver_waits(catalog: &std::sync::Mutex<Catalog>) -> Result<Vec<String>> {
-    reconcile_reports(catalog)?;
-    let preparations = {
-        let mut owner = catalog
-            .lock()
-            .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?;
-        owner.capture_child_waits()?
-    };
-    for preparation in preparations {
-        let prepared = preparation.load()?;
-        catalog
-            .lock()
-            .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?
-            .admit_child_wait(prepared)?;
-    }
-    catalog
-        .lock()
-        .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?
-        .pending_child_continuations()
+    let lock = || catalog.lock().map_err(|_| RuntimeError::Invalid("catalog owner failed".into()));
+    let mut failure = reconcile_reports(catalog).err();
+    let progress = (|| {
+        let preparations = lock()?.capture_child_waits()?;
+        for preparation in preparations {
+            if let Err(cause) = preparation.load().and_then(|prepared| lock()?.admit_child_wait(prepared)) {
+                failure.get_or_insert(cause);
+            }
+        }
+        lock()?.pending_child_continuations()
+    })();
+    if let Some(failure) = failure { return Err(failure); }
+    progress
 }
 
 /// Reports are immutable after publication. The original invocation acceptance is already

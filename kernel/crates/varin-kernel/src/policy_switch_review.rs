@@ -162,8 +162,7 @@ impl Fixture {
             progress: ProgressSink::default(),
         };
         start = crate::questions::configure(start, self.db.clone());
-        start = crate::collaboration::configure(start, self.db.clone());
-        start = crate::process_wait::configure(start, self.db.clone());
+        start = crate::observations::configure(start, self.db.clone());
         let input = self
             .db
             .lock()

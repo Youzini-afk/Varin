@@ -245,6 +245,7 @@ pub(crate) fn spawn(
         let mut runtime: Option<Arc<RunSupervisor>> = None;
         let mut run_models: Option<Arc<crate::run_models::RunModels>> = None;
         let mut run_tools: Option<Arc<crate::run_tools::RunTools>> = None;
+        let mut continuation_stop:Option<crate::continuation_wake::StopGuard> = None;
         let mut opening = false;
         let mut initialization_failure: Option<String> = None;
         let mut waiting = std::collections::VecDeque::new();
@@ -270,6 +271,7 @@ pub(crate) fn spawn(
                     }
                 }
                 Command::Stop => {
+                    continuation_stop.take();
                     if let Some(runtime) = runtime.as_ref() {
                         if let Ok(catalog) = runtime.catalog().lock() {
                             catalog.stop_followup_admission();
@@ -372,6 +374,7 @@ pub(crate) fn spawn(
                             catalog.cancel_content_collection();
                         }
                     }
+                    continuation_stop.take();
                     identity = Some(selected.clone());
                     opening = true;
                     initialization_failure = None;
@@ -409,42 +412,12 @@ pub(crate) fn spawn(
                         let catalog = result?;
                         let owner = Arc::new(RunSupervisor::new(catalog));
                         let (notify, notifications) = mpsc::sync_channel(1);
-                        let (continuation_notify, continuation_wakes) = mpsc::sync_channel(1);
+                        let (continuation_notify, continuation_wakes) = crate::continuation_wake::channel()?;
+                        continuation_stop=Some(crate::continuation_wake::StopGuard(continuation_notify.clone()));
                         let continuation_owner = Arc::downgrade(&owner);
                         thread::Builder::new()
                             .name("thread-continuations".into())
-                            .spawn(move || {
-                                let mut failed = false;
-                                while continuation_wakes.recv().is_ok() {
-                                    let Some(owner) = continuation_owner.upgrade() else {
-                                        break;
-                                    };
-                                    let result = owner
-                                        .reconcile_message_requests()
-                                        .and_then(|_| owner.reconcile_goal_waits())
-                                        .map_err(|_| ())
-                                        .and_then(|_| {
-                                            varin_runtime::catalog::followups::reconcile(
-                                                &owner.catalog(),
-                                            )
-                                            .map(|_| ())
-                                            .map_err(|_| ())
-                                        });
-                                    match result {
-                                        Ok(_) => failed = false,
-                                        Err(_) if !failed => {
-                                            failed = true;
-                                            if let Ok(mut catalog) = owner.catalog().lock() {
-                                                let _ = catalog.record_recovery_failure(
-                                                    "followups",
-                                                    "continuation_reconciliation_failed",
-                                                );
-                                            };
-                                        }
-                                        Err(_) => (),
-                                    }
-                                }
-                            })?;
+                            .spawn(move || crate::continuation_wake::drive(continuation_owner, continuation_wakes))?;
                         owner
                             .catalog()
                             .lock()
@@ -467,7 +440,7 @@ pub(crate) fn spawn(
                                 // Subscribe before the first capture. Notifications coalesce but
                                 // the worker always rechecks durable facts; its own held state emits
                                 // no repeat events and a concurrent commit retains the next wake.
-                                let _ = continuation_notify.try_send(());
+                                continuation_notify.notify();
                                 if let Some(cursor) = cursor {
                                     // A disconnected Host projection cannot stop native durable work.
                                     let _ = event_responses.send(json!({"v":PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":event_epoch,"stream":"durable","cursor":cursor}));
@@ -740,9 +713,8 @@ pub(crate) fn spawn(
                                 | "runtime.operation.cancel"
                                 | "runtime.child.cancel"
                                 | "runtime.tree.cancel"
-                                | "runtime.child.reconcile"
+                                | "runtime.observations.reconcile"
                                 | "runtime.child.wait.cancel"
-                                | "runtime.process.wait.reconcile"
                                 | "runtime.followup.control"
                                 | "runtime.goal.control"
                         ) {

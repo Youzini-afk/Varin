@@ -781,6 +781,7 @@ impl Catalog {
             subject: operation_id.into(),
             kind: "operation.settled".into(),
             after_cursor: child.cursor,
+            deadline_at_ms: None,
             trigger_cursor,
             cancelled: false,
         };
@@ -827,6 +828,9 @@ impl Catalog {
         if !wait_id.starts_with("child-wait:") {
             return Err(RuntimeError::Invalid("not a collaboration Wait".into()));
         }
+        self.reconcile_waits()?;
+        let wait:Wait=record(&self.db,"waits",wait_id)?;
+        if wait.trigger_cursor.is_some(){return Ok(wait)}
         self.cancel_wait(wait_id)
     }
     /// Only a parked Run has relinquished its model-history writer. Do not append a report

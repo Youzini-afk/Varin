@@ -12,7 +12,7 @@ use admission::InputAdmission;
 #[test]
 fn child_assembly_rebinds_only_admitted_extension_and_activates_its_own_static_owner() {
     let mut f = fixture::Fixture::new_host_child(false, None, vec!["helper".into()]);
-    f.launch.policy = crate::process_wait::default_policy_identity();
+    f.launch.policy = crate::observations::default_policy_identity();
     let child = f.accept();
     let mut source = child.source.pin().unwrap().source.clone();
     source.branch_id = Some(format!("child-source:{}", child.operation_id));

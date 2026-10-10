@@ -129,10 +129,10 @@ it('slow startup launch cannot block the existing child/process pump or a later 
   f.runtime.rebindLaunch.mockImplementation(async () => { await gate; f.launch.startable = false; return { runId: f.run.id, epoch: 1 }; });
   let listener!: (event: AgentRuntimeStreamEvent) => void;
   const events: RuntimeEvent[] = [];
-  const reconcileChildren = vi.fn(async () => [] as string[]);
+  const reconcileObservations = vi.fn(async () => [] as string[]);
   const runtime = Object.assign(f.runtime, {
     onEvent: (handler: typeof listener) => { listener = handler; return () => {}; }, onExit: () => () => {}, onReady: () => () => {},
-    reconcileChildren, reconcileProcessWaits: async () => [], children: async () => [], unacceptedChildSources: async () => [],
+    reconcileObservations, children: async () => [], unacceptedChildSources: async () => [],
     status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
   const continues = vi.fn(async (runId: string, signal: AbortSignal) => { if (runId === f.run.id) await f.adapter.continueLaunch(runId, { signal }); });
@@ -142,24 +142,24 @@ it('slow startup launch cannot block the existing child/process pump or a later 
   try {
     await collaboration.recover();
     await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());
-    const previous = reconcileChildren.mock.calls.length;
+    const previous = reconcileObservations.mock.calls.length;
     events.push({ cursor: 1, subject: 'pause:other', revision: 2, kind: 'policy.resumed', data: { run_id: 'run:other', action_id: 'pause:other', wait_id: 'wait:other' } });
     listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 1 });
     await vi.waitFor(() => expect(continues).toHaveBeenCalledWith('run:other', expect.any(AbortSignal)));
-    expect(reconcileChildren.mock.calls.length).toBeGreaterThan(previous);
+    expect(reconcileObservations.mock.calls.length).toBeGreaterThan(previous);
     expect(f.runtime.pendingLaunches).toHaveBeenCalledOnce();
     expect(f.errors).toEqual([]);
   } finally { release(); collaboration.stop(); await tick(); }
 });
 
-it.each(['followup.admitted', 'goal.run_ready', 'message.run_ready'] as const)('%s uses the same cold launch owner, while unrelated and repeated durable events cannot relaunch it', async kind => {
+it.each(['followup.admitted', 'goal.run_ready', 'message.run_ready', 'observation.run_ready'] as const)('%s uses the same cold launch owner, while unrelated and repeated durable events cannot relaunch it', async kind => {
   const f = fixture();
-  const subject = kind === 'goal.run_ready' ? 'goal:one' : kind === 'message.run_ready' ? 'message:original' : 'followup:process';
+  const subject = kind === 'goal.run_ready' ? 'goal:one' : kind === 'message.run_ready' ? 'message:original' : kind === 'observation.run_ready' ? 'reply-wait:send' : 'followup:process';
   const events: RuntimeEvent[] = [];
   let listener!: (event: AgentRuntimeStreamEvent) => void;
   const runtime = Object.assign(f.runtime, {
     onEvent: (handler: typeof listener) => { listener = handler; return () => {}; }, onExit: () => () => {}, onReady: () => () => {},
-    reconcileChildren: async () => [], reconcileProcessWaits: async () => [], children: async () => [], unacceptedChildSources: async () => [],
+    reconcileObservations: async () => [], children: async () => [], unacceptedChildSources: async () => [],
     status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
   const continues = vi.fn((runId: string, signal: AbortSignal) => f.adapter.continueLaunch(runId, { signal }));
@@ -178,10 +178,10 @@ it.each(['followup.admitted', 'goal.run_ready', 'message.run_ready'] as const)('
     // Only the exact continuation admission wakes cold preparation. Generic accepted Runs may be children.
     f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable'; f.run.waiting_on = null;
     events.push({ cursor: 2, subject: 'run:unprepared-child', revision: 1, kind: 'run.accepted', data: { run_id: 'run:unprepared-child' } });
-    events.push({ cursor: 3, subject, revision: 1, kind: kind === 'goal.run_ready' ? 'goal.started' : kind === 'message.run_ready' ? 'message.accepted' : 'followup.registered', data: { run_id: f.run.id } });
+    events.push({ cursor: 3, subject, revision: 1, kind: kind === 'goal.run_ready' ? 'goal.started' : kind === 'message.run_ready' ? 'message.accepted' : kind === 'observation.run_ready' ? 'wait.registered' : 'followup.registered', data: { run_id: f.run.id } });
     notify(); await tick(); await tick(); expect(continues).toHaveBeenCalledOnce();
     events.push({ cursor: 4, subject, revision: 2, kind, data: {
-      run_id: f.run.id, ...(kind === 'goal.run_ready' ? { goal_id: subject } : kind === 'message.run_ready' ? { message_id: subject } : {
+      run_id: f.run.id, ...(kind === 'goal.run_ready' ? { goal_id: subject } : kind === 'message.run_ready' ? { message_id: subject } : kind === 'observation.run_ready' ? { wait_id: subject } : {
         followup_id: subject, occurrence_id: 'occurrence:process', source_run_id: 'run:source', operation_id: 'operation:process',
       }),
     } });
@@ -195,7 +195,7 @@ it.each(['followup.admitted', 'goal.run_ready', 'message.run_ready'] as const)('
   } finally { collaboration.stop(); }
 });
 
-it.each(['followup.admitted', 'goal.run_ready', 'message.run_ready'] as const)('startup discovery retains %s during the saved-launch scan and discovers saved work after an epoch change', async kind => {
+it.each(['followup.admitted', 'goal.run_ready', 'message.run_ready', 'observation.run_ready'] as const)('startup discovery retains %s during the saved-launch scan and discovers saved work after an epoch change', async kind => {
   const f = fixture(); f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable'; f.run.waiting_on = null;
   let release!: () => void; const scanned = new Promise<void>(resolve => { release = resolve; });
   f.runtime.pendingLaunches.mockImplementationOnce(async () => { await scanned; return []; });
@@ -204,7 +204,7 @@ it.each(['followup.admitted', 'goal.run_ready', 'message.run_ready'] as const)('
   const runtime = Object.assign(f.runtime, {
     onEvent: (handler: typeof listener) => { listener = handler; return () => {}; },
     onExit: (handler: () => void) => { exit = handler; return () => {}; }, onReady: (handler: () => void) => { ready = handler; return () => {}; },
-    reconcileChildren: async () => [], reconcileProcessWaits: async () => [], children: async () => [], unacceptedChildSources: async () => [],
+    reconcileObservations: async () => [], children: async () => [], unacceptedChildSources: async () => [],
     status: async () => ({ eventCursor: events.at(-1)?.cursor ?? 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
   const collaboration = new ThreadCollaboration({ kernel: { reconcileChildToolHandoffs() {}, releaseChildToolHandoff() {} } as never, storageAdapter: {} as never,
@@ -215,7 +215,7 @@ it.each(['followup.admitted', 'goal.run_ready', 'message.run_ready'] as const)('
   try {
     const discovery = collaboration.recover();
     await vi.waitFor(() => expect(f.runtime.pendingLaunches).toHaveBeenCalledOnce());
-    events.push({ cursor: 1, subject: kind === 'goal.run_ready' ? 'goal:one' : kind === 'message.run_ready' ? 'message:original' : 'followup:process', revision: 2, kind, data: { run_id: f.run.id } });
+    events.push({ cursor: 1, subject: kind === 'goal.run_ready' ? 'goal:one' : kind === 'message.run_ready' ? 'message:original' : kind === 'observation.run_ready' ? 'reply-wait:send' : 'followup:process', revision: 2, kind, data: { run_id: f.run.id } });
     listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 1 });
     release(); await discovery;
     await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());
@@ -391,7 +391,7 @@ it.each(['child_revision', 'process_receipt'] as const)('%s observed during an a
   const events: RuntimeEvent[] = [];
   const runtime = Object.assign(f.runtime, {
     onEvent: (handler: typeof listener) => { listener = handler; return () => {}; }, onExit: () => () => {}, onReady: () => () => {},
-    reconcileChildren: async () => [], reconcileProcessWaits: async () => [], children, childExecutions: async () => [structuredClone(child)], unacceptedChildSources: async () => [],
+    reconcileObservations: async () => [], children, childExecutions: async () => [structuredClone(child)], unacceptedChildSources: async () => [],
     childExecution: async () => structuredClone(child), releaseSourceGrants: vi.fn(async () => {}),
     status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
@@ -424,7 +424,7 @@ it('domain receipt discovery keeps the new epoch wake while an aborted old disco
   const gate = new Promise<void>(resolve => { release = resolve; });
   const runtime = Object.assign(f.runtime, {
     onEvent: () => () => {}, onExit: (handler: () => void) => { exit = handler; return () => {}; }, onReady: (handler: () => void) => { ready = handler; return () => {}; },
-    reconcileChildren: async () => [], reconcileProcessWaits: async () => [], children: async () => [], unacceptedChildSources: async () => [],
+    reconcileObservations: async () => [], children: async () => [], unacceptedChildSources: async () => [],
     status: async () => ({ eventCursor: 0 }), events: async () => [],
   });
   const reconcileDomainReceipts = vi.fn(async (_signal: AbortSignal) => {}).mockImplementationOnce(async () => { await gate; });
@@ -460,4 +460,36 @@ it('subtree cancellation carries the original parent scope and never loads child
   expect(await f.adapter.cancelOperation('dispatch-operation')).toBe(status);
   expect(runtime.cancelTree).toHaveBeenLastCalledWith({ kind: 'child', operation_id: 'dispatch-operation' });
   expect(runtime.child).not.toHaveBeenCalled(); expect(runtime.operation).not.toHaveBeenCalled();
+});
+
+it('an unrelated observation error remains visible without blocking original saved-launch discovery or event replay', async () => {
+  const f = fixture(); f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable'; f.run.waiting_on = null;
+  const failure = new Error('Original child report content is unavailable');
+  const reconcileObservations = vi.fn(async (): Promise<string[]> => { throw failure; });
+  let listener!: (event: AgentRuntimeStreamEvent) => void;
+  const events: RuntimeEvent[] = [];
+  const runtime = Object.assign(f.runtime, {
+    onEvent: (handler: typeof listener) => { listener = handler; return () => {}; }, onExit: () => () => {}, onReady: () => () => {},
+    reconcileObservations, children: async () => [], unacceptedChildSources: async () => [],
+    status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
+  });
+  const continueRun = vi.fn(async (runId: string, signal: AbortSignal) => f.adapter.continueLaunch(runId, { signal }));
+  const collaboration = new ThreadCollaboration({ kernel: { reconcileChildToolHandoffs() {}, releaseChildToolHandoff() {} } as never,
+    storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
+    runtime: runtime as unknown as AgentRuntimeClient, workingStates: {} as never, prepareContext: {} as never,
+    continueRun, recoverLaunches: signal => f.adapter.recover(signal), onError: (_id, error) => f.errors.push(error) });
+  try {
+    await collaboration.recover();
+    await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());
+    expect(f.errors).toEqual([failure]);
+    expect(reconcileObservations).toHaveBeenCalledOnce();
+    events.push({ cursor: 1, subject: 'reply-wait:send', revision: 2, kind: 'observation.run_ready', data: { run_id: f.run.id } });
+    listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 1 });
+    await vi.waitFor(() => expect(continueRun).toHaveBeenCalledOnce());
+    await tick(); await tick();
+    expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce();
+    expect(f.runtime.pendingLaunches).toHaveBeenCalledOnce();
+    expect(reconcileObservations).toHaveBeenCalledTimes(2);
+    expect(f.errors).toEqual([failure, failure]);
+  } finally { collaboration.stop(); }
 });

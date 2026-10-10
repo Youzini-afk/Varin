@@ -191,7 +191,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {snapshot && <ThreadGoal api={api.goals} identity={identity} goals={snapshot.goals} sourceRunId={run?.id} refresh={async () => { await projection.current?.refresh(); }} />}
       {launch && <ThreadChildProfiles launch={launch.selection} />}
       {api.family && <ThreadFamily api={api.family} identity={identity} />}
-      {api.messages && <ThreadMessages api={api.messages} family={api.family} identity={identity} eventCursor={snapshot?.eventCursor} />}
+      {api.messages && <ThreadMessages api={api.messages} family={api.family} identity={identity} eventCursor={snapshot?.eventCursor} cancelObservation={pending ? undefined : operationId => act(() => api.cancelOperation(operationId), true)} />}
       {api.plan && <ThreadPlan api={api.plan} identity={identity} contextRevision={snapshot?.context.checkpoint?.revision} />}
       {visibleHistory.map(item => <article key={item.id} className="mx-auto max-w-3xl">
         <div className="mb-1 text-xs text-muted-foreground">{item.source}</div>
@@ -240,7 +240,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           && (operation.intent as { call?: { arguments?: { mode?: string } } } | null)?.call?.arguments?.mode === 'pty'
           && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => openProcessTerminal(operation.id))}>Open process terminal</Button>}
         {operation.external_receipt && <div className="text-xs text-muted-foreground">{operation.external_receipt.executor} · {operation.external_receipt.outcome}</div>}
-        {operation.phase !== 'terminal' && (operation.executor !== 'ask_user' || run?.waiting_on === operation.waiting_on) && <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelOperation(operation.id), true)}>{operation.executor === 'dispatch' ? 'Cancel child task' : operation.executor === 'wait_child' ? 'Cancel observation wait' : 'Cancel operation'}</Button>}
+        {operation.phase !== 'terminal' && (operation.executor !== 'ask_user' || run?.waiting_on === operation.waiting_on) && <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelOperation(operation.id), true)}>{operation.executor === 'dispatch' ? 'Cancel child task' : operation.execution_owner?.kind === 'kernel' && (operation.executor === 'wait_child' || operation.executor === 'wait_process' || (operation.executor === 'send' && operation.waiting_on !== null)) ? 'Cancel observation wait' : 'Cancel operation'}</Button>}
       </div>)}
       {snapshot?.inputs.filter(input => input.state === 'queued').map(input => <div key={input.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
         <form onSubmit={event => { event.preventDefault(); const edited = new FormData(event.currentTarget).get('text');

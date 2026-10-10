@@ -15,10 +15,11 @@ vi.mock('@/components/ui/textarea', () => ({ Textarea: (props: React.TextareaHTM
 vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div> }));
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:child', branchId: 'branch:child' };
 const family: FamilyList = { rootThreadId: 'thread:root', members: [{ threadId: 'thread:peer', parentThreadId: 'thread:root', task: 'Peer task', state: 'waiting', branches: [{ branchId: 'branch:peer', headId: null, activeRunId: 'run:peer', latestRun: { runId: 'run:peer', state: 'waiting' } }] }] };
-const receipt: MessageReceipt = { messageId: 'message:original', senderThreadId: 'thread:peer', senderBranchId: 'branch:peer', targetThreadId: identity.threadId, targetBranchId: identity.branchId, actor: { kind: 'agent', runId: 'run:peer', operationId: 'original-send', origin: { kind: 'model_step', request_id: 'original-request' } }, kind: 'inform', replyTo: null, acceptedCursor: 19 };
-const summary: MessageSummary = { ...receipt, state: 'queued', activation: { state: 'passive' }, deliveredRunId: null, deliveredCursor: null };
+const receipt: MessageReceipt = { messageId: 'message:original', senderThreadId: 'thread:peer', senderBranchId: 'branch:peer', targetThreadId: identity.threadId, targetBranchId: identity.branchId, actor: { kind: 'agent', runId: 'run:peer', operationId: 'original-send', origin: { kind: 'model_step', request_id: 'original-request' } }, kind: 'inform', replyTo: null, acceptedCursor: 19, acceptedAtMs: 1000 };
+const summary: MessageSummary = { ...receipt, state: 'queued', activation: { state: 'passive' }, replyWait: null, deliveredRunId: null, deliveredCursor: null };
 function fixture() {
   return {
+    cancelObservation: vi.fn<(operationId: string) => Promise<void>>(async () => {}),
     api: {
       list: vi.fn<ThreadMessagesAPI['list']>(async (_identity, request) => ({ messages: request.direction === 'incoming' ? [summary] : [], nextCursor: null })),
       get: vi.fn<ThreadMessagesAPI['get']>(async () => ({ ...summary, text: 'Original message body' })),
@@ -36,7 +37,7 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
-const render = async (f: ReturnType<typeof fixture>, selected = identity, eventCursor = 1) => { await act(async () => root.render(<ThreadMessages api={f.api} family={f.family} identity={selected} eventCursor={eventCursor} />)); };
+const render = async (f: ReturnType<typeof fixture>, selected = identity, eventCursor = 1) => { await act(async () => root.render(<ThreadMessages api={f.api} family={f.family} identity={selected} eventCursor={eventCursor} cancelObservation={f.cancelObservation} />)); };
 const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === label)!;
 const click = async (label: string) => { await act(async () => button(label).click()); };
 const enter = async (value: string) => { await act(async () => { const input = container.querySelector<HTMLTextAreaElement>('[aria-label="Task message text"]')!; input.value = value; input.dispatchEvent(new window.Event('input', { bubbles: true })); }); };
@@ -106,5 +107,44 @@ it('shows request admission separately from delivery and retains failed or cance
   await render(f, identity, 4);
   expect(container.textContent).toContain('Request activation failed: source_unavailable');
   expect(container.textContent).toContain('Accepted · not delivered');
+  expect(f.api.send).not.toHaveBeenCalled();
+});
+
+it('projects original reply observations, ends only the selected Operation and keeps late replies separate from an elapsed wait', async () => {
+  const f = fixture();
+  const waiting: MessageSummary = { ...summary, senderThreadId: identity.threadId, senderBranchId: identity.branchId,
+    targetThreadId: 'thread:peer', targetBranchId: 'branch:peer', kind: 'request',
+    actor: { kind: 'agent', runId: 'run:original-sender', operationId: 'own-send', origin: { kind: 'model_step', request_id: 'own-request' } },
+    activation: { state: 'bound', runId: 'run:receiver', executionId: null, holdReason: null },
+    replyWait: { waitId: 'reply-wait:own-send', operationId: 'own-send', runId: 'run:original-sender',
+      deadlineAtMs: null, state: 'waiting', replyMessageId: null, delivered: false } };
+  const expired: MessageSummary = { ...waiting, messageId: 'message:expired', actor: { ...waiting.actor, kind: 'agent', runId: 'run:original-sender', operationId: 'expired-send', origin: { kind: 'model_step', request_id: 'own-request' } },
+    replyWait: { ...waiting.replyWait!, waitId: 'reply-wait:expired-send', operationId: 'expired-send', state: 'expired', deadlineAtMs: 5000 } };
+  const replied: MessageSummary = { ...waiting, messageId: 'message:replied', actor: { ...waiting.actor, kind: 'agent', runId: 'run:original-sender', operationId: 'replied-send', origin: { kind: 'model_step', request_id: 'own-request' } },
+    replyWait: { ...waiting.replyWait!, waitId: 'reply-wait:replied-send', operationId: 'replied-send', state: 'replied', replyMessageId: 'message:answer', delivered: true } };
+  const received: MessageSummary = { ...summary, replyWait: { ...waiting.replyWait!, waitId: 'reply-wait:original-send', operationId: 'original-send', runId: 'run:peer' } };
+  let sent = [waiting, expired, replied];
+  f.api.list.mockImplementation(async (_scope, request) => ({ messages: request.direction === 'incoming' ? [received] : sent, nextCursor: null }));
+  await render(f); await click('Open task messages');
+  expect(container.textContent).toContain('Waiting for a linked reply · no deadline');
+  expect(button('End reply observation')).toBeUndefined(); // A received view never controls its peer.
+  await click('Sent messages');
+  expect(container.textContent).toContain('Reply wait deadline elapsed');
+  expect(container.textContent).toContain('observation result not delivered');
+  expect(container.textContent).toContain('Linked reply received: message:answer');
+  expect(container.textContent).toContain('observation result delivered');
+  await click('End reply observation');
+  expect(f.cancelObservation).toHaveBeenCalledExactlyOnceWith('own-send');
+  expect(container.textContent).toContain('Waiting for a linked reply'); // No optimistic terminal state.
+  sent = [{ ...waiting, replyWait: { ...waiting.replyWait!, state: 'cancelled', delivered: true } }, expired, replied];
+  await render(f, identity, 2);
+  expect(container.textContent).toContain('sent message was not withdrawn');
+  expect(button('End reply observation')).toBeUndefined();
+  const late: MessageSummary = { ...summary, messageId: 'message:late', replyTo: expired.messageId };
+  f.api.list.mockResolvedValue({ messages: [late], nextCursor: null });
+  f.api.get.mockResolvedValue({ ...late, text: 'Actual late reply, still linked to the original message' });
+  await click('Received messages'); await click('Read message message:late');
+  expect(container.textContent).toContain('reply to message:expired');
+  expect(container.textContent).toContain('Actual late reply');
   expect(f.api.send).not.toHaveBeenCalled();
 });

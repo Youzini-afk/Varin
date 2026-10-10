@@ -77,7 +77,8 @@ export interface ThreadFamilyAPI {
   read(identity: ThreadIdentity, request: Omit<FamilyReadParams, 'callerThreadId'>, signal?: AbortSignal): Promise<FamilyRead>;
   item(identity: ThreadIdentity, request: Omit<FamilyItemParams, 'callerThreadId'>, signal?: AbortSignal): Promise<FamilyItem>;
 }
-/** Durable same-family messages. Acceptance, history delivery and request activation are distinct facts. */
+/** Durable same-family messages. Acceptance, history delivery, request activation and Agent reply
+ * observations are distinct facts. User sends do not create a Run or an observation. */
 export interface ThreadMessagesAPI {
   send(identity: ThreadIdentity, request: Omit<MessageSendParams, 'senderThreadId' | 'senderBranchId'>, signal?: AbortSignal): Promise<MessageReceipt>;
   list(identity: ThreadIdentity, request: Omit<MessageListParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MessagePage>;

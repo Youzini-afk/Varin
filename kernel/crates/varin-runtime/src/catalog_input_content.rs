@@ -405,6 +405,7 @@ impl Catalog {
         let ids = statement
             .query_map(params![run_id, run.branch_id], |row| row.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
+        let ids = if super::super::observations::next(&self.db, run_id)?.is_some() { Vec::new() } else { ids };
         let reads = ids
             .into_iter()
             .map(|id| self.capture_input_row(&id))

@@ -272,8 +272,7 @@ fn combined(ending: Ending) {
         },
         db.clone(),
     );
-    start = crate::collaboration::configure(start, db.clone());
-    start = crate::process_wait::configure(start, db.clone());
+    start = crate::observations::configure(start, db.clone());
     let mut declarations = KernelToolExecutor::new(binding.clone(), client.clone())
         .unwrap()
         .declarations(true);

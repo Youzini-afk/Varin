@@ -2937,14 +2937,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.child.release" => serde_json::from_value::<ChildExecutionParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.process.wait.reconcile" => {
+        "runtime.observations.reconcile" => {
             serde_json::from_value::<KernelEmptyParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
-        "runtime.child.reconcile" => serde_json::from_value::<KernelEmptyParams>(params.clone())
-            .map(|_| ())
-            .map_err(|error| error.to_string()),
         "runtime.child.wait.cancel" => serde_json::from_value::<ChildWaitParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

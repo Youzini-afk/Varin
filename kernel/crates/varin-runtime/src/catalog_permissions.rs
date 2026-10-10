@@ -72,6 +72,7 @@ impl Catalog {
             subject: op.id.clone(),
             kind: "permission.decided".into(),
             after_cursor: cursor,
+            deadline_at_ms: None,
             trigger_cursor: None,
             cancelled: false,
         };

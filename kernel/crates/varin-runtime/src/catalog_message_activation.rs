@@ -128,7 +128,7 @@ fn run_hold(db: &Connection, run: &Run) -> Result<Option<MessageActivationHold>>
             MessageActivationHold::ManualPause
         } else if id.starts_with("question:") {
             MessageActivationHold::Question
-        } else if id.starts_with("child-wait:") || id.starts_with("process-wait:") {
+        } else if super::super::observations::is_observation_id(id) {
             MessageActivationHold::DependencyWait
         } else {
             MessageActivationHold::Preparing
@@ -805,64 +805,30 @@ impl Catalog {
             }
         }
     }
-    pub fn request_observation_positions(&self) -> Result<Vec<(String, String)>> {
-        let mut q=self.db.prepare("SELECT DISTINCT r.id,json_extract(r.body,'$.waiting_on') FROM input_queue i JOIN runs r ON r.id=i.run_id WHERE i.origin='message' AND i.activation='activating' AND i.state='queued' AND json_extract(r.body,'$.state')='waiting' AND (json_extract(r.body,'$.waiting_on') LIKE 'child-wait:%' OR json_extract(r.body,'$.waiting_on') LIKE 'process-wait:%') ORDER BY r.id")?;
-        let rows = q.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
-    }
-    /// End only the original live observation. A request is neither a question answer nor Resume.
+    /// A real current-boundary input ends observations, not their targets. Questions, policy
+    /// pause and Goal control remain independent owners. NextRun input never interrupts this Run.
     pub fn interrupt_request_observations(&mut self) -> Result<bool> {
         let runs = {
-            let mut q=self.db.prepare("SELECT DISTINCT run_id FROM input_queue WHERE origin='message' AND activation='activating' AND state='queued' AND run_id IS NOT NULL")?;
-            let rows = q.query_map([], |r| r.get::<_, String>(0))?;
-            rows.collect::<std::result::Result<Vec<_>, _>>()?
+            let mut q=self.db.prepare("SELECT DISTINCT run_id FROM input_queue WHERE activation='activating' AND mode!='next_run' AND state='queued' AND run_id IS NOT NULL")?;
+            let rows=q.query_map([],|r|r.get::<_,String>(0))?;
+            rows.collect::<std::result::Result<Vec<_>,_>>()?
         };
-        // Preserve a dependency's already committed result before deciding which original
-        // observations remain live. This uses the same retrospective Wait event owner.
-        if !runs.is_empty() {
-            self.reconcile_waits()?;
-        }
-        let mut changed = false;
+        if !runs.is_empty(){self.reconcile_waits()?;}
+        let mut changed=false;
         for id in runs {
-            let run = self.run(&id)?;
-            if run.cancel_requested || run.state != RunState::Waiting || goal_hold(&self.db, &run)?
-            {
-                continue;
-            }
-            let Some(wait_id) = run.waiting_on else {
-                continue;
-            };
-            let wait: Wait = record(&self.db, "waits", &wait_id)?;
-            if wait.run_id != id {
-                continue;
-            }
-            if !wait_id.starts_with("child-wait:") && !wait_id.starts_with("process-wait:") {
-                continue;
-            }
-            // All live observations in the original Run belong to this input boundary. Leaving
-            // another one parked would consume the request and immediately suspend it again.
-            let observations = {
-                let mut q=self.db.prepare("SELECT body FROM operations WHERE run_id=?1 AND json_extract(body,'$.phase')!='terminal' AND json_extract(body,'$.execution_owner.kind')='kernel' AND json_extract(body,'$.executor') IN ('wait_child','wait_process') AND json_extract(body,'$.waiting_on') IS NOT NULL")?;
-                let rows = q.query_map([&id], |r| r.get::<_, String>(0))?;
-                rows.map(|r| Ok(serde_json::from_str(&r?)?))
-                    .collect::<Result<Vec<Operation>>>()?
-            };
-            for op in observations {
-                let original = op.waiting_on.as_deref().expect("selected Wait");
-                let wait: Wait = record(&self.db, "waits", original)?;
-                if wait.cancelled || wait.trigger_cursor.is_some() {
-                    continue;
-                }
-                if op.executor.as_deref() == Some(collaboration::WAIT_TOOL) {
-                    self.request_cancel_child_wait(original)?;
-                } else {
-                    self.cancel_process_wait(&op.id)?;
-                }
-                changed = true;
+            let run=self.run(&id)?;
+            if run.cancel_requested || run.state.terminal() || goal_hold(&self.db,&run)?
+                || self.pending_question_wait(&id)?.is_some()
+                || (run.state==RunState::Waiting && !run.waiting_on.as_deref().is_some_and(super::super::observations::is_observation_id)) {continue}
+            for op in super::super::observations::operations(&self.db,Some(&id))? {
+                let wait:Wait=record(&self.db,"waits",op.waiting_on.as_deref().expect("observation"))?;
+                if wait.cancelled || wait.trigger_cursor.is_some(){continue}
+                self.cancel_observation(&op.id)?;changed=true;
             }
         }
         Ok(changed)
     }
+
 }
 /// One event-driven pass; a raced candidate is recaptured before returning. Held work emits
 /// no repeat event and waits for its actual dependency, control, source or execution owner.

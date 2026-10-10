@@ -8,8 +8,8 @@ fn error(e: impl ToString) -> ExecutionError {
     ExecutionError::new("message_send", e.to_string())
 }
 pub(crate) fn schema() -> ToolSchema {
-    ToolSchema { name:messages::SEND_TOOL.into(),version:"2".into(),description:"Send a durable inform or request message to another member of this task family. Requires targetThreadId and targetBranchId, or replyTo from a message received on your branch. An explicit reply target must match the original sender. An inform is retained for the target's next normal processing and does not start or wake a model. Returns an accepted message ID, not proof that the target handled it. A request enters an active Run at a closed input boundary or starts a new idle Run, while preserving explicit pauses, unanswered questions and Goal limits. wait is not supported.".into(),output_schema:None,metadata:None,
-        schema:json!({"type":"object","properties":{"targetThreadId":{"type":"string","minLength":1},"targetBranchId":{"type":"string","minLength":1},"replyTo":{"type":"string","minLength":1},"kind":{"type":"string","enum":["inform","request"]},"text":{"type":"string","minLength":1}},"required":["kind","text"],"additionalProperties":false}) }
+    ToolSchema { name:messages::SEND_TOOL.into(),version:"3".into(),description:"Send a durable inform or request message to another member of this task family. Requires targetThreadId and targetBranchId, or replyTo from a message received on your branch. An explicit reply target must match the original sender. An inform is retained for the target's next normal processing and does not start or wake a model. Returns an accepted message ID, not proof that the target handled it. A request enters an active Run at a closed input boundary or starts a new idle Run, while preserving explicit pauses, unanswered questions and Goal limits. An explicit wait:{} observes only an actual replyTo this message without a deadline; wait:{timeoutMs:N} fixes a deadline at acceptance (0 ends immediately). It returns the original operation handle and parks this Run until all its observations end. Cancelling observation never withdraws the accepted message.".into(),output_schema:None,metadata:None,
+        schema:json!({"type":"object","properties":{"targetThreadId":{"type":"string","minLength":1},"targetBranchId":{"type":"string","minLength":1},"replyTo":{"type":"string","minLength":1},"kind":{"type":"string","enum":["inform","request"]},"text":{"type":"string","minLength":1},"wait":{"type":"object","properties":{"timeoutMs":{"type":"integer","minimum":0,"maximum":9007199254740991u64}},"additionalProperties":false}},"required":["kind","text"],"additionalProperties":false}) }
 }
 fn input(call: &ToolCall) -> Result<MessageInput, ExecutionError> {
     let input: MessageInput = serde_json::from_value(call.arguments.clone()).map_err(error)?;
@@ -69,13 +69,13 @@ impl ToolExecutor for MessageTools {
         {
             return Err(error("send was not selected in this frozen invocation"));
         }
-        input(call)?;
+        let waiting = input(call)?.wait.is_some();
         Ok(ToolContract {
             name: call.name.clone(),
             schema_version: call.schema_version.clone(),
             read_only: false,
-            completion: CompletionKind::Result,
-            lifetime: Lifetime::Run,
+            completion: if waiting { CompletionKind::Job } else { CompletionKind::Result },
+            lifetime: if waiting { Lifetime::Thread } else { Lifetime::Run },
             resources: vec![],
         })
     }
