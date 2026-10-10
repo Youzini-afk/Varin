@@ -300,6 +300,65 @@ it('family tools and public views read original and fork-inherited conversations
   expect(reopened.errors).toEqual([]);
 }, 30_000);
 
+it('passive family messages keep Agent and User identities, do not reopen finished work, and arrive once in a natural later Run', async () => {
+  const entered = gate(); const release = gate();
+  let parentSteps = 0; let childSteps = 0; let operationId = ''; let agentMessageId = '';
+  const f = await fixture(({ body, response }) => {
+    assertPairing(body);
+    if (isParent(body)) {
+      if (++parentSteps === 1) complete(response, [tool('dispatch', { ...dispatch, tools: ['threads', 'send'] }, 'message-child')]);
+      else if (parentSteps === 2) { operationId = job(body); complete(response, [answer('Parent deliberately finished before any message', 'message-parent-first')]); }
+      else {
+        expect(JSON.stringify(body.input)).toContain('AGENT_PASSIVE_ORIGINAL');
+        expect(JSON.stringify(body.input)).toContain('USER_FROM_CHILD_ORIGINAL');
+        complete(response, [answer('Natural new Run processed retained information', 'message-parent-next')]);
+      }
+    } else if (++childSteps === 1) complete(response, [tool('threads', {}, 'message-discovery')]);
+    else if (childSteps === 2) {
+      const content = result(body, 'threads')?.content as { page: import('./protocol.generated.js').FamilyList };
+      const parent = content.page.members.find(member => member.threadId === content.page.rootThreadId)!;
+      complete(response, [tool('send', { kind: 'inform', targetThreadId: parent.threadId, targetBranchId: parent.branches[0]!.branchId, text: 'AGENT_PASSIVE_ORIGINAL' }, 'message-send')]);
+    } else {
+      const completion = result(body, 'send'); expect(completion).toMatchObject({ outcome: 'succeeded', effect: 'confirmed' });
+      agentMessageId = (completion!.content as { message: { messageId: string } }).message.messageId;
+      complete(response, [answer('Child completed independently', 'message-child-done')]);
+    }
+  });
+  const h = await f.openHost({ context: original => blockChild(original, entered, release) });
+  try {
+    const identity = await h.api.create('passive-family-messages');
+    const prepared = await h.api.prepareSource({ ...identity, key: 'message-source', path: f.workspace, mode: 'fixed_branch' });
+    const original = await h.api.submit({ ...identity, key: 'message-input', expectedHead: null, text: 'Dispatch and finish; ordinary notifications need no response', model, source: prepared.source });
+    await entered.promise; await expect.poll(async () => (await h.runtime.run(original.run_id)).state).toBe('completed');
+    release.release();
+    await expect.poll(async () => (await h.runtime.child(operationId)).report?.outcome, { timeout: 10_000 }).toBe('succeeded');
+    const child = await h.runtime.child(operationId);
+    const childIdentity = { runtime: 'agent' as const, threadId: child.child_thread_id, branchId: child.child_branch_id };
+    const userIntent = { key: 'same-user-message', kind: 'inform' as const, targetThreadId: identity.threadId, targetBranchId: identity.branchId, text: 'USER_FROM_CHILD_ORIGINAL' };
+    const accepted = await h.api.messages!.send(childIdentity, userIntent);
+    expect(await h.api.messages!.send(childIdentity, userIntent)).toEqual(accepted);
+    const inbox = await h.api.messages!.list(identity, { direction: 'incoming' }); expect(inbox.messages).toHaveLength(2);
+    expect(inbox.messages.find(message => message.messageId === agentMessageId)).toMatchObject({ actor: { kind: 'agent', runId: child.receipt!.run_id }, state: 'queued', deliveredRunId: null });
+    expect(inbox.messages.find(message => message.messageId === accepted.messageId)).toMatchObject({ actor: { kind: 'user' }, senderThreadId: child.child_thread_id, state: 'queued' });
+    expect(parentSteps).toBe(2); expect(childSteps).toBe(3); expect((await h.runtime.run(original.run_id)).state).toBe('completed');
+    const reply = await h.api.messages!.send(identity, { key: 'reply-to-original-agent', kind: 'inform', replyTo: agentMessageId, text: 'USER_REPLY_AFTER_CHILD_FINISHED' });
+    expect(reply).toMatchObject({ targetThreadId: child.child_thread_id, targetBranchId: child.child_branch_id, actor: { kind: 'user' } });
+    const next = await h.api.enqueue({ ...identity, key: 'natural-new-parent-run', mode: 'boundary', text: 'Now process retained information' });
+    expect(next.run_id).not.toBe(original.run_id);
+    await expect.poll(async () => (await h.runtime.run(next.run_id)).state, { timeout: 10_000 }).toBe('completed');
+    const history = (await h.api.snapshot(identity)).history;
+    expect(history.filter(item => item.id === agentMessageId)).toMatchObject([{ source: 'agent', run_id: next.run_id }]);
+    expect(history.filter(item => item.id === accepted.messageId)).toMatchObject([{ source: 'user', run_id: next.run_id }]);
+    expect((await h.api.messages!.get(childIdentity, reply.messageId)).state).toBe('queued');
+    await h.close(); const reopened = await f.openHost();
+    expect(await reopened.api.messages!.send(childIdentity, userIntent)).toEqual(accepted);
+    expect((await reopened.api.messages!.get(identity, agentMessageId)).deliveredRunId).toBe(next.run_id);
+    expect((await reopened.api.messages!.get(childIdentity, reply.messageId)).state).toBe('queued');
+    expect((await reopened.runtime.child(operationId)).receipt).toEqual(child.receipt);
+    expect(parentSteps).toBe(3); expect(childSteps).toBe(3); expect(reopened.errors).toEqual([]);
+  } finally { release.release(); }
+}, 30_000);
+
 it('selected read-only child owns its ordinary notes and plan through real Host owners and public plan consumers', async () => {
   const entered = gate(); const release = gate();
   let parentSteps = 0; let childSteps = 0; let operationId = '';

@@ -837,7 +837,7 @@ impl Persistence for BoundaryPersistence {
         r: &str,
         e: u64,
         h: Option<&str>,
-    ) -> Result<Vec<ConversationItem>, ExecutionError> {
+    ) -> Result<InputBatch, ExecutionError> {
         self.db.consume_inputs(r, e, h)
     }
     fn commit(&self, r: &str, e: u64, v: &ExecutionRecord) -> Result<(), ExecutionError> {

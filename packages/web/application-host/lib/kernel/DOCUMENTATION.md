@@ -36,6 +36,24 @@ also forwards mandatory `HistoryReference.run_id`, preserving inherited items' o
 Messages/continuation are not inferred from opening a view. See the
 [family read evidence](../../../../../docs/reviews/runtime-family-reads-2026-10-11.md).
 
+## Task-family messages
+
+The authenticated `/api/threads/messages/{send,list,get}` routes use the original Catalog input queue
+and ContentStore through AgentRuntimeClient. ThreadAdapter validates the selected Thread/branch and
+sets the trusted User sender; the nested send request cannot contain actor or sender overrides. The
+Host neither queues a second copy nor prepares a model/source or calls continueLaunch for an inform.
+Rust validates the actual family and exact reply peers. Generated parameters reject unsupported
+request/wait behavior before acceptance. Read responses use the ordinary data path.
+
+`ThreadsAPI.messages` and the shared `ThreadMessages` panel separate immutable acceptance from actual
+history delivery. Received/sent lists contain metadata; opening a message reads its original body.
+Reply preserves the received message ID and lets the original owner resolve the target. An unknown
+send response retains the same body, target and key for retry, including across panel collapse; an
+HTTP 400 alone is not evidence of non-acceptance when it reports a lost kernel response. The user can
+explicitly leave an uncertain draft without withdrawing an accepted message. Host/identity changes
+clear local drafts/views and late replies cannot repopulate them. Passive messages do not imply a
+request, a reply Wait, a continuing Goal, or a new child Run.
+
 ## Runtime content maintenance
 
 `POST /api/runtime/content/collect` accepts an empty JSON object under the existing Host authentication.

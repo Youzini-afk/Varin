@@ -61,8 +61,8 @@ impl Persistence for Store {
         _: &str,
         _: u64,
         _: Option<&str>,
-    ) -> Result<Vec<ConversationItem>, ExecutionError> {
-        Ok(vec![])
+    ) -> Result<InputBatch, ExecutionError> {
+        Ok(InputBatch::default())
     }
     fn commit(&self, _: &str, _: u64, record: &ExecutionRecord) -> Result<(), ExecutionError> {
         if self.fail_settlement && matches!(record, ExecutionRecord::ToolSettled { .. }) {
@@ -574,7 +574,7 @@ fn cancellation_after_durable_dispatch_marker_settles_no_send_and_releases_occup
             run: &str,
             epoch: u64,
             head: Option<&str>,
-        ) -> Result<Vec<ConversationItem>, ExecutionError> {
+        ) -> Result<InputBatch, ExecutionError> {
             self.db.consume_inputs(run, epoch, head)
         }
         fn commit(

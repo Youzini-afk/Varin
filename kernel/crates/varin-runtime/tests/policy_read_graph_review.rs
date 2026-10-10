@@ -1211,7 +1211,7 @@ impl Persistence for InterleavingPersistence {
         run: &str,
         epoch: u64,
         head: Option<&str>,
-    ) -> Result<Vec<ConversationItem>, ExecutionError> {
+    ) -> Result<InputBatch, ExecutionError> {
         self.db.consume_inputs(run, epoch, head)
     }
     fn commit(

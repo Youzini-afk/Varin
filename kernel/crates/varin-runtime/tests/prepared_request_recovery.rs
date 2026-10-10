@@ -144,7 +144,7 @@ impl Persistence for PreparedBoundary {
         r: &str,
         e: u64,
         h: Option<&str>,
-    ) -> Result<Vec<ConversationItem>, ExecutionError> {
+    ) -> Result<InputBatch, ExecutionError> {
         Persistence::consume_inputs(self.db.as_ref(), r, e, h)
     }
     fn goal_context(&self, r: &str, e: u64) -> Result<Option<GoalContext>, ExecutionError> {

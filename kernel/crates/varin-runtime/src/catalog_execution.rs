@@ -444,7 +444,7 @@ impl Persistence for Mutex<Catalog> {
         run_id: &str,
         epoch: u64,
         expected_head: Option<&str>,
-    ) -> std::result::Result<Vec<ConversationItem>, ExecutionError> {
+    ) -> std::result::Result<InputBatch, ExecutionError> {
         loop {
             let preparation = self
                 .lock()

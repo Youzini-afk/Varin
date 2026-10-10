@@ -957,10 +957,10 @@ fn queued_skill_admission_edit_cancel_delivery_and_retry_keep_one_revision_autho
     let delivery=db.prepare_input_delivery(&owner.run_id,db.epoch(),db.head("main").unwrap().as_deref()).unwrap().load().unwrap();
     let delivered=db.admit_input_delivery(delivery).unwrap().unwrap();
     assert!(db.admit_input_edit(late).is_err());
-    let bindings=varin_runtime::catalog::resources::retained_activations(&delivered);
+    let bindings=varin_runtime::catalog::resources::retained_activations(&delivered.items);
     assert_eq!(bindings.len(),2); assert_eq!(bindings[0].resource_checkpoint_id,original.id);
     assert_eq!(bindings[0].input_revision,2); assert_eq!(bindings[1].resource_checkpoint_id,current.id);
-    assert!(delivered.iter().any(|item| matches!(&item.content,Content::Attachment{content_ref,..} if content_ref=="replacement-image")));
+    assert!(delivered.items.iter().any(|item| matches!(&item.content,Content::Attachment{content_ref,..} if content_ref=="replacement-image")));
     content_collection::collect(||db.prepare_content_collection(Default::default())).unwrap();
     finish(&mut db,&owner);
     let next=db.capture_queued_input(&receipts[2].input_id).unwrap().load().unwrap();

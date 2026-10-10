@@ -1,5 +1,63 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export type MessageKind = 'inform';
+
+export interface MessageSendParams {
+  key: string;
+  senderThreadId: string;
+  senderBranchId: string;
+  targetThreadId?: string;
+  targetBranchId?: string;
+  replyTo?: string;
+  kind: MessageKind;
+  text: string;
+}
+
+export interface MessageListParams {
+  threadId: string;
+  branchId: string;
+  direction: MessageDirection;
+  cursor?: string;
+  limit?: number;
+}
+
+export type MessageDirection = 'incoming' | 'outgoing';
+
+export interface MessageGetParams {
+  threadId: string;
+  branchId: string;
+  messageId: string;
+}
+
+export type MessageActor = {kind: 'user'} | {kind: 'agent'; runId: string; operationId: string; origin: ToolOrigin};
+
+export interface MessageReceipt {
+  messageId: string;
+  senderThreadId: string;
+  senderBranchId: string;
+  targetThreadId: string;
+  targetBranchId: string;
+  actor: MessageActor;
+  kind: MessageKind;
+  replyTo: string | null;
+  acceptedCursor: number;
+}
+
+export interface MessageSummary extends MessageReceipt {
+  state: 'queued' | 'delivered';
+  deliveredRunId: string | null;
+  deliveredCursor: number | null;
+}
+
+export interface MessageView extends MessageSummary {
+  text: string;
+}
+
+export interface MessagePage {
+  messages: MessageSummary[];
+  nextCursor: string | null;
+}
+
 export type FollowupTrigger = { kind: 'process_stopped'; operation_id: string } | { kind: 'run_completed'; cursor: number } | { kind: 'goal_requested'; cursor: number };
 
 export type FollowupEvidence = { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | { kind: 'run_completed'; run_revision: number } | { kind: 'goal_requested'; run_revision: number };

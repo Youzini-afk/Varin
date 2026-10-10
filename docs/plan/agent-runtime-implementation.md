@@ -8,6 +8,14 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-11 增量：同任务被动消息与关联回复
+
+- 普通 `send` 版本 1 和公开 User 入口支持 `inform`、固定 Thread/branch 与原 `replyTo`。真实 Agent 来自冻结 ModelStep/PolicyAction 和原 Operation，用户从 child UI 发出仍是 User；家系授权不依赖 cwd。消息与完整工具回执同事务确认，同一原调用的并发准备/重开只返回原事实。
+- 原 input_queue 泛化 typed origin/activation，未交付 inform 没有接收 Run；正文、原 intent 和回执仍在 ContentStore，无新 inbox 或调度权威。Idle/Waiting 不醒，合法闭合边界交付不造 InputDelivered、不清策略决定、不改 Goal、不强迫最终回答多一轮模型。取消拒迟到提交，原消息可由下一自然合法 Run 一次消费；显式已授权 followup 不被普通信息挡住。Catalog **28**、input domain **3**，旧格式直接拒绝。
+- 认证 Host/application-client 与共享消息面板保留真实 User、原目标/reply ID和原文，受理/历史交付/处理分开；未知回执保同 key/正文/目标重试，切 Host/身份拒迟到结果。原普通用户队列编辑/取消不能改写消息。
+- 同源 runtime **342/0、2 ignored**，kernel **77/0、11 ignored**，fresh guardian **1/1**；Host **24/24**、UI **38/38**。all-targets、类型/lint/协议、实际 Host bundle、准确 Linux x64 `0.9.25` binary 与 staging 通过，前后 Rust 清单一致。独审四条外部真实 Catalog 探针通过，接受本切片；首次提交前两候选、取消和旧 epoch 均按原窗口复核。
+- 主动 `request`、关联 Wait/期限、多等待屏障、已完成 child 新 Run 与其新资源/报告/结果仍继续，未做部分在严格 schema 中副作用前拒绝，不降级为 inform。完整 Host IPC 组合已补入口但未执行；完整设计与用户验收后自行迁移的分工不变。见[验收与复跑](../reviews/runtime-passive-messages-2026-10-11.md)。
+
 ## 2026-10-11 增量：同任务发现与按需会话互读
 
 - 普通 `threads`/`read_thread` 与四个公开 family reader 共用 Catalog 的真实任务血缘，支持根/父/兄弟/后代、历史 Run、固定最近/范围/搜索页和原 JSON 分块。当前 Thread 可以按需读其他已完成/取消会话，不启动目标模型或 cwd，不获得其控制、文件或私有策略状态权限；ModelStep 和 PolicyAction 都核实际冻结声明与 origin，未选工具重开不补入。

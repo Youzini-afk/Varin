@@ -1189,7 +1189,7 @@ pub trait Persistence: Send + Sync {
         run_id: &str,
         owner_generation: u64,
         expected_head: Option<&str>,
-    ) -> Result<Vec<ConversationItem>, ExecutionError>;
+    ) -> Result<InputBatch, ExecutionError>;
 
     fn commit(
         &self,
@@ -1199,6 +1199,13 @@ pub trait Persistence: Send + Sync {
     ) -> Result<(), ExecutionError>;
 }
 
+/// A committed ingress batch carries activation separately from content provenance.
+#[derive(Debug, Clone, Default)]
+pub struct InputBatch {
+    pub items: Vec<ConversationItem>,
+    pub input_ids: Vec<String>,
+    pub activating: bool,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ExecutionEvent {
@@ -1628,41 +1635,33 @@ impl<
                     input.owner_generation,
                     history_cursor.as_deref(),
                 )?;
-                if incoming.is_empty() && interrupted_generation {
-                    finish!('agent,RunState::Cancelled,None,None);
+                let interrupted_without_activation = !incoming.activating && interrupted_generation;
+                if !incoming.items.is_empty() {
+                    let activating = incoming.activating;
+                    let input_ids = incoming.input_ids;
+                    history_cursor = incoming.items.last().map(|item| item.id.clone()).or(history_cursor);
+                    history.extend(incoming.items);
+                    if activating {
+                        if let Some(committed_state) = &control_state {
+                            // Active ingress invalidates an unexecuted decision, not the
+                            // original durable action's completion or committed private state.
+                            policy_state = committed_state.clone();
+                        } else {
+                            event = PolicyEvent::InputDelivered { input_ids };
+                        }
+                        recovered_decision = None;
+                        interrupted_generation = false;
+                        if state != RunState::Runnable {
+                            state = RunState::Runnable;
+                            self.commit(
+                                &input,
+                                ExecutionRecord::StateChanged { state, waiting_on: None },
+                            )?;
+                        }
+                    }
                 }
-                if !incoming.is_empty() {
-                    let input_ids = incoming
-                        .iter()
-                        .filter_map(|item| match &item.provenance {
-                            Provenance::UserInstruction { input_id } => Some(input_id.clone()),
-                            _ => None,
-                        })
-                        .collect();
-                    history_cursor = incoming
-                        .last()
-                        .map(|item| item.id.clone())
-                        .or(history_cursor);
-                    history.extend(incoming);
-                    if let Some(committed_state) = &control_state {
-                        // The input is real history. It invalidates a not-yet-executed decision,
-                        // not the original durable action's completion event or private state.
-                        policy_state = committed_state.clone();
-                    } else {
-                        event = PolicyEvent::InputDelivered { input_ids };
-                    }
-                    recovered_decision = None;
-                    interrupted_generation = false;
-                    if state != RunState::Runnable {
-                        state = RunState::Runnable;
-                        self.commit(
-                            &input,
-                            ExecutionRecord::StateChanged {
-                                state,
-                                waiting_on: None,
-                            },
-                        )?;
-                    }
+                if interrupted_without_activation {
+                    finish!('agent, RunState::Cancelled, None, None);
                 }
             }
             if pending.is_none() {
