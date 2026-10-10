@@ -12,6 +12,15 @@ impl ControlCommands {
     /// and body work are deferred; dispatch cancellation remains tied to the durable command.
     pub fn admit_cancellation(&self, method: &str, params: &Value) -> Result<(), KernelError> {
         match method {
+            "runtime.child.wait.cancel" => {
+                let p: ChildWaitParams = serde_json::from_value(params.clone())?;
+                self.runtime
+                    .catalog()
+                    .lock()
+                    .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                    .request_cancel_child_wait(&p.wait_id)
+                    .map_err(domain)?;
+            }
             "runtime.run.cancel" => {
                 let p: RunParams = serde_json::from_value(params.clone())?;
                 self.runtime
@@ -202,28 +211,40 @@ impl ControlCommands {
                         .cancel(&receipt.run_id)
                         .map_err(|e| KernelError::Operation(e.to_string()))?;
                 }
+                varin_runtime::catalog::child_delivery::reconcile_reports(&runtime.catalog())
+                    .map_err(domain)?;
                 let owner = runtime.catalog();
-                let mut catalog = owner
+                let catalog = owner
                     .lock()
                     .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-                catalog.reconcile_child_reports().map_err(domain)?;
                 let child = catalog.child_task(&p.operation_id).map_err(domain)?;
                 let read = catalog.capture_child_read(child);
                 drop(catalog);
                 Ok(serde_json::to_value(read.load().map_err(domain)?)?)
             }
-            "runtime.child.reconcile"
-            | "runtime.child.wait.cancel"
-            | "runtime.process.wait.reconcile" => {
-                if method == "runtime.process.wait.reconcile" {
-                    runtime
-                        .quiesce_process_waits()
-                        .map_err(|e| KernelError::Operation(e.to_string()))?;
-                } else {
-                    runtime
-                        .quiesce_child_waits()
-                        .map_err(|e| KernelError::Operation(e.to_string()))?;
+            "runtime.child.reconcile" | "runtime.child.wait.cancel" => {
+                runtime
+                    .quiesce_child_waits()
+                    .map_err(|error| KernelError::Operation(error.to_string()))?;
+                let resumed =
+                    varin_runtime::catalog::child_delivery::deliver_waits(&runtime.catalog())
+                        .map_err(domain)?;
+                if method == "runtime.child.reconcile" {
+                    return Ok(serde_json::to_value(resumed)?);
                 }
+                let p: ChildWaitParams = serde_json::from_value(params)?;
+                let wait = runtime
+                    .catalog()
+                    .lock()
+                    .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                    .inspect_child_wait(&p.wait_id)
+                    .map_err(domain)?;
+                Ok(serde_json::to_value(wait)?)
+            }
+            "runtime.process.wait.reconcile" => {
+                runtime
+                    .quiesce_process_waits()
+                    .map_err(|e| KernelError::Operation(e.to_string()))?;
                 let owner = runtime.catalog();
                 let mut catalog = owner
                     .lock()

@@ -926,8 +926,6 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         "runtime.child.sources.pending" => Ok(serde_json::to_value(catalog.unaccepted_child_sources().map_err(domain)?)?),
         "runtime.child.sources.release" => {let p:OperationParams=serde_json::from_value(params)?;catalog.mark_unaccepted_child_source_released(&p.operation_id).map_err(domain)?;Ok(json!({}))},
         "runtime.process.wait.reconcile" => Ok(serde_json::to_value(catalog.deliver_process_waits().map_err(domain)?)?),
-        "runtime.child.reconcile" => Ok(serde_json::to_value(catalog.deliver_child_waits().map_err(domain)?)?),
-        "runtime.child.wait.cancel" => {let p:ChildWaitParams=serde_json::from_value(params)?;Ok(serde_json::to_value(catalog.cancel_child_wait(&p.wait_id).map_err(domain)?)?)},
         "runtime.status" => Ok(json!({"epoch":catalog.epoch(),"eventCursor":catalog.event_cursor().map_err(domain)?,"admission":catalog.resource_admission().summary()})),
         "runtime.admission.inspect" => {
             let p: AdmissionInspectParams = serde_json::from_value(params)?;

@@ -312,6 +312,31 @@ fn cancelling_observation_then_waiting_again_never_cancels_child_or_consumes_its
     std::fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn cancelled_wait_rejects_a_prepared_report_append_and_a_new_observer_can_receive_it() {
+    let mut f=Fixture::new();
+    let child=f.accept();
+    f.settle_exchange();
+    f.db.fail_child_preparation(&child.operation_id,"RETAINED_REPORT").unwrap();
+    let wait=f.admit_wait("cancel-during-body-preparation");
+    let prepared=f.db.capture_child_waits().unwrap().pop().unwrap().load().unwrap();
+    assert_eq!(f.db.collect_content_objects().unwrap(),0);
+    f.db.request_cancel_child_wait(&wait.id).unwrap();
+    assert!(f.db.admit_child_wait(prepared).unwrap().is_none());
+    assert!(f.db.history("branch:parent").unwrap().iter().all(|item|item.source!=HistorySource::Agent));
+    f.db.deliver_child_waits().unwrap();
+    assert_eq!(f.db.run(&f.context.run_id).unwrap().state,RunState::Runnable);
+    f.admit_wait("new-observer");
+    f.db.deliver_child_waits().unwrap();
+    let history=f.db.history("branch:parent").unwrap();
+    let reports:Vec<_>=history.iter().filter(|item|item.source==HistorySource::Agent).collect();
+    assert_eq!(reports.len(),1);
+    assert!(serde_json::to_string(&reports[0].content).unwrap().contains("RETAINED_REPORT"));
+    let root=f.root.clone();
+    drop(f);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 fn child_context(
     child: &varin_runtime::catalog::collaboration::ChildTask,
 ) -> (
