@@ -356,9 +356,9 @@ it('boundary input edits and cancellation remain outside history until a legal m
   const command = { key: 'boundary-queued', threadId: 'boundary-thread', branchId: 'boundary-branch', mode: 'boundary' as const, input: { text: 'unrevised queued content' } };
   const queued = await f.runtimeClient.enqueue(command);
   expect(queued.run_id).toBe(run.run_id);
-  const edited = await f.runtimeClient.editInput(queued.input_id, 1, { text: 'revised boundary content' });
+  const edited = await f.runtimeClient.editInput({ inputId: queued.input_id, expectedRevision: 1, content: { text: 'revised boundary content' } });
   expect(edited.revision).toBe(2);
-  await expect(f.runtimeClient.editInput(queued.input_id, 1, { text: 'stale write' })).rejects.toThrow(/conflict/i);
+  await expect(f.runtimeClient.editInput({ inputId: queued.input_id, expectedRevision: 1, content: { text: 'stale write' } })).rejects.toThrow(/conflict/i);
   expect(await f.runtimeClient.enqueue(command)).toEqual(queued);
   const cancelled = await f.runtimeClient.enqueue({ ...command, key: 'boundary-cancelled', input: { text: 'cancelled content' } });
   expect((await f.runtimeClient.cancelInput(cancelled.input_id, 1)).state).toBe('cancelled');

@@ -28,7 +28,7 @@ impl Drop for Fixture {
 fn schema() -> ToolSchema {
     ToolSchema {
         name: "resource_read".into(),
-        version: "1".into(),
+        version: "2".into(),
         description: "Read selected resource".into(),
         schema: json!({"type":"object"}),
         output_schema: None,
@@ -74,6 +74,7 @@ fn proposal(text: &str) -> ContextProposal {
 }
 fn binding(branch: &str, head: Option<String>) -> RequestBinding {
     RequestBinding {
+        resource_activations: Vec::new(),
         resource_checkpoint_id: None,
         connection_identity: "connection".into(),
         provider_family: "fixture".into(),
@@ -201,7 +202,7 @@ fn model_call(db: &mut Catalog, receipt: &Receipt, checkpoint: &str) -> ToolOrig
                     call: ToolCall {
                         call_id: "read-skill".into(),
                         name: "resource_read".into(),
-                        schema_version: "1".into(),
+                        schema_version: "2".into(),
                         arguments: json!({"kind":"skill","resourceId":"skill"}),
                     },
                 },
@@ -230,19 +231,19 @@ fn original_model_call_reads_retained_bytes_after_refresh_and_collection() {
     assert_ne!(old.id, latest.id);
     content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
     let bound = db
-        .capture_resource_snapshot(&receipt.run_id, &origin, "read-skill", &old.id)
+        .capture_resource_snapshot(&receipt.run_id, &origin, "read-skill", &old.id, None)
         .unwrap()
         .load()
         .unwrap();
     assert_eq!(bound, old.resources.unwrap());
     assert_eq!(bound.snapshot.captured_files[0].content, "old bytes");
     assert!(db
-        .capture_resource_snapshot(&receipt.run_id, &origin, "read-skill", &latest.id)
+        .capture_resource_snapshot(&receipt.run_id, &origin, "read-skill", &latest.id, None)
         .unwrap()
         .load()
         .is_err());
     assert!(db
-        .capture_resource_snapshot(&receipt.run_id, &origin, "forged-call", &old.id)
+        .capture_resource_snapshot(&receipt.run_id, &origin, "forged-call", &old.id, None)
         .is_err());
     let sql = rusqlite::Connection::open(f.0.join("conversation.sqlite")).unwrap();
     assert_eq!(
@@ -255,7 +256,7 @@ fn original_model_call_reads_retained_bytes_after_refresh_and_collection() {
     drop(db);
     let db = f.open();
     assert_eq!(
-        db.capture_resource_snapshot(&receipt.run_id, &origin, "read-skill", &old.id)
+        db.capture_resource_snapshot(&receipt.run_id, &origin, "read-skill", &old.id, None)
             .unwrap()
             .load()
             .unwrap()
@@ -298,11 +299,12 @@ fn policy_graph_freezes_original_resource_checkpoint_without_model_step() {
                 call: ToolCall {
                     call_id: "read-node".into(),
                     name: "resource_read".into(),
-                    schema_version: "1".into(),
+                    schema_version: "2".into(),
                     arguments: json!({"kind":"skill","resourceId":"skill"}),
                 },
             },
             context: FrozenToolContext {
+                resource_activations: Vec::new(),
                 resource_checkpoint_id: Some(old.id.clone()),
                 run_id: receipt.run_id.clone(),
                 origin: origin.clone(),
@@ -316,19 +318,19 @@ fn policy_graph_freezes_original_resource_checkpoint_without_model_step() {
         .unwrap();
     let latest = refresh(&mut db, "policy new");
     assert_eq!(
-        db.capture_resource_snapshot(&receipt.run_id, &origin, "read-node", &old.id)
+        db.capture_resource_snapshot(&receipt.run_id, &origin, "read-node", &old.id, None)
             .unwrap()
             .load()
             .unwrap(),
         old.resources.unwrap()
     );
     assert!(db
-        .capture_resource_snapshot(&receipt.run_id, &origin, "read-node", &latest.id)
+        .capture_resource_snapshot(&receipt.run_id, &origin, "read-node", &latest.id, None)
         .unwrap()
         .load()
         .is_err());
     assert!(db
-        .capture_resource_snapshot(&receipt.run_id, &origin, "other-node", &old.id)
+        .capture_resource_snapshot(&receipt.run_id, &origin, "other-node", &old.id, None)
         .unwrap()
         .load()
         .is_err());
@@ -417,8 +419,19 @@ fn explicit_source_switch_publishes_context_and_run_atomically_with_actual_envir
         Some(first.run_id.as_str())
     );
     finish(&mut db, &first);
-    let next = admit(&mut db, "next", "source-b", Some(physical.clone()));
+    let selected = resources("source-b", Some(physical.clone()));
+    let mut candidate = old.clone(); candidate.resources = Some(selected.clone());
+    let mut preparation = explicit_preparation(&candidate, "new source");
+    preparation.expected_context_checkpoint = None;
+    let mut next_command = command(&db,"next","main"); next_command.input=json!({"text":"/skill:skill new source"});
+    let prepared = db.prepare_submission(next_command,Some(proposal("source-b")),Some(basis("source-b"))).unwrap()
+        .with_resources(Some(selected)).with_expected_context_checkpoint(Some(old.id.clone()))
+        .with_input_preparation(Some(preparation)).load(Some(launch(Some(physical.clone()))),false).unwrap();
+    let next = db.admit_submission(prepared).unwrap();
     let current = db.active_context("main").unwrap().unwrap();
+    let activation = varin_runtime::catalog::resources::retained_activations(&projection(&db,&next).history).pop().unwrap();
+    assert_eq!(activation.resource_checkpoint_id,current.id);
+    assert_eq!(activation.snapshot_id,"snapshot-source-b");
     assert_eq!(
         current
             .resources
@@ -509,7 +522,7 @@ fn fork_and_reopen_preserve_resource_snapshot_provenance_and_bytes() {
         .is_none());
     let origin = model_call(&mut db, &fork_run, &fork.id);
     assert_eq!(
-        db.capture_resource_snapshot(&fork_run.run_id, &origin, "read-skill", &fork.id)
+        db.capture_resource_snapshot(&fork_run.run_id, &origin, "read-skill", &fork.id, None)
             .unwrap()
             .load()
             .unwrap(),
@@ -625,7 +638,7 @@ fn compaction_copies_original_resource_bytes_even_before_previous_summary_bounda
     let f = Fixture::new();
     let mut db = f.open();
     db.create_thread("thread", "main").unwrap();
-    let first = admit(&mut db, "first", "immutable resource", None);
+    let first = admit_explicit(&mut db, "first", "/skill:skill", "immutable resource");
     finish(&mut db, &first);
     let second = db
         .prepare_submission(command(&db, "second", "main"), None, None)
@@ -699,6 +712,8 @@ fn compaction_copies_original_resource_bytes_even_before_previous_summary_bounda
     let compacted = db.publish_context_job(&job.receipt.run_id).unwrap();
     assert_eq!(compacted.resources, original.resources);
     assert_eq!(compacted.proposal.summary, "Earlier summary");
+    assert_eq!(compacted.resource_activations, original.resource_activations);
+    assert_eq!(compacted.resource_activations.len(), 1);
     content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
     drop(db);
     let db = f.open();
@@ -740,4 +755,218 @@ fn late_input_preparation_cannot_overwrite_a_checkpoint_newer_than_the_host_cand
         .is_none());
     assert_eq!(db.active_context("main").unwrap().unwrap(), current);
     assert_eq!(db.head("main").unwrap(), Some(first.input_id));
+}
+
+fn explicit_preparation(checkpoint: &ContextCheckpoint, arguments: &str) -> varin_runtime::catalog::resources::InputResourcePreparation {
+    use varin_runtime::catalog::resources::{InputResourcePreparation, PreparedExplicitSkill};
+    let snapshot = &checkpoint.resources.as_ref().unwrap().snapshot;
+    let descriptor = &snapshot.skills[0];
+    InputResourcePreparation { expected_context_checkpoint: Some(checkpoint.id.clone()), skill: Some(PreparedExplicitSkill {
+        snapshot_id: snapshot.id.clone(), resource_id: descriptor.id.clone(), reference: descriptor.reference.clone(),
+        name: descriptor.name.clone(), arguments: arguments.into(), body: snapshot.captured_files[0].content.clone(),
+    }) }
+}
+fn admit_explicit(db: &mut Catalog, key: &str, raw: &str, text: &str) -> Receipt {
+    let mut selected = resources(text, None);
+    selected.snapshot.skills[0].disable_model_invocation = true;
+    let candidate = ContextCheckpoint { resource_activations: vec![], id: "candidate".into(), revision: 1,
+        proposal: proposal(text), personalization: Some(basis(text)), resources: Some(selected.clone()) };
+    let mut preparation = explicit_preparation(&candidate, raw.split_once(' ').map(|(_, arguments)| arguments.trim()).unwrap_or(""));
+    let expected = db.active_context("main").unwrap().map(|checkpoint| checkpoint.id);
+    preparation.expected_context_checkpoint = None;
+    let mut command = command(db, key, "main");
+    command.input = json!({"text":raw,"attachments":[{"media_type":"image/png","content_ref":"image-original"}]});
+    let prepared = db.prepare_submission(command, Some(proposal(text)), Some(basis(text))).unwrap()
+        .with_resources(Some(selected)).with_expected_context_checkpoint(expected)
+        .with_input_preparation(Some(preparation)).load(Some(launch(None)), false).unwrap();
+    db.admit_submission(prepared).unwrap()
+}
+fn projection(db: &Catalog, receipt: &Receipt) -> ContextProjection {
+    db.prepare_context_read(&receipt.run_id, db.epoch(), db.head(&receipt.branch_id).unwrap().as_deref())
+        .unwrap().unwrap().load().unwrap()
+}
+
+struct ResourceModel(std::sync::Mutex<Vec<RequestSnapshot>>);
+impl ModelProvider for ResourceModel {
+    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> { Ok(serde_json::to_value(view).unwrap()) }
+    fn generate(&self, snapshot: &RequestSnapshot, _: &CancellationToken, emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>) -> Result<FinishReason, ModelFailure> {
+        let mut requests = self.0.lock().unwrap();
+        let first = requests.is_empty();
+        requests.push(snapshot.clone());
+        let content = if first {
+            Content::ToolCall { call: ToolCall { call_id: "original-skill".into(), name: "resource_read".into(), schema_version: "2".into(),
+                arguments: json!({"kind":"skill-resource","resourceId":"skill","activationId":snapshot.view.binding.resource_activations[0].activation_id,"relativePath":"support.txt"}) } }
+        } else { Content::Text { text: "Read the original skill version".into() } };
+        emit(ProviderEvent::ItemCompleted { item: ProviderItem { id: format!("item-{}", requests.len()), content, opaque: None } }).unwrap();
+        Ok(if first { FinishReason::ToolCalls } else { FinishReason::Stop })
+    }
+}
+struct ResourceFixtureTools { db: Arc<std::sync::Mutex<Catalog>>, frozen: std::sync::Mutex<Vec<FrozenToolContext>> }
+impl ToolExecutor for ResourceFixtureTools {
+    fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken) -> Result<ToolPreparation, ExecutionError> {
+        self.prepare(call, context, cancel).map(ToolPreparation::Ready)
+    }
+    fn prepare(&self, _: &ToolCall, context: &FrozenToolContext, _: &CancellationToken) -> Result<ToolContract, ExecutionError> {
+        self.frozen.lock().unwrap().push(context.clone());
+        Ok(ToolContract { name:"resource_read".into(), schema_version:"2".into(), read_only:true,
+            completion:CompletionKind::Result, lifetime:varin_runtime::Lifetime::Run, resources:vec![] })
+    }
+    fn authorize(&self, _: &ToolExecutionContext, _: &ToolCall, _: &ToolContract, _: &CancellationToken) -> Result<(), ExecutionError> { Ok(()) }
+    fn execute(&self, context: &ToolExecutionContext, call: &ToolCall, _: &ToolContract, _: &CancellationToken) -> ToolCompletion {
+        let frozen = self.frozen.lock().unwrap().last().unwrap().clone();
+        let binding = &frozen.resource_activations[0];
+        let read = self.db.lock().unwrap().capture_resource_snapshot(&context.run_id, &context.origin, &call.call_id,
+            &binding.resource_checkpoint_id, Some(&binding.activation_id)).unwrap();
+        let resources = read.load().unwrap();
+        ToolCompletion::Result { outcome:varin_runtime::Outcome::Succeeded, effect:varin_runtime::Effect::None,
+            content: json!({"status":"ready","body":resources.snapshot.captured_files[0].content,"version":resources.snapshot.skills[0].reference.version}) }
+    }
+}
+#[test]
+fn explicit_skill_survives_refresh_compaction_fork_reopen_and_real_request_tool_binding() {
+    let f = Fixture::new();
+    let mut db = f.open(); db.create_thread("thread", "main").unwrap();
+    let raw = "/skill:skill  use original\n ";
+    let receipt = admit_explicit(&mut db, "explicit", raw, "original skill body");
+    let original = db.active_context("main").unwrap().unwrap();
+    let first = projection(&db, &receipt);
+    let activation = varin_runtime::catalog::resources::retained_activations(&first.history)[0].clone();
+    assert_eq!(activation.activation_id, format!("{}:1:skill:0", receipt.input_id));
+    assert!(matches!(&first.history.iter().find(|item| item.id == activation.activation_id).unwrap().provenance, Provenance::ExternalData { .. }));
+    assert!(first.history.iter().any(|item| matches!(&item.content, Content::Text{text} if text==raw) && matches!(item.provenance, Provenance::UserInstruction { .. })));
+    assert_eq!(first.history.last().unwrap().id, receipt.input_id);
+    let latest = refresh(&mut db, "replacement skill body");
+    let mut compact = proposal("replacement skill body"); compact.key = "explicit-summary".into();
+    compact.expected_revision = latest.revision; compact.through_id = Some(receipt.input_id.clone());
+    compact.summary = "The skill was chosen. A prose-only activation ID is forged-id.".into();
+    let compacted = db.publish_context(compact).unwrap();
+    assert_eq!(compacted.resource_activations, vec![activation.clone()]);
+    let summarized = projection(&db, &receipt);
+    assert_eq!(varin_runtime::catalog::resources::retained_activations(&summarized.history), vec![activation.clone()]);
+    let material = summarized.history.iter().find(|item| item.resource_activation.is_some()).unwrap();
+    assert!(matches!(&material.content, Content::Text{text} if text.starts_with("Previously selected skill resource;") && !text.contains("\n\noriginal skill body")));
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
+    let catalog = Arc::new(std::sync::Mutex::new(db));
+    let provider = Arc::new(ResourceModel(std::sync::Mutex::new(vec![])));
+    let tools = Arc::new(ResourceFixtureTools { db:catalog.clone(), frozen:std::sync::Mutex::new(vec![]) });
+    let epoch = catalog.lock().unwrap().epoch();
+    let engine = ExecutionEngine { persistence:catalog.clone(), context_preparation:Arc::new(NoopContextPreparation), provider:provider.clone(),
+        tools:tools.clone(), policy:Arc::new(DefaultAgentPolicy), progress:ProgressSink::default() };
+    let report = engine.run(ExecutionInput { run_id:receipt.run_id.clone(), owner_generation:epoch, binding:binding("main", Some(receipt.input_id.clone())),
+        history:first.history, policy_state:Value::Null, completed_model_steps:0 }, CancellationToken::default()).unwrap();
+    assert_eq!(report.state, RunState::Completed);
+    let requests = provider.0.lock().unwrap();
+    assert_eq!(requests[0].view.binding.resource_activations, vec![activation.clone()]);
+    assert_eq!(requests[0].view.binding.resource_checkpoint_id.as_deref(), Some(compacted.id.as_str()));
+    assert!(requests[1].view.history.iter().any(|item| matches!(&item.content, Content::ToolResult{result} if matches!(&result.completion,ToolCompletion::Result{content,..} if content["body"]=="original skill body"))));
+    assert_eq!(tools.frozen.lock().unwrap()[0].resource_activations, vec![activation.clone()]);
+    let origin = ToolOrigin::ModelStep { request_id:requests[0].view.request_id.clone() };
+    drop(requests);
+    let mut db = catalog.lock().unwrap();
+    assert!(db.capture_resource_snapshot(&receipt.run_id, &origin, "original-skill", &original.id, Some("forged-id")).is_err());
+    let fork = db.prepare_branch_fork("main", "fork-explicit", Some(&receipt.input_id), None).unwrap().load().unwrap();
+    db.admit_branch_fork(fork).unwrap();
+    let fork_input = db.prepare_submission(command(&db, "fork-input", "fork-explicit"), None, None).unwrap().load(Some(launch(None)), true).unwrap();
+    let fork_receipt = db.admit_submission(fork_input).unwrap();
+    assert_eq!(varin_runtime::catalog::resources::retained_activations(&projection(&db, &fork_receipt).history), vec![activation.clone()]);
+    drop(db); drop(engine); drop(tools); drop(catalog);
+    let mut db = f.open();
+    assert_eq!(varin_runtime::catalog::resources::retained_activations(&projection(&db, &fork_receipt).history), vec![activation.clone()]);
+    let boundary = db.policy_boundary(&fork_receipt.run_id, db.epoch()).unwrap();
+    let action_id = format!("{}:policy:{}",fork_receipt.run_id,boundary.id);
+    let origin = ToolOrigin::PolicyAction { action_id:action_id.clone(), node_id:"inherited-skill".into() };
+    let intent = PolicyGraphIntent::PolicyToolGraphV1 { action_id:action_id.clone(), boundary:boundary.clone(),
+        identity:PolicyIdentity{name:"default".into(),version:"1".into()},state:Value::Null,
+        nodes:vec![PolicyAdmittedNode { node:PolicyToolNode { id:"inherited-skill".into(),depends_on:vec![],
+            call:ToolCall { call_id:"inherited-skill".into(),name:"resource_read".into(),schema_version:"2".into(),
+                arguments:json!({"kind":"skill-resource","resourceId":"skill","relativePath":"support.txt","activationId":activation.activation_id}) } },
+            context:FrozenToolContext { resource_activations:vec![activation.clone()],resource_checkpoint_id:boundary.resource_checkpoint_id.clone(),
+                run_id:fork_receipt.run_id.clone(),origin:origin.clone(),tool_schema_generation:1,tools:Arc::new(vec![schema()]),source:None } }] };
+    let mut forged = intent.clone();
+    let PolicyGraphIntent::PolicyToolGraphV1 { nodes, .. } = &mut forged;
+    nodes[0].context.resource_activations[0].input_revision += 1;
+    assert!(db.admit_policy_graph(&fork_receipt.run_id,db.epoch(),&forged).is_err());
+    db.admit_policy_graph(&fork_receipt.run_id,db.epoch(),&intent).unwrap();
+    assert_eq!(db.capture_resource_snapshot(&fork_receipt.run_id,&origin,"inherited-skill",&original.id,Some(&activation.activation_id)).unwrap().load().unwrap(), original.resources.unwrap());
+    assert!(db.capture_resource_snapshot(&fork_receipt.run_id,&origin,"inherited-skill",boundary.resource_checkpoint_id.as_deref().unwrap(),Some(&activation.activation_id)).unwrap().load().is_err());
+    assert!(db.capture_resource_snapshot(&fork_receipt.run_id,&origin,"inherited-skill",&original.id,Some("forged-id")).unwrap().load().is_err());
+    assert!(db.capture_resource_snapshot(&fork_receipt.run_id,&origin,"inherited-skill",&original.id,None).unwrap().load().is_err());
+    db.request_cancel_operation(&action_id).unwrap();
+    assert!(db.capture_resource_snapshot(&fork_receipt.run_id,&origin,"inherited-skill",&original.id,Some(&activation.activation_id)).is_err());
+}
+
+#[test]
+fn queued_skill_admission_edit_cancel_delivery_and_retry_keep_one_revision_authority() {
+    use varin_runtime::{InputMode, InputState};
+    use varin_runtime::catalog::inputs::EnqueueInput;
+    let f = Fixture::new(); let mut db = f.open(); db.create_thread("thread", "main").unwrap();
+    let owner = admit(&mut db, "owner", "queue A", None);
+    let original = db.active_context("main").unwrap().unwrap();
+    let make = |key: &str, mode| EnqueueInput { key:key.into(), thread_id:"thread".into(), branch_id:"main".into(), mode,
+        input:json!({"text":"/skill:skill argument","attachments":[{"media_type":"image/png","content_ref":"first-image"}]}), configuration:None };
+    let commands = vec![make("boundary",InputMode::Boundary),make("interrupt",InputMode::Interrupt),make("next",InputMode::NextRun)];
+    let receipts = commands.iter().map(|command| {
+        let prepared = db.prepare_enqueue(command.clone()).unwrap().with_input_preparation(Some(explicit_preparation(&original,"argument"))).load().unwrap();
+        let concurrent = db.prepare_enqueue(command.clone()).unwrap().with_input_preparation(Some(explicit_preparation(&original,"argument"))).load().unwrap();
+        let first = db.admit_queued_input(prepared).unwrap(); assert!(first.accepted);
+        let duplicate = db.admit_queued_input(concurrent).unwrap(); assert!(!duplicate.accepted);
+        assert_eq!(first.receipt, duplicate.receipt);
+        first.receipt
+    }).collect::<Vec<_>>();
+    let stale_command = make("stale-enqueue",InputMode::NextRun);
+    let stale = db.prepare_enqueue(stale_command.clone()).unwrap().with_input_preparation(Some(explicit_preparation(&original,"argument"))).load().unwrap();
+    let current = refresh(&mut db, "queue B");
+    assert!(db.admit_queued_input(stale).is_err());
+    assert!(db.prepare_enqueue(stale_command).unwrap().existing_receipt().unwrap().is_none());
+    let mut invalid = explicit_preparation(&current, "wrong arguments"); invalid.skill.as_mut().unwrap().resource_id = "removed-resource".into();
+    let duplicate = db.prepare_enqueue(commands[0].clone()).unwrap().with_input_preparation(Some(invalid));
+    assert_eq!(duplicate.existing_receipt().unwrap(), Some(receipts[0].clone()));
+    let retry = db.admit_queued_input(duplicate.load().unwrap()).unwrap();
+    assert!(!retry.accepted); assert_eq!(retry.receipt, receipts[0]);
+    let mut different = commands[0].clone(); different.mode = InputMode::NextRun;
+    assert!(db.prepare_enqueue(different).unwrap().existing_receipt().is_err());
+    let edited = db.prepare_input_edit(&receipts[0].input_id,1,json!({"text":"/skill:skill argument",
+        "attachments":[{"media_type":"image/png","content_ref":"replacement-image"}]})).unwrap().load().unwrap();
+    let edited = db.admit_input_edit(edited).unwrap().load().unwrap();
+    assert_eq!(edited.revision,2); assert_eq!(edited.content["skillInvocations"][0]["body"],"queue A");
+    assert_eq!(edited.content["skillInvocations"][0]["contentRevision"],2);
+    let changed = db.prepare_input_edit(&receipts[1].input_id,1,json!({"text":"/skill:skill changed"})).unwrap()
+        .with_input_preparation(Some(explicit_preparation(&current,"changed"))).load().unwrap();
+    let changed = db.admit_input_edit(changed).unwrap().load().unwrap();
+    assert_eq!(changed.content["skillInvocations"][0]["body"],"queue B");
+    let plain = db.prepare_input_edit(&receipts[1].input_id,changed.revision,json!({"text":"ordinary text"})).unwrap().load().unwrap();
+    let plain = db.admit_input_edit(plain).unwrap().load().unwrap();
+    assert!(plain.content.get("skillInvocations").is_none());
+    assert!(db.prepare_input_edit(&receipts[1].input_id,plain.revision,json!({"text":"/skill:missing"})).unwrap()
+        .with_input_preparation(Some(explicit_preparation(&current,""))).load().is_err());
+    assert_eq!(db.capture_queued_input(&receipts[1].input_id).unwrap().load().unwrap().content,plain.content);
+    let restored = db.prepare_input_edit(&receipts[1].input_id,plain.revision,json!({"text":"/skill:skill restored"})).unwrap()
+        .with_input_preparation(Some(explicit_preparation(&current,"restored"))).load().unwrap();
+    db.admit_input_edit(restored).unwrap();
+    let cancel_command=make("cancel-next",InputMode::NextRun);
+    let prepared=db.prepare_enqueue(cancel_command).unwrap().with_input_preparation(Some(explicit_preparation(&current,"argument"))).load().unwrap();
+    let cancelled=db.admit_queued_input(prepared).unwrap().receipt;
+    let late=db.prepare_input_edit(&cancelled.input_id,1,json!({"text":"/skill:skill late"})).unwrap()
+        .with_input_preparation(Some(explicit_preparation(&current,"late"))).load().unwrap();
+    assert_eq!(db.cancel_input(&cancelled.input_id,1).unwrap().load().unwrap().state,InputState::Cancelled);
+    assert!(db.admit_input_edit(late).is_err());
+    let late=db.prepare_input_edit(&receipts[0].input_id,2,json!({"text":"/skill:skill late"})).unwrap()
+        .with_input_preparation(Some(explicit_preparation(&current,"late"))).load().unwrap();
+    let delivery=db.prepare_input_delivery(&owner.run_id,db.epoch(),db.head("main").unwrap().as_deref()).unwrap().load().unwrap();
+    let delivered=db.admit_input_delivery(delivery).unwrap().unwrap();
+    assert!(db.admit_input_edit(late).is_err());
+    let bindings=varin_runtime::catalog::resources::retained_activations(&delivered);
+    assert_eq!(bindings.len(),2); assert_eq!(bindings[0].resource_checkpoint_id,original.id);
+    assert_eq!(bindings[0].input_revision,2); assert_eq!(bindings[1].resource_checkpoint_id,current.id);
+    assert!(delivered.iter().any(|item| matches!(&item.content,Content::Attachment{content_ref,..} if content_ref=="replacement-image")));
+    content_collection::collect(||db.prepare_content_collection(Default::default())).unwrap();
+    finish(&mut db,&owner);
+    let next=db.capture_queued_input(&receipts[2].input_id).unwrap().load().unwrap();
+    assert_eq!(next.state,InputState::Delivered); assert_eq!(next.content["skillInvocations"][0]["body"],"queue A");
+    assert_eq!(next.content["text"],"/skill:skill argument");
+    assert_eq!(db.capture_queued_input(&cancelled.input_id).unwrap().load().unwrap().state,InputState::Cancelled);
+    drop(db); let db=f.open();
+    let recovered=db.execution_history("main").unwrap();
+    assert!(recovered.iter().any(|item| item.resource_activation.as_ref().is_some_and(|binding| binding.input_id==receipts[2].input_id && binding.resource_checkpoint_id==original.id)));
+    assert!(!recovered.iter().any(|item| item.resource_activation.as_ref().is_some_and(|binding| binding.input_id==cancelled.input_id)));
 }

@@ -111,6 +111,7 @@ impl PolicyControlPreparation {
         let (metadata, item) = match &intent.action {
             PolicyAction::Deliver { text } => {
                 let item = ConversationItem {
+                    resource_activation: None,
                     id: format!("{}:output", intent.action_id),
                     provenance: Provenance::PolicyOutput {
                         action_id: intent.action_id.clone(),

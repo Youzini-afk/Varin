@@ -1,4 +1,4 @@
-import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildWait, Followup, LiveRoot, ContextPersonalization, ContextResources, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
+import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildWait, Followup, LiveRoot, ContextPersonalization, ContextResources, ResourceActivation, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
 
 import type { RunModelSelection, RunModelSelections } from '@varin/protocol';
 import type { FollowupControlAction } from '@varin/protocol';
@@ -49,6 +49,7 @@ export interface ContextJob {
   receipt: InputSubmitReceipt;
 }
 export interface ContextCheckpoint {
+  resource_activations: ResourceActivation[];
   resources?: ContextResources;
   personalization?: ContextPersonalization;
   id: string;

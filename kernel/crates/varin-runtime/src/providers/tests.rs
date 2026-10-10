@@ -70,6 +70,7 @@ fn pi_messages_fragmented_signed_thinking_and_tool_exchange_roundtrip() {
         .into_iter()
         .filter_map(|event| match event {
             ProviderEvent::ItemCompleted { item } => Some(ConversationItem {
+                resource_activation: None,
                 id: item.id,
                 provenance: Provenance::Assistant,
                 content: item.content,
@@ -79,6 +80,7 @@ fn pi_messages_fragmented_signed_thinking_and_tool_exchange_roundtrip() {
         })
         .collect();
     replay.history.push(ConversationItem {
+        resource_activation: None,
         id: "result".into(),
         provenance: Provenance::ToolData {
             call_id: "call-1".into(),
@@ -122,6 +124,7 @@ fn view(family: &str) -> RequestView {
             },
         },
         binding: RequestBinding {
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "fixture-connection".into(),
             provider_family: family.into(),
@@ -196,6 +199,7 @@ fn responses_fragmented_utf8_opaque_tool_and_usage_roundtrip() {
     v.history = items
         .into_iter()
         .map(|i| ConversationItem {
+            resource_activation: None,
             id: i.id,
             provenance: Provenance::Assistant,
             content: i.content,
@@ -283,6 +287,7 @@ fn anthropic_signature_and_server_tool_remain_opaque() {
     v.history = items
         .into_iter()
         .map(|i| ConversationItem {
+            resource_activation: None,
             id: i.id,
             provenance: Provenance::Assistant,
             content: i.content,
@@ -596,6 +601,7 @@ fn chat_complete_tool_fragments_replay_once_and_keep_usage_after_finish() {
     v.history = items
         .into_iter()
         .map(|i| ConversationItem {
+            resource_activation: None,
             id: i.id,
             provenance: Provenance::Assistant,
             content: i.content,
@@ -717,6 +723,7 @@ fn google_signed_parts_replay_in_place_and_optional_call_ids_pair_by_name() {
     v.history = items
         .into_iter()
         .map(|i| ConversationItem {
+            resource_activation: None,
             id: i.id,
             provenance: Provenance::Assistant,
             content: i.content,
@@ -724,6 +731,7 @@ fn google_signed_parts_replay_in_place_and_optional_call_ids_pair_by_name() {
         })
         .collect();
     v.history.push(ConversationItem {
+        resource_activation: None,
         id: "result".into(),
         provenance: Provenance::ToolData {
             call_id: call_id.clone(),
@@ -831,6 +839,7 @@ fn same_protocol_other_connection_never_receives_opaque_history() {
         .filter_map(|e| {
             if let ProviderEvent::ItemCompleted { item } = e {
                 Some(ConversationItem {
+                    resource_activation: None,
                     id: item.id,
                     provenance: Provenance::Assistant,
                     content: item.content,
@@ -872,6 +881,7 @@ fn mistral_wire_id_collision_keeps_both_tool_result_pairs() {
     let mut v = view(mistral::FAMILY);
     for id in [&first, &second] {
         v.history.push(ConversationItem {
+            resource_activation: None,
             id: format!("item-{id}"),
             provenance: Provenance::Assistant,
             content: Content::ToolCall {
@@ -887,6 +897,7 @@ fn mistral_wire_id_collision_keeps_both_tool_result_pairs() {
     }
     for id in [&first, &second] {
         v.history.push(ConversationItem {
+            resource_activation: None,
             id: format!("result-{id}"),
             provenance: Provenance::ToolData {
                 call_id: id.clone(),
@@ -1038,6 +1049,7 @@ fn codex_fixture_separates_instructions_and_pins_session_headers() {
     v.binding.history_range.branch_id = "long-branch/with unicode 测试".repeat(8);
     v.history = vec![
         ConversationItem {
+            resource_activation: None,
             id: "system".into(),
             provenance: Provenance::SystemInstruction {
                 source: "fixture".into(),
@@ -1048,6 +1060,7 @@ fn codex_fixture_separates_instructions_and_pins_session_headers() {
             opaque: None,
         },
         ConversationItem {
+            resource_activation: None,
             id: "user".into(),
             provenance: Provenance::UserInstruction {
                 input_id: "user".into(),
@@ -1133,6 +1146,7 @@ fn explicit_model_image_capability_rejects_attachment_before_request_serializati
     let provider = responses::ResponsesProvider::new(connection);
     let mut request = view(responses::FAMILY);
     request.history.push(ConversationItem {
+        resource_activation: None,
         id: "image".into(),
         provenance: Provenance::UserInstruction {
             input_id: "input".into(),
@@ -1237,6 +1251,7 @@ fn bedrock_fragmented_binary_preserves_reasoning_tool_and_trailing_usage() {
     request.history = items
         .into_iter()
         .map(|item| ConversationItem {
+            resource_activation: None,
             id: item.id,
             provenance: Provenance::Assistant,
             content: item.content,
@@ -1415,6 +1430,7 @@ fn policy_output_is_assistant_history_in_every_provider_family() {
     for (family, provider, path, role) in providers {
         let mut request = view(family);
         request.history.push(ConversationItem {
+            resource_activation: None,
             id: "delivered".into(),
             provenance: Provenance::PolicyOutput {
                 action_id: "action".into(),

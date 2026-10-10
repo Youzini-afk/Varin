@@ -58,6 +58,13 @@ pub struct InputReceipt {
     pub cursor: u64,
 }
 
+/// Admission status is local control evidence, not part of the public durable receipt.
+/// A duplicate interrupt must not stop a newer generation of the same Run.
+pub struct QueuedInputAdmission {
+    pub receipt: InputReceipt,
+    pub accepted: bool,
+}
+
 /// This additive user-content domain is installed atomically. Existing unrecognized tables,
 /// partial domains and future versions are preserved and rejected, never replaced with empty data.
 pub(super) fn initialize(tx: &Transaction<'_>) -> Result<()> {
@@ -166,12 +173,13 @@ fn write_input(tx: &Transaction<'_>, input: &QueuedInputMetadata) -> Result<()> 
     Ok(())
 }
 impl Catalog {
-    pub fn admit_queued_input(&mut self, prepared: PreparedQueueInput) -> Result<InputReceipt> {
+    pub fn admit_queued_input(&mut self, prepared: PreparedQueueInput) -> Result<QueuedInputAdmission> {
         let PreparedQueueInput {
             identity: command,
             epoch,
             history: history_content,
             intent,
+            checkpoint,
             _publication,
         } = prepared;
         if epoch != self.epoch {
@@ -195,7 +203,12 @@ impl Catalog {
                     "input key has different content or mode".into(),
                 ));
             }
-            return Ok(serde_json::from_str(&receipt)?);
+            return Ok(QueuedInputAdmission { receipt: serde_json::from_str(&receipt)?, accepted: false });
+        }
+        if let Some(expected) = checkpoint {
+            let active: Option<String> = tx.query_row("SELECT checkpoint_id FROM active_contexts WHERE branch_id=?1",
+                [&command.branch_id], |row| row.get(0)).optional()?;
+            if active != expected { return Err(RuntimeError::Conflict("input resource context changed during preparation".into())); }
         }
         let delegated: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM child_tasks WHERE child_thread_id=?1)",
@@ -394,7 +407,7 @@ impl Catalog {
             params![command.key, encoded, encode(&receipt)?],
         )?;
         tx.commit()?;
-        Ok(receipt)
+        Ok(QueuedInputAdmission { receipt, accepted: true })
     }
     pub fn cancel_input(&mut self, id: &str, revision: u64) -> Result<QueuedInputRead> {
         let tx = self.db.transaction()?;

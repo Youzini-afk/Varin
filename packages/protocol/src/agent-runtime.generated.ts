@@ -175,7 +175,32 @@ export interface ContextResources {
   snapshot: AgentResourceSnapshot;
 }
 
-export type AgentResourceRequest = { kind: 'skill'; resourceId: string } | { kind: 'skill-resource'; resourceId: string; relativePath: string } | { kind: 'instruction-scope'; targetPath: string; targetType?: 'file' | 'directory' };
+export interface ResourceActivation {
+  activationId: string;
+  inputId: string;
+  inputRevision: number;
+  ordinal: number;
+  resourceCheckpointId: string;
+  snapshotId: string;
+  resourceId: string;
+  reference: AgentResourceReference;
+}
+
+export interface PreparedExplicitSkill {
+  snapshotId: string;
+  resourceId: string;
+  reference: AgentResourceReference;
+  name: string;
+  arguments: string;
+  body: string;
+}
+
+export interface InputResourcePreparation {
+  expectedContextCheckpoint: string | null;
+  skill: PreparedExplicitSkill | null;
+}
+
+export type AgentResourceRequest = { kind: 'skill'; resourceId: string; activationId?: string } | { kind: 'skill-resource'; resourceId: string; relativePath: string; activationId?: string } | { kind: 'instruction-scope'; targetPath: string; targetType?: 'file' | 'directory' };
 
 export interface ResourceRefreshParams {
   branchId: string;
@@ -184,6 +209,7 @@ export interface ResourceRefreshParams {
 }
 
 export interface ResourceSnapshotParams {
+  activationId?: string;
   runId: string;
   origin: ToolOrigin;
   callId: string;
@@ -548,6 +574,7 @@ export type InputMode = "boundary" | "interrupt" | "next_run";
 export type InputState = "queued" | "delivered" | "cancelled";
 
 export interface InputEnqueueParams {
+  inputPreparation?: InputResourcePreparation;
   key: string;
   threadId: string;
   branchId: string;
@@ -557,6 +584,7 @@ export interface InputEnqueueParams {
 }
 
 export interface InputEditParams {
+  inputPreparation?: InputResourcePreparation;
   inputId: string;
   expectedRevision: number;
   content: unknown;
@@ -795,6 +823,7 @@ export interface InitialContext {
 }
 
 export interface InputSubmitParams {
+  inputPreparation?: InputResourcePreparation;
   expectedContextCheckpoint?: string;
   initialContext?: InitialContext;
   launch?: SubmitLaunch;

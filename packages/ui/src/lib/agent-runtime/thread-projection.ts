@@ -1,5 +1,6 @@
 import { subscribeRuntimeEndpointWillChange } from '@varin/application-client';
 import type { ThreadIdentity, ThreadSnapshot, ThreadsAPI } from '@varin/application-client';
+import type { AgentResourceReference } from '@varin/protocol';
 
 /** Rebuildable view only. No model history or running state is written by the UI. */
 export class ThreadProjection {
@@ -98,6 +99,34 @@ export function historyText(content: unknown): string {
   if (value.content !== undefined) return historyText(value.content);
   if (value.blocks !== undefined) return historyText(value.blocks);
   return '';
+}
+
+export interface SkillMaterialMetadata {
+  ordinal: number;
+  resourceId: string;
+  name: string;
+  reference: AgentResourceReference;
+}
+
+/** Separate resource metadata from the unchanged user text. Never project a skill body. */
+export function historySkillMaterials(content: unknown): SkillMaterialMetadata[] {
+  if (!content || typeof content !== 'object') return [];
+  const entries = (content as Record<string, unknown>).skillInvocations;
+  if (!Array.isArray(entries)) return [];
+  return entries.flatMap(entry => {
+    if (!entry || typeof entry !== 'object') return [];
+    const value = entry as Record<string, unknown>;
+    if (typeof value.ordinal !== 'number' || !Number.isSafeInteger(value.ordinal) || value.ordinal < 0
+      || typeof value.resourceId !== 'string' || typeof value.name !== 'string'
+      || !value.reference || typeof value.reference !== 'object') return [];
+    const reference = value.reference as Record<string, unknown>;
+    if (typeof reference.domainId !== 'string' || typeof reference.viewId !== 'string'
+      || typeof reference.path !== 'string' || typeof reference.canonicalId !== 'string'
+      || typeof reference.version !== 'string') return [];
+    return [{ ordinal: value.ordinal, resourceId: value.resourceId, name: value.name,
+      reference: { domainId: reference.domainId, viewId: reference.viewId, path: reference.path,
+        canonicalId: reference.canonicalId, version: reference.version } }];
+  });
 }
 
 /** UI projection of accepted inline images; never fetch arbitrary provider URLs as a fallback. */

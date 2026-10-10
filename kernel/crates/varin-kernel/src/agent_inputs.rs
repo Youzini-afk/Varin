@@ -12,8 +12,19 @@ fn submit_input(
         return Err(KernelError::Cancelled);
     }
     let mut params = params;
-    if receipt_only {
-        if let Some(params) = params.as_object_mut() { params.remove("initialContext"); }
+    if !receipt_only {
+        let object = params.as_object_mut().ok_or_else(|| KernelError::Protocol("input command must be an object".into()))?;
+        let initial = object.remove("initialContext");
+        let prepared = object.remove("inputPreparation");
+        let expected = object.remove("expectedContextCheckpoint");
+        let receipt = submit_input(catalog.clone(), params.clone(), cancelled.clone(), None, true)?;
+        if !receipt.is_null() { return Ok(receipt); }
+        let object = params.as_object_mut().expect("validated input object");
+        if let Some(value) = initial { object.insert("initialContext".into(), value); }
+        if let Some(value) = prepared { object.insert("inputPreparation".into(), value); }
+        if let Some(value) = expected { object.insert("expectedContextCheckpoint".into(), value); }
+    } else if let Some(params) = params.as_object_mut() {
+        params.remove("initialContext"); params.remove("inputPreparation"); params.remove("expectedContextCheckpoint");
     }
     let p: InputSubmitParams = serde_json::from_value(params)?;
     validate_configuration(&p.configuration)?;
@@ -56,6 +67,7 @@ fn submit_input(
         .prepare_submission(command, initial, initial_personalization)
         .map_err(domain)?
         .with_resources(initial_resources)
+        .with_input_preparation(p.input_preparation)
         .with_expected_context_checkpoint(p.expected_context_checkpoint);
     let plan_eligible = preparation.scope().is_some_and(|scope| {
         scope.mode == "agent"
@@ -232,7 +244,10 @@ pub(super) fn execute(
         "runtime.input.submit" => submit_input(catalog, params, cancelled, order, false),
         "runtime.input.receipt" => submit_input(catalog, params, cancelled, None, true),
         "runtime.child.prepare" => prepare_child_input(catalog, params, cancelled),
-        "runtime.input.enqueue" => {
+        "runtime.input.enqueue" | "runtime.input.enqueueReceipt" => {
+            let receipt_only = method == "runtime.input.enqueueReceipt";
+            let mut params = params;
+            let preparation_value = params.as_object_mut().and_then(|object| object.remove("inputPreparation"));
             let p: InputEnqueueParams = serde_json::from_value(params)?;
             if let Some(configuration) = &p.configuration {
                 validate_configuration(configuration)?;
@@ -247,8 +262,14 @@ pub(super) fn execute(
                     mode: p.mode,
                     input: p.input,
                     configuration: p.configuration,
-                });
-            let prepared = preparation.load().map_err(domain)?;
+                }).map_err(domain)?;
+            let existing = preparation.existing_receipt().map_err(domain)?;
+            if receipt_only || existing.is_some() {
+                if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                return Ok(serde_json::to_value(existing)?);
+            }
+            let derived = preparation_value.map(serde_json::from_value).transpose()?;
+            let prepared = preparation.with_input_preparation(derived).load().map_err(domain)?;
             if cancelled.load(Ordering::Acquire) {
                 return Err(KernelError::Cancelled);
             }
@@ -262,10 +283,10 @@ pub(super) fn execute(
                 }
                 owner.admit_queued_input(prepared).map_err(domain)?
             };
-            if receipt.mode == varin_runtime::InputMode::Interrupt {
-                runtime.interrupt_generation(&receipt.run_id);
+            if receipt.accepted && receipt.receipt.mode == varin_runtime::InputMode::Interrupt {
+                runtime.interrupt_generation(&receipt.receipt.run_id);
             }
-            Ok(serde_json::to_value(receipt)?)
+            Ok(serde_json::to_value(receipt.receipt)?)
         }
         "runtime.input.edit" => {
             let p: InputEditParams = serde_json::from_value(params)?;
@@ -275,7 +296,7 @@ pub(super) fn execute(
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                 .prepare_input_edit(&p.input_id, revision, p.content)
-                .map_err(domain)?;
+                .map_err(domain)?.with_input_preparation(p.input_preparation);
             let prepared = preparation.load().map_err(domain)?;
             if cancelled.load(Ordering::Acquire) {
                 return Err(KernelError::Cancelled);
@@ -424,7 +445,10 @@ mod resource_receipt_tests {
         assert!(catalog.lock().unwrap().head("branch").unwrap().is_none());
         let receipt=submit_input(catalog.clone(),input.clone(),cancel.clone(),None,false).unwrap();
         input["initialContext"]=json!("not a prepared context");
+        input["inputPreparation"]=json!({"skill":"malformed derived candidate"});
+        input["expectedContextCheckpoint"]=json!(42);
         assert_eq!(submit_input(catalog.clone(),input.clone(),cancel.clone(),None,true).unwrap(),receipt);
+        assert_eq!(submit_input(catalog.clone(),input.clone(),cancel.clone(),None,false).unwrap(),receipt);
         input.as_object_mut().unwrap().remove("initialContext");
         assert_eq!(submit_input(catalog.clone(),input.clone(),cancel.clone(),None,true).unwrap(),receipt);
         let mut different=input.clone();different["input"]=json!("changed command");
@@ -432,7 +456,8 @@ mod resource_receipt_tests {
         let mut different=input.clone();different["launch"]["source"]=json!({"mode":"fixed_branch","workspaceId":"workspace","executionWorkspaceId":"workspace","branchId":"source","revision":1,"liveRoot":null});
         assert!(submit_input(catalog.clone(),different,cancel.clone(),None,true).is_err());
         input["key"]=json!("not-yet-accepted");
-        assert_eq!(submit_input(catalog.clone(),input,cancel,None,true).unwrap(),Value::Null);
+        assert_eq!(submit_input(catalog.clone(),input.clone(),cancel.clone(),None,true).unwrap(),Value::Null);
+        assert!(submit_input(catalog.clone(),input,cancel,None,false).is_err());
         let sql=rusqlite::Connection::open(root.join("conversation.sqlite")).unwrap();
         assert_eq!(sql.query_row("SELECT count(*) FROM runs",[],|row|row.get::<_,i64>(0)).unwrap(),1);
         assert_eq!(sql.query_row("SELECT count(*) FROM commands",[],|row|row.get::<_,i64>(0)).unwrap(),1);

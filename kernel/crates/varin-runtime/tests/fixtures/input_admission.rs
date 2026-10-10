@@ -153,8 +153,8 @@ impl InputAdmission for Catalog {
         self.admit_submission(prepared)
     }
     fn enqueue_input(&mut self, command: &EnqueueInput) -> Result<InputReceipt> {
-        let prepared = self.prepare_enqueue(command.clone()).load()?;
-        self.admit_queued_input(prepared)
+        let prepared = self.prepare_enqueue(command.clone())?.load()?;
+        self.admit_queued_input(prepared).map(|admission| admission.receipt)
     }
     fn queued_input(&self, id: &str) -> Result<QueuedInput> {
         self.capture_queued_input(id)?.load()

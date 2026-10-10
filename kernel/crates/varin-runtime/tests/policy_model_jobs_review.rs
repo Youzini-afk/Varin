@@ -35,6 +35,7 @@ impl Fixture {
             })
             .unwrap();
         let binding = RequestBinding {
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "main-account".into(),
             provider_family: "test".into(),
@@ -568,6 +569,7 @@ fn quoted_history_catalog_wait_diagnostic() {
         let f = Fixture::new();
         let (intent, mut snapshot) = frozen_job(&f, json!({"request":true}));
         let quoted = vec![ConversationItem {
+            resource_activation: None,
             id: "source".into(),
             provenance: Provenance::UserInstruction {
                 input_id: "source".into(),
@@ -578,6 +580,7 @@ fn quoted_history_catalog_wait_diagnostic() {
             opaque: None,
         }];
         snapshot.view.history.push(ConversationItem {
+            resource_activation: None,
             id: "quoted-context".into(),
             provenance: Provenance::ExternalData {
                 source: "committed-conversation-context".into(),

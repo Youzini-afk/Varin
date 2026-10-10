@@ -2,6 +2,7 @@ import { ThreadPlan } from './ThreadPlan';
 import { ThreadFollowups } from './ThreadFollowups';
 import { ThreadMemory } from './ThreadMemory';
 import { ThreadResources } from './ThreadResources';
+import { ThreadSkillMaterials } from './ThreadSkillMaterials';
 import { ThreadPermission } from './ThreadPermission';
 import { ThreadQuestion } from './ThreadQuestion';
 import { ThreadSourcePicker } from './ThreadSourcePicker';
@@ -16,6 +17,15 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ThreadProjection, historyText, historyImages } from '@/lib/agent-runtime/thread-projection';
+
+const resourceErrorMessages = new Map([
+  ['resource-missing', 'This skill or resource is missing from the current snapshot. Refresh instructions and skills, then try again.'],
+  ['resource-invalid', 'This skill or resource could not be prepared. Check the skill definition or command, then try again.'],
+  ['resource-denied', 'Access to this skill or resource was denied. Check workspace permissions and project trust before retrying.'],
+  ['resource-unavailable', 'This skill or resource is unavailable right now. Refresh instructions and skills, then try again.'],
+  ['resource-stale', 'This skill or resource has changed. Refresh instructions and skills, then try again.'],
+  ['resource-cancelled', 'Skill or resource preparation was cancelled. Try again when ready.'],
+]);
 
 export function ThreadConversation({ api, identity, onBranchCreated, initialWorkspacePath }: { api: ThreadsAPI; identity: ThreadIdentity; onBranchCreated?: (identity: ThreadIdentity) => void; initialWorkspacePath?: string }) {
   const { t } = useI18n();
@@ -35,6 +45,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const compactionKeys = React.useRef(new Map<string, string>());
   const [progress, setProgress] = React.useState('');
   const [text, setText] = React.useState('');
+  const messageInput = React.useRef<HTMLTextAreaElement | null>(null);
   const draftRef = React.useRef({ text, images });
   draftRef.current = { text, images };
   const [providerId, setProviderId] = React.useState('');
@@ -85,10 +96,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       if (!current()) return;
       if (value instanceof ThreadRequestError && value.status === 409) { pendingInput.current = undefined; await projection.current?.refresh(); }
       if (!current()) return;
-      setError(value instanceof ThreadRequestError && ['kernel-frame-too-large', 'http-body-too-large'].includes(value.code)
+      const resourceError = value instanceof ThreadRequestError ? resourceErrorMessages.get(value.code) : undefined;
+      setError(resourceError ?? (value instanceof ThreadRequestError && ['kernel-frame-too-large', 'http-body-too-large'].includes(value.code)
         ? 'These images exceed the current transport request size. Remove or resize an image and retry; your attachments are still here.'
         : value instanceof ThreadRequestError && value.code === 'model-images-unsupported' ? 'The selected model does not accept images. Choose an image-capable model or remove the images.'
-        : value instanceof Error ? value.message : 'Thread request failed');
+        : value instanceof Error ? value.message : 'Thread request failed'));
     }
     finally { if (current()) { pendingAction.current = null; setPending(false); } }
   };
@@ -107,6 +119,12 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     if (active && run) {
       void act(()=>api.selectModel({...identity,runId:run.id,key:crypto.randomUUID(),model:{providerId:provider,modelId:model,thinkingLevel:thinking}}));
     } else {setProviderId(provider);setModelId(model);setThinkingLevel(thinking);}
+  };
+  const addSkill = (name: string) => {
+    if (pendingAction.current || name.includes(' ')) return;
+    const command = `/skill:${name}`;
+    setText(current => current === command || current.startsWith(`${command} `) ? current : `${command} ${current}`);
+    messageInput.current?.focus();
   };
   const returnToLatest = () => { historyGeneration.current += 1; setHistoryView(null); setHistoryLoading(false); };
   const loadEarlier = async () => {
@@ -159,6 +177,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         <div className="mb-1 text-xs text-muted-foreground">{item.source}</div>
         <MarkdownRenderer messageId={item.id} content={historyText(item.content)} />
         <ImageAttachmentStrip images={historyImages(item.content)} />
+        <ThreadSkillMaterials content={item.content} />
         <details className="mt-2 text-xs text-muted-foreground">
           <summary className="cursor-pointer">Summarize through this message</summary>
           <p className="py-2">Generate a continuation summary with the selected model. Original messages stay available. Apply the completed summary below when ready.</p>
@@ -203,6 +222,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           if (typeof edited === 'string') void act(() => api.editInput(input.id, input.revision, edited)); }}>
           <label className="text-xs text-muted-foreground">{input.mode}</label>
           <ImageAttachmentStrip images={historyImages(input.content)} />
+          <ThreadSkillMaterials content={input.content} />
           <Textarea key={`${input.id}:${input.revision}`} name="text" aria-label="Edit queued input" defaultValue={historyText(input.content)} />
           <Button type="submit" variant="ghost" size="sm">Save queued input</Button>
         </form>
@@ -211,6 +231,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     </div>
     {snapshot?.context.checkpoint?.personalization && <ThreadMemory key={identity.threadId} identity={identity} basis={snapshot.context.checkpoint.personalization} />}
     {snapshot?.context.checkpoint && <ThreadResources checkpoint={snapshot.context.checkpoint} pending={pending}
+      onAddSkill={addSkill}
       onRefresh={() => void act(() => api.resources.refresh({ ...identity, expectedRevision: snapshot.context.checkpoint!.revision }))} />}
     <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={initialWorkspacePath}
       active={active || pending} launch={snapshot?.launch ?? null} prepared={preparedSource} onPrepared={setPreparedSource} onPreparingChange={setPreparingSource} />
@@ -281,7 +302,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         onRemove={index => setImages(current => current.filter((_, candidate) => candidate !== index))} />
       <input ref={fileInput} type="file" accept="image/*" multiple hidden aria-label="Choose image attachments"
         onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addImages(files); }} />
-      <Textarea aria-label="Message thread" value={text} onChange={event => setText(event.target.value)}
+      <Textarea ref={messageInput} aria-label="Message thread" value={text} onChange={event => setText(event.target.value)}
         onPaste={event => { const files = [...event.clipboardData.files].filter(file => file.type.startsWith('image/')); if (files.length) { event.preventDefault(); void addImages(files); } }}
         onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
         onDrop={event => { const files = [...event.dataTransfer.files]; if (files.length) { event.preventDefault(); void addImages(files); } }} />

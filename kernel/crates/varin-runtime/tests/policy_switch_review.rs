@@ -58,6 +58,7 @@ impl Fixture {
             })
             .unwrap();
         let binding = RequestBinding {
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "main-original".into(),
             provider_family: "fixture".into(),

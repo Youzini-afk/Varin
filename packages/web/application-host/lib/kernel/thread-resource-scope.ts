@@ -20,7 +20,8 @@ import type { LiveSourceResolver } from './live-source.js';
 import type { AgentResourceRequest, SourceResourceCapture, SourceResourceCapsule, SourceResourceTarget } from './protocol.generated.js';
 
 export class ResourceScopeError extends Error {
-  constructor(readonly failure: ResourceFailure) { super(failure.reason); this.name = 'ResourceScopeError'; }
+  readonly code: string;
+  constructor(readonly failure: ResourceFailure) { super(failure.reason); this.name = 'ResourceScopeError'; this.code = `resource-${failure.status}`; }
 }
 
 interface ResourceContextScope { mode: 'agent' | 'bot'; threadRole: string; projectId: string | null }

@@ -1,5 +1,5 @@
 import { PlanConflict } from './plan-service.js';
-import { parseThreadImages, threadInput } from './thread-images.js';
+import { parseThreadImages } from './thread-images.js';
 import type { Express, RequestHandler } from 'express';
 import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel } from '@varin/application-client';
 import { KernelClientError } from './kernel-client.js';
@@ -173,17 +173,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     if (typeof body.text !== 'string' || (!body.text.length && !images?.length)) throw new Error('Text or images are required');
     return adapter.enqueue({ ...selected, key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), mode: body.mode as 'boundary' | 'interrupt' | 'next_run' });
   });
-  post('input/edit', async body => {
-    const queued = await adapter.requireInput(text(body.inputId));
-    const images = parseThreadImages(body.images);
-    if (images?.length) adapter.assertImagesSupported(images, (await adapter.requireRun(queued.run_id)).configuration);
+  post('input/edit', (body, signal) => {
     if (typeof body.text !== 'string') throw new Error('Input text must be a string');
-    // Text-only edits preserve the accepted media; explicit images replaces/removes it under CAS.
-    const existing = queued.content as { attachments?: unknown[] };
-    const content = images === undefined ? { ...(body.text.length || !existing.attachments?.length ? { text: body.text } : {}), ...(existing.attachments ? { attachments: existing.attachments } : {}) }
-      : threadInput(body.text, images);
-    if (!body.text.length && !('attachments' in content && content.attachments?.length)) throw new Error('Text or images are required');
-    return adapter.runtime.editInput(queued.id, revision(body.expectedRevision), content);
+    return adapter.editInput(text(body.inputId), revision(body.expectedRevision), body.text, parseThreadImages(body.images), signal);
   });
   post('input/cancel', async body => { await adapter.requireInput(text(body.inputId)); return adapter.runtime.cancelInput(text(body.inputId), revision(body.expectedRevision)); });
   post('run', body => adapter.requireRun(text(body.runId))); 

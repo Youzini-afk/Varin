@@ -304,6 +304,7 @@ fn execution_input(db: &Mutex<Catalog>, run: &str, policy: PolicyIdentity) -> Ex
     let launch = owner.launch_intent(run).unwrap().unwrap().selection;
     let run_record = owner.run(run).unwrap();
     let binding = RequestBinding {
+        resource_activations: Vec::new(),
         resource_checkpoint_id: None,
         connection_identity: launch.connection_identity,
         provider_family: launch.provider_family,
