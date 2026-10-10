@@ -151,3 +151,24 @@ fn process_terminal_fact_preserves_the_guardians_string_signal() {
     assert_eq!(fact["signal"],"Killed"); assert_eq!(fact["outcome"],"failed");
     assert!(fact["exitCode"].is_null()); f.cleanup();
 }
+
+#[test]
+fn prepared_process_result_cannot_undo_observer_cancel_and_cancel_needs_no_result_body() {
+    let mut f = Fixture::new();
+    f.terminal();
+    let wait = f.wait("result-cancel-race");
+    let prepared = f.db.capture_process_waits().unwrap().pop().unwrap().load().unwrap();
+    let observer = wait.id.strip_prefix("process-wait:").unwrap();
+    f.db.cancel_process_wait(observer).unwrap();
+    assert!(!f.db.admit_process_wait(prepared).unwrap(), "a stale process result cannot revive the cancelled observation");
+    assert!(f.facts().is_empty());
+    let process = f.db.operation("process").unwrap();
+    let reference = &process.external_receipt.as_ref().unwrap().result_ref;
+    let path = varin_runtime::content::object_path(&f.root.join("content"), reference["content_object"].as_str().unwrap()).unwrap();
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(f.db.deliver_process_waits().unwrap(), vec![f.run.clone()]);
+    assert_eq!(f.db.operation(observer).unwrap().outcome, Some(Outcome::Cancelled));
+    assert_eq!(f.db.operation("process").unwrap(), process);
+    assert_eq!(f.facts().len(), 1);
+    f.cleanup();
+}

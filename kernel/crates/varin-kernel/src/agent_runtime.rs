@@ -30,7 +30,7 @@ fn run_cancellation_receipt(run: &varin_runtime::Run) -> Value {
     json!({"id":run.id,"thread_id":run.thread_id,"branch_id":run.branch_id,"state":run.state,
         "revision":run.revision,"epoch":run.epoch,"cancel_requested":run.cancel_requested,"waiting_on":run.waiting_on})
 }
-fn operation_cancellation_receipt(op: &varin_runtime::Operation) -> Value {
+fn operation_cancellation_receipt<E, R>(op: &varin_runtime::Operation<E, R>) -> Value {
     json!({"id":op.id,"run_id":op.run_id,"epoch":op.epoch,"revision":op.revision,"phase":op.phase,"outcome":op.outcome,
         "effect":op.effect,"cancel_requested":op.cancel_requested,"lifetime":op.lifetime,"handed_off":op.handed_off,
         "executor":op.executor,"waiting_on":op.waiting_on})
@@ -193,14 +193,14 @@ pub(crate) fn spawn(
                         continue;
                     }
                     if let Some(runtime) = runtime.as_ref() {
-                        let result = apply_process_terminal(runtime, &fact);
-                        if let Err(error) = result {
-                            let catalog = runtime.catalog();
-                            if let Ok(mut catalog) = catalog.lock() {
-                                let _ = catalog
-                                    .record_recovery_failure(&fact.process_id, &error.to_string());
-                            };
-                        }
+                        let runtime = runtime.clone();
+                        thread::spawn(move || {
+                            if let Err(error) = apply_process_terminal(&runtime, &fact) {
+                                if let Ok(mut catalog) = runtime.catalog().lock() {
+                                    let _ = catalog.record_recovery_failure(&fact.process_id, &error.to_string());
+                                }
+                            }
+                        });
                     }
                 }
                 Command::ProcessReplayFailed(reason) => {
@@ -391,7 +391,7 @@ pub(crate) fn spawn(
                             });
                             deferred = true; return Ok(Value::Null);
                         }
-                        if matches!(method,"runtime.operation.inspect"|"runtime.thread.operations.active"|"runtime.permission.open"|"runtime.permission.consume"|"runtime.permission.decide") {
+                        if matches!(method,"runtime.events.read"|"runtime.operation.inspect"|"runtime.thread.operations.active"|"runtime.permission.open"|"runtime.permission.consume"|"runtime.permission.decide") {
                             let runtime=runtime.clone();let method=method.to_owned();
                             let response_id=id.clone();let response_sender=responses.clone();let done=finished.clone();let cancelled=cancellation.clone();
                             thread::spawn(move||{
@@ -912,7 +912,6 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
     match method {
         "runtime.child.sources.pending" => Ok(serde_json::to_value(catalog.unaccepted_child_sources().map_err(domain)?)?),
         "runtime.child.sources.release" => {let p:OperationParams=serde_json::from_value(params)?;catalog.mark_unaccepted_child_source_released(&p.operation_id).map_err(domain)?;Ok(json!({}))},
-        "runtime.process.wait.reconcile" => Ok(serde_json::to_value(catalog.deliver_process_waits().map_err(domain)?)?),
         "runtime.status" => Ok(json!({"epoch":catalog.epoch(),"eventCursor":catalog.event_cursor().map_err(domain)?,"admission":catalog.resource_admission().summary()})),
         "runtime.admission.inspect" => {
             let p: AdmissionInspectParams = serde_json::from_value(params)?;
@@ -948,16 +947,6 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
             catalog.acknowledge_run_activity(&p.observer_id, &p.thread_id, cursor, p.state).map_err(domain)?;
             Ok(json!({}))
         }
-        "runtime.events.read" => {
-            let p: EventsParams = serde_json::from_value(params)?;
-            let cursor = u64::try_from(p.cursor)
-                .map_err(|_| KernelError::Protocol("event cursor must be nonnegative".into()))?;
-            let limit = u32::try_from(p.limit)
-                .map_err(|_| KernelError::Protocol("event limit out of range".into()))?;
-            Ok(serde_json::to_value(
-                catalog.events_after(cursor, limit).map_err(domain)?,
-            )?)
-        }
         _ => Err(KernelError::Protocol(
             "unknown runtime method".into(),
         )),
@@ -978,10 +967,8 @@ fn apply_process_terminal(
         ));
     }
     let catalog = runtime.catalog();
-    let mut catalog = catalog
-        .lock()
-        .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-    let operation = match catalog.operation(&fact.process_id) {
+    let operation = match catalog.lock()
+        .map_err(|_| KernelError::Storage("catalog owner failed".into()))?.operation(&fact.process_id) {
         Ok(op) => op,
         Err(RuntimeError::NotFound(_)) => return Ok(()),
         Err(error) => return Err(domain(error)),
@@ -1006,9 +993,8 @@ fn apply_process_terminal(
     } else {
         Outcome::Indeterminate
     };
-    catalog
-        .record_external_receipt_with_stop(
-            &fact.process_id,
+    varin_runtime::catalog::result_content::record_external_receipt(
+            &catalog, &fact.process_id,
             ExternalReceipt {
                 executor: "process_spawn".into(),
                 identity: fact.process_id.clone(),

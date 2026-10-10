@@ -229,9 +229,9 @@ pub(crate) struct PolicyGraphProgress {
 impl PolicyGraphProgress {
     pub fn read(op: &Operation, metadata: &PolicyActionMetadata) -> Result<Self> {
         let progress: Self =
-            serde_json::from_value(op.result.clone().ok_or_else(|| {
+            serde_json::from_value(op.result.as_ref().ok_or_else(|| {
                 RuntimeError::Invalid("policy graph progress is missing".into())
-            })?)?;
+            })?.control()?.clone())?;
         if progress.failed + progress.cancelled > progress.settled
             || progress.settled > metadata.graph_nodes().unwrap_or(0)
             || (op.phase == OperationPhase::Terminal)

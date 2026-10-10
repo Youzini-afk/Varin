@@ -668,7 +668,7 @@ impl RunSupervisor {
     pub fn quiesce_process_waits(&self) -> Result<()> {
         self.quiesce_waits("process-wait:")
     }
-    pub fn cancel_operation(&self, operation_id: &str) -> Result<crate::Operation> {
+    pub fn cancel_operation(&self, operation_id: &str) -> Result<crate::OperationMetadata> {
         self.cancel_operation_control(operation_id);
         self.catalog
             .lock()

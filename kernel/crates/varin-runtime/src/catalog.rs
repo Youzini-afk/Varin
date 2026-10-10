@@ -1,4 +1,5 @@
 use crate::types::*;
+use crate::types::OperationMetadata as Operation;
 use fs2::FileExt;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{de::DeserializeOwned, Serialize};
@@ -29,7 +30,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 14;
+pub(crate) const FORMAT: i64 = 15;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -624,7 +625,7 @@ impl Catalog {
             return Err(RuntimeError::Invalid("run cancellation pending".into()));
         }
         let op = Operation {
-                            external_receipt:None,
+            external_receipt:None,
             id: key.into(),
             run_id: run_id.into(),
             epoch,
@@ -700,14 +701,15 @@ impl Catalog {
         tx.commit()?;
         Ok(op)
     }
-    pub fn settle_operation(
+    pub fn settle_operation_prepared(
         &mut self,
         key: &str,
         epoch: u64,
         outcome: Outcome,
         effect: Effect,
-        result: Value,
+        prepared: result_content::PreparedOperationResult,
     ) -> Result<Operation> {
+        let result = OperationResultMetadata::Content { reference: prepared.reference };
         let tx = self.db.transaction()?;
         let mut op: Operation = record(&tx, "operations", key)?;
         if policy::graph_metadata(&op)?.is_some() || policy_model::model_metadata(&op)?.is_some() {return Err(RuntimeError::Invalid("policy graph settles through node receipts only".into()));}
@@ -1126,6 +1128,8 @@ impl Catalog {
         Ok(result)
     }
     fn recover(&mut self) -> Result<()> {
+        let interrupted_read: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE json_extract(body,'$.phase')='running' AND json_extract(body,'$.effect')='none' AND coalesce(json_extract(body,'$.intent.kind'),'') NOT IN ('policy_read_graph_v1','policy_model_job_v1'))", [], |row|row.get(0))?;
+        let interrupted_result = interrupted_read.then(|| self.content.save(&json!({"reason":"executor interrupted"}))).transpose()?;
         let tx = self.db.transaction()?;
         tx.execute("UPDATE resumptions SET claimed=0 WHERE acknowledged=0", [])?;
         let runs: Vec<Run> = read_all(&tx, "runs")?;
@@ -1175,7 +1179,7 @@ impl Catalog {
                     result.dispatch=crate::execution::PolicyModelDispatch::Interrupted;
                     result.receipt=Some(crate::execution::PolicyModelReceipt{dispatch:crate::execution::PolicyModelDispatch::Interrupted,outcome:Outcome::Indeterminate,output:None,usage:output.usage,finish_reason:None,failure:Some(crate::execution::ModelFailure{code:"planning_interrupted".into(),message:"dispatch intent was durable; completion is unknown and request will not replay".into(),retry_after_ms:None,provider_request_id:None}),usable:false});
                     op.phase=OperationPhase::Terminal;op.outcome=Some(Outcome::Indeterminate);op.revision+=1;
-                    op.result=Some(serde_json::to_value(result)?);
+                    op.result=Some(OperationResultMetadata::Control { value: serde_json::to_value(result)? });
                     event(&tx,&op.id,op.revision,"policy.model_interrupted",Value::Null)?;
                 }
                 op.epoch=self.epoch;put(&tx,"operations",&op.id,&op)?;continue;
@@ -1199,7 +1203,7 @@ impl Catalog {
             }
             if op.phase != OperationPhase::Terminal {
                 // A live user's one-action decision cannot survive its authorizing owner.
-                if op.effect == Effect::None && op.result.as_ref().is_some_and(|v| v.get("permission").is_some()) {
+                if op.effect == Effect::None && op.result.as_ref().is_some_and(|v| matches!(v, OperationResultMetadata::Control { value } if value.get("permission").is_some())) {
                     if let Some(wait_id) = &op.waiting_on {
                         let mut wait: Wait = record(&tx, "waits", wait_id)?;
                         wait.cancelled = true;
@@ -1219,7 +1223,7 @@ impl Catalog {
                 } else if op.phase == OperationPhase::Running {
                     op.phase = OperationPhase::Terminal;
                     op.outcome = Some(Outcome::Failed);
-                    op.result = Some(json!({"reason":"executor interrupted"}));
+                    op.result = Some(OperationResultMetadata::Content { reference: interrupted_result.as_ref().ok_or_else(|| RuntimeError::Invalid("interrupted result was not prepared".into()))?.clone() });
                 }
                 op.epoch = self.epoch;
                 op.revision += 1;
@@ -1360,3 +1364,9 @@ pub mod plan;
 
 #[path = "catalog_models.rs"]
 pub mod models;
+
+#[path = "catalog_result_content.rs"]
+pub mod result_content;
+
+#[path = "catalog_process_delivery.rs"]
+pub mod process_delivery;

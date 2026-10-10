@@ -163,7 +163,8 @@ pub(crate) struct PreparedMemoryDeliveries {
 struct PreparedMemoryReceipt {
     request_id: String,
     call_id: String,
-    receipt: Value,
+    result_ref: Value,
+    origin: Option<String>,
     facts: Result<Vec<(u64, u64, String)>>,
 }
 impl PreparedMemoryDeliveries {
@@ -217,7 +218,8 @@ impl PreparedMemoryDeliveries {
                         self.receipts.push(PreparedMemoryReceipt {
                             request_id: result.request_id.clone(),
                             call_id: result.call_id.clone(),
-                            receipt: receipt.clone(),
+                            result_ref: crate::content::ContentStore::reference(content)?,
+                            origin: receipt["origin"].as_str().map(str::to_owned),
                             facts: receipt_facts(receipt),
                         });
                     }
@@ -264,7 +266,7 @@ pub(super) fn record_deliveries(
     let mut facts = prepared.facts;
     for candidate in prepared.receipts {
         if !owned_receipt(tx, &candidate.request_id, &candidate.call_id, thread)?
-            .is_some_and(|owned| owned == candidate.receipt)
+            .is_some_and(|(reference, origin)| reference == candidate.result_ref && candidate.origin.as_deref() == Some(origin.as_str()))
         {
             continue;
         }
@@ -313,7 +315,7 @@ fn owned_receipt(
     request_id: &str,
     call_id: &str,
     thread: &str,
-) -> Result<Option<Value>> {
+) -> Result<Option<(Value, String)>> {
     let key = format!("{request_id}:tool:{call_id}");
     let Some(operation) = optional_record::<Operation>(db, "operations", &key)? else {
         return Ok(None);
@@ -335,19 +337,13 @@ fn owned_receipt(
     if !owned {
         return Ok(None);
     }
-    let Some(receipt) = operation
-        .result
-        .and_then(|result| result.get("memoryReceipt").cloned())
-    else {
-        return Ok(None);
-    };
-    if receipt["origin"].as_str() != Some(&format!("run:{}:{}", operation.run_id, operation.id)) {
-        return Ok(None);
-    }
-    Ok(Some(receipt))
+    let reference = operation.result.as_ref().map(OperationResultMetadata::reference).transpose()?.cloned();
+    Ok(reference.map(|reference| (reference, format!("run:{}:{}", operation.run_id, operation.id))))
 }
+
 pub(super) fn trusted_memory_receipts(
     database: &Connection,
+    content: &crate::content::ContentStore,
     thread: &str,
 ) -> Result<BTreeMap<String, Value>> {
     let mut statement = database.prepare("SELECT o.body FROM operations o JOIN runs r ON r.id=o.run_id WHERE json_extract(r.body,'$.thread_id')=?1 AND json_extract(o.body,'$.executor')='memory' AND json_extract(o.body,'$.outcome')='succeeded' AND json_extract(o.body,'$.effect')='confirmed'")?;
@@ -361,8 +357,7 @@ pub(super) fn trusted_memory_receipts(
         if tool.call().name != "memory" {
             continue;
         }
-        if let Some(receipt) = operation
-            .result
+        if let Some(receipt) = operation.result.map(|result| result.load(content)).transpose()?
             .and_then(|result| result.get("memoryReceipt").cloned())
         {
             if receipt["origin"].as_str()

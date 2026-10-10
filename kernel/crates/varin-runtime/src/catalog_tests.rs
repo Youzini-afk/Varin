@@ -701,7 +701,9 @@ fn external_receipts_are_idempotent_and_only_same_epoch_unknown_can_refine() {
     db.dispatch_operation("job", epoch, "process-executor", true)
         .unwrap();
     db.handoff_operation("job", epoch).unwrap();
-    let unknown = external("job", Outcome::Indeterminate, Effect::Unknown);
+    let mut unknown = external("job", Outcome::Indeterminate, Effect::Unknown);
+    let unknown_body = json!({"permission":{"opaque":true},"unknown":"lost-reply-original".repeat(20000)});
+    unknown.result = unknown_body.clone();
     let observed = db.record_external_receipt("job", unknown.clone()).unwrap();
     assert_eq!(
         db.record_external_receipt("job", unknown).unwrap(),
@@ -710,7 +712,9 @@ fn external_receipts_are_idempotent_and_only_same_epoch_unknown_can_refine() {
     let mut foreign = external("job", Outcome::Succeeded, Effect::Confirmed);
     foreign.epoch = "wrong-generation".into();
     assert!(db.record_external_receipt("job", foreign).is_err());
-    let confirmed = external("job", Outcome::Succeeded, Effect::Confirmed);
+    let mut confirmed = external("job", Outcome::Succeeded, Effect::Confirmed);
+    let confirmed_body = json!({"exitCode":0,"opaque":"confirmed-original".repeat(20000)});
+    confirmed.result = confirmed_body.clone();
     let settled = db
         .record_external_receipt("job", confirmed.clone())
         .unwrap();
@@ -728,6 +732,19 @@ fn external_receipts_are_idempotent_and_only_same_epoch_unknown_can_refine() {
     wrong.identity = "job".into();
     wrong.executor = "other-executor".into();
     assert!(db.record_external_receipt("job", wrong).is_err());
+    db.collect_content_objects().unwrap();
+    let metadata = db.operation("job").unwrap();
+    assert!(serde_json::to_vec(&metadata).unwrap().len() < 2048);
+    assert_eq!(db.capture_operation_read(metadata).load().unwrap().result, Some(confirmed_body.clone()));
+    let events = db.capture_events_read(0, 1000).unwrap().load().unwrap();
+    assert!(events.iter().any(|event| event.data["external_receipt"]["result"] == unknown_body), "refinement must retain the original uncertain executor evidence");
+    drop(db);
+    let mut db = f.open();
+    db.collect_content_objects().unwrap();
+    assert_eq!(db.capture_operation_read(db.operation("job").unwrap()).load().unwrap().result, Some(confirmed_body));
+    let events = db.capture_events_read(0, 1000).unwrap().load().unwrap();
+    assert!(events.iter().any(|event| event.data["external_receipt"]["result"] == unknown_body));
+
 }
 #[test]
 fn early_external_terminal_and_model_job_acceptance_converge() {
@@ -865,28 +882,42 @@ fn early_external_terminal_and_model_job_acceptance_converge() {
 
 #[test]
 fn later_external_confirmation_resolves_lost_acceptance_receipt_without_handoff() {
-    let f = Fixture::new();
-    let mut db = f.open();
-    let r = submit(&mut db);
-    let epoch = db.epoch();
-    db.admit_operation("job", &r.run_id, epoch, Lifetime::Thread, Value::Null)
-        .unwrap();
-    db.dispatch_operation("job", epoch, "process-executor", true)
-        .unwrap();
-    db.settle_operation(
-        "job",
-        epoch,
-        Outcome::Indeterminate,
-        Effect::Unknown,
-        json!({"reason":"acceptance response lost"}),
-    )
-    .unwrap();
-    assert!(!db.operation("job").unwrap().handed_off);
-    let receipt = external("job", Outcome::Succeeded, Effect::Confirmed);
-    let confirmed = db.record_external_receipt("job", receipt).unwrap();
-    assert_eq!(confirmed.outcome,Some(Outcome::Succeeded),"actual resource confirmation was stored but the original uncertain outcome was never resolved");
-    assert_eq!(confirmed.effect, Effect::Confirmed);
-    assert_eq!(confirmed.phase, OperationPhase::Terminal);
+    for (outcome, effect) in [(Outcome::Succeeded, Effect::Confirmed), (Outcome::Failed, Effect::None)] {
+        for persisted_before_crash in [false, true] {
+            let f = Fixture::new();
+            let mut db = f.open();
+            let r = submit(&mut db);
+            let epoch = db.epoch();
+            db.admit_operation("job", &r.run_id, epoch, Lifetime::Thread, Value::Null).unwrap();
+            db.dispatch_operation("job", epoch, "process-executor", true).unwrap();
+            db.register_wait("receipt-wait", &r.run_id, "job", "operation.settled", r.cursor).unwrap();
+            let mut receipt = external("job", outcome, effect);
+            receipt.result = json!({"original":"executor evidence", "outcome":outcome,"opaque":[null,"原始",17]});
+            if persisted_before_crash {
+                // The executor fact committed, but the model's ToolSettled/handoff did not.
+                let early = db.record_external_receipt("job", receipt.clone()).unwrap();
+                assert_eq!((early.phase, early.effect), (OperationPhase::Running, Effect::Dispatched));
+                assert!(db.pending_resumptions().unwrap().is_empty());
+                drop(db);
+                db = f.open();
+            } else {
+                db.settle_operation("job", epoch, Outcome::Indeterminate, Effect::Unknown,
+                    json!({"reason":"acceptance response lost"})).unwrap();
+            }
+            let interrupted = db.operation("job").unwrap();
+            assert!(!interrupted.handed_off);
+            assert_eq!((interrupted.outcome, interrupted.effect), (Some(Outcome::Indeterminate), Effect::Unknown));
+            let confirmed = db.record_external_receipt("job", receipt.clone()).unwrap();
+            assert_eq!((confirmed.phase, confirmed.outcome, confirmed.effect), (OperationPhase::Terminal, Some(outcome), effect));
+            assert_eq!(confirmed.revision, interrupted.revision + 1);
+            assert_eq!(db.capture_operation_read(confirmed.clone()).load().unwrap().result, Some(receipt.result.clone()));
+            assert!(db.pending_resumptions().unwrap().iter().any(|wait| wait == "receipt-wait"));
+            // Replaying an applied fact is genuinely idempotent, including its event cursor.
+            let cursor = db.event_cursor().unwrap();
+            assert_eq!(db.record_external_receipt("job", receipt).unwrap(), confirmed);
+            assert_eq!(db.event_cursor().unwrap(), cursor);
+        }
+    }
 }
 
 #[test]
@@ -1817,34 +1848,41 @@ fn dispatched_no_effect_requires_exact_durable_executor_evidence() {
     let owner = std::sync::Mutex::new(db);
     let context = ToolExecutionContext { run_id:run.run_id.clone(), operation_id:"model-1:tool:conflict".into(),
         origin:ToolOrigin::ModelStep { request_id:"model-1".into() } };
-    let content = json!({"status":"conflict","currentRef":"user-version"});
+    let content = json!({"status":"conflict","currentRef":"user-version","permission":{"ordinary":"opaque tool field"},"data":"result-body-漢字".repeat(20000)});
     let completion = ToolCompletion::Result { outcome:Outcome::Failed, effect:Effect::None, content:content.clone() };
     let settlement = |completion| ExecutionRecord::ToolSettled { result:ToolResult {
         request_id:"model-1".into(), call_id:"conflict".into(), completion,
     }};
     // A tool's no-effect claim alone must neither bypass normalization nor settle a dispatch.
     assert!(!owner.confirms_no_effect(&context, epoch, &completion).unwrap());
-    assert!(owner.lock().unwrap().commit_execution(&run.run_id, epoch, &settlement(completion.clone())).is_err());
+    assert!(owner.commit(&run.run_id, epoch, &settlement(completion.clone())).is_err());
     let op = owner.lock().unwrap().operation(&context.operation_id).unwrap();
     assert_eq!((op.phase,op.effect),(OperationPhase::Running,Effect::Dispatched));
-    owner.lock().unwrap().record_external_receipt(&context.operation_id, ExternalReceipt {
+    super::result_content::record_external_receipt(&owner, &context.operation_id, ExternalReceipt {
         identity:context.operation_id.clone(), executor:"cas-owner".into(), epoch:"opaque-owner-epoch".into(),
         outcome:Outcome::Failed, effect:Effect::None, result:content.clone(),
-    }).unwrap();
+    }, true).unwrap();
     // Even authentic evidence cannot approve changed content or another Operation/generation.
     let changed = ToolCompletion::Result { outcome:Outcome::Failed, effect:Effect::None, content:json!({"status":"conflict","currentRef":"forged"}) };
     assert!(!owner.confirms_no_effect(&context, epoch, &changed).unwrap());
-    assert!(owner.lock().unwrap().commit_execution(&run.run_id, epoch, &settlement(changed)).is_err());
+    assert!(owner.commit(&run.run_id, epoch, &settlement(changed)).is_err());
     let mut foreign = context.clone(); foreign.operation_id="model-1:tool:other".into();
     assert!(!owner.confirms_no_effect(&foreign, epoch, &completion).unwrap());
     foreign = context.clone(); foreign.origin=ToolOrigin::ModelStep { request_id:"other-request".into() };
     assert!(!owner.confirms_no_effect(&foreign, epoch, &completion).unwrap());
     assert!(owner.confirms_no_effect(&context, epoch+1, &completion).is_err());
     assert!(owner.confirms_no_effect(&context, epoch, &completion).unwrap());
-    owner.lock().unwrap().commit_execution(&run.run_id, epoch, &settlement(completion)).unwrap();
+    owner.commit(&run.run_id, epoch, &settlement(completion)).unwrap();
     let op = owner.lock().unwrap().operation(&context.operation_id).unwrap();
     assert_eq!((op.phase,op.outcome,op.effect),(OperationPhase::Terminal,Some(Outcome::Failed),Effect::None));
-    assert_eq!(op.result,Some(content));
+    let read = owner.lock().unwrap().capture_operation_read(op);
+    assert_eq!(read.load().unwrap().result,Some(content.clone()));
+    let events = owner.lock().unwrap().capture_events_read(0,1000).unwrap();
+    assert!(events.load().unwrap().iter().any(|event| event.kind == "operation.settled" && event.data["result"] == content));
+    let db = owner.lock().unwrap();
+    let receipt: String = db.db.query_row("SELECT receipt FROM tool_calls WHERE request_id='model-1' AND call_id='conflict'", [], |row|row.get(0)).unwrap();
+    assert!(receipt.len() < 1024, "tool receipt must carry metadata, not output bytes");
+    drop(db);
     assert_eq!(owner.lock().unwrap().operation("model-1:tool:other").unwrap().effect,Effect::Dispatched);
 }
 
@@ -1938,4 +1976,32 @@ fn recovery_preparation_discards_stale_failure_after_a_real_tool_receipt_arrives
     assert_eq!(recovery.receipts["receipt-race"].completion, ToolCompletion::Result {
         outcome:Outcome::Succeeded, effect:Effect::Confirmed, content:json!("actual receipt"),
     });
+}
+
+#[test]
+fn result_publication_stages_without_catalog_and_gc_protects_until_commit() {
+    use std::sync::{mpsc, Mutex};
+    let f = Fixture::new();
+    let mut db = f.open();
+    let run = submit(&mut db);
+    let epoch = db.epoch();
+    db.admit_operation("result-publication", &run.run_id, epoch, Lifetime::Run, Value::Null).unwrap();
+    db.dispatch_operation("result-publication", epoch, "read", false).unwrap();
+    let owner = Mutex::new(db);
+    let preparation = owner.lock().unwrap().prepare_result_content();
+    let body = json!({"body":"immutable-result".repeat(40000),"opaque":[true,null,17]});
+    let expected = body.clone();
+    let (send, receive) = mpsc::channel();
+    let catalog = owner.lock().unwrap();
+    let worker = std::thread::spawn(move || send.send(preparation.write_result(&body)).unwrap());
+    // Holding Catalog cannot prevent body staging; the publication stays alive in the prepared value.
+    let prepared = receive.recv_timeout(std::time::Duration::from_secs(10)).unwrap().unwrap();
+    assert!(catalog.operation("result-publication").unwrap().result.is_none());
+    drop(catalog);
+    worker.join().unwrap();
+    assert_eq!(owner.lock().unwrap().collect_content_objects().unwrap(), 0);
+    let operation = owner.lock().unwrap().settle_operation_prepared("result-publication", epoch, Outcome::Succeeded, Effect::None, prepared).unwrap();
+    owner.lock().unwrap().collect_content_objects().unwrap();
+    let read = owner.lock().unwrap().capture_operation_read(operation);
+    assert_eq!(read.load().unwrap().result, Some(expected));
 }

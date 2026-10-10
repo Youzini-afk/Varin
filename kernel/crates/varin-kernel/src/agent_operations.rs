@@ -11,6 +11,13 @@ pub(super) fn execute(
         return Err(KernelError::Cancelled);
     }
     let owner = runtime.catalog();
+    if method == "runtime.events.read" {
+        let p: EventsParams = serde_json::from_value(params)?;
+        let cursor = u64::try_from(p.cursor).map_err(|_| KernelError::Protocol("event cursor must be nonnegative".into()))?;
+        let limit = u32::try_from(p.limit).map_err(|_| KernelError::Protocol("event limit out of range".into()))?;
+        let read = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.capture_events_read(cursor, limit).map_err(domain)?;
+        return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
+    }
     if method == "runtime.thread.operations.active" {
         let p: ThreadOperationsParams = serde_json::from_value(params)?;
         let reads = {

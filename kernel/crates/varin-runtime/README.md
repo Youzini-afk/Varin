@@ -126,14 +126,15 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 14, input domain 2 and collaboration domain 2 store input intents/queue bodies and context-job ownership,
+Catalog version 15, input domain 2 and collaboration domain 2 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. `Catalog::collect_content_objects` marks requests, provider originals,
 history, all model outputs (including rejected output), original command intents, queued-history references, context
 checkpoints, memory projections, summary recipes and source parts, policy action/checkpoint bodies,
-and indexed graph receipts, planning-model request/output references, ordinary tool arguments and
-permission call/scope bodies, including completed permission audit events. It verifies every live object
+and indexed graph receipts, planning-model request/output references, ordinary tool arguments/results,
+external executor receipts and permission call/scope bodies, including historical receipt and completed
+permission audit events. It verifies each distinct live object
 before sweeping and preserves unknown files; it never deletes history or invokes system-kernel GC.
 
 Child task records retain ownership/state and references to task text, configuration and launch
@@ -149,8 +150,18 @@ prepared identities; dispatch, settlement and cancellation use metadata. Recover
 views load arguments on workers. Permission preparation also stages the exact call and scope outside
 Catalog; approval and consumption compare those identities against the admitted action. Public views
 restore the original call/scope shape. Plan authorization reads its frozen model request outside Catalog,
-then rechecks the current owner and request reference. Generic tool results and external receipt bodies
-still remain inline; their isolation is unfinished.
+then rechecks the current owner and request reference. Ordinary tool results and original external
+receipt bodies use the same ContentStore. Workers persist bodies before Catalog commits their
+identities, outcome/effect facts and events. Internal tagged control state cannot be confused with
+arbitrary result JSON; public Operation/event views restore the original shape on read workers.
+Tool-batch replay and memory trust checks use the original receipt/content identity. Publication
+leases protect staged and captured content through commit or hydration.
+
+Process observations capture their Run, Wait, process and Operation revisions before preparing
+lifecycle history on a worker. Publication rechecks those identities and the branch head. A cancelled
+observation does not read the process result or terminate the process; an already visible delivery
+reuses its original history. Child completion likewise stages the original receipt outside Catalog
+and commits only against the same child/parent execution boundary.
 
 Provider serialization still visits and sends full legal requests; chunk reuse is not remote
 incremental-context support or a measured speedup claim.
@@ -160,8 +171,8 @@ then load, validate, merge and stage bodies on the worker. Publication compares 
 for synchronization, active checkpoint identities. A changed basis causes a fresh owner read; an
 unchanged owner revision regression remains an error. Late confirmed receipts may settle after Run
 cancellation, without reviving the Run or overwriting a newer note. Context compilation reads trusted
-receipt bodies on its read worker. Full child-task records and content collection remain separate
-unfinished control-path boundaries.
+receipt bodies on its read worker. Content collection still performs its complete mark/verify/sweep
+under Catalog ownership; removing that long control-path work remains a separate implementation step.
 
 ## Execution and trust
 
@@ -173,6 +184,9 @@ A dispatched model request is interrupted on restart and is not automatically se
 unconfirmed external effect becomes indeterminate and requires reconciliation. Wait resumption uses
 a durable identity: a crashed claimant can reacquire it, and acknowledgment commits the runnable
 continuation state in the same transaction.
+An original executor receipt may already be durable before tool settlement or handoff. Reconciliation
+applies that same receipt to a recovered unresolved Operation instead of mistaking receipt identity
+for completed settlement. Once applied, repeated receipt delivery leaves revisions and events unchanged.
 
 Transient provider progress uses a bounded, nonblocking sink. Durable tool results and model output
 remain available independently of whether a viewer consumed progress.

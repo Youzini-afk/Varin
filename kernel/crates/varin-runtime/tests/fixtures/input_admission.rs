@@ -13,6 +13,15 @@ type Result<T> = std::result::Result<T, RuntimeError>;
 
 #[allow(dead_code)]
 pub trait InputAdmission {
+    fn settle_operation(&mut self, key: &str, epoch: u64, outcome: varin_runtime::Outcome, effect: varin_runtime::Effect, result: Value) -> Result<varin_runtime::OperationMetadata>;
+    fn record_external_receipt(&mut self, key: &str, receipt: varin_runtime::ExternalReceipt) -> Result<varin_runtime::OperationMetadata>;
+    fn record_external_receipt_with_stop(&mut self, key: &str, receipt: varin_runtime::ExternalReceipt, stopped: bool) -> Result<varin_runtime::OperationMetadata>;
+    fn deliver_process_waits(&mut self) -> Result<Vec<String>>;
+    fn reconcile_child_reports(&mut self) -> Result<()>;
+    fn settle_child_receipts(&mut self) -> Result<()>;
+    fn deliver_child_waits(&mut self) -> Result<Vec<String>>;
+    fn cancel_child_wait(&mut self, id: &str) -> Result<varin_runtime::Wait>;
+
     fn fork_branch(&mut self, source: &str, target: &str, head: Option<&str>) -> Result<()>;
     fn submit(&mut self, command: &SubmitInput) -> Result<Receipt>;
     fn submit_with_launch(
@@ -61,6 +70,44 @@ pub trait InputAdmission {
     ) -> Result<ChildTask>;
 }
 impl InputAdmission for Catalog {
+    fn settle_operation(&mut self, key: &str, epoch: u64, outcome: varin_runtime::Outcome, effect: varin_runtime::Effect, result: Value) -> Result<varin_runtime::OperationMetadata> {
+        let prepared = self.prepare_result_content().write_result(&result)?;
+        self.settle_operation_prepared(key, epoch, outcome, effect, prepared)
+    }
+    fn record_external_receipt(&mut self, key: &str, receipt: varin_runtime::ExternalReceipt) -> Result<varin_runtime::OperationMetadata> {
+        let stopped = receipt.outcome != varin_runtime::Outcome::Indeterminate;
+        self.record_external_receipt_with_stop(key, receipt, stopped)
+    }
+    fn record_external_receipt_with_stop(&mut self, key: &str, receipt: varin_runtime::ExternalReceipt, stopped: bool) -> Result<varin_runtime::OperationMetadata> {
+        let prepared = self.prepare_result_content().write_external_receipt(receipt)?;
+        self.record_external_receipt_prepared(key, prepared, stopped)
+    }
+    fn deliver_process_waits(&mut self) -> Result<Vec<String>> {
+        for read in self.capture_process_waits()? { self.admit_process_wait(read.load()?)?; }
+        self.pending_process_continuations()
+    }
+    fn reconcile_child_reports(&mut self) -> Result<()> {
+        for report in self.capture_child_reports()?.load()? { self.admit_child_report(report)?; }
+        self.settle_child_receipts()
+    }
+    fn settle_child_receipts(&mut self) -> Result<()> {
+        for receipt in self.capture_child_receipts()? {
+            let (identity, receipt) = receipt.load()?;
+            self.record_external_receipt_prepared(&identity, receipt, true)?;
+        }
+        Ok(())
+    }
+    fn deliver_child_waits(&mut self) -> Result<Vec<String>> {
+        self.reconcile_child_reports()?;
+        for read in self.capture_child_waits()? { self.admit_child_wait(read.load()?)?; }
+        self.pending_child_continuations()
+    }
+    fn cancel_child_wait(&mut self, id: &str) -> Result<varin_runtime::Wait> {
+        self.request_cancel_child_wait(id)?;
+        self.deliver_child_waits()?;
+        self.inspect_child_wait(id)
+    }
+
     fn fork_branch(&mut self, source: &str, target: &str, head: Option<&str>) -> Result<()> {
         let prepared = self
             .prepare_branch_fork(source, target, head, None)?

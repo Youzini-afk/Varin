@@ -12,7 +12,7 @@ pub(crate) fn reconcile(
     runtime: Arc<RunSupervisor>,
     resources: KernelResourceClient,
     binding: ToolBinding,
-    operations: Vec<varin_runtime::Operation>,
+    operations: Vec<varin_runtime::OperationMetadata>,
     request_id: String,
     responses: crate::transport::Sender,
     finished: Arc<dyn Fn(&str) + Send + Sync>,
@@ -27,17 +27,12 @@ pub(crate) fn reconcile(
                 let operations=reads.into_iter().map(|read|read.load().map_err(|error|KernelError::Operation(error.to_string()))).collect::<Result<Vec<_>,_>>()?;
                 let receipts = resources.reconcile_mutations(binding, operations)?;
                 let mut reconciled = Vec::new();
-                {
-                    let catalog = runtime.catalog();
-                    let mut catalog = catalog
-                        .lock()
-                        .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-                    for (operation_id, receipt) in receipts {
-                        catalog
-                            .record_external_receipt(&operation_id, receipt)
-                            .map_err(|error| KernelError::Operation(error.to_string()))?;
-                        reconciled.push(operation_id);
-                    }
+                let catalog = runtime.catalog();
+                for (operation_id, receipt) in receipts {
+                    let stopped = receipt.outcome != varin_runtime::Outcome::Indeterminate;
+                    varin_runtime::catalog::result_content::record_external_receipt(&catalog, &operation_id, receipt, stopped)
+                        .map_err(|error| KernelError::Operation(error.to_string()))?;
+                    reconciled.push(operation_id);
                 }
                 let unresolved: Vec<_> = requested
                     .into_iter()

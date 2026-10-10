@@ -115,29 +115,38 @@ impl ModelStepRead {
     }
 }
 impl OperationRead {
-    pub fn load(mut self) -> Result<Operation> {
-        if self.operation.intent.get("kind").and_then(Value::as_str) == Some("tool") {
-            let intent = ToolIntent::from_operation(&self.operation)?.load(&self.content)?;
-            self.operation.intent = serde_json::to_value(intent)?;
-        }
-        if let Some(permission) = self
-            .operation
-            .result
-            .as_mut()
-            .and_then(|result| result.get_mut("permission"))
-        {
-            let call = self.content.load(&permission["call_ref"])?;
-            let scope = self.content.load(&permission["scope_ref"])?;
-            let record = permission
-                .as_object_mut()
-                .ok_or_else(|| RuntimeError::Invalid("permission record is malformed".into()))?;
-            record.remove("call_ref");
-            record.remove("scope_ref");
-            record.insert("call".into(), call);
-            record.insert("scope".into(), scope);
-        }
-        Ok(self.operation)
+    pub fn load(self) -> Result<crate::types::Operation> {
+        hydrate_operation(self.operation, &self.content)
     }
+}
+pub(super) fn hydrate_operation(mut operation: Operation, content: &crate::content::ContentStore) -> Result<crate::types::Operation> {
+    if operation.intent.get("kind").and_then(Value::as_str) == Some("tool") {
+        operation.intent = serde_json::to_value(ToolIntent::from_operation(&operation)?.load(content)?)?;
+    }
+    let result = match operation.result {
+        Some(OperationResultMetadata::Control { mut value }) => {
+            if let Some(permission) = value.get_mut("permission") {
+                let call = content.load(&permission["call_ref"])?;
+                let scope = content.load(&permission["scope_ref"])?;
+                let record = permission.as_object_mut().ok_or_else(|| RuntimeError::Invalid("permission record is malformed".into()))?;
+                record.remove("call_ref"); record.remove("scope_ref");
+                record.insert("call".into(), call); record.insert("scope".into(), scope);
+            }
+            Some(value)
+        }
+        Some(OperationResultMetadata::Content { reference }) => Some(content.load(&reference)?),
+        None => None,
+    };
+    let external_receipt = operation.external_receipt.map(|receipt| Ok::<_,RuntimeError>(ExternalReceipt {
+        executor:receipt.executor, identity:receipt.identity, epoch:receipt.epoch,
+        outcome:receipt.outcome, effect:receipt.effect, result:content.load(&receipt.result_ref)?,
+    })).transpose()?;
+    Ok(crate::types::Operation {
+        external_receipt, id:operation.id, run_id:operation.run_id, epoch:operation.epoch,
+        revision:operation.revision, phase:operation.phase, outcome:operation.outcome, effect:operation.effect,
+        cancel_requested:operation.cancel_requested, lifetime:operation.lifetime, handed_off:operation.handed_off,
+        executor:operation.executor, waiting_on:operation.waiting_on, intent:operation.intent, result,
+    })
 }
 impl Catalog {
     pub fn model_step_metadata(&self, id: &str) -> Result<ModelStep> {

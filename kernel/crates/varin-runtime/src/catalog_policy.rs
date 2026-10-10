@@ -328,7 +328,7 @@ impl Catalog {
             executor: Some("policy-read-graph.v1".into()),
             waiting_on: None,
             intent: serde_json::to_value(metadata)?,
-            result: Some(serde_json::to_value(PolicyGraphProgress::default())?),
+            result: Some(OperationResultMetadata::Control { value: serde_json::to_value(PolicyGraphProgress::default())? }),
             external_receipt: None,
         };
         let tx = self.db.transaction()?;
@@ -499,7 +499,7 @@ impl Catalog {
                 Outcome::Failed
             });
         }
-        op.result = Some(serde_json::to_value(&progress)?);
+        op.result = Some(OperationResultMetadata::Control { value: serde_json::to_value(&progress)? });
         let tx = self.db.transaction()?;
         tx.execute(
             "UPDATE policy_graph_nodes SET receipt=?3,outcome=?4 WHERE action_id=?1 AND node_id=?2",

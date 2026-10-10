@@ -93,5 +93,8 @@ pub(super) fn execute(
         };
         catalog.capture_child_read(child)
     };
+    if method == "runtime.child.fail" {
+        varin_runtime::catalog::child_delivery::reconcile_reports(&owner).map_err(domain)?;
+    }
     Ok(serde_json::to_value(read.load().map_err(domain)?)?)
 }

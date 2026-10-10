@@ -248,7 +248,7 @@ impl Catalog {
         };
         tx.execute(
             "UPDATE tool_calls SET receipt=?3 WHERE request_id=?1 AND call_id=?2",
-            params![receipt.request_id, receipt.call_id, encode(&receipt)?],
+            params![receipt.request_id, receipt.call_id, encode(&super::result_content::ToolReceiptMetadata::job(&receipt)?)?],
         )?;
         op.handed_off = true;
         op.phase = OperationPhase::Preparing;
@@ -660,39 +660,7 @@ impl Catalog {
             json!({"sender_thread_id":child.child_thread_id,"outcome":child.report.as_ref().map(|r|r.outcome)}),
         )?;
         tx.commit()?;
-        self.settle_child_receipts()?;
         Ok(child)
-    }
-    /// Called on real completion/event notifications and restart, never a timer. The original
-    /// model exchange must commit before terminalizing its Job, including very fast children.
-    pub fn settle_child_receipts(&mut self) -> Result<()> {
-        let children:Vec<ChildTask>={
-            let mut statement=self.db.prepare("SELECT c.body FROM child_tasks c JOIN operations o ON o.id=c.id JOIN tool_calls t ON t.request_id=json_extract(c.body,'$.origin.request_id') AND t.call_id=json_extract(c.body,'$.call_id') WHERE json_extract(c.body,'$.report') IS NOT NULL AND json_extract(o.body,'$.external_receipt') IS NULL AND t.committed=1")?;
-            let rows=statement.query_map([],|row|row.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
-            rows.into_iter().map(|row|serde_json::from_str(&row).map_err(Into::into)).collect::<Result<_>>()?
-        };
-        for child in children {
-            let report=child.report.as_ref().expect("selected report");
-            let op = self.operation(&child.operation_id)?;
-            if op.external_receipt.is_none() {
-                self.record_external_receipt(
-                    &child.operation_id,
-                    ExternalReceipt {
-                        executor: DISPATCH_TOOL.into(),
-                        identity: child.operation_id.clone(),
-                        epoch: "collaboration-v1".into(),
-                        outcome: report.outcome,
-                        effect: Effect::None,
-                        result: serde_json::to_value(report)?,
-                    },
-                )?;
-            }
-        }
-        Ok(())
-    }
-    pub fn reconcile_child_reports(&mut self) -> Result<()> {
-        for prepared in self.capture_child_reports()?.load()? { self.admit_child_report(prepared)?; }
-        self.settle_child_receipts()
     }
 
 }
@@ -826,7 +794,7 @@ impl Catalog {
         };
         tx.execute(
             "UPDATE tool_calls SET receipt=?3 WHERE request_id=?1 AND call_id=?2",
-            params![receipt.request_id, receipt.call_id, encode(&receipt)?],
+            params![receipt.request_id, receipt.call_id, encode(&super::result_content::ToolReceiptMetadata::job(&receipt)?)?],
         )?;
         event(
             &tx,
@@ -843,11 +811,6 @@ impl Catalog {
             params![run_id,WAIT_TOOL],|row|row.get(0)).optional().map_err(Into::into)
     }
 
-    pub fn cancel_child_wait(&mut self, wait_id: &str) -> Result<Wait> {
-        self.request_cancel_child_wait(wait_id)?;
-        self.deliver_child_waits()?;
-        self.inspect_child_wait(wait_id)
-    }
     pub fn inspect_child_wait(&self,wait_id:&str) -> Result<Wait> {
         if !wait_id.starts_with("child-wait:") {return Err(RuntimeError::Invalid("not a collaboration Wait".into()));}
         record(&self.db,"waits",wait_id)
@@ -885,7 +848,7 @@ impl Catalog {
             op.effect = Effect::None;
             op.cancel_requested = true;
             op.revision += 1;
-            op.result = Some(json!({"wait_cancelled":true,"reason":"parent_run_finished"}));
+            op.result = Some(OperationResultMetadata::Control { value: json!({"wait_cancelled":true,"reason":"parent_run_finished"}) });
             put(&tx, "operations", &op.id, &op)?;
             event(
                 &tx,
@@ -897,14 +860,6 @@ impl Catalog {
         }
         tx.commit()?;
         Ok(())
-    }
-    pub fn deliver_child_waits(&mut self) -> Result<Vec<String>> {
-        self.reconcile_child_reports()?;
-        self.close_finished_parent_waits()?;
-        for preparation in self.capture_child_waits()? {
-            self.admit_child_wait(preparation.load()?)?;
-        }
-        self.pending_child_continuations()
     }
 
 }

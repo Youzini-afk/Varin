@@ -12,9 +12,7 @@ pub(crate) fn model_metadata(
 }
 pub(crate) fn model_result(op: &Operation) -> Result<PolicyModelResult> {
     let result: PolicyModelResult = serde_json::from_value(
-        op.result
-            .clone()
-            .ok_or_else(|| RuntimeError::Invalid("policy model result missing".into()))?,
+        op.result.as_ref().ok_or_else(|| RuntimeError::Invalid("policy model result missing".into()))?.control()?.clone(),
     )?;
     if (op.phase == OperationPhase::Terminal) != result.receipt.is_some()
         || result
@@ -318,7 +316,7 @@ impl Catalog {
             executor: Some("policy-model.v1".into()),
             waiting_on: None,
             intent: serde_json::to_value(&metadata)?,
-            result: Some(serde_json::to_value(&result)?),
+            result: Some(OperationResultMetadata::Control { value: serde_json::to_value(&result)? }),
             external_receipt: None,
         };
         let tx = self.db.transaction()?;
@@ -420,7 +418,7 @@ impl Catalog {
             ));
         }
         result.dispatch = PolicyModelDispatch::Dispatched;
-        op.result = Some(serde_json::to_value(result)?);
+        op.result = Some(OperationResultMetadata::Control { value: serde_json::to_value(result)? });
         op.phase = OperationPhase::Running;
         op.revision += 1;
         let tx = self.db.transaction()?;
@@ -554,7 +552,7 @@ impl Catalog {
             result.receipt = Some(receipt);
             op.phase = OperationPhase::Terminal;
         }
-        op.result = Some(serde_json::to_value(result)?);
+        op.result = Some(OperationResultMetadata::Control { value: serde_json::to_value(result)? });
         op.revision += 1;
         let tx = self.db.transaction()?;
         put(&tx, "operations", action, &op)?;

@@ -4,7 +4,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use varin_runtime::execution::*;
-use varin_runtime::{Catalog, Effect, Lifetime, Operation, Outcome};
+use varin_runtime::{Catalog, Effect, Lifetime, Outcome};
 
 const TOOL: &str = "todo";
 fn error(value: impl ToString) -> ExecutionError {
@@ -321,7 +321,7 @@ impl ToolExecutor for PlanTools {
                 let intent =
                     varin_runtime::catalog::tool_content::ToolIntent::fingerprint(call, contract)
                         .map_err(error)?;
-                let mut catalog = self.catalog.lock().map_err(error)?;
+                let catalog = self.catalog.lock().map_err(error)?;
                 let run = catalog.run(&context.run_id).map_err(error)?;
                 let operation = catalog.operation(&context.operation_id).map_err(error)?;
                 let admitted =
@@ -336,9 +336,9 @@ impl ToolExecutor for PlanTools {
                         "plan receipt no longer matches the admitted execution",
                     ));
                 }
-                catalog
-                    .record_external_receipt(
-                        &operation.id,
+                drop(catalog);
+                varin_runtime::catalog::result_content::record_external_receipt(
+                        &self.catalog, &operation.id,
                         varin_runtime::ExternalReceipt {
                             identity: operation.id.clone(),
                             executor: TOOL.into(),
@@ -346,7 +346,7 @@ impl ToolExecutor for PlanTools {
                             outcome,
                             effect,
                             result: value.clone(),
-                        },
+                        }, outcome != Outcome::Indeterminate,
                     )
                     .map_err(error)?;
                 Ok(())
@@ -388,7 +388,7 @@ pub(crate) fn reconcile(
                         .map_err(error)?
                         .into_iter()
                         .map(|id| catalog.operation(&id).map_err(error))
-                        .collect::<Result<Vec<Operation>, _>>()?
+                        .collect::<Result<Vec<varin_runtime::OperationMetadata>, _>>()?
                         .into_iter()
                         .filter(|op| op.run_id == run_id)
                         .collect::<Vec<_>>();
@@ -429,13 +429,13 @@ pub(crate) fn reconcile(
                         continue;
                     };
                     let owner = runtime.catalog();
-                    let mut catalog = owner.lock().map_err(error)?;
+                    let catalog = owner.lock().map_err(error)?;
                     if catalog.epoch() != epoch {
                         return Err(error("plan reconciliation generation changed"));
                     }
-                    catalog
-                        .record_external_receipt(
-                            &operation.id,
+                    drop(catalog);
+                    varin_runtime::catalog::result_content::record_external_receipt(
+                            &owner, &operation.id,
                             varin_runtime::ExternalReceipt {
                                 identity: operation.id.clone(),
                                 executor: TOOL.into(),
@@ -443,7 +443,7 @@ pub(crate) fn reconcile(
                                 outcome,
                                 effect,
                                 result: response,
-                            },
+                            }, outcome != Outcome::Indeterminate,
                         )
                         .map_err(error)?;
                     reconciled.push(operation.id);

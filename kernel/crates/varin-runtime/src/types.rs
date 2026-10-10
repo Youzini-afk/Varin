@@ -29,9 +29,8 @@ impl RunState {
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Operation {
-    #[serde(default)]
-    pub external_receipt:Option<ExternalReceipt>,
+pub struct Operation<E = ExternalReceipt, R = Value> {
+    pub external_receipt:Option<E>,
     pub id: String,
     pub run_id: String,
     pub epoch: u64,
@@ -45,7 +44,29 @@ pub struct Operation {
     pub executor: Option<String>,
     pub waiting_on: Option<String>,
     pub intent: Value,
-    pub result: Option<Value>,
+    pub result: Option<R>,
+}
+/// Catalog representation. Public reads hydrate immutable bodies into Operation.
+pub type OperationMetadata = Operation<ExternalReceiptMetadata, OperationResultMetadata>;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum OperationResultMetadata {
+    /// Short domain-owned permission, question, policy or wait state, never tool output.
+    Control { value: Value },
+    /// Immutable ordinary/generic operation result.
+    Content { reference: Value },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ExternalReceiptMetadata {
+    pub executor: String,
+    pub identity: String,
+    pub epoch: String,
+    pub outcome: Outcome,
+    pub effect: Effect,
+    pub result_ref: Value,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Run {

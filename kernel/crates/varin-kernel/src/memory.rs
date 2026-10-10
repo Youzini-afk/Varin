@@ -297,8 +297,8 @@ pub(crate) fn reconcile(
                 if response["status"] != "ready" || response["memoryReceipt"].is_null() { unresolved.push(operation.id); continue; }
                 let owner = runtime.catalog();
                 observe_receipt(&owner,&run_id,&response["memoryReceipt"])?;
-                let mut catalog=owner.lock().map_err(error)?;
-                catalog.record_external_receipt(&operation.id, varin_runtime::ExternalReceipt { identity: operation.id.clone(), executor: TOOL.into(), epoch: origin, outcome: Outcome::Succeeded, effect: Effect::Confirmed, result: response }).map_err(error)?;
+                varin_runtime::catalog::result_content::record_external_receipt(&owner, &operation.id,
+                    varin_runtime::ExternalReceipt { identity: operation.id.clone(), executor: TOOL.into(), epoch: origin, outcome: Outcome::Succeeded, effect: Effect::Confirmed, result: response }, true).map_err(error)?;
                 reconciled.push(operation.id);
             }
             Ok(json!({"reconciled":reconciled,"unresolved":unresolved}))
