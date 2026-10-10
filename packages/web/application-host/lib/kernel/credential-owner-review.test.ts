@@ -19,8 +19,14 @@ it('model selection preserves capacity, thinking mapping and sampling through cr
     modelOptions: { samplingParams: { thinking: { type: 'enabled' }, top_p: 0.8, temperature: 0.5 } } });
   await authority.rebindModel(configuration, scope);
   await expect(authority.resolveModel({ providerId: 'fixture-provider', modelId: 'deepseek-fixture', thinkingLevel: 'xhigh' })).rejects.toMatchObject({ code: 'model-thinking-level-unavailable' });
+  const explicit = await authority.resolveModel({ providerId: 'fixture-provider', modelId: 'deepseek-fixture', thinkingLevel: 'high', temperature: 0 });
+  expect(explicit.configuration.modelOptions).toEqual({ temperature: 0, samplingParams: { thinking: { type: 'enabled' }, top_p: 0.8 } });
+  expect(explicit.configuration.configurationGeneration).not.toBe(configuration.configurationGeneration);
+  await authority.rebindModel(explicit.configuration, scope);
+  await expect(authority.resolveModel({ providerId: 'fixture-provider', modelId: 'deepseek-fixture', temperature: Number.NaN })).rejects.toMatchObject({ code: 'model-temperature-invalid' });
   topP = 0.9;
   await expect(authority.rebindModel(configuration, scope)).rejects.toMatchObject({ code: 'model-configuration-changed' });
+  await expect(authority.rebindModel(explicit.configuration, scope)).rejects.toMatchObject({ code: 'model-configuration-changed' });
 });
 function owner(overrides: Partial<CredentialOwnerOptions> = {}) {
   return new ExistingHostCredentialOwner({ providerId: 'fixture-provider', providerFamily: 'openai-responses', endpoint: 'https://model.example.test/v1/responses', currentScope: async () => ({ ...scope }), runtime: { getAuth: async () => ({ auth: { apiKey: 'fake-test-key' } }) }, ...overrides });

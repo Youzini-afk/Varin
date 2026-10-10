@@ -495,6 +495,7 @@ mod tests {
             arguments: json!({}),
         };
         let context = FrozenToolContext {
+            child_dispatch: None,
             resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             run_id: "run".into(),
@@ -522,6 +523,7 @@ mod tests {
         );
         let next_token = CancellationToken::default();
         let next_context = FrozenToolContext {
+            child_dispatch: None,
             resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             tools: Arc::new(next.schemas().to_vec()),

@@ -31,7 +31,7 @@ function fixture() {
   const run: Run = { id: 'run', thread_id: 'thread:original', branch_id: 'branch', state: 'waiting', waiting_on: 'wait', revision: 1, epoch: 1, configuration: {}, cancel_requested: false };
   const launch: LaunchIntent = { policy_preparable: false, policy_generation: 0, policy_target: selection.active.target, run_id: run.id,
     revision: 1, startable: false, requires_rebind: false, bound_epoch: 1, preparation_failure: null, pause: { action_id: 'pause', wait_id: 'wait', reason: 'Explicit resume required' },
-    selection: { policy: current.identity, policy_models: [], extension_bindings: [], mcp_binding: null, credential_scope: null, connection_identity: 'model', provider_family: 'model',
+    selection: { policy: current.identity, child_dispatch: null, policy_models: [], extension_bindings: [], mcp_binding: null, credential_scope: null, connection_identity: 'model', provider_family: 'model',
       model: 'model', configuration_generation: 1, tool_schema_generation: 1, tools: [], source: null } };
   let counter = 0, generation = 0, loseReady = false;
   let heldDecision: { name: string; work: () => Promise<VarinAgentPolicyDecision> } | undefined;

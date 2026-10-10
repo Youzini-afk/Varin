@@ -80,6 +80,7 @@ pub struct PreparedPolicyGraphSchemas {
     _publication: crate::content::ContentPublication,
 }
 struct PreparedGraphNode {
+    child_dispatch: Option<Value>,
     id: String,
     call_id: String,
     dependencies: Vec<String>,
@@ -122,6 +123,7 @@ impl PolicyGraphSchemaPreparation {
                 let call =
                     super::tool_content::ToolCallMetadata::write(&self.content, &node.node.call)?;
                 Ok(PreparedGraphNode {
+                    child_dispatch: node.child_dispatch,
                     id: node.node.id,
                     call_id: node.node.call.call_id,
                     dependencies: node.node.depends_on,
@@ -404,7 +406,8 @@ impl Catalog {
             if launch.selection.policy != *identity
                 || schemas.tools_ref != launch.selection.tools_ref
                 || schemas.nodes.iter().any(|node| {
-                    node.generation != launch.selection.tool_schema_generation
+                    node.child_dispatch != launch.dispatch_context_ref
+                        || node.generation != launch.selection.tool_schema_generation
                         || node.source != launch.selection.source
                 })
             {

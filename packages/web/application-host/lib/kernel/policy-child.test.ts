@@ -60,7 +60,7 @@ const reference = { action_id: 'independent-read-action', node_id: 'parent-read'
 async function waitingCheckpoint(lease: AgentPolicyLease): Promise<VarinAgentPolicyDecision> {
   const dispatch = await decide(lease, { kind: 'started' });
   expect(dispatch.action).toMatchObject({ kind: 'tool_graph', nodes: [{ id: 'dispatch', call: {
-    name: 'dispatch', arguments: { model: 'parent', profile: 'read_only' },
+    name: 'dispatch', schema_version: '2', arguments: { workMode: 'read_only', tools: ['file_read', 'file_list', 'file_search'] },
   } }] });
   const read = await decide(lease, graph('dispatch-action', 'dispatch', accepted('original-child-operation', 'preparing_child')), dispatch.state);
   expect(read.action).toMatchObject({ kind: 'tool_graph', nodes: [{ id: 'parent-read', call: { name: 'file_read', arguments: { path: 'source.txt' } } }] });

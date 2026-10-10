@@ -44,7 +44,7 @@ async function fixture() {
 }
 
 /** Runtime doubles model publication CAS only; preparation and Host admission use their real owners. */
-function adapterFixture(saved: ContextCheckpoint, prepare: ContextPreparer) {
+function adapterFixture(saved: ContextCheckpoint, prepare: ContextPreparer, childProfiles?: import('./child-profiles.js').ChildProfilePreparer) {
   let active = structuredClone(saved);
   const runtime = {
     thread: vi.fn(async () => ({ thread_id: identity.threadId, observer_project_ids: [], branches: [
@@ -69,7 +69,7 @@ function adapterFixture(saved: ContextCheckpoint, prepare: ContextPreparer) {
   const admit = vi.fn(async () => {}); const errors: unknown[] = [];
   const adapter = new ThreadAdapter(runtime as unknown as AgentRuntimeClient,
     { resolveModel: async () => ({ configuration, credentialOwner }), rebindModel: async () => credentialOwner },
-    admit, (_runId, error) => { errors.push(error); }, undefined, prepare);
+    admit, (_runId, error) => { errors.push(error); }, undefined, prepare, undefined, undefined, undefined, childProfiles);
   return { adapter, runtime, admit, errors, active: () => structuredClone(active) };
 }
 
@@ -89,10 +89,13 @@ it('renders selected resources once, keeps runtime safety outside SYSTEM, and ex
   expect(f.composition).toHaveBeenCalledTimes(1);
 });
 
-it('profile refresh and compaction retain original resource bytes while only compaction updates the note snapshot', async () => {
-  const f = await fixture(); const saved = checkpoint(f.context);
+it('refresh and compaction preserve frozen child instructions and resources while only compaction updates notes', async () => {
+  const f = await fixture();
+  const childProfile = { preset_id: 'reviewer', catalog_identity: 'original-catalog', work_mode: 'read_only' as const, tools: [], instructions: 'ORIGINAL CHILD INSTRUCTIONS' };
+  const saved = checkpoint(await f.prepare(identity, null, { mode: 'agent', threadRole: 'worker', projectId: null, childProfile }));
+  childProfile.instructions = 'LATER CHILD SETTINGS';
   await fs.writeFile(path.join(f.agentDir, 'SYSTEM.md'), 'LATER LIVE SYSTEM');
-  f.setCatalog({ revision: 2, prompts: { global: { sections: { preamble: 'PROFILE OVERRIDE', runtime_identity: null } } },
+  f.setCatalog({ revision: 2, prompts: { global: { sections: { preamble: 'PROFILE OVERRIDE', runtime_identity: null, child_profile: 'LIVE PROFILE CANNOT REPLACE FROZEN CHILD' } } },
     memories: [{ id: 2, scope: { kind: 'global' }, content: 'LATER NOTE', updatedAt: '2026-10-10T01:00:00Z' }] });
   const refreshed = await f.prepare.refresh!(saved);
   expect(refreshed.resources).toBe(saved.resources);
@@ -106,6 +109,14 @@ it('profile refresh and compaction retain original resource bytes while only com
   expect(compacted.resources).toBe(saved.resources);
   expect(compacted.effectiveSystemPrompt).toContain('LATER NOTE');
   expect(compacted.effectiveSystemPrompt).not.toContain('FROZEN NOTE');
+  const resources = await f.prepare.refreshResources!(saved);
+  const source = await f.prepare.forSource!(saved, null);
+  for (const context of [refreshed, compacted, resources, source]) {
+    expect(context.effectiveSystemPrompt).toContain('ORIGINAL CHILD INSTRUCTIONS');
+    expect(context.effectiveSystemPrompt).not.toContain('LATER CHILD SETTINGS');
+    expect(context.effectiveSystemPrompt).not.toContain('LIVE PROFILE CANNOT REPLACE FROZEN CHILD');
+    expect(context.instructionSources).toContain('agent.child-profile:{"catalogIdentity":"original-catalog","presetId":"reviewer"}');
+  }
 });
 
 it('resource refresh creates a separate candidate, preserves saved notes and memory checkpoint, and leaves failed candidates unpublished', async () => {
@@ -194,7 +205,9 @@ it('ThreadAdapter submits an explicit source with real forSource preparation and
     { id: 99, scope: { kind: 'global' }, content: 'ORIGINAL SOURCE MEMORY', updatedAt: '2026-10-10T00:00:00Z' }] };
   const prepare = createThreadContext({ resources, personalization: { catalog: async () => structuredClone(catalog) }, projectForWorkspace: projectLookup });
   const original = await prepare(identity, null, { mode: 'agent', threadRole: 'worker', projectId: 'admitted-project' });
-  const saved = checkpoint(original); const fAdapter = adapterFixture(saved, prepare);
+  const frozenProfiles = { identity: 'original-child-catalog', presets: [], normal_unavailable: null };
+  const childProfiles = vi.fn(async () => structuredClone(frozenProfiles));
+  const saved = checkpoint(original); const fAdapter = adapterFixture(saved, prepare, childProfiles);
   catalog = { revision: 6, prompts: {}, memories: [
     { id: 100, scope: { kind: 'global' }, content: 'LATER UNACCEPTED MEMORY', updatedAt: '2026-10-10T01:00:00Z' }] };
   const sourcePreparation = vi.spyOn(prepare, 'forSource'); const mainPreparation = vi.spyOn(prepare, 'main');
@@ -207,7 +220,9 @@ it('ThreadAdapter submits an explicit source with real forSource preparation and
   const submitted = fAdapter.runtime.submit.mock.calls[0]![0];
   const changed = submitted.initialContext!;
   expect(submitted.expectedContextCheckpoint).toBe(saved.id);
-  expect(submitted.launch).toMatchObject({ inheritSource: false, source: { workspaceId: 'new-workspace', branchId: 'new-source', revision: 2 } });
+  expect(submitted.launch).toMatchObject({ inheritSource: false, source: { workspaceId: 'new-workspace', branchId: 'new-source', revision: 2 }, childDispatch: frozenProfiles });
+  expect(childProfiles).toHaveBeenCalledExactlyOnceWith({ parent: { configuration: submitted.configuration, credential_scope: submitted.launch!.credentialScope } });
+
   expect(changed.resources?.source).toMatchObject({ workspace_id: 'new-workspace', branch_id: 'new-source', revision: 2 });
   expect(changed.resources?.snapshot.scope).toMatchObject({ mode: 'agent', threadRole: 'worker', projectId: 'admitted-project' });
   expect(changed.personalization?.memorySnapshot).toEqual(saved.personalization?.memorySnapshot);
@@ -222,7 +237,9 @@ it('ThreadAdapter submits an explicit source with real forSource preparation and
 });
 
 it('ThreadAdapter reuses an accepted input receipt after settings break, and only a matching raced receipt can recover a new preparation failure', async () => {
-  const f = await fixture(); const saved = checkpoint(f.context); const fAdapter = adapterFixture(saved, f.prepare);
+  const f = await fixture(); const saved = checkpoint(f.context);
+  const childProfiles = vi.fn(async () => ({ identity: 'accepted-profile-snapshot', presets: [], normal_unavailable: null }));
+  const fAdapter = adapterFixture(saved, f.prepare, childProfiles);
   const source: ThreadSource = { workspaceId: 'selected-workspace', executionWorkspaceId: 'selected-workspace',
     mode: 'fixed_branch', branchId: 'selected-source', revision: 0, tools: ['file_read'] };
   // Source pin admission is a separate tested owner. Keep this fixture's real user resource
@@ -239,7 +256,9 @@ it('ThreadAdapter reuses an accepted input receipt after settings break, and onl
   expect(fAdapter.runtime.submit.mock.calls[0]![0].expectedContextCheckpoint).toBe(saved.id);
   await fs.writeFile(path.join(f.agentDir, 'settings.json'), '{malformed');
   fAdapter.runtime.inputReceipt.mockResolvedValue(receipt);
+  childProfiles.mockRejectedValue(new Error('New profile settings unavailable'));
   expect(await fAdapter.adapter.submit(input)).toEqual(receipt);
+  expect(childProfiles).toHaveBeenCalledOnce();
   expect(preparation).toHaveBeenCalledOnce();
   expect(fAdapter.runtime.submit).toHaveBeenCalledOnce();
   expect(fAdapter.runtime.inputReceipt).toHaveBeenLastCalledWith(expect.objectContaining({ key: input.key,

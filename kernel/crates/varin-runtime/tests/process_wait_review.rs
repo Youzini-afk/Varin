@@ -76,6 +76,7 @@ impl Fixture {
             schema: json!({"type":"object"}),
         };
         let binding = RequestBinding {
+            child_dispatch: None,
             goal: None,
             resource_activations: Vec::new(),
             resource_checkpoint_id: None,
@@ -431,6 +432,7 @@ impl Fixture {
         };
         let launch = self.db.launch_intent(&self.run).unwrap().unwrap().selection;
         let context = FrozenToolContext {
+            child_dispatch: None,
             resource_activations: vec![],
             resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),
             run_id: self.run.clone(),

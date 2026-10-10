@@ -149,6 +149,7 @@ impl ExtensionToolBinding {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchSelection {
+    pub child_dispatch: Option<super::dispatch::ChildDispatchCatalog>,
     pub extension_bindings: Vec<ExtensionToolBinding>,
     #[serde(default)]
     pub policy_models: Vec<PolicyModelCapability>,
@@ -172,6 +173,7 @@ impl LaunchSelection {
         source: Option<SourceSelection>,
     ) -> Self {
         Self {
+            child_dispatch: None,
             extension_bindings: Vec::new(),
             policy_models: Vec::new(),
             mcp_binding: None,
@@ -187,6 +189,7 @@ impl LaunchSelection {
         }
     }
     pub(super) fn validate(&self) -> Result<()> {
+        if let Some(catalog) = &self.child_dispatch { catalog.validate()?; }
         validate_policy_models(&self.policy_models)?;
         let mut tools = std::collections::BTreeMap::new();
         if self.tools.iter().any(|tool| {
@@ -568,6 +571,7 @@ impl Catalog {
             }
             None => {
                 let intent = LaunchMetadata {
+                    dispatch_context_ref: None,
                     policy_generation: 0,
                     policy_target: super::policy_switch::PolicyTarget::Default,
                     preparation_failure: None,

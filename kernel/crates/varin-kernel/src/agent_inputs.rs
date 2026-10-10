@@ -139,6 +139,7 @@ fn submit_input(
                 ));
             }
             Ok::<_, KernelError>(varin_runtime::catalog::launches::LaunchSelection {
+                child_dispatch: selected.child_dispatch,
                 extension_bindings: Vec::new(),
                 policy_models: Vec::new(),
                 mcp_binding: None,
@@ -157,9 +158,7 @@ fn submit_input(
                         crate::questions::schemas(
                             crate::tools::KernelToolExecutor::selected_schemas(&kinds),
                         ),
-                        source.as_ref().is_some_and(|source| {
-                            source.mode == varin_runtime::SourceMode::FixedBranch
-                        }),
+                        source.is_some(),
                     );
                     tools = crate::process_wait::schemas(tools);
                     tools.push(crate::memory::schema(true));

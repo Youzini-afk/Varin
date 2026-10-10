@@ -59,6 +59,7 @@ fn model_call(
         },
     );
     let binding = RequestBinding {
+        child_dispatch: None,
         goal: None,
         resource_activations: Vec::new(),
         resource_checkpoint_id: None,
@@ -128,6 +129,7 @@ fn model_call(
             origin: origin.clone(),
         },
         FrozenToolContext {
+            child_dispatch: None,
             resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             run_id: run.into(),

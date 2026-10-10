@@ -34,7 +34,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 24;
+pub(crate) const FORMAT: i64 = 25;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -407,6 +407,7 @@ impl Catalog {
             ).optional()?;
             if let (Some(selection), Some((previous_run, body))) = (launch.as_mut(), previous) {
                 let previous: launch_content::LaunchMetadata = serde_json::from_str(&body)?;
+                if selection.child_dispatch_ref.is_none() { selection.child_dispatch_ref = previous.selection.child_dispatch_ref; }
                 selection.source = previous.selection.source;
                 if let Some(source) = selection.source.as_mut() {
                     if source.mode == crate::SourceMode::Materialized
@@ -488,6 +489,7 @@ impl Catalog {
                 }
             }
             let intent = launch_content::LaunchMetadata {
+                dispatch_context_ref: None,
                 policy_generation: 0,
                 policy_target: policy_switch::PolicyTarget::Default,
                 run_id: run_id.clone(),
@@ -621,22 +623,9 @@ impl Catalog {
     }
     pub fn request_cancel_run(&mut self, id: &str) -> Result<Run> {
         let tx = self.db.transaction()?;
-        let mut run: Run = record(&tx, "runs", id)?;
-        if run.state.terminal() || run.cancel_requested {
-            return Ok(run);
-        }
-        run.cancel_requested = true;
-        followups::cancel_source_run(&tx, id)?;
-        goals::cancel_run(&tx,id)?;
-        if run.state == RunState::Waiting {
-            questions::cancel_run_questions(&tx, id)?;
-            policy_control::cancel_run_pause(&tx, &run)?;
-        }
-        run.revision += 1;
-        put(&tx, "runs", id, &run)?;
-        event(&tx, id, run.revision, "run.cancel_requested", Value::Null)?;
+        let result = request_cancel_run_in(&tx, id)?;
         tx.commit()?;
-        Ok(run)
+        Ok(result)
     }
     /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn append_history(
@@ -912,32 +901,9 @@ impl Catalog {
     }
     pub fn request_cancel_operation(&mut self, key: &str) -> Result<Operation> {
         let tx = self.db.transaction()?;
-        let mut op: Operation = record(&tx, "operations", key)?;
-        if matches!(
-            policy_body::PolicyActionMetadata::from_operation(&op)?,
-            Some(policy_body::PolicyActionMetadata::PolicyPauseV1 { .. })
-        ) {
-            return Err(RuntimeError::Invalid(
-                "policy pause requires explicit Run resume or Run cancellation".into(),
-            ));
-        }
-        if (op.phase == OperationPhase::Terminal && op.outcome != Some(Outcome::Indeterminate))
-            || op.cancel_requested
-        {
-            return Ok(op);
-        }
-        op.cancel_requested = true;
-        op.revision += 1;
-        put(&tx, "operations", key, &op)?;
-        event(
-            &tx,
-            key,
-            op.revision,
-            "operation.cancel_requested",
-            Value::Null,
-        )?;
+        let result = request_cancel_operation_in(&tx, key)?;
         tx.commit()?;
-        Ok(op)
+        Ok(result)
     }
     pub fn handoff_operation(&mut self, key: &str, epoch: u64) -> Result<Operation> {
         let tx = self.db.transaction()?;
@@ -1643,6 +1609,9 @@ pub(crate) mod policy;
 #[path = "catalog_policy_model.rs"]
 pub(crate) mod policy_model;
 
+#[path = "catalog_dispatch.rs"]
+pub mod dispatch;
+
 #[path = "catalog_collaboration.rs"]
 pub mod collaboration;
 #[path = "catalog_memory.rs"]
@@ -1683,3 +1652,51 @@ impl Drop for Catalog {
 #[cfg(test)]
 #[path = "catalog_content_collection_tests.rs"]
 mod content_collection_tests;
+
+pub(super) fn request_cancel_run_in(tx: &Transaction<'_>, id: &str) -> Result<Run> {
+        let mut run: Run = record(tx, "runs", id)?;
+        if run.state.terminal() || run.cancel_requested {
+            return Ok(run);
+        }
+        run.cancel_requested = true;
+        followups::cancel_source_run(tx, id)?;
+        goals::cancel_run(tx,id)?;
+        if run.state == RunState::Waiting {
+            questions::cancel_run_questions(tx, id)?;
+            policy_control::cancel_run_pause(tx, &run)?;
+        }
+        run.revision += 1;
+        put(tx, "runs", id, &run)?;
+        event(tx, id, run.revision, "run.cancel_requested", Value::Null)?;
+        Ok(run)
+}
+
+pub(super) fn request_cancel_operation_in(tx: &Transaction<'_>, key: &str) -> Result<Operation> {
+        let mut op: Operation = record(tx, "operations", key)?;
+        if matches!(
+            policy_body::PolicyActionMetadata::from_operation(&op)?,
+            Some(policy_body::PolicyActionMetadata::PolicyPauseV1 { .. })
+        ) {
+            return Err(RuntimeError::Invalid(
+                "policy pause requires explicit Run resume or Run cancellation".into(),
+            ));
+        }
+        let unproven_process = op.executor.as_deref() == Some("process_spawn") && op.effect != Effect::None
+            && !op.external_receipt.as_ref().is_some_and(|receipt| receipt.executor_stopped);
+        if (op.phase == OperationPhase::Terminal && op.outcome != Some(Outcome::Indeterminate) && !unproven_process)
+            || op.cancel_requested
+        {
+            return Ok(op);
+        }
+        op.cancel_requested = true;
+        op.revision += 1;
+        put(tx, "operations", key, &op)?;
+        event(
+            tx,
+            key,
+            op.revision,
+            "operation.cancel_requested",
+            Value::Null,
+        )?;
+        Ok(op)
+}

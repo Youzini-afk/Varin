@@ -12,6 +12,10 @@ impl ControlCommands {
     /// and body work are deferred; dispatch cancellation remains tied to the durable command.
     pub fn admit_control(&self, method: &str, params: &Value) -> Result<Option<Value>, KernelError> {
         match method {
+            "runtime.tree.cancel" => {
+                let p: varin_runtime::catalog::dispatch::TreeCancelParams = serde_json::from_value(params.clone())?;
+                return Ok(Some(self.admit_tree_cancel(p.target, p.expected_parent_thread_id.as_deref())?));
+            }
             "runtime.goal.control" => {
                 let p:GoalControlParams=serde_json::from_value(params.clone())?;
                 let revision=p.expected_revision.try_into().map_err(|_|KernelError::Protocol("Goal revision must be nonnegative".into()))?;
@@ -47,22 +51,36 @@ impl ControlCommands {
             }
             "runtime.child.cancel" => {
                 let p: OperationParams = serde_json::from_value(params.clone())?;
-                let child = self
-                    .runtime
-                    .catalog()
-                    .lock()
-                    .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                    .cancel_child(&p.operation_id)
-                    .map_err(domain)?;
-                if let Some(receipt) = child.receipt {
-                    self.runtime
-                        .cancel(&receipt.run_id)
-                        .map_err(|e| KernelError::Operation(e.to_string()))?;
-                }
+                return Ok(Some(self.admit_tree_cancel(varin_runtime::catalog::dispatch::TreeCancelTarget::Child { operation_id: p.operation_id }, None)?));
             }
             _ => (),
         }
         Ok(None)
+    }
+    fn admit_tree_cancel(&self, target: varin_runtime::catalog::dispatch::TreeCancelTarget, expected_parent_thread_id: Option<&str>) -> Result<Value, KernelError> {
+                let capture = self.runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.cancel_tree_checked(target, expected_parent_thread_id).map_err(domain)?;
+                for run in &capture.run_ids { self.runtime.cancel_control(run); }
+                for operation in &capture.process_ids { self.runtime.cancel_operation_control(operation); }
+                let receipt = serde_json::to_value(&capture.receipt)?;
+                let runtime = self.runtime.clone();
+                let resources = self.resources.clone();
+                let models = self.models.clone();
+                let tools = self.tools.clone();
+                thread::spawn(move || {
+                    for run in &capture.run_ids {
+                        if let Ok(run) = runtime.cancel(run) { if run.state.terminal() { models.release(&run.id); tools.release(&run.id); } }
+                    }
+                    for id in &capture.process_ids {
+                        // The same original operation and ProcessManager own stop and recovery.
+                        // Admission receipts never claim that a process has already stopped.
+                        if let Ok(false) = resources.cancel_known_process(id) {
+                            let operation = runtime.catalog().lock().ok().and_then(|owner| owner.operation(id).ok());
+                            if let Some(operation) = operation { let _ = resources.cancel_process(id, &operation.run_id); }
+                        }
+                    }
+                    let _ = varin_runtime::catalog::child_delivery::reconcile_reports(&runtime.catalog());
+                });
+        Ok(receipt)
     }
     fn finish_question(
         &self,
@@ -213,36 +231,6 @@ impl ControlCommands {
                     }
                 }
                 Ok(operation_cancellation_receipt(&operation))
-            }
-            "runtime.child.cancel" => {
-                let p: OperationParams = serde_json::from_value(params)?;
-                let child = runtime
-                    .catalog()
-                    .lock()
-                    .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                    .child_task(&p.operation_id)
-                    .map_err(domain)?;
-                runtime
-                    .catalog()
-                    .lock()
-                    .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                    .cancel_child(&p.operation_id)
-                    .map_err(domain)?;
-                if let Some(receipt) = child.receipt {
-                    runtime
-                        .cancel(&receipt.run_id)
-                        .map_err(|e| KernelError::Operation(e.to_string()))?;
-                }
-                varin_runtime::catalog::child_delivery::reconcile_reports(&runtime.catalog())
-                    .map_err(domain)?;
-                let owner = runtime.catalog();
-                let catalog = owner
-                    .lock()
-                    .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-                let child = catalog.child_task(&p.operation_id).map_err(domain)?;
-                let read = catalog.capture_child_read(child);
-                drop(catalog);
-                Ok(serde_json::to_value(read.load().map_err(domain)?)?)
             }
             "runtime.child.reconcile" | "runtime.child.wait.cancel" => {
                 runtime

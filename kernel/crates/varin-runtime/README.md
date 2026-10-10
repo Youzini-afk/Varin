@@ -171,7 +171,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 24, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
+Catalog version 25, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -623,13 +623,36 @@ key and revision uniqueness contracts. Older or malformed formats are preserved 
 
 `catalog_collaboration` is the Catalog's parent/child domain. A dispatch binds the committed
 ModelStep/tool or PolicyAction/node origin, parent Run/Thread/branch, exact model configuration and
-credential scope, admission project, explicit profile and original source. Model arguments cannot
-select parent identity, project, workspace, source or grants. Both `read_only` and `isolated_write`
-require explicit `model: parent`. The read-only profile retains the selected file read/list/search
-subset; the writable profile adds controlled text write/edit only inside its private materialized
-source. Neither profile gains process, recursive dispatch, arbitrary extension or memory mutation
-tools. Private child writes do not require write authority over the parent's source; explicit parent
-Integration is a separate authorized action.
+credential scope, admission project, selected profile and original source. Model arguments cannot
+select parent identity, project, workspace, source or grants. `dispatch` schema 2 takes `task`, an
+optional configured `preset`, `workMode` and explicitly narrowed `tools`; old `model/profile` input
+is rejected. The existing Host `harness.models[role].agent`, `harness.agents` and shared preset
+resolver remain the configuration authority. Host prepares immutable `ChildDispatchCatalog` content
+with explicit inheritance/selection, original model configuration and credential scope. Original input
+or model-selection admission commits its reference atomically; retries keep the first accepted snapshot.
+
+`catalog_dispatch` retains these content references through Launch/ModelSelection, actual request and
+policy-node binding, and selected ChildTask content. The same closed-boundary preparation freezes the
+actual parent model/tool declarations and adds credential-free discovery to the model RequestView.
+A later configuration, model or tool selection cannot rewrite an old invocation. GC follows original
+nested references and in-flight publication; descendants share the catalog rather than nesting copies.
+
+Normal dispatch inherits its actual model and delegated tool declarations, excluding automatically
+injected main-only memory/plan/Goal helpers. Explicit `tools` may narrow that set; same-name but different
+declarations are not reinterpreted as core tools. The default set fails visibly if capabilities are
+unsupported. An explicit preset validates its whole declared definition before narrowing or overriding
+its work mode; missing, disabled or unsupported choices never fall back. Explicitly selected models
+remain selected even if their IDs match the parent. Inherited overrides retain the original parent
+basis, including explicit zero temperature and thinking settings.
+
+`read_only` fixes the source and removes known physical capabilities. `isolated_write` preserves the
+existing controlled file_write/file_edit projection inside a private materialized source; it does not
+add process authority or grant writes over the parent's source. Native children can select file tools,
+resources, questions, child dispatch/status/report/wait and managed process spawn/inspect/read/write/resize
+and wait. Process access requires the frozen configured capability or actual parent delegation, source
+authority and ordinary permission gates. A process cwd is not an OS sandbox. Arbitrary MCP/extension,
+planning/memory/Goal, LSP, Computer and remote child bindings are not silently enabled; those broader
+capability contracts remain separate work. Explicit parent Integration is a separate authorized action.
 
 The source owner validates whole-root read authority and records a bounded handoff under the
 persisted tool Operation. Fixed sources retain their original revision pin. Physical sources retain
@@ -650,12 +673,20 @@ preparation cannot launch a child.
 The child has an independent Run and grant. Parent final, cancelling only the parent's current Run,
 normal extension retirement, or revoking the old parent grant after handoff does not kill the child.
 Child/tree cancellation remains explicit; actual higher-level workspace or credential revocation
-still applies. Arbitrary sibling exchange, remote environments and the complete collaboration
-product migration remain outside this increment.
+still applies. Recursive dispatch captures the current child's actual physical source, including its
+changes, rather than reverting to its initial immutable baseline or the top parent's directory.
+Catalog computes the specified subtree from retained Thread/ChildTask lineage with no depth cap. Its
+transaction cancels preparing children, descendant Runs, live process Operations and original active
+followup/Goal continuations, including terminal source Runs. Parent and sibling subtrees stay outside
+a child target. A short TreeCancellationReceipt acknowledges cancellation intent, not executor stop.
+A parent-Thread scope fence is checked in that same transaction. Arbitrary sibling exchange, remote
+environments and the complete collaboration product migration remain separate work.
 
 A report, execution outcome and file result are separate facts. A read-only textual report is valid
-with `no_changes`. Writable children wait for actual file-worker/root-lease drainage before fixing a
-candidate through the original Storage owner. Candidate/base pins and original operation receipts
+with `no_changes`. A final child report can coexist with independent live processes. Writable children
+wait for actual file-worker/root-lease drainage and original process/guardian executor-stop evidence
+before fixing a candidate through the original Storage owner. Unknown effects remain distinct from
+proved stop; neither report completion nor cancellation intent releases the writer barrier. Candidate/base pins and original operation receipts
 bridge crashes; an existing candidate can publish without its former physical directory. A readonly
 worker prepares the WorkingResult, then Storage atomically publishes its original branch revision,
 record references and receipt. Catalog retains only the verified fixed result identity and effect.
@@ -691,7 +722,7 @@ original cancelled fact is delivered once, and the child remains independent. Wa
 their original tool origin are loaded on a worker; registration rechecks the same operation and graph
 admission before committing only metadata.
 
-Collaboration domain version 2 is required by the read-only existing-catalog preflight. An older,
+Collaboration domain version 3 is required by the read-only existing-catalog preflight. An older,
 missing or malformed domain is rejected before writable SQLite access or epoch advancement;
 there is no schema upgrade, fallback registry, or asset reset. New empty catalogs create the domain
 explicitly. Context scope uses the separate context domain version 4 contract.

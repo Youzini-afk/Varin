@@ -68,7 +68,11 @@ pub(super) struct SubmissionBody {
 }
 
 fn submission_intent(command: &SubmitInput, launch: &Option<launches::LaunchSelection>, inherit_source: bool, child_context: Option<&Value>) -> Value {
-    json!({"command":command,"launch":launch,"inherit_source":inherit_source,"child_context":child_context})
+    // The configuration catalog is prepared authority, like the initial context, not
+    // a new user intent. An already accepted key keeps the first committed snapshot.
+    let mut selected = serde_json::to_value(launch).expect("typed launch selection");
+    if let Some(object) = selected.as_object_mut() { object.remove("child_dispatch"); }
+    json!({"command":command,"launch":selected,"inherit_source":inherit_source,"child_context":child_context})
 }
 
 impl Catalog {

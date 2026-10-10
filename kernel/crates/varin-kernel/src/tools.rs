@@ -227,7 +227,7 @@ struct ProcessSpawnArgs {
 #[derive(Debug, Clone)]
 enum ResourceOperation {
     ChildSourceHandoff {
-        profile: String,
+        delegation: varin_runtime::catalog::dispatch::ChildSourceDelegation,
     },
     ChildStorageReceipt {
         operation_id: String,
@@ -714,7 +714,7 @@ impl KernelResourceClient {
         &self,
         binding: &ToolBinding,
         context: &ToolExecutionContext,
-        profile: &str,
+        delegation: &varin_runtime::catalog::dispatch::ChildSourceDelegation,
         authorize_only: bool,
         cancel: &CancellationToken,
     ) -> Result<Value, ExecutionError> {
@@ -722,7 +722,7 @@ impl KernelResourceClient {
             binding,
             context,
             ResourceOperation::ChildSourceHandoff {
-                profile: profile.into(),
+                delegation: delegation.clone(),
             },
             authorize_only,
             cancel,
@@ -1815,11 +1815,11 @@ pub(crate) fn serve_resource(
             storage.validate_live_root(root, &grant, host_id)?;
         }
         match &request.operation {
-            ResourceOperation::ChildSourceHandoff { profile } => {
+            ResourceOperation::ChildSourceHandoff { delegation } => {
                 return storage.child_source_handoff(
                     &request.binding,
                     &request.context,
-                    profile,
+                    delegation,
                     &grant,
                     host_id,
                     request.authorize_only,

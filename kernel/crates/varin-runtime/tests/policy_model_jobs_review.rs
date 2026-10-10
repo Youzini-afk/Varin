@@ -35,6 +35,7 @@ impl Fixture {
             })
             .unwrap();
         let binding = RequestBinding {
+            child_dispatch: None,
             goal: None, resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "main-account".into(),

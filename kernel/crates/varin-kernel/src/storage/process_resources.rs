@@ -662,6 +662,12 @@ impl Storage {
         &mut self,
         target: &Path,
     ) -> Result<(), KernelError> {
+        if let Some(process) = self.process_directory_writer(target)? {
+            return Err(KernelError::Operation(format!("process writer {process} has not confirmed exit; directory is retained")));
+        }
+        Ok(())
+    }
+    pub(super) fn process_directory_writer(&mut self, target: &Path) -> Result<Option<String>, KernelError> {
         self.refresh_process_records()?;
         let records = self
             .conn
@@ -673,12 +679,9 @@ impl Storage {
             if record["writerActive"].as_bool() != Some(false)
                 && contains(target, Path::new(string(&record, "cwd")?))
             {
-                return Err(KernelError::Operation(format!(
-                    "process writer {} has not confirmed exit; directory is retained",
-                    string(&record, "processId")?
-                )));
+                return Ok(Some(string(&record, "processId")?.into()));
             }
         }
-        Ok(())
+        Ok(None)
     }
 }

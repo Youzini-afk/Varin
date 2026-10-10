@@ -6,8 +6,8 @@
 export const KERNEL_PROTOCOL_VERSION = 1 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
-export const KERNEL_CONTROL_METHODS = ["runtime.goal.control","runtime.followup.control","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
-export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.goal.control","runtime.followup.control","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
+export const KERNEL_CONTROL_METHODS = ["runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
+export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.history.body"] as const;
@@ -84,6 +84,7 @@ export type KernelMethod =
   | "runtime.permission.consume"
   | "runtime.question.answer"
   | "runtime.operation.inspect"
+  | "runtime.operation.status"
   | "runtime.process.access"
   | "runtime.operation.cancel"
   | "runtime.events.read"
@@ -204,6 +205,8 @@ export type KernelMethod =
   | "runtime.child.prepare"
   | "runtime.child.fail"
   | "runtime.child.cancel"
+  | "runtime.tree.cancel"
+  | "runtime.child.capabilities"
   | "runtime.child.release"
   | "runtime.process.wait.reconcile"
   | "runtime.child.reconcile"
@@ -627,6 +630,7 @@ export interface SubmitLaunch {
   source: LaunchSourceParams | null;
   enabledTools: string[];
   credentialScope?: CredentialScope;
+  childDispatch?: ChildDispatchCatalog;
 }
 
 export interface LaunchFailedParams {
@@ -681,6 +685,7 @@ export interface LaunchSelectParams {
   source: LaunchSourceParams | null;
   enabledTools: string[];
   credentialScope?: CredentialScope;
+  childDispatch?: ChildDispatchCatalog;
 }
 
 export interface LaunchSource {
@@ -886,6 +891,7 @@ export interface LaunchSelection {
   tools: LaunchTool[];
   policy: LaunchPolicy;
   source: LaunchSource | null;
+  child_dispatch: ChildDispatchCatalog | null;
 }
 
 export interface LaunchIntent {
@@ -1054,6 +1060,7 @@ export interface ModelSelectParams {
   key: string;
   configuration: unknown;
   credentialScope?: CredentialScope;
+  childDispatch?: ChildDispatchCatalog;
 }
 
 export interface RunModelSelection {
@@ -2749,10 +2756,70 @@ export interface ChildWaitParams {
   waitId: string;
 }
 
+export interface ChildCapabilityDescriptor {
+  name: string;
+  version: string;
+  source_requirement: 'none' | 'source' | 'physical';
+}
+
+export type ChildWorkMode = 'read_only' | 'isolated_write';
+
+export interface ChildModelBinding {
+  configuration: ModelSessionConfiguration;
+  credential_scope: CredentialScope | null;
+}
+
+export interface ChildCapabilityFailure {
+  code: string;
+  capabilities: string[];
+}
+
+export interface ChildPreset {
+  id: string;
+  name: string;
+  instructions: string;
+  tools: string[];
+  work_mode: ChildWorkMode;
+  model: ChildModelBinding | null;
+  unavailable: ChildCapabilityFailure | null;
+  model_source: 'inherit' | 'selected';
+  inherit_base: ChildModelBinding | null;
+}
+
+export interface ChildDispatchCatalog {
+  identity: string;
+  presets: ChildPreset[];
+  normal_unavailable: ChildCapabilityFailure | null;
+}
+
+export interface ChildSelectedProfile {
+  preset_id: string | null;
+  catalog_identity: string | null;
+  work_mode: ChildWorkMode;
+  tools: string[];
+  instructions: string;
+}
+
+export type TreeCancelTarget = { kind: 'thread'; thread_id: string } | { kind: 'child'; operation_id: string };
+
+export interface TreeCancelParams {
+  target: TreeCancelTarget;
+  expectedParentThreadId?: string;
+}
+
+export interface TreeCancellationReceipt {
+  target: TreeCancelTarget;
+  cursor: number;
+  run_count: number;
+  child_count: number;
+  process_count: number;
+}
+
 export interface ChildInput {
   task: string;
-  model: string;
-  profile: string;
+  preset?: string;
+  workMode?: ChildWorkMode;
+  tools?: string[];
 }
 
 export interface ChildSourcePin {
@@ -2806,6 +2873,7 @@ export interface ChildTask {
   resources_released: boolean;
   source: ChildSource;
   code_result: ChildCodeResult;
+  selected_profile: ChildSelectedProfile;
 }
 
 export interface ChildWait {
@@ -2885,6 +2953,7 @@ export type KernelMethodParams = {
   "runtime.permission.consume": PermissionOpenParams;
   "runtime.question.answer": QuestionAnswerParams;
   "runtime.operation.inspect": OperationParams;
+  "runtime.operation.status": OperationParams;
   "runtime.operation.cancel": OperationParams;
   "runtime.process.access": RuntimeProcessAccessParams;
   "runtime.events.read": EventsParams;
@@ -3009,6 +3078,8 @@ export type KernelMethodParams = {
   "runtime.child.prepare": ChildPrepareParams;
   "runtime.child.fail": ChildFailParams;
   "runtime.child.cancel": OperationParams;
+  "runtime.tree.cancel": TreeCancelParams;
+  "runtime.child.capabilities": KernelEmptyParams;
   "runtime.child.release": OperationParams;
   "runtime.process.wait.reconcile": KernelEmptyParams;
   "runtime.child.reconcile": KernelEmptyParams;
@@ -3606,6 +3677,15 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.operation.inspect";
+      params: OperationParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.operation.status";
       params: OperationParams;
       epoch?: string;
       grantId?: string;
@@ -4723,6 +4803,24 @@ export type KernelRequest =
       id: string;
       method: "runtime.child.cancel";
       params: OperationParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.tree.cancel";
+      params: TreeCancelParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.child.capabilities";
+      params: KernelEmptyParams;
       epoch?: string;
       grantId?: string;
     }

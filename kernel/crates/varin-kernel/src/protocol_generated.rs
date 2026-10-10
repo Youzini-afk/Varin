@@ -9,6 +9,10 @@ pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 1;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
+    "runtime.operation.status",
+    "runtime.child.cancel",
+    "runtime.child.capabilities",
+    "runtime.tree.cancel",
     "runtime.goal.control",
     "runtime.followup.control",
     "runtime.policy.select",
@@ -40,6 +44,10 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "process.subscription.unsubscribe",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "runtime.operation.status",
+    "runtime.child.cancel",
+    "runtime.child.capabilities",
+    "runtime.tree.cancel",
     "runtime.goal.control",
     "runtime.followup.control",
     "runtime.policy.select",
@@ -303,6 +311,7 @@ pub(crate) struct LaunchSelectParams {
     pub(crate) source: RequiredNullable<LaunchSourceParams>,
     pub(crate) enabled_tools: Vec<String>,
     pub(crate) credential_scope: Option<CredentialScope>,
+    pub(crate) child_dispatch: Option<varin_runtime::catalog::dispatch::ChildDispatchCatalog>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -398,6 +407,7 @@ pub(crate) struct ModelSelectParams {
     pub(crate) key: String,
     pub(crate) configuration: Value,
     pub(crate) credential_scope: Option<CredentialScope>,
+    pub(crate) child_dispatch: Option<varin_runtime::catalog::dispatch::ChildDispatchCatalog>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1591,6 +1601,13 @@ pub(crate) struct ChildFailParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct TreeCancelParams {
+    pub(crate) target: varin_runtime::catalog::dispatch::TreeCancelTarget,
+    pub(crate) expected_parent_thread_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ChildWaitParams {
     pub(crate) wait_id: String,
 }
@@ -1712,6 +1729,7 @@ pub(crate) struct SubmitLaunch {
     pub(crate) source: RequiredNullable<LaunchSourceParams>,
     pub(crate) enabled_tools: Vec<String>,
     pub(crate) credential_scope: Option<CredentialScope>,
+    pub(crate) child_dispatch: Option<varin_runtime::catalog::dispatch::ChildDispatchCatalog>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2231,6 +2249,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.operation.inspect" => serde_json::from_value::<OperationParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.operation.status" => serde_json::from_value::<OperationParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.operation.cancel" => serde_json::from_value::<OperationParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -2745,6 +2766,12 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.child.cancel" => serde_json::from_value::<OperationParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.tree.cancel" => serde_json::from_value::<TreeCancelParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.child.capabilities" => serde_json::from_value::<KernelEmptyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.child.release" => serde_json::from_value::<OperationParams>(params.clone())

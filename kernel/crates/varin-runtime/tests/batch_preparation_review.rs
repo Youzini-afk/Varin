@@ -284,6 +284,7 @@ fn input(run: &str) -> ExecutionInput {
         run_id: run.into(),
         owner_generation: 1,
         binding: RequestBinding {
+            child_dispatch: None,
             goal: None, resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "fixture".into(),

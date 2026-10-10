@@ -7,7 +7,7 @@ import type { AgentPersonalization } from '../memory/agent-personalization.js';
 import { createAgentResourceAuthority, type PreparedAgentResources } from '../agent-resources/authority.js';
 import { resourceSections } from '../agent-resources/render.js';
 import { ResourceScopeError, type ThreadResourceScope, type ThreadResourceScopeOptions } from './thread-resource-scope.js';
-import type { InitialContext, ContextPersonalization, ContextResources, LaunchSource } from './protocol.generated.js';
+import type { InitialContext, ContextPersonalization, ContextResources, LaunchSource, ChildSelectedProfile } from './protocol.generated.js';
 
 interface ContextOwners {
   composition?: ContextCompositionPreparer;
@@ -20,6 +20,7 @@ export interface AdmittedContextScope {
   mode: AgentPersonalizationContext['mode'];
   threadRole: AgentPersonalizationContext['threadRole'];
   projectId: string | null;
+  childProfile?: ChildSelectedProfile;
 }
 export interface ContextPreparer {
   (identity: ThreadIdentity, source: ThreadSource | null, admitted: AdmittedContextScope): Promise<InitialContext>;
@@ -81,10 +82,10 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
     const composition = owners.composition ? await owners.composition({ sessionId: basis.sessionId,
       ...(basis.projectId ? { projectId: basis.projectId } : {}) }) : basis.contextComposition;
     const { contextComposition: _oldComposition, ...provenance } = basis;
-    const { runtime_identity: _profileIdentity, ...personalized } = personalizeAgentSystemPrompt(original, context);
+    const { runtime_identity: _profileIdentity, child_profile: _profileChild, ...personalized } = personalizeAgentSystemPrompt(original, context);
     return {
       ...(resources ? { resources } : {}),
-      effectiveSystemPrompt: renderAgentSystemPrompt({ runtime_identity: original.runtime_identity ?? '', ...personalized }),
+      effectiveSystemPrompt: renderAgentSystemPrompt({ runtime_identity: original.runtime_identity ?? '', ...personalized, ...(original.child_profile ? { child_profile: original.child_profile } : {}) }),
       instructionSources: [...basis.instructionSources, `agent.personalization:profiles:${configurationDigest}`],
       memoryCheckpoint: `agent.personalization:${memorySnapshot.revision}:${digest({ scopes, memories: context.memories })}`,
       personalization: { ...provenance, memorySnapshot, configurationDigest,
@@ -110,8 +111,8 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
     const snapshot = await prepareResources(identity, source, admitted);
     return render({ memorySnapshot: { revision: 0, memories: [] }, configurationDigest: '', mode: admitted.mode,
       threadRole: admitted.threadRole, revision: 0, sessionId: identity.threadId, projectId: admitted.projectId,
-      originalSections: Object.entries(sections(snapshot)).map(([name, content]) => ({ name, content })),
-      instructionSources: sources(snapshot) }, { source: resourceSource(source), snapshot }, true);
+      originalSections: Object.entries({ ...sections(snapshot), ...(admitted.childProfile?.instructions ? { child_profile: admitted.childProfile.instructions } : {}) }).map(([name, content]) => ({ name, content })),
+      instructionSources: [...sources(snapshot), ...(admitted.childProfile?.preset_id ? [`agent.child-profile:${JSON.stringify({ catalogIdentity: admitted.childProfile.catalog_identity, presetId: admitted.childProfile.preset_id })}`] : [])] }, { source: resourceSource(source), snapshot }, true);
   };
   const replaceResources = async (checkpoint: ContextCheckpoint, source: ThreadSource | null,
     options: ResourceRefreshOptions | undefined, retainSource: boolean): Promise<InitialContext> => {
@@ -128,8 +129,9 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
       throw new Error('Resource refresh cannot change the original source');
     }
     const candidate = await render({ ...basis,
-      originalSections: Object.entries(sections(snapshot)).map(([name, content]) => ({ name, content })),
-      instructionSources: sources(snapshot) }, { source: retainSource ? previous.source : resourceSource(source), snapshot });
+      originalSections: [...Object.entries(sections(snapshot)).map(([name, content]) => ({ name, content })),
+        ...basis.originalSections.filter(section => section.name === 'child_profile')],
+      instructionSources: [...sources(snapshot), ...basis.instructionSources.filter(source => source.startsWith('agent.child-profile:'))] }, { source: retainSource ? previous.source : resourceSource(source), snapshot });
     options?.signal?.throwIfAborted();
     // Resource publication does not acknowledge a newer memory note snapshot.
     return { ...candidate, memoryCheckpoint: checkpoint.proposal.memory_checkpoint };

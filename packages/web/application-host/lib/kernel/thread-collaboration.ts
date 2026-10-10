@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { admitRunSourceAuthority } from './source-launch.js';
+import { admitRunSourceAuthority, sourceToolSchemas } from './source-launch.js';
 import type { KernelClient } from './kernel-client.js';
 import { KernelWorkingStateRootStore, type KernelStorageAdapter } from './storage-adapter.js';
 import type { LiveSourceResolver } from './live-source.js';
@@ -27,7 +27,7 @@ export interface ThreadCollaborationOwners {
 /** Consumes committed child/process-wait/follow-up facts, including startup backlog. Maps hold only cancellable live
  * work; Catalog owns task identities, preparation receipts, reports and Wait delivery. */
 export class ThreadCollaboration {
-  private readonly tasks = new Map<string, { controller: AbortController; work: Promise<void>; revision: number; recheck: boolean }>();
+  private readonly tasks = new Map<string, { controller: AbortController; work: Promise<void>; revision: number; preparing: boolean; recheck: boolean }>();
   private readonly cleaningSources = new Set<string>();
   private readonly removers: Array<() => void>;
   private epoch = new AbortController();
@@ -95,13 +95,15 @@ export class ThreadCollaboration {
         }
         epoch.signal.throwIfAborted();
         for (const child of children) {
-          if (child.report && !child.receipt) this.tasks.get(child.operation_id)?.controller.abort();
           const active = this.tasks.get(child.operation_id);
+          if (child.report && active?.preparing) {
+            active.recheck = true; active.controller.abort();
+          }
           if (active && child.revision > active.revision) active.recheck = true;
           if (!active && (!child.resources_released || child.state === 'preparing' || child.state === 'ready' || Boolean(child.report && child.receipt && ['pending', 'settling', 'candidate'].includes(child.code_result.kind)))) {
             const controller = new AbortController();
             const signal = AbortSignal.any([epoch.signal, controller.signal]);
-            const task = { controller, work: Promise.resolve(), revision: child.revision, recheck: false };
+            const task = { controller, work: Promise.resolve(), revision: child.revision, preparing: !child.report, recheck: false };
             this.tasks.set(child.operation_id, task);
             task.work = this.advance(child, signal, epoch.signal).catch(error => {
               if (!signal.aborted) this.owners.onError(child.operation_id, error);
@@ -138,7 +140,13 @@ export class ThreadCollaboration {
       events = await runtime.events(this.launchCursor, 256, signal);
       signal.throwIfAborted();
       for (const event of events) {
-        if (event.kind.startsWith('operation.')) { this.domainRecoveryNeeded = true; this.dirty = true; }
+        if (event.kind.startsWith('operation.')) {
+          this.domainRecoveryNeeded = true; this.dirty = true;
+          // A process receipt can release a child's writer barrier without changing the
+          // ChildTask revision. Keep that wake even while its earlier check is draining.
+          for (const task of this.tasks.values()) task.recheck = true;
+        }
+        if (event.kind === 'run.cancel_requested') this.owners.kernel.cancelRunPreparation(event.subject);
         const data = event.data as { run_id?: unknown } | null;
         if ((event.kind === 'policy.resumed' || event.kind === 'followup.admitted' || event.kind === 'goal.run_ready') && data && typeof data.run_id === 'string') {
           void this.owners.continueRun(data.run_id, signal).catch(error => {
@@ -153,10 +161,7 @@ export class ThreadCollaboration {
     if (child.source.kind !== 'ready') throw new Error('Child source is not ready');
     const fixed = child.source.selection;
     if ((fixed.mode !== 'fixed_branch' && fixed.mode !== 'materialized') || !fixed.branch_id || fixed.revision === null) throw new Error('Child source is not fixed');
-    const tools = child.launch.tools.map(tool => {
-      if (!['file_read', 'file_list', 'file_search', 'file_write', 'file_edit'].includes(tool.name)) throw new Error('Child contains an unadmitted capability');
-      return tool.name as ThreadSource['tools'][number];
-    });
+    const tools = sourceToolSchemas(child.launch).map(tool => tool.name as ThreadSource['tools'][number]);
     return { mode: fixed.mode, workspaceId: fixed.workspace_id, executionWorkspaceId: fixed.execution_workspace_id,
       branchId: fixed.branch_id, revision: fixed.revision, tools,
       ...(fixed.environment_run_id ? { environmentRunId: fixed.environment_run_id } : {}) };
@@ -225,6 +230,9 @@ export class ThreadCollaboration {
         if (!candidate) {
           if (purpose === 'result') continue;
           child = await runtime.settleChild({ operationId: child.operation_id, toolBinding: authority.toolBinding }, signal);
+          // A final report does not stop its accepted processes. Only the existing
+          // settlement barrier authorizes freezing the private execution directory.
+          if (child.code_result.kind !== 'settling') return child;
           if (!authority.rootId || !authority.canonicalRoot) throw new Error('Child has no original private execution root');
           store = new KernelWorkingStateRootStore(await storageAdapter.contextFromSourceGrant({ grant: authority.grant,
             owningWorkspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId,
@@ -275,7 +283,7 @@ export class ThreadCollaboration {
         child = await this.prepareSource(child, signal);
         const source = this.childSource(child);
         const identity: ThreadIdentity = { runtime: 'agent', threadId: child.child_thread_id, branchId: child.child_branch_id };
-        const context = await waitWithSignal(prepareContext(identity, source, { mode: 'agent', threadRole: 'worker', projectId: child.project_id }), signal);
+        const context = await waitWithSignal(prepareContext(identity, source, { mode: 'agent', threadRole: 'worker', projectId: child.project_id, childProfile: child.selected_profile }), signal);
         signal.throwIfAborted();
         if (source.mode === 'live_root') throw new Error('Child source is not isolated');
         child = await runtime.prepareChild({ operationId: child.operation_id, source: { mode: source.mode, liveRoot: null,

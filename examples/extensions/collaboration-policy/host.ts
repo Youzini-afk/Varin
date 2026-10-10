@@ -22,8 +22,8 @@ function restore(value: JsonValue): State {
   }
   return structuredClone(value) as unknown as State;
 }
-function node(id: string, name: string, args: JsonValue): VarinAgentPolicyToolNode {
-  return { id, depends_on: [], call: { call_id: id, name, schema_version: '1', arguments: args } };
+function node(id: string, name: string, args: JsonValue, version = '1'): VarinAgentPolicyToolNode {
+  return { id, depends_on: [], call: { call_id: id, name, schema_version: version, arguments: args } };
 }
 export default defineHostExtension({
   activate(context) {
@@ -85,7 +85,7 @@ export default defineHostExtension({
           return fail('Unexpected graph after the parent answer began');
         }
         if (input.state === null && (event.kind === 'started' || event.kind === 'input_delivered')) return {
-          action: { kind: 'tool_graph', nodes: [node('dispatch', 'dispatch', { task: config.task, model: 'parent', profile: 'read_only' })] }, state: asJson(state),
+          action: { kind: 'tool_graph', nodes: [node('dispatch', 'dispatch', { task: config.task, workMode: 'read_only', tools: ['file_read', 'file_list', 'file_search'] }, '2')] }, state: asJson(state),
         };
         return fail('Collaboration policy requires its committed operation event');
       },

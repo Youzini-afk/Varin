@@ -14,6 +14,8 @@ pub enum RunModelSelectionStatus {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RunModelSelection {
+    #[serde(skip)]
+    pub child_dispatch_ref: Option<Value>,
     pub id: String,
     pub run_id: String,
     pub revision: u64,
@@ -28,6 +30,25 @@ pub struct RunModelSelections {
     pub desired: Option<RunModelSelection>,
     pub active: Option<RunModelSelection>,
 }
+#[derive(Serialize, Deserialize)]
+struct ModelSelectionRecord {
+    #[serde(flatten)]
+    selection: RunModelSelection,
+    child_dispatch_ref: Option<Value>,
+}
+fn encode_selection(selection: &RunModelSelection) -> Result<String> {
+    encode(&ModelSelectionRecord { selection: selection.clone(), child_dispatch_ref: selection.child_dispatch_ref.clone() })
+}
+fn decode_selection(body: &str) -> Result<RunModelSelection> {
+    let record: ModelSelectionRecord = serde_json::from_str(body)?;
+    let mut selection = record.selection;
+    selection.child_dispatch_ref = record.child_dispatch_ref;
+    Ok(selection)
+}
+fn selection_record(db: &Connection, id: &str) -> Result<RunModelSelection> {
+    let body: String = db.query_row("SELECT body FROM model_selections WHERE id=?1", [id], |row| row.get(0))?;
+    decode_selection(&body)
+}
 impl Catalog {
     pub fn model_selections(&self, run_id: &str) -> Result<RunModelSelections> {
         self.run(run_id)?;
@@ -39,7 +60,7 @@ impl Catalog {
                 |row| row.get::<_, String>(0),
             )
             .optional()?
-            .map(|body| serde_json::from_str(&body))
+            .map(|body| decode_selection(&body))
             .transpose()?;
         let active = self
             .db
@@ -49,7 +70,7 @@ impl Catalog {
                 |row| row.get::<_, String>(0),
             )
             .optional()?
-            .map(|body| serde_json::from_str(&body))
+            .map(|body| decode_selection(&body))
             .transpose()?;
         Ok(RunModelSelections { desired, active })
     }
@@ -59,6 +80,12 @@ impl Catalog {
         key: &str,
         configuration: ModelSessionConfiguration,
         credential_scope: Option<CredentialScope>,
+    ) -> Result<RunModelSelection> {
+        self.select_model_prepared(run_id, key, configuration, credential_scope, None)
+    }
+    pub fn select_model_prepared(
+        &mut self, run_id: &str, key: &str, configuration: ModelSessionConfiguration,
+        credential_scope: Option<CredentialScope>, prepared: Option<dispatch::PreparedChildCatalog>,
     ) -> Result<RunModelSelection> {
         if key.trim().is_empty() {
             return Err(RuntimeError::Invalid(
@@ -79,7 +106,7 @@ impl Catalog {
                 "Run is closing or has a fixed context-job model".into(),
             ));
         }
-        if let Some(previous) = optional_record::<RunModelSelection>(&tx, "model_selections", key)?
+        if let Some(previous) = tx.query_row("SELECT body FROM model_selections WHERE id=?1", [key], |row| row.get::<_, String>(0)).optional()?.map(|body| decode_selection(&body)).transpose()?
         {
             if previous.run_id == run_id
                 && previous.configuration == configuration
@@ -100,14 +127,16 @@ impl Catalog {
         // remains valid for its admitted work until activation of the replacement.
         let previous: Option<String> = tx.query_row("SELECT id FROM model_selections WHERE run_id=?1 AND active=0 AND status IN ('preparing','ready','failed') ORDER BY revision DESC LIMIT 1",[run_id],|row|row.get(0)).optional()?;
         if let Some(previous) = previous {
-            let mut previous: RunModelSelection = record(&tx, "model_selections", &previous)?;
+            let mut previous: RunModelSelection = selection_record(&tx, &previous)?;
             previous.status = RunModelSelectionStatus::Superseded;
             tx.execute(
                 "UPDATE model_selections SET status='superseded',body=?2 WHERE id=?1",
-                params![previous.id, encode(&previous)?],
+                params![previous.id, encode_selection(&previous)?],
             )?;
         }
+        let launch: launch_content::LaunchMetadata = record(&tx, "run_launches", run_id)?;
         let selection = RunModelSelection {
+            child_dispatch_ref: prepared.as_ref().and_then(|prepared| prepared.reference.clone()).or(launch.selection.child_dispatch_ref),
             id: key.into(),
             run_id: run_id.into(),
             revision,
@@ -117,7 +146,7 @@ impl Catalog {
             status: RunModelSelectionStatus::Preparing,
             failure: None,
         };
-        tx.execute("INSERT INTO model_selections(id,run_id,revision,status,body) VALUES(?1,?2,?3,'preparing',?4)",params![key,run_id,sql_number(revision)?,encode(&selection)?])?;
+        tx.execute("INSERT INTO model_selections(id,run_id,revision,status,body) VALUES(?1,?2,?3,'preparing',?4)",params![key,run_id,sql_number(revision)?,encode_selection(&selection)?])?;
         run.revision += 1;
         put(&tx, "runs", run_id, &run)?;
         event(
@@ -151,7 +180,7 @@ impl Catalog {
         if current != selection.id {
             return Ok(false);
         }
-        let mut stored: RunModelSelection = record(&tx, "model_selections", &selection.id)?;
+        let mut stored: RunModelSelection = selection_record(&tx, &selection.id)?;
         if stored.configuration != selection.configuration
             || stored.credential_scope != selection.credential_scope
         {
@@ -177,7 +206,7 @@ impl Catalog {
                 } else {
                     "ready"
                 },
-                encode(&stored)?
+                encode_selection(&stored)?
             ],
         )?;
         run.revision += 1;
@@ -212,7 +241,7 @@ impl Catalog {
         if current != selection.id {
             return Ok(false);
         }
-        let mut stored: RunModelSelection = record(&tx, "model_selections", &selection.id)?;
+        let mut stored: RunModelSelection = selection_record(&tx, &selection.id)?;
         if stored.status == RunModelSelectionStatus::Active {
             return Ok(true);
         }
@@ -248,17 +277,17 @@ impl Catalog {
             )
             .optional()?;
         if let Some(old) = old {
-            let mut old: RunModelSelection = record(&tx, "model_selections", &old)?;
+            let mut old: RunModelSelection = selection_record(&tx, &old)?;
             old.status = RunModelSelectionStatus::Superseded;
             tx.execute(
                 "UPDATE model_selections SET status='superseded',active=0,body=?2 WHERE id=?1",
-                params![old.id, encode(&old)?],
+                params![old.id, encode_selection(&old)?],
             )?;
         }
         stored.status = RunModelSelectionStatus::Active;
         tx.execute(
             "UPDATE model_selections SET status='active',active=1,body=?2 WHERE id=?1",
-            params![stored.id, encode(&stored)?],
+            params![stored.id, encode_selection(&stored)?],
         )?;
         run.configuration = serde_json::to_value(&stored.configuration)?;
         run.revision += 1;
@@ -269,6 +298,8 @@ impl Catalog {
         launch.selection.model = binding.model.clone();
         launch.selection.configuration_generation = binding.configuration_generation;
         launch.selection.credential_scope = stored.credential_scope;
+        launch.selection.child_dispatch_ref = stored.child_dispatch_ref;
+        launch.dispatch_context_ref = None;
         launch.revision += 1;
         put(&tx, "run_launches", &run.id, &launch)?;
         event(

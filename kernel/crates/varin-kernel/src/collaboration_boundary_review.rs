@@ -30,7 +30,7 @@ fn boundary(revoke_before: bool, policy: bool) {
         fixture.context = fixture.admit_policy_call(ToolCall {
             call_id: "dispatch-call".into(),
             name: "dispatch".into(),
-            schema_version: "1".into(),
+            schema_version: "2".into(),
             arguments: serde_json::to_value(&fixture.input).unwrap(),
         });
         fixture
@@ -130,10 +130,11 @@ fn boundary(revoke_before: bool, policy: bool) {
     let call = ToolCall {
         call_id: "dispatch-call".into(),
         name: "dispatch".into(),
-        schema_version: "1".into(),
+        schema_version: "2".into(),
         arguments: serde_json::to_value(f.input).unwrap(),
     };
     let frozen = FrozenToolContext {
+        child_dispatch: db.lock().unwrap().launch_metadata(&f.context.run_id).unwrap().unwrap().dispatch_context_ref,
         resource_activations: Vec::new(),
         resource_checkpoint_id: None,
         run_id: f.context.run_id.clone(),

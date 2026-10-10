@@ -19,7 +19,7 @@ function fixture(prepareContext?: ContextPreparer) {
   const launch: LaunchIntent = { policy_preparable: false, policy_generation: 0, policy_target: { kind: 'default' }, run_id: run.id, revision: 1, startable: false, requires_rebind: true, bound_epoch: null,
     pause: { action_id: 'pause:one', wait_id: 'wait:one', reason: 'Review before proceeding' }, preparation_failure: null,
     selection: { credential_scope: { reference: 'scope', authority: 'fixture', account: 'account', generation: 1 },
-      policy_models: [], mcp_binding: null, extension_bindings:[], connection_identity: 'fixture', provider_family: 'fixture', model: 'fixture',
+      child_dispatch: null, policy_models: [], mcp_binding: null, extension_bindings:[], connection_identity: 'fixture', provider_family: 'fixture', model: 'fixture',
       configuration_generation: 1, tool_schema_generation: 1, tools: [], policy: { name: 'fixture', version: '1' }, source: null } };
   const receipt = { run_id: run.id, action_id: 'pause:one', wait_id: 'wait:one', cursor: 7 };
   let preparation = new AbortController();
@@ -372,24 +372,25 @@ it('policy HTTP controls require the displayed selection and branch, reject priv
   expect(f.runtime.rebindLaunch).not.toHaveBeenCalled();
 });
 
-it('a child fact observed during an active launch is rechecked once after that launch releases', async () => {
+it.each(['child_revision', 'process_receipt'] as const)('%s observed during an active child task is rechecked once after it releases', async wake => {
   const f = fixture();
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   let listener!: (event: AgentRuntimeStreamEvent) => void;
   const child = { operation_id: 'child-operation', parent_run_id: 'parent', parent_thread_id: 'parent-thread', parent_branch_id: 'parent-branch',
     child_thread_id: 'child-thread', child_branch_id: 'child-branch', origin: {}, call_id: 'dispatch', project_id: null,
-    input: { task: 'Read source', model: 'parent', profile: 'read_only' }, configuration: {}, launch: f.launch.selection,
+    input: { task: 'Read source', workMode: 'read_only' }, selected_profile: {preset_id:null, catalog_identity:null, work_mode:'read_only', tools:[], instructions:''}, configuration: {}, launch: f.launch.selection,
     state: 'ready', revision: 1, cursor: 1, receipt: { key: 'child-input', run_id: f.run.id, input_id: 'child-input', branch_id: 'child-branch', thread_id: 'child-thread', cursor: 1 },
     report: null, resources_released: true, code_result: { kind: 'no_changes' },
     source: { kind: 'pending', handoff: { operation_id: 'handoff', source: { mode: 'fixed_branch', workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null }, root: { kind: 'fixed', pin: { pin_id: 'pin', root: 'root', source: { mode: 'fixed_branch', workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null } } } } },
   } as import('./protocol.generated.js').ChildTask;
   const children = vi.fn(async () => [structuredClone(child)]);
+  const events: RuntimeEvent[] = [];
   const runtime = Object.assign(f.runtime, {
     onEvent: (handler: typeof listener) => { listener = handler; return () => {}; }, onExit: () => () => {}, onReady: () => () => {},
     reconcileChildren: async () => [], reconcileProcessWaits: async () => [], children, unacceptedChildSources: async () => [],
     child: async () => structuredClone(child), releaseSourceGrants: vi.fn(async () => {}),
-    status: async () => ({ eventCursor: 0 }), events: async () => [],
+    status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
   const continueRun = vi.fn(async () => { await gate; });
   const collaboration = new ThreadCollaboration({ kernel: {} as never, storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
@@ -397,14 +398,20 @@ it('a child fact observed during an active launch is rechecked once after that l
     continueRun, recoverLaunches: async () => {}, onError: (_id, error) => { f.errors.push(error); } });
   try {
     await collaboration.recover(); expect(continueRun).toHaveBeenCalledOnce();
-    child.revision = 2; child.state = 'completed';
-    child.report = { outcome: 'succeeded', sender_thread_id: child.child_thread_id, run_id: f.run.id, history_ids: [], detail: null };
+    if (wake === 'child_revision') {
+      child.revision = 2; child.state = 'completed';
+      child.report = { outcome: 'succeeded', sender_thread_id: child.child_thread_id, run_id: f.run.id, history_ids: [], detail: null };
+    } else {
+      // Original process stop is a distinct fact; it does not revise ChildTask.
+      events.push({ cursor: 1, subject: 'original-child-process', revision: 2, kind: 'operation.executor_stopped', data: { operation_id: 'original-child-process', executor: 'process_spawn', receipt_identity: 'guardian', receipt_epoch: 1 } });
+    }
     listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 2 });
-    await vi.waitFor(() => expect(children).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(children).toHaveBeenCalledTimes(wake === 'child_revision' ? 2 : 3));
+    const scans = children.mock.calls.length;
     release();
-    await vi.waitFor(() => expect(children).toHaveBeenCalledTimes(3));
-    await tick(); expect(children).toHaveBeenCalledTimes(3);
-    expect(continueRun).toHaveBeenCalledOnce(); expect(f.errors).toEqual([]);
+    await vi.waitFor(() => expect(children).toHaveBeenCalledTimes(scans + 1));
+    await tick(); expect(children).toHaveBeenCalledTimes(scans + 1);
+    expect(continueRun).toHaveBeenCalledTimes(wake === 'child_revision' ? 1 : 2); expect(f.errors).toEqual([]);
   } finally { release(); collaboration.stop(); }
 });
 
@@ -429,4 +436,25 @@ it('domain receipt discovery keeps the new epoch wake while an aborted old disco
     expect(reconcileDomainReceipts.mock.calls[1]![0].aborted).toBe(false);
     expect(f.errors).toEqual([]);
   } finally { release(); collaboration.stop(); }
+});
+
+
+it('subtree cancellation carries the original parent scope and never loads child or operation bodies', async () => {
+  const f = fixture();
+  const status = { id: 'dispatch-operation', run_id: f.run.id, epoch: 1, revision: 2, phase: 'running' as const,
+    outcome: null, effect: 'dispatched' as const, cancel_requested: false, lifetime: 'thread' as const, handed_off: true,
+    executor: 'dispatch', waiting_on: null, call_completion: null, execution_owner: { kind: 'kernel' as const } };
+  const runtime = Object.assign(f.runtime, {
+    child: vi.fn(async () => { throw new Error('Unavailable child instruction body'); }),
+    operation: vi.fn(async () => { throw new Error('Unavailable result body'); }),
+    operationStatus: vi.fn(async () => status),
+    cancelTree: vi.fn(async (target: import('./protocol.generated.js').TreeCancelTarget) => ({ target, cursor: 8, run_count: 2, child_count: 3, process_count: 1 })),
+  });
+  expect(await f.adapter.cancelChild(identity, 'dispatch-operation')).toMatchObject({ target: { kind: 'child', operation_id: 'dispatch-operation' }, process_count: 1 });
+  expect(runtime.cancelTree).toHaveBeenLastCalledWith({ kind: 'child', operation_id: 'dispatch-operation' }, undefined, identity.threadId);
+  await f.adapter.cancelTree(identity);
+  expect(runtime.cancelTree).toHaveBeenLastCalledWith({ kind: 'thread', thread_id: identity.threadId });
+  expect(await f.adapter.cancelOperation('dispatch-operation')).toBe(status);
+  expect(runtime.cancelTree).toHaveBeenLastCalledWith({ kind: 'child', operation_id: 'dispatch-operation' });
+  expect(runtime.child).not.toHaveBeenCalled(); expect(runtime.operation).not.toHaveBeenCalled();
 });

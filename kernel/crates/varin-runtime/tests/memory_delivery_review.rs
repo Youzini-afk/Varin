@@ -168,6 +168,7 @@ fn snapshot(run: &str, head: &str, id: &str, projection: ContextProjection) -> R
             history_range: range.clone(),
         },
         binding: RequestBinding {
+            child_dispatch: None,
             goal: None, resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "review-provider".into(),

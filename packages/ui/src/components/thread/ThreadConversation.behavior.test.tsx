@@ -142,6 +142,32 @@ it('active-thread controls queue the chosen mode, save/cancel queued text, and s
   expect(button('Stop run')).toBeUndefined();
 });
 
+it('keeps subtree stop available after a child report while the original writer result is pending', async () => {
+  const f = fixture(true); pauseView(f.view);
+  const child = { operation_id: 'original-child', parent_run_id: 'ui-run', parent_thread_id: identity.threadId, parent_branch_id: identity.branchId,
+    child_thread_id: 'thread:child', child_branch_id: 'branch:child', origin: { kind: 'model_step' as const, request_id: 'request' }, call_id: 'dispatch', project_id: null,
+    input: { task: 'Run a private experiment' }, selected_profile: { preset_id: 'custom:experiment', catalog_identity: 'frozen', work_mode: 'isolated_write' as const,
+      tools: ['process_spawn'], instructions: 'Retain measured results' }, configuration: {}, launch: f.view.launch!.selection,
+    state: 'completed' as const, revision: 3, cursor: 3, receipt: { key: 'input', run_id: 'child-run', input_id: 'input', branch_id: 'branch:child', thread_id: 'thread:child', cursor: 1 },
+    report: { outcome: 'succeeded' as const, sender_thread_id: 'thread:child', run_id: 'child-run', history_ids: [], detail: 'Independent process is still running' },
+    resources_released: true, code_result: { kind: 'pending' as const },
+    source: { kind: 'pending' as const, handoff: { operation_id: 'handoff', source: { mode: 'fixed_branch' as const, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null },
+      root: { kind: 'fixed' as const, pin: { pin_id: 'pin', root: 'root', source: { mode: 'fixed_branch' as const, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null } } } } },
+  };
+  f.view.children = [child];
+  const cancelChild = vi.fn(async (_identity: ThreadIdentity, operationId: string) => ({ target: { kind: 'child' as const, operation_id: operationId }, cursor: 4, run_count: 1, child_count: 1, process_count: 1 }));
+  const cancelTree = vi.fn(async () => ({ target: { kind: 'thread' as const, thread_id: identity.threadId }, cursor: 5, run_count: 2, child_count: 1, process_count: 1 }));
+  f.api.collaboration = { children: async () => [child], readReport: async () => { throw new Error('No history page'); }, cancelWait: async () => { throw new Error('No wait'); }, cancelChild, cancelTree };
+  await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  expect(container.textContent).toContain('Report complete; file result waiting for writers and original receipts');
+  await act(async () => { button('Stop child subtree').click(); });
+  expect(cancelChild).toHaveBeenCalledExactlyOnceWith(identity, 'original-child');
+  // A short admission ACK is not a process-stop or file-publication fact.
+  expect(container.textContent).toContain('Report complete; file result waiting for writers and original receipts');
+  await act(async () => { button('Stop task and children').click(); });
+  expect(cancelTree).toHaveBeenCalledExactlyOnceWith(identity);
+});
+
 it('registers one process follow-up through an uncertain reply and controls only its current definition', async () => {
   const f = fixture(true);
   f.view.operations = [{ id: 'process:original', run_id: 'ui-run', epoch: 1, revision: 1,
@@ -731,7 +757,7 @@ function pauseView(view: ThreadSnapshot, waitId = 'wait:policy-one') {
   view.activeRun!.state = 'waiting'; view.activeRun!.waiting_on = waitId;
   view.launch = { run_id: view.activeRun!.id, revision: 1, policy_generation: 0, policy_preparable: false, policy_target: { kind: 'default' }, startable: false, requires_rebind: true, bound_epoch: null, preparation_failure: null,
     pause: { action_id: `action:${waitId}`, wait_id: waitId, reason: 'Review the first delivered result.' },
-    selection: { extension_bindings: [], policy_models: [], mcp_binding: null, credential_scope: null, connection_identity: 'fixture', provider_family: 'fixture', model: 'fixture',
+    selection: { extension_bindings: [], child_dispatch: null, policy_models: [], mcp_binding: null, credential_scope: null, connection_identity: 'fixture', provider_family: 'fixture', model: 'fixture',
       configuration_generation: 1, tool_schema_generation: 1, tools: [], policy: { name: 'fixture', version: '1' }, source: null } };
   view.operations = [{ id: view.launch.pause!.action_id, run_id: view.activeRun!.id, epoch: 1, revision: 1,
     phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'run', handed_off: false,

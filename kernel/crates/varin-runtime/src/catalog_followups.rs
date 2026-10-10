@@ -345,7 +345,9 @@ fn cancel_definition(tx: &Transaction<'_>, definition: &mut Definition) -> Resul
     )?;
     Ok(())
 }
-pub(super) fn cancel_source_run(tx: &Transaction<'_>, run_id: &str) -> Result<()> {
+pub(super) fn cancel_source_run(tx: &Transaction<'_>, run_id: &str) -> Result<()> { cancel_source_registrations(tx, run_id, false) }
+pub(super) fn cancel_tree_source_run(tx: &Transaction<'_>, run_id: &str) -> Result<()> { cancel_source_registrations(tx, run_id, true) }
+fn cancel_source_registrations(tx: &Transaction<'_>, run_id: &str, include_goal_owned: bool) -> Result<()> {
     let mut query = tx.prepare("SELECT body FROM followups WHERE source_run_id=?1")?;
     let definitions = query
         .query_map([run_id], |r| r.get::<_, String>(0))?
@@ -353,7 +355,7 @@ pub(super) fn cancel_source_run(tx: &Transaction<'_>, run_id: &str) -> Result<()
     drop(query);
     for raw in definitions {
         let mut d:Definition=serde_json::from_str(&raw)?;
-        if d.goal_id.is_none(){cancel_definition(tx,&mut d)?;}
+        if include_goal_owned || d.goal_id.is_none(){cancel_definition(tx,&mut d)?;}
     }
     Ok(())
 }

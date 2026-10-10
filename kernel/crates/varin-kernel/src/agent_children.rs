@@ -122,12 +122,26 @@ pub(super) fn execute(
             operation_id: child.operation_id.clone(),
         };
         let cancel = varin_runtime::execution::CancellationToken::default();
-        if method == "runtime.child.settle" {
-            resources
-                .require_child_root_idle(&binding, &context, &cancel)
-                .map_err(|error| KernelError::Operation(error.to_string()))?;
+        // A directory capture still needs the original physical writers/leases to stop.
+        // Once Storage has fixed a candidate, recovery uses its durable receipt and
+        // may deliberately have no execution root (including after cwd removal).
+        let captures_directory = method == "runtime.child.settle"
+            && matches!(child.code_result,
+                varin_runtime::catalog::collaboration::ChildCodeResult::Pending
+                | varin_runtime::catalog::collaboration::ChildCodeResult::Settling { .. });
+        {
+            let directory_idle = if captures_directory {
+                resources.require_child_root_idle(&binding, &context, &cancel)
+                    .map_err(|error| KernelError::Operation(error.to_string()))?["writerStopped"] == true
+            } else { true };
+            let catalog = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            if !directory_idle || !catalog.child_process_writers_stopped(&operation_id).map_err(domain)? {
+                let read = catalog.capture_child_read(catalog.child_task(&operation_id).map_err(domain)?);
+                drop(catalog);
+                return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
+            }
         }
-        if method == "runtime.child.settle" {
+        if captures_directory {
             owner
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?

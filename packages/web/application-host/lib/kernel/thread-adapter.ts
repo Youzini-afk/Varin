@@ -1,3 +1,4 @@
+import type { ChildProfilePreparer } from './child-profiles.js';
 import type { ThreadToolInspection } from '@varin/application-client';
 import type { PlanService } from './plan-service.js';
 import type { ImageAttachment } from '@varin/protocol';
@@ -29,7 +30,8 @@ export class ThreadAdapter {
     private readonly prepareWorkspace?: (input: ThreadPrepareSource) => Promise<ThreadPreparedSource>,
     private readonly prepareContext?: ContextPreparer, private readonly plans?: PlanService,
     private readonly prepareSkillInput?: ThreadSkillInputPreparer,
-    private readonly processTerminals?: import('@varin/application-client').ThreadProcessesAPI) {}
+    private readonly processTerminals?: import('@varin/application-client').ThreadProcessesAPI,
+    private readonly prepareChildProfiles?: ChildProfilePreparer) {}
 
   private async skillInput(identity: ThreadIdentity, resources: ContextResources | undefined, text: string, signal?: AbortSignal): Promise<PreparedExplicitSkill | null> {
     if (!parseExplicitSkillCommand(text)) return null;
@@ -148,13 +150,13 @@ export class ThreadAdapter {
     return result;
   }
   async cancelOperation(operationId: string) {
-    await this.requireOperation(operationId);
-    const current = await this.runtime.operation(operationId);
+    const current = await this.runtime.operationStatus(operationId);
+    await this.requireRun(current.run_id);
     if (current.executor === 'dispatch') {
-      await this.runtime.cancelChild(operationId); return this.runtime.operation(operationId);
+      await this.runtime.cancelTree({ kind: 'child', operation_id: operationId }); return this.runtime.operationStatus(operationId);
     }
     if (current.executor === 'wait_child' && current.waiting_on) {
-      await this.runtime.cancelChildWait(current.waiting_on); return this.runtime.operation(operationId);
+      await this.runtime.cancelChildWait(current.waiting_on); return this.runtime.operationStatus(operationId);
     }
     const result = await this.runtime.cancelOperation(operationId);
     if (result.executor === 'ask_user') await this.continueLaunch(result.run_id);
@@ -172,23 +174,19 @@ export class ThreadAdapter {
   }
   async cancelChild(identity: ThreadIdentity, operationId: string) {
     await this.requireIdentity(identity);
-    const child = await this.runtime.child(operationId);
-    if (child.parent_thread_id !== identity.threadId) throw new Error('Child belongs to another parent Thread');
-    return this.runtime.cancelChild(operationId);
+    return this.runtime.cancelTree({ kind: 'child', operation_id: operationId }, undefined, identity.threadId);
   }
   async cancelChildWait(identity: ThreadIdentity, waitId: string) {
     await this.requireIdentity(identity);
     if (!waitId.startsWith('child-wait:')) throw new Error('Not a child observation wait');
-    const operation = await this.runtime.operation(waitId.slice('child-wait:'.length));
+    const operation = await this.runtime.operationStatus(waitId.slice('child-wait:'.length));
     const run = await this.requireRun(operation.run_id);
     if (run.thread_id !== identity.threadId) throw new Error('Wait belongs to another parent Thread');
     return this.runtime.cancelChildWait(waitId);
   }
-  async cancelTree(identity: ThreadIdentity): Promise<void> {
-    const thread = await this.requireIdentity(identity);
-    const children = await this.children(identity);
-    await Promise.all(children.filter(child => !child.report).map(child => this.runtime.cancelChild(child.operation_id)));
-    await Promise.all(thread.branches.filter(branch => branch.active_run_id).map(branch => this.runtime.cancelRun(branch.active_run_id!)));
+  async cancelTree(identity: ThreadIdentity) {
+    await this.requireIdentity(identity);
+    return this.runtime.cancelTree({ kind: 'thread', thread_id: identity.threadId });
   }
   async listModels() {
     if (!this.models.listModels) throw new Error('Model catalog is unavailable');
@@ -320,7 +318,7 @@ export class ThreadAdapter {
     const checkpoint = this.prepareContext || explicitSkill ? await this.runtime.context(input.branchId) : null;
     const preparesResources = this.prepareContext && (input.source !== undefined || !checkpoint);
     let inputPreparation: InputResourcePreparation | undefined;
-    if (preparesResources || explicitSkill) {
+    if (preparesResources || explicitSkill || this.prepareChildProfiles) {
       // An accepted command owns its original receipt. A later malformed settings file must not
       // make an uncertain reply depend on re-preparing a replacement resource generation.
       const existing = await this.runtime.inputReceipt(command);
@@ -348,6 +346,11 @@ export class ThreadAdapter {
             }
           }
           initialContext = await this.prepareContext.main(input, source);
+        }
+        if (this.prepareChildProfiles) {
+          command.launch!.childDispatch = await this.prepareChildProfiles({ parent: {
+            configuration: model.configuration, credential_scope: command.launch!.credentialScope ?? null,
+          } });
         }
         const skill = await this.skillInput(input, initialContext ? initialContext.resources : checkpoint?.resources, input.text);
         if (skill) inputPreparation = { expectedContextCheckpoint: initialContext ? null : checkpoint?.id ?? null, skill };
@@ -437,7 +440,14 @@ export class ThreadAdapter {
     const run = await this.requireRun(input.runId);
     if (run.thread_id !== input.threadId || run.branch_id !== input.branchId) throw new Error('Run belongs to another branch');
     const model = await this.models.resolveModel(input.model);
-    return this.runtime.selectModel(run.id,input.key,model.configuration,model.credentialOwner);
+    const previous = await this.runtime.modelSelections(run.id);
+    const existing = [previous.desired, previous.active].find(selection => selection?.binding_id === `model:${input.key}`);
+    // The original candidate already froze its prepared profile catalog. Repeated key delivery
+    // never makes that accepted selection depend on current settings.
+    const childDispatch = !existing && this.prepareChildProfiles ? await this.prepareChildProfiles({ parent: {
+      configuration: model.configuration, credential_scope: await model.credentialOwner.scope(),
+    } }) : undefined;
+    return this.runtime.selectModel(run.id, input.key, model.configuration, model.credentialOwner, undefined, childDispatch);
   }
 
   assertImagesSupported(images: readonly ImageAttachment[] | undefined, configuration: unknown): void {

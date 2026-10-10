@@ -10,8 +10,9 @@ export function thinkingLevels(model: SelectedModel): ThreadThinkingLevel[] {
     && (!['xhigh', 'max'].includes(level) || model.thinkingLevelMap?.[level] !== undefined)) : ['off'];
 }
 const budgets = { minimal: 1024, low: 2048, medium: 8192, high: 16384, xhigh: 16384, max: 16384 };
-export function modelOptions(model: SelectedModel, requested: ThreadThinkingLevel | undefined, max: number | null)
+export function modelOptions(model: SelectedModel, requested: ThreadThinkingLevel | undefined, max: number | null, temperature?: number)
   : Pick<ModelSessionConfiguration, 'thinkingLevel' | 'reasoningEffort' | 'modelOptions'> {
+  if (temperature !== undefined && (typeof temperature !== 'number' || !Number.isFinite(temperature) || temperature < 0)) return failed('model-temperature-invalid');
   const available = thinkingLevels(model);
   const level = requested ?? available[0];
   if (!level || !available.includes(level)) return failed('model-thinking-level-unavailable');
@@ -89,6 +90,8 @@ export function modelOptions(model: SelectedModel, requested: ThreadThinkingLeve
     }
   }
   const samplingParams = { ...parameters, ...model.samplingParams, ...model.samplingParamsByThinkingLevel?.[level] };
+  // Explicit profile/user selection wins over catalog defaults, including zero.
+  if (temperature !== undefined) delete samplingParams.temperature;
   return { thinkingLevel: level, reasoningEffort,
-    modelOptions: { ...(Object.keys(samplingParams).length ? { samplingParams } : {}), ...(Object.keys(protocol).length ? { protocol } : {}) } };
+    modelOptions: { ...(temperature === undefined ? {} : { temperature }), ...(Object.keys(samplingParams).length ? { samplingParams } : {}), ...(Object.keys(protocol).length ? { protocol } : {}) } };
 }
