@@ -67,6 +67,7 @@ impl PersonalizationBasis {
 }
 impl Catalog {
     /// CAS against the active context, preserving its compacted prefix and original tail.
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn refresh_personalization(
         &mut self,
         branch_id: &str,
@@ -76,6 +77,7 @@ impl Catalog {
         memory_checkpoint: Option<String>,
         personalization: PersonalizationBasis,
     ) -> Result<context::ContextCheckpoint> {
+        let _synchronous = self.content.begin_synchronous()?;
         let prepared = self.prepare_personalization_refresh(branch_id,expected_revision,effective_system_prompt,
             instruction_sources,memory_checkpoint,personalization)?.load()?;
         self.publish_personalization_refresh(prepared)

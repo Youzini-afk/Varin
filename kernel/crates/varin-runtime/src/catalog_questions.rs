@@ -141,13 +141,17 @@ impl Catalog {
 
     /// Answer receipt, conversation delivery, terminal operation and continuation commit together.
     /// Equal retries return the original receipt; cancellation and conflicting answers are rejected.
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn answer_question(&mut self, operation_id: &str, answer: &str) -> Result<Operation> {
+        let _synchronous = self.content.begin_synchronous()?;
         let prepared = self
             .prepare_question_answer(operation_id, Some(answer.into()))?
             .load()?;
         self.admit_question_answer(prepared)
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn cancel_question(&mut self, operation_id: &str) -> Result<Operation> {
+        let _synchronous = self.content.begin_synchronous()?;
         let prepared = self.prepare_question_answer(operation_id, None)?.load()?;
         self.admit_question_answer(prepared)
     }

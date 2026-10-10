@@ -284,7 +284,9 @@ impl Catalog {
             [run_id], |row| row.get(0),
         ).optional()?.ok_or_else(|| RuntimeError::NotFound(run_id.into()))
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn active_context(&self, branch_id: &str) -> Result<Option<ContextCheckpoint>> {
+        let _synchronous = self.content.begin_synchronous()?;
         self.capture_active_checkpoint(branch_id)?
             .map(CheckpointRead::load)
             .transpose()
@@ -324,7 +326,9 @@ impl Catalog {
             .transpose()
     }
     /// A candidate fixes an ancestor, not a moving leaf. Appended tail input remains untouched.
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn publish_context(&mut self, proposal: ContextProposal) -> Result<ContextCheckpoint> {
+        let _synchronous = self.content.begin_synchronous()?;
         let (checkpoint, reference) = self.stage_context(proposal)?;
         let tx = self.db.transaction()?;
         publish_prepared(&tx, &checkpoint, &reference)?;
@@ -337,11 +341,13 @@ impl Catalog {
     ) -> Result<(ContextCheckpoint, Value)> {
         self.stage_context_with_personalization(proposal, None)
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub(super) fn stage_context_with_personalization(
         &self,
         proposal: ContextProposal,
         personalization: Option<super::personalization::PersonalizationBasis>,
     ) -> Result<(ContextCheckpoint, Value)> {
+        let _synchronous = self.content.begin_synchronous()?;
         if let Some(basis) = &personalization {
             basis.validate()?;
         }

@@ -1,3 +1,5 @@
+#[path = "fixtures/content_collection.rs"]
+mod content_collection;
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
@@ -118,7 +120,7 @@ fn memory_publication_preserves_concurrent_receipts_and_settles_after_run_comple
     )
     .unwrap();
     assert!(db.publish_memory_state(late).unwrap());
-    db.collect_content_objects().unwrap();
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
     drop(db);
     let db = Catalog::open(&fixture.0).unwrap();
     let state = db.memory_state("main").unwrap().unwrap();
@@ -347,7 +349,7 @@ fn policy_model_quoted_real_memory_facts_keep_selection_send_and_commit_separate
         )
         .unwrap();
     assert_eq!(states(&f.0, &action), vec!["\"committed\""]);
-    owner.lock().unwrap().collect_content_objects().unwrap();
+    content_collection::collect(|| owner.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
     assert_eq!(
         owner
             .policy_model_job(&receipt.run_id, epoch)
@@ -442,7 +444,7 @@ fn memory_request_selection_is_not_delivery_and_frozen_request_evidence_survives
         db.model_step("prepared-only").unwrap().request,
         serde_json::to_value(&selected).unwrap()
     );
-    db.collect_content_objects().unwrap();
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
     assert_eq!(
         db.model_step("prepared-only").unwrap().request,
         serde_json::to_value(&selected).unwrap()
@@ -525,10 +527,10 @@ fn memory_request_selection_is_not_delivery_and_frozen_request_evidence_survives
         .contains("PENDING_NOTE_V3"));
     db.fork_branch("main", "opaque-fork", Some(&raw_history.last().unwrap().id))
         .unwrap();
-    db.collect_content_objects().unwrap();
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
     drop(db);
-    let mut db = Catalog::open(&f.0).unwrap();
-    db.collect_content_objects().unwrap();
+    let db = Catalog::open(&f.0).unwrap();
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
     assert_eq!(db.history("main").unwrap(), raw_history);
     assert_eq!(db.history("opaque-fork").unwrap(), raw_history);
     assert_eq!(
@@ -1012,8 +1014,8 @@ fn policy_memory_mutation_uses_original_receipt_for_evidence_or_tail_delivery() 
             item.content,
             Content::ToolCall { .. } | Content::ToolResult { .. }
         )));
-        let mut db = owner.lock().unwrap();
-        db.collect_content_objects().unwrap();
+        content_collection::collect(|| owner.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+        let db = owner.lock().unwrap();
         let operations: Vec<_> = db
             .events_after(0, 1000)
             .unwrap()

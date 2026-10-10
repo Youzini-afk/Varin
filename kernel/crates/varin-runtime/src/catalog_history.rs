@@ -18,6 +18,7 @@ pub struct HistoryPage {
 pub struct HistoryBodyRead {
     content: crate::content::ContentStore,
     reference: Value,
+    _publication: crate::content::ContentPublication,
 }
 impl HistoryBodyRead {
     pub fn chunk(self, index: usize) -> Result<crate::content::ContentChunk> {
@@ -98,6 +99,7 @@ impl Catalog {
         let item: HistoryItem = record(&self.db, "history", item_id)?;
         Ok(HistoryBodyRead {
             content: self.content.clone(),
+            _publication: self.content.begin_publication(),
             reference: item.content,
         })
     }

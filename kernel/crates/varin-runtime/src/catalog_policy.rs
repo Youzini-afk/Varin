@@ -269,7 +269,9 @@ impl Catalog {
             .and_then(|launch| launch.selection.source);
         Ok(PolicyBoundary { id, source })
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn policy_graph(&self, run_id: &str, epoch: u64) -> Result<Option<PolicyGraphState>> {
+        let _synchronous = self.content.begin_synchronous()?;
         self.prepare_policy_graph_read(run_id, epoch)?
             .map(PolicyGraphRead::load)
             .transpose()
@@ -337,12 +339,14 @@ impl Catalog {
         }
         self.graph_read(op, metadata, checkpoint).map(Some)
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn admit_policy_graph(
         &mut self,
         run_id: &str,
         epoch: u64,
         intent: &PolicyGraphIntent,
     ) -> Result<PolicyGraphState> {
+        let _synchronous = self.content.begin_synchronous()?;
         let schemas = self.prepare_policy_graph_schemas().load(intent)?;
         self.admit_policy_graph_prepared(run_id, epoch, schemas)?
             .load()
@@ -464,6 +468,7 @@ impl Catalog {
         tx.commit()?;
         self.graph_read(op, schemas.metadata, None)
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn settle_policy_node(
         &mut self,
         run_id: &str,
@@ -472,6 +477,7 @@ impl Catalog {
         node: &str,
         completion: &ToolCompletion,
     ) -> Result<PolicyNodeReceipt> {
+        let _synchronous = self.content.begin_synchronous()?;
         let _publication = self.content.begin_publication();
         let metadata = ToolCompletionMetadata::write(&self.content, completion)?;
         self.settle_policy_node_reference(run_id, epoch, action, node, completion, metadata)
@@ -655,6 +661,7 @@ impl Catalog {
         }
         Ok(json!({"content_object":reference.content_ref}))
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn policy_output_chunk(
         &self,
         run_id: &str,
@@ -663,6 +670,7 @@ impl Catalog {
         content_ref: &str,
         index: usize,
     ) -> Result<crate::content::ContentChunk> {
+        let _synchronous = self.content.begin_synchronous()?;
         self.content.load_chunk(
             &self.owned_policy_reference(
                 run_id,
@@ -679,12 +687,14 @@ impl Catalog {
         let op: Operation = record(&self.db, "operations", &reference.action_id)?;
         Ok(super::policy_model::model_metadata(&op)?.is_some())
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn policy_evidence(
         &self,
         run_id: &str,
         epoch: u64,
         reference: &PolicyEvidenceRef,
     ) -> Result<ConversationItem> {
+        let _synchronous = self.content.begin_synchronous()?;
         fence(&self.run(run_id)?, epoch)?;
         let content = self
             .content

@@ -1,3 +1,5 @@
+#[path = "fixtures/content_collection.rs"]
+mod content_collection;
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
@@ -146,7 +148,7 @@ fn permission_is_exact_one_use_and_denial_or_cancellation_never_authorizes_dispa
         json!({"cancelled":true}),
     )
     .unwrap();
-    f.db.collect_content_objects().unwrap();
+    content_collection::collect(|| f.db.prepare_content_collection(Default::default())).unwrap();
     let view = f.db.capture_operation_read(opened).load().unwrap();
     let tool: varin_runtime::execution::ToolInvocation =
         serde_json::from_value(view.intent).unwrap();

@@ -27,6 +27,7 @@ import { sharedHostCredentialAuthority } from '@varin/runtime-broker';
 import { AgentRuntimeClient } from './lib/kernel/agent-runtime-client.js';
 import { ThreadAdapter } from './lib/kernel/thread-adapter.js';
 import { registerThreadRoutes } from './lib/kernel/thread-routes.js';
+import { registerRuntimeMaintenanceRoutes } from './lib/kernel/runtime-maintenance-routes.js';
 import { createModelAuthority } from './lib/kernel/model-authority.js';
 import 'reflect-metadata';
 import { createBotDataCleanup } from './lib/bots/bot-data-cleanup.js';
@@ -3000,6 +3001,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   void refreshThreadPersonalization().catch(() => console.error('[Thread] Personalization refresh requires attention'));
   void contextService.recover().catch(() => console.error('[Thread] Saved context job discovery requires attention'));
   registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
+  registerRuntimeMaintenanceRoutes(app, agentRuntime, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerHarnessThreadRoutes(app, {
     registry: threadRegistry,
     runtime: threadRuntime,

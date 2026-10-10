@@ -1,3 +1,5 @@
+#[path = "fixtures/content_collection.rs"]
+mod content_collection;
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
@@ -216,7 +218,7 @@ fn exercise(mode: Mode) {
         db.run(&job.receipt.run_id).unwrap().configuration,
         json!({})
     );
-    db.collect_content_objects().unwrap();
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
     assert_eq!(db.context_job(&job.receipt.run_id).unwrap(), job);
     assert_eq!(
         db.create_context_job(request.clone(), launch, json!({}))

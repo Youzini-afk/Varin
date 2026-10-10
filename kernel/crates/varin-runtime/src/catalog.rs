@@ -176,7 +176,8 @@ pub struct Catalog {
     content: crate::content::ContentStore,
     resource_admission: std::sync::Arc<crate::resource_admission::ResourceAdmission>,
     context_compositions: std::sync::Arc<crate::composition::context::ContextCompositions>,
-    _owner: File,
+    _owner: std::sync::Arc<File>,
+    database_path: std::path::PathBuf,
     epoch: u64,
     plan_cursor_key: [u8; 32],
 }
@@ -225,7 +226,8 @@ impl Catalog {
             context_compositions: std::sync::Arc::new(
                 crate::composition::context::ContextCompositions::default(),
             ),
-            _owner: owner,
+            _owner: std::sync::Arc::new(owner),
+            database_path,
             epoch,
             plan_cursor_key: {
                 let mut key = [0; 32];
@@ -610,6 +612,7 @@ impl Catalog {
         tx.commit()?;
         Ok(run)
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn append_history(
         &mut self,
         run_id: &str,
@@ -619,6 +622,7 @@ impl Catalog {
         content: Value,
         provider: Option<ProviderOriginal>,
     ) -> Result<HistoryItem> {
+        let _synchronous = self.content.begin_synchronous()?;
         context_jobs::require_regular_branch(&self.db, &self.run(run_id)?.branch_id)?;
         let body_reference = self.content.save_history(&content, &provider)?;
         let tx = self.db.transaction()?;
@@ -660,7 +664,9 @@ impl Catalog {
         item.provider = provider;
         Ok(item)
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn history(&self, branch: &str) -> Result<Vec<HistoryItem>> {
+        let _synchronous = self.content.begin_synchronous()?;
         let mut head = self.head(branch)?;
         let mut result = Vec::new();
         while let Some(key) = head {
@@ -938,6 +944,7 @@ impl Catalog {
         self.reconcile_waits()?;
         Ok(op)
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn prepare_model_step(
         &mut self,
         key: &str,
@@ -945,6 +952,7 @@ impl Catalog {
         epoch: u64,
         request: Value,
     ) -> Result<ModelStep> {
+        let _synchronous = self.content.begin_synchronous()?;
         let request_ref = self.content.save(&request)?;
         let tx = self.db.transaction()?;
         let graph_pending = policy_body::has_pending_action(&tx, run_id)?;
@@ -984,14 +992,25 @@ impl Catalog {
         step.request = request;
         Ok(step)
     }
-    /// Collect only unreferenced immutable bodies under this catalog owner lock.
-    pub fn collect_content_objects(&mut self) -> Result<u64> {
-        self.content.collect(&self.db)
+    /// Short admission only. The returned owned collection must run after releasing Catalog.
+    pub fn prepare_content_collection(
+        &self,
+        cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> crate::content::ContentCollectionAdmission {
+        self.content.prepare_collection(self.database_path.clone(), self._owner.clone(), cancellation)
     }
+    /// Request cooperative maintenance shutdown without waiting for I/O or a worker.
+    pub fn cancel_content_collection(&self) {
+        self.content.cancel_collection();
+    }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn model_step(&self, key: &str) -> Result<ModelStep> {
+        let _synchronous = self.content.begin_synchronous()?;
         self.capture_model_step_read(key)?.load()
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn dispatch_model_step(&mut self, key: &str, epoch: u64) -> Result<ModelStep> {
+        let _synchronous = self.content.begin_synchronous()?;
         let hydrated = self.model_step(key)?;
         let tx = self.db.transaction()?;
         let mut step: ModelStep = record(&tx, "model_steps", key)?;
@@ -1012,6 +1031,7 @@ impl Catalog {
         step.original = hydrated.original;
         Ok(step)
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn settle_model_step(
         &mut self,
         key: &str,
@@ -1020,6 +1040,7 @@ impl Catalog {
         original: Vec<ProviderOriginal>,
         usage: Option<Value>,
     ) -> Result<ModelStep> {
+        let _synchronous = self.content.begin_synchronous()?;
         let request = self.model_step(key)?.request;
         let stored_original = self.content.save_originals(&original)?;
         let tx = self.db.transaction()?;
@@ -1611,3 +1632,13 @@ pub mod policy_control;
 
 #[path = "catalog_policy_switch.rs"]
 pub mod policy_switch;
+
+impl Drop for Catalog {
+    fn drop(&mut self) {
+        self.content.cancel_collection();
+    }
+}
+
+#[cfg(test)]
+#[path = "catalog_content_collection_tests.rs"]
+mod content_collection_tests;

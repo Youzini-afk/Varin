@@ -62,6 +62,7 @@ import type {
   HistoryItem,
   RuntimeEvent,
   RuntimeStatus,
+  ContentCollectionReport,
   RunStartReceipt,
   PolicyResumeReceipt,
   PolicyModelCapability, PolicySelections, PolicySelection, PolicyTarget, PolicyStateMode,
@@ -594,6 +595,10 @@ export class AgentRuntimeClient {
   }
   status(signal?: AbortSignal): Promise<RuntimeStatus> {
     return this.kernel.agentRuntimeRequest('runtime.status', {}, signal);
+  }
+  /** Explicit Host maintenance, independent of Run/input admission and Storage's own GC. */
+  collectContent(signal?: AbortSignal): Promise<ContentCollectionReport> {
+    return this.kernel.agentRuntimeRequest('runtime.content.collect', {}, signal);
   }
   /** Use the Run epoch and actual ModelStep/tool-call or policy-action/node identity. */
   admission(

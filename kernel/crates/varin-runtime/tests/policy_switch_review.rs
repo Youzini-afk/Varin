@@ -1,4 +1,6 @@
 //! Real Catalog cuts and Engine recovery; no Host IPC, paid model, or synthetic activation action.
+#[path = "fixtures/content_collection.rs"]
+mod content_collection;
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
@@ -340,9 +342,9 @@ fn resumed_cut_survives_activation_then_pending_decision_crash_and_gc() {
             },
         )
         .unwrap();
-    f.db().collect_content_objects().unwrap();
+    content_collection::collect(|| f.db().prepare_content_collection(Default::default())).unwrap();
     f.reopen();
-    f.db().collect_content_objects().unwrap();
+    content_collection::collect(|| f.db().prepare_content_collection(Default::default())).unwrap();
     let binding = f.binding.clone();
     let (new_input, recovery) = f
         .db()
@@ -690,9 +692,9 @@ fn input_winning_pending_completion_preserves_committed_activation_live_and_afte
                         .len(),
                     1
                 );
-                f.db().collect_content_objects().unwrap();
+                content_collection::collect(|| f.db().prepare_content_collection(Default::default())).unwrap();
                 f.reopen();
-                f.db().collect_content_objects().unwrap();
+                content_collection::collect(|| f.db().prepare_content_collection(Default::default())).unwrap();
             }
             let binding = f.binding.clone();
             let (input, recovery) = f

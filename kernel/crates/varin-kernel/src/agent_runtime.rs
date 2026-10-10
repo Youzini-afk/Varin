@@ -239,7 +239,14 @@ pub(crate) fn spawn(
                         }
                     }
                 }
-                Command::Stop => break,
+                Command::Stop => {
+                    if let Some(runtime) = runtime.as_ref() {
+                        if let Ok(catalog) = runtime.catalog().lock() {
+                            catalog.cancel_content_collection();
+                        }
+                    }
+                    break;
+                },
                 Command::ToolReceipt(receipt) => {
                     if opening {
                         waiting.push_back(Command::ToolReceipt(receipt));
@@ -306,6 +313,11 @@ pub(crate) fn spawn(
                     let selected = (root.join("agent-runtime"), epoch);
                     if identity.as_ref() == Some(&selected) {
                         continue;
+                    }
+                    if let Some(runtime) = runtime.as_ref() {
+                        if let Ok(catalog) = runtime.catalog().lock() {
+                            catalog.cancel_content_collection();
+                        }
                     }
                     identity = Some(selected.clone());
                     opening = true;
@@ -509,6 +521,37 @@ pub(crate) fn spawn(
                         runtime
                             .reap()
                             .map_err(|e| KernelError::Operation(e.to_string()))?;
+                        if method == "runtime.content.collect" {
+                            // This admission is metadata-only. Maintenance never enters Storage or
+                            // the ordinary history/receipt content queue, and does not own a Run.
+                            let collection = runtime.catalog().lock()
+                                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                                .prepare_content_collection(cancellation.clone());
+                            match collection {
+                                varin_runtime::content::ContentCollectionAdmission::Deferred(report) => {
+                                    return Ok(serde_json::to_value(report)?);
+                                }
+                                varin_runtime::content::ContentCollectionAdmission::Ready(collection) => {
+                                    let response_id = id.clone();
+                                    let response_sender = responses.clone();
+                                    let done = finished.clone();
+                                    thread::Builder::new().name("runtime-content-maintenance".into())
+                                        .spawn(move || {
+                                            // Collection owns the original runtime.owner file until
+                                            // the last unlink/fsync finishes, including after Stop.
+                                            let report = collection.run();
+                                            let response = match serde_json::to_value(report) {
+                                                Ok(value) => response_ok(&response_id, value),
+                                                Err(error) => response_error(&response_id, &error.into()),
+                                            };
+                                            done(&response_id);
+                                            let _ = response_sender.send(response);
+                                        })?;
+                                    deferred = true;
+                                    return Ok(Value::Null);
+                                }
+                            }
+                        }
                         if matches!(
                             method,
                             "runtime.policy.select"

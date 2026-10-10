@@ -133,7 +133,7 @@ Unsupported catalog/content formats fail without converting or rebuilding stored
 Catalog version 19, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
-objects fail explicitly. `Catalog::collect_content_objects` marks requests, provider originals,
+objects fail explicitly. The owned content collection worker marks requests, provider originals,
 history, all model outputs (including rejected output), original command intents, queued-history references, context
 checkpoints, memory projections, summary recipes and source parts, policy action/checkpoint bodies,
 and indexed graph calls/receipts, planning-model request/output references, ordinary tool arguments/results,
@@ -175,8 +175,30 @@ then load, validate, merge and stage bodies on the worker. Publication compares 
 for synchronization, active checkpoint identities. A changed basis causes a fresh owner read; an
 unchanged owner revision regression remains an error. Late confirmed receipts may settle after Run
 cancellation, without reviving the Run or overwriting a newer note. Context compilation reads trusted
-receipt bodies on its read worker. Content collection still performs its complete mark/verify/sweep
-under Catalog ownership; removing that long control-path work remains a separate implementation step.
+receipt bodies on its read worker.
+
+### Explicit content maintenance
+
+`Catalog::prepare_content_collection` performs only short admission. Its owned handle runs after
+Catalog is unlocked: it reads roots in one read-only transaction on the original conversation database,
+ends that snapshot, verifies live content, and sweeps orphan objects and crash staging. No root mirror,
+maintenance journal or second database is created. The actual `runtime.owner` file remains held until
+the worker can no longer delete content, including after Catalog or Agent shutdown requests cancellation.
+
+Publication and retained-reader registration never wait for content I/O. A sequence change invalidates
+an older collection even if the new publication finishes before sweep. The ContentStore I/O gate also
+protects reuse of existing orphan hashes and in-flight staging. A new publication makes sweep yield at
+its next safe boundary; Catalog status and cancellation do not wait for that gate. Synchronous fixture
+conveniences refuse collection overlap rather than waiting under Catalog; production callers use the
+capture, worker, commit path.
+
+The authenticated Host `runtime.content.collect` request runs a separate maintenance worker, not a
+Run, Storage job or history/receipt queue entry. It returns a generated `ContentCollectionReport` with
+completed, deferred, cancelled or failed status, actual phase and deletion counts. Mark failures delete
+nothing; interrupted sweep reports already removed objects without pretending to roll them back.
+Unknown files are preserved. There is no automatic timer, per-Run barrier or retry loop; repeated explicit
+maintenance can defer while the store is in use. Actual filesystem calls still have their ordinary cost
+and cancellation limits; off-lock execution is not a fixed latency or throughput guarantee.
 
 ## Execution and trust
 

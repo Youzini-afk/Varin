@@ -6,6 +6,7 @@ use super::tool_content::ToolIntent;
 use super::*;
 
 impl Catalog {
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn open_permission(
         &mut self,
         operation_id: &str,
@@ -13,6 +14,7 @@ impl Catalog {
         call: Value,
         scope: Value,
     ) -> Result<Operation> {
+        let _synchronous = self.content.begin_synchronous()?;
         let prepared = self.prepare_permission(call, scope).load()?;
         self.open_permission_prepared(operation_id, permission_id, prepared)
     }
@@ -136,6 +138,7 @@ impl Catalog {
     }
 
     /// Only the live authorizing Host consumes the exact decision. There is no session grant.
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn consume_permission(
         &mut self,
         operation_id: &str,
@@ -143,6 +146,7 @@ impl Catalog {
         call: Value,
         scope: Value,
     ) -> Result<Operation> {
+        let _synchronous = self.content.begin_synchronous()?;
         let prepared = self.prepare_permission(call, scope).load()?;
         self.consume_permission_prepared(operation_id, permission_id, prepared)
     }

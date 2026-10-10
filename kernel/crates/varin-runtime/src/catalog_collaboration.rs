@@ -142,6 +142,7 @@ pub struct ChildTextPage {
 }
 impl Catalog {
     /// Bounded projection of existing history content. No duplicated report body is persisted.
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn read_child_report(
         &self,
         operation_id: &str,
@@ -149,6 +150,7 @@ impl Catalog {
         offset: usize,
         max_bytes: usize,
     ) -> Result<ChildTextPage> {
+        let _synchronous = self.content.begin_synchronous()?;
         self.capture_child_report(operation_id,item_id,offset,max_bytes)?.load()
     }
     pub fn capture_child_report(
@@ -192,6 +194,7 @@ impl Catalog {
     }
     /// The source owner has already admitted and pinned this exact revision under the real parent
     /// grant. No directory capture, credential preparation or extension callback runs here.
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn accept_child(
         &mut self,
         context: &ToolExecutionContext,
@@ -199,11 +202,14 @@ impl Catalog {
         pin: ChildSourcePin,
         child_launch: launches::LaunchSelection,
     ) -> Result<ChildTask> {
+        let _synchronous = self.content.begin_synchronous()?;
         let prepared = self.prepare_child_launch(&context.run_id, child_launch)?.load()?;
         self.accept_prepared_child(context, input, pin, prepared)
     }
+    /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn accept_prepared_child(&mut self, context: &ToolExecutionContext, input: DispatchInput,
         pin: ChildSourcePin, prepared: launch_content::PreparedChildLaunch) -> Result<ChildTask> {
+        let _synchronous = self.content.begin_synchronous()?;
         let prepared = self.prepare_child_admission(context,input,ChildSourceHandoff::fixed(&context.operation_id,pin),prepared)?.load()?;
         self.accept_child_references(prepared)
     }

@@ -19,6 +19,24 @@ stops queued admission or signals the active kernel operation without returning 
 child to exit. A missing executable, protocol mismatch, malformed response, revoked grant, or child exit is
 an explicit Host failure; it never selects the old backend as a fallback.
 
+## Runtime content maintenance
+
+`POST /api/runtime/content/collect` accepts an empty JSON object under the existing Host authentication.
+`AgentRuntimeClient.collectContent(signal)` calls `runtime.content.collect` for the current Agent owner;
+callers cannot select another directory, provide a tool grant, or invoke system-kernel Storage GC through
+this entry. No Run or input automatically starts collection.
+
+The kernel admits the pass under the short Catalog owner and runs root SQL, content verification and
+file deletion on its independent maintenance worker. The generated report preserves completed,
+deferred, cancelled and failed states, the actual phase, removed object/byte/staging counts, and a nullable
+reason. A partial failure is returned as that report rather than successful zero cleanup. Closing the HTTP
+request forwards only this request's cancellation; it does not cancel Runs or erase work already done.
+`removedBytes` counts immutable object file bytes; abandoned staging files are counted separately.
+An aborted client Promise can reject before the worker stops; a disconnected caller is not guaranteed
+to receive the eventual partial report. Native request credit remains owned until its acknowledgement.
+The worker retains the original runtime file owner until it stops. This maintenance path is separate
+from workspace `storage.gc` and adds no persistent job ledger, automatic retry or shared execution barrier.
+
 ## Responsibility table
 
 | Resource | Current authority | Kernel boundary after Stage R |
