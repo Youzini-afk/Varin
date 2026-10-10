@@ -608,6 +608,22 @@ impl RunSupervisor {
         }
         Ok(())
     }
+    pub fn reconcile_message_requests(&self)->Result<()> {
+        self.catalog.lock().map_err(error)?.interrupt_request_observations().map_err(error)?;
+        // Original observation delivery is also the crash-recovery path after the cancellation
+        // committed. Quiesce the same waiter before its existing writer changes history.
+        loop {
+            let before=self.catalog.lock().map_err(error)?.request_observation_positions().map_err(error)?;
+            self.quiesce_child_waits()?;
+            self.quiesce_process_waits()?;
+            crate::catalog::child_delivery::deliver_waits(&self.catalog).map_err(error)?;
+            crate::catalog::process_delivery::deliver_waits(&self.catalog).map_err(error)?;
+            let after=self.catalog.lock().map_err(error)?.request_observation_positions().map_err(error)?;
+            if before==after || after.is_empty(){break}
+        }
+        crate::catalog::messages::activation::reconcile(&self.catalog).map_err(error)?;
+        Ok(())
+    }
     pub fn resume_policy_pause(&self, run_id: &str, wait_id: &str) -> Result<crate::catalog::policy_control::PolicyResumeReceipt> {
         if let Some(receipt) = self.catalog.lock().map_err(error)?.policy_resume_receipt(run_id, wait_id).map_err(error)? { return Ok(receipt); }
         self.quiesce_run(run_id, |run| run.state == RunState::Waiting && run.waiting_on.as_deref() == Some(wait_id))?;

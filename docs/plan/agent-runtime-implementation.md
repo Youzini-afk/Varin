@@ -8,6 +8,15 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-11 增量：定向请求与真实执行接续
+
+- 普通 `send` **版本2** 与公开 User 入口支持 inform/request，真实两调用来源与家系/replyTo 身份不变。受理、原历史投递和执行激活分开；原 input_queue、ContentStore、Run/Launch 和 delegated execution 继续各自唯一拥有事实。Catalog **30**、input **4**、collaboration **5**，旧内部格式拒绝。关联 Wait/期限尚不接受，避免把未实现字段默默吞掉。
+- 活动请求在 Catalog 事务内绑定可接收的真实 Run；空闲请求由原 coalesced continuation worker 锁外准备、按精确前轮/来源/上下文核对后创建 root 或 child 新 Run。普通 User 准入与 child 发布同事务领取 Pending 请求。child MessageRequest 与 User 续接共用原执行 owner，正文不伪装成 User 或激活 slash skill；真实停止、固定 WorkingResult、当前权限与旧 Unknown 事实保持独立。
+- manual Pause、question 和 Goal 暂停/预算仍挡执行。请求可结束原 child/process 观察等待，保留已经成功触发的结果，不停止观察对象；所有原观察交付完才回到模型边界。公开 Host/API/UI 显示实际激活、hold、Run/execution 与原消息，未确定受理保原 key/kind/正文重试；idle 准备也可经原 Stop task and children 取消。
+- 独审真实复现并最小修复两个窗口：Stop 提交后、旧 Run 尚未结束时受理的新请求不能被旧停止追溯取消；多观察只取消第一项即崩溃，恢复须幂等补完其余原观察。原失败探针源未改并转绿，另验证真实成功报告/trigger 保留、前后停止集合及新 Run 一次绑定。无第二账本、永久停止世代或效果重放。
+- 最终同源 runtime **360/0、2 ignored**，kernel **78/0、11 ignored**；Portable Host **67/67**、UI **36/36**。完整 Host IPC 的 MessageRequest 恢复/真实文件来源场景已补并类型检查，当前未执行，不与组件证据合称 E2E。准确 binary、真实 guardian 和最终构建证据见[本切片验收与复跑](../reviews/runtime-request-activation-2026-10-11.md)。
+- 接着实现关联回复 Wait、实际期限与多等待消费；更广事件/日历和剩余领域继续。两设计整体未完成，用户验收后自行全面迁移的分工不变。
+
 ## 2026-10-11 增量：子任务独立新 Run 与逐轮结果
 
 - 已结束 child 的明确 User 输入现在通过原任务关系下的独立 execution 受理，新建 Run，不重启原 dispatch 或改写前轮回执。首轮和续轮共用一个执行准备/来源/报告/结果 owner；Run/Launch/Operation 仍拥有执行和效果。Catalog **29**、collaboration **4**，旧内部格式拒绝。原 wait_child 保持首轮，child_status/child_report 与普通 integrate_child **版本2** 按确切 execution/publication 消费。

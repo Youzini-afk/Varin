@@ -492,7 +492,7 @@ impl Persistence for Mutex<Catalog> {
             )),
             Err(RuntimeError::InputPending) => Err(ExecutionError::new(
                 "input_pending",
-                "new user input is waiting at this boundary",
+                "new input is waiting at this boundary",
             )),
             Err(error) => {
                 if matches!(record, ExecutionRecord::ModelFinished { .. }) {

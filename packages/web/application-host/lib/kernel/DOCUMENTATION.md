@@ -42,17 +42,26 @@ The authenticated `/api/threads/messages/{send,list,get}` routes use the origina
 and ContentStore through AgentRuntimeClient. ThreadAdapter validates the selected Thread/branch and
 sets the trusted User sender; the nested send request cannot contain actor or sender overrides. The
 Host neither queues a second copy nor prepares a model/source or calls continueLaunch for an inform.
-Rust validates the actual family and exact reply peers. Generated parameters reject unsupported
-request/wait behavior before acceptance. Read responses use the ordinary data path.
+Rust validates the actual family and exact reply peers. Generated parameters accept explicit request
+activation but still reject unsupported wait/deadline fields before acceptance. Read responses use the ordinary data path.
 
 `ThreadsAPI.messages` and the shared `ThreadMessages` panel separate immutable acceptance from actual
-history delivery. Received/sent lists contain metadata; opening a message reads its original body.
+history delivery and request activation. Received/sent lists contain metadata; opening a message reads its original body.
 Reply preserves the received message ID and lets the original owner resolve the target. An unknown
 send response retains the same body, target and key for retry, including across panel collapse; an
 HTTP 400 alone is not evidence of non-acceptance when it reports a lost kernel response. The user can
 explicitly leave an uncertain draft without withdrawing an accepted message. Host/identity changes
 clear local drafts/views and late replies cannot repopulate them. Passive messages do not imply a
 request, a reply Wait, a continuing Goal, or a new child Run.
+
+Request admission belongs to Catalog, including active-Run binding and idle-root/child continuation.
+The same durable event/startup pump consumes `message.run_ready` through `continueLaunch`; accepted
+child requests appear in the original delegated-execution discovery. There is no Host request queue or
+separate activation RPC. A new child request uses the exact fixed predecessor source and context path,
+while only explicit UserContinuation parses User skill commands. The message panel exposes the chosen
+inform/request kind, holds, exact Run/execution linkage and failed/cancelled activation separately from
+delivery. Uncertain retries keep the kind as well as body/peer/key. Tree stop remains available even
+when a Thread has no active Run or displayed children, so pre-Run requests can be fenced.
 
 ## Runtime content maintenance
 
@@ -797,7 +806,8 @@ text/images on the actual child branch. It cannot choose a different actor, conf
 The shared composer uses this path when the child is idle, retains the original key after an uncertain
 response, and uses ordinary boundary/interrupt input when active. Snapshot and exact execution report
 routes expose separate Run/report/file-result identities; old dispatch cards and Waits remain original
-facts. Agent request activation and correlated Wait/deadline are separate unfinished capabilities.
+facts. Directed requests use this same continuation owner with a `message_request` trigger and original
+message provenance; correlated reply Wait/deadline remains separate unfinished work.
 
 Child Run termination, report production, process lifetime and file settlement are separate facts.
 Actual worker/root leases, original file receipts, guardian-confirmed process stop and original

@@ -224,7 +224,11 @@ export type KernelMethod =
   | "runtime.messages.list"
   | "runtime.messages.get";
 
-export type MessageKind = 'inform';
+export type MessageKind = 'inform' | 'request';
+
+export type MessageActivationHold = 'manual_pause' | 'question' | 'goal_blocked' | 'dependency_wait' | 'preparing' | 'source_unsettled';
+
+export type MessageActivation = { state: 'passive' } | { state: 'pending'; executionId: string | null; holdReason: MessageActivationHold | null } | { state: 'bound'; runId: string; executionId: string | null; holdReason: MessageActivationHold | null } | { state: 'cancelled'; runId: string | null; executionId: string | null } | { state: 'failed'; executionId: string | null; code: string };
 
 export interface MessageSendParams {
   key: string;
@@ -268,7 +272,8 @@ export interface MessageReceipt {
 }
 
 export interface MessageSummary extends MessageReceipt {
-  state: 'queued' | 'delivered';
+  state: 'queued' | 'delivered' | 'cancelled';
+  activation: MessageActivation;
   deliveredRunId: string | null;
   deliveredCursor: number | null;
 }
@@ -2995,7 +3000,7 @@ export interface ChildExecutionReportReadParams {
   maxBytes?: number;
 }
 
-export type DelegatedExecutionTrigger = { kind: 'dispatch' } | { kind: 'user_continuation'; key: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null };
+export type DelegatedExecutionTrigger = { kind: 'dispatch' } | { kind: 'user_continuation'; key: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'message_request'; message_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null };
 
 export type ChildSourceBasis = { kind: 'working_result'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; result: ChildWorkingResultRef } | { kind: 'immutable_source'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; pin: ChildSourcePin };
 

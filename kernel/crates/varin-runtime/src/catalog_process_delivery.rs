@@ -284,12 +284,13 @@ impl Catalog {
             "UPDATE resumptions SET claimed=?2,acknowledged=1 WHERE wait_id=?1",
             params![wait.id, sql_number(run.epoch)?],
         )?;
-        run.state = RunState::Runnable;
-        run.waiting_on = None;
+        let next_wait=super::next_ready_dependency_wait(&tx,&run.id)?;
+        run.state = if next_wait.is_some(){RunState::Waiting}else{RunState::Runnable};
+        run.waiting_on = next_wait;
         run.revision += 1;
         put(&tx, "runs", &run.id, &run)?;
         let mut launch: launch_content::LaunchMetadata = record(&tx, "run_launches", &run.id)?;
-        launch.requires_rebind = true;
+        launch.requires_rebind = run.state==RunState::Runnable;
         launch.bound_epoch = None;
         launch.revision += 1;
         put(&tx, "run_launches", &run.id, &launch)?;

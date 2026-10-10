@@ -3,7 +3,7 @@ use super::*;
 use varin_runtime::catalog::messages::*;
 #[test]
 fn selected_send_is_a_durable_effect_from_model_and_policy_with_real_agent_actor() {
-    for model in [true, false] {
+    for (model,kind) in [(true,"inform"),(false,"inform"),(true,"request"),(false,"request")] {
         let f = Fixture::with_tools(
             false,
             vec![crate::message_tools::schema()],
@@ -12,8 +12,8 @@ fn selected_send_is_a_durable_effect_from_model_and_policy_with_real_agent_actor
         let calls = vec![ToolCall {
             call_id: "message".into(),
             name: "send".into(),
-            schema_version: "1".into(),
-            arguments: json!({"targetThreadId":"thread:parent","targetBranchId":"branch:parent","kind":"inform","text":"Child original progress"}),
+            schema_version: "2".into(),
+            arguments: json!({"targetThreadId":"thread:parent","targetBranchId":"branch:parent","kind":kind,"text":"Child original progress"}),
         }];
         execute(&f, model, calls, &mut OwnerReplies::default(), false);
         let catalog = f.catalog();
@@ -97,7 +97,7 @@ fn selected_send_is_a_durable_effect_from_model_and_policy_with_real_agent_actor
             .load()
             .unwrap();
         let batch = db.admit_input_delivery(prepared).unwrap().unwrap();
-        assert!(!batch.activating);
+        assert_eq!(batch.activating,kind=="request");
         assert_eq!(batch.items.len(), 1);
         assert!(
             matches!(&batch.items[0].provenance,Provenance::AgentMessage{thread_id} if thread_id==&f.run.thread_id)
@@ -174,7 +174,7 @@ fn send_rejects_unselected_and_model_supplied_sender_before_any_message_is_accep
     let call = ToolCall {
         call_id: "reject".into(),
         name: "send".into(),
-        schema_version: "1".into(),
+        schema_version: "2".into(),
         arguments: json!({"targetThreadId":"thread:parent","targetBranchId":"branch:parent","kind":"inform","text":"not selected"}),
     };
     assert!(start
@@ -199,7 +199,7 @@ fn send_rejects_unselected_and_model_supplied_sender_before_any_message_is_accep
         vec![ToolCall {
             call_id: "reject".into(),
             name: "send".into(),
-            schema_version: "1".into(),
+            schema_version: "2".into(),
             arguments: json!({"targetThreadId":"thread:parent","targetBranchId":"branch:parent","kind":"inform","text":"forged user","actor":{"kind":"user"}}),
         }],
         &mut OwnerReplies::default(),

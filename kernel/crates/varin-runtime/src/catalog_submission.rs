@@ -39,6 +39,7 @@ pub(super) enum SubmissionOrigin {
         occurrence_id: String,
         checkpoint: Option<String>,
     },
+    MessageRequest { identity: messages::MessageIdentity, execution_id: Option<String>, checkpoint: Option<String>, history: Value },
     Summary,
 }
 pub struct PreparedSubmission {
@@ -256,10 +257,10 @@ impl PreparedSubmission {
                 ));
             }
         }
-        resources::validate_raw_input(&command.input)?;
+        if !matches!(origin,SubmissionOrigin::MessageRequest{..}) { resources::validate_raw_input(&command.input)?; }
         let checkpoint = match &origin {
             SubmissionOrigin::User { checkpoint } | SubmissionOrigin::Child { checkpoint, .. }
-            | SubmissionOrigin::ChildContinuation { checkpoint, .. } | SubmissionOrigin::Continuation { checkpoint, .. } => {
+            | SubmissionOrigin::ChildContinuation { checkpoint, .. } | SubmissionOrigin::Continuation { checkpoint, .. } | SubmissionOrigin::MessageRequest { checkpoint, .. } => {
                 checkpoint
             }
             SubmissionOrigin::Summary => &None,
@@ -327,6 +328,7 @@ impl PreparedSubmission {
             None => command.input.clone(),
         };
         let history = match &origin {
+            SubmissionOrigin::MessageRequest { history, .. } => history.clone(),
             SubmissionOrigin::Child {
                 operation_id,
                 parent_thread_id,

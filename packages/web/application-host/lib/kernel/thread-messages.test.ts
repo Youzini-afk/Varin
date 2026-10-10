@@ -59,11 +59,11 @@ function fixture() {
 }
 afterEach(() => vi.unstubAllGlobals());
 
-it('carries the exact user message and fixed peer through the public consumer chain without preparing or starting work', async () => {
+it.each(['inform', 'request'] as const)('carries exact User %s acceptance through public consumers without making Host the activation owner', async kind => {
   const f = fixture();
-  const request = { key: 'stable-user-intent', ...target, kind: 'inform' as const, text: '路径 C:\\work\\原文\nunchanged' };
+  const request = { key: 'stable-user-intent', ...target, kind, text: '路径 C:\\work\\原文\nunchanged' };
   f.facts.reply = { messageId: 'message:original', senderThreadId: identity.threadId, senderBranchId: identity.branchId,
-    ...target, actor: { kind: 'user' }, kind: 'inform', replyTo: null, acceptedCursor: 41 };
+    ...target, actor: { kind: 'user' }, kind, replyTo: null, acceptedCursor: 41 };
   expect(await f.api.send(identity, request)).toEqual(f.facts.reply);
   expect(f.requests.mock.calls.at(-1)!.slice(0, 2)).toEqual(['runtime.messages.send', { ...request, senderThreadId: identity.threadId, senderBranchId: identity.branchId }]);
   await f.api.send(identity, { key: 'reply-key', kind: 'inform', text: 'reply without a guessed target', replyTo: 'received-message' });
@@ -78,11 +78,11 @@ it('carries the exact user message and fixed peer through the public consumer ch
   expect(f.models.resolveModel).not.toHaveBeenCalled(); expect(f.models.rebindModel).not.toHaveBeenCalled();
 });
 
-it('requires Host authentication and preserves User ingress against forged actor, sender and unsupported active requests', async () => {
+it('requires Host authentication and preserves User ingress against forged actor, sender and unsupported Wait fields', async () => {
   const f = fixture(); const request = { key: 'k', ...target, kind: 'inform', text: 'body' };
   for (const method of ['send', 'list', 'get']) expect((await f.request(`/api/threads/messages/${method}`, identity, false)).status).toBe(401);
   expect(f.requests).not.toHaveBeenCalled();
-  for (const extra of [{ actor: { kind: 'agent', runId: 'forged' } }, { senderThreadId: 'forged' }, { senderBranchId: 'forged' }, { kind: 'request' }, { wait: true }]) {
+  for (const extra of [{ actor: { kind: 'agent', runId: 'forged' } }, { senderThreadId: 'forged' }, { senderBranchId: 'forged' }, { kind: 'unknown' }, { wait: true }]) {
     expect((await f.request('/api/threads/messages/send', { ...identity, request: { ...request, ...extra } })).status).toBe(400);
   }
   expect((await f.request('/api/threads/messages/list', { ...identity, request: { direction: 'incoming', threadId: 'foreign' } })).status).toBe(400);

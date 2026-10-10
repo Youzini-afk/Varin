@@ -8,10 +8,11 @@ import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 export function ThreadExecutions({ api, identity, executions }: { api: ThreadsAPI; identity: ThreadIdentity; executions: DelegatedExecution[] }) {
   return <div aria-label="Delegated executions" className="space-y-2">
     {executions.map(execution => <details key={execution.execution_id} className="rounded border p-2 text-sm">
-      <summary>{execution.trigger.kind === 'dispatch' ? 'Initial delegated execution' : 'User continuation'} · {execution.state}</summary>
+      <summary>{execution.trigger.kind === 'dispatch' ? 'Initial delegated execution' : execution.trigger.kind === 'message_request' ? 'Request continuation' : 'User continuation'} · {execution.state}</summary>
       <div className="break-all text-xs text-muted-foreground">Execution: {execution.execution_id}</div>
       <div className="break-all text-xs text-muted-foreground">Run: {execution.receipt?.run_id ?? 'Not admitted yet'}</div>
-      {execution.trigger.kind === 'user_continuation' && <div className="break-all text-xs text-muted-foreground">Previous Run: {execution.trigger.previous_run_id}</div>}
+      {execution.trigger.kind !== 'dispatch' && <div className="break-all text-xs text-muted-foreground">Previous Run: {execution.trigger.previous_run_id}</div>}
+      {execution.trigger.kind === 'message_request' && <div className="break-all text-xs text-muted-foreground">Request message: {execution.trigger.message_id}</div>}
       <div className="text-xs text-muted-foreground">{execution.code_result.kind === 'published'
         ? `Fixed file result: ${execution.code_result.result.publication_id} · revision ${execution.code_result.result.result_revision} · effect ${execution.code_result.effect}`
         : execution.code_result.kind === 'unavailable' ? `File result unavailable: ${execution.code_result.code} · effect ${execution.code_result.effect}`
@@ -34,7 +35,7 @@ export function ChildExecutions({ api, identity, operationId }: { api: ThreadsAP
     setLoading(true); setError('');
     try {
       const result = await api.collaboration!.executions(identity, operationId, controller.signal);
-      if (!controller.signal.aborted) setExecutions(result.filter(execution => execution.trigger.kind === 'user_continuation'));
+      if (!controller.signal.aborted) setExecutions(result.filter(execution => execution.trigger.kind !== 'dispatch'));
     } catch (value) { if (!controller.signal.aborted) setError(value instanceof Error ? value.message : 'Execution list unavailable'); }
     finally { if (!controller.signal.aborted) setLoading(false); }
   };

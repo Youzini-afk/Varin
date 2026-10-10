@@ -88,16 +88,19 @@ exercises a stalled response body, concurrent mint sharing, retry and late-publi
 
 ## Task-family message contract
 
-`ThreadsAPI.messages` exposes immutable `inform` acceptance and original incoming/outgoing message
+`ThreadsAPI.messages` exposes immutable `inform`/`request` acceptance and original incoming/outgoing message
 views. The caller supplies its `ThreadIdentity` separately from the peer request. The trusted Host
 sets User identity; clients cannot choose Agent actor/sender fields. `replyTo` addresses the exact
 original peer without guessing its current branch. A send receipt confirms acceptance, while message
-views separately report the actual history delivery Run and cursor; neither promises execution.
+views separately report the actual history delivery Run/cursor and request activation. A bound Run
+is not proof that it completed the requested work. Pending holds and failed/cancelled activation keep
+the original message readable; message views never become another execution owner.
 
 Read calls accept AbortSignal and all calls keep the existing runtime endpoint-generation checks.
 A lost send response must be retried with the same original key and intent. Aborting the transport or
-closing a UI does not retract a message already accepted by the Catalog. This version does not expose
-active requests or reply Waits.
+closing a UI does not retract a message already accepted by the Catalog. A request can enter the
+current Run or admit a new root/child execution through its existing owner. Manual pauses, unanswered
+questions and Goal limits remain effective. This version does not expose reply Waits or deadlines.
 
 ## Delegated execution continuation
 

@@ -491,8 +491,10 @@ impl Fixture {
             .unwrap()
     }
     pub(crate) fn admit_wait(&mut self, suffix: &str) -> Wait {
+        self.admit_waits(suffix, 1).remove(0)
+    }
+    pub(crate) fn admit_waits(&mut self, suffix: &str, count: usize) -> Vec<Wait> {
         let request_id = format!("wait-request-{suffix}");
-        let call_id = format!("wait-call-{suffix}");
         let epoch = self.db.epoch();
         let branch = self.db.run(&self.context.run_id).unwrap().branch_id;
         let range = HistoryRange {
@@ -516,8 +518,14 @@ impl Fixture {
                     history_range: range.clone(),
                 },
                 binding: RequestBinding {
-                    child_dispatch: self.db.launch_metadata(&self.context.run_id).unwrap().unwrap().dispatch_context_ref,
-                    goal: None, resource_activations: Vec::new(),
+                    child_dispatch: self
+                        .db
+                        .launch_metadata(&self.context.run_id)
+                        .unwrap()
+                        .unwrap()
+                        .dispatch_context_ref,
+                    goal: None,
+                    resource_activations: Vec::new(),
                     resource_checkpoint_id: None,
                     connection_identity: self.launch.connection_identity.clone(),
                     provider_family: self.launch.provider_family.clone(),
@@ -552,12 +560,14 @@ impl Fixture {
                 },
             )
             .unwrap();
-        let call = ToolCall {
-            call_id: call_id.clone(),
-            name: WAIT_TOOL.into(),
-            schema_version: "1".into(),
-            arguments: json!({"operationId": self.context.operation_id}),
-        };
+        let calls = (0..count)
+            .map(|index| ToolCall {
+                call_id: format!("wait-call-{suffix}-{index}"),
+                name: WAIT_TOOL.into(),
+                schema_version: "1".into(),
+                arguments: json!({"operationId":self.context.operation_id}),
+            })
+            .collect::<Vec<_>>();
         self.db
             .commit_execution(
                 &self.context.run_id,
@@ -566,111 +576,97 @@ impl Fixture {
                     request_id: request_id.clone(),
                     outcome: ModelOutcome::Completed,
                     finish_reason: Some(FinishReason::ToolCalls),
-                    items: vec![ProviderItem {
-                        id: format!("wait-item-{suffix}"),
-                        content: Content::ToolCall { call: call.clone() },
-                        opaque: None,
-                    }],
+                    items: calls
+                        .iter()
+                        .map(|call| ProviderItem {
+                            id: call.call_id.clone(),
+                            content: Content::ToolCall { call: call.clone() },
+                            opaque: None,
+                        })
+                        .collect(),
                     interrupted_deltas: vec![],
                     usage: UsageReceipt::default(),
                     failure: None,
                 },
             )
             .unwrap();
-        self.db
-            .commit_execution(&self.context.run_id, epoch, &{
-                let tool = AdmittedTool {
-                    call,
-                    contract: ToolContract {
-                        name: WAIT_TOOL.into(),
-                        schema_version: "1".into(),
-                        read_only: true,
-                        completion: CompletionKind::Job,
-                        lifetime: Lifetime::Thread,
-                        resources: vec![],
-                    },
-                };
-                ExecutionRecord::ToolAdmitted {
-                    context: {
-                        let request_id: String = request_id.clone();
-                        let call_id: String = tool.call.call_id.clone();
-                        varin_runtime::execution::ToolExecutionContext {
-                            run_id: (&self.context.run_id).to_string(),
-                            operation_id: format!("{request_id}:tool:{call_id}"),
-                            origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
-                        }
-                    },
-                    tool,
-                }
-            })
-            .unwrap();
-        self.db
-            .commit_execution(
-                &self.context.run_id,
-                epoch,
-                &ExecutionRecord::ToolDispatched {
-                    executor_owner: varin_runtime::ExecutorOwner::Kernel,
-                    context: {
-                        let request_id: String = request_id.clone();
-                        let call_id: String = call_id.clone();
-                        varin_runtime::execution::ToolExecutionContext {
-                            run_id: (&self.context.run_id).to_string(),
-                            operation_id: format!("{request_id}:tool:{call_id}"),
-                            origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
-                        }
-                    },
+        let mut waits = Vec::new();
+        let mut results = Vec::new();
+        for call in calls {
+            let context = ToolExecutionContext {
+                run_id: self.context.run_id.clone(),
+                origin: ToolOrigin::ModelStep {
+                    request_id: request_id.clone(),
                 },
-            )
-            .unwrap();
-        let context = ToolExecutionContext {
-            run_id: self.context.run_id.clone(),
-            origin: ToolOrigin::ModelStep {
-                request_id: request_id.clone(),
-            },
-            operation_id: format!("{request_id}:tool:{call_id}"),
-        };
-        let prepared = self
-            .db
-            .prepare_child_wait_registration(&context, &self.context.operation_id)
-            .unwrap()
-            .load()
-            .unwrap();
-        let wait = self.db.register_child_wait(prepared).unwrap();
-        let result = ToolResult {
-            request_id: request_id.clone(),
-            call_id,
-            completion: ToolCompletion::JobAccepted {
-                operation_id: context.operation_id,
-                phase: "awaiting_child".into(),
-                effect: Effect::None,
-                lifetime: Lifetime::Thread,
-            },
-        };
-        self.db
-            .commit_execution(&self.context.run_id, epoch, &{
-                let result = result.clone();
-                ExecutionRecord::ToolSettled {
-                    executor_stopped: false,
-                    context: {
-                        let request_id: String = result.request_id.clone();
-                        let call_id: String = result.call_id.clone();
-                        varin_runtime::execution::ToolExecutionContext {
-                            run_id: (&self.context.run_id).to_string(),
-                            operation_id: format!("{request_id}:tool:{call_id}"),
-                            origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
-                        }
+                operation_id: format!("{request_id}:tool:{}", call.call_id),
+            };
+            self.db
+                .commit_execution(
+                    &self.context.run_id,
+                    epoch,
+                    &ExecutionRecord::ToolAdmitted {
+                        context: context.clone(),
+                        tool: AdmittedTool {
+                            call: call.clone(),
+                            contract: ToolContract {
+                                name: WAIT_TOOL.into(),
+                                schema_version: "1".into(),
+                                read_only: true,
+                                completion: CompletionKind::Job,
+                                lifetime: Lifetime::Thread,
+                                resources: vec![],
+                            },
+                        },
                     },
-                    completion: result.completion,
-                }
-            })
-            .unwrap();
+                )
+                .unwrap();
+            self.db
+                .commit_execution(
+                    &self.context.run_id,
+                    epoch,
+                    &ExecutionRecord::ToolDispatched {
+                        context: context.clone(),
+                        executor_owner: ExecutorOwner::Kernel,
+                    },
+                )
+                .unwrap();
+            let prepared = self
+                .db
+                .prepare_child_wait_registration(&context, &self.context.operation_id)
+                .unwrap()
+                .load()
+                .unwrap();
+            waits.push(self.db.register_child_wait(prepared).unwrap());
+            let result = ToolResult {
+                request_id: request_id.clone(),
+                call_id: call.call_id,
+                completion: ToolCompletion::JobAccepted {
+                    operation_id: context.operation_id.clone(),
+                    phase: "awaiting_child".into(),
+                    effect: Effect::None,
+                    lifetime: Lifetime::Thread,
+                },
+            };
+            self.db
+                .commit_execution(
+                    &self.context.run_id,
+                    epoch,
+                    &ExecutionRecord::ToolSettled {
+                        executor_stopped: false,
+                        context,
+                        completion: result.completion.clone(),
+                    },
+                )
+                .unwrap();
+            results.push(result);
+        }
         self.db
             .commit_execution(
                 &self.context.run_id,
                 epoch,
                 &ExecutionRecord::ToolBatchCommitted {
                     request_id,
-                    results: vec![result],
+                    results,
                 },
             )
             .unwrap();
@@ -680,11 +676,11 @@ impl Fixture {
                 epoch,
                 &ExecutionRecord::StateChanged {
                     state: RunState::Waiting,
-                    waiting_on: Some(wait.id.clone()),
+                    waiting_on: Some(waits[0].id.clone()),
                 },
             )
             .unwrap();
-        wait
+        waits
     }
     pub(crate) fn admit_policy_call(&mut self, call: ToolCall) -> ToolExecutionContext {
         let run_id = self.context.run_id.clone();

@@ -766,25 +766,39 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
         .unwrap()
         .child_writers_stopped_sync(child.operation.as_ref().unwrap())
         .unwrap());
-    let continuation_head = {
-        let db = owner.lock().unwrap();
-        db.head(&db.run(&child.binding.run_id).unwrap().branch_id)
-            .unwrap()
+    let send_request = |key: &str| {
+        let (sender, target) = {
+            let db = owner.lock().unwrap();
+            (
+                db.run(&parent.binding.run_id).unwrap(),
+                db.run(&child.binding.run_id).unwrap(),
+            )
+        };
+        input_commands::execute(
+            h.runtime.clone(),
+            "runtime.messages.send",
+            json!({"key":key,"senderThreadId":sender.thread_id,"senderBranchId":sender.branch_id,
+                "targetThreadId":target.thread_id,"targetBranchId":target.branch_id,"kind":"request",
+                "text":"Continue from the fixed result after the actual writer stops"}),
+            Arc::new(AtomicBool::new(false)),
+            None,
+        ).unwrap()
     };
-    let continue_command = json!({"key":"explicit-user-after-writer", "childOperationId":child.operation,
-        "previousRunId":child.binding.run_id,"expectedHead":continuation_head,
-        "input":{"text":"Continue from the fixed result after the actual writer stops"}});
-    let blocked = child_commands::execute(
-        h.runtime.clone(),
-        h.resources.clone(),
-        "runtime.child.continuation.accept",
-        continue_command.clone(),
-        &AtomicBool::new(false),
-    );
-    assert!(
-        matches!(&blocked, Err(KernelError::Operation(message)) if message.contains("source writers have not confirmed stop")),
-        "live original writer must fence the new execution: {blocked:?}"
-    );
+    let blocked = send_request("request-before-stop");
+    h.runtime.reconcile_message_requests().unwrap();
+    {
+        let db = owner.lock().unwrap();
+        let target = db.run(&child.binding.run_id).unwrap();
+        let message = db.capture_message(
+            &target.thread_id, &target.branch_id, blocked["messageId"].as_str().unwrap(),
+        ).unwrap().load().unwrap();
+        assert!(matches!(message.summary.activation,
+            varin_runtime::catalog::messages::MessageActivation::Pending {
+                execution_id: None,
+                hold_reason: Some(varin_runtime::catalog::messages::MessageActivationHold::SourceUnsettled)
+            }
+        ));
+    }
     let ack=h.controls.admit_control("runtime.tree.cancel",&json!({"target":{"kind":"child","operation_id":child.operation},"expectedParentThreadId":"parent"})).unwrap().unwrap();
     assert_eq!(ack["child_count"], 2);
     assert_eq!(ack["process_count"], 2);
@@ -886,15 +900,25 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
             .unwrap(),
         bytes
     );
-    // The same trusted User command is now admitted against the exact real Storage result.
-    let continued = child_commands::execute(
-        h.runtime.clone(),
-        h.resources.clone(),
-        "runtime.child.continuation.accept",
-        continue_command,
-        &AtomicBool::new(false),
-    )
-    .unwrap();
+    // Tree stop cancelled the old accepted request. A new request uses the same original
+    // message authority and creates a real MessageRequest execution from the fixed Storage root.
+    let accepted = send_request("request-after-real-stop");
+    h.runtime.reconcile_message_requests().unwrap();
+    let read = {
+        let db = owner.lock().unwrap();
+        let target = db.run(&child.binding.run_id).unwrap();
+        let old = db.capture_message(
+            &target.thread_id, &target.branch_id, blocked["messageId"].as_str().unwrap(),
+        ).unwrap().load().unwrap();
+        assert_eq!(old.summary.state, varin_runtime::InputState::Cancelled);
+        let next = db.delegated_executions(child.operation.as_deref()).unwrap()
+            .into_iter().find(|execution| matches!(&execution.trigger,
+                varin_runtime::catalog::delegated::DelegatedTrigger::MessageRequest { message_id, .. }
+                    if message_id == accepted["messageId"].as_str().unwrap()
+            )).expect("one original request execution");
+        db.capture_delegated_execution(next).unwrap()
+    };
+    let continued = serde_json::to_value(read.load().unwrap()).unwrap();
     let execution_id = continued["execution_id"].as_str().unwrap();
     assert_ne!(Some(execution_id), child.operation.as_deref());
     assert_eq!(continued["source_basis"]["kind"], "working_result");

@@ -25,6 +25,13 @@ pub struct ChildRelation {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DelegatedTrigger {
     Dispatch,
+    MessageRequest {
+        message_id: String,
+        previous_execution_id: String,
+        previous_run_id: String,
+        previous_run_revision: u64,
+        expected_head: Option<String>,
+    },
     UserContinuation {
         key: String,
         previous_execution_id: String,
@@ -298,7 +305,7 @@ impl DelegatedExecutionRead {
             child_branch_id: child.child_branch_id,
             project_id: child.project_id,
             state: execution.state().into(),
-            input: self.content.load(&execution.input_ref)?,
+            input: if matches!(execution.trigger,DelegatedTrigger::MessageRequest{..}) {self.content.load_history_payload(&execution.input_ref)?.0} else {self.content.load(&execution.input_ref)?},
             configuration: self.content.load(&execution.configuration_ref)?,
             selected_profile: serde_json::from_value(
                 self.content.load(&child.selected_profile_ref)?,
@@ -380,6 +387,7 @@ pub struct ChildContinuationCommand {
     pub input: Value,
 }
 pub struct ChildContinuationPreparation {
+    message: Option<(inputs::QueuedInputMetadata,Value)>,
     command: ChildContinuationCommand,
     existing: Option<DelegatedExecution>,
     previous: Option<DelegatedExecution>,
@@ -391,6 +399,7 @@ pub struct ChildContinuationPreparation {
     publication: crate::content::ContentPublication,
 }
 pub struct PreparedChildContinuation {
+    pub(super) message: Option<inputs::QueuedInputMetadata>,
     command: ChildContinuationCommand,
     input_ref: Value,
     configuration_ref: Option<Value>,
@@ -408,8 +417,10 @@ impl ChildContinuationPreparation {
         if self.command.key.trim().is_empty() {
             return Err(RuntimeError::Invalid("continuation key is required".into()));
         }
-        resources::validate_raw_input(&self.command.input)?;
-        let input_ref = self.content.save(&self.command.input)?;
+        let input_ref=if let Some((_,history))=&self.message {
+            self.content.load_history_payload(history)?;
+            history.clone()
+        } else { resources::validate_raw_input(&self.command.input)?; self.content.save(&self.command.input)? };
         if let Some(existing) = &self.existing {
             check_retry(existing, &self.command, &input_ref)?;
         }
@@ -446,30 +457,13 @@ impl ChildContinuationPreparation {
             .as_ref()
             .map(|launch| -> Result<_> {
                 let mut selection = launch.selection.clone();
-                let mut models = selection.load_policy_models(&self.content)?;
-                for model in &mut models {
-                    if model.status == crate::execution::PolicyModelStatus::Available {
-                        let configuration_identity =
-                            model.configuration_identity.as_deref().ok_or_else(|| {
-                                RuntimeError::Invalid(
-                                    "planning configuration identity is missing".into(),
-                                )
-                            })?;
-                        // A new Run starts its own policy generation, while retaining the exact
-                        // selected model, credentials and tool-free provider binding.
-                        model.binding_id = Some(format!(
-                            "policy:0:{}:{configuration_identity}",
-                            model.capability_id
-                        ));
-                    }
-                }
-                selection.policy_models =
-                    launch_content::stage_policy_models(&self.content, &models)?;
+                selection.rebase_policy_models(&self.content)?;
                 selection.source = None;
                 Ok(selection)
             })
             .transpose()?;
         Ok(PreparedChildContinuation {
+            message:self.message.map(|(row,_)|row),
             selection,
             provenance_ref,
             configuration_ref: self
@@ -538,6 +532,7 @@ impl Catalog {
             (Some(previous), Some(run), Some(launch), Some(writers))
         };
         Ok(ChildContinuationPreparation {
+            message:None,
             command,
             existing,
             previous,
@@ -548,6 +543,12 @@ impl Catalog {
             content: self.content.clone(),
             publication: self.content.begin_publication(),
         })
+    }
+    pub(super) fn capture_message_continuation(&self,row:inputs::QueuedInputMetadata,previous:Run,child_operation_id:String)->Result<ChildContinuationPreparation> {
+        let history:String=self.db.query_row("SELECT body FROM input_history_content WHERE input_id=?1",[&row.id],|r|r.get(0))?;
+        let mut preparation=self.capture_child_continuation(ChildContinuationCommand{key:row.id.clone(),child_operation_id,previous_run_id:previous.id,expected_head:self.head(&row.branch_id)?,input:Value::Null})?;
+        preparation.message=Some((row,serde_json::from_str(&history)?));
+        Ok(preparation)
     }
     pub fn accept_child_continuation(
         &mut self,
@@ -571,6 +572,7 @@ impl Catalog {
                 "continuation preparation belongs to a previous owner".into(),
             ));
         }
+        if let Some(row)=&prepared.message { messages::activation::validate_pending(&self.db,row)?; }
         let previous = prepared
             .previous
             .ok_or_else(|| RuntimeError::Conflict("continuation predecessor changed".into()))?;
@@ -582,11 +584,13 @@ impl Catalog {
         // by that result's existing Storage publication owner; independently-lived
         // processes and Host source callbacks still require their original stop receipt.
         if !self.child_writers_stopped(&writers)? {
+            if prepared.message.is_some(){return Err(RuntimeError::RequestActivationHeld)}
             return Err(RuntimeError::Conflict(
                 "previous child source writers have not confirmed stop".into(),
             ));
         }
         if !run.state.terminal() || previous.report.is_none() || !previous.code_result.settled() {
+            if prepared.message.is_some(){return Err(RuntimeError::RequestActivationHeld)}
             return Err(RuntimeError::Conflict(
                 "previous child execution has not fixed its report and source result".into(),
             ));
@@ -649,6 +653,7 @@ impl Catalog {
             || actual_launch.policy_target != launch.policy_target
             || actual_launch.revision != launch.revision
         {
+            if prepared.message.is_some(){return Err(RuntimeError::RequestActivationStale)}
             return Err(RuntimeError::Conflict(
                 "previous child execution changed during continuation preparation".into(),
             ));
@@ -671,6 +676,7 @@ impl Catalog {
             || pending
             || latest_run != run.id
         {
+            if prepared.message.is_some(){return Err(RuntimeError::RequestActivationStale)}
             return Err(RuntimeError::Conflict(
                 "child head or execution owner changed".into(),
             ));
@@ -680,13 +686,13 @@ impl Catalog {
         let mut next = DelegatedExecution {
             execution_id: execution_id.clone(),
             child_operation_id: child.operation_id,
-            trigger: DelegatedTrigger::UserContinuation {
+            trigger: if let Some(row)=&prepared.message { DelegatedTrigger::MessageRequest {message_id:row.id.clone(),previous_execution_id:previous.execution_id.clone(),previous_run_id:run.id.clone(),previous_run_revision:run.revision,expected_head:head.clone()} } else { DelegatedTrigger::UserContinuation {
                 key: prepared.command.key.clone(),
                 previous_execution_id: previous.execution_id,
                 previous_run_id: run.id,
                 previous_run_revision: run.revision,
                 expected_head: head,
-            },
+            } },
             input_ref: prepared.input_ref,
             configuration_ref: prepared.configuration_ref.expect("captured configuration"),
             launch: selected,
@@ -714,6 +720,7 @@ impl Catalog {
             json!({"child_operation_id":next.child_operation_id}),
         )?;
         insert_execution(&tx, &next, Some(&prepared.command.key))?;
+        messages::activation::bind_execution(&tx,&child.child_branch_id,&next.execution_id)?;
         tx.commit()?;
         Ok(next)
     }
@@ -817,6 +824,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
         let expected_key = match &execution.trigger {
             DelegatedTrigger::Dispatch => None,
             DelegatedTrigger::UserContinuation { key, .. } => Some(key.as_str()),
+            DelegatedTrigger::MessageRequest { message_id, .. } => Some(message_id.as_str()),
         };
         let family = relation(db, &child)?;
         if let Some(receipt) = &execution.receipt {

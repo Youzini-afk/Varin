@@ -420,7 +420,8 @@ pub(crate) fn spawn(
                                         break;
                                     };
                                     let result = owner
-                                        .reconcile_goal_waits()
+                                        .reconcile_message_requests()
+                                        .and_then(|_| owner.reconcile_goal_waits())
                                         .map_err(|_| ())
                                         .and_then(|_| {
                                             varin_runtime::catalog::followups::reconcile(

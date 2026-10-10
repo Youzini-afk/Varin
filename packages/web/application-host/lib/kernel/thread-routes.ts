@@ -126,7 +126,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('messages/send', (body, signal) => {
     const request = object(body.request);
     if (Object.keys(request).some(key => !['key', 'targetThreadId', 'targetBranchId', 'replyTo', 'kind', 'text'].includes(key))) throw new Error('Invalid message field');
-    if (request.kind !== 'inform' || typeof request.text !== 'string') throw new Error('Invalid message content');
+    if ((request.kind !== 'inform' && request.kind !== 'request') || typeof request.text !== 'string') throw new Error('Invalid message content');
     return adapter.sendMessage(identity(body), { key: text(request.key), kind: request.kind, text: request.text,
       ...(request.targetThreadId === undefined ? {} : { targetThreadId: text(request.targetThreadId) }),
       ...(request.targetBranchId === undefined ? {} : { targetBranchId: text(request.targetBranchId) }),
