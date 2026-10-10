@@ -321,7 +321,8 @@ it('rebuilds only Host continuation service while its kernel keeps the original 
   }
 }, 60_000);
 
-it.each(['process_stopped', 'at'] as const)('admits one %s follow-up without the Host pump, then cold-prepares and reads the original long-lived process output', async triggerKind => {
+it.each(['process_stopped', 'at', 'any', 'all'] as const)('admits one %s follow-up without the Host pump, then cold-prepares and reads the original long-lived process output', async triggerKind => {
+  const waitsForStop = triggerKind === 'process_stopped' || triggerKind === 'all';
   let turn = 0; let processId = ''; let readResult = ''; let finishSource: (() => void) | undefined;
   const failures: unknown[] = [];
   const f = await fixture((body, response) => {
@@ -355,27 +356,36 @@ it.each(['process_stopped', 'at'] as const)('admits one %s follow-up without the
   try {
     await expect.poll(() => processId, { timeout: 15_000 }).not.toBe('');
     f.collaboration.stop();
-    if (triggerKind === 'at') {
+    if (!waitsForStop) {
       finishSource!();
       await expect.poll(async () => (await f.runtime.run(source.run_id)).state, { timeout: 15_000 }).toBe('completed');
     }
-    const command = { ...identity, key: 'continue-process-once', runId: source.run_id, trigger: triggerKind === 'at' ? { kind: 'at' as const, atMs: Date.now() } : { kind: 'process_stopped' as const, operationId: processId }, instruction: `Read the original process output for ${processId}; do not restart it.` };
+    const at = { kind: 'at' as const, atMs: Date.now() };
+    const stopped = { kind: 'process_stopped' as const, operationId: processId };
+    const trigger = triggerKind === 'at' ? at : triggerKind === 'process_stopped' ? stopped : { kind: triggerKind, sources: [at, stopped] };
+    const command = { ...identity, key: 'continue-process-once', runId: source.run_id, trigger,
+      instruction: `Read the original process output for ${processId}; do not restart it.` };
     const registered = await f.api.followups.register(command);
-    if (triggerKind === 'process_stopped') { expect(registered.wait.state).toBe('waiting'); expect(registered.occurrence).toBeNull(); }
+    if (waitsForStop) { expect(registered.wait.state).toBe('waiting'); expect(registered.occurrence).toBeNull(); }
     expect(await f.api.followups.register(command)).toMatchObject({ id: registered.id, registered_at_ms: registered.registered_at_ms, trigger: registered.trigger });
     finishSource!();
     await expect.poll(async () => (await f.runtime.run(source.run_id)).state, { timeout: 15_000 }).toBe('completed');
     expect((await f.runtime.operation(processId)).phase).not.toBe('terminal');
     // No Host continuation service is running. Only the native process receipt and the independent
     // kernel event worker can consume this authorization and atomically admit the next Run.
-    if (triggerKind === 'process_stopped') await fs.writeFile(path.join(f.root, 'release-process'), 'release');
+    if (waitsForStop) await fs.writeFile(path.join(f.root, 'release-process'), 'release');
     await expect.poll(async () => Boolean((await f.api.followups.list(identity))[0]?.occurrence?.delivery?.run_id), { timeout: 15_000 }).toBe(true);
     const admitted = (await f.api.followups.list(identity))[0]!;
     const continuation = admitted.occurrence!.delivery!; continuedRunId = continuation.run_id!;
     expect(continuedRunId).not.toBe(source.run_id); expect(admitted.occurrence!.delivery?.activation_state).toBe('bound');
-    expect(admitted.occurrence!.evidence).toMatchObject(triggerKind === 'at' ? { kind: 'at', at_ms: command.trigger.kind === 'at' ? command.trigger.atMs : 0 }
+    if (triggerKind === 'any' || triggerKind === 'all') {
+      expect(admitted.occurrence!.evidence).toMatchObject({ kind: triggerKind,
+        sources: [{ source_index: 0, evidence: { kind: 'at', at_ms: at.atMs } }, ...(waitsForStop ? [
+          { source_index: 1, evidence: { kind: 'process_stopped', receipt_identity: processId, receipt_epoch: expect.any(String) } },
+        ] : [])] });
+    } else expect(admitted.occurrence!.evidence).toMatchObject(triggerKind === 'at' ? { kind: 'at', at_ms: at.atMs }
       : { kind: 'process_stopped', receipt_identity: processId, receipt_epoch: expect.any(String) });
-    if (triggerKind === 'at') expect((await f.runtime.operation(processId)).phase).not.toBe('terminal');
+    if (!waitsForStop) expect((await f.runtime.operation(processId)).phase).not.toBe('terminal');
     else expect((await f.runtime.operation(processId)).outcome).toBe('succeeded');
     expect(await f.runtime.run(continuedRunId)).toMatchObject({ state: 'accepted', thread_id: identity.threadId, branch_id: identity.branchId });
     expect(await f.runtime.launch(continuedRunId)).toMatchObject({ startable: true, requires_rebind: true });
@@ -390,10 +400,10 @@ it.each(['process_stopped', 'at'] as const)('admits one %s follow-up without the
       onError: (_operation, error) => { errors.push(error); } });
     await replacement.recover();
     await expect.poll(async () => (await f.runtime.run(continuedRunId!)).state, { timeout: 15_000 }).toBe('completed');
-    expect(readResult).toContain(triggerKind === 'at' ? 'running' : 'succeeded');
+    expect(readResult).toContain(!waitsForStop ? 'running' : 'succeeded');
     const observed = JSON.parse(readResult) as { content: { chunks: Array<{ bytesBase64: string }> } };
     expect(Buffer.concat(observed.content.chunks.map(chunk => Buffer.from(chunk.bytesBase64, 'base64'))).toString())
-      .toBe(triggerKind === 'at' ? 'original-live-process-output' : 'original-live-process-outputone-shot-process-output');
+      .toBe(!waitsForStop ? 'original-live-process-output' : 'original-live-process-outputone-shot-process-output');
     expect((await f.api.followups.register(command)).occurrence!.delivery).toMatchObject({ input_id: continuation.input_id, run_id: continuation.run_id, state: 'delivered' });
     for (const action of ['pause', 'resume', 'cancel'] as const) {
       expect((await f.api.followups.control({ ...identity, followupId: registered.id,

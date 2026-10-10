@@ -12,9 +12,40 @@ use crate::execution::{
     rename_all_fields = "camelCase",
     deny_unknown_fields
 )]
-pub enum FollowupRegistrationTrigger {
+pub enum FollowupRegistrationSource {
     At { at_ms: u64 },
     ProcessStopped { operation_id: String },
+}
+impl FollowupRegistrationSource {
+    fn source(&self) -> FollowupSource {
+        match self {
+            Self::At { at_ms } => FollowupSource::At { at_ms: *at_ms },
+            Self::ProcessStopped { operation_id } => FollowupSource::ProcessStopped {
+                operation_id: operation_id.clone(),
+            },
+        }
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum FollowupRegistrationTrigger {
+    At {
+        at_ms: u64,
+    },
+    ProcessStopped {
+        operation_id: String,
+    },
+    Any {
+        sources: Vec<FollowupRegistrationSource>,
+    },
+    All {
+        sources: Vec<FollowupRegistrationSource>,
+    },
 }
 impl FollowupRegistrationTrigger {
     fn trigger(&self) -> FollowupTrigger {
@@ -23,7 +54,29 @@ impl FollowupRegistrationTrigger {
             Self::ProcessStopped { operation_id } => FollowupTrigger::ProcessStopped {
                 operation_id: operation_id.clone(),
             },
+            Self::Any { sources } => FollowupTrigger::Any {
+                sources: sources
+                    .iter()
+                    .map(FollowupRegistrationSource::source)
+                    .collect(),
+            },
+            Self::All { sources } => FollowupTrigger::All {
+                sources: sources
+                    .iter()
+                    .map(FollowupRegistrationSource::source)
+                    .collect(),
+            },
         }
+    }
+    pub fn process_operation_ids(&self) -> Vec<String> {
+        self.trigger()
+            .sources()
+            .into_iter()
+            .filter_map(|source| match source {
+                FollowupSource::ProcessStopped { operation_id } => Some(operation_id),
+                FollowupSource::At { .. } => None,
+            })
+            .collect()
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -44,20 +97,29 @@ impl FollowupRegistration {
                 "follow-up instruction is required".into(),
             ));
         }
-        match &self.trigger {
-            FollowupRegistrationTrigger::At { at_ms } if *at_ms > observations::MAX_DEADLINE_MS => {
-                return Err(RuntimeError::Invalid(
-                    "follow-up instant exceeds the native wall-clock timer representation".into(),
-                ))
+        let sources = self.trigger.trigger().sources();
+        if sources.is_empty() {
+            return Err(RuntimeError::Invalid(
+                "follow-up sources cannot be empty".into(),
+            ));
+        }
+        for source in sources {
+            match source {
+                FollowupSource::At { at_ms } if at_ms > observations::MAX_DEADLINE_MS => {
+                    return Err(RuntimeError::Invalid(
+                        "follow-up instant exceeds the native wall-clock timer representation"
+                            .into(),
+                    ));
+                }
+                FollowupSource::ProcessStopped { operation_id }
+                    if operation_id.trim().is_empty() =>
+                {
+                    return Err(RuntimeError::Invalid(
+                        "original process operationId is required".into(),
+                    ));
+                }
+                _ => (),
             }
-            FollowupRegistrationTrigger::ProcessStopped { operation_id }
-                if operation_id.trim().is_empty() =>
-            {
-                return Err(RuntimeError::Invalid(
-                    "original process operationId is required".into(),
-                ))
-            }
-            _ => (),
         }
         Ok(())
     }
@@ -222,8 +284,8 @@ impl Catalog {
         if let Some(i) = &p.invocation {
             self.validate_tool_invocation(i, true)?;
         }
-        if let FollowupRegistrationTrigger::ProcessStopped { operation_id } = &p.input.trigger {
-            require_process(&self.db, &p.run, operation_id)?;
+        for operation_id in p.input.trigger.process_operation_ids() {
+            require_process(&self.db, &p.run, &operation_id)?;
         }
         Ok(())
     }
@@ -259,6 +321,9 @@ impl Catalog {
         self.authorize_followup_registration(&p)?;
         let tx = self.db.transaction()?;
         let run: Run = record(&tx, "runs", &p.run.id)?;
+        for operation_id in p.input.trigger.process_operation_ids() {
+            require_process(&tx, &run, &operation_id)?;
+        }
         if let (Some(op), Some(i)) = (&p.operation, &p.invocation) {
             require_invocation(&tx, self.epoch, op, i, p.input.wait.is_some())?;
         }

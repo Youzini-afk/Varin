@@ -132,7 +132,8 @@ subsequent convergence step and retain their existing native session authority.
 
 The authenticated `/api/threads/followup/{register,list,get,control}` POST routes implement
 `ThreadsAPI.followups`. Registration carries a stable key, selected Thread/branch, original source Run,
-one `at` instant or `process_stopped` operation, and the retained instruction. Host checks Run ownership;
+one `at` instant, `process_stopped` operation, or flat `any`/`all` sources, and the retained instruction.
+Host validates each leaf shape and Run ownership;
 Catalog validates the actual trigger and accepted process. Agent tools use their own original invocation,
 not this User route. Caller-supplied actor, wait and extra trigger fields are rejected by the User API.
 List/control stay metadata-only; `get` checks branch scope before hydrating the original instruction.
@@ -144,8 +145,9 @@ a real idle-root/delegated-child continuation. The Host consumes `ingress.run_re
 credential/tool/policy preparation remains with its existing owner; generic `run.accepted` is not an
 automatic launch instruction. Follow-up control cannot resolve an independent policy Pause or question.
 
-The Thread UI supports one-shot local date/time (showing its exact instant) and accepted process
-selection. It retains source Run, trigger, instruction and key across an uncertain response, including
+The Thread UI supports one-shot local date/time (showing its exact instant), accepted process
+selection and `any`/`all` combinations. Each condition displays its original observed cursor or pending
+state. Partial `all` progress comes from durable Catalog events; there is no client condition evaluator. It retains source Run, trigger, instruction and key across an uncertain response, including
 when a newer Run appears. Reading an accepted instruction is on demand and abortable. Cards distinguish
 triggering, input binding, actual delivery, preparation failure and continuation Run/execution. Bound
 but undelivered ingress can still be paused/cancelled. The optional Agent observation is separately

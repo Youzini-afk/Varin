@@ -8,6 +8,13 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-11 增量：组合条件与原发生项
+
+- 普通 `follow_up` **版本2** 和 User API 接入 flat Any/All，逐叶授权原 At/ProcessStopped；Catalog **34** 保存每叶游标与实际观察证据，删除重复单一 operation_id，无新调度/正文 owner。All 部分命中跨 reopen/GC 保留，已到期叶退出 deadline；Any 实际 At 不等未命中进程，发生项冻结真实观察快照，后续来源不重触发。
+- 原 input/activation/Environment/root/child 链保持，准备只读实际命中进程回执；原 Goal 时间检查仅认发生项里真正观察的 At，未来 At 不能被借来绕过 Dependency。原 tool observation、定义取消与 Run/进程控制分开。GUI 条件编辑和逐叶进度、认证 route、同 key 不确定重试及真实事件消费者同步接线。
+- 最终 runtime **400/0、2 ignored**，kernel **91/0、11 ignored**，准确 binary 原 guardian/Storage **3/3**；独审预先定义七条探针全过，无已确认阻断。Host **30/30**、UI **35/35**、all-targets、类型/lint/生成协议和实际 Host bundle 通过。构建同源与复跑入口见[组合条件验收](../reviews/runtime-composite-followups-2026-10-11.md)。完整 Host 四条件冷续接已类型检查，未运行。
+- 本步完成现有时刻/停止事件的组合，不把文件、日志、指标、研究/远端来源记成已接入。下一步继续真实 source owner 与两设计余项；默认切换和全面迁移仍交用户验收后负责。
+
 ## 2026-10-11 增量：日历资产与真实发生项
 
 - GUI/Markdown 仍由原项目资产 owner 管理；逐定义明确 `runtime: agent`，原 Pi 默认保留。Catalog **33**、input **6**、collaboration **7** 持有定义世代、UTC slot、游标和发生项，ContentStore 保存原指令。共享原 native deadline、typed ingress、Run/Goal 和 child execution；无 Host 原生 timer/执行状态库、假 Pi session 或假前轮 Run。

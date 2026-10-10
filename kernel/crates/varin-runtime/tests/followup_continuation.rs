@@ -1183,8 +1183,10 @@ fn one_explicit_check_enters_original_dependency_goal_without_clearing_subscript
     assert!(f.db.followups("thread").unwrap().iter().any(|v| matches!(
         v.actor,
         FollowupActor::Goal { .. }
-    ) && v.operation_id.as_deref()
-        == Some(process.as_str())
+    ) && matches!(&v.trigger, FollowupTrigger::ProcessStopped { operation_id } if operation_id == &process)
         && v.wait.state == NextRunWaitState::Waiting));
     f.cleanup();
 }
+
+#[path = "fixtures/followup_conditions.rs"]
+mod conditions;

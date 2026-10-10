@@ -476,7 +476,7 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
     let follow = ToolCall {
         call_id: "on-stop".into(),
         name: "follow_up".into(),
-        schema_version: "1".into(),
+        schema_version: "2".into(),
         arguments: json!({"action":"register","trigger":{"kind":"process_stopped","operationId":processes[0]},"instruction":"Read the final original output after stop"}),
     };
     let (follow_context, follow_frozen) =

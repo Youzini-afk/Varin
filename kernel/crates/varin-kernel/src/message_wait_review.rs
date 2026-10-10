@@ -550,7 +550,7 @@ fn native_deadline_survives_unrelated_followup_reconciliation_failure() {
     // Inject an unreadable followup definition in the independent original control owner.
     // All original Wait/Run/Operation/message facts remain valid and queryable.
     let fault = rusqlite::Connection::open(f.root.join("conversation.sqlite")).unwrap();
-    fault.execute("INSERT INTO followups(id,thread_id,source_run_id,operation_id,body) VALUES('broken-followup',?1,?2,NULL,?3)", rusqlite::params![f.run.thread_id, f.run.id, r#"{"wait":{"state":"waiting"}}"#]).unwrap();
+    fault.execute("INSERT INTO followups(id,thread_id,source_run_id,body) VALUES('broken-followup',?1,?2,?3)", rusqlite::params![f.run.thread_id, f.run.id, r#"{"wait":{"state":"waiting"}}"#]).unwrap();
     assert!(varin_runtime::catalog::followups::reconcile(&f.catalog()).is_err());
     let (signal, wakes) = crate::continuation_wake::channel().unwrap();
     let (events, event_rx) = mpsc::sync_channel(1);

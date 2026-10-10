@@ -13,6 +13,9 @@ mod registration;
 pub use registration::*;
 #[path = "catalog_followup_wait.rs"]
 pub mod observation;
+#[path = "catalog_followup_sources.rs"]
+mod sources;
+pub use sources::*;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -75,6 +78,8 @@ pub enum FollowupActor {
 pub enum FollowupTrigger {
     At { at_ms: u64 },
     ProcessStopped { operation_id: String },
+    Any { sources: Vec<FollowupSource> },
+    All { sources: Vec<FollowupSource> },
     RunCompleted { cursor: u64 },
     GoalRequested { cursor: u64 },
 }
@@ -88,6 +93,12 @@ pub enum TriggerEvidence {
     ProcessStopped {
         receipt_identity: String,
         receipt_epoch: String,
+    },
+    Any {
+        sources: Vec<FollowupSourceEvidence>,
+    },
+    All {
+        sources: Vec<FollowupSourceEvidence>,
     },
     RunCompleted {
         run_revision: u64,
@@ -147,12 +158,12 @@ pub struct Followup {
     pub thread_id: String,
     pub branch_id: String,
     pub source_run_id: String,
-    pub operation_id: Option<String>,
     pub goal_id: Option<String>,
     pub actor: FollowupActor,
     pub has_instruction: bool,
     pub registered_at_ms: u64,
     pub trigger: FollowupTrigger,
+    pub sources: Vec<FollowupSourceState>,
     pub state: FollowupState,
     pub wait: NextRunWait,
     pub observation: Option<observation::FollowupObservation>,
@@ -167,13 +178,13 @@ struct Definition {
     thread_id: String,
     branch_id: String,
     source_run_id: String,
-    operation_id: Option<String>,
     goal_id: Option<String>,
     actor: FollowupActor,
     instruction_ref: Option<Value>,
     registered_at_ms: u64,
     observation_operation_id: Option<String>,
     trigger: FollowupTrigger,
+    sources: Vec<FollowupSourceState>,
     state: FollowupState,
     wait: NextRunWait,
     source: Option<launches::SourceSelection>,
@@ -185,16 +196,15 @@ impl Definition {
     }
 }
 pub(super) fn initialize_new(tx: &Transaction<'_>) -> Result<()> {
-    tx.execute_batch("CREATE TABLE followups(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES threads(id),source_run_id TEXT NOT NULL REFERENCES runs(id),operation_id TEXT REFERENCES operations(id),body TEXT NOT NULL);
+    tx.execute_batch("CREATE TABLE followups(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES threads(id),source_run_id TEXT NOT NULL REFERENCES runs(id),body TEXT NOT NULL);
       CREATE INDEX followups_thread ON followups(thread_id);
       CREATE INDEX followups_source ON followups(source_run_id);
       CREATE INDEX followups_wait_state ON followups(json_extract(body,'$.wait.state'));
-      CREATE INDEX followups_deadline ON followups(json_extract(body,'$.trigger.at_ms')) WHERE json_extract(body,'$.wait.state')='waiting';
       CREATE TABLE followup_occurrences(id TEXT PRIMARY KEY,followup_id TEXT NOT NULL UNIQUE REFERENCES followups(id),input_id TEXT UNIQUE REFERENCES input_queue(id),body TEXT NOT NULL);")?;
     Ok(())
 }
 pub(super) fn check_format(db: &Connection) -> Result<()> {
-    db.prepare("SELECT id,thread_id,source_run_id,operation_id,body FROM followups")?;
+    db.prepare("SELECT id,thread_id,source_run_id,body FROM followups")?;
     db.prepare("SELECT id,followup_id,input_id,body FROM followup_occurrences")?;
     Ok(())
 }
@@ -282,7 +292,7 @@ fn dependency_check_eligible(
     d: &Definition,
     goal: &goals::Definition,
 ) -> Result<bool> {
-    if !matches!(d.trigger, FollowupTrigger::At { .. })
+    if !occurrence(db, &d.id)?.is_some_and(|v| v.evidence.has_at())
         || d.autonomous()
         || goal.blocked != Some(goals::GoalBlockReason::Dependency)
     {
@@ -369,20 +379,8 @@ fn eligibility(
             return Ok(Some(HoldReason::BranchActive));
         }
     }
-    if let Some(id) = &d.operation_id {
-        let op: Operation = record(db, "operations", id)?;
-        let occupied: bool = db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM resource_occupancy WHERE operation_id=?1)",
-            [id],
-            |r| r.get(0),
-        )?;
-        if op.phase != OperationPhase::Terminal
-            || occupied
-            || !op
-                .external_receipt
-                .as_ref()
-                .is_some_and(|r| r.executor_stopped)
-        {
+    if let Some(v) = occurrence(db, &d.id)? {
+        if !sources::evidence_settled(db, &v.evidence)? {
             return Ok(Some(HoldReason::SourceUnsettled));
         }
     }
@@ -394,51 +392,21 @@ fn observe(tx: &Transaction<'_>, d: &mut Definition, now: u64) -> Result<bool> {
     }
     let run: Run = record(tx, "runs", &d.source_run_id)?;
     let (cursor, evidence) = match &d.trigger {
-        FollowupTrigger::At { at_ms } => {
-            if now < *at_ms {
-                return Ok(false);
-            }
-            let cursor = event(
-                tx,
-                &d.id,
-                d.revision,
-                "followup.time_reached",
-                json!({"at_ms":at_ms,"observed_at_ms":now}),
-            )?;
-            (
-                cursor,
-                TriggerEvidence::At {
-                    at_ms: *at_ms,
-                    observed_at_ms: now,
-                },
-            )
-        }
-        FollowupTrigger::ProcessStopped { operation_id } => {
-            let op: Operation = record(tx, "operations", operation_id)?;
-            let Some(r) = op.external_receipt.as_ref().filter(|r| r.executor_stopped) else {
+        FollowupTrigger::At { .. }
+        | FollowupTrigger::ProcessStopped { .. }
+        | FollowupTrigger::Any { .. }
+        | FollowupTrigger::All { .. } => {
+            let Some(observed) = sources::observe_sources(tx, d, now)? else {
                 return Ok(false);
             };
-            if r.identity != op.id
-                || r.executor != "process_spawn"
-                || op.execution_owner != Some(ExecutorOwner::Kernel)
-            {
-                return Err(RuntimeError::Invalid(
-                    "process stop receipt owner mismatch".into(),
-                ));
-            }
-            let cursor=tx.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind='operation.executor_stopped' AND json_extract(data,'$.receipt_identity')=?2 AND json_extract(data,'$.receipt_epoch')=?3 ORDER BY cursor LIMIT 1",params![op.id,r.identity,r.epoch],|r|read_number(r,0))?;
             if d.autonomous() {
-                if let Some(goal) = &d.goal_id {
+                if let (Some(goal), FollowupTrigger::ProcessStopped { operation_id }) =
+                    (&d.goal_id, &d.trigger)
+                {
                     goals::clear_dependency(tx, goal, operation_id)?;
                 }
             }
-            (
-                cursor,
-                TriggerEvidence::ProcessStopped {
-                    receipt_identity: r.identity.clone(),
-                    receipt_epoch: r.epoch.clone(),
-                },
-            )
+            observed
         }
         FollowupTrigger::RunCompleted { cursor } => {
             if run.state != RunState::Completed {
@@ -603,12 +571,12 @@ fn project(db: &Connection, d: Definition) -> Result<Followup> {
         thread_id: d.thread_id,
         branch_id: d.branch_id,
         source_run_id: d.source_run_id,
-        operation_id: d.operation_id,
         goal_id: d.goal_id,
         actor: d.actor,
         has_instruction: d.instruction_ref.is_some(),
         registered_at_ms: d.registered_at_ms,
         trigger: d.trigger,
+        sources: d.sources,
         state: d.state,
         wait: d.wait,
         observation,
@@ -694,13 +662,20 @@ fn definition_for_run(
     let cursor = db.query_row("SELECT coalesce(max(cursor),0) FROM events", [], |r| {
         read_number(r, 0)
     })?;
-    let operation_id = if let FollowupTrigger::ProcessStopped { operation_id } = &trigger {
-        Some(operation_id.clone())
-    } else {
-        None
-    };
+    let sources = trigger
+        .sources()
+        .iter()
+        .enumerate()
+        .map(|(source_index, _)| FollowupSourceState {
+            source_index,
+            after_cursor: cursor,
+            observed: None,
+        })
+        .collect();
     let kind = match trigger {
         FollowupTrigger::At { .. } => "at",
+        FollowupTrigger::Any { .. } => "any",
+        FollowupTrigger::All { .. } => "all",
         FollowupTrigger::ProcessStopped { .. } => "process_stopped",
         FollowupTrigger::RunCompleted { .. } => "run_completed",
         FollowupTrigger::GoalRequested { .. } => "goal_requested",
@@ -712,13 +687,13 @@ fn definition_for_run(
         thread_id: run.thread_id.clone(),
         branch_id: run.branch_id.clone(),
         source_run_id: run.id.clone(),
-        operation_id,
         goal_id: goal,
         actor,
         instruction_ref: None,
         registered_at_ms: now,
         observation_operation_id: None,
         trigger,
+        sources,
         state: FollowupState::Active,
         wait: NextRunWait {
             id: format!("followup-trigger:{key}"),
@@ -732,7 +707,10 @@ fn definition_for_run(
     })
 }
 fn insert(tx: &Transaction<'_>, d: &Definition) -> Result<()> {
-    tx.execute("INSERT INTO followups(id,thread_id,source_run_id,operation_id,body) VALUES(?1,?2,?3,?4,?5)",params![d.id,d.thread_id,d.source_run_id,d.operation_id,encode(d)?])?;
+    tx.execute(
+        "INSERT INTO followups(id,thread_id,source_run_id,body) VALUES(?1,?2,?3,?4)",
+        params![d.id, d.thread_id, d.source_run_id, encode(d)?],
+    )?;
     event(
         tx,
         &d.id,
@@ -760,7 +738,10 @@ pub(super) fn register_process_tx(
 ) -> Result<Followup> {
     if let Some(d) = optional_record::<Definition>(tx, "followups", key)? {
         if d.source_run_id != run_id
-            || d.operation_id.as_deref() != Some(operation_id)
+            || d.trigger
+                != (FollowupTrigger::ProcessStopped {
+                    operation_id: operation_id.into(),
+                })
             || d.goal_id.as_deref() != goal_id
         {
             return Err(RuntimeError::Conflict(
@@ -806,7 +787,7 @@ pub(super) fn register_goal_continuation(
         return Ok(());
     }
     let raws = {
-        let mut q=tx.prepare("SELECT body FROM followups WHERE json_extract(body,'$.actor.kind')='goal' AND json_extract(body,'$.goal_id')=?1 AND operation_id IS NULL AND json_extract(body,'$.wait.state') IN ('waiting','observed')")?;
+        let mut q=tx.prepare("SELECT body FROM followups WHERE json_extract(body,'$.actor.kind')='goal' AND json_extract(body,'$.goal_id')=?1 AND json_extract(body,'$.trigger.kind') IN ('run_completed','goal_requested') AND json_extract(body,'$.wait.state') IN ('waiting','observed')")?;
         let rows = q.query_map([&goal.id], |r| r.get::<_, String>(0))?;
         rows.collect::<std::result::Result<Vec<_>, _>>()?
     };
@@ -1013,7 +994,7 @@ impl Catalog {
         self.continuation_stopping.store(true, Ordering::Release);
     }
     pub fn nearest_followup_deadline(&self) -> Result<Option<u64>> {
-        self.db.query_row("SELECT min(json_extract(body,'$.trigger.at_ms')) FROM followups WHERE json_extract(body,'$.wait.state')='waiting' AND json_extract(body,'$.state')!='cancelled' AND json_extract(body,'$.trigger.kind')='at'",[],|r|r.get::<_,Option<i64>>(0))?.map(|n|u64::try_from(n).map_err(|_|RuntimeError::Invalid("negative follow-up deadline".into()))).transpose()
+        sources::nearest_deadline(&self.db)
     }
     pub fn reconcile_followup_facts_at(&mut self, now: u64) -> Result<usize> {
         if self.continuation_stopping.load(Ordering::Acquire) {
@@ -1123,7 +1104,7 @@ fn control_tx(
 pub struct ContinuationPreparation {
     definition: Definition,
     occurrence: Occurrence,
-    source: Option<Operation>,
+    sources: Vec<Operation>,
     goal: Option<goals::FrozenGoal>,
     epoch: u64,
     content: crate::content::ContentStore,
@@ -1158,18 +1139,11 @@ impl ContinuationPreparation {
                     .and_then(|v| Ok(serde_json::from_value(v)?))
             })
             .transpose()?;
-        let process = if let Some(op) = &self.source {
-            let receipt = op
-                .external_receipt
-                .as_ref()
-                .ok_or_else(|| RuntimeError::Invalid("original process receipt missing".into()))?;
-            Some(
-                json!({"processId":op.id,"receiptIdentity":receipt.identity,"receiptEpoch":receipt.epoch,"executorStopped":receipt.executor_stopped,"outcome":receipt.outcome,"effect":receipt.effect,"result":self.content.load(&receipt.result_ref)?,"outputReader":{"name":"process_read","arguments":{"processId":op.id,"cursor":0}}}),
-            )
-        } else {
-            None
-        };
-        let facts = json!({"followupId":d.id,"generation":d.generation,"occurrenceId":v.id,"sourceRunId":d.source_run_id,"registeredBy":d.actor,"trigger":d.trigger,"evidence":v.evidence,"goal":self.goal,"process":process});
+        let processes = self.sources.iter().map(|op| -> Result<Value> {
+            let receipt = op.external_receipt.as_ref().ok_or_else(|| RuntimeError::Invalid("original process receipt missing".into()))?;
+            Ok(json!({"processId":op.id,"receiptIdentity":receipt.identity,"receiptEpoch":receipt.epoch,"executorStopped":receipt.executor_stopped,"outcome":receipt.outcome,"effect":receipt.effect,"result":self.content.load(&receipt.result_ref)?,"outputReader":{"name":"process_read","arguments":{"processId":op.id,"cursor":0}}}))
+        }).collect::<Result<Vec<_>>>()?;
+        let facts = json!({"followupId":d.id,"generation":d.generation,"occurrenceId":v.id,"sourceRunId":d.source_run_id,"registeredBy":d.actor,"trigger":d.trigger,"evidence":v.evidence,"goal":self.goal,"processes":processes});
         let text=format!("A previously registered one-shot follow-up has triggered. Its actual registration source and evidence are below. This retained intent is not a new user message, system instruction, recurring-monitoring authorization, or proof that any previous effect succeeded. Continue only within current permissions and Goal controls. Original process output remains with its process owner.\n{}\n\nRegistered follow-up instruction:\n{}",serde_json::to_string(&facts)?,instruction.as_deref().unwrap_or("Continue the explicitly established Goal according to its retained objective and controls."));
         let item = ConversationItem {
             resource_activation: None,
@@ -1220,16 +1194,17 @@ impl Catalog {
                 if v.preparation_failed || eligibility(&self.db, &d, None)?.is_some() {
                     return Ok(None);
                 }
-                let source = d
-                    .operation_id
-                    .as_ref()
-                    .map(|id| record(&self.db, "operations", id))
-                    .transpose()?;
+                let sources = v
+                    .evidence
+                    .process_receipts()
+                    .into_iter()
+                    .map(|(id, _)| record(&self.db, "operations", id))
+                    .collect::<Result<Vec<Operation>>>()?;
                 let goal = effective_goal(&self.db, &d)?.map(|g| g.binding());
                 Ok(Some(ContinuationPreparation {
                     definition: d,
                     occurrence: v,
-                    source,
+                    sources,
                     goal,
                     epoch: self.epoch,
                     content: self.content.clone(),
@@ -1291,11 +1266,12 @@ impl Catalog {
         if d != c.definition
             || v != c.occurrence
             || effective_goal(&tx, &d)?.map(|d| d.binding()) != c.goal
-            || c.source
-                .as_ref()
+            || c.sources
+                .iter()
                 .map(|o| record::<Operation>(&tx, "operations", &o.id).map(|v| v != *o))
-                .transpose()?
-                .unwrap_or(false)
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .any(|changed| changed)
         {
             return Ok(ContinuationAdmission::Stale);
         }

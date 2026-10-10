@@ -237,7 +237,8 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
     use varin_runtime::catalog::followups::{
         observation::FollowupObservationState, FollowupActor, NextRunWaitState,
     };
-    for model in [true, false] {
+    for (trigger_kind, model) in ["at", "any", "all"].into_iter()
+        .flat_map(|kind| [true, false].map(|model| (kind, model))) {
         for wait in [false, true] {
             let f = Fixture::with_tools(
                 false,
@@ -246,13 +247,16 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
             );
             let deadline = varin_runtime::catalog::observations::wall_time_ms().unwrap() + 60_000;
             let mut args = json!({"action":"register","trigger":{"kind":"at","atMs":deadline},"instruction":"Check this delegated task once at the requested time"});
+            if trigger_kind != "at" {
+                args["trigger"] = json!({"kind":trigger_kind,"sources":[{"kind":"at","atMs":deadline},{"kind":"at","atMs":deadline+1}]});
+            }
             if wait {
                 args["wait"] = json!({});
             }
             let calls = vec![ToolCall {
                 call_id: "one-check".into(),
                 name: "follow_up".into(),
-                schema_version: "1".into(),
+                schema_version: "2".into(),
                 arguments: args,
             }];
             if wait {
@@ -318,7 +322,7 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
 
 #[test]
 #[cfg(target_os = "linux")]
-fn native_followup_instant_delivers_original_wait_and_one_active_ingress_without_host_polling() {
+fn native_followup_all_instants_deliver_original_wait_and_one_active_ingress_without_host_polling() {
     use varin_runtime::catalog::followups::{
         observation::FollowupObservationState, NextRunWaitState,
     };
@@ -334,8 +338,8 @@ fn native_followup_instant_delivers_original_wait_and_one_active_ingress_without
         vec![ToolCall {
             call_id: "wake-once".into(),
             name: "follow_up".into(),
-            schema_version: "1".into(),
-            arguments: json!({"action":"register","trigger":{"kind":"at","atMs":deadline},"instruction":"Inspect current work once","wait":{}}),
+            schema_version: "2".into(),
+            arguments: json!({"action":"register","trigger":{"kind":"all","sources":[{"kind":"at","atMs":deadline-100},{"kind":"at","atMs":deadline}]},"instruction":"Inspect current work once","wait":{}}),
         }],
     );
     let (signal, wakes) = crate::continuation_wake::channel().unwrap();
@@ -418,7 +422,7 @@ fn followup_get_list_and_control_consume_real_retained_user_instruction_from_bot
             .unwrap()
             .admit_followup_registration(prepared)
             .unwrap();
-        let calls=[json!({"action":"get","followupId":"user-instruction"}),json!({"action":"list"}),json!({"action":"control","followupId":"user-instruction","expectedRevision":1,"control":"cancel"})].into_iter().enumerate().map(|(n,arguments)|ToolCall{call_id:format!("manage-{n}"),name:"follow_up".into(),schema_version:"1".into(),arguments}).collect();
+        let calls=[json!({"action":"get","followupId":"user-instruction"}),json!({"action":"list"}),json!({"action":"control","followupId":"user-instruction","expectedRevision":1,"control":"cancel"})].into_iter().enumerate().map(|(n,arguments)|ToolCall{call_id:format!("manage-{n}"),name:"follow_up".into(),schema_version:"2".into(),arguments}).collect();
         execute(&f, model, calls, &mut OwnerReplies::default(), false);
         let read = rusqlite::Connection::open(f.root.join("conversation.sqlite")).unwrap();
         let mut values = Vec::new();
