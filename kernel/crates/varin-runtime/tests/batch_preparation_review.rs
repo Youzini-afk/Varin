@@ -42,6 +42,7 @@ struct Store {
     fail_settlement: bool,
 }
 impl Persistence for Store {
+    fn policy_action(&self, _: &str, _: u64) -> Result<Option<PolicyActionState>, ExecutionError> { Ok(None) }
     fn resource_admission(&self) -> Arc<ResourceAdmission> {
         self.admission.clone()
     }
@@ -539,6 +540,7 @@ fn cancellation_after_durable_dispatch_marker_settles_no_send_and_releases_occup
         cancel: CancellationToken,
     }
     impl Persistence for CancelAfterDispatch {
+        fn policy_action(&self, run: &str, epoch: u64) -> Result<Option<PolicyActionState>, ExecutionError> { self.db.policy_action(run, epoch) }
         fn resource_admission(&self) -> Arc<ResourceAdmission> {
             self.db.resource_admission()
         }

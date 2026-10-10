@@ -15,7 +15,7 @@ import type { KernelClient } from './kernel-client.js';
 import type { RunModelSelection, RunModelSelections, ModelSessionConfiguration } from './protocol.generated.js';
 import type {
   AdmissionInspectParams, AdmissionInspection, ChildTextPage, UnacceptedChildSource, ChildTask, ChildPrepareParams, ChildWait, ContextRefreshParams, ContextJobCreateParams, HistoryPage, HistoryPageParams, HistoryReference, HistoryBodyChunk, RunReconcileResult, ThreadSummary, LaunchIntent, LaunchSelectParams, InputSubmitParams, InputSubmitReceipt, Run, Operation,
-  HistoryItem, RuntimeEvent, RuntimeStatus, RunStartReceipt, InputEnqueueParams, InputReceipt, QueuedInput, RunCancellationReceipt, OperationCancellationReceipt,
+  HistoryItem, RuntimeEvent, RuntimeStatus, RunStartReceipt, PolicyResumeReceipt, InputEnqueueParams, InputReceipt, QueuedInput, RunCancellationReceipt, OperationCancellationReceipt,
 } from './protocol.generated.js';
 
 export interface McpPreparation {
@@ -55,7 +55,8 @@ export class AgentRuntimeClient {
     for (const grantId of grants) { await this.kernel.revokeGrant(grantId); grants.delete(grantId); }
     if (!grants.size) this.sourceGrants.delete(runId);
   }
-  private async withRunPreparation<T>(runId: string, callerSignal: AbortSignal | undefined, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  /** Host admission and nested resource assembly share the same Run/epoch cancellation owner. */
+  async withRunPreparation<T>(runId: string, callerSignal: AbortSignal | undefined, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
     const registration = this.kernel.beginRunPreparation(runId);
     const signal = callerSignal ? AbortSignal.any([callerSignal, registration.signal]) : registration.signal;
     try { signal.throwIfAborted(); return await waitWithSignal(work(signal), signal); }
@@ -411,6 +412,9 @@ export class AgentRuntimeClient {
     const run = await this.kernel.agentRuntimeRequest<Run, 'runtime.run.inspect'>('runtime.run.inspect', { runId }, signal);
     if (['completed', 'failed', 'cancelled'].includes(run.state)) { this.kernel.cancelRunPreparation(runId); this.kernel.unregisterCredentialOwner(runId); this.kernel.unregisterMcpOwner(runId); this.kernel.unregisterPolicyOwner(runId); }
     return run;
+  }
+  resumeRun(runId: string, waitId: string, signal?: AbortSignal): Promise<PolicyResumeReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.run.resume', { runId, waitId }, signal);
   }
   async cancelRun(runId: string, signal?: AbortSignal): Promise<RunCancellationReceipt> {
     this.kernel.cancelRunPreparation(runId);

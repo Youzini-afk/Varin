@@ -55,6 +55,7 @@ impl ModelProvider for Provider {
 struct Sequence {
     decisions: AtomicUsize,
     cancel_before_park: bool,
+    pause_before_observation: bool,
 }
 impl AgentPolicy for Sequence {
     fn identity(&self) -> PolicyIdentity {
@@ -115,6 +116,25 @@ impl AgentPolicy for Sequence {
                     panic!("expected independent status")
                 };
                 assert_eq!(receipts[0].outcome(), Outcome::Succeeded);
+                if self.pause_before_observation {
+                    return Ok(PolicyDecision {
+                        action: PolicyAction::Pause {
+                            reason: "child continues independently".into(),
+                        },
+                        state: json!({"stage":20,"child":state["child"]}),
+                    });
+                }
+                (
+                    node(
+                        "observe",
+                        "wait_child",
+                        json!({"operationId":state["child"]}),
+                    ),
+                    json!({"stage":3,"child":state["child"]}),
+                )
+            }
+            20 => {
+                assert!(matches!(event, PolicyEvent::Resumed { .. }));
                 (
                     node(
                         "observe",
@@ -299,7 +319,7 @@ fn execution_input(db: &Mutex<Catalog>, run: &str, policy: PolicyIdentity) -> Ex
         .prepare_execution(run, binding, policy, Value::Null)
         .unwrap()
 }
-fn run_sequence(cancel_before_park: bool) {
+fn run_sequence(cancel_before_park: bool, pause_before_observation: bool) {
     let root = std::env::temp_dir().join(format!(
         "varin-policy-child-engine-{}",
         uuid::Uuid::new_v4()
@@ -312,6 +332,7 @@ fn run_sequence(cancel_before_park: bool) {
     let sequence = Arc::new(Sequence {
         decisions: AtomicUsize::new(0),
         cancel_before_park,
+        pause_before_observation,
     });
     let identity = policy_identity(sequence.identity());
     let launch: LaunchSelection = serde_json::from_value(json!({"connection_identity":"frozen-connection","provider_family":"fixture","model":"fixture-model",
@@ -332,7 +353,7 @@ fn run_sequence(cancel_before_park: bool) {
         )
         .unwrap();
     let run = receipt.run_id;
-    let db = Arc::new(Mutex::new(catalog));
+    let mut db = Arc::new(Mutex::new(catalog));
     let storage_root = root.join("storage");
     let mut storage = Storage::open(&storage_root, HOST).unwrap();
     for grant in ["setup", "parent"] {
@@ -396,8 +417,8 @@ fn run_sequence(cancel_before_park: bool) {
     let directory = Arc::new(
         varin_runtime::composition::tools::ToolDirectory::assemble(declarations(
             db.clone(),
-            Some(binding),
-            resources,
+            Some(binding.clone()),
+            resources.clone(),
         ))
         .unwrap(),
     );
@@ -410,12 +431,14 @@ fn run_sequence(cancel_before_park: bool) {
         accepted: accepted_tx,
         release: Arc::new(Mutex::new(release_rx)),
     });
-    let policy = Arc::new(CollaborationPolicy {
+    let mut policy = Arc::new(CollaborationPolicy {
         inner: sequence.clone(),
         catalog: db.clone(),
     });
     let provider = Arc::new(Provider::default());
-    let engine = Arc::new(ExecutionEngine {
+    let mut engine: Arc<
+        ExecutionEngine<Mutex<Catalog>, Provider, dyn ToolExecutor, dyn AgentPolicy>,
+    > = Arc::new(ExecutionEngine {
         persistence: db.clone(),
         context_preparation: Arc::new(NoopContextPreparation),
         provider: provider.clone(),
@@ -483,7 +506,8 @@ fn run_sequence(cancel_before_park: bool) {
     let waiting = handle.join().unwrap().unwrap();
     assert_eq!(waiting.state, RunState::Waiting);
     assert_eq!(
-        waiting.policy_state["stage"], 3,
+        waiting.policy_state["stage"],
+        if pause_before_observation { 20 } else { 3 },
         "wrapper cannot checkpoint an unexecuted inner action"
     );
     assert_eq!(
@@ -523,6 +547,78 @@ fn run_sequence(cancel_before_park: bool) {
     );
     varin_runtime::catalog::child_delivery::deliver_waits(&db).unwrap();
     varin_runtime::catalog::child_delivery::deliver_waits(&db).unwrap();
+    if pause_before_observation {
+        let pause = waiting.waiting_on.unwrap();
+        assert_eq!(
+            db.lock().unwrap().run(&run).unwrap().waiting_on.as_deref(),
+            Some(pause.as_str())
+        );
+        assert!(!db.lock().unwrap().run_startable(&run).unwrap());
+        assert_eq!(
+            db.lock()
+                .unwrap()
+                .child_task(&operation)
+                .unwrap()
+                .report
+                .unwrap()
+                .outcome,
+            Outcome::Succeeded
+        );
+        drop(child_engine);
+        drop(engine);
+        drop(policy);
+        drop(db);
+        db = Arc::new(Mutex::new(Catalog::open(&root).unwrap()));
+        assert_eq!(
+            db.lock().unwrap().run(&run).unwrap().waiting_on.as_deref(),
+            Some(pause.as_str())
+        );
+        varin_runtime::catalog::child_delivery::deliver_waits(&db).unwrap();
+        assert!(!db.lock().unwrap().run_startable(&run).unwrap());
+        let epoch = db.lock().unwrap().epoch();
+        db.lock()
+            .unwrap()
+            .resume_policy_pause(&run, &pause, epoch)
+            .unwrap();
+        policy = Arc::new(CollaborationPolicy {
+            inner: sequence.clone(),
+            catalog: db.clone(),
+        });
+        let directory = Arc::new(
+            varin_runtime::composition::tools::ToolDirectory::assemble(declarations(
+                db.clone(),
+                Some(binding),
+                resources,
+            ))
+            .unwrap(),
+        );
+        let hooks = Arc::new(Hooks {
+            directory,
+            catalog: db.clone(),
+            cancel_wait: false,
+            accepted: mpsc::channel().0,
+            release: Arc::new(Mutex::new(mpsc::channel().1)),
+        });
+        engine = Arc::new(ExecutionEngine {
+            persistence: db.clone(),
+            context_preparation: Arc::new(NoopContextPreparation),
+            provider: provider.clone(),
+            tools: hooks,
+            policy: policy.clone(),
+            progress: ProgressSink::default(),
+        });
+        let input = execution_input(&db, &run, identity.clone());
+        assert_eq!(
+            engine
+                .run(input, CancellationToken::default())
+                .unwrap()
+                .state,
+            RunState::Waiting
+        );
+        varin_runtime::catalog::child_delivery::deliver_waits(&db).unwrap();
+    } else {
+        drop(child_engine);
+    }
     let input = execution_input(&db, &run, identity);
     assert_eq!(
         engine
@@ -583,7 +679,6 @@ fn run_sequence(cancel_before_park: bool) {
     assert_eq!(requests[1].run_id, run);
     drop(requests);
     drop(owner);
-    drop(child_engine);
     drop(engine);
     drop(policy);
     drop(db);
@@ -592,9 +687,14 @@ fn run_sequence(cancel_before_park: bool) {
 }
 #[test]
 fn policy_dispatch_prepares_independently_then_waits_reports_and_continues() {
-    run_sequence(false);
+    run_sequence(false, false);
 }
 #[test]
 fn cancelled_policy_child_wait_before_park_delivers_cancellation_without_losing_next_action() {
-    run_sequence(true);
+    run_sequence(true, false);
+}
+
+#[test]
+fn policy_pause_preserves_independent_child_completion_across_reopen_until_explicit_resume() {
+    run_sequence(false, true);
 }

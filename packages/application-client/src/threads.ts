@@ -1,4 +1,4 @@
-import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildWait, LiveRoot, ContextPersonalization, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, ImageAttachment } from '@varin/protocol';
+import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildWait, LiveRoot, ContextPersonalization, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
 
 import type { RunModelSelection, RunModelSelections } from '@varin/protocol';
 
@@ -118,7 +118,8 @@ export interface ThreadsAPI {
   cancelOperation(operationId: string): Promise<OperationCancellationReceipt>;
   decidePermission(input: ThreadIdentity & { operationId: string; permissionId: string; decision: 'allow_once' | 'deny' }): Promise<Operation>;
   answerQuestion(input: ThreadIdentity & { operationId: string; answer: string }): Promise<Operation>;
-  resume(runId: string): Promise<void>;
+  resume(runId: string, waitId: string): Promise<PolicyResumeReceipt>;
+  retryPreparation(runId: string): Promise<void>;
   events(cursor: number): Promise<RuntimeEvent[]>;
   /** Reconnect from the last durable cursor; progress is presentation-only. */
   observe(cursor: number, listener: (event: RuntimeEvent | AgentRuntimeStreamEvent) => void, options: { signal: AbortSignal }): Promise<void>;

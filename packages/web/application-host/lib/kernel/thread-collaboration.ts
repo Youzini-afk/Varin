@@ -1,32 +1,30 @@
 import { waitWithSignal } from '../cancellation.js';
 import type { ThreadIdentity, ThreadSource } from '@varin/application-client';
 import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
-import type { ThreadModelAuthority } from './thread-adapter.js';
 import type { ContextPreparer } from './thread-context.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
-import type { ChildTask, ModelSessionConfiguration } from './protocol.generated.js';
+import type { ChildTask } from './protocol.generated.js';
 
 interface Owners {
   runtime: AgentRuntimeClient;
-  models: ThreadModelAuthority;
+  continueRun(runId: string, signal: AbortSignal): Promise<void>;
+  recoverLaunches(signal: AbortSignal): Promise<void>;
   workingStates: WorkspaceWorkingStateRootAccess;
   prepareContext: ContextPreparer;
-  admitSource(source: ThreadSource, identity: ThreadIdentity): Promise<void>;
   onError(operationId: string | undefined, error: unknown): void;
 }
 /** Consumes committed child/process-wait facts, including startup backlog. Maps hold only cancellable live
  * work; Catalog owns task identities, preparation receipts, reports and Wait delivery. */
 export class ThreadCollaboration {
   private readonly tasks = new Map<string, { controller: AbortController; work: Promise<void> }>();
-  private readonly launching = new Set<string>();
   private readonly cleaningSources = new Set<string>();
-  private readonly startedRuns = new Set<string>();
   private readonly removers: Array<() => void>;
   private epoch = new AbortController();
   private stopped = false;
   private suspended = false;
   private pumping = false;
   private dirty = false;
+  private launchCursor: number | undefined;
   constructor(private readonly owners: Owners) {
     const runtime = owners.runtime;
     this.removers = [runtime.onEvent(event => {
@@ -35,7 +33,7 @@ export class ThreadCollaboration {
     }), runtime.onExit(() => {
       this.suspended = true; this.epoch.abort();
       for (const task of this.tasks.values()) task.controller.abort();
-      this.tasks.clear(); this.launching.clear(); this.startedRuns.clear();
+      this.tasks.clear(); this.launchCursor = undefined;
     }), runtime.onReady(() => { this.resumeEpoch(); void this.recover(); })];
   }
   private resumeEpoch(): void {
@@ -85,13 +83,41 @@ export class ThreadCollaboration {
             }).finally(() => { if (this.tasks.get(child.operation_id) === task) this.tasks.delete(child.operation_id); });
           }
         }
-        for (const runId of resumed) void this.resumeRun(runId, epoch.signal).catch(error => {
+        await this.discoverLaunches(epoch.signal);
+        for (const runId of resumed) void this.owners.continueRun(runId, epoch.signal).catch(error => {
           if (!epoch.signal.aborted) this.owners.onError(undefined, error);
         });
       }
     } catch (error) {
       if (!epoch.signal.aborted) this.owners.onError(undefined, error);
-    } finally { this.pumping = false; }
+    } finally {
+      this.pumping = false;
+      if (epoch !== this.epoch && this.dirty && !this.stopped && !this.suspended) void this.recover();
+    }
+  }
+  private async discoverLaunches(signal: AbortSignal): Promise<void> {
+    const { runtime } = this.owners;
+    if (this.launchCursor === undefined) {
+      // Capture before discovery so a resume committed during discovery is read on the next pass.
+      const cursor = (await runtime.status(signal)).eventCursor;
+      await this.owners.recoverLaunches(signal);
+      signal.throwIfAborted();
+      this.launchCursor = cursor;
+    }
+    let events;
+    do {
+      events = await runtime.events(this.launchCursor, 256, signal);
+      signal.throwIfAborted();
+      for (const event of events) {
+        const data = event.data as { run_id?: unknown } | null;
+        if (event.kind === 'policy.resumed' && data && typeof data.run_id === 'string') {
+          void this.owners.continueRun(data.run_id, signal).catch(error => {
+            if (!signal.aborted) this.owners.onError(undefined, error);
+          });
+        }
+        this.launchCursor = event.cursor;
+      }
+    } while (events.length === 256);
   }
   private async advance(admitted: ChildTask, signal: AbortSignal, ownerSignal: AbortSignal): Promise<void> {
     const { runtime, workingStates, prepareContext } = this.owners;
@@ -123,7 +149,7 @@ export class ThreadCollaboration {
         child = await runtime.prepareChild({ operationId: child.operation_id, source: { mode: 'fixed_branch', liveRoot: null,
           workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, branchId: sourceBranch, revision: 0 }, context }, signal);
       }
-      if (child.receipt && child.state === 'ready') await this.resumeRun(child.receipt.run_id, signal);
+      if (child.receipt && child.state === 'ready') await this.owners.continueRun(child.receipt.run_id, signal);
     } catch (error) {
       if (!signal.aborted) {
         const current = await runtime.child(child.operation_id);
@@ -154,44 +180,5 @@ export class ThreadCollaboration {
         }
       }
     }
-  }
-  private async resumeRun(runId: string, signal: AbortSignal): Promise<void> {
-    if (this.launching.has(runId)) return;
-    this.launching.add(runId);
-    try {
-      const { runtime, models } = this.owners;
-      const run = await runtime.run(runId, signal);
-      if (run.cancel_requested || ['completed', 'failed', 'cancelled', 'generating', 'executing'].includes(run.state)
-        || (run.state === 'waiting' && !run.waiting_on?.startsWith('recovery:'))) return;
-      const launch = await runtime.launch(runId, signal);
-      if (!launch?.selection.credential_scope) throw new Error('Child/continuation has no exact credential scope');
-      // A still-owned worker is not a reason to release its live credential binding.
-      if (!launch.requires_rebind && this.startedRuns.has(runId)) return;
-      const source = launch.selection.source;
-      if (source?.mode === 'fixed_branch' && source.branch_id !== null && source.revision !== null) {
-        const child = await runtime.childForThread(run.thread_id, signal);
-        if (child) await this.owners.workingStates.withBranchStore(source.workspace_id, 'child-source-check', async store => {
-          const pin = await store.pinBranch(source.branch_id!, { revision: source.revision!, signal });
-          try { if (pin.root !== child.source_pin.root) throw new Error('Child fixed source no longer matches its admitted root'); }
-          finally { await pin.release(); }
-        }, 'shared', { threadId: run.thread_id });
-        await waitWithSignal(this.owners.admitSource({ mode: 'fixed_branch', workspaceId: source.workspace_id,
-          executionWorkspaceId: source.execution_workspace_id, branchId: source.branch_id, revision: source.revision, tools: [] },
-        { runtime: 'agent', threadId: run.thread_id, branchId: run.branch_id }), signal);
-      }
-      // Process continuation must re-admit the current Host source before a fresh grant
-      // can observe the original process. Historical ownership is not current trust.
-      if (source?.mode === 'materialized' && source.branch_id !== null && source.revision !== null) {
-        await waitWithSignal(this.owners.admitSource({ mode: 'materialized', workspaceId: source.workspace_id,
-          executionWorkspaceId: source.execution_workspace_id, branchId: source.branch_id, revision: source.revision, tools: [] },
-        { runtime: 'agent', threadId: run.thread_id, branchId: run.branch_id }), signal);
-      }
-      // live_root is revalidated by rebindLaunch's existing LiveSource owner.
-      const owner = await waitWithSignal(models.rebindModel(run.configuration as ModelSessionConfiguration, launch.selection.credential_scope), signal);
-      signal.throwIfAborted();
-      if (run.state === 'runnable') runtime.releaseRunCredentialOwner(runId);
-      await runtime.rebindLaunch(runId, { credentialOwner: owner, signal });
-      this.startedRuns.add(runId);
-    } finally { this.launching.delete(runId); }
   }
 }

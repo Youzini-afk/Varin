@@ -79,7 +79,10 @@ immutable declared configuration and versioned private JSON state are distinct f
 the Host pins exact package/configuration identity for the Run. Return a permitted action rather
 than calling models or tools in the decision handler. Core validates exchanges, permissions,
 registered waits and cancellation. [The bounded evidence example](../../examples/extensions/evidence-policy/README.md)
-shows the executable contract and current action limits.
+shows bounded evidence, [the collaboration example](../../examples/extensions/collaboration-policy/README.md)
+shows direct child dispatch and observation, and [delivery with explicit pause](../../examples/extensions/delivery-pause-policy/README.md)
+shows independent output and the original Run/Wait resume boundary. These examples do not switch the
+product's default runtime or give the policy ownership of core history.
 
 `provideRetrievalPlan(context, { configurationId, structure })` registers an immutable
 `varin.retrieval.plan@1` declaration with matching `inspect` schemas. Select `structure: 'builtin'`

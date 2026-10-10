@@ -24,7 +24,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const [readingFiles, setReadingFiles] = React.useState(false);
   const [preparedSource, setPreparedSource] = React.useState<ThreadPreparedSource | null>(null);
   const [preparingSource, setPreparingSource] = React.useState(false);
-  const [snapshot, setSnapshot] = React.useState<ThreadSnapshot>();
+  const [snapshotState, setSnapshot] = React.useState<ThreadSnapshot>();
   const [historyView, setHistoryView] = React.useState<ThreadHistoryPage | null>(null);
   const [historyLoading, setHistoryLoading] = React.useState(false);
   const historyGeneration = React.useRef(0);
@@ -43,30 +43,36 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const [error, setError] = React.useState<string>();
   const [inputMode, setInputMode] = React.useState<'boundary' | 'interrupt' | 'next_run'>('boundary');
   const [pending, setPending] = React.useState(false);
+  const pendingAction = React.useRef<object | null>(null);
   const pendingInput = React.useRef<{ fingerprint: string; send(): Promise<unknown> } | undefined>(undefined);
   const projection = React.useRef<ThreadProjection | undefined>(undefined);
   React.useEffect(() => {
     identityGeneration.current += 1; forkKeys.current.clear(); compactionKeys.current.clear();
     historyGeneration.current += 1; setHistoryView(null); setHistoryLoading(false);
     setPreparedSource(null); setPreparingSource(false);
-    setPending(false); setError(undefined);
+    pendingAction.current = null; setPending(false); setError(undefined);
     setSnapshot(undefined); setProgress(''); setImages([]); setReadingFiles(false); pendingInput.current = undefined; fileReadGeneration.current += 1;
     const view = new ThreadProjection(api, identity, setSnapshot, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress);
     projection.current = view; view.start();
     return () => { identityGeneration.current += 1; historyGeneration.current += 1; fileReadGeneration.current += 1; view.close(); };
   }, [api, identity, host]);
+  const snapshot = snapshotState?.identity.threadId === identity.threadId && snapshotState?.identity.branchId === identity.branchId ? snapshotState : undefined;
   const branch = snapshot?.thread.branches.find(value => value.branch_id === identity.branchId);
   const run = snapshot?.activeRun ?? branch?.latest_run;
   const active = Boolean(branch?.active_run_id);
+  const launch = snapshot?.launch?.run_id === run?.id ? snapshot?.launch : null;
+  const pause = run?.state === 'waiting' && launch?.pause?.wait_id === run.waiting_on ? launch.pause : null;
   const acceptsImages = active ? (run?.configuration as { acceptsImages?: boolean } | undefined)?.acceptsImages
     : models.find(model => model.providerId === providerId && model.modelId === modelId)?.acceptsImages;
   React.useEffect(() => {
     const config = (snapshot?.modelSelection.desired?.configuration ?? run?.configuration) as { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel } | undefined;
     if (config?.providerId && config.model && (active || !providerId)) { setProviderId(config.providerId); setModelId(config.model); setThinkingLevel(config.thinkingLevel ?? 'off'); }
   }, [run?.configuration, snapshot?.modelSelection.desired, active, providerId]);
-  const act = async (work: () => Promise<unknown>) => {
+  const act = async (work: () => Promise<unknown>, interrupt = false) => {
+    if (pendingAction.current && !interrupt) return;
+    const action = {}; pendingAction.current = action;
     const generation = identityGeneration.current;
-    const current = () => generation === identityGeneration.current && host === getRuntimeEndpointGeneration();
+    const current = () => generation === identityGeneration.current && host === getRuntimeEndpointGeneration() && pendingAction.current === action;
     setPending(true); setError(undefined);
     try { await work(); if (current()) await projection.current?.refresh(); }
     catch (value) {
@@ -78,7 +84,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         : value instanceof ThreadRequestError && value.code === 'model-images-unsupported' ? 'The selected model does not accept images. Choose an image-capable model or remove the images.'
         : value instanceof Error ? value.message : 'Thread request failed');
     }
-    finally { if (current()) setPending(false); }
+    finally { if (current()) { pendingAction.current = null; setPending(false); } }
   };
   const addImages = async (files: File[]) => {
     const generation = fileReadGeneration.current;
@@ -135,7 +141,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, text, images, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source]);
   const sourceCannotBeApplied = active && Boolean(preparedSource) && pendingInput.current?.fingerprint !== submissionFingerprint();
   return <section className="flex h-full min-h-0 flex-col" aria-label="Thread conversation">
-    <div className="border-b px-4 py-2 text-xs text-muted-foreground">thread · {identity.threadId} · branch {identity.branchId.slice(-8)} · {run?.state ?? 'Ready'}{run?.waiting_on ? ` · ${run.waiting_on}` : ''}</div>
+    <div className="border-b px-4 py-2 text-xs text-muted-foreground">thread · {identity.threadId} · branch {identity.branchId.slice(-8)} · {run?.state ?? 'Ready'}{pause ? ' · Paused' : run?.waiting_on ? ` · ${run.waiting_on}` : ''}</div>
     <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4">
       <div className="mx-auto flex max-w-3xl items-center gap-2">
         {previousHistory && <Button variant="ghost" size="sm" disabled={historyLoading} onClick={() => void loadEarlier()}>{historyLoading ? 'Loading earlier history' : 'Load earlier history'}</Button>}
@@ -168,12 +174,12 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         {!child.report && api.collaboration && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelChild(identity, child.operation_id))}>Cancel child task</Button>}
       </div>)}
       {snapshot?.children?.some(child => !child.report) && api.collaboration && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelTree(identity))}>Stop task and children</Button>}
-      {snapshot?.operations.map(operation => <div key={operation.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
+      {snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
         <ThreadPermission operation={operation} enabled={!pending && operation.run_id === run?.id && !run?.cancel_requested} onDecide={(permissionId, decision) => act(() => api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }))} />
         {operation.executor === 'ask_user' && <ThreadQuestion operation={operation} enabled={!pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on} onAnswer={answer => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}
         <div>Background operation · {operation.phase} · {operation.outcome ?? 'In progress'} · effect: {operation.effect}</div>
         {operation.external_receipt && <div className="text-xs text-muted-foreground">{operation.external_receipt.executor} · {operation.external_receipt.outcome}</div>}
-        {operation.phase !== 'terminal' && (operation.executor !== 'ask_user' || run?.waiting_on === operation.waiting_on) && <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelOperation(operation.id))}>{operation.executor === 'dispatch' ? 'Cancel child task' : operation.executor === 'wait_child' ? 'Cancel observation wait' : 'Cancel operation'}</Button>}
+        {operation.phase !== 'terminal' && (operation.executor !== 'ask_user' || run?.waiting_on === operation.waiting_on) && <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelOperation(operation.id), true)}>{operation.executor === 'dispatch' ? 'Cancel child task' : operation.executor === 'wait_child' ? 'Cancel observation wait' : 'Cancel operation'}</Button>}
       </div>)}
       {snapshot?.inputs.filter(input => input.state === 'queued').map(input => <div key={input.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
         <form onSubmit={event => { event.preventDefault(); const edited = new FormData(event.currentTarget).get('text');
@@ -183,7 +189,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           <Textarea key={`${input.id}:${input.revision}`} name="text" aria-label="Edit queued input" defaultValue={historyText(input.content)} />
           <Button type="submit" variant="ghost" size="sm">Save queued input</Button>
         </form>
-        <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelInput(input.id, input.revision))}>Cancel queued input</Button>
+        <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelInput(input.id, input.revision), true)}>Cancel queued input</Button>
       </div>)}
     </div>
     {snapshot?.context.checkpoint?.personalization && <ThreadMemory key={identity.threadId} identity={identity} basis={snapshot.context.checkpoint.personalization} />}
@@ -226,6 +232,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       });
     }}>
       {sourceCannotBeApplied && <p role="status" className="text-sm text-muted-foreground">The prepared workspace needs a new run. Keep the current workspace to queue this message, or wait for this run to finish.</p>}
+      {pause && <p role="status" aria-label="Policy pause" className="text-sm text-muted-foreground">Paused: {pause.reason || 'Waiting for your explicit resume.'} Messages can be queued while paused.</p>}
       {snapshot?.launch?.preparation_failure && <p role="alert" className="text-sm text-destructive">Preparation needs attention: {snapshot.launch.preparation_failure}</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {snapshot?.modelSelection.desired?.status === 'failed' && <p role="alert" className="text-sm text-destructive">Model preparation failed: {snapshot.modelSelection.desired.failure}</p>}
@@ -258,8 +265,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       <div className="flex gap-2">
         <Button type="button" variant="ghost" disabled={readingFiles || acceptsImages === false} onClick={() => fileInput.current?.click()}>Attach images</Button>
         <Button type="submit" disabled={pending || preparingSource || sourceCannotBeApplied || readingFiles || (images.length > 0 && acceptsImages === false) || (!text.trim() && !images.length) || (!active && (!providerId || !modelId))}>{active ? 'Queue message' : 'Send'}</Button>
-        {active && branch?.active_run_id && <Button type="button" variant="outline" onClick={() => void act(() => api.cancelRun(branch.active_run_id!))}>Stop run</Button>}
-        {run && !['completed', 'cancelled', 'failed'].includes(run.state) && <Button type="button" variant="ghost" onClick={() => void act(() => api.resume(run.id))}>Resume preparation</Button>}
+        {active && branch?.active_run_id && <Button type="button" variant="outline" onClick={() => void act(() => api.cancelRun(branch.active_run_id!), true)}>Stop run</Button>}
+        {run && pause && <Button type="button" variant="outline" disabled={pending || run.cancel_requested} onClick={() => void act(() => api.resume(run.id, pause.wait_id))}>Resume run</Button>}
+        {run && launch?.startable && launch.requires_rebind && !pause && <Button type="button" variant="ghost" disabled={pending} onClick={() => void act(() => api.retryPreparation(run.id))}>Retry preparation</Button>}
       </div>
     </form>
   </section>;

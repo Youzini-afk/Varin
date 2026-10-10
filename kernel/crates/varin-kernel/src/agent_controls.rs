@@ -88,6 +88,12 @@ impl ControlCommands {
     ) -> Result<Value, KernelError> {
         let runtime = &self.runtime;
         match method {
+            "runtime.run.resume" => {
+                let p: RunResumeParams = serde_json::from_value(params)?;
+                if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                let receipt = runtime.resume_policy_pause(&p.run_id, &p.wait_id).map_err(|e| KernelError::Operation(e.to_string()))?;
+                Ok(serde_json::to_value(receipt)?)
+            }
             "runtime.question.answer" => {
                 let p: QuestionAnswerParams = serde_json::from_value(params)?;
                 let operation = self.finish_question(&p.operation_id, Some(p.answer), cancelled)?;

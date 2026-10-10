@@ -1092,6 +1092,9 @@ impl Persistence for InterleavingPersistence {
     fn policy_boundary(&self, run: &str, epoch: u64) -> Result<PolicyBoundary, ExecutionError> {
         self.db.policy_boundary(run, epoch)
     }
+    fn policy_action(&self, run: &str, epoch: u64) -> Result<Option<PolicyActionState>, ExecutionError> {
+        Ok(self.policy_graph(run, epoch)?.map(PolicyActionState::Graph))
+    }
     fn policy_graph(
         &self,
         run: &str,

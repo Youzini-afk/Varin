@@ -140,6 +140,8 @@ pub(super) fn stage_policy_models(
         .collect()
 }
 pub struct LaunchRead {
+    startable: bool,
+    pause: Option<super::policy_control::PolicyPauseRead>,
     pub metadata: LaunchMetadata,
     content: crate::content::ContentStore,
     _publication: crate::content::ContentPublication,
@@ -147,6 +149,8 @@ pub struct LaunchRead {
 impl LaunchRead {
     pub fn load(self) -> Result<LaunchIntent> {
         Ok(LaunchIntent {
+            startable: self.startable,
+            pause: self.pause.map(|pause| pause.load(&self.content)).transpose()?,
             run_id: self.metadata.run_id,
             revision: self.metadata.revision,
             selection: self.metadata.selection.load(&self.content)?,
@@ -233,6 +237,7 @@ impl LaunchChangePreparation {
             metadata,
             content,
             _publication,
+            ..
         } = self.read;
         let mut selection = metadata.selection.clone();
         let kind = match self.change {
@@ -301,17 +306,17 @@ impl Catalog {
         }
         Ok(metadata)
     }
-    pub(super) fn launch_read(&self, metadata: LaunchMetadata) -> LaunchRead {
-        LaunchRead {
+    pub(super) fn launch_read(&self, metadata: LaunchMetadata) -> Result<LaunchRead> {
+        Ok(LaunchRead {
+            startable: self.run_startable(&metadata.run_id)?,
+            pause: self.capture_policy_pause(&metadata.run_id)?,
             metadata,
             content: self.content.clone(),
             _publication: self.content.begin_publication(),
-        }
+        })
     }
     pub fn capture_launch(&self, run_id: &str) -> Result<Option<LaunchRead>> {
-        Ok(self
-            .launch_metadata(run_id)?
-            .map(|metadata| self.launch_read(metadata)))
+        self.launch_metadata(run_id)?.map(|metadata| self.launch_read(metadata)).transpose()
     }
     pub fn capture_pending_launches(&self) -> Result<Vec<LaunchRead>> {
         let mut query = self.db.prepare("SELECT l.body FROM run_launches l JOIN runs r ON r.id=l.id WHERE json_extract(r.body,'$.state') NOT IN ('completed','failed','cancelled') ORDER BY l.rowid")?;
@@ -319,7 +324,7 @@ impl Catalog {
         rows.map(|row| {
             let mut metadata: LaunchMetadata = serde_json::from_str(&row?)?;
             metadata.requires_rebind = metadata.bound_epoch != Some(self.epoch);
-            Ok(self.launch_read(metadata))
+            self.launch_read(metadata)
         })
         .collect()
     }

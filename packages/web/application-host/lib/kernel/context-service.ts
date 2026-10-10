@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { waitWithSignal } from '../cancellation.js';
 import type { ContextJob } from '@varin/application-client';
 import type { ContextPreparer } from './thread-context.js';
-import type { ThreadModelAuthority } from './thread-adapter.js';
 import type { ModelSessionConfiguration, LaunchIntent, Run } from './protocol.generated.js';
 import type { ContextPolicySnapshot } from './context-settings.js';
 import type { ContextOwner, ContextQuery, ContextResult } from './context-bridge.js';
@@ -18,10 +17,10 @@ type CompactQuery = Extract<ContextQuery,{action:'compact'}>;
 /** Credentials remain with the existing model authority; Rust owns each summary Run and CAS. */
 export class ContextService implements ContextOwner {
   private readonly jobs=new Map<string,Job>();
-  constructor(private readonly runtime:AgentRuntimeClient,private readonly models:ThreadModelAuthority,
+  constructor(private readonly runtime:AgentRuntimeClient,
     private readonly prepareContext:ContextPreparer,
     private readonly readPolicy:(run:Run,launch:LaunchIntent|null)=>Promise<ContextPolicySnapshot>,
-    private readonly continueRun:(runId:string)=>Promise<void>) {}
+    private readonly continueRun:(runId:string,signal?:AbortSignal)=>Promise<void>) {}
   close():void {for(const job of this.jobs.values()) job.controller.abort();this.jobs.clear();}
   async query(query:ContextQuery,signal:AbortSignal):Promise<ContextResult> {
     signal.throwIfAborted();
@@ -86,17 +85,8 @@ export class ContextService implements ContextOwner {
     return job;
   }
   private async start(job:ContextJob,signal:AbortSignal):Promise<void> {
-    const current=await this.runtime.run(job.receipt.run_id,signal);
-    if(['accepted','preparing','runnable'].includes(current.state)) {
-      const launch=await this.runtime.launch(current.id,signal);
-      const scope=launch?.selection.credential_scope;
-      const configuration=current.configuration as ModelSessionConfiguration;
-      if(scope) {
-        const owner=await this.models.rebindModel(configuration,scope);
-        signal.throwIfAborted();
-        await this.runtime.startRunWithCredentialOwner(current.id,owner,signal);
-      } else await this.runtime.startRun(current.id,signal);
-    }
+    const launch=await this.runtime.launch(job.receipt.run_id,signal);
+    if(launch?.startable && launch.requires_rebind) await this.continueRun(job.receipt.run_id,signal);
   }
   private async publish(job:ContextJob,parentId:string,work:Job):Promise<ContextResult> {
     const signal=work.controller.signal;

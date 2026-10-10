@@ -487,7 +487,7 @@ it('reopening a graph after the memory domain CAS but before ToolSettled reconci
     expect(reopened.memoryWrites).toEqual([]);
     expect(await reopened.runtime.operation(operationId)).toMatchObject({ outcome: 'succeeded', effect: 'confirmed', call_completion: { kind: 'result', outcome: 'succeeded', effect: 'confirmed' } });
     expect((await reopened.personalization.catalog()).revision).toBe(1);
-    await reopened.adapter.resume(run.run_id);
+    await reopened.adapter.retryPreparation(run.run_id);
     await expect.poll(async () => (await reopened.runtime.run(run.run_id)).state).toBe('completed');
     expect(graphReceipts(reopened).find(receipt => receipt.node_id === 'save')?.completion).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'confirmed', output: { action_id: actionId, node_id: 'save' } });
     expect(reopened.memoryQueries.some(query => query.action === 'tool' && query.arguments?.action === 'save')).toBe(false);

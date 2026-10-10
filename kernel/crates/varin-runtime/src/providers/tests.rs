@@ -1281,3 +1281,26 @@ fn planning_call_original_is_retained_without_weakening_main_schema_authority() 
         }
     }
 }
+
+#[test]
+fn policy_output_is_assistant_history_in_every_provider_family() {
+    let providers: Vec<(&str, Box<dyn ModelProvider>, &[&str], &str)> = vec![
+        (chat::FAMILY, Box::new(chat::ChatProvider::new(connection(vec![], 1))), &["messages"], "assistant"),
+        (responses::FAMILY, Box::new(responses::ResponsesProvider::new(connection(vec![], 1))), &["input"], "assistant"),
+        (codex::FAMILY, Box::new(codex::CodexProvider::new(connection(vec![], 1))), &["input"], "assistant"),
+        (anthropic::FAMILY, Box::new(anthropic::AnthropicProvider::new(connection(vec![], 1), 128)), &["messages"], "assistant"),
+        (bedrock::FAMILY, Box::new(bedrock::BedrockProvider::new(connection(vec![], 1))), &["messages"], "assistant"),
+        (google::FAMILY, Box::new(google::GoogleProvider::new(connection(vec![], 1)).unwrap()), &["contents"], "model"),
+        (google::VERTEX_FAMILY, Box::new(google::GoogleProvider::vertex(connection(vec![], 1)).unwrap()), &["contents"], "model"),
+        (pi_messages::FAMILY, Box::new(pi_messages::PiMessagesProvider { connection: connection(vec![], 1), max_output_tokens: None, reasoning: None, cache_retention: None }), &["context", "messages"], "assistant"),
+    ];
+    for (family, provider, path, role) in providers {
+        let mut request = view(family);
+        request.history.push(ConversationItem { id: "delivered".into(), provenance: Provenance::PolicyOutput { action_id: "action".into(), identity: PolicyIdentity { name: "strategy".into(), version: "1".into() } }, content: Content::Text { text: "独立交付 🧭".into() }, opaque: None });
+        let wire = provider.serialize(&request).unwrap_or_else(|error| panic!("{family}: {error}"));
+        let mut messages = &wire;
+        for key in path { messages = &messages[*key]; }
+        let output = messages.as_array().unwrap().iter().find(|message| message.to_string().contains("独立交付 🧭")).unwrap_or_else(|| panic!("missing policy output in {family}: {wire}"));
+        assert_eq!(output["role"], role, "policy output must remain the same agent's output for {family}");
+    }
+}

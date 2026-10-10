@@ -61,10 +61,9 @@ it.each([
   let runtime=new AgentRuntimeClient(kernel);
   const context={effectiveSystemPrompt:'BASE_SYSTEM_V1',instructionSources:['fixture:base'],memoryCheckpoint:null};
   const prepare=Object.assign(async()=>context,{main:async()=>context}) as ContextPreparer;
-  const unused=async():Promise<never>=>{throw new Error('anonymous fixture must not select another model or credential owner');};
   const policies:ContextPolicySnapshot[]=[];
   const installOwner=()=>{
-    const service=new ContextService(runtime,{resolveModel:unused,rebindModel:unused},prepare,async()=>{
+    const service=new ContextService(runtime,prepare,async()=>{
     const policy=await readContextPolicy({agentDir,projectRoot,projectTrusted:false,modelId:'fixture-model',providerId:'fixture'});
     policies.push(policy);return policy;
     },async runId=>{await runtime.startRun(runId);});

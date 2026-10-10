@@ -1,6 +1,6 @@
 # Varin 原生运行时：能力组合与扩展设计
 
-状态：设计草案，未实施。与[原生 Agent 运行时设计](agent-runtime-design.md)共同定义目标；本文中的新接口名称和 SDK 示例均为拟议合同。
+状态：目标设计已进入实施，完整能力组合与生产切换尚未完成。与[原生 Agent 运行时设计](agent-runtime-design.md)共同定义目标；当前实现和验证范围见[实施台账](../plan/agent-runtime-implementation.md)。本文的作者接口示例仍表达目标合同，实际可运行示例以仓库 SDK 和 examples 为准。
 
 日期：2026-10-09（Asia/Singapore）。Varin 实现核对基线：`3881c0ab`；DeepSeek Harness 参考基线：`5badb15009ae1756c3afe0ae0cef1faafc290ccc`。
 参考来自本地源码阅读，没有运行两者的性能对比。以下目标不构成已实现的性能结论。
@@ -350,7 +350,7 @@ Agent 按需查合同，不把完整目录、调用阶段、插件说明统一�
 
 实际需要验证的是：候选切换与在途调用、无 UI 启用、同名资源的环境映射、观察者背压、策略状态边界以及组合复用的成本。
 性能比较区分冷启动、已有环境的新任务、稳定调用及扩展更新；不预填没有依据的毫秒目标或倍数收益。
-本轮仅做源码核对与设计修订，没有运行测试、应用、桌面操作或付费模型。
+2026-10-09 原设计修订仅做源码核对；后续实施和实际验证另见[实施台账](../plan/agent-runtime-implementation.md)，不将局部行为检查当作完整设计或性能结论。
 
 [ds-seams]: https://github.com/deepseek-ai/deepseek-harness/blob/5badb15009ae1756c3afe0ae0cef1faafc290ccc/docs/architecture.md#L131-L135
 [ds-context]: https://github.com/deepseek-ai/deepseek-harness/blob/5badb15009ae1756c3afe0ae0cef1faafc290ccc/vendor/cordis/src/context.ts#L90-L145

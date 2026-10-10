@@ -150,10 +150,10 @@ impl RunSupervisor {
         let admission = (|| {
             let catalog = self.catalog.lock().map_err(error)?;
             let run = catalog.run(run_id).map_err(error)?;
-            if run.cancel_requested || run.state.terminal() {
+            if !catalog.run_startable(run_id).map_err(error)? {
                 return Err(ExecutionError::new(
                     "run_not_runnable",
-                    "Run is cancelled or terminal",
+                    "Run is not eligible for worker admission",
                 ));
             }
             Ok((
@@ -600,6 +600,20 @@ impl RunSupervisor {
     }
     /// The question wait was durably committed, so its worker has no further execution work.
     /// Join its final teardown before an answer can make the same Run runnable again.
+    pub fn resume_policy_pause(&self, run_id: &str, wait_id: &str) -> Result<crate::catalog::policy_control::PolicyResumeReceipt> {
+        if let Some(receipt) = self.catalog.lock().map_err(error)?.policy_resume_receipt(run_id, wait_id).map_err(error)? { return Ok(receipt); }
+        self.quiesce_run(run_id, |run| run.state == RunState::Waiting && run.waiting_on.as_deref() == Some(wait_id))?;
+        let mut catalog = self.catalog.lock().map_err(error)?;
+        let epoch = catalog.epoch();
+        catalog.resume_policy_pause(run_id, wait_id, epoch).map_err(error)
+    }
+    /// Read-only overlay for launch consumers; the catalog still owns durable eligibility.
+    pub fn start_available(&self, run_id: &str) -> Result<bool> {
+        let quiescence = self.quiescence.lock().map_err(error)?;
+        if quiescence.get(run_id).is_some_and(|drain| drain.active.load(Ordering::Acquire)) { return Ok(false); }
+        let workers = self.workers.lock().map_err(error)?;
+        Ok(workers.get(run_id).is_none_or(|worker| worker.join.as_ref().is_some_and(JoinHandle::is_finished)))
+    }
     pub fn quiesce_question(&self, operation_id: &str) -> Result<()> {
         let run_id = {
             let catalog = self.catalog.lock().map_err(error)?;

@@ -87,9 +87,8 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
     rebindModel: async () => owner,
   }, async source => { await documents.inspectWorkspace(source.workspaceId); await documents.inspectWorkspace(source.executionWorkspaceId); }, (_runId, error) => { launchErrors.push(error); }, prepare, context.prepareContext);
   const collaboration = new ThreadCollaboration({ runtime: adapter.runtime, workingStates,
-    models: { resolveModel: async () => ({ configuration, credentialOwner: owner }), rebindModel: async () => owner },
+    continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal),
     prepareContext: context.prepareContext,
-    admitSource: async source => { await documents.inspectWorkspace(source.workspaceId); await documents.inspectWorkspace(source.executionWorkspaceId); },
     onError: (_operation, error) => { launchErrors.push(error); } });
   cleanups.push(async () => { collaboration.stop(); });
   const app = express();
@@ -101,7 +100,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const hostUrl = await listen(createServer(app));
   configureRuntimeUrlResolver({ apiBaseUrl: hostUrl, realtimeBaseUrl: hostUrl });
   setRuntimeExtraHeaders({ 'x-fixture-auth': 'fixture-client' });
-  return { workspace, documents, workingStates, close, kernel, grants, collaboration, owner, configuration, context, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel };
+  return { adapter, workspace, documents, workingStates, close, kernel, grants, collaboration, owner, configuration, context, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel };
 }
 
 function tool(response: ServerResponse, name: string, args: Record<string, unknown>, serial: number) {
@@ -238,10 +237,13 @@ it('reopens a parked wait after kernel shutdown and delivers the original stoppe
     reopenedStorage = new KernelStorageAdapter({ client: reopened, hostId: 'http-review', storageRoot: f.root, resolveWorkspaceRoot: async id => (await f.documents.inspectWorkspace(id)).root });
     const workingStates = createKernelWorkspaceWorkingStateAccess(reopenedStorage);
     const context = contextOwner(reopened, workingStates);
+    const adapter = new ThreadAdapter(runtime,
+      { resolveModel: async () => ({ configuration: f.configuration, credentialOwner: f.owner }), rebindModel: async () => f.owner },
+      async source => { await f.documents.inspectWorkspace(source.workspaceId); await f.documents.inspectWorkspace(source.executionWorkspaceId); },
+      (_runId, error) => { errors.push(error); }, undefined, context.prepareContext);
     collaboration = new ThreadCollaboration({ runtime, workingStates,
-      models: { resolveModel: async () => ({ configuration: f.configuration, credentialOwner: f.owner }), rebindModel: async () => f.owner },
+      continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal),
       prepareContext: context.prepareContext,
-      admitSource: async source => { await f.documents.inspectWorkspace(source.workspaceId); await f.documents.inspectWorkspace(source.executionWorkspaceId); },
       onError: (_operation, error) => { errors.push(error); } });
     await reopened.start(); await collaboration.recover();
     // Shutdown may already have supplied the terminal receipt. Its original Wait identity
@@ -296,9 +298,8 @@ it('rebuilds only Host continuation service while its kernel keeps the original 
     f.collaboration.stop();
     const errors: unknown[] = [];
     replacement = new ThreadCollaboration({ runtime: f.runtime, workingStates: f.workingStates,
-      models: { resolveModel: async () => ({ configuration: f.configuration, credentialOwner: f.owner }), rebindModel: async () => f.owner },
+      continueRun: (runId, signal) => f.adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => f.adapter.recover(signal),
       prepareContext: f.context.prepareContext,
-      admitSource: async source => { await f.documents.inspectWorkspace(source.workspaceId); await f.documents.inspectWorkspace(source.executionWorkspaceId); },
       onError: (_operation, error) => { errors.push(error); } });
     await replacement.recover();
     expect((await f.runtime.run(receipt.run_id)).waiting_on).toBe(waitId); expect(turn).toBe(2);

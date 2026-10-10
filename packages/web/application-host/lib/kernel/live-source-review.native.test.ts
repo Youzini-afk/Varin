@@ -237,7 +237,7 @@ it('queued live selection reopens with fresh authority and reads changed disk wi
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'changed while Host was closed');
   const reopened = await fixture(reply, f.root, f.endpoint);
   const grants = vi.spyOn(reopened.kernel, 'issueGrant');
-  await reopened.adapter.resume(next.run_id);
+  await reopened.adapter.retryPreparation(next.run_id);
   expect(reopened.kernel.kernelEpoch).not.toBe(epoch);
   await reopened.runtime.cancelRun(first.run_id);
   await expect.poll(async () => (await reopened.api.run(next.run_id)).state, { timeout: 15_000 }).toBe('completed');

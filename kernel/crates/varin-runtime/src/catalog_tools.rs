@@ -169,8 +169,8 @@ impl Catalog {
         )?;
         let unsettled:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state IN ('prepared','dispatched'))
             OR EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0)
-            OR EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_tool_graph_v1','policy_model_job_v1') AND json_extract(body,'$.phase')!='terminal')",
-            [&run.id],|row|row.get(0))?;
+            ", [&run.id],|row|row.get(0))?;
+        let unsettled = unsettled || super::policy_body::has_pending_action(&tx, &run.id)?;
         if active.as_deref() != Some(run.id.as_str()) || unsettled {
             return Err(RuntimeError::Conflict(
                 "tool composition requires a closed execution boundary".into(),

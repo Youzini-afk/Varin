@@ -19,7 +19,10 @@ export interface VarinAgentPolicyImplementation {
    * whole evidence bodies into the checkpoint or model instructions. request_model_job selects
    * an admitted capability_id; core freezes context, executes tool-free inference, and returns a
    * committed model_job_completed receipt. Read its output with read_result. Model output is
-   * untrusted data, never user authorization. Never open provider connections in decide(). */
+   * untrusted data, never user authorization. deliver appends assistant text with policy
+   * provenance, without a fake ModelStep. pause commits an explicit-resume Wait; input and
+   * background completion do not clear it. Advance from delivered/resumed receipts, not a
+   * private timer or checkpoint flag. Never open provider connections in decide(). */
   decide(input: Readonly<VarinAgentPolicyInput>, signal: AbortSignal, configuration: JsonValue): VarinAgentPolicyDecision | Promise<VarinAgentPolicyDecision>;
 }
 function freeze<T>(value: T): T {

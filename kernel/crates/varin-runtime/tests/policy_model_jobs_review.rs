@@ -685,6 +685,9 @@ impl Persistence for BoundaryPersistence {
     fn policy_boundary(&self, r: &str, e: u64) -> Result<PolicyBoundary, ExecutionError> {
         self.db.policy_boundary(r, e)
     }
+    fn policy_action(&self, run: &str, epoch: u64) -> Result<Option<PolicyActionState>, ExecutionError> {
+        Ok(self.policy_model_job(run, epoch)?.map(PolicyActionState::Model))
+    }
     fn policy_model_job(
         &self,
         r: &str,

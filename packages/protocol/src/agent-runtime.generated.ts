@@ -229,6 +229,8 @@ export interface LaunchIntent {
   selection: LaunchSelection;
   bound_epoch: number | null;
   requires_rebind: boolean;
+  startable: boolean;
+  pause: PolicyPauseInfo | null;
 }
 
 export type InputMode = "boundary" | "interrupt" | "next_run";
@@ -489,6 +491,24 @@ export interface InputSubmitParams {
 
 export interface RunParams {
   runId: string;
+}
+
+export interface RunResumeParams {
+  runId: string;
+  waitId: string;
+}
+
+export interface PolicyResumeReceipt {
+  run_id: string;
+  action_id: string;
+  wait_id: string;
+  cursor: number;
+}
+
+export interface PolicyPauseInfo {
+  action_id: string;
+  wait_id: string;
+  reason: string;
 }
 
 export interface PermissionOpenParams {

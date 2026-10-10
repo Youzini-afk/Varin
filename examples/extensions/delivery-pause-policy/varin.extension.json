@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "example.delivery-pause-policy",
+  "displayName": "Delivery and Explicit Pause Policy",
+  "version": "1.0.0",
+  "engines": { "varin": "*" },
+  "entrypoints": { "host": { "file": "host.cjs", "mode": "brokered", "activation": ["service-request"] } },
+  "provides": { "services": [{ "id": "varin.agent.policy", "version": 2, "multiple": true }] }
+}
