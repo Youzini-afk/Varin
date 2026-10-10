@@ -131,6 +131,11 @@ export function registerManagedRemoteRoutes(
     response.json(await service.admit(request.body, owner.principalId));
   }));
 
+  app.post(`${base}/resources/observe`, requireAuth, requireManagedAuth, route(async (request, response) => {
+    const owner = authorize(request, value(request.body).coordinatorHostId);
+    response.json(await service.observeAdmission(request.body, owner.principalId));
+  }));
+
   app.post(`${base}/resources/release`, requireAuth, requireManagedAuth, route(async (request, response) => {
     const body = value(request.body);
     const owner = authorize(request, body.coordinatorHostId);

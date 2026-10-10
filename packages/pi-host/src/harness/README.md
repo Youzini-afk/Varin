@@ -128,6 +128,10 @@ in its explicit or request-frozen default cwd; cd/env/venv changes do not carry 
 Use the returned runtime handle to continue a still-running process.
 
 Research tools require the Host's actual services, research work focus and the session's tool selection.
+`experiment submit` returns the original durable attempt before input capture and backend preparation.
+Its spec can be null until fixed input is ready; the accepted attempt can already be observed or cancelled.
+Default submit/rerun request keys use the actual tool call, and explicit keys retain their original intent.
+Cancelling a wait does not cancel the experiment; cancel intent and confirmed backend drain are separate.
 `wait` without `timeout_ms` holds an event subscription with no periodic model calls. New user input
 interrupts the wait normally; the Host readmits the yielded execution slot before returning. Task roots
 and waiting conditions persist across restarts. `submit_code` captures one fixed source in the Host,

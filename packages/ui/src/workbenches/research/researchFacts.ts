@@ -57,7 +57,8 @@ const ATTEMPT_STATES = new Set([
 
 const parseAttempt = (value: unknown): ExperimentAttemptView | null => {
   if (!isRecord(value)) return null;
-  if (typeof value.attemptId !== 'string' || typeof value.specId !== 'string') return null;
+  if (typeof value.attemptId !== 'string' || (value.specId !== null && typeof value.specId !== 'string')) return null;
+  if (typeof value.cancelRequested !== 'boolean') return null;
   if (typeof value.state !== 'string') return null;
   if (typeof value.createdAt !== 'number') return null;
   // Keep an attempt visible when a newer service adds a state. Unknown is a
@@ -138,9 +139,14 @@ export const loadResearchFacts = async (
     runtimeFetch(`${base}/sources`, init).then(readJson),
   ]);
   if (experimentsBody === null && resourcesBody === null && sourcesBody === null) return null;
-  const attempts = isRecord(experimentsBody) && Array.isArray(experimentsBody.attempts)
-    ? experimentsBody.attempts.map(parseAttempt).filter((entry): entry is ExperimentAttemptView => entry !== null)
-    : [];
+  if (experimentsBody !== null && (!isRecord(experimentsBody) || !Array.isArray(experimentsBody.attempts))) {
+    throw new Error('Experiment facts response is malformed');
+  }
+  const attempts = experimentsBody === null ? [] : (experimentsBody as { attempts: unknown[] }).attempts.map(value => {
+    const attempt = parseAttempt(value);
+    if (!attempt) throw new Error('Experiment facts contain an unreadable attempt');
+    return attempt;
+  });
   const machines = isRecord(resourcesBody) && Array.isArray(resourcesBody.machines)
     ? resourcesBody.machines.map(parseMachine).filter((entry): entry is ResourceMachineView => entry !== null)
     : [];
@@ -246,17 +252,10 @@ export const cancelResearchAttempts = async (
   });
 };
 
-const requestIdForRerun = (attemptId: string, index: number): string => {
-  const randomUUID = typeof globalThis.crypto?.randomUUID === 'function'
-    ? globalThis.crypto.randomUUID.bind(globalThis.crypto)
-    : undefined;
-  return randomUUID?.() ?? `ui-rerun-${Date.now()}-${index}-${attemptId}`;
-};
-
 export const rerunResearchAttempt = async (
   sessionId: string,
   attemptId: string,
-  machineId?: string,
+  intent: { requestId: string; machineId?: string },
 ): Promise<ExperimentSubmitResult> => {
   const response = await runtimeFetch(
     `/api/harness/sessions/${encodeURIComponent(sessionId)}/experiments/${encodeURIComponent(attemptId)}/rerun`,
@@ -265,23 +264,23 @@ export const rerunResearchAttempt = async (
       cache: 'no-store',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        requestId: requestIdForRerun(attemptId, 0),
-        ...(machineId ? { machineId } : {}),
+        requestId: intent.requestId,
+        ...(intent.machineId ? { machineId: intent.machineId } : {}),
       }),
     },
   );
   const body = await readJsonBody(response, 'Rerun failed');
   const attempt = parseAttempt(body.attempt);
-  if (!attempt || !isRecord(body.spec) || typeof body.spec.specId !== 'string') throw new Error('Rerun response is malformed');
+  if (!attempt || (body.spec !== null && (!isRecord(body.spec) || typeof body.spec.specId !== 'string'))) throw new Error('Rerun response is malformed');
   return { ...body, attempt, spec: body.spec as unknown as ExperimentSubmitResult['spec'] } as unknown as ExperimentSubmitResult;
 };
 
 export const rerunResearchAttempts = async (
   sessionId: string,
-  attempts: Array<Pick<ExperimentAttemptView, 'attemptId' | 'specId' | 'machineId'>>,
+  attempts: Array<Pick<ExperimentAttemptView, 'attemptId' | 'machineId'> & { specId: string; requestId: string }>,
 ): Promise<ResearchBatchRerunItem[]> => {
-  const items = attempts.map((attempt, index) => ({
-    requestId: requestIdForRerun(attempt.attemptId, index),
+  const items = attempts.map((attempt) => ({
+    requestId: attempt.requestId,
     retryOfAttemptId: attempt.attemptId,
     specId: attempt.specId,
     ...(attempt.machineId ? { machineId: attempt.machineId } : {}),
@@ -298,17 +297,18 @@ export const rerunResearchAttempts = async (
   const body = await readJsonBody(response, 'Batch rerun failed');
   if (!Array.isArray(body.items)) throw new Error('Batch rerun response is malformed');
   return body.items.flatMap((value): ResearchBatchRerunItem[] => {
-    if (!isRecord(value) || typeof value.index !== 'number' || typeof value.requestId !== 'string' || typeof value.accepted !== 'boolean') return [];
+    if (!isRecord(value) || typeof value.index !== 'number' || typeof value.requestId !== 'string' || typeof value.accepted !== 'boolean') throw new Error('Batch rerun item is malformed');
     const attempt = parseAttempt(value.attempt);
-    const spec = isRecord(value.spec) && typeof value.spec.specId === 'string'
-      ? value.spec as unknown as ExperimentSubmitResult['spec']
+    const spec = value.spec === null ? null : isRecord(value.spec) && typeof value.spec.specId === 'string'
+      ? value.spec as unknown as NonNullable<ExperimentSubmitResult['spec']>
       : undefined;
+    if (value.accepted && (!attempt || spec === undefined)) throw new Error('Accepted rerun receipt is malformed');
     return [{
       index: value.index,
       requestId: value.requestId,
       accepted: value.accepted,
       ...(attempt ? { attempt } : {}),
-      ...(spec ? { spec } : {}),
+      ...(spec !== undefined ? { spec } : {}),
       ...(typeof value.text === 'string' ? { text: value.text } : {}),
       ...(typeof value.error === 'string' ? { error: value.error } : {}),
     }];

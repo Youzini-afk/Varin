@@ -8,6 +8,14 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-11 增量：研究实验短受理与独立准备
+
+- 原 ExperimentService 已把规范化请求、真实 caller 的 source/retry 授权和固定来源元数据短受理为 durable attempt，再独立 capture/spec/resource/prepare/spawn。原 Storage experiment/spec/job/artifact 与 ResourceService 继续唯一拥有领域事实；spec/specId 可为 null，cancelRequested 与真实排空分开。Pi 工具与现有 User/Research UI 展示原受理，未知 rerun 回应复用同键/原意图，取消不等全 workspace 恢复。
+- 原 source lease、capture-batch、materialize 与远端准备都按实际 ACK/原 receipt/真实物理 lease 排空；资源受理丢回应只向原分配 owner 查询，missing 不当未分配，不盲重 admit/prepare/spawn。Late spawn 按原 handle 停止，恢复 observer 重读原取消；明确 terminal status、writer inactive 和日志 cursor drain 才终结。候选 branch→spec 先存确切接收者，取消和去重失败者只清理自己原候选，丢 delete ACK 查原 operation。
+- 独审原七条失败反例最终 **7/7** 修后通过：来源权限、稳定显式请求跨 Run、两种 branch 清理、非法资源自困、恢复取消与不可互读 Thread 的 spec 去重。Inline spec 以原创建 Thread/session 为归属，同 owner 跨 Run 可去重，显式跨 owner 引用仍核原权限，没有新权限缓存或第二状态库。
+- 最终 portable Host **43/43**、Pi **16/16**、UI **15/15**，Host/Pi/UI 类型、协议构建、全部 TS lint 与真实 Host bundle（531 reachable / 72 excluded）通过，23 个冻结源码/测试指纹保持一致。独审接受本基础片；实际 Storage/process IPC、真实 managed machine 与平台验收未执行。原 Rust inventory metadata scan 仍同步，后续继续其控制边界。详见[验收与复跑](../reviews/runtime-experiment-admission-2026-10-11.md)。
+- Native 研究调用身份、普通目录 Job/Wait、child/source 与 native User 消费仍是下一纵切，不能以本基础片的 Host/Pi 行为替代。完整设计和用户负责最终迁移的分工保持。
+
 ## 2026-10-11 增量：原来源文件条件与取消恢复
 
 - 普通 `follow_up` **版本3** 与 User API 接入 file exists/changed/ready，单独或 flat Any/All 共用原 occurrence/input/Goal/root/child 链。Catalog **35** 保存原叶基线、实际 FileState、持久接受的 watch position 和 gap；Storage 原 operations/operation_owners 保存精确只读来源受理，ContentStore 保持正文 owner。live_root、原 materialized run root、fixed_branch 精确 revision 分别核验，不随 child 新结果改读来源。

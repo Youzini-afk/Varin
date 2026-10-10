@@ -150,7 +150,7 @@ export function createExperimentTool(bridge: HostServicesBridge, _sessionId: str
   return defineTool({
     name: "experiment",
     label: "Experiment",
-    description: "Run and manage durable experiments. submit pins a spec and starts an attempt on a machine (local backend now); list shows concise attempt rows; get/logs/artifact/collect expand one attemptId; wait blocks until the attempt finishes or times out; cancel requests backend stop. Retrying a submit with the same requestId returns the recorded attempt instead of starting a second job.",
+    description: "Run and manage durable experiments. submit accepts an attempt, then prepares its immutable spec and execution independently; list shows concise attempt rows; get/logs/artifact/collect expand one attemptId; wait blocks until the attempt finishes or times out; cancel requests backend stop. Retrying a submit with the same requestId returns the recorded attempt instead of starting a second job.",
     promptSnippet: "experiment: submit/list/get/logs/artifact/wait/cancel/collect durable experiment attempts",
     promptGuidelines: [
       "Attempts retain their identity after the Run ends or the session disconnects. get/list read existing attempts; wait timeout leaves the job running.",
@@ -158,7 +158,7 @@ export function createExperimentTool(bridge: HostServicesBridge, _sessionId: str
     ],
     parameters: ExperimentParams,
     executionMode: "sequential",
-    execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
+    execute: async (toolCallId, params, signal, _onUpdate, _ctx) => {
       const needAttempt = (): string => {
         if (params.attemptId === undefined || params.attemptId.trim() === "") {
           throw new HarnessRequestError("invalid-params", `action "${params.action}" requires attemptId`);
@@ -196,7 +196,7 @@ export function createExperimentTool(bridge: HostServicesBridge, _sessionId: str
           }
           case "submit": {
             const result = await submitDraft({
-              ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
+              requestId: params.requestId ?? `experiment:${toolCallId}`,
               ...(params.title !== undefined ? { title: params.title } : {}),
               ...(params.specId !== undefined ? { specId: params.specId } : {}),
               ...(params.command !== undefined ? { command: params.command } : {}),
@@ -212,7 +212,7 @@ export function createExperimentTool(bridge: HostServicesBridge, _sessionId: str
             return {
               content: [{ type: "text", text: `${typed.text}\nTo act when it finishes, register follow_up (source kind "experiment", attemptId "${typed.attempt.attemptId}") — non-blocking; the attempt keeps running.` }],
               details: {
-                specId: typed.spec.specId,
+                specId: typed.attempt.specId,
                 attemptId: typed.attempt.attemptId,
                 state: typed.attempt.state,
                 backend: typed.attempt.backend,
@@ -223,18 +223,20 @@ export function createExperimentTool(bridge: HostServicesBridge, _sessionId: str
           }
           case "submit_many": {
             if (!params.items?.length) return invalidParams("experiment", "submit_many requires at least one item");
-            const submitted = await Promise.allSettled(params.items.map((item) => submitDraft(item)));
+            const drafts = params.items.map((item, index) => ({ ...item,
+              requestId: item.requestId ?? `experiment:${toolCallId}:item:${index}` }));
+            const submitted = await Promise.allSettled(drafts.map(submitDraft));
             const items = submitted.map((result, index) => result.status === "fulfilled"
               ? {
                   index,
-                  requestId: params.items![index]!.requestId,
+                  requestId: drafts[index]!.requestId,
                   accepted: true as const,
                   attempt: result.value.attempt,
                   spec: result.value.spec,
                 }
               : {
                   index,
-                  requestId: params.items![index]!.requestId,
+                  requestId: drafts[index]!.requestId,
                   accepted: false as const,
                   error: result.reason instanceof Error ? result.reason.message : String(result.reason),
                 });
@@ -250,10 +252,11 @@ export function createExperimentTool(bridge: HostServicesBridge, _sessionId: str
           case "rerun": {
             const priorId = needAttempt();
             const prior = await bridge.request<"experiment.get">("experiment.get", { attemptId: priorId }, signal ? { signal } : undefined) as ExperimentGetResult;
+            if (prior.attempt.specId === null) return invalidParams("experiment", "This attempt has no prepared immutable spec to rerun; submit the intended command again with a new requestId.");
             const result = await submitDraft({
               specId: prior.attempt.specId,
               retryOfAttemptId: priorId,
-              ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
+              requestId: params.requestId ?? `experiment:${toolCallId}`,
               ...(params.machineId !== undefined ? { machineId: params.machineId } : prior.attempt.machineId ? { machineId: prior.attempt.machineId } : {}),
               ...(params.title !== undefined ? { title: params.title } : {}),
             });

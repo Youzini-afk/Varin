@@ -127,14 +127,33 @@ export interface ExperimentBackend {
   ): Promise<{ bytes: Buffer; nextOffset: number; eof: boolean }>;
 }
 
+/** An adapter may certify preparation drain only from an actual settled effect or no-dispatch fact. */
+export class ExperimentPreparationError extends Error {
+  readonly drained: boolean;
+  readonly retryable: boolean;
+  constructor(message: string, options: { drained: boolean; retryable?: boolean; cause?: unknown }) {
+    super(message, { cause: options.cause });
+    this.name = "ExperimentPreparationError";
+    this.drained = options.drained;
+    this.retryable = options.retryable ?? true;
+  }
+}
+
 /** A backend bound to the resolved execution site for one attempt. */
 export interface ResolvedExperimentBackend {
   backend: ExperimentBackend;
   site: ExperimentBackendSite;
+  /** Read the original preparation effect without starting or resending it. */
+  reconcilePreparation?(request: {
+    attemptId: string;
+    input: import("./experiment-workspace.js").ExperimentInputSnapshot;
+  }): Promise<"drained" | "unknown">;
   /** Prepare the immutable input on this execution target. */
   prepare(request: {
     attemptId: string;
     input: import("./experiment-workspace.js").ExperimentInputSnapshot;
+    /** Cancels preparation only. Resolution does not prove a spawned job stopped. */
+    signal?: AbortSignal;
   }): Promise<{
     backend?: ExperimentBackend;
     site: ExperimentBackendSite;

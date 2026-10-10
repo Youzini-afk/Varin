@@ -3,9 +3,9 @@
  *
  * Capacity, committed reservations and sampled usage are separate durable
  * records, each carrying its own provenance and observation time. A request is
- * not a commitment — `admit` is the only writer that can confirm one, and it
- * serializes per machine so concurrent submissions cannot both claim the same
- * remaining capacity. Unknown capacity or an unread usage dimension is never
+ * not a commitment — `admit` owns allocation and reconciliation only restores
+ * its original confirmed receipt. Per-machine serialization prevents concurrent
+ * submissions from claiming the same remaining capacity. An unread usage dimension is never
  * treated as free.
  */
 import os from "node:os";
@@ -76,6 +76,12 @@ export interface ResourceAdmission {
   reason?: string;
 }
 
+/** Observation of the original allocation, never a new admission request. */
+export type ResourceAdmissionReconciliation =
+  | { status: "confirmed"; commitmentId: string; gpuAllocation?: GpuAllocation }
+  | { status: "not-admitted" }
+  | { status: "unknown" };
+
 /** Resource authority implemented by an execution target, not this coordinator. */
 export interface ExternalResourceAuthority {
   readonly authorityId: string;
@@ -85,6 +91,12 @@ export interface ExternalResourceAuthority {
     attemptId: string;
     resources: ExperimentResourceRequest;
   }): Promise<ResourceAdmission>;
+  reconcileAdmission?(input: {
+    workspaceId: string;
+    machineId: string;
+    attemptId: string;
+    resources: ExperimentResourceRequest;
+  }): Promise<ResourceAdmissionReconciliation>;
   release(input: {
     workspaceId: string;
     machineId: string;
@@ -293,7 +305,7 @@ const gpuUsageForProbe = (result: GpuProbeResult): Array<Record<string, unknown>
 const resourceDimensions = ["cpuCores", "memoryMb", "gpuCount", "gpuMemoryMb"] as const;
 type ResourceDimension = typeof resourceDimensions[number];
 
-const validateResources = (value: ExperimentResourceRequest): ExperimentResourceRequest => {
+export const validateResources = (value: ExperimentResourceRequest): ExperimentResourceRequest => {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("resource request must be an object");
   }
@@ -819,6 +831,48 @@ export function createResourceService(deps: ResourceServiceDeps) {
     };
   };
 
+  const reconcileAdmission = async (
+    workspaceId: string,
+    machineId: string,
+    resources: ExperimentResourceRequest,
+    attemptId: string,
+  ): Promise<ResourceAdmissionReconciliation> => {
+    if (!workspaceId || !machineId || !attemptId) throw new Error("resource admission identity is required");
+    const normalized = validateResources(resources);
+    const gpuRequested = (normalized.gpuCount ?? 0) > 0 || (normalized.gpuMemoryMb ?? 0) > 0;
+    return withMachineLock(deps.client, machineId, async () => {
+      const scoped = await globalContext();
+      const commitmentId = commitmentIdFor(workspaceId, machineId, attemptId);
+      const existing = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.commitment(commitmentId));
+      if (existing) {
+        const fact = commitmentFact(existing);
+        if (!fact || fact.ownerWorkspaceId !== workspaceId || fact.view.machineId !== machineId
+          || fact.view.attemptId !== attemptId || !sameResources(fact.view.resources, normalized)) {
+          throw new Error(`resource commitment identity conflict for ${commitmentId}`);
+        }
+        if (fact.view.state === "released") return { status: "not-admitted" };
+        if (fact.view.state === "confirmed" && (!gpuRequested || fact.gpuAllocation)) return { status: "confirmed", commitmentId,
+          ...(fact.gpuAllocation ? { gpuAllocation: fact.gpuAllocation } : {}) };
+        return { status: "unknown" };
+      }
+      const machine = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.machine(machineId));
+      const external = machine ? await deps.resolveExternalAuthority?.(machineId, machine) : null;
+      if (!external?.reconcileAdmission) return { status: "unknown" };
+      const receipt = await external.reconcileAdmission({ workspaceId, machineId, attemptId, resources: normalized });
+      if (receipt.status === "unknown" || receipt.status === "not-admitted") return receipt;
+      if (receipt.status !== "confirmed") throw new Error("Remote resource observation returned an invalid state");
+      if (!receipt.commitmentId) throw new Error("Remote resource observation returned no commitment identity");
+      if (gpuRequested && !receipt.gpuAllocation) return { status: "unknown" };
+      // Restore the coordinator's original receipt from the target owner; do not reserve again.
+      await putGlobalRecord({ recordId: recordIdFor.commitment(commitmentId), recordType: "resource.commitment", state: "confirmed",
+        payload: { id: commitmentId, workspaceId, machineId, attemptId, resources: normalized,
+          confirmedBy: external.authorityId, externalCommitmentId: receipt.commitmentId,
+          ...(receipt.gpuAllocation ? { gpuAllocation: receipt.gpuAllocation } : {}), confirmedAt: now() } });
+      changed(workspaceId);
+      return { status: "confirmed", commitmentId, ...(receipt.gpuAllocation ? { gpuAllocation: receipt.gpuAllocation } : {}) };
+    });
+  };
+
   const admit = async (
     workspaceId: string,
     machineId: string,
@@ -1242,6 +1296,7 @@ export function createResourceService(deps: ResourceServiceDeps) {
     registerMachine,
     list,
     admit,
+    reconcileAdmission,
     release,
   };
 }

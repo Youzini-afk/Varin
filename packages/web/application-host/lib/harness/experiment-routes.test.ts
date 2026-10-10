@@ -11,6 +11,7 @@ const attempt = {
   backend: "local",
   machineId: "local",
   state: "running",
+  cancelRequested: false,
   collection: "none",
   createdAt: 1,
 };
@@ -50,7 +51,7 @@ const fixture = () => {
     list: vi.fn(async () => ({ attempts: [attempt], text: "1 attempt" })),
     get: vi.fn(async () => ({ attempt, artifacts: [] })),
     logs: vi.fn(async () => ({ attemptId: attempt.attemptId, stream: "stdout", offset: 0, nextOffset: 3, eof: true, text: "out", origin: "live" })),
-    cancel: vi.fn(async () => ({ ...attempt, state: "stopping" })),
+    cancel: vi.fn(async () => ({ ...attempt, state: "stopping", cancelRequested: true })),
     collect: vi.fn(async () => ({ attempt: { ...attempt, collection: "done" }, artifacts: [] })),
     readArtifact: vi.fn(async () => ({ name: "results/answer.txt", byteLength: 9, chunks: (async function* () { yield Buffer.from("answer="); yield Buffer.from("42"); })() })),
   };

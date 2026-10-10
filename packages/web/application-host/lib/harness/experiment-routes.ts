@@ -166,6 +166,7 @@ export function registerHarnessExperimentRoutes(
       const caller = await callerFor(sessionIdOf(request));
       const priorId = attemptIdOf(request);
       const prior = await experiments.get(caller, priorId);
+      if (prior.attempt.specId === null) throw new HarnessServiceError("invalid-params", "This attempt has no prepared immutable spec to rerun; submit a new experiment intent.");
       const result = await experiments.submit(caller, {
         specId: prior.attempt.specId,
         retryOfAttemptId: priorId,

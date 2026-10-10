@@ -1387,7 +1387,7 @@ export class KernelClient {
   }
 
   async fileMaterialize(params: KernelMethodParams["file.materialize"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.requestRaw<Record<string, unknown>>("file.materialize", params, { signal, grant });
+    return this.requestRaw<Record<string, unknown>>("file.materialize", params, { signal, grant, settleCancellation: true });
   }
 
   async createBranch(params: KernelCreateBranchInput, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
