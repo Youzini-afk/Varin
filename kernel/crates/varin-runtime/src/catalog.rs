@@ -29,7 +29,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 12;
+pub(crate) const FORMAT: i64 = 13;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -1299,6 +1299,8 @@ pub mod launch_content;
 pub(crate) mod policy_checkpoint;
 #[path="catalog_policy_body.rs"]
 pub(crate) mod policy_body;
+#[path="catalog_child_content.rs"]
+pub mod child_content;
 
 #[path="catalog_tools.rs"]
 pub mod tools;

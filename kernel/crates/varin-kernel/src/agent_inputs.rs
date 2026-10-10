@@ -382,7 +382,8 @@ fn prepare_child_input(
         if cancelled.load(Ordering::Acquire) {
             return Err(KernelError::Cancelled);
         }
-        owner.admit_child(prepared).map_err(domain)?
+        let child = owner.admit_child(prepared).map_err(domain)?;
+        owner.capture_child_read(child)
     };
-    Ok(serde_json::to_value(result)?)
+    Ok(serde_json::to_value(result.load().map_err(domain)?)?)
 }

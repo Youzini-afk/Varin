@@ -46,6 +46,7 @@ pub struct ChildReport {
     pub code_result: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ChildTask {
     pub operation_id: String,
     pub parent_run_id: String,
@@ -56,9 +57,9 @@ pub struct ChildTask {
     pub child_thread_id: String,
     pub child_branch_id: String,
     pub project_id: Option<String>,
-    pub input: DispatchInput,
-    pub configuration: Value,
-    pub launch: launches::LaunchSelection,
+    pub input_ref: Value,
+    pub configuration_ref: Value,
+    pub launch: launch_content::LaunchSelectionMetadata,
     pub source_pin: ChildSourcePin,
     pub state: String,
     pub revision: u64,
@@ -86,6 +87,15 @@ impl Catalog {
         offset: usize,
         max_bytes: usize,
     ) -> Result<ChildTextPage> {
+        self.capture_child_report(operation_id,item_id,offset,max_bytes)?.load()
+    }
+    pub fn capture_child_report(
+        &self,
+        operation_id: &str,
+        item_id: &str,
+        offset: usize,
+        max_bytes: usize,
+    ) -> Result<child_content::ChildReportRead> {
         let child = self.child_task(operation_id)?;
         if !child
             .report
@@ -96,35 +106,8 @@ impl Catalog {
                 "item is not a report of this child".into(),
             ));
         }
-        let item = self
-            .content
-            .hydrate_history(record(&self.db, "history", item_id)?)?;
-        let conversation: crate::execution::ConversationItem =
-            serde_json::from_value(item.content)?;
-        let crate::execution::Content::Text { text } = conversation.content else {
-            return Err(RuntimeError::Invalid("report item is not text".into()));
-        };
-        if offset > text.len() || !text.is_char_boundary(offset) || max_bytes == 0 {
-            return Err(RuntimeError::Invalid("invalid report byte range".into()));
-        }
-        // 64 KiB text leaves ample JSON escaping/envelope headroom in the 16 MiB IPC frame.
-        let mut end = offset.saturating_add(max_bytes.min(65536)).min(text.len());
-        while end > offset && !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        if end == offset && offset < text.len() {
-            return Err(RuntimeError::Invalid(
-                "maxBytes cannot hold the next UTF-8 character".into(),
-            ));
-        }
-        Ok(ChildTextPage {
-            operation_id: operation_id.into(),
-            item_id: item_id.into(),
-            offset,
-            next_offset: (end < text.len()).then_some(end),
-            total_bytes: text.len(),
-            text: text[offset..end].into(),
-        })
+        Ok(child_content::ChildReportRead::new(self, operation_id, item_id, offset, max_bytes,
+            record(&self.db,"history",item_id)?))
     }
 
     pub fn child_task(&self, operation_id: &str) -> Result<ChildTask> {
@@ -159,28 +142,21 @@ impl Catalog {
     }
     pub fn accept_prepared_child(&mut self, context: &ToolExecutionContext, input: DispatchInput,
         pin: ChildSourcePin, prepared: launch_content::PreparedChildLaunch) -> Result<ChildTask> {
-        let mut child_launch = prepared.selection;
-        input.validate()?;
-        pin.source.validate()?;
-        if pin.source.mode != SourceMode::FixedBranch
-            || pin.pin_id.is_empty()
-            || pin.root.is_empty()
-        {
-            return Err(RuntimeError::Invalid(
-                "child requires a retained fixed source".into(),
-            ));
-        }
-        child_launch.source = Some(pin.source.clone());
-        child_launch.mcp_binding = None;
-        child_launch.policy_models.clear();
+        let prepared = self.prepare_child_admission(context,input,pin,prepared)?.load()?;
+        self.accept_child_references(prepared)
+    }
+    pub fn accept_child_references(&mut self, prepared: child_content::PreparedChildAdmission) -> Result<ChildTask> {
+        let context = &prepared.context;
+        let child_launch = &prepared.launch;
+        let pin = &prepared.pin;
         if let Some(old) =
             optional_record::<ChildTask>(&self.db, "child_tasks", &context.operation_id)?
         {
             if old.parent_run_id == context.run_id
                 && old.origin == context.origin
-                && old.input == input
-                && old.source_pin == pin
-                && old.launch == child_launch
+                && old.input_ref == prepared.input_ref
+                && &old.source_pin == pin
+                && &old.launch == child_launch
             {
                 return Ok(old);
             }
@@ -193,7 +169,6 @@ impl Catalog {
         let run: Run = record(&tx, "runs", &context.run_id)?;
         fence(&run, self.epoch)?;
         let mut op: Operation = record(&tx, "operations", &context.operation_id)?;
-        let admitted: AdmittedTool = serde_json::from_value(op.intent.clone())?;
         let request_id = match &context.origin {
             ToolOrigin::ModelStep { request_id } => request_id,
             ToolOrigin::PolicyAction { .. } => {
@@ -207,9 +182,8 @@ impl Catalog {
             || op.run_id != run.id
             || op.epoch != run.epoch
             || op.executor.as_deref() != Some(DISPATCH_TOOL)
-            || admitted.call.name != DISPATCH_TOOL
-            || context.operation_id != format!("{request_id}:tool:{}", admitted.call.call_id)
-            || admitted.call.arguments != serde_json::to_value(&input)?
+            || context.operation_id != format!("{request_id}:tool:{}", prepared.call_id)
+            || op.revision != prepared.operation_revision
             || op.phase != OperationPhase::Running
             || op.cancel_requested
             || run.cancel_requested
@@ -226,27 +200,12 @@ impl Catalog {
             || parent.selection.provider_family != child_launch.provider_family
             || parent.selection.configuration_generation != child_launch.configuration_generation
             || parent.selection.tool_schema_generation != child_launch.tool_schema_generation
-            || child_launch.policy
-                != (crate::execution::PolicyIdentity {
-                    name: "default".into(),
-                    version: "1".into(),
-                })
-            || child_launch.tools.iter().any(|tool| {
-                !matches!(
-                    tool.name.as_str(),
-                    "file_read" | "file_list" | "file_search"
-                )
-            })
             || parent.selection.tools_ref != prepared.parent_tools_ref
         {
             return Err(RuntimeError::Conflict(
                 "child exceeds parent source/model/read authority".into(),
             ));
         }
-        child_launch.source = Some(pin.source.clone());
-        child_launch.mcp_binding = None;
-        child_launch.policy_models.clear();
-        child_launch.validate()?;
         let child_thread_id = format!("thread:child:{}", op.id);
         let child_branch_id = format!("branch:child:{}", op.id);
         tx.execute("INSERT INTO threads(id) VALUES(?1)", [&child_thread_id])?;
@@ -260,14 +219,14 @@ impl Catalog {
             parent_thread_id: run.thread_id.clone(),
             parent_branch_id: run.branch_id.clone(),
             origin: context.origin.clone(),
-            call_id: admitted.call.call_id.clone(),
+            call_id: prepared.call_id.clone(),
             child_thread_id,
             child_branch_id,
             project_id,
-            input,
-            configuration: run.configuration,
-            launch: child_launch,
-            source_pin: pin,
+            input_ref: prepared.input_ref,
+            configuration_ref: prepared.configuration_ref,
+            launch: prepared.launch,
+            source_pin: prepared.pin,
             state: "preparing".into(),
             revision: 1,
             cursor: 0,
@@ -279,7 +238,7 @@ impl Catalog {
         // complete the original exchange without creating another child or replaying the dispatch.
         let receipt = ToolResult {
             request_id: request_id.clone(),
-            call_id: admitted.call.call_id,
+            call_id: prepared.call_id,
             completion: ToolCompletion::JobAccepted {
                 operation_id: op.id.clone(),
                 phase: "preparing_child".into(),
@@ -328,7 +287,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             .collect::<std::result::Result<_, _>>()?;
         rows
     };
-    if version != Some(1)
+    if version != Some(2)
         || columns
             != vec![
                 ("id".into(), "TEXT".into(), 0, 1),
@@ -432,7 +391,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
     Ok(())
 }
 pub(super) fn initialize_new(db: &Connection) -> Result<()> {
-    db.execute_batch("CREATE TABLE child_tasks(id TEXT PRIMARY KEY REFERENCES operations(id),child_thread_id TEXT NOT NULL UNIQUE REFERENCES threads(id),body TEXT NOT NULL); INSERT INTO runtime_domains(name,version) VALUES('collaboration',1);")?;
+    db.execute_batch("CREATE TABLE child_tasks(id TEXT PRIMARY KEY REFERENCES operations(id),child_thread_id TEXT NOT NULL UNIQUE REFERENCES threads(id),body TEXT NOT NULL); INSERT INTO runtime_domains(name,version) VALUES('collaboration',2);")?;
     Ok(())
 }
 
@@ -570,7 +529,9 @@ impl ChildPreparation {
                 submission: None,
             });
         }
-        let mut launch = child.launch.clone();
+        let input: DispatchInput = serde_json::from_value(content.load(&child.input_ref)?)?;
+        let configuration = content.load(&child.configuration_ref)?;
+        let mut launch = child.launch.load(&content)?;
         launch.source = Some(source);
         let operation_id = child.operation_id;
         let submission = submissions::PreparedSubmission::stage(submissions::SubmissionBody {
@@ -579,8 +540,8 @@ impl ChildPreparation {
                 thread_id: child.child_thread_id,
                 branch_id: child.child_branch_id,
                 expected_head: None,
-                input: Value::String(child.input.task),
-                configuration: child.configuration,
+                input: Value::String(input.task),
+                configuration,
             },
             launch: Some(launch),
             inherit_source: false,

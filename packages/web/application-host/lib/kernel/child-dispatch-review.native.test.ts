@@ -1001,7 +1001,7 @@ for (const [defect, mutation] of Object.entries(combinedFormatDefects)) {
     const catalog = path.join(f.root, 'agent-runtime', 'conversation.sqlite');
     const database = new DatabaseSync(catalog);
     expect(database.prepare("SELECT name,version FROM runtime_domains WHERE name IN ('context_checkpoints','collaboration') ORDER BY name").all()).toEqual([
-      { name: 'collaboration', version: 1 }, { name: 'context_checkpoints', version: 3 },
+      { name: 'collaboration', version: 2 }, { name: 'context_checkpoints', version: 3 },
     ]);
     database.exec(`PRAGMA foreign_keys=OFF; ${mutation}; PRAGMA wal_checkpoint(TRUNCATE)`);
     database.close();

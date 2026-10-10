@@ -139,7 +139,8 @@ fn boundary(revoke_before: bool) {
         let children = db.lock().unwrap().child_tasks().unwrap();
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].parent_run_id, f.context.run_id);
-        assert_eq!(children[0].launch.tools.len(), 1);
+        let read = db.lock().unwrap().capture_child_read(children[0].clone());
+        assert_eq!(read.load().unwrap().launch.tools.len(), 1);
         assert_eq!(children[0].source_pin.source.revision, Some(0));
     }
     drop(executor);

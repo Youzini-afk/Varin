@@ -188,17 +188,19 @@ impl ToolExecutor for CollaborationTools {
                 let input: DispatchInput =
                     serde_json::from_value(call.arguments.clone()).map_err(error)?;
                 // A replay after durable admission does not touch a now-retired source permit.
-                if let Ok(old) = self
-                    .catalog
-                    .lock()
-                    .map_err(error)?
-                    .child_task(&c.operation_id)
-                {
-                    if old.input != input || old.parent_run_id != c.run_id || old.origin != c.origin
+                let existing = self.catalog.lock().map_err(error)?.child_task(&c.operation_id);
+                match existing {
+                    Ok(old) => {
+                    let input_preparation = self.catalog.lock().map_err(error)?.child_input_preparation();
+                    let input_ref = input_preparation.reference(&input).map_err(error)?;
+                    if old.input_ref != input_ref || old.parent_run_id != c.run_id || old.origin != c.origin
                     {
                         return Err(error("dispatch origin input changed"));
                     }
                     return Ok(accepted(c, "preparing_child"));
+                    }
+                    Err(varin_runtime::RuntimeError::NotFound(_)) => (),
+                    Err(failure) => return Err(error(failure)),
                 }
                 let binding = self
                     .binding
@@ -242,8 +244,11 @@ impl ToolExecutor for CollaborationTools {
                     let preparation = self.catalog.lock().map_err(error)?
                         .prepare_child_launch(&c.run_id, launch).map_err(error)?;
                     let prepared = preparation.load().map_err(error)?;
+                    let preparation = self.catalog.lock().map_err(error)?
+                        .prepare_child_admission(c,input,pin,prepared).map_err(error)?;
+                    let prepared = preparation.load().map_err(error)?;
                     if cancel.is_cancelled() { return Err(error("collaboration cancelled")); }
-                    self.catalog.lock().map_err(error)?.accept_prepared_child(c, input, pin, prepared).map_err(error)
+                    self.catalog.lock().map_err(error)?.accept_child_references(prepared).map_err(error)
                 })();
                 if admission.is_err() {
                     let _ = self.resources.collaboration_pin(
@@ -264,8 +269,8 @@ impl ToolExecutor for CollaborationTools {
                 .require_child_parent(&c.run_id, &handle.operation_id)
                 .map_err(error)?;
             if call.name == collaboration::REPORT_TOOL {
-                let page = db
-                    .read_child_report(
+                let read = db
+                    .capture_child_report(
                         &handle.operation_id,
                         handle
                             .item_id
@@ -275,6 +280,8 @@ impl ToolExecutor for CollaborationTools {
                         handle.max_bytes.unwrap_or(65536),
                     )
                     .map_err(error)?;
+                drop(db);
+                let page = read.load().map_err(error)?;
                 return Ok(ToolCompletion::Result {
                     outcome: Outcome::Succeeded,
                     effect: Effect::None,
