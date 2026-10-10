@@ -34,12 +34,16 @@ pub(super) enum SubmissionOrigin {
         parent_thread_id: String,
         checkpoint: Option<String>,
     },
-    ChildContinuation { execution_id: String, checkpoint: Option<String> },
-    Continuation {
-        occurrence_id: String,
+    ChildContinuation {
+        execution_id: String,
         checkpoint: Option<String>,
     },
-    MessageRequest { identity: messages::MessageIdentity, execution_id: Option<String>, checkpoint: Option<String>, history: Value },
+    Ingress {
+        input: inputs::QueuedInputMetadata,
+        execution_id: Option<String>,
+        checkpoint: Option<String>,
+        history: Value,
+    },
     Summary,
 }
 pub struct PreparedSubmission {
@@ -69,11 +73,18 @@ pub(super) struct SubmissionBody {
     pub publication: crate::content::ContentPublication,
 }
 
-fn submission_intent(command: &SubmitInput, launch: &Option<launches::LaunchSelection>, inherit_source: bool, child_context: Option<&Value>) -> Value {
+fn submission_intent(
+    command: &SubmitInput,
+    launch: &Option<launches::LaunchSelection>,
+    inherit_source: bool,
+    child_context: Option<&Value>,
+) -> Value {
     // The configuration catalog is prepared authority, like the initial context, not
     // a new user intent. An already accepted key keeps the first committed snapshot.
     let mut selected = serde_json::to_value(launch).expect("typed launch selection");
-    if let Some(object) = selected.as_object_mut() { object.remove("child_dispatch"); }
+    if let Some(object) = selected.as_object_mut() {
+        object.remove("child_dispatch");
+    }
     json!({"command":command,"launch":selected,"inherit_source":inherit_source,"child_context":child_context})
 }
 
@@ -92,11 +103,26 @@ impl Catalog {
         )?;
         if delegated {
             return Err(RuntimeError::Invalid(
-                "delegated Threads require their admitted execution or an explicit continuation".into(),
+                "delegated Threads require their admitted execution or an explicit continuation"
+                    .into(),
             ));
         }
-        let existing: Option<(String,String)> = self.db.query_row("SELECT intent,receipt FROM commands WHERE id=?1", [&command.key], |row| Ok((row.get(0)?,row.get(1)?))).optional()?;
-        let existing = existing.map(|(intent,receipt)| -> Result<_> {Ok((serde_json::from_str(&intent)?,serde_json::from_str(&receipt)?))}).transpose()?;
+        let existing: Option<(String, String)> = self
+            .db
+            .query_row(
+                "SELECT intent,receipt FROM commands WHERE id=?1",
+                [&command.key],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let existing = existing
+            .map(|(intent, receipt)| -> Result<_> {
+                Ok((
+                    serde_json::from_str(&intent)?,
+                    serde_json::from_str(&receipt)?,
+                ))
+            })
+            .transpose()?;
         let checkpoint = self.capture_active_checkpoint(&command.branch_id)?;
         let scope = checkpoint
             .as_ref()
@@ -129,7 +155,10 @@ impl Catalog {
 }
 
 impl SubmissionPreparation {
-    pub fn with_input_preparation(mut self, preparation: Option<resources::InputResourcePreparation>) -> Self {
+    pub fn with_input_preparation(
+        mut self,
+        preparation: Option<resources::InputResourcePreparation>,
+    ) -> Self {
         self.input_preparation = preparation;
         self
     }
@@ -147,10 +176,24 @@ impl SubmissionPreparation {
     pub fn scope(&self) -> Option<&context::ContextScope> {
         self.scope.as_ref()
     }
-    pub fn existing_receipt(&self, launch: &Option<launches::LaunchSelection>, inherit_source: bool) -> Result<Option<Receipt>> {
-        let Some((intent,receipt)) = &self.existing else { return Ok(None); };
-        if crate::content::ContentStore::reference(&submission_intent(&self.command,launch,inherit_source,None))? != *intent {
-            return Err(RuntimeError::Conflict("idempotency key has different input".into()));
+    pub fn existing_receipt(
+        &self,
+        launch: &Option<launches::LaunchSelection>,
+        inherit_source: bool,
+    ) -> Result<Option<Receipt>> {
+        let Some((intent, receipt)) = &self.existing else {
+            return Ok(None);
+        };
+        if crate::content::ContentStore::reference(&submission_intent(
+            &self.command,
+            launch,
+            inherit_source,
+            None,
+        ))? != *intent
+        {
+            return Err(RuntimeError::Conflict(
+                "idempotency key has different input".into(),
+            ));
         }
         Ok(Some(receipt.clone()))
     }
@@ -160,26 +203,54 @@ impl SubmissionPreparation {
         inherit_source: bool,
     ) -> Result<PreparedSubmission> {
         if let Some(receipt) = self.existing_receipt(&launch, inherit_source)? {
-            let intent = self.existing.as_ref().expect("validated original receipt").0.clone();
+            let intent = self
+                .existing
+                .as_ref()
+                .expect("validated original receipt")
+                .0
+                .clone();
             return Ok(PreparedSubmission {
-                run_id:receipt.run_id,
-                identity:SubmissionIdentity {key:self.command.key,thread_id:self.command.thread_id,branch_id:self.command.branch_id,
-                    expected_head:self.command.expected_head,configuration:self.command.configuration},
-                epoch:self.epoch,intent,history:Value::Null,launch:None,inherit_source,initial:None,
-                origin:SubmissionOrigin::User {checkpoint:self.checkpoint},_publication:self.publication,
+                run_id: receipt.run_id,
+                identity: SubmissionIdentity {
+                    key: self.command.key,
+                    thread_id: self.command.thread_id,
+                    branch_id: self.command.branch_id,
+                    expected_head: self.command.expected_head,
+                    configuration: self.command.configuration,
+                },
+                epoch: self.epoch,
+                intent,
+                history: Value::Null,
+                launch: None,
+                inherit_source,
+                initial: None,
+                origin: SubmissionOrigin::User {
+                    checkpoint: self.checkpoint,
+                },
+                _publication: self.publication,
             });
         }
-        if (self.resources.is_some() && self.checkpoint.is_some()) || self.expected_context_checkpoint.is_some() {
+        if (self.resources.is_some() && self.checkpoint.is_some())
+            || self.expected_context_checkpoint.is_some()
+        {
             if self.expected_context_checkpoint != self.checkpoint {
-                return Err(RuntimeError::Conflict("prepared resource context is based on a different checkpoint".into()));
+                return Err(RuntimeError::Conflict(
+                    "prepared resource context is based on a different checkpoint".into(),
+                ));
             }
         }
         if let Some(prepared) = &self.input_preparation {
             // A null inner checkpoint selects this submission's prepared initial context.
             // The outer H1 checkpoint still fences replacement of an existing source.
-            let expected = if self.initial.is_some() && self.resources.is_some() { None } else { self.checkpoint.clone() };
+            let expected = if self.initial.is_some() && self.resources.is_some() {
+                None
+            } else {
+                self.checkpoint.clone()
+            };
             if prepared.expected_context_checkpoint != expected {
-                return Err(RuntimeError::Conflict("prepared skill context is based on a different checkpoint".into()));
+                return Err(RuntimeError::Conflict(
+                    "prepared skill context is based on a different checkpoint".into(),
+                ));
             }
         }
         PreparedSubmission::stage(SubmissionBody {
@@ -219,7 +290,9 @@ impl PreparedSubmission {
         } = body;
         let run_id = id();
         if resources.is_some() && initial.is_none() {
-            return Err(RuntimeError::Invalid("resource candidate requires its prepared context".into()));
+            return Err(RuntimeError::Invalid(
+                "resource candidate requires its prepared context".into(),
+            ));
         }
         if command.key.trim().is_empty() {
             return Err(RuntimeError::Invalid(
@@ -257,78 +330,146 @@ impl PreparedSubmission {
                 ));
             }
         }
-        if !matches!(origin,SubmissionOrigin::MessageRequest{..}) { resources::validate_raw_input(&command.input)?; }
+        if !matches!(origin, SubmissionOrigin::Ingress { .. }) {
+            resources::validate_raw_input(&command.input)?;
+        }
         let checkpoint = match &origin {
-            SubmissionOrigin::User { checkpoint } | SubmissionOrigin::Child { checkpoint, .. }
-            | SubmissionOrigin::ChildContinuation { checkpoint, .. } | SubmissionOrigin::Continuation { checkpoint, .. } | SubmissionOrigin::MessageRequest { checkpoint, .. } => {
-                checkpoint
-            }
+            SubmissionOrigin::User { checkpoint }
+            | SubmissionOrigin::Child { checkpoint, .. }
+            | SubmissionOrigin::ChildContinuation { checkpoint, .. }
+            | SubmissionOrigin::Ingress { checkpoint, .. } => checkpoint,
             SubmissionOrigin::Summary => &None,
         };
         let active = current.map(context::CheckpointRead::load).transpose()?;
         let selected_source = launch.as_ref().and_then(|launch| launch.source.clone());
-        let normalized_source = super::followups::normalized_source(selected_source.clone(), &run_id);
+        let normalized_source =
+            super::followups::normalized_source(selected_source.clone(), &run_id);
         if resources.is_none() && !inherit_source && selected_source.is_some() {
-            if let Some(previous) = active.as_ref().and_then(|checkpoint| checkpoint.resources.as_ref()) {
+            if let Some(previous) = active
+                .as_ref()
+                .and_then(|checkpoint| checkpoint.resources.as_ref())
+            {
                 if previous.source != normalized_source {
-                    return Err(RuntimeError::Conflict("a changed input source requires its prepared resource context".into()));
+                    return Err(RuntimeError::Conflict(
+                        "a changed input source requires its prepared resource context".into(),
+                    ));
                 }
             }
         }
         let mut input_material = None;
-        let initial = initial.map(|mut proposal| -> Result<_> {
-            if proposal.branch_id != command.branch_id || proposal.through_id.is_some()
-                || proposal.expected_revision != 0 || !proposal.summary.is_empty() {
-                return Err(RuntimeError::Invalid("input context must be a prepared system snapshot".into()));
-            }
-            if let Some(basis) = &personalization { basis.validate()?; }
-            if let Some(resources) = &resources {
-                let basis = personalization.as_ref().ok_or_else(|| RuntimeError::Invalid("resources require an owned context scope".into()))?;
-                resources.validate(basis)?;
-                if resources.snapshot.scope.branch_id != command.branch_id || resources.source != selected_source {
-                    return Err(RuntimeError::Conflict("resource snapshot differs from the admitted branch/source".into()));
+        let initial = initial
+            .map(|mut proposal| -> Result<_> {
+                if proposal.branch_id != command.branch_id
+                    || proposal.through_id.is_some()
+                    || proposal.expected_revision != 0
+                    || !proposal.summary.is_empty()
+                {
+                    return Err(RuntimeError::Invalid(
+                        "input context must be a prepared system snapshot".into(),
+                    ));
                 }
-            }
-            let revision = if let Some(active) = &active {
-                // An explicit new source and its prepared prompt publish with the new input/Run.
-                // Ordinary contextless inputs keep their original checkpoint unchanged.
-                if resources.is_none() { return Ok(None); }
-                let previous = active.personalization.as_ref().ok_or_else(|| RuntimeError::Invalid("resource replacement needs an owned context scope".into()))?;
-                let next = personalization.as_ref().expect("resource scope checked");
-                if context::ContextScope::from(previous) != context::ContextScope::from(next)
-                    || previous.memory_snapshot != next.memory_snapshot
-                    || active.proposal.memory_checkpoint != proposal.memory_checkpoint
-                    || next.revision < previous.revision {
-                    return Err(RuntimeError::Conflict("input resource replacement changed frozen scope or memory".into()));
+                if let Some(basis) = &personalization {
+                    basis.validate()?;
                 }
-                let revision = active.revision.checked_add(1).ok_or_else(|| RuntimeError::Invalid("context revision exhausted".into()))?;
-                proposal.key = format!("input-context:{}:{}", command.branch_id, command.key);
-                proposal.expected_revision = active.revision;
-                proposal.through_id = active.proposal.through_id.clone();
-                proposal.summary = active.proposal.summary.clone();
-                revision
-            } else {
-                if checkpoint.is_some() { return Err(RuntimeError::Conflict("captured input context is unavailable".into())); }
-                1
-            };
-            if let Some(resources) = resources.as_mut() {
-                resources.source = super::followups::normalized_source(resources.source.take(), &run_id);
-            }
-            let body = context::ContextCheckpoint { id:proposal.key.clone(),revision,proposal,personalization,resources,
-                resource_activations: active.as_ref().map(|active| active.resource_activations.clone()).unwrap_or_default() };
-            if matches!(origin, SubmissionOrigin::User { .. } | SubmissionOrigin::ChildContinuation { .. }) {
-                input_material = Some(resources::bind_input(&command.input, 1, input_preparation.as_ref(), Some(&body))?);
-            }
-            let reference = content.save(&serde_json::to_value(&body)?)?;
-            Ok(Some((context::CheckpointMetadata::from(&body), reference)))
-        }).transpose()?.flatten();
+                if let Some(resources) = &resources {
+                    let basis = personalization.as_ref().ok_or_else(|| {
+                        RuntimeError::Invalid("resources require an owned context scope".into())
+                    })?;
+                    resources.validate(basis)?;
+                    if resources.snapshot.scope.branch_id != command.branch_id
+                        || resources.source != selected_source
+                    {
+                        return Err(RuntimeError::Conflict(
+                            "resource snapshot differs from the admitted branch/source".into(),
+                        ));
+                    }
+                }
+                let revision = if let Some(active) = &active {
+                    // An explicit new source and its prepared prompt publish with the new input/Run.
+                    // Ordinary contextless inputs keep their original checkpoint unchanged.
+                    if resources.is_none() {
+                        return Ok(None);
+                    }
+                    let previous = active.personalization.as_ref().ok_or_else(|| {
+                        RuntimeError::Invalid(
+                            "resource replacement needs an owned context scope".into(),
+                        )
+                    })?;
+                    let next = personalization.as_ref().expect("resource scope checked");
+                    if context::ContextScope::from(previous) != context::ContextScope::from(next)
+                        || previous.memory_snapshot != next.memory_snapshot
+                        || active.proposal.memory_checkpoint != proposal.memory_checkpoint
+                        || next.revision < previous.revision
+                    {
+                        return Err(RuntimeError::Conflict(
+                            "input resource replacement changed frozen scope or memory".into(),
+                        ));
+                    }
+                    let revision = active.revision.checked_add(1).ok_or_else(|| {
+                        RuntimeError::Invalid("context revision exhausted".into())
+                    })?;
+                    proposal.key = format!("input-context:{}:{}", command.branch_id, command.key);
+                    proposal.expected_revision = active.revision;
+                    proposal.through_id = active.proposal.through_id.clone();
+                    proposal.summary = active.proposal.summary.clone();
+                    revision
+                } else {
+                    if checkpoint.is_some() {
+                        return Err(RuntimeError::Conflict(
+                            "captured input context is unavailable".into(),
+                        ));
+                    }
+                    1
+                };
+                if let Some(resources) = resources.as_mut() {
+                    resources.source =
+                        super::followups::normalized_source(resources.source.take(), &run_id);
+                }
+                let body = context::ContextCheckpoint {
+                    id: proposal.key.clone(),
+                    revision,
+                    proposal,
+                    personalization,
+                    resources,
+                    resource_activations: active
+                        .as_ref()
+                        .map(|active| active.resource_activations.clone())
+                        .unwrap_or_default(),
+                };
+                if matches!(
+                    origin,
+                    SubmissionOrigin::User { .. } | SubmissionOrigin::ChildContinuation { .. }
+                ) {
+                    input_material = Some(resources::bind_input(
+                        &command.input,
+                        1,
+                        input_preparation.as_ref(),
+                        Some(&body),
+                    )?);
+                }
+                let reference = content.save(&serde_json::to_value(&body)?)?;
+                Ok(Some((context::CheckpointMetadata::from(&body), reference)))
+            })
+            .transpose()?
+            .flatten();
         let input_material = match input_material {
             Some(value) => value,
-            None if matches!(origin, SubmissionOrigin::User { .. } | SubmissionOrigin::ChildContinuation { .. }) => resources::bind_input(&command.input, 1, input_preparation.as_ref(), active.as_ref())?,
+            None if matches!(
+                origin,
+                SubmissionOrigin::User { .. } | SubmissionOrigin::ChildContinuation { .. }
+            ) =>
+            {
+                resources::bind_input(
+                    &command.input,
+                    1,
+                    input_preparation.as_ref(),
+                    active.as_ref(),
+                )?
+            }
             None => command.input.clone(),
         };
         let history = match &origin {
-            SubmissionOrigin::MessageRequest { history, .. } => history.clone(),
+            SubmissionOrigin::Ingress { history, .. } => history.clone(),
             SubmissionOrigin::Child {
                 operation_id,
                 parent_thread_id,
@@ -355,9 +496,20 @@ impl PreparedSubmission {
         };
         // The intent retains the original content and requested selection. Inherited source and
         // the initial prompt are separately frozen by the atomic admission, never by a retry.
-        let child_context = if matches!(origin, SubmissionOrigin::Child { .. }) { initial.as_ref().map(|(_,reference)|reference) } else { None };
-        let intent = content.save(&submission_intent(&command, &launch, inherit_source, child_context))?;
-        let launch = launch.map(|selection| launch_content::LaunchSelectionMetadata::stage(&content, selection)).transpose()?;
+        let child_context = if matches!(origin, SubmissionOrigin::Child { .. }) {
+            initial.as_ref().map(|(_, reference)| reference)
+        } else {
+            None
+        };
+        let intent = content.save(&submission_intent(
+            &command,
+            &launch,
+            inherit_source,
+            child_context,
+        ))?;
+        let launch = launch
+            .map(|selection| launch_content::LaunchSelectionMetadata::stage(&content, selection))
+            .transpose()?;
         Ok(Self {
             run_id,
             identity: SubmissionIdentity {

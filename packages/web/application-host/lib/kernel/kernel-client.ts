@@ -604,7 +604,7 @@ export class KernelClient {
   private window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private controlWindow = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private closePromise: Promise<void> | undefined;
-  private readonly revokedGrants = new Set<string>();
+  private readonly inactiveGrants = new Set<string>();
   private started = false;
   private transportFailed = false;
   private readonly exitListeners = new Set<(error: Error) => void>();
@@ -688,7 +688,7 @@ export class KernelClient {
   /** Resolve only an actual Host-issued native Run grant, never caller-created scope metadata. */
   retrievalGrant(query: { grantId: string; runId: string; threadId: string; workspaceId: string; executionWorkspaceId: string }): KernelGrantHandle {
     const grant = this.issuedGrants.get(query.grantId);
-    if (!grant || this.revokedGrants.has(query.grantId) || grant.runId !== query.runId || grant.threadId !== query.threadId
+    if (!grant || this.inactiveGrants.has(query.grantId) || grant.runId !== query.runId || grant.threadId !== query.threadId
       || grant.owningWorkspace !== query.workspaceId || grant.executionWorkspace !== query.executionWorkspaceId
       || grant.sessionId !== null || grant.workerId !== null) {
       throw new KernelClientError({ code: 'forbidden', message: 'Native retrieval Run grant is unavailable or mismatched' });
@@ -817,7 +817,7 @@ export class KernelClient {
     this.window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
     this.controlWindow = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
     this.transportFailed = false;
-    this.revokedGrants.clear();
+    this.inactiveGrants.clear();
     const transport = await (this.options.transportFactory ?? KernelTransport.prepare)(value => this.consumeFrame(value), error => this.failAll(error, true), id => {
       // Only a cancelled observer discards a response body. Domain effect receipts remain in
       // their durable owner; this releases transport credit after the peer settles that body.
@@ -977,7 +977,7 @@ export class KernelClient {
       || typeof event.grantId !== "string" || typeof event.processId !== "string" || !Number.isSafeInteger(event.sequence)
       || !["control", "data", "closed"].includes(event.stream)) { invalid("Malformed process stream envelope"); return; }
     const entry = this.processSubscriptions.get(event.subscriptionId);
-    if (!entry || entry.closed || this.revokedGrants.has(entry.grant.grantId)) return;
+    if (!entry || entry.closed || this.inactiveGrants.has(entry.grant.grantId)) return;
     if (event.kernelEpoch !== this.epoch || event.kernelEpoch !== entry.grant.kernelEpoch || event.grantId !== entry.grant.grantId || event.processId !== entry.processId) {
       invalid("Process stream actor or epoch mismatch"); return;
     }
@@ -1051,8 +1051,8 @@ export class KernelClient {
       if (options.signal?.aborted) throw cancelled();
       const id = randomUUID();
       const grant = options.grant ? this.assertGrant(options.grant) : this.isManagementMethod(method) ? this.managementGrant : null;
-      if (grant && this.revokedGrants.has(grant.grantId)) throw new KernelClientError({ code: "forbidden", message: "Kernel grant was revoked" });
-      if (this.epoch && !grant && !options.allowBootstrap && method !== "kernel.handshake" && method !== "authority.grant.issue" && method !== "authority.grant.revoke") {
+      if (grant && this.inactiveGrants.has(grant.grantId)) throw new KernelClientError({ code: "forbidden", message: "Kernel grant is no longer active" });
+      if (this.epoch && !grant && !options.allowBootstrap && method !== "kernel.handshake" && method !== "authority.grant.issue" && method !== "authority.grant.revoke" && method !== "authority.grant.retire") {
         throw new KernelClientError({ code: "kernel-grant-required", message: "A scoped grant is required for " + method, retryable: false });
       }
       const identity = { ...(this.epoch ? { epoch: this.epoch } : {}), ...(grant ? { grantId: grant.grantId } : {}) };
@@ -1578,7 +1578,7 @@ export class KernelClient {
     if (!this.handshakeResult) await this.start();
     const result = await this.requestRaw<Record<string, unknown>>("source.handoff.claim", params, { signal });
     const handle = this.grantFromResponse(result);
-    this.revokedGrants.delete(handle.grantId); this.issuedGrants.set(handle.grantId, handle);
+    this.inactiveGrants.delete(handle.grantId); this.issuedGrants.set(handle.grantId, handle);
     return handle;
   }
 
@@ -1599,23 +1599,41 @@ export class KernelClient {
       ...(params.workerId === undefined ? {} : { workerId: params.workerId }),
       ...(params.workerGeneration === undefined ? {} : { workerGeneration: params.workerGeneration }),
     }, { signal });
-    this.revokedGrants.delete(String(grant.grant_id));
+    this.inactiveGrants.delete(String(grant.grant_id));
     const handle = this.grantFromResponse(grant);
     this.issuedGrants.set(handle.grantId, handle);
     return handle;
   }
 
-  async revokeGrant(grantId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    if (!this.handshakeResult) await this.start();
-    this.revokedGrants.add(grantId);
+  private closeGrantCaller(grantId: string): void {
+    this.inactiveGrants.add(grantId);
     this.issuedGrants.delete(grantId);
     for (const [id, entry] of this.processSubscriptions) {
       if (entry.grant.grantId !== grantId) continue;
       entry.closed = true; this.processSubscriptions.delete(id);
-      entry.reject(new KernelClientError({ code: "forbidden", message: "Process subscription grant was revoked" }));
+      entry.reject(new KernelClientError({ code: "forbidden", message: "Process subscription authority is no longer active" }));
     }
     for (const pending of this.pending.values()) if (pending.grantId === grantId) pending.cancel();
+  }
+
+  async revokeGrant(grantId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (!this.handshakeResult) await this.start();
+    this.closeGrantCaller(grantId);
     return this.requestRaw<Record<string, unknown>>("authority.grant.revoke", { grantId }, { signal });
+  }
+
+  /** Normal source retirement is distinct from revoking the original result's authority. */
+  async retireGrant(grantId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (!this.handshakeResult) await this.start();
+    this.closeGrantCaller(grantId);
+    return this.requestRaw<Record<string, unknown>>("authority.grant.retire", { target: { kind: "grant", grantId } }, { signal });
+  }
+
+  /** Durable Storage ownership also retires grants issued by an earlier Host generation. */
+  async retireRunGrants(runId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (!this.handshakeResult) await this.start();
+    for (const grant of this.issuedGrants.values()) if (grant.runId === runId) this.closeGrantCaller(grant.grantId);
+    return this.requestRaw<Record<string, unknown>>("authority.grant.retire", { target: { kind: "run", runId } }, { signal });
   }
 
   async releaseBlob(ownerId: string, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {

@@ -152,9 +152,9 @@ it('slow startup launch cannot block the existing child/process pump or a later 
   } finally { release(); collaboration.stop(); await tick(); }
 });
 
-it.each(['followup.admitted', 'goal.run_ready', 'message.run_ready', 'observation.run_ready'] as const)('%s uses the same cold launch owner, while unrelated and repeated durable events cannot relaunch it', async kind => {
+it.each(['ingress.run_ready', 'goal.run_ready', 'observation.run_ready'] as const)('%s uses the same cold launch owner, while unrelated and repeated durable events cannot relaunch it', async kind => {
   const f = fixture();
-  const subject = kind === 'goal.run_ready' ? 'goal:one' : kind === 'message.run_ready' ? 'message:original' : kind === 'observation.run_ready' ? 'reply-wait:send' : 'followup:process';
+  const subject = kind === 'goal.run_ready' ? 'goal:one' : kind === 'ingress.run_ready' ? 'followup-input:original' : kind === 'observation.run_ready' ? 'reply-wait:send' : 'followup:process';
   const events: RuntimeEvent[] = [];
   let listener!: (event: AgentRuntimeStreamEvent) => void;
   const runtime = Object.assign(f.runtime, {
@@ -178,10 +178,10 @@ it.each(['followup.admitted', 'goal.run_ready', 'message.run_ready', 'observatio
     // Only the exact continuation admission wakes cold preparation. Generic accepted Runs may be children.
     f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable'; f.run.waiting_on = null;
     events.push({ cursor: 2, subject: 'run:unprepared-child', revision: 1, kind: 'run.accepted', data: { run_id: 'run:unprepared-child' } });
-    events.push({ cursor: 3, subject, revision: 1, kind: kind === 'goal.run_ready' ? 'goal.started' : kind === 'message.run_ready' ? 'message.accepted' : kind === 'observation.run_ready' ? 'wait.registered' : 'followup.registered', data: { run_id: f.run.id } });
+    events.push({ cursor: 3, subject, revision: 1, kind: kind === 'goal.run_ready' ? 'goal.started' : kind === 'ingress.run_ready' ? 'followup.input_accepted' : kind === 'observation.run_ready' ? 'wait.registered' : 'followup.registered', data: { run_id: f.run.id } });
     notify(); await tick(); await tick(); expect(continues).toHaveBeenCalledOnce();
     events.push({ cursor: 4, subject, revision: 2, kind, data: {
-      run_id: f.run.id, ...(kind === 'goal.run_ready' ? { goal_id: subject } : kind === 'message.run_ready' ? { message_id: subject } : kind === 'observation.run_ready' ? { wait_id: subject } : {
+      run_id: f.run.id, ...(kind === 'goal.run_ready' ? { goal_id: subject } : kind === 'ingress.run_ready' ? { input_id: subject } : kind === 'observation.run_ready' ? { wait_id: subject } : {
         followup_id: subject, occurrence_id: 'occurrence:process', source_run_id: 'run:source', operation_id: 'operation:process',
       }),
     } });
@@ -195,7 +195,7 @@ it.each(['followup.admitted', 'goal.run_ready', 'message.run_ready', 'observatio
   } finally { collaboration.stop(); }
 });
 
-it.each(['followup.admitted', 'goal.run_ready', 'message.run_ready', 'observation.run_ready'] as const)('startup discovery retains %s during the saved-launch scan and discovers saved work after an epoch change', async kind => {
+it.each(['ingress.run_ready', 'goal.run_ready', 'observation.run_ready'] as const)('startup discovery retains %s during the saved-launch scan and discovers saved work after an epoch change', async kind => {
   const f = fixture(); f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable'; f.run.waiting_on = null;
   let release!: () => void; const scanned = new Promise<void>(resolve => { release = resolve; });
   f.runtime.pendingLaunches.mockImplementationOnce(async () => { await scanned; return []; });
@@ -215,7 +215,7 @@ it.each(['followup.admitted', 'goal.run_ready', 'message.run_ready', 'observatio
   try {
     const discovery = collaboration.recover();
     await vi.waitFor(() => expect(f.runtime.pendingLaunches).toHaveBeenCalledOnce());
-    events.push({ cursor: 1, subject: kind === 'goal.run_ready' ? 'goal:one' : kind === 'message.run_ready' ? 'message:original' : kind === 'observation.run_ready' ? 'reply-wait:send' : 'followup:process', revision: 2, kind, data: { run_id: f.run.id } });
+    events.push({ cursor: 1, subject: kind === 'goal.run_ready' ? 'goal:one' : kind === 'ingress.run_ready' ? 'followup-input:original' : kind === 'observation.run_ready' ? 'reply-wait:send' : 'followup:process', revision: 2, kind, data: { run_id: f.run.id } });
     listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 1 });
     release(); await discovery;
     await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());
@@ -392,7 +392,7 @@ it.each(['child_revision', 'process_receipt'] as const)('%s observed during an a
   const runtime = Object.assign(f.runtime, {
     onEvent: (handler: typeof listener) => { listener = handler; return () => {}; }, onExit: () => () => {}, onReady: () => () => {},
     reconcileObservations: async () => [], children, childExecutions: async () => [structuredClone(child)], unacceptedChildSources: async () => [],
-    childExecution: async () => structuredClone(child), releaseSourceGrants: vi.fn(async () => {}),
+    childExecution: async () => structuredClone(child), retireSourceGrants: vi.fn(async () => {}),
     status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
   const continueRun = vi.fn(async () => { await gate; });
@@ -415,6 +415,8 @@ it.each(['child_revision', 'process_receipt'] as const)('%s observed during an a
     await vi.waitFor(() => expect(children).toHaveBeenCalledTimes(scans + 1));
     await tick(); expect(children).toHaveBeenCalledTimes(scans + 1);
     expect(continueRun).toHaveBeenCalledTimes(wake === 'child_revision' ? 1 : 2); expect(f.errors).toEqual([]);
+    if (wake === 'child_revision') expect(runtime.retireSourceGrants).toHaveBeenCalledWith(f.run.id);
+    else expect(runtime.retireSourceGrants).not.toHaveBeenCalled();
   } finally { release(); collaboration.stop(); }
 });
 

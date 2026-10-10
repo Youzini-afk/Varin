@@ -41,6 +41,14 @@ An uncertain creation retry keeps its original key and input. Update/control con
 the current revision before a new explicit action. Ordinary message submission and conversation fork
 are not Goal creation commands. Goal-owned followups are controlled through their Goal.
 
+`ThreadsAPI.followups` registers one explicit instruction for an absolute `at` instant or an accepted
+`process_stopped` operation. Register retains a stable key and exact source Run/trigger/body for uncertain
+retries. `list` exposes short lifecycle metadata, while abortable `get` reads the original instruction.
+Control uses the displayed revision. Triggering, input binding and actual history delivery are distinct:
+a bound but undelivered occurrence can still be paused/cancelled without cancelling its shared Run or
+process. Agent-only optional waiting is not part of this User API. Independently registered followups
+retain their explicit actor even under a Goal; automatic Goal-owned definitions use Goal controls.
+
 `ThreadsAPI.family` reads the original task family without selecting another execution target.
 The caller `ThreadIdentity` is separate from the target request. `list` discovers actual related
 Threads, `runs` lists direct and inherited historical Run owners, `read` uses fixed recent/range/search

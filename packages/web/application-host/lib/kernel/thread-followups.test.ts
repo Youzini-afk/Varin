@@ -13,8 +13,11 @@ const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:followup'
 const run: Run = { id: 'run:source', thread_id: identity.threadId, branch_id: identity.branchId,
   state: 'waiting', revision: 2, epoch: 1, configuration: {}, cancel_requested: false, waiting_on: 'policy-pause:source' };
 const operationId = 'operation:process';
+const trigger = { kind: 'process_stopped' as const, operationId };
+const instruction = '  Read the original process output.\nDo not start it again.  ';
 const definition: Followup = { id: 'followup:process', revision: 1, generation: 1,
   thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: run.id,
+  actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
   goal_id: null, trigger: { kind: 'process_stopped', operation_id: operationId }, operation_id: operationId, state: 'active',
   wait: { id: 'wait:process', kind: 'process_stopped', after_cursor: 4, trigger_cursor: null, state: 'waiting' }, occurrence: null };
 
@@ -35,18 +38,19 @@ function fixture() {
         return facts.reply;
       }
       case 'runtime.followup.list': return facts.list;
+      case 'runtime.followup.get': return { followup: facts.list.find(value => value.id === params.followupId), instruction };
       case 'runtime.followup.control': {
         if (facts.conflict) throw new KernelClientError({ code: 'operation-error', message: 'operation error: conflict: follow-up revision changed' });
         return facts.reply;
       }
       case 'runtime.status': return { eventCursor: 5 };
       case 'runtime.history.page': return { head: null, previous: null, items: [] };
-      case 'runtime.context.inspect': return null;
-      case 'runtime.input.list': case 'runtime.thread.operations.active': case 'runtime.context_job.list': case 'runtime.child.list': case 'runtime.goal.list': return [];
+      case 'runtime.context.inspect': case 'runtime.child.for_thread': return null;
+      case 'runtime.input.list': case 'runtime.thread.operations.active': case 'runtime.context_job.list': case 'runtime.child.list': case 'runtime.child.execution.list': case 'runtime.goal.list': return [];
       default: throw new Error(`Unexpected RPC: ${method}`);
     }
   });
-  const runtime = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, agentRuntimeRequest: requests } as unknown as KernelClient);
+  const runtime = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {}, agentRuntimeRequest: requests } as unknown as KernelClient);
   const models = { resolveModel: vi.fn(), rebindModel: vi.fn() };
   const adapter = new ThreadAdapter(runtime, models, vi.fn(), vi.fn());
   const routes = new Map<string, RequestHandler[]>();
@@ -83,13 +87,13 @@ afterEach(() => vi.unstubAllGlobals());
 
 it('the public management client preserves registration keys, revisions and original consumed receipts', async () => {
   const f = fixture();
-  const input = { ...identity, key: 'register-once', runId: run.id, operationId };
+  const input = { ...identity, key: 'register-once', runId: run.id, trigger, instruction };
   const accepted = await f.api.followups.register(input);
   expect(await f.api.followups.register(input)).toEqual(accepted);
   const registrations = f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.register');
   expect(registrations).toHaveLength(2);
   for (const [, params, signal] of registrations) {
-    expect(params).toEqual({ key: input.key, runId: run.id, operationId });
+    expect(params).toEqual({ key: input.key, runId: run.id, trigger, instruction });
     expect(signal).toBeInstanceOf(AbortSignal);
   }
   for (const [action, state] of [['pause', 'paused'], ['resume', 'active'], ['cancel', 'cancelled']] as const) {
@@ -104,8 +108,8 @@ it('the public management client preserves registration keys, revisions and orig
   f.facts.reply = { ...accepted, revision: 7, wait: { ...accepted.wait, trigger_cursor: 9, state: 'consumed' }, occurrence: {
     id: 'occurrence:process', generation: 1, trigger_cursor: 9,
     evidence: { kind: 'process_stopped', receipt_identity: 'process:receipt', receipt_epoch: 'process-epoch:one' },
-    state: 'admitted', hold_reason: null, receipt: { thread_id: identity.threadId,
-      branch_id: identity.branchId, run_id: 'run:continued', input_id: 'environment:process', cursor: 10 },
+    state: 'admitted', hold_reason: null, delivery: { state: 'delivered', activation_state: 'bound',
+      run_id: 'run:continued', input_id: 'environment:process', delivered_cursor: 10, execution_id: null, failure_code: null },
   } };
   for (const action of ['pause', 'resume', 'cancel'] as const) {
     expect(await f.api.followups.control({ ...identity, followupId: accepted.id, expectedRevision: 1, action })).toEqual(f.facts.reply);
@@ -120,31 +124,35 @@ it('list and snapshot expose only the selected branch and controls reject anothe
   const other = { ...definition, id: 'followup:other', branch_id: 'branch:other' };
   f.facts.list.push(other);
   expect(await f.api.followups.list(identity)).toEqual([definition]);
+  expect(await f.api.followups.get(identity, definition.id)).toEqual({ followup: definition, instruction });
+  await expect(f.api.followups.get(identity, other.id)).rejects.toMatchObject({ status: 400 });
   expect((await f.api.snapshot(identity)).followups).toEqual([definition]);
   expect(await f.api.followups.list({ ...identity, branchId: 'branch:other' })).toEqual([other]);
   await expect(f.api.followups.control({ ...identity, followupId: other.id, expectedRevision: 1, action: 'cancel' })).rejects.toMatchObject({ status: 400 });
   f.facts.source.branch_id = 'branch:other';
-  await expect(f.api.followups.register({ ...identity, key: 'foreign', runId: run.id, operationId })).rejects.toMatchObject({ status: 400 });
+  await expect(f.api.followups.register({ ...identity, key: 'foreign', runId: run.id, trigger, instruction })).rejects.toMatchObject({ status: 400 });
   await expect(f.api.followups.list({ ...identity, branchId: 'branch:unknown' })).rejects.toMatchObject({ status: 400 });
   expect(f.requests.mock.calls.some(([method]) => ['runtime.followup.register', 'runtime.followup.control'].includes(method))).toBe(false);
   f.facts.source.branch_id = identity.branchId; f.facts.registerError = true;
-  await expect(f.api.followups.register({ ...identity, key: 'foreign-operation', runId: run.id, operationId: 'operation:other' }))
+  await expect(f.api.followups.register({ ...identity, key: 'foreign-operation', runId: run.id, trigger: { kind: 'process_stopped', operationId: 'operation:other' }, instruction }))
     .rejects.toMatchObject({ status: 400, code: 'operation-error' });
   expect(f.requests.mock.calls.at(-1)!.slice(0, 2)).toEqual(['runtime.followup.register', {
-    key: 'foreign-operation', runId: run.id, operationId: 'operation:other',
+    key: 'foreign-operation', runId: run.id, trigger: { kind: 'process_stopped', operationId: 'operation:other' }, instruction,
   }]);
 });
 
 it('management routes enforce authentication, exact fields and revision conflict without exposing private errors', async () => {
   const f = fixture();
-  const register = { ...identity, key: 'register', runId: run.id, operationId };
-  for (const method of ['register', 'list', 'control']) {
+  const register = { ...identity, key: 'register', runId: run.id, trigger, instruction };
+  for (const method of ['register', 'list', 'get', 'control']) {
     expect((await f.request(`/api/threads/followup/${method}`, identity, false)).status).toBe(401);
   }
   expect(f.requests).not.toHaveBeenCalled();
   for (const body of [
-    { ...register, text: 'different work' }, { ...register, schedule: 'daily' }, { ...register, operationId: '' },
-    { ...register, runtime: 'pi' },
+    { ...register, text: 'different work' }, { ...register, schedule: 'daily' }, { ...register, trigger: { kind: 'process_stopped', operationId: '' } },
+    { ...register, runtime: 'pi' }, { ...register, actor: { kind: 'user' } }, { ...register, wait: {} },
+    { ...register, trigger: { kind: 'at', atMs: -1 } }, { ...register, trigger: { kind: 'at', atMs: 1.5 } },
+    { ...register, trigger: { kind: 'at', atMs: 123, timeZone: 'UTC' } },
   ]) expect((await f.request('/api/threads/followup/register', body)).status).toBe(400);
   const control = { ...identity, followupId: definition.id, expectedRevision: 1, action: 'cancel' };
   for (const body of [
@@ -157,4 +165,32 @@ it('management routes enforce authentication, exact fields and revision conflict
     .rejects.toMatchObject({ status: 409, code: 'thread-conflict' });
   const response = await f.request('/api/threads/followup/control', control);
   expect(await response.json()).toEqual({ code: 'thread-conflict', error: 'Thread request could not be completed' });
+});
+
+
+it('time registration preserves the exact absolute instant, original text and User source without launching work in the Host', async () => {
+  const f = fixture(); f.facts.source.state = 'cancelled'; f.facts.source.cancel_requested = true;
+  const original = { ...identity, key: 'at-once', runId: run.id, trigger: { kind: 'at' as const, atMs: 0 }, instruction };
+  await f.api.followups.register(original); await f.api.followups.register(original);
+  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.register').map(([, params]) => params))
+    .toEqual([original, original].map(({ runtime: _runtime, threadId: _thread, branchId: _branch, ...params }) => params));
+  expect(f.models.resolveModel).not.toHaveBeenCalled(); expect(f.models.rebindModel).not.toHaveBeenCalled();
+  expect(f.requests.mock.calls.some(([method]) => method.startsWith('runtime.run.') && method !== 'runtime.run.inspect')).toBe(false);
+});
+
+
+it('normal source retirement uses the original grants while failed preparation still explicitly revokes its grant', async () => {
+  const retireRunGrants = vi.fn(async (_grantId: string) => ({})); const revokeGrant = vi.fn(async (_grantId: string) => ({}));
+  const runtime = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, retireRunGrants, revokeGrant } as unknown as KernelClient);
+  runtime.retainSourceGrant('old-child-run', 'original-creating-grant');
+  runtime.retainSourceGrant('old-child-run', 'rebound-child-grant');
+  runtime.retainSourceGrant('failed-preparation', 'unaccepted-grant');
+  await runtime.retireSourceGrants('old-child-run'); await runtime.retireSourceGrants('old-child-run');
+  expect(retireRunGrants.mock.calls.map(args => args[0])).toEqual(['old-child-run', 'old-child-run']);
+  const restarted = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, retireRunGrants, revokeGrant } as unknown as KernelClient);
+  await restarted.retireSourceGrants('previous-host-child-run');
+  expect(retireRunGrants).toHaveBeenLastCalledWith('previous-host-child-run');
+  expect(revokeGrant).not.toHaveBeenCalled();
+  await runtime.releaseSourceGrant('failed-preparation', 'unaccepted-grant');
+  expect(revokeGrant).toHaveBeenCalledWith('unaccepted-grant');
 });

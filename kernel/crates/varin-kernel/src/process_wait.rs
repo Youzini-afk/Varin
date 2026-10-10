@@ -257,11 +257,18 @@ impl ProcessWaitTools {
             (h.process_id, None)
         };
         let source_run_id = self.check_owner(c, &id)?;
+        let lineage = self
+            .catalog
+            .lock()
+            .map_err(error)?
+            .process_result_lineage(&c.run_id, &id)
+            .map_err(error)?;
         self.resources.observe_process(
             &self.binding,
             c,
             &id,
             &source_run_id,
+            lineage,
             read,
             authorize_only,
             cancel,

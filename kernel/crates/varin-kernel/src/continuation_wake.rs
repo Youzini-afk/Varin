@@ -73,6 +73,13 @@ pub(crate) fn drive(
             }
             break;
         }
+        // Persist due instants before loading any follow-up content. A held/failed consumer
+        // cannot leave an elapsed deadline armed and spin this native wake source.
+        let time_facts = runtime.catalog().lock().map_err(|_| ()).and_then(|mut c| {
+            varin_runtime::catalog::observations::wall_time_ms()
+                .and_then(|now| c.reconcile_followup_facts_at(now))
+                .map_err(|_| ())
+        });
         // All three original owners get this committed-event pass independently. Diagnostics
         // are edge-triggered per owner, so the error event itself cannot generate a retry loop.
         let results = [
@@ -85,7 +92,8 @@ pub(crate) fn drive(
                 "followups",
                 varin_runtime::catalog::followups::reconcile(&runtime.catalog())
                     .map(|_| ())
-                    .map_err(|_| ()),
+                    .map_err(|_| ())
+                    .and(time_facts.map(|_| ())),
             ),
         ];
         for (index, (source, result)) in results.into_iter().enumerate() {

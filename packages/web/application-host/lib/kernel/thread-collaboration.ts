@@ -161,7 +161,7 @@ export class ThreadCollaboration {
         }
         if (event.kind === 'run.cancel_requested') this.owners.kernel.cancelRunPreparation(event.subject);
         const data = event.data as { run_id?: unknown } | null;
-        if ((event.kind === 'policy.resumed' || event.kind === 'followup.admitted' || event.kind === 'goal.run_ready' || event.kind === 'message.run_ready' || event.kind === 'observation.run_ready') && data && typeof data.run_id === 'string') {
+        if ((event.kind === 'policy.resumed' || event.kind === 'ingress.run_ready' || event.kind === 'goal.run_ready' || event.kind === 'observation.run_ready') && data && typeof data.run_id === 'string') {
           void this.owners.continueRun(data.run_id, signal).catch(error => {
             if (!signal.aborted) this.owners.onError(undefined, error);
           });
@@ -377,7 +377,7 @@ export class ThreadCollaboration {
         child = await runtime.childExecution(child.execution_id, ownerSignal);
         if (child.report && child.trigger.kind === 'dispatch') this.owners.kernel.releaseChildToolHandoff(child.parent_run_id, child.child_operation_id);
         await this.releaseHandoff(child, ownerSignal);
-        if (child.report && child.receipt && ['published', 'no_changes', 'unavailable'].includes(child.code_result.kind)) await runtime.releaseSourceGrants(child.receipt.run_id);
+        if (child.report && child.receipt && ['published', 'no_changes', 'unavailable'].includes(child.code_result.kind)) await runtime.retireSourceGrants(child.receipt.run_id);
       }
     }
   }

@@ -265,7 +265,9 @@ pub(super) fn for_run(db: &Connection, run_id: &str) -> Result<Option<Definition
         }
         // A UserContinuation with no admitted Goal mapping explicitly crossed an
         // ended Goal boundary. Do not infer the old Goal again from stable family ties.
-        if continuation_predecessor(db, &current)?.is_some() { return Ok(None); }
+        if continuation_predecessor(db, &current)?.is_some() {
+            return Ok(None);
+        }
         if let Some(parent) = context_jobs::context_job_parent(db, &current)? {
             current = parent;
             continue;
@@ -283,12 +285,15 @@ pub(super) fn for_run(db: &Connection, run_id: &str) -> Result<Option<Definition
     }
 }
 fn continuation_predecessor(db: &Connection, run_id: &str) -> Result<Option<String>> {
-    Ok(db.query_row("SELECT json_extract(body,'$.trigger.previous_run_id') FROM delegated_executions WHERE run_id=?1 AND json_extract(body,'$.trigger.kind') IN ('user_continuation','message_request')",[run_id],|row|row.get(0)).optional()?)
+    Ok(db.query_row("SELECT json_extract(body,'$.trigger.previous_run_id') FROM delegated_executions WHERE run_id=?1 AND json_extract(body,'$.trigger.kind') IN ('user_continuation','message_request','followup')",[run_id],|row|row.get(0)).optional()?)
 }
 pub(super) fn bind_admission(tx: &Transaction<'_>, run: &Run) -> Result<()> {
     if let Some(previous) = continuation_predecessor(tx, &run.id)? {
         if let Some(goal) = for_run(tx, &previous)?.filter(|goal| !goal.ended()) {
-            tx.execute("INSERT INTO goal_runs(id,goal_id,primary_run) VALUES(?1,?2,0)", params![run.id,goal.id])?;
+            tx.execute(
+                "INSERT INTO goal_runs(id,goal_id,primary_run) VALUES(?1,?2,0)",
+                params![run.id, goal.id],
+            )?;
         }
         return Ok(());
     }
@@ -330,7 +335,7 @@ pub(super) fn bind_child(tx: &Transaction<'_>, operation: &str, parent: &str) ->
     Ok(())
 }
 fn adopt_descendants(tx: &Transaction<'_>, run: &str, goal: &str) -> Result<()> {
-    tx.execute("WITH RECURSIVE descendants(id) AS (SELECT ?1 UNION SELECT j.run_id FROM context_jobs j JOIN descendants d ON j.owner_run_id=d.id UNION SELECT r.id FROM child_tasks c JOIN descendants d ON json_extract(c.body,'$.parent_run_id')=d.id JOIN runs r ON r.branch_id=json_extract(c.body,'$.child_branch_id') WHERE NOT EXISTS(SELECT 1 FROM delegated_executions e WHERE e.run_id=r.id AND json_extract(e.body,'$.trigger.kind') IN ('user_continuation','message_request'))) INSERT INTO goal_runs(id,goal_id,primary_run) SELECT id,?2,0 FROM descendants WHERE id!=?1 ON CONFLICT(id) DO NOTHING",params![run,goal])?;
+    tx.execute("WITH RECURSIVE descendants(id) AS (SELECT ?1 UNION SELECT j.run_id FROM context_jobs j JOIN descendants d ON j.owner_run_id=d.id UNION SELECT r.id FROM child_tasks c JOIN descendants d ON json_extract(c.body,'$.parent_run_id')=d.id JOIN runs r ON r.branch_id=json_extract(c.body,'$.child_branch_id') WHERE NOT EXISTS(SELECT 1 FROM delegated_executions e WHERE e.run_id=r.id AND json_extract(e.body,'$.trigger.kind') IN ('user_continuation','message_request','followup'))) INSERT INTO goal_runs(id,goal_id,primary_run) SELECT id,?2,0 FROM descendants WHERE id!=?1 ON CONFLICT(id) DO NOTHING",params![run,goal])?;
     tx.execute("INSERT INTO goal_children(id,goal_id) SELECT c.id,?1 FROM child_tasks c JOIN goal_runs g ON json_extract(c.body,'$.parent_run_id')=g.id WHERE g.goal_id=?1 ON CONFLICT(id) DO NOTHING",[goal])?;
     Ok(())
 }
@@ -353,11 +358,10 @@ fn projection_block(db: &Connection, d: &Definition) -> Result<Option<GoalBlockR
     if waiting {
         return Ok(Some(GoalBlockReason::Waiting));
     }
-    let held:Option<String>=db.query_row("SELECT json_extract(o.body,'$.hold_reason') FROM followup_occurrences o JOIN followups f ON f.id=o.followup_id JOIN runs r ON r.id=json_extract(f.body,'$.source_run_id') WHERE json_extract(f.body,'$.goal_id')=?1 AND json_extract(o.body,'$.state')='held' AND json_extract(r.body,'$.state') IN ('completed','failed','cancelled') ORDER BY o.rowid DESC LIMIT 1",[&d.id],|r|r.get(0)).optional()?.flatten();
-    Ok(match held.as_deref() {
-        Some("source_unsettled") => Some(GoalBlockReason::Unsettled),
-        Some("context_scope_changed") => Some(GoalBlockReason::ContextChanged),
-        Some("preparation_failed") => Some(GoalBlockReason::PreparationFailed),
+    Ok(match followups::goal_projection_hold(db, &d.id)? {
+        Some(followups::HoldReason::SourceUnsettled) => Some(GoalBlockReason::Unsettled),
+        Some(followups::HoldReason::ContextScopeChanged) => Some(GoalBlockReason::ContextChanged),
+        Some(followups::HoldReason::PreparationFailed) => Some(GoalBlockReason::PreparationFailed),
         _ => None,
     })
 }
@@ -689,7 +693,9 @@ pub(super) fn check_dispatch(
         if d.control != GoalControl::Active
             || budget_limited(&d, &u)
             || usage_unknown(&d, &u)
-            || (d.blocked.is_some() && is_primary(db, run)?)
+            || (d.blocked.is_some()
+                && is_primary(db, run)?
+                && !followups::dependency_check_for_run(db, run, &d)?)
         {
             return Err(RuntimeError::GoalChanged);
         }
@@ -801,7 +807,11 @@ impl Catalog {
                     state: RunState::Cancelled,
                 })
             }
-            GoalControl::Active if d.blocked.is_some() && is_primary(&tx, run_id)? => {
+            GoalControl::Active
+                if d.blocked.is_some()
+                    && is_primary(&tx, run_id)?
+                    && !followups::dependency_check_for_run(&tx, run_id, &d)? =>
+            {
                 // Only this Run's reported round ends. User input delivered after the report,
                 // or admitted to another Run, remains pending work until the block is released.
                 let reported:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM events e WHERE e.subject=?1 AND e.kind='goal.reported' AND json_extract(e.data,'$.run_id')=?2 AND json_extract(e.data,'$.state')='blocked' AND NOT EXISTS(SELECT 1 FROM events i WHERE i.subject=?2 AND i.kind='input.delivered' AND i.cursor>e.cursor))",params![d.id,run_id],|r|r.get(0))?;
@@ -875,7 +885,9 @@ impl Catalog {
             || (d.control == GoalControl::Active
                 && (budget_limited(&d, &usage)
                     || usage_unknown(&d, &usage)
-                    || (d.blocked.is_some() && is_primary(&tx, run_id)?)))
+                    || (d.blocked.is_some()
+                        && is_primary(&tx, run_id)?
+                        && !followups::dependency_check_for_run(&tx, run_id, &d)?)))
         {
             return Ok(false);
         }

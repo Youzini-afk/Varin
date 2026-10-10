@@ -38,7 +38,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 31;
+pub(crate) const FORMAT: i64 = 32;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -336,10 +336,12 @@ impl Catalog {
             ));
         }
         let child_operation = match &origin {
-            submissions::SubmissionOrigin::Child { operation_id, .. } | submissions::SubmissionOrigin::ChildContinuation { execution_id: operation_id, .. } => {
-                Some(operation_id.as_str())
-            }
-            submissions::SubmissionOrigin::MessageRequest { execution_id, .. } => execution_id.as_deref(),
+            submissions::SubmissionOrigin::Child { operation_id, .. }
+            | submissions::SubmissionOrigin::ChildContinuation {
+                execution_id: operation_id,
+                ..
+            } => Some(operation_id.as_str()),
+            submissions::SubmissionOrigin::Ingress { execution_id, .. } => execution_id.as_deref(),
             _ => None,
         };
         let create_thread = matches!(origin, submissions::SubmissionOrigin::Summary);
@@ -365,8 +367,7 @@ impl Catalog {
         if let submissions::SubmissionOrigin::User { checkpoint }
         | submissions::SubmissionOrigin::Child { checkpoint, .. }
         | submissions::SubmissionOrigin::ChildContinuation { checkpoint, .. }
-        | submissions::SubmissionOrigin::Continuation { checkpoint, .. }
-        | submissions::SubmissionOrigin::MessageRequest { checkpoint, .. } = &origin
+        | submissions::SubmissionOrigin::Ingress { checkpoint, .. } = &origin
         {
             let active: Option<String> = tx
                 .query_row(
@@ -415,7 +416,9 @@ impl Catalog {
             ).optional()?;
             if let (Some(selection), Some((previous_run, body))) = (launch.as_mut(), previous) {
                 let previous: launch_content::LaunchMetadata = serde_json::from_str(&body)?;
-                if selection.child_dispatch_ref.is_none() { selection.child_dispatch_ref = previous.selection.child_dispatch_ref; }
+                if selection.child_dispatch_ref.is_none() {
+                    selection.child_dispatch_ref = previous.selection.child_dispatch_ref;
+                }
                 selection.source = previous.selection.source;
                 if let Some(source) = selection.source.as_mut() {
                     if source.mode == crate::SourceMode::Materialized
@@ -433,9 +436,10 @@ impl Catalog {
             }
         }
         let input_id = match &origin {
-            submissions::SubmissionOrigin::MessageRequest { identity, .. } => identity.message_id.clone(),
-            submissions::SubmissionOrigin::Continuation { occurrence_id, .. } => format!("continuation-input:{occurrence_id}"),
-            submissions::SubmissionOrigin::Child {operation_id,..} => format!("child-input:{operation_id}"),
+            submissions::SubmissionOrigin::Ingress { input, .. } => input.id.clone(),
+            submissions::SubmissionOrigin::Child { operation_id, .. } => {
+                format!("child-input:{operation_id}")
+            }
             _ => id(),
         };
         let run_id = prepared.run_id.clone();
@@ -444,11 +448,9 @@ impl Catalog {
             id: input_id.clone(),
             thread_id: thread.clone(),
             parent: head,
-            source: if let submissions::SubmissionOrigin::MessageRequest{identity,..}=origin {
-                if matches!(identity.actor,messages::MessageActor::User) {HistorySource::User}else{HistorySource::Agent}
-            } else if matches!(&origin, submissions::SubmissionOrigin::Continuation { .. }) {
-                HistorySource::Environment
-            } else if matches!(origin,submissions::SubmissionOrigin::Child{..}) {
+            source: if let submissions::SubmissionOrigin::Ingress { input, .. } = origin {
+                input.origin.history_source()
+            } else if matches!(origin, submissions::SubmissionOrigin::Child { .. }) {
                 HistorySource::Agent
             } else {
                 HistorySource::User
@@ -538,10 +540,10 @@ impl Catalog {
         if let Some(operation_id) = child_operation {
             collaboration::publish_submission(&tx, operation_id, &receipt)?;
         }
-        if let submissions::SubmissionOrigin::MessageRequest{identity,..}=origin {
-            messages::activation::delivered_submission(tx,identity,&run,cursor)?;
+        if let submissions::SubmissionOrigin::Ingress { input, .. } = origin {
+            activation::delivered_submission(tx, input, &run, cursor)?;
         }
-        messages::activation::bind_pending(tx,&run)?;
+        activation::bind_pending(tx, &run)?;
         // The exact delegated trigger must be visible to Goal admission in this same
         // transaction. A new explicit User Run may outlive a completed parent Goal.
         goals::bind_admission(tx, &run)?;
@@ -612,8 +614,12 @@ impl Catalog {
             policy_switch::close_run_candidate(&tx, id, run.revision + 1)?;
         }
         run.state = next;
-        if next == RunState::Cancelled { followups::cancel_source_run(&tx, id)?; }
-        if next.terminal() { followups::settle_run(&tx, &run)?; }
+        if next == RunState::Cancelled && !run.cancel_requested {
+            followups::cancel_source_run(&tx, id)?;
+        }
+        if next.terminal() {
+            followups::settle_run(&tx, &run)?;
+        }
         if next != RunState::Waiting {
             run.waiting_on = None;
         }
@@ -636,7 +642,9 @@ impl Catalog {
             "run.changed",
             serde_json::to_value(&run)?,
         )?;
-        if run.state.terminal(){goals::settle_run(&tx,&run)?;}
+        if run.state.terminal() {
+            goals::settle_run(&tx, &run)?;
+        }
         tx.commit()?;
         Ok(run)
     }
@@ -986,7 +994,8 @@ impl Catalog {
             return Err(RuntimeError::Conflict("model step identity reused".into()));
         }
         let mut step = ModelStep {
-            goal: None, superseded_by_input: None,
+            goal: None,
+            superseded_by_input: None,
             id: key.into(),
             run_id: run_id.into(),
             epoch,
@@ -1009,7 +1018,11 @@ impl Catalog {
         &self,
         cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> crate::content::ContentCollectionAdmission {
-        self.content.prepare_collection(self.database_path.clone(), self._owner.clone(), cancellation)
+        self.content.prepare_collection(
+            self.database_path.clone(),
+            self._owner.clone(),
+            cancellation,
+        )
     }
     /// Request cooperative maintenance shutdown without waiting for I/O or a worker.
     pub fn cancel_content_collection(&self) {
@@ -1062,7 +1075,12 @@ impl Catalog {
                 step.state,
                 ModelStepState::Prepared | ModelStepState::Dispatched
             )
-            || matches!(state, ModelStepState::Prepared | ModelStepState::Dispatched | ModelStepState::NotDispatched)
+            || matches!(
+                state,
+                ModelStepState::Prepared
+                    | ModelStepState::Dispatched
+                    | ModelStepState::NotDispatched
+            )
         {
             return Err(RuntimeError::Conflict("model step cannot settle".into()));
         }
@@ -1151,7 +1169,9 @@ impl Catalog {
                 continue;
             }
             if wait.kind == messages::reply_wait::REPLY_EVENT {
-                if messages::reply_wait::resolve(&tx, &mut wait, observations::wall_time_ms()?)? { count += 1; }
+                if messages::reply_wait::resolve(&tx, &mut wait, observations::wall_time_ms()?)? {
+                    count += 1;
+                }
                 continue;
             }
             let cursor:Option<u64>=tx.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind=?2 AND cursor>?3 ORDER BY cursor LIMIT 1",params![wait.subject,wait.kind,sql_number(wait.after_cursor)?],|r|read_number(r,0)).optional()?;
@@ -1373,7 +1393,11 @@ impl Catalog {
         let steps: Vec<ModelStep> = read_all(&tx, "model_steps")?;
         for mut step in steps {
             if step.state == ModelStepState::Dispatched {
-                if step.usage.is_none(){let usage=crate::execution::UsageReceipt::default();goals::measured(&tx,step.goal.as_ref(),&usage)?;step.usage=Some(serde_json::to_value(usage)?);}
+                if step.usage.is_none() {
+                    let usage = crate::execution::UsageReceipt::default();
+                    goals::measured(&tx, step.goal.as_ref(), &usage)?;
+                    step.usage = Some(serde_json::to_value(usage)?);
+                }
                 step.state = ModelStepState::Interrupted;
                 put(&tx, "model_steps", &step.id, &step)?;
                 tx.execute(
@@ -1403,7 +1427,7 @@ impl Catalog {
                         })
                         .transpose()?
                         .unwrap_or_default();
-                    goals::measured(&tx,result.goal.as_ref(),&output.usage)?;
+                    goals::measured(&tx, result.goal.as_ref(), &output.usage)?;
                     result.dispatch = crate::execution::PolicyModelDispatch::Interrupted;
                     result.receipt=Some(crate::execution::PolicyModelReceipt{dispatch:crate::execution::PolicyModelDispatch::Interrupted,outcome:Outcome::Indeterminate,output:None,usage:output.usage,finish_reason:None,failure:Some(crate::execution::ModelFailure{code:"planning_interrupted".into(),message:"dispatch intent was durable; completion is unknown and request will not replay".into(),retry_after_ms:None,provider_request_id:None}),usable:false});
                     op.phase = OperationPhase::Terminal;
@@ -1459,7 +1483,10 @@ impl Catalog {
                 // A dispatched effect is reconciled under its original intent generation.
                 // Only work that may actually be readmitted acquires this owner's epoch.
                 // Run/graph fencing still governs every new execution and receipt consumer.
-                let preserve_dispatch_epoch = matches!(op.effect, Effect::Dispatched | Effect::Partial | Effect::Unknown);
+                let preserve_dispatch_epoch = matches!(
+                    op.effect,
+                    Effect::Dispatched | Effect::Partial | Effect::Unknown
+                );
                 // A live user's one-action decision cannot survive its authorizing owner.
                 if op.effect == Effect::None && op.result.as_ref().is_some_and(|v| matches!(v, OperationResultMetadata::Control { value } if value.get("permission").is_some())) {
                     if let Some(wait_id) = &op.waiting_on {
@@ -1504,7 +1531,9 @@ impl Catalog {
                         });
                     }
                 }
-                if !preserve_dispatch_epoch { op.epoch = self.epoch; }
+                if !preserve_dispatch_epoch {
+                    op.epoch = self.epoch;
+                }
                 op.revision += 1;
                 put(&tx, "operations", &op.id, &op)?;
                 event(
@@ -1692,22 +1721,22 @@ impl Drop for Catalog {
 mod content_collection_tests;
 
 pub(super) fn request_cancel_run_in(tx: &Transaction<'_>, id: &str) -> Result<Run> {
-        let mut run: Run = record(tx, "runs", id)?;
-        if run.state.terminal() || run.cancel_requested {
-            return Ok(run);
-        }
-        run.cancel_requested = true;
-        messages::activation::cancel_run(tx,id)?;
-        followups::cancel_source_run(tx, id)?;
-        goals::cancel_run(tx,id)?;
-        if run.state == RunState::Waiting {
-            questions::cancel_run_questions(tx, id)?;
-            policy_control::cancel_run_pause(tx, &run)?;
-        }
-        run.revision += 1;
-        put(tx, "runs", id, &run)?;
-        event(tx, id, run.revision, "run.cancel_requested", Value::Null)?;
-        Ok(run)
+    let mut run: Run = record(tx, "runs", id)?;
+    if run.state.terminal() || run.cancel_requested {
+        return Ok(run);
+    }
+    run.cancel_requested = true;
+    activation::cancel_run(tx, id)?;
+    followups::cancel_source_run(tx, id)?;
+    goals::cancel_run(tx, id)?;
+    if run.state == RunState::Waiting {
+        questions::cancel_run_questions(tx, id)?;
+        policy_control::cancel_run_pause(tx, &run)?;
+    }
+    run.revision += 1;
+    put(tx, "runs", id, &run)?;
+    event(tx, id, run.revision, "run.cancel_requested", Value::Null)?;
+    Ok(run)
 }
 
 pub(super) fn request_cancel_operation_in(tx: &Transaction<'_>, key: &str) -> Result<Operation> {
@@ -1752,3 +1781,6 @@ pub(super) fn request_cancel_operation_in(tx: &Transaction<'_>, key: &str) -> Re
     )?;
     Ok(op)
 }
+
+#[path = "catalog_activation.rs"]
+pub mod activation;

@@ -7,7 +7,7 @@ use fixture::Fixture;
 use input_admission::InputAdmission;
 use serde_json::json;
 use varin_runtime::{
-    catalog::{dispatch::TreeCancelTarget, messages::activation::*, messages::*},
+    catalog::{activation::*, dispatch::TreeCancelTarget, messages::*},
     execution::*,
     *,
 };
@@ -516,41 +516,99 @@ fn unreadable_unobserved_child_report_does_not_suppress_independent_request_acti
     source.branch_id = Some(format!("child-source:{}", child.execution_id));
     source.revision = Some(0);
     let proposal = ContextProposal {
-        key: "independent-child-context".into(), branch_id: child.child_branch_id.clone(),
-        through_id: None, expected_revision: 0, summary: String::new(),
-        effective_system_prompt: "Read-only child".into(), instruction_sources: vec![], memory_checkpoint: None,
+        key: "independent-child-context".into(),
+        branch_id: child.child_branch_id.clone(),
+        through_id: None,
+        expected_revision: 0,
+        summary: String::new(),
+        effective_system_prompt: "Read-only child".into(),
+        instruction_sources: vec![],
+        memory_checkpoint: None,
     };
     let basis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"independent-child","memorySnapshot":{"revision":0,"memories":[]},"sessionId":child.child_thread_id,"projectId":child.project_id,"originalSections":[{"name":"system","content":"Read-only child"}],"instructionSources":[]})).unwrap();
-    let child = f.db.prepare_child(&child.execution_id, source, proposal, basis).unwrap();
+    let child =
+        f.db.prepare_child(&child.execution_id, source, proposal, basis)
+            .unwrap();
     let child_run = child.receipt.as_ref().unwrap().run_id.clone();
     let epoch = f.db.epoch();
-    f.db.commit_execution(&child_run, epoch, &ExecutionRecord::StateChanged { state:RunState::Runnable, waiting_on:None }).unwrap();
-    let item=f.db.append_history(&child_run,epoch,f.db.head(&child.child_branch_id).unwrap().as_deref(),HistorySource::Assistant,serde_json::to_value(ConversationItem {
-        id:"unobserved-child-report".into(), resource_activation:None, provenance:Provenance::Assistant,
-        content:Content::Text{text:"Independent report".into()},opaque:None,
-    }).unwrap(),None).unwrap();
-    f.db.commit_execution(&child_run, epoch, &ExecutionRecord::StateChanged { state:RunState::Completed, waiting_on:None }).unwrap();
+    f.db.commit_execution(
+        &child_run,
+        epoch,
+        &ExecutionRecord::StateChanged {
+            state: RunState::Runnable,
+            waiting_on: None,
+        },
+    )
+    .unwrap();
+    let item =
+        f.db.append_history(
+            &child_run,
+            epoch,
+            f.db.head(&child.child_branch_id).unwrap().as_deref(),
+            HistorySource::Assistant,
+            serde_json::to_value(ConversationItem {
+                id: "unobserved-child-report".into(),
+                resource_activation: None,
+                provenance: Provenance::Assistant,
+                content: Content::Text {
+                    text: "Independent report".into(),
+                },
+                opaque: None,
+            })
+            .unwrap(),
+            None,
+        )
+        .unwrap();
+    f.db.commit_execution(
+        &child_run,
+        epoch,
+        &ExecutionRecord::StateChanged {
+            state: RunState::Completed,
+            waiting_on: None,
+        },
+    )
+    .unwrap();
     finish(&mut f, RunState::Completed);
     let message = send(&mut f, "independent-request");
-    assert!(matches!(view(&f.db,&message).summary.activation, MessageActivation::Pending{..}));
-    let fault=rusqlite::Connection::open(f.root.join("conversation.sqlite")).unwrap();
-    let raw:String=fault.query_row("SELECT body FROM history WHERE id=?1",[&item.id],|r|r.get(0)).unwrap();
-    let metadata:serde_json::Value=serde_json::from_str(&raw).unwrap();
-    let hash=metadata["content"]["content_object"].as_str().unwrap().strip_prefix("sha256-").unwrap();
-    let path=f.root.join("content/objects").join(&hash[..2]).join(&hash[2..]);
-    let held=path.with_extension("fault-injection");
-    std::fs::rename(&path,&held).unwrap();
-    let runtime=varin_runtime::supervisor::RunSupervisor::new(f.db);
-    let failure=runtime.reconcile_message_requests().unwrap_err();
-    assert_eq!(failure.code,"supervisor");
-    let owner=runtime.catalog();
-    let mut db=owner.lock().unwrap();
-    let projected=view(&db,&message).summary.activation;
-    let MessageActivation::Bound{run_id,..}=projected else{panic!("unrelated report blocked request activation: {projected:?}")};
-    assert_ne!(run_id,f.context.run_id);
+    assert!(matches!(
+        view(&f.db, &message).summary.activation,
+        MessageActivation::Pending { .. }
+    ));
+    let fault = rusqlite::Connection::open(f.root.join("conversation.sqlite")).unwrap();
+    let raw: String = fault
+        .query_row("SELECT body FROM history WHERE id=?1", [&item.id], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    let metadata: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let hash = metadata["content"]["content_object"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("sha256-")
+        .unwrap();
+    let path = f
+        .root
+        .join("content/objects")
+        .join(&hash[..2])
+        .join(&hash[2..]);
+    let held = path.with_extension("fault-injection");
+    std::fs::rename(&path, &held).unwrap();
+    let runtime = varin_runtime::supervisor::RunSupervisor::new(f.db);
+    let failure = runtime.reconcile_message_requests().unwrap_err();
+    assert_eq!(failure.code, "supervisor");
+    let owner = runtime.catalog();
+    let mut db = owner.lock().unwrap();
+    let projected = view(&db, &message).summary.activation;
+    let MessageActivation::Bound { run_id, .. } = projected else {
+        panic!("unrelated report blocked request activation: {projected:?}")
+    };
+    assert_ne!(run_id, f.context.run_id);
     assert_eq!(db.run(&run_id).unwrap().state, RunState::Accepted);
-    std::fs::rename(held,path).unwrap();
+    std::fs::rename(held, path).unwrap();
     db.request_cancel_run(&run_id).unwrap();
-    drop(db);drop(owner);drop(runtime);drop(fault);
+    drop(db);
+    drop(owner);
+    drop(runtime);
+    drop(fault);
     std::fs::remove_dir_all(f.root).unwrap();
 }

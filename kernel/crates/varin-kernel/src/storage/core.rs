@@ -102,18 +102,6 @@ impl Storage {
             json!({"hostId": host_id, "pid": std::process::id(), "createdAt": now_ms()});
         file.write_all(lock_record.to_string().as_bytes())?;
         file.sync_all()?;
-        for directory in ["objects", "staging"] {
-            fs::create_dir_all(root.join(directory))?;
-        }
-        // No staging scan or directory mutation is allowed before the OS lock
-        // is held. A second Host must not clean files owned by the first Host.
-        if let Ok(entries) = fs::read_dir(root.join("staging")) {
-            for entry in entries.flatten() {
-                if entry.path().extension().and_then(|value| value.to_str()) == Some("stream") {
-                    let _ = fs::remove_file(entry.path());
-                }
-            }
-        }
         let catalog_path = root.join("catalog.sqlite");
         let catalog_existed = catalog_path.exists();
         let (format, catalog_empty): (Option<String>, bool) = if catalog_existed {
@@ -144,20 +132,10 @@ impl Storage {
         } else {
             (None, true)
         };
-        let mut initialize_catalog = !catalog_existed || (format.is_none() && catalog_empty);
-        let mut obsolete_catalog = None;
+        let initialize_catalog = !catalog_existed || (format.is_none() && catalog_empty);
         if !initialize_catalog {
             match format.as_deref() {
                 Some(value) if value == STORAGE_FORMAT_VERSION => {}
-                Some(value)
-                    if value
-                        .parse::<u64>()
-                        .ok()
-                        .zip(STORAGE_FORMAT_VERSION.parse::<u64>().ok())
-                        .is_some_and(|(found, current)| found < current) =>
-                {
-                    obsolete_catalog = Some(value.to_string());
-                }
                 Some(value) => {
                     return Err(KernelError::Storage(format!(
                         "unsupported catalog format version: {value}"
@@ -169,33 +147,6 @@ impl Storage {
                     ))
                 }
             }
-        }
-        if let Some(previous_format) = obsolete_catalog {
-            // Internal kernel formats have no compatibility contract. Once the
-            // storage lock is held, an older catalog can be discarded and
-            // recreated without touching workspace files, Git, Pi data, or
-            // external configuration. Future and corrupt catalogs still fail.
-            for suffix in ["", "-wal", "-shm"] {
-                let candidate = root.join(format!("catalog.sqlite{suffix}"));
-                match fs::remove_file(&candidate) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error.into()),
-                }
-            }
-            for directory in ["objects", "staging"] {
-                let candidate = root.join(directory);
-                match fs::remove_dir_all(&candidate) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error.into()),
-                }
-                fs::create_dir_all(candidate)?;
-            }
-            eprintln!(
-                "[varin-kernel] recreated obsolete storage catalog format {previous_format} as {STORAGE_FORMAT_VERSION}"
-            );
-            initialize_catalog = true;
         }
         let conn = Connection::open(catalog_path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
@@ -220,6 +171,18 @@ impl Storage {
             conn.execute_batch("COMMIT")?;
         } else {
             Self::validate_catalog_schema(&conn)?;
+        }
+        for directory in ["objects", "staging"] {
+            fs::create_dir_all(root.join(directory))?;
+        }
+        // Cleanup requires both the exclusive owner and a verified current catalog.
+        // Unsupported or corrupt formats must retain their original in-flight assets.
+        if let Ok(entries) = fs::read_dir(root.join("staging")) {
+            for entry in entries.flatten() {
+                if entry.path().extension().and_then(|value| value.to_str()) == Some("stream") {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
         }
         // Query pins belong to the process epoch that created them. Durable
         // revision pins and pending domain-operation references remain intact.
@@ -267,5 +230,35 @@ impl Storage {
             return Err(KernelError::Cancelled);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod format_tests {
+    use super::*;
+    #[test]
+    fn obsolete_storage_rejection_preserves_catalog_objects_and_inflight_streams() {
+        let root = std::env::temp_dir().join(format!("varin-rejected-storage-{}", Uuid::new_v4()));
+        let storage = Storage::open(&root, "original-host").unwrap();
+        storage
+            .conn
+            .execute(
+                "UPDATE metadata SET value='10' WHERE key='format_version'",
+                [],
+            )
+            .unwrap();
+        drop(storage);
+        let object = root.join("objects/retained-original");
+        let stream = root.join("staging/original.stream");
+        fs::write(&object, b"original immutable bytes").unwrap();
+        fs::write(&stream, b"original in-flight bytes").unwrap();
+        let catalog = fs::read(root.join("catalog.sqlite")).unwrap();
+        assert!(
+            matches!(Storage::open(&root,"replacement-host"),Err(KernelError::Storage(message)) if message.contains("unsupported catalog format version: 10"))
+        );
+        assert_eq!(fs::read(root.join("catalog.sqlite")).unwrap(), catalog);
+        assert_eq!(fs::read(&object).unwrap(), b"original immutable bytes");
+        assert_eq!(fs::read(&stream).unwrap(), b"original in-flight bytes");
+        fs::remove_dir_all(root).unwrap();
     }
 }

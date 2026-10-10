@@ -252,7 +252,11 @@ impl Catalog {
     }
     pub fn capture_queued_input(&self, id: &str) -> Result<QueuedInputRead> {
         let read = self.capture_input_row(id)?;
-        if !read.metadata.origin.is_user_ingress() { return Err(RuntimeError::Invalid("message records use the read-only message API".into())); }
+        if !read.metadata.origin.is_user_ingress() {
+            return Err(RuntimeError::Invalid(
+                "message records use the read-only message API".into(),
+            ));
+        }
         Ok(read)
     }
     pub(super) fn capture_input_row(&self, id: &str) -> Result<QueuedInputRead> {
@@ -270,9 +274,9 @@ impl Catalog {
         })
     }
     pub fn capture_queued_inputs(&self, branch: &str) -> Result<Vec<QueuedInputRead>> {
-        let mut statement = self
-            .db
-            .prepare("SELECT id FROM input_queue WHERE branch_id=?1 AND origin='user' ORDER BY cursor")?;
+        let mut statement = self.db.prepare(
+            "SELECT id FROM input_queue WHERE branch_id=?1 AND origin='user' ORDER BY cursor",
+        )?;
         let ids = statement
             .query_map([branch], |row| row.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -287,7 +291,9 @@ impl Catalog {
         value: Value,
     ) -> Result<InputEditPreparation> {
         let metadata = self.queued_input_metadata(id)?;
-        if !metadata.origin.is_user_ingress() { return Err(RuntimeError::Invalid("messages are immutable".into())); }
+        if !metadata.origin.is_user_ingress() {
+            return Err(RuntimeError::Invalid("messages are immutable".into()));
+        }
         if metadata.state != InputState::Queued || metadata.revision != revision {
             return Err(RuntimeError::Conflict(
                 "input has changed or was already delivered".into(),
@@ -322,7 +328,9 @@ impl Catalog {
         }
         let tx = self.db.transaction()?;
         let mut input: QueuedInputMetadata = record(&tx, "input_queue", &id)?;
-        if !input.origin.is_user_ingress() { return Err(RuntimeError::Invalid("messages are immutable".into())); }
+        if !input.origin.is_user_ingress() {
+            return Err(RuntimeError::Invalid("messages are immutable".into()));
+        }
         if input.state != InputState::Queued || input.revision != revision {
             return Err(RuntimeError::Conflict(
                 "input has changed or was already delivered".into(),
@@ -379,10 +387,17 @@ impl InputDeliveryPreparation {
         for read in self.reads {
             selected.push(read.metadata.clone());
             let (content, provider) = read.content.load_history_payload(&read.reference)?;
-            if provider.is_some() { return Err(RuntimeError::Invalid("input has provider original".into())); }
+            if provider.is_some() {
+                return Err(RuntimeError::Invalid("input has provider original".into()));
+            }
             if read.metadata.origin.history_source() == HistorySource::User {
-                items.extend(execution_persistence::user_input_items(&read.metadata.id, &content)?);
-            } else { items.push(serde_json::from_value(content)?); }
+                items.extend(execution_persistence::user_input_items(
+                    &read.metadata.id,
+                    &content,
+                )?);
+            } else {
+                items.push(serde_json::from_value(content)?);
+            }
         }
         Ok(PreparedInputDelivery {
             run: self.run,
@@ -403,13 +418,25 @@ impl Catalog {
         let run = validate_delivery(&self.db, run_id, epoch, head)?;
         let mut statement=self.db.prepare("SELECT id FROM input_queue WHERE branch_id=?2 AND state='queued' AND mode!='next_run' AND (run_id=?1 OR activation='passive') ORDER BY cursor")?;
         let ids = statement
-            .query_map(params![run_id, run.branch_id], |row| row.get::<_, String>(0))?
+            .query_map(params![run_id, run.branch_id], |row| {
+                row.get::<_, String>(0)
+            })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        let ids = if super::super::observations::next(&self.db, run_id)?.is_some() { Vec::new() } else { ids };
-        let reads = ids
-            .into_iter()
-            .map(|id| self.capture_input_row(&id))
-            .collect::<Result<Vec<_>>>()?;
+        let ids = if super::super::observations::next(&self.db, run_id)?.is_some() {
+            Vec::new()
+        } else {
+            ids
+        };
+        let mut reads = Vec::new();
+        for id in ids {
+            let read = self.capture_input_row(&id)?;
+            if super::super::followups::ingress_hold(&self.db, &read.metadata, Some(&run))?
+                .is_none()
+            {
+                reads.push(read);
+            }
+        }
+
         Ok(InputDeliveryPreparation {
             run,
             head: head.map(str::to_owned),

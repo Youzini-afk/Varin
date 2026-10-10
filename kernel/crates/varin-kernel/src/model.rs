@@ -75,6 +75,28 @@ pub(crate) struct BranchRow {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum GrantRetireTarget {
+    Grant {
+        #[serde(rename = "grantId")]
+        grant_id: String,
+    },
+    Run {
+        #[serde(rename = "runId")]
+        run_id: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum GrantState {
+    Active,
+    Retired,
+    Revoked,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Grant {
     pub(crate) grant_id: String,
     pub(crate) host_id: String,
@@ -91,7 +113,7 @@ pub(crate) struct Grant {
     pub(crate) capabilities: BTreeSet<String>,
     pub(crate) path_scopes: Vec<String>,
     pub(crate) kernel_epoch: String,
-    pub(crate) revoked: bool,
+    pub(crate) state: GrantState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) handoff_operation_id: Option<String>,
 }

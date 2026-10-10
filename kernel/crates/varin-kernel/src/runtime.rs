@@ -413,6 +413,12 @@ impl Kernel {
                 )?,
             )));
         }
+        if method == "authority.grant.retire" {
+            return Ok(Some(response_ok(
+                id,
+                storage.retire_grants(&params_value, host_id)?,
+            )));
+        }
         if method == "authority.grant.revoke" {
             reject_unknown_fields(&params_value, &["grantId"], "grant revoke")?;
             return Ok(Some(response_ok(
@@ -1322,6 +1328,20 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     revoked.remove(target);
                 }
             }
+            if method.as_deref() == Some("authority.grant.retire")
+                && response.get("ok") == Some(&Value::Bool(true))
+            {
+                if let Some(ids) = response
+                    .get("result")
+                    .and_then(|v| v.get("grantIds"))
+                    .and_then(Value::as_array)
+                {
+                    for id in ids.iter().filter_map(Value::as_str) {
+                        storage_subscriptions.close_grant(id);
+                        mark_grant_revoked(&worker_revoked_grants, &worker_cancellations, id);
+                    }
+                }
+            }
             if method.as_deref() == Some("authority.grant.issue") {
                 let target = request
                     .get("params")
@@ -1614,15 +1634,22 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 active.token = cancel.shared_flag();
                 active.runtime_cancel = Some(cancel.clone());
-                if KERNEL_DEFERRED_RESPONSE_METHODS.contains(&request["method"].as_str().unwrap_or_default()) {
+                if KERNEL_DEFERRED_RESPONSE_METHODS
+                    .contains(&request["method"].as_str().unwrap_or_default())
+                {
                     // The complete body is owned by this cancellable interaction, not by the
                     // shared transport window. Its final response remains the effect evidence.
                     active.wire_lane = None;
                 }
                 cancel
             };
-            if KERNEL_DEFERRED_RESPONSE_METHODS.contains(&request["method"].as_str().unwrap_or_default()) {
-                let epoch = admission_epoch.lock().map_err(|_| "admission epoch poisoned")?.clone();
+            if KERNEL_DEFERRED_RESPONSE_METHODS
+                .contains(&request["method"].as_str().unwrap_or_default())
+            {
+                let epoch = admission_epoch
+                    .lock()
+                    .map_err(|_| "admission epoch poisoned")?
+                    .clone();
                 let _ = response_tx.send_control(json!({
                     "v": PROTOCOL_VERSION, "kind": "request-credit-released", "id": request_id,
                     "kernelEpoch": epoch.unwrap_or_default(), "method": request["method"]

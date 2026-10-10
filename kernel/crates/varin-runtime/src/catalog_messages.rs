@@ -15,7 +15,9 @@ pub mod reply_wait;
 pub use reply_wait::ReplyWaitView;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct MessageWaitOptions { pub timeout_ms: Option<u64> }
+pub struct MessageWaitOptions {
+    pub timeout_ms: Option<u64>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(
@@ -45,7 +47,9 @@ pub struct MessageInput {
 }
 impl MessageInput {
     pub fn validate(&self) -> Result<()> {
-        if let Some(duration)=self.wait.as_ref().and_then(|w|w.timeout_ms) { super::observations::deadline_after(super::observations::wall_time_ms()?, duration)?; }
+        if let Some(duration) = self.wait.as_ref().and_then(|w| w.timeout_ms) {
+            super::observations::deadline_after(super::observations::wall_time_ms()?, duration)?;
+        }
         if self.text.trim().is_empty() {
             return Err(RuntimeError::Invalid("message text is required".into()));
         }
@@ -173,7 +177,7 @@ fn branch_owner(db: &Connection, thread: &str, branch: &str) -> Result<()> {
     }
     super::context_jobs::require_regular_branch(db, branch)
 }
-fn message_identity(input: &QueuedInputMetadata) -> Result<&MessageIdentity> {
+pub(super) fn message_identity(input: &QueuedInputMetadata) -> Result<&MessageIdentity> {
     match &input.origin {
         InputOrigin::Message { identity, .. } => Ok(identity),
         _ => Err(RuntimeError::NotFound("message".into())),
@@ -246,7 +250,11 @@ impl Catalog {
         branch: String,
         input: MessageInput,
     ) -> Result<MessagePreparation> {
-        if input.wait.is_some() { return Err(RuntimeError::Invalid("User messages have no execution observation owner".into())); }
+        if input.wait.is_some() {
+            return Err(RuntimeError::Invalid(
+                "User messages have no execution observation owner".into(),
+            ));
+        }
         if key.trim().is_empty() {
             return Err(RuntimeError::Invalid(
                 "message idempotency key is required".into(),
@@ -425,9 +433,19 @@ impl Catalog {
                 || intent.call().name != SEND_TOOL
                 || intent.contract().name != SEND_TOOL
                 || intent.contract().schema_version != intent.call().schema_version
-                || intent.contract().lifetime != if prepared.wait.is_some() { Lifetime::Thread } else { Lifetime::Run }
+                || intent.contract().lifetime
+                    != if prepared.wait.is_some() {
+                        Lifetime::Thread
+                    } else {
+                        Lifetime::Run
+                    }
                 || intent.contract().read_only
-                || intent.contract().completion != if prepared.wait.is_some() { crate::execution::CompletionKind::Job } else { crate::execution::CompletionKind::Result }
+                || intent.contract().completion
+                    != if prepared.wait.is_some() {
+                        crate::execution::CompletionKind::Job
+                    } else {
+                        crate::execution::CompletionKind::Result
+                    }
                 || !super::goals::tool_allowed(&tx, &invocation.context)?
             {
                 return Err(RuntimeError::Conflict(
@@ -436,17 +454,15 @@ impl Catalog {
             }
         }
         let accepted_at_ms = super::observations::wall_time_ms()?;
-        let deadline_at_ms = prepared.wait.as_ref().and_then(|w|w.timeout_ms)
-            .map(|timeout|super::observations::deadline_after(accepted_at_ms, timeout)).transpose()?;
+        let deadline_at_ms = prepared
+            .wait
+            .as_ref()
+            .and_then(|w| w.timeout_ms)
+            .map(|timeout| super::observations::deadline_after(accepted_at_ms, timeout))
+            .transpose()?;
         let mut accepted = serde_json::to_value(identity)?;
         accepted["acceptedAtMs"] = json!(accepted_at_ms);
-        let cursor = event(
-            &tx,
-            &identity.message_id,
-            1,
-            "message.accepted",
-            accepted,
-        )?;
+        let cursor = event(&tx, &identity.message_id, 1, "message.accepted", accepted)?;
         let receipt = MessageReceipt {
             identity: identity.clone(),
             accepted_cursor: cursor,
@@ -467,7 +483,11 @@ impl Catalog {
                 command_key: prepared.key.clone(),
                 activation,
             },
-            activation: if identity.kind == MessageKind::Request { InputActivation::Activating } else { InputActivation::Passive },
+            activation: if identity.kind == MessageKind::Request {
+                InputActivation::Activating
+            } else {
+                InputActivation::Passive
+            },
             delivered_cursor: None,
         };
         tx.execute("INSERT INTO input_queue(id,branch_id,run_id,mode,state,cursor,origin,activation,sender_thread_id,sender_branch_id,body) VALUES(?1,?2,?7,'boundary','queued',?3,'message',?8,?4,?5,?6)", params![input.id,input.branch_id,sql_number(cursor)?,identity.sender_thread_id,identity.sender_branch_id,encode(&input)?,input.run_id,encode(&input.activation)?.trim_matches('"')])?;
@@ -487,10 +507,19 @@ impl Catalog {
                 .1
                 .clone();
             if prepared.wait.is_some() {
-                reply_wait::register(&tx, &mut operation, identity, cursor, deadline_at_ms, accepted_at_ms)?;
+                reply_wait::register(
+                    &tx,
+                    &mut operation,
+                    identity,
+                    cursor,
+                    deadline_at_ms,
+                    accepted_at_ms,
+                )?;
             } else {
                 let reference = match &completion {
-                    super::result_content::ToolCompletionMetadata::Result { content_ref, .. } => content_ref.clone(),
+                    super::result_content::ToolCompletionMetadata::Result {
+                        content_ref, ..
+                    } => content_ref.clone(),
                     _ => return Err(RuntimeError::Invalid("send completion kind changed".into())),
                 };
                 operation.phase = OperationPhase::Terminal;
@@ -521,7 +550,11 @@ impl Catalog {
                 &tx,
                 &operation.id,
                 operation.revision,
-                if prepared.wait.is_some() { "message.wait_registered" } else { "operation.settled" },
+                if prepared.wait.is_some() {
+                    "message.wait_registered"
+                } else {
+                    "operation.settled"
+                },
                 serde_json::to_value(&operation)?,
             )?;
         }
@@ -603,12 +636,17 @@ impl MessagePreparation {
             let completion = if self.input.wait.is_some() {
                 ToolCompletion::JobAccepted {
                     operation_id: self.operation.as_ref().expect("send Operation").id.clone(),
-                    phase: "awaiting_reply".into(), effect: Effect::Confirmed, lifetime: Lifetime::Thread,
+                    phase: "awaiting_reply".into(),
+                    effect: Effect::Confirmed,
+                    lifetime: Lifetime::Thread,
                 }
-            } else { ToolCompletion::Result {
-                outcome: Outcome::Succeeded, effect: Effect::Confirmed,
-                content: json!({"accepted":true,"message":self.identity}),
-            }};
+            } else {
+                ToolCompletion::Result {
+                    outcome: Outcome::Succeeded,
+                    effect: Effect::Confirmed,
+                    content: json!({"accepted":true,"message":self.identity}),
+                }
+            };
             let metadata =
                 super::result_content::ToolCompletionMetadata::write(&self.content, &completion)?;
             Some((completion, metadata))
@@ -632,15 +670,28 @@ impl MessagePreparation {
 fn summary(db: &Connection, row: QueuedInputMetadata) -> Result<MessageSummary> {
     let activation = activation::project(db, &row)?;
     let identity = message_identity(&row)?.clone();
-    let InputOrigin::Message { command_key, .. } = &row.origin else { unreachable!() };
-    let receipt: String = db.query_row("SELECT receipt FROM commands WHERE id=?1", [command_key], |r|r.get(0))?;
+    let InputOrigin::Message { command_key, .. } = &row.origin else {
+        unreachable!()
+    };
+    let receipt: String = db.query_row(
+        "SELECT receipt FROM commands WHERE id=?1",
+        [command_key],
+        |r| r.get(0),
+    )?;
     let receipt: MessageReceipt = serde_json::from_str(&receipt)?;
-    if receipt.identity != identity || receipt.accepted_cursor != row.cursor { return Err(RuntimeError::Invalid("message receipt identity changed".into())); }
+    if receipt.identity != identity || receipt.accepted_cursor != row.cursor {
+        return Err(RuntimeError::Invalid(
+            "message receipt identity changed".into(),
+        ));
+    }
     let reply_wait = reply_wait::project(db, &identity)?;
     Ok(MessageSummary {
-        receipt, reply_wait,
+        receipt,
+        reply_wait,
         state: row.state,
-        delivered_run_id: (row.state == InputState::Delivered).then_some(row.run_id).flatten(),
+        delivered_run_id: (row.state == InputState::Delivered)
+            .then_some(row.run_id)
+            .flatten(),
         activation,
         delivered_cursor: row.delivered_cursor,
     })
@@ -832,7 +883,10 @@ impl MessageListRead {
         let mut messages = Vec::new();
         while let Some(row) = rows.next()? {
             check()?;
-            messages.push(summary(&db, serde_json::from_str(&row.get::<_, String>(0)?)?)?);
+            messages.push(summary(
+                &db,
+                serde_json::from_str(&row.get::<_, String>(0)?)?,
+            )?);
         }
         drop(rows);
         drop(statement);
@@ -877,6 +931,4 @@ impl MessageListRead {
     }
 }
 
-#[path = "catalog_message_activation.rs"]
-pub mod activation;
-pub use activation::{MessageActivation, MessageActivationFact, MessageActivationHold};
+pub use super::activation::{IngressActivationFact, MessageActivation, MessageActivationHold};

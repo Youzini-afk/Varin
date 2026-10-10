@@ -55,7 +55,7 @@ clear local drafts/views and late replies cannot repopulate them. Passive messag
 request, a reply Wait, a continuing Goal, or a new child Run.
 
 Request admission belongs to Catalog, including active-Run binding and idle-root/child continuation.
-The same durable event/startup pump consumes `message.run_ready` through `continueLaunch`; accepted
+The same durable event/startup pump consumes `ingress.run_ready` through `continueLaunch`; accepted
 child requests appear in the original delegated-execution discovery. There is no Host request queue or
 separate activation RPC. A new child request uses the exact fixed predecessor source and context path,
 while only explicit UserContinuation parses User skill commands. The message panel exposes the chosen
@@ -128,27 +128,34 @@ Catalog checks the frozen invocation and original input ancestry before choosing
 current scope/trust and cancellation still apply. Older Pi resource/catalog/command consumers remain a
 subsequent convergence step and retain their existing native session authority.
 
-## Explicit one-time process follow-ups
+## Explicit one-shot follow-ups
 
-The authenticated `/api/threads/followup/register`, `/list` and `/control` POST routes are exposed as
-`ThreadsAPI.followups`. Registration supplies the selected Thread/branch and exact source Run/Operation;
-the Host verifies Run ownership and the Catalog validates the accepted process in its transaction.
-The Host does not hydrate the Operation body for this control check. Listing and Thread snapshots
-project only the selected branch; definition controls carry the displayed revision.
+The authenticated `/api/threads/followup/{register,list,get,control}` POST routes implement
+`ThreadsAPI.followups`. Registration carries a stable key, selected Thread/branch, original source Run,
+one `at` instant or `process_stopped` operation, and the retained instruction. Host checks Run ownership;
+Catalog validates the actual trigger and accepted process. Agent tools use their own original invocation,
+not this User route. Caller-supplied actor, wait and extra trigger fields are rejected by the User API.
+List/control stay metadata-only; `get` checks branch scope before hydrating the original instruction.
 
-The Catalog owns the one-shot authorization, next-Run Wait and occurrence. Its independent Kernel
-worker consumes real stop evidence and atomically admits the new Run even when the Host is offline.
-The Host only discovers `followup.admitted` through its existing durable cursor, or finds the original
-pending launch at startup, then calls the shared `continueLaunch` entry. Frozen source/model/credential/
-tool/policy selections are rebound through their current authorities. A generic `run.accepted` event is
-not a new automatic launch instruction, and no follow-up control consumes an independent policy Pause.
+Catalog owns the definition, occurrence and typed input. Its native worker observes the clock or
+actual process stop with no Host timer. Existing input activation binds current lawful work or creates
+a real idle-root/delegated-child continuation. The Host consumes `ingress.run_ready` through the shared
+`continueLaunch` pump or finds the original pending launch/execution at startup. Current model/source/
+credential/tool/policy preparation remains with its existing owner; generic `run.accepted` is not an
+automatic launch instruction. Follow-up control cannot resolve an independent policy Pause or question.
 
-The Thread UI offers registration only for an accepted process, retains a registration key across an
-uncertain response, displays held/paused state and removes consumed/cancelled controls from active cards.
-Past occurrences retain their actual continuation Run identity. Cancelling an unconsumed definition
-does not cancel its process; after consumption the new Run is cancelled separately. Cancelling the
-source Run cancels its pending follow-up authorization. This native control path does not write the
-older Pi follow-up/calendar ledger or create an implicit Goal.
+The Thread UI supports one-shot local date/time (showing its exact instant) and accepted process
+selection. It retains source Run, trigger, instruction and key across an uncertain response, including
+when a newer Run appears. Reading an accepted instruction is on demand and abortable. Cards distinguish
+triggering, input binding, actual delivery, preparation failure and continuation Run/execution. Bound
+but undelivered ingress can still be paused/cancelled. The optional Agent observation is separately
+cancelled through its original Operation, and does not kill its process or withdraw registration.
+
+Normal terminal child cleanup retires source grants by exact durable Storage Host/Run, including after
+Host restart. Retirement closes the old caller but retains stopped-process creation provenance for a
+proven delegated successor. Failed preparation and explicit authority revocation still revoke. This
+path uses the original grant owner, not a Host ACL/map of permitted old processes. No Pi calendar or
+follow-up ledger is written by these native controls.
 
 ## Responsibility table
 

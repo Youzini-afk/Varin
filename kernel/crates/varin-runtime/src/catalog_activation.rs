@@ -1,11 +1,14 @@
 //! Request activation belongs to the ingress row. Run, Wait and delegated execution remain
 //! the owners of actual work; projections below never copy their lifecycle into a message.
+use super::inputs::{InputOrigin, QueuedInputMetadata};
+use super::messages::MessageIdentity;
 use super::*;
+use serde::Deserialize;
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
-pub enum MessageActivationFact {
+pub enum IngressActivationFact {
     Passive,
     Pending {
         execution_id: Option<String>,
@@ -23,7 +26,7 @@ pub enum MessageActivationFact {
         code: String,
     },
 }
-impl MessageActivationFact {
+impl IngressActivationFact {
     pub(in crate::catalog) fn run_id(&self) -> Option<&str> {
         match self {
             Self::Bound { run_id, .. } => Some(run_id),
@@ -31,7 +34,7 @@ impl MessageActivationFact {
             _ => None,
         }
     }
-    fn execution_id(&self) -> Option<&str> {
+    pub(in crate::catalog) fn execution_id(&self) -> Option<&str> {
         match self {
             Self::Pending { execution_id }
             | Self::Bound { execution_id, .. }
@@ -78,16 +81,20 @@ pub enum MessageActivation {
         code: String,
     },
 }
-fn fact(row: &QueuedInputMetadata) -> Result<&MessageActivationFact> {
+pub(in crate::catalog) fn fact(row: &QueuedInputMetadata) -> Result<&IngressActivationFact> {
     match &row.origin {
-        InputOrigin::Message { activation, .. } => Ok(activation),
+        InputOrigin::Message { activation, .. } | InputOrigin::Followup { activation, .. } => {
+            Ok(activation)
+        }
         _ => Err(RuntimeError::Invalid(
-            "request activation requires a message".into(),
+            "ingress activation requires a typed activating input".into(),
         )),
     }
 }
-fn set_fact(row: &mut QueuedInputMetadata, next: MessageActivationFact) {
-    if let InputOrigin::Message { activation, .. } = &mut row.origin {
+pub(in crate::catalog) fn set_fact(row: &mut QueuedInputMetadata, next: IngressActivationFact) {
+    if let InputOrigin::Message { activation, .. } | InputOrigin::Followup { activation, .. } =
+        &mut row.origin
+    {
         *activation = next;
     }
 }
@@ -107,11 +114,25 @@ fn goal_hold(db: &Connection, run: &Run) -> Result<bool> {
     let Some(goal) = goal else { return Ok(false) };
     let usage: goals::GoalUsage = record(db, "goal_usage", &goal.id)?;
     Ok(goal.control == goals::GoalControl::Paused
-        || goal.blocked.is_some()
+        || (goal.blocked.is_some() && !followups::dependency_check_for_run(db, &run.id, &goal)?)
         || goals::budget_limited(&goal, &usage)
         || goals::usage_unknown(&goal, &usage))
 }
-fn run_hold(db: &Connection, run: &Run) -> Result<Option<MessageActivationHold>> {
+fn row_goal_hold(db: &Connection, row: &QueuedInputMetadata, run: &Run) -> Result<bool> {
+    if !goal_hold(db, run)? {
+        return Ok(false);
+    }
+    if matches!(row.origin, InputOrigin::Followup { .. })
+        && followups::pending_dependency_check(db, row)?
+    {
+        return Ok(false);
+    }
+    Ok(true)
+}
+pub(in crate::catalog) fn run_hold(
+    db: &Connection,
+    run: &Run,
+) -> Result<Option<MessageActivationHold>> {
     if goal_hold(db, run)? {
         return Ok(Some(MessageActivationHold::GoalBlocked));
     }
@@ -128,7 +149,7 @@ fn run_hold(db: &Connection, run: &Run) -> Result<Option<MessageActivationHold>>
             MessageActivationHold::ManualPause
         } else if id.starts_with("question:") {
             MessageActivationHold::Question
-        } else if super::super::observations::is_observation_id(id) {
+        } else if super::observations::is_observation_id(id) {
             MessageActivationHold::DependencyWait
         } else {
             MessageActivationHold::Preparing
@@ -156,30 +177,33 @@ fn pending_execution(db: &Connection, thread: &str, branch: &str) -> Result<Opti
 pub(in crate::catalog) fn accept(
     db: &Connection,
     identity: &MessageIdentity,
-) -> Result<MessageActivationFact> {
+) -> Result<IngressActivationFact> {
     if identity.kind == MessageKind::Inform {
-        return Ok(MessageActivationFact::Passive);
+        return Ok(IngressActivationFact::Passive);
     }
+    accept_target(db, &identity.target_thread_id, &identity.target_branch_id)
+}
+pub(in crate::catalog) fn accept_target(
+    db: &Connection,
+    thread: &str,
+    branch: &str,
+) -> Result<IngressActivationFact> {
     let active: Option<String> = db.query_row(
         "SELECT active_run FROM branches WHERE id=?1",
-        [&identity.target_branch_id],
+        [branch],
         |r| r.get(0),
     )?;
     if let Some(run_id) = active {
         let run: Run = record(db, "runs", &run_id)?;
         if !run.cancel_requested && !run.state.terminal() {
-            return Ok(MessageActivationFact::Bound {
+            return Ok(IngressActivationFact::Bound {
                 execution_id: execution_for_run(db, &run_id)?,
                 run_id,
             });
         }
     }
-    Ok(MessageActivationFact::Pending {
-        execution_id: pending_execution(
-            db,
-            &identity.target_thread_id,
-            &identity.target_branch_id,
-        )?,
+    Ok(IngressActivationFact::Pending {
+        execution_id: pending_execution(db, thread, branch)?,
     })
 }
 pub(in crate::catalog) fn project(
@@ -187,19 +211,19 @@ pub(in crate::catalog) fn project(
     row: &QueuedInputMetadata,
 ) -> Result<MessageActivation> {
     Ok(match fact(row)? {
-        MessageActivationFact::Passive => MessageActivation::Passive,
-        MessageActivationFact::Cancelled {
+        IngressActivationFact::Passive => MessageActivation::Passive,
+        IngressActivationFact::Cancelled {
             run_id,
             execution_id,
         } => MessageActivation::Cancelled {
             run_id: run_id.clone(),
             execution_id: execution_id.clone(),
         },
-        MessageActivationFact::Failed { execution_id, code } => MessageActivation::Failed {
+        IngressActivationFact::Failed { execution_id, code } => MessageActivation::Failed {
             execution_id: execution_id.clone(),
             code: code.clone(),
         },
-        MessageActivationFact::Pending { execution_id } => {
+        IngressActivationFact::Pending { execution_id } => {
             let mut hold = Some(MessageActivationHold::Preparing);
             if let Some(id) = execution_id {
                 let execution = delegated::execution(db, id)?;
@@ -230,7 +254,7 @@ pub(in crate::catalog) fn project(
                 hold_reason: hold,
             }
         }
-        MessageActivationFact::Bound {
+        IngressActivationFact::Bound {
             run_id,
             execution_id,
         } => {
@@ -247,10 +271,10 @@ pub(in crate::catalog) fn project(
         }
     })
 }
-fn write_changed(
+pub(in crate::catalog) fn write_changed(
     tx: &Transaction<'_>,
     row: &mut QueuedInputMetadata,
-    next: MessageActivationFact,
+    next: IngressActivationFact,
 ) -> Result<()> {
     if fact(row)? == &next {
         return Ok(());
@@ -262,8 +286,12 @@ fn write_changed(
         tx,
         &row.id,
         row.revision,
-        "message.activation_changed",
-        json!({"message_id":row.id}),
+        if matches!(row.origin, InputOrigin::Followup { .. }) {
+            "followup.activation_changed"
+        } else {
+            "message.activation_changed"
+        },
+        json!({"input_id":row.id}),
     )?;
     Ok(())
 }
@@ -274,7 +302,7 @@ pub(in crate::catalog) fn bind_pending(tx: &Transaction<'_>, run: &Run) -> Resul
     }
     let execution_id = execution_for_run(tx, &run.id)?;
     let rows = {
-        let mut q=tx.prepare("SELECT body FROM input_queue WHERE branch_id=?1 AND origin='message' AND state='queued' AND json_extract(body,'$.origin.activation.state')='pending' ORDER BY cursor")?;
+        let mut q=tx.prepare("SELECT body FROM input_queue WHERE branch_id=?1 AND origin IN ('message','followup') AND state='queued' AND json_extract(body,'$.origin.activation.state')='pending' ORDER BY cursor")?;
         let rows = q.query_map([&run.branch_id], |r| r.get::<_, String>(0))?;
         rows.map(|r| Ok(serde_json::from_str(&r?)?))
             .collect::<Result<Vec<QueuedInputMetadata>>>()?
@@ -284,11 +312,15 @@ pub(in crate::catalog) fn bind_pending(tx: &Transaction<'_>, run: &Run) -> Resul
         if pending.is_some() && pending != execution_id.as_deref() {
             continue;
         }
+        if followups::ingress_hold(tx, &row, Some(run))?.is_some() {
+            continue;
+        }
+        followups::refresh_ingress_goal(tx, &mut row)?;
         row.run_id = Some(run.id.clone());
         write_changed(
             tx,
             &mut row,
-            MessageActivationFact::Bound {
+            IngressActivationFact::Bound {
                 run_id: run.id.clone(),
                 execution_id: execution_id.clone(),
             },
@@ -302,16 +334,19 @@ pub(in crate::catalog) fn bind_execution(
     execution_id: &str,
 ) -> Result<()> {
     let rows = {
-        let mut q=tx.prepare("SELECT body FROM input_queue WHERE branch_id=?1 AND origin='message' AND state='queued' AND json_extract(body,'$.origin.activation.state')='pending' AND json_extract(body,'$.origin.activation.execution_id') IS NULL ORDER BY cursor")?;
+        let mut q=tx.prepare("SELECT body FROM input_queue WHERE branch_id=?1 AND origin IN ('message','followup') AND state='queued' AND json_extract(body,'$.origin.activation.state')='pending' AND json_extract(body,'$.origin.activation.execution_id') IS NULL ORDER BY cursor")?;
         let rows = q.query_map([branch], |r| r.get::<_, String>(0))?;
         rows.map(|r| Ok(serde_json::from_str(&r?)?))
             .collect::<Result<Vec<QueuedInputMetadata>>>()?
     };
     for mut row in rows {
+        if followups::ingress_hold(tx, &row, None)?.is_some() {
+            continue;
+        }
         write_changed(
             tx,
             &mut row,
-            MessageActivationFact::Pending {
+            IngressActivationFact::Pending {
                 execution_id: Some(execution_id.into()),
             },
         )?;
@@ -328,9 +363,9 @@ pub(in crate::catalog) fn cancel_row(
     let current = fact(row)?.clone();
     if matches!(
         current,
-        MessageActivationFact::Passive
-            | MessageActivationFact::Cancelled { .. }
-            | MessageActivationFact::Failed { .. }
+        IngressActivationFact::Passive
+            | IngressActivationFact::Cancelled { .. }
+            | IngressActivationFact::Failed { .. }
     ) {
         return Ok(());
     }
@@ -338,7 +373,7 @@ pub(in crate::catalog) fn cancel_row(
     write_changed(
         tx,
         row,
-        MessageActivationFact::Cancelled {
+        IngressActivationFact::Cancelled {
             run_id: current.run_id().map(str::to_owned),
             execution_id: current.execution_id().map(str::to_owned),
         },
@@ -346,7 +381,7 @@ pub(in crate::catalog) fn cancel_row(
 }
 pub(in crate::catalog) fn cancel_run(tx: &Transaction<'_>, run: &str) -> Result<()> {
     let rows = {
-        let mut q=tx.prepare("SELECT body FROM input_queue WHERE run_id=?1 AND origin='message' AND state='queued' AND activation='activating'")?;
+        let mut q=tx.prepare("SELECT body FROM input_queue WHERE run_id=?1 AND origin IN ('message','followup') AND state='queued' AND activation='activating'")?;
         let rows = q.query_map([run], |r| r.get::<_, String>(0))?;
         rows.map(|r| Ok(serde_json::from_str(&r?)?))
             .collect::<Result<Vec<QueuedInputMetadata>>>()?
@@ -358,7 +393,7 @@ pub(in crate::catalog) fn cancel_run(tx: &Transaction<'_>, run: &str) -> Result<
 }
 pub(in crate::catalog) fn cancel_thread(tx: &Transaction<'_>, thread: &str) -> Result<()> {
     let rows = {
-        let mut q=tx.prepare("SELECT q.body FROM input_queue q JOIN branches b ON b.id=q.branch_id WHERE b.thread_id=?1 AND q.origin='message' AND q.state='queued' AND q.activation='activating'")?;
+        let mut q=tx.prepare("SELECT q.body FROM input_queue q JOIN branches b ON b.id=q.branch_id WHERE b.thread_id=?1 AND q.origin IN ('message','followup') AND q.state='queued' AND q.activation='activating'")?;
         let rows = q.query_map([thread], |r| r.get::<_, String>(0))?;
         rows.map(|r| Ok(serde_json::from_str(&r?)?))
             .collect::<Result<Vec<QueuedInputMetadata>>>()?
@@ -371,19 +406,19 @@ pub(in crate::catalog) fn cancel_thread(tx: &Transaction<'_>, thread: &str) -> R
 /// The original message history is the first new-Run input; it is never converted to User text.
 pub(in crate::catalog) fn delivered_submission(
     tx: &Transaction<'_>,
-    identity: &MessageIdentity,
+    input: &QueuedInputMetadata,
     run: &Run,
     cursor: u64,
 ) -> Result<()> {
-    let mut row: QueuedInputMetadata = record(tx, "input_queue", &identity.message_id)?;
-    if message_identity(&row)? != identity || row.state != InputState::Queued {
+    let mut row: QueuedInputMetadata = record(tx, "input_queue", &input.id)?;
+    if row != *input || row.state != InputState::Queued {
         return Err(RuntimeError::Conflict(
             "message activation changed before Run admission".into(),
         ));
     }
     let execution_id = execution_for_run(tx, &run.id)?;
     match fact(&row)? {
-        MessageActivationFact::Pending {
+        IngressActivationFact::Pending {
             execution_id: pending,
         } if pending.is_none() || pending == &execution_id => (),
         _ => {
@@ -398,11 +433,12 @@ pub(in crate::catalog) fn delivered_submission(
     write_changed(
         tx,
         &mut row,
-        MessageActivationFact::Bound {
+        IngressActivationFact::Bound {
             run_id: run.id.clone(),
             execution_id,
         },
     )?;
+    followups::delivered(tx, &row)?;
     event(
         tx,
         &run.id,
@@ -422,7 +458,7 @@ pub(in crate::catalog) fn validate_pending(
         || current.state != InputState::Queued
         || !matches!(
             fact(&current)?,
-            MessageActivationFact::Pending { execution_id: None }
+            IngressActivationFact::Pending { execution_id: None }
         )
     {
         return Err(RuntimeError::RequestActivationStale);
@@ -460,7 +496,7 @@ pub enum PreparedRequestActivation {
     },
 }
 impl RequestActivationPreparation {
-    pub fn message_id(&self) -> &str {
+    pub fn input_id(&self) -> &str {
         match self {
             Self::Root(v) => &v.row.id,
             Self::Child { row, .. } => &row.id,
@@ -511,12 +547,11 @@ impl RequestActivationPreparation {
                         ));
                     }
                 }
-                let identity = message_identity(&row)?.clone();
-                let intent=content.save(&json!({"message_id":row.id,"previous_run_id":run.id,"previous_run_revision":run.revision,"launch_revision":launch.revision}))?;
+                let intent=content.save(&json!({"input_id":row.id,"previous_run_id":run.id,"previous_run_revision":run.revision,"launch_revision":launch.revision}))?;
                 let submission = submissions::PreparedSubmission {
                     run_id: id(),
                     identity: submissions::SubmissionIdentity {
-                        key: format!("message-run:{}", row.id),
+                        key: format!("ingress-run:{}", row.id),
                         thread_id: row.thread_id.clone(),
                         branch_id: row.branch_id.clone(),
                         expected_head: head,
@@ -528,8 +563,8 @@ impl RequestActivationPreparation {
                     launch: Some(selection),
                     inherit_source: false,
                     initial: None,
-                    origin: submissions::SubmissionOrigin::MessageRequest {
-                        identity,
+                    origin: submissions::SubmissionOrigin::Ingress {
+                        input: row.clone(),
                         execution_id: None,
                         checkpoint: checkpoint_id,
                         history,
@@ -556,118 +591,195 @@ pub enum RequestActivationAdmission {
 impl Catalog {
     /// Small queue/owner capture only. Payload hydration and launch rebasing happen on the worker.
     pub fn capture_request_activations(&mut self) -> Result<Vec<RequestActivationPreparation>> {
+        let (candidates, failure) = self.capture_activation_batch()?;
+        if let Some(error) = failure {
+            Err(error)
+        } else {
+            Ok(candidates)
+        }
+    }
+    fn capture_activation_batch(
+        &mut self,
+    ) -> Result<(Vec<RequestActivationPreparation>, Option<RuntimeError>)> {
         if self
             .continuation_stopping
             .load(std::sync::atomic::Ordering::Acquire)
         {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), None));
         }
         let rows = {
-            let mut q=self.db.prepare("SELECT body FROM input_queue WHERE origin='message' AND state='queued' AND activation='activating' ORDER BY cursor")?;
+            let mut q=self.db.prepare("SELECT body FROM input_queue WHERE origin IN ('message','followup') AND state='queued' AND activation='activating' ORDER BY cursor")?;
             let rows = q.query_map([], |r| r.get::<_, String>(0))?;
             rows.map(|r| Ok(serde_json::from_str(&r?)?))
                 .collect::<Result<Vec<QueuedInputMetadata>>>()?
         };
         let mut candidates = Vec::new();
         let mut branches = std::collections::BTreeSet::new();
-        for row in rows {
-            if let MessageActivationFact::Bound { run_id, .. } = fact(&row)? {
-                let run = self.run(run_id)?;
-                if run.cancel_requested || run.state == RunState::Cancelled {
+        let mut failure = None;
+        for mut row in rows {
+            let id = row.id.clone();
+            let revision = row.revision;
+            let branch = row.branch_id.clone();
+            let result = (|| -> Result<()> {
+                if let IngressActivationFact::Bound { run_id, .. } = fact(&row)?.clone() {
+                    let run = self.run(&run_id)?;
                     let tx = self.db.transaction()?;
-                    cancel_run(&tx, run_id)?;
+                    if run.cancel_requested || run.state == RunState::Cancelled {
+                        cancel_run(&tx, &run_id)?;
+                    } else if run.state.terminal()
+                        && matches!(row.origin, InputOrigin::Followup { .. })
+                    {
+                        row.run_id = None;
+                        write_changed(
+                            &tx,
+                            &mut row,
+                            IngressActivationFact::Pending { execution_id: None },
+                        )?;
+                    } else if matches!(row.origin, InputOrigin::Followup { .. }) {
+                        let old = row.clone();
+                        followups::refresh_ingress_goal(&tx, &mut row)?;
+                        if row != old {
+                            row.revision += 1;
+                            inputs::write_input(&tx, &row)?;
+                            event(
+                                &tx,
+                                &row.id,
+                                row.revision,
+                                "followup.goal_bound",
+                                json!({"input_id":row.id}),
+                            )?;
+                        }
+                    }
+                    tx.commit()?;
+                    if !matches!(
+                        fact(&row)?,
+                        IngressActivationFact::Pending { execution_id: None }
+                    ) {
+                        return Ok(());
+                    }
+                }
+                if !matches!(
+                    fact(&row)?,
+                    IngressActivationFact::Pending { execution_id: None }
+                ) {
+                    return Ok(());
+                }
+                let active: Option<String> = self.db.query_row(
+                    "SELECT active_run FROM branches WHERE id=?1",
+                    [&row.branch_id],
+                    |r| r.get(0),
+                )?;
+                if let Some(id) = active {
+                    let run = self.run(&id)?;
+                    let tx = self.db.transaction()?;
+                    bind_pending(&tx, &run)?;
+                    tx.commit()?;
+                    return Ok(());
+                }
+                if let Some(id) = pending_execution(&self.db, &row.thread_id, &row.branch_id)? {
+                    let tx = self.db.transaction()?;
+                    bind_execution(&tx, &row.branch_id, &id)?;
+                    tx.commit()?;
+                    return Ok(());
+                }
+                let Some(run) = latest_run(&self.db, &row.branch_id)? else {
+                    self.fail_request_activation(&row.id, row.revision, "launch_unavailable")?;
+                    return Ok(());
+                };
+                if followups::ingress_hold(&self.db, &row, Some(&run))?.is_some() {
+                    return Ok(());
+                }
+                if !run.state.terminal() || row_goal_hold(&self.db, &row, &run)? {
+                    return Ok(());
+                }
+                if !branches.insert(row.branch_id.clone()) {
+                    return Ok(());
+                }
+                if matches!(row.origin, InputOrigin::Followup { .. }) {
+                    let tx = self.db.transaction()?;
+                    let old = row.clone();
+                    followups::refresh_ingress_goal(&tx, &mut row)?;
+                    if row != old {
+                        row.revision += 1;
+                        inputs::write_input(&tx, &row)?;
+                        event(
+                            &tx,
+                            &row.id,
+                            row.revision,
+                            "followup.goal_bound",
+                            json!({"input_id":row.id}),
+                        )?;
+                    }
                     tx.commit()?;
                 }
-                continue;
-            }
-            if !matches!(
-                fact(&row)?,
-                MessageActivationFact::Pending { execution_id: None }
-            ) {
-                continue;
-            }
-            let active: Option<String> = self.db.query_row(
-                "SELECT active_run FROM branches WHERE id=?1",
-                [&row.branch_id],
-                |r| r.get(0),
-            )?;
-            if let Some(id) = active {
-                let run = self.run(&id)?;
-                let tx = self.db.transaction()?;
-                bind_pending(&tx, &run)?;
-                tx.commit()?;
-                continue;
-            }
-            if let Some(id) = pending_execution(&self.db, &row.thread_id, &row.branch_id)? {
-                let tx = self.db.transaction()?;
-                bind_execution(&tx, &row.branch_id, &id)?;
-                tx.commit()?;
-                continue;
-            }
-            if !branches.insert(row.branch_id.clone()) {
-                continue;
-            }
-            let Some(run) = latest_run(&self.db, &row.branch_id)? else {
-                self.fail_request_activation(&row.id, row.revision, "launch_unavailable")?;
-                continue;
-            };
-            if !run.state.terminal() || goal_hold(&self.db, &run)? {
-                continue;
-            }
-            let child = self.child_task_for_thread(&row.thread_id)?;
-            if let Some(child) = child {
-                if child.child_branch_id != row.branch_id {
-                    self.fail_request_activation(
-                        &row.id,
-                        row.revision,
-                        "execution_branch_unavailable",
-                    )?;
-                    continue;
-                }
-                let Some(previous) = self.delegated_execution_for_run(&run.id)? else {
-                    self.fail_request_activation(&row.id, row.revision, "source_unavailable")?;
-                    continue;
-                };
-                if previous.report.is_none() || !previous.code_result.settled() {
-                    continue;
-                }
-                let preparation =
-                    match self.capture_message_continuation(row.clone(), run, child.operation_id) {
+                let child = self.child_task_for_thread(&row.thread_id)?;
+                if let Some(child) = child {
+                    if child.child_branch_id != row.branch_id {
+                        self.fail_request_activation(
+                            &row.id,
+                            row.revision,
+                            "execution_branch_unavailable",
+                        )?;
+                        return Ok(());
+                    }
+                    let Some(previous) = self.delegated_execution_for_run(&run.id)? else {
+                        self.fail_request_activation(&row.id, row.revision, "source_unavailable")?;
+                        return Ok(());
+                    };
+                    if previous.report.is_none() || !previous.code_result.settled() {
+                        return Ok(());
+                    }
+                    let preparation = match self.capture_ingress_continuation(
+                        row.clone(),
+                        run,
+                        child.operation_id,
+                    ) {
                         Ok(value) => value,
-                        Err(_) => {
+                        Err(error) => {
                             self.fail_request_activation(
                                 &row.id,
                                 row.revision,
                                 "activation_preparation_failed",
                             )?;
-                            continue;
+                            return Err(error);
                         }
                     };
-                candidates.push(RequestActivationPreparation::Child { row, preparation });
-            } else {
-                let Some(launch) = self.launch_metadata(&run.id)? else {
-                    self.fail_request_activation(&row.id, row.revision, "launch_unavailable")?;
-                    continue;
-                };
-                let history: String = self.db.query_row(
-                    "SELECT body FROM input_history_content WHERE input_id=?1",
-                    [&row.id],
-                    |r| r.get(0),
-                )?;
-                candidates.push(RequestActivationPreparation::Root(RootCapture {
-                    head: self.head(&row.branch_id)?,
-                    checkpoint: self.capture_active_checkpoint(&row.branch_id)?,
-                    row,
-                    run,
-                    launch,
-                    epoch: self.epoch,
-                    history: serde_json::from_str(&history)?,
-                    content: self.content.clone(),
-                    publication: self.content.begin_publication(),
-                }));
+                    candidates.push(RequestActivationPreparation::Child { row, preparation });
+                } else {
+                    let Some(launch) = self.launch_metadata(&run.id)? else {
+                        self.fail_request_activation(&row.id, row.revision, "launch_unavailable")?;
+                        return Ok(());
+                    };
+                    let history: String = self.db.query_row(
+                        "SELECT body FROM input_history_content WHERE input_id=?1",
+                        [&row.id],
+                        |r| r.get(0),
+                    )?;
+                    candidates.push(RequestActivationPreparation::Root(RootCapture {
+                        head: self.head(&row.branch_id)?,
+                        checkpoint: self.capture_active_checkpoint(&row.branch_id)?,
+                        row,
+                        run,
+                        launch,
+                        epoch: self.epoch,
+                        history: serde_json::from_str(&history)?,
+                        content: self.content.clone(),
+                        publication: self.content.begin_publication(),
+                    }));
+                }
+                Ok(())
+            })();
+            if let Err(error) = result {
+                branches.remove(&branch);
+                failure.get_or_insert(error);
+                if let Err(error) =
+                    self.fail_request_activation(&id, revision, "activation_preparation_failed")
+                {
+                    failure.get_or_insert(error);
+                }
             }
         }
-        Ok(candidates)
+        Ok((candidates, failure))
     }
     pub fn fail_request_activation(&mut self, id: &str, revision: u64, code: &str) -> Result<()> {
         if self
@@ -682,13 +794,13 @@ impl Catalog {
             && row.state == InputState::Queued
             && matches!(
                 fact(&row)?,
-                MessageActivationFact::Pending { execution_id: None }
+                IngressActivationFact::Pending { execution_id: None }
             )
         {
             write_changed(
                 &tx,
                 &mut row,
-                MessageActivationFact::Failed {
+                IngressActivationFact::Failed {
                     execution_id: None,
                     code: code.into(),
                 },
@@ -717,7 +829,7 @@ impl Catalog {
                     Err(e) => return Err(e),
                 }
                 if let Some(run) = latest_run(&self.db, &row.branch_id)? {
-                    if goal_hold(&self.db, &run)? {
+                    if row_goal_hold(&self.db, &row, &run)? {
                         return Ok(RequestActivationAdmission::Held);
                     }
                 }
@@ -772,8 +884,7 @@ impl Catalog {
                 {
                     return Ok(RequestActivationAdmission::Stale);
                 }
-                let submissions::SubmissionOrigin::MessageRequest { checkpoint, .. } =
-                    &submission.origin
+                let submissions::SubmissionOrigin::Ingress { checkpoint, .. } = &submission.origin
                 else {
                     unreachable!()
                 };
@@ -784,7 +895,9 @@ impl Catalog {
                 {
                     return Ok(RequestActivationAdmission::Stale);
                 }
-                if goal_hold(&self.db, &actual)? {
+                if followups::ingress_hold(&self.db, &row, Some(&actual))?.is_some()
+                    || row_goal_hold(&self.db, &row, &actual)?
+                {
                     return Ok(RequestActivationAdmission::Held);
                 }
                 let tx = self.db.transaction()?;
@@ -797,8 +910,8 @@ impl Catalog {
                     &tx,
                     &row.id,
                     row.revision + 1,
-                    "message.run_ready",
-                    json!({"message_id":row.id,"run_id":receipt.run_id}),
+                    "ingress.run_ready",
+                    json!({"input_id":row.id,"run_id":receipt.run_id}),
                 )?;
                 tx.commit()?;
                 Ok(RequestActivationAdmission::Bound(receipt.run_id))
@@ -810,25 +923,42 @@ impl Catalog {
     pub fn interrupt_request_observations(&mut self) -> Result<bool> {
         let runs = {
             let mut q=self.db.prepare("SELECT DISTINCT run_id FROM input_queue WHERE activation='activating' AND mode!='next_run' AND state='queued' AND run_id IS NOT NULL")?;
-            let rows=q.query_map([],|r|r.get::<_,String>(0))?;
-            rows.collect::<std::result::Result<Vec<_>,_>>()?
+            let rows = q.query_map([], |r| r.get::<_, String>(0))?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
         };
-        if !runs.is_empty(){self.reconcile_waits()?;}
-        let mut changed=false;
+        if !runs.is_empty() {
+            self.reconcile_waits()?;
+        }
+        let mut changed = false;
         for id in runs {
-            let run=self.run(&id)?;
-            if run.cancel_requested || run.state.terminal() || goal_hold(&self.db,&run)?
+            let run = self.run(&id)?;
+            if run.cancel_requested
+                || run.state.terminal()
+                || goal_hold(&self.db, &run)?
                 || self.pending_question_wait(&id)?.is_some()
-                || (run.state==RunState::Waiting && !run.waiting_on.as_deref().is_some_and(super::super::observations::is_observation_id)) {continue}
-            for op in super::super::observations::operations(&self.db,Some(&id))? {
-                let wait:Wait=record(&self.db,"waits",op.waiting_on.as_deref().expect("observation"))?;
-                if wait.cancelled || wait.trigger_cursor.is_some(){continue}
-                self.cancel_observation(&op.id)?;changed=true;
+                || (run.state == RunState::Waiting
+                    && !run
+                        .waiting_on
+                        .as_deref()
+                        .is_some_and(super::observations::is_observation_id))
+            {
+                continue;
+            }
+            for op in super::observations::operations(&self.db, Some(&id))? {
+                let wait: Wait = record(
+                    &self.db,
+                    "waits",
+                    op.waiting_on.as_deref().expect("observation"),
+                )?;
+                if wait.cancelled || wait.trigger_cursor.is_some() {
+                    continue;
+                }
+                self.cancel_observation(&op.id)?;
+                changed = true;
             }
         }
         Ok(changed)
     }
-
 }
 /// One event-driven pass; a raced candidate is recaptured before returning. Held work emits
 /// no repeat event and waits for its actual dependency, control, source or execution owner.
@@ -839,20 +969,36 @@ pub fn reconcile(catalog: &Mutex<Catalog>) -> Result<Vec<String>> {
             .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))
     };
     let mut runs = Vec::new();
+    let mut failure = None;
     loop {
-        let candidates = lock()?.capture_request_activations()?;
+        let candidates = match lock()?.capture_activation_batch() {
+            Ok((v, error)) => {
+                if let Some(error) = error {
+                    failure.get_or_insert(error);
+                }
+                v
+            }
+            Err(error) => {
+                failure.get_or_insert(error);
+                Vec::new()
+            }
+        };
         let mut stale = false;
         for candidate in candidates {
-            let id = candidate.message_id().to_owned();
+            let id = candidate.input_id().to_owned();
             let revision = candidate.revision();
             let prepared = match candidate.load() {
                 Ok(p) => p,
-                Err(_) => {
-                    lock()?.fail_request_activation(
+                Err(error) => {
+                    stale = true;
+                    failure.get_or_insert(error);
+                    if let Err(error) = lock()?.fail_request_activation(
                         &id,
                         revision,
                         "activation_preparation_failed",
-                    )?;
+                    ) {
+                        failure.get_or_insert(error);
+                    }
                     continue;
                 }
             };
@@ -863,17 +1009,25 @@ pub fn reconcile(catalog: &Mutex<Catalog>) -> Result<Vec<String>> {
                     ()
                 }
                 Ok(RequestActivationAdmission::Stale) => stale = true,
-                Err(_) => {
-                    lock()?.fail_request_activation(
+                Err(error) => {
+                    stale = true;
+                    failure.get_or_insert(error);
+                    if let Err(error) = lock()?.fail_request_activation(
                         &id,
                         revision,
                         "activation_preparation_failed",
-                    )?;
+                    ) {
+                        failure.get_or_insert(error);
+                    }
                 }
             }
         }
         if !stale {
-            return Ok(runs);
+            return if let Some(error) = failure {
+                Err(error)
+            } else {
+                Ok(runs)
+            };
         }
     }
 }

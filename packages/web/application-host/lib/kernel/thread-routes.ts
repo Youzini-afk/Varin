@@ -1,11 +1,11 @@
-import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
+import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams, FollowupRegistrationTrigger } from '@varin/protocol';
 import { PlanConflict } from './plan-service.js';
 import { parseThreadImages } from './thread-images.js';
 import type { Express, RequestHandler } from 'express';
 import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel } from '@varin/application-client';
 import { KernelClientError } from './kernel-client.js';
 import { ThreadAdapter } from './thread-adapter.js';
-import { controlThreadFollowup, listThreadFollowups, registerThreadFollowup } from './thread-followups.js';
+import { controlThreadFollowup, getThreadFollowup, listThreadFollowups, registerThreadFollowup } from './thread-followups.js';
 import { controlThreadGoal, listThreadGoals, startThreadGoal, updateThreadGoal } from './thread-goals.js';
 
 const object = (value: unknown): Record<string, unknown> => {
@@ -29,6 +29,17 @@ const familyRequest = <T>(value: unknown): Omit<T, 'callerThreadId'> => {
   const request = object(value);
   if ('callerThreadId' in request) throw new Error('Family caller is the authenticated Thread identity');
   return request as Omit<T, 'callerThreadId'>;
+};
+const followupTrigger = (value: unknown): FollowupRegistrationTrigger => {
+  const trigger = object(value);
+  if (trigger.kind === 'at' && Object.keys(trigger).every(key => key === 'kind' || key === 'atMs')
+    && Number.isSafeInteger(trigger.atMs) && Number(trigger.atMs) >= 0) {
+    return { kind: 'at', atMs: Number(trigger.atMs) };
+  }
+  if (trigger.kind === 'process_stopped' && Object.keys(trigger).every(key => key === 'kind' || key === 'operationId')) {
+    return { kind: 'process_stopped', operationId: text(trigger.operationId) };
+  }
+  throw new Error('Invalid one-shot follow-up trigger');
 };
 const goalBudget = (value: unknown): { maxOutputTokens: number } | null => {
   if (value === null) return null;
@@ -73,7 +84,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'child/list': ['runtime', 'threadId', 'branchId'], 'child/cancel': ['runtime', 'threadId', 'branchId', 'operationId'],
     'child/wait/cancel': ['runtime', 'threadId', 'branchId', 'waitId'], 'tree/cancel': ['runtime', 'threadId', 'branchId'],
     'resources/refresh': ['runtime', 'threadId', 'branchId', 'expectedRevision', 'instructionDirectories', 'supportingFiles'],
-    'followup/register': ['runtime', 'threadId', 'branchId', 'key', 'runId', 'operationId'],
+    'followup/register': ['runtime', 'threadId', 'branchId', 'key', 'runId', 'trigger', 'instruction'],
+    'followup/get': ['runtime', 'threadId', 'branchId', 'followupId'],
     'followup/list': ['runtime', 'threadId', 'branchId'],
     'followup/control': ['runtime', 'threadId', 'branchId', 'followupId', 'expectedRevision', 'action'],
     'goal/start': ['runtime', 'threadId', 'branchId', 'key', 'runId', 'objective', 'budget'],
@@ -182,7 +194,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       ...(instructionDirectories ? { instructionDirectories } : {}), ...(supportingFiles ? { supportingFiles } : {}) }, signal);
   });
   post('followup/register', (body, signal) => registerThreadFollowup(adapter,
-    { ...identity(body), key: text(body.key), runId: text(body.runId), operationId: text(body.operationId) }, signal));
+    { ...identity(body), key: text(body.key), runId: text(body.runId), trigger: followupTrigger(body.trigger), instruction: text(body.instruction) }, signal));
+  post('followup/get', (body, signal) => getThreadFollowup(adapter, identity(body), text(body.followupId), signal));
   post('followup/list', (body, signal) => listThreadFollowups(adapter, identity(body), signal));
   post('followup/control', (body, signal) => {
     if (body.action !== 'pause' && body.action !== 'resume' && body.action !== 'cancel') throw new Error('Invalid follow-up control');

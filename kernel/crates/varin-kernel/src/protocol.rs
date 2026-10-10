@@ -20,7 +20,7 @@ pub(crate) const KERNEL_ARCH: &str = match option_env!("VARIN_KERNEL_ARCH") {
     Some(value) => value,
     None => "unknown-arch",
 };
-pub(crate) const STORAGE_FORMAT_VERSION: &str = "10";
+pub(crate) const STORAGE_FORMAT_VERSION: &str = "11";
 // Control frames are deliberately bounded. Content bytes travel through the
 // begin/data/finish stream and therefore do not need a giant JSON envelope.
 pub(crate) const MAX_FRAME_BYTES: usize = crate::protocol_generated::KERNEL_MAX_FRAME_BYTES;

@@ -256,6 +256,7 @@ enum ResourceOperation {
     },
     ProcessObservation {
         source_run_id: String,
+        lineage: Option<varin_runtime::catalog::process_wait::ProcessResultLineage>,
         process_id: String,
         read: Option<(u64, Option<u64>)>,
     },
@@ -645,6 +646,7 @@ impl KernelResourceClient {
         context: &ToolExecutionContext,
         process_id: &str,
         source_run_id: &str,
+        lineage: Option<varin_runtime::catalog::process_wait::ProcessResultLineage>,
         read: Option<(u64, Option<u64>)>,
         authorize_only: bool,
         cancel: &CancellationToken,
@@ -654,6 +656,7 @@ impl KernelResourceClient {
             context,
             ResourceOperation::ProcessObservation {
                 source_run_id: source_run_id.into(),
+                lineage,
                 process_id: process_id.into(),
                 read,
             },
@@ -676,6 +679,7 @@ impl KernelResourceClient {
             context,
             process_id,
             &context.run_id,
+            None,
             None,
             true,
             cancel,
@@ -1912,13 +1916,30 @@ pub(crate) fn serve_resource(
                 result
             });
         }
-        if let ResourceOperation::ProcessObservation { source_run_id, .. } = &request.operation {
+        if let ResourceOperation::ProcessObservation {
+            source_run_id,
+            lineage,
+            ..
+        } = &request.operation
+        {
+            if lineage.as_ref().is_some_and(|proof| {
+                proof.target()
+                    != &request
+                        .binding
+                        .source_selection()
+                        .expect("validated binding")
+            }) {
+                return Err(KernelError::Authorization(
+                    "delegated process source changed".into(),
+                ));
+            }
             return storage.observe_run_process(
                 method,
                 &authorized,
                 &grant,
                 request.binding.root_id.as_deref(),
                 source_run_id,
+                lineage.as_ref(),
                 request.authorize_only,
             );
         }

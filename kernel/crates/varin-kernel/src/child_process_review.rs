@@ -460,7 +460,7 @@ impl Harness {
         }
     }
     fn spawn_writer(&mut self, node: &Node) -> String {
-        let script = "(while [ ! -f go ]; do sleep 0.02; done; n=0; while :; do n=$((n+1)); printf 'after-report-%s\\n' \"$n\" > result.txt; sleep 0.02; done) & echo $! > descendant.pid; printf ready > ready; wait";
+        let script = "printf 'original-child-output\\n'; (while [ ! -f go ]; do sleep 0.02; done; n=0; while :; do n=$((n+1)); printf 'after-report-%s\\n' \"$n\" > result.txt; sleep 0.02; done) & echo $! > descendant.pid; printf ready > ready; wait";
         let call = ToolCall {
             call_id: "spawn".into(),
             name: "process_spawn".into(),
@@ -563,6 +563,8 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
         "file_read".into(),
         "file_write".into(),
         "process_spawn".into(),
+        "process_inspect".into(),
+        "process_read".into(),
     ])
     .unwrap();
     let catalog = ChildDispatchCatalog {
@@ -789,16 +791,38 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
     {
         let db = owner.lock().unwrap();
         let target = db.run(&child.binding.run_id).unwrap();
-        let message = db.capture_message(
-            &target.thread_id, &target.branch_id, blocked["messageId"].as_str().unwrap(),
-        ).unwrap().load().unwrap();
-        assert!(matches!(message.summary.activation,
+        let message = db
+            .capture_message(
+                &target.thread_id,
+                &target.branch_id,
+                blocked["messageId"].as_str().unwrap(),
+            )
+            .unwrap()
+            .load()
+            .unwrap();
+        assert!(matches!(
+            message.summary.activation,
             varin_runtime::catalog::messages::MessageActivation::Pending {
                 execution_id: None,
-                hold_reason: Some(varin_runtime::catalog::messages::MessageActivationHold::SourceUnsettled)
+                hold_reason: Some(
+                    varin_runtime::catalog::messages::MessageActivationHold::SourceUnsettled
+                )
             }
         ));
     }
+    assert!(
+        h.storage
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .retire_grants(
+                &json!({"target":{"kind":"run","runId":child.binding.run_id}}),
+                HOST
+            )
+            .is_err(),
+        "normal retirement cannot stop a running writer"
+    );
     let ack=h.controls.admit_control("runtime.tree.cancel",&json!({"target":{"kind":"child","operation_id":child.operation},"expectedParentThreadId":"parent"})).unwrap().unwrap();
     assert_eq!(ack["child_count"], 2);
     assert_eq!(ack["process_count"], 2);
@@ -902,19 +926,82 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
     );
     // Tree stop cancelled the old accepted request. A new request uses the same original
     // message authority and creates a real MessageRequest execution from the fixed Storage root.
-    let accepted = send_request("request-after-real-stop");
-    h.runtime.reconcile_message_requests().unwrap();
+    {
+        use varin_runtime::catalog::followups::*;
+        let p = owner
+            .lock()
+            .unwrap()
+            .prepare_followup_registration(
+                "process-after-real-stop",
+                &child.binding.run_id,
+                FollowupRegistration {
+                    trigger: FollowupRegistrationTrigger::ProcessStopped {
+                        operation_id: child_process.clone(),
+                    },
+                    instruction:
+                        "Read the stopped child process output in the new delegated execution"
+                            .into(),
+                    wait: None,
+                },
+            )
+            .unwrap()
+            .load()
+            .unwrap();
+        owner
+            .lock()
+            .unwrap()
+            .admit_followup_registration(p)
+            .unwrap();
+    }
+    varin_runtime::catalog::followups::reconcile(&owner).unwrap();
+    // Normal Host cleanup retires by the durable Run owner, without remembering grant IDs.
+    let retired = h
+        .storage
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .retire_grants(
+            &json!({"target":{"kind":"run","runId":child.binding.run_id}}),
+            HOST,
+        )
+        .unwrap();
+    assert!(retired["grantIds"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("child")));
+    assert!(h
+        .storage
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .authorize(
+            Some("child"),
+            EPOCH,
+            HOST,
+            GENERATION,
+            "process.inspect",
+            &json!({"workspaceId":"workspace","processId":child_process})
+        )
+        .is_err());
     let read = {
         let db = owner.lock().unwrap();
         let target = db.run(&child.binding.run_id).unwrap();
-        let old = db.capture_message(
-            &target.thread_id, &target.branch_id, blocked["messageId"].as_str().unwrap(),
-        ).unwrap().load().unwrap();
+        let old = db
+            .capture_message(
+                &target.thread_id,
+                &target.branch_id,
+                blocked["messageId"].as_str().unwrap(),
+            )
+            .unwrap()
+            .load()
+            .unwrap();
         assert_eq!(old.summary.state, varin_runtime::InputState::Cancelled);
         let next = db.delegated_executions(child.operation.as_deref()).unwrap()
             .into_iter().find(|execution| matches!(&execution.trigger,
-                varin_runtime::catalog::delegated::DelegatedTrigger::MessageRequest { message_id, .. }
-                    if message_id == accepted["messageId"].as_str().unwrap()
+                varin_runtime::catalog::delegated::DelegatedTrigger::Followup { followup_id, .. }
+                    if followup_id == "process-after-real-stop"
             )).expect("one original request execution");
         db.capture_delegated_execution(next).unwrap()
     };
@@ -1004,7 +1091,7 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
             .source
             .unwrap()
             .branch_id,
-        Some(next_branch)
+        Some(next_branch.clone())
     );
     assert_eq!(
         serde_json::to_value(
@@ -1018,6 +1105,128 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
         .unwrap(),
         result["code_result"]
     );
+    // Materialize the actual successor's fixed result in a different physical environment.
+    h.issue("continued-child", &child.binding.thread_id, next_run, true);
+    let managed = root.join("storage/managed/runs");
+    let registered=h.invoke("continued-child","file.root.register",json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":managed}));
+    use sha2::{Digest, Sha256};
+    let key = hex::encode(Sha256::digest(
+        serde_json::to_vec(&json!(["workspace", next_run])).unwrap(),
+    ));
+    let params = json!({"operationId":format!("source-materialize:{key}"),"workspaceId":"workspace","rootId":registered["rootId"],"path":key,"sourceRoot":next_pin["root"]});
+    {
+        let mut lock = h.storage.lock().unwrap();
+        let storage = lock.as_mut().unwrap();
+        let (grant, _) = storage
+            .authorize(
+                Some("continued-child"),
+                EPOCH,
+                HOST,
+                GENERATION,
+                "file.materialize",
+                &params,
+            )
+            .unwrap();
+        let crate::storage::materialization::Admission::Work(task) = storage
+            .prepare_materialization(&params, &grant, Arc::new(AtomicBool::new(false)))
+            .unwrap()
+        else {
+            panic!("new environment")
+        };
+        task.run(|control| {
+            storage.control_materialization(&task.operation_id, &task.job_id, control, false)
+        })
+        .unwrap();
+        storage.finish_materialization(&task.operation_id, &task.job_id);
+    }
+    let cwd = managed.join(key).canonicalize().unwrap();
+    let registered = h.invoke(
+        "continued-child",
+        "file.root.register",
+        json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":cwd}),
+    );
+    let mut binding = child.binding.clone();
+    binding.run_id = next_run.into();
+    binding.grant_id = "continued-child".into();
+    binding.root_id = Some(registered["rootId"].as_str().unwrap().into());
+    binding.materialized_source = Some(FixedFileSource {
+        branch_id: next_branch,
+        revision: 0,
+    });
+    binding
+        .enabled_tools
+        .extend([ToolKind::ProcessRead, ToolKind::ProcessInspect]);
+    let next = Node {
+        operation: Some(execution_id.into()),
+        binding,
+        cwd,
+    };
+    let call = ToolCall {
+        call_id: "read-original".into(),
+        name: "process_read".into(),
+        schema_version: "1".into(),
+        arguments: json!({"processId":child_process,"cursor":0}),
+    };
+    let (context, frozen) = h.request(&next, Some(&call));
+    let directory = Arc::new(
+        varin_runtime::composition::tools::ToolDirectory::assemble(
+            crate::process_wait::declarations(
+                owner.clone(),
+                next.binding.clone(),
+                h.resources.clone(),
+            ),
+        )
+        .unwrap(),
+    );
+    let token = CancellationToken::default();
+    let bound = directory.bind_call(&call, &frozen, &token).unwrap();
+    let contract = bound.prepare(&token).unwrap();
+    h.admit(&context, &call, &contract);
+    bound.authorize(&context, &contract, &token).unwrap();
+    h.dispatched(&context);
+    let completion = bound.execute(&context, &contract, &token).completion;
+    let ToolCompletion::Result {
+        outcome: varin_runtime::Outcome::Succeeded,
+        content,
+        ..
+    } = &completion
+    else {
+        panic!("retired predecessor spool must remain readable: {completion:?}")
+    };
+    let output = content["chunks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|chunk| {
+            base64::prelude::BASE64_STANDARD
+                .decode(chunk["bytesBase64"].as_str().unwrap())
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert!(String::from_utf8(output)
+        .unwrap()
+        .contains("original-child-output"));
+    assert_ne!(next.cwd, child.cwd);
+    assert!(!child.cwd.exists());
+    h.close(&context, &call, completion, true);
+    // Explicit revocation remains stronger even when normal retirement arrives late.
+    {
+        let mut lock = h.storage.lock().unwrap();
+        let storage = lock.as_mut().unwrap();
+        storage
+            .revoke_grant(&json!({"grantId":"child"}), HOST)
+            .unwrap();
+        storage
+            .retire_grants(
+                &json!({"target":{"kind":"run","runId":child.binding.run_id}}),
+                HOST,
+            )
+            .unwrap();
+    }
+    assert!(
+        bound.authorize(&context, &contract, &token).is_err(),
+        "late retire must not erase explicit revocation"
+    );
     h.controls.admit_control("runtime.tree.cancel",&json!({"target":{"kind":"child","operation_id":sibling.operation},"expectedParentThreadId":"parent"})).unwrap();
     let terminal = h.terminals.recv_timeout(Duration::from_secs(20)).unwrap();
     assert_eq!(terminal.process_id, sibling_process);
@@ -1025,6 +1234,7 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
     let original = owner.lock().unwrap().operation(&child_process).unwrap();
     assert!(original.external_receipt.as_ref().unwrap().executor_stopped);
     let original_result = result["code_result"].clone();
+    drop(bound);
     drop(owner);
     drop(h);
     let reopened = Catalog::open(root.join("catalog")).unwrap();

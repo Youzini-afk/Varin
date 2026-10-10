@@ -1,5 +1,6 @@
 //! Persisted grants and resource-derived authorization.
 use super::*;
+use crate::model::GrantState;
 
 impl Storage {
     pub(super) fn load_grant(&self, grant_id: &str) -> Result<Grant, KernelError> {
@@ -119,7 +120,7 @@ impl Storage {
             capabilities,
             path_scopes,
             kernel_epoch: epoch.to_string(),
-            revoked: false,
+            state: GrantState::Active,
             handoff_operation_id: None,
         };
         let params_hash = hash_json(params)?;
@@ -138,17 +139,21 @@ impl Storage {
                 ));
             }
             let mut stored_grant: Grant = serde_json::from_str(&stored_json)?;
-            if stored_grant.kernel_epoch != epoch || stored_grant.revoked {
+            if stored_grant.state != GrantState::Active {
+                return Err(KernelError::Authorization(
+                    "grant is retired or revoked; issue a new grant identity".into(),
+                ));
+            }
+            if stored_grant.kernel_epoch != epoch {
                 stored_grant.kernel_epoch = epoch.to_string();
-                stored_grant.revoked = false;
                 self.conn.execute(
-                    "UPDATE grants SET revoked = 0, updated_at = ?2, grant_json = ?3 WHERE grant_id = ?1",
+                    "UPDATE grants SET state = 'active', updated_at = ?2, grant_json = ?3 WHERE grant_id = ?1",
                     params![grant_id, now_ms(), serde_json::to_string(&stored_grant)?],
                 )?;
             }
             return Ok(serde_json::to_value(stored_grant)?);
         }
-        self.conn.execute("INSERT INTO grants(grant_id, host_id, grant_json, params_hash, revoked, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5)", params![grant_id, host_id, serde_json::to_string(&grant)?, params_hash, now_ms()])?;
+        self.conn.execute("INSERT INTO grants(grant_id, host_id, grant_json, params_hash, state, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?5)", params![grant_id, host_id, serde_json::to_string(&grant)?, params_hash, now_ms()])?;
         Ok(serde_json::to_value(grant)?)
     }
 
@@ -169,11 +174,11 @@ impl Storage {
         }
         self.computations.revoke(grant_id);
         let mut revoked = grant;
-        revoked.revoked = true;
+        revoked.state = GrantState::Revoked;
         self.conn.execute_batch("BEGIN IMMEDIATE")?;
         let outcome = (|| {
             self.conn.execute(
-                "UPDATE grants SET revoked = 1, updated_at = ?2, grant_json = ?3 WHERE grant_id = ?1",
+                "UPDATE grants SET state = 'revoked', updated_at = ?2, grant_json = ?3 WHERE grant_id = ?1",
                 params![grant_id, now_ms(), serde_json::to_string(&revoked)?],
             )?;
             self.abort_streams_for_grant(grant_id)?;
@@ -209,6 +214,122 @@ impl Storage {
                 Err(error)
             }
         }
+    }
+
+    /// Retiring closes the original caller lifetime without discarding creation provenance.
+    /// A missing/unknown process status is not a stop receipt and cannot authorize retirement.
+    pub(crate) fn retire_grants(
+        &mut self,
+        params: &Value,
+        host_id: &str,
+    ) -> Result<Value, KernelError> {
+        use crate::model::GrantRetireTarget;
+        let target: GrantRetireTarget = serde_json::from_value(
+            params
+                .get("target")
+                .cloned()
+                .ok_or_else(|| KernelError::Protocol("retire target is required".into()))?,
+        )?;
+        let ids = match target {
+            GrantRetireTarget::Grant { grant_id } => {
+                if grant_id.is_empty() {
+                    return Err(KernelError::Protocol("grantId is required".into()));
+                }
+                vec![grant_id]
+            }
+            GrantRetireTarget::Run { run_id } => {
+                if run_id.is_empty() {
+                    return Err(KernelError::Protocol("runId is required".into()));
+                }
+                let mut q=self.conn.prepare("SELECT grant_id FROM grants WHERE host_id=?1 AND json_extract(grant_json,'$.run_id')=?2 ORDER BY grant_id")?;
+                let rows = q.query_map(params![host_id, run_id], |r| r.get::<_, String>(0))?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            }
+        };
+        // Validate all targets before closing any caller. Each transition is durable below.
+        for id in &ids {
+            self.require_retirable_grant(id, host_id)?;
+        }
+        for id in &ids {
+            self.retire_grant_id(id, host_id)?;
+        }
+        Ok(json!({"grantIds":ids}))
+    }
+    fn require_retirable_grant(&mut self, id: &str, host_id: &str) -> Result<(), KernelError> {
+        let grant = self.load_grant(id)?;
+        if grant.host_id != host_id {
+            return Err(KernelError::Authorization(
+                "grant belongs to another Host".into(),
+            ));
+        }
+        if grant.state == GrantState::Revoked {
+            return Ok(());
+        }
+        let ids = {
+            let mut q = self
+                .conn
+                .prepare("SELECT process_id FROM process_records WHERE grant_id=?1")?;
+            let rows = q.query_map([id], |r| r.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        for process_id in ids {
+            let record = self.refresh_process_record(&process_id)?.ok_or_else(|| {
+                KernelError::Storage("process receipt disappeared during grant retirement".into())
+            })?;
+            if record["writerActive"] != false
+                || !matches!(
+                    record["status"].as_str(),
+                    Some("exited" | "failed" | "released")
+                )
+            {
+                return Err(KernelError::Operation(
+                    "source grant still has an unstopped or unknown process".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+    fn retire_grant_id(&mut self, id: &str, host_id: &str) -> Result<Value, KernelError> {
+        let mut grant = self.load_grant(id)?;
+        if grant.host_id != host_id {
+            return Err(KernelError::Authorization(
+                "grant belongs to another Host".into(),
+            ));
+        }
+        if grant.state == GrantState::Revoked {
+            return Ok(json!({"grantId":id,"state":"revoked"}));
+        }
+        grant.state = GrantState::Retired;
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let result = (|| {
+            self.conn.execute(
+                "UPDATE grants SET state='retired',updated_at=?2,grant_json=?3 WHERE grant_id=?1",
+                params![id, now_ms(), serde_json::to_string(&grant)?],
+            )?;
+            self.abort_streams_for_grant(id)?;
+            self.conn
+                .execute("DELETE FROM pins WHERE grant_id=?1 AND ephemeral=1", [id])?;
+            Ok::<_, KernelError>(())
+        })();
+        if let Err(error) = result {
+            let _ = self.conn.execute_batch("ROLLBACK");
+            return Err(error);
+        }
+        self.conn.execute_batch("COMMIT")?;
+        self.computations.revoke(id);
+        self.processes.revoke_subscriptions(id);
+        self.file_leases.retain(|key, lease| {
+            if lease.grant_id != id {
+                return true;
+            }
+            if let Some(retained) = self.retained_file_leases.get_mut(key) {
+                retained.release_requested = true;
+                true
+            } else {
+                false
+            }
+        });
+        Ok(json!({"grantId":id,"state":"retired"}))
     }
 
     pub(super) fn blob_reachable(
@@ -273,8 +394,10 @@ impl Storage {
         let grant_id = grant_id
             .ok_or_else(|| KernelError::Authorization("grantId is required".to_string()))?;
         let grant = self.load_grant(grant_id)?;
-        if grant.revoked {
-            return Err(KernelError::Authorization("grant is revoked".to_string()));
+        if grant.state != GrantState::Active {
+            return Err(KernelError::Authorization(
+                "grant is retired or revoked".to_string(),
+            ));
         }
         if grant.host_id != host_id
             || grant.host_generation != host_generation

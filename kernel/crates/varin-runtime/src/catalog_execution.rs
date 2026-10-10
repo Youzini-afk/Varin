@@ -6,12 +6,34 @@ use crate::execution::*;
 use std::sync::Mutex;
 
 impl Persistence for Mutex<Catalog> {
-    fn goal_tool_allowed(&self,c:&ToolExecutionContext)->std::result::Result<bool,ExecutionError>{goals::tool_allowed(&self.lock().map_err(catalog_lock_error)?.db,c).map_err(policy_error)}
-    fn goal_context(&self,run:&str,epoch:u64)->std::result::Result<Option<goals::GoalContext>,ExecutionError>{
-        let read=self.lock().map_err(catalog_lock_error)?.capture_goal_context(run,epoch).map_err(policy_error)?;
-        read.map(|r|r.load()).transpose().map_err(policy_error)
+    fn goal_tool_allowed(
+        &self,
+        c: &ToolExecutionContext,
+    ) -> std::result::Result<bool, ExecutionError> {
+        goals::tool_allowed(&self.lock().map_err(catalog_lock_error)?.db, c).map_err(policy_error)
     }
-    fn goal_boundary(&self,run:&str,epoch:u64)->std::result::Result<goals::GoalBoundary,ExecutionError>{self.lock().map_err(catalog_lock_error)?.goal_boundary(run,epoch).map_err(policy_error)}
+    fn goal_context(
+        &self,
+        run: &str,
+        epoch: u64,
+    ) -> std::result::Result<Option<goals::GoalContext>, ExecutionError> {
+        let read = self
+            .lock()
+            .map_err(catalog_lock_error)?
+            .capture_goal_context(run, epoch)
+            .map_err(policy_error)?;
+        read.map(|r| r.load()).transpose().map_err(policy_error)
+    }
+    fn goal_boundary(
+        &self,
+        run: &str,
+        epoch: u64,
+    ) -> std::result::Result<goals::GoalBoundary, ExecutionError> {
+        self.lock()
+            .map_err(catalog_lock_error)?
+            .goal_boundary(run, epoch)
+            .map_err(policy_error)
+    }
 
     fn resume_tool(
         &self,
@@ -311,7 +333,8 @@ impl Persistence for Mutex<Catalog> {
         let preparation = self
             .lock()
             .map_err(catalog_lock_error)?
-            .prepare_policy_graph_schemas(run, epoch).map_err(policy_error)?;
+            .prepare_policy_graph_schemas(run, epoch)
+            .map_err(policy_error)?;
         let schemas = preparation.load(intent).map_err(policy_error)?;
         let read = self
             .lock()
@@ -485,7 +508,10 @@ impl Persistence for Mutex<Catalog> {
         });
         match result {
             Ok(()) => Ok(()),
-            Err(RuntimeError::GoalChanged) => Err(ExecutionError::new("goal_changed","Goal authorization or constraints changed")),
+            Err(RuntimeError::GoalChanged) => Err(ExecutionError::new(
+                "goal_changed",
+                "Goal authorization or constraints changed",
+            )),
             Err(RuntimeError::DispatchCancelled) => Err(ExecutionError::new(
                 "dispatch_cancelled",
                 "tool dispatch cancelled before executor entry",
@@ -526,7 +552,9 @@ impl Persistence for Mutex<Catalog> {
 }
 fn policy_error(error: RuntimeError) -> ExecutionError {
     ExecutionError::new(
-        if matches!(error,RuntimeError::GoalChanged){"goal_changed"} else if matches!(error, RuntimeError::InputPending) {
+        if matches!(error, RuntimeError::GoalChanged) {
+            "goal_changed"
+        } else if matches!(error, RuntimeError::InputPending) {
             "input_pending"
         } else {
             "policy_graph"
@@ -578,7 +606,7 @@ fn append_item(
         ));
     }
     let stored = HistoryItem {
-                run_id: run.id.clone(),
+        run_id: run.id.clone(),
         id: id.into(),
         thread_id: run.thread_id.clone(),
         parent: head,
@@ -588,7 +616,13 @@ fn append_item(
     };
     tx.execute(
         "INSERT INTO history(id,thread_id,parent,body,run_id) VALUES(?1,?2,?3,?4,?5)",
-        params![stored.id, stored.thread_id, stored.parent, encode(&stored)?, run.id],
+        params![
+            stored.id,
+            stored.thread_id,
+            stored.parent,
+            encode(&stored)?,
+            run.id
+        ],
     )?;
     tx.execute(
         "UPDATE branches SET head=?2 WHERE id=?1",
@@ -671,8 +705,12 @@ impl ExecutionBodyPreparation {
     fn write(self, record: &ExecutionRecord) -> Result<PreparedExecutionBodies> {
         let request = match record {
             ExecutionRecord::RequestPrepared { snapshot } => {
-                if snapshot.view.binding.resource_activations != resources::retained_activations(&snapshot.view.history) {
-                    return Err(RuntimeError::Conflict("request skill bindings differ from retained input material".into()));
+                if snapshot.view.binding.resource_activations
+                    != resources::retained_activations(&snapshot.view.history)
+                {
+                    return Err(RuntimeError::Conflict(
+                        "request skill bindings differ from retained input material".into(),
+                    ));
                 }
                 Some(self.content.save(&serde_json::to_value(snapshot)?)?)
             }
@@ -847,7 +885,7 @@ impl ExecutionBodyPreparation {
             policy_continuation,
             calls,
             admitted,
-            frozen_goal:snapshot.as_ref().and_then(|s|s.view.binding.goal.clone()),
+            frozen_goal: snapshot.as_ref().and_then(|s| s.view.binding.goal.clone()),
             frozen_history_range,
             memory_deliveries,
             history,
@@ -1102,19 +1140,26 @@ impl Catalog {
                     && matches!(
                         state,
                         RunState::Waiting | RunState::Completed | RunState::Failed
-                    ) && !waiting_on.as_deref().is_some_and(|id|id.starts_with("goal-wait:"))
+                    )
+                    && !waiting_on
+                        .as_deref()
+                        .is_some_and(|id| id.starts_with("goal-wait:"))
                 {
                     super::policy_checkpoint::consume(&tx, run_id)?;
                 }
                 run.state = *state;
-                if *state == RunState::Cancelled { super::followups::cancel_source_run(&tx, run_id)?; }
-                if state.terminal() { super::followups::settle_run(&tx, &run)?; }
+                if *state == RunState::Cancelled && !run.cancel_requested {
+                    super::followups::cancel_source_run(&tx, run_id)?;
+                }
+                if state.terminal() {
+                    super::followups::settle_run(&tx, &run)?;
+                }
                 run.waiting_on = waiting_on.clone();
                 run.revision += 1;
                 put(&tx, "runs", run_id, &run)?;
             }
             ExecutionRecord::RequestPrepared { snapshot } => {
-                goals::check_dispatch(&tx,run_id,snapshot.view.binding.goal.as_ref())?;
+                goals::check_dispatch(&tx, run_id, snapshot.view.binding.goal.as_ref())?;
                 if let Some(launch) = optional_record::<super::launch_content::LaunchMetadata>(
                     &tx,
                     "run_launches",
@@ -1122,7 +1167,7 @@ impl Catalog {
                 )? {
                     if launch.dispatch_context_ref != snapshot.view.binding.child_dispatch
                         || launch.selection.tool_schema_generation
-                        != snapshot.view.binding.tool_schema_generation
+                            != snapshot.view.binding.tool_schema_generation
                         || Some(&launch.selection.tools_ref) != tools_ref.as_ref()
                     {
                         return Err(RuntimeError::Conflict(
@@ -1163,7 +1208,8 @@ impl Catalog {
                     ));
                 }
                 let step = ModelStep {
-                    goal: None, superseded_by_input: None,
+                    goal: None,
+                    superseded_by_input: None,
                     id: snapshot.view.request_id.clone(),
                     run_id: run_id.into(),
                     epoch,
@@ -1204,8 +1250,10 @@ impl Catalog {
                 {
                     return Err(RuntimeError::Conflict("model cannot dispatch".into()));
                 }
-                step.goal=goals::check_dispatch(&tx,run_id,frozen_goal.as_ref())?;
-                if let Some(goal)=&step.goal{goals::dispatched(&tx,goal)?;}
+                step.goal = goals::check_dispatch(&tx, run_id, frozen_goal.as_ref())?;
+                if let Some(goal) = &step.goal {
+                    goals::dispatched(&tx, goal)?;
+                }
                 step.state = ModelStepState::Dispatched;
                 put(&tx, "model_steps", request_id, &step)?;
                 tx.execute(
@@ -1254,7 +1302,7 @@ impl Catalog {
                 step.original = prepared_originals.ok_or_else(|| {
                     RuntimeError::Invalid("prepared model originals missing".into())
                 })?;
-                goals::measured(&tx,step.goal.as_ref(),usage)?;
+                goals::measured(&tx, step.goal.as_ref(), usage)?;
                 step.usage = Some(serde_json::to_value(usage)?);
                 put(&tx, "model_steps", request_id, &step)?;
                 tx.execute(
@@ -1390,7 +1438,10 @@ impl Catalog {
                 {
                     return Err(RuntimeError::Conflict("tool no longer admitted".into()));
                 }
-                if op.cancel_requested || run.cancel_requested || !goals::tool_allowed(&tx,context)? {
+                if op.cancel_requested
+                    || run.cancel_requested
+                    || !goals::tool_allowed(&tx, context)?
+                {
                     return Err(RuntimeError::DispatchCancelled);
                 }
                 let tool: ToolIntent = serde_json::from_value(op.intent.clone())?;
@@ -1768,8 +1819,13 @@ impl Catalog {
                 ExecutionRecord::PolicyDecisionConsumed { .. } => "policy_decision_consumed",
             }}),
         )?;
-        if matches!(record,ExecutionRecord::StateChanged{..}|ExecutionRecord::ContextPreparationFailed{..}) {
-            if run.state.terminal(){goals::settle_run(&tx,&run)?;}
+        if matches!(
+            record,
+            ExecutionRecord::StateChanged { .. } | ExecutionRecord::ContextPreparationFailed { .. }
+        ) {
+            if run.state.terminal() {
+                goals::settle_run(&tx, &run)?;
+            }
         }
         tx.commit()?;
         if let ExecutionRecord::ToolSettled { context, .. } = record {
@@ -1935,23 +1991,28 @@ pub(super) fn user_input_items(id: &str, input: &Value) -> Result<Vec<Conversati
         return Err(RuntimeError::Invalid("user input has no content".into()));
     }
     let last = parts.len() - 1;
-    let mut items: Vec<ConversationItem> = resources::invocations(input)?.iter().map(|entry| entry.project(id)).collect();
-    items.extend(parts
-        .into_iter()
-        .enumerate()
-        .map(|(index, content)| ConversationItem {
-            resource_activation: None,
-            id: if index == last {
-                id.into()
-            } else {
-                format!("{id}:part:{index}")
-            },
-            provenance: Provenance::UserInstruction {
-                input_id: id.into(),
-            },
-            content,
-            opaque: None,
-        }));
+    let mut items: Vec<ConversationItem> = resources::invocations(input)?
+        .iter()
+        .map(|entry| entry.project(id))
+        .collect();
+    items.extend(
+        parts
+            .into_iter()
+            .enumerate()
+            .map(|(index, content)| ConversationItem {
+                resource_activation: None,
+                id: if index == last {
+                    id.into()
+                } else {
+                    format!("{id}:part:{index}")
+                },
+                provenance: Provenance::UserInstruction {
+                    input_id: id.into(),
+                },
+                content,
+                opaque: None,
+            }),
+    );
     Ok(items)
 }
 
@@ -2077,12 +2138,24 @@ impl Catalog {
         {
             return Ok(());
         }
-        let previous:Option<String>=tx.query_row("SELECT body FROM model_outputs WHERE request_id=?1",[request_id],|r|r.get(0)).optional()?;
-        if let Some(previous)=previous {
-            if serde_json::from_str::<Value>(&previous)?!=output||step.usage.as_ref()!=Some(&serde_json::to_value(usage)?){return Err(RuntimeError::Conflict("original rejected model receipt changed".into()));}
+        let previous: Option<String> = tx
+            .query_row(
+                "SELECT body FROM model_outputs WHERE request_id=?1",
+                [request_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(previous) = previous {
+            if serde_json::from_str::<Value>(&previous)? != output
+                || step.usage.as_ref() != Some(&serde_json::to_value(usage)?)
+            {
+                return Err(RuntimeError::Conflict(
+                    "original rejected model receipt changed".into(),
+                ));
+            }
             return Ok(());
         }
-        goals::measured(&tx,step.goal.as_ref(),usage)?;
+        goals::measured(&tx, step.goal.as_ref(), usage)?;
         step.original = originals;
         step.usage = Some(serde_json::to_value(usage)?);
         put(&tx, "model_steps", request_id, &step)?;
@@ -2273,7 +2346,10 @@ impl Catalog {
                 "job is already settled with another receipt".into(),
             ));
         }
-        let previously_stopped = op.external_receipt.as_ref().is_some_and(|old| old.executor_stopped);
+        let previously_stopped = op
+            .external_receipt
+            .as_ref()
+            .is_some_and(|old| old.executor_stopped);
         receipt.executor_stopped |= previously_stopped;
         op.external_receipt = Some(receipt.clone());
         op.revision += 1;
@@ -2347,7 +2423,9 @@ impl Catalog {
             )?;
         }
         tx.commit()?;
-        for operation in &operations {self.release_stopped_resource_owner(&operation.id)?;}
+        for operation in &operations {
+            self.release_stopped_resource_owner(&operation.id)?;
+        }
         Ok(())
     }
     fn release_stopped_resource_owner(&self, owner: &str) -> Result<()> {

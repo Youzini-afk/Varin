@@ -263,7 +263,7 @@ ordinary message input. There is no Host Goal database, inferred authorization o
 Start/update return only their accepted identity/revision/generation/control. Control has the same
 short receipt contract and never hydrates large objective/report bodies before pause/cancel. Snapshot
 reads hydrate current Goals and select the displayed branch. `goal.run_ready` joins the existing
-single-flight launch consumer; new occurrence Runs still use `followup.admitted`. Startup discovery
+single-flight launch consumer; message/follow-up occurrence Runs use `ingress.run_ready`. Startup discovery
 reuses saved launches and the same credential/preparation owner.
 
 The shared Goal panel keeps unsaved drafts and their original editing revision across background

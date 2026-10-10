@@ -25,17 +25,41 @@ pub struct QueuedInput {
 }
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum InputActivation { Activating, Passive }
+pub enum InputActivation {
+    Activating,
+    Passive,
+}
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum InputOrigin {
     UserIngress,
-    Message { identity: super::messages::MessageIdentity, command_key: String, activation: super::messages::MessageActivationFact },
+    Followup {
+        followup_id: String,
+        occurrence_id: String,
+        generation: u64,
+        activation: super::activation::IngressActivationFact,
+        goal: Option<super::goals::FrozenGoal>,
+    },
+    Message {
+        identity: super::messages::MessageIdentity,
+        command_key: String,
+        activation: super::messages::IngressActivationFact,
+    },
 }
 impl InputOrigin {
-    pub fn is_user_ingress(&self) -> bool { matches!(self, Self::UserIngress) }
+    pub fn is_user_ingress(&self) -> bool {
+        matches!(self, Self::UserIngress)
+    }
     pub(super) fn history_source(&self) -> HistorySource {
-        match self { Self::Message { identity, .. } if matches!(identity.actor, super::messages::MessageActor::Agent { .. }) => HistorySource::Agent, _ => HistorySource::User }
+        match self {
+            Self::Followup { .. } => HistorySource::Environment,
+            Self::Message { identity, .. }
+                if matches!(identity.actor, super::messages::MessageActor::Agent { .. }) =>
+            {
+                HistorySource::Agent
+            }
+            _ => HistorySource::User,
+        }
     }
 }
 /// Queue ownership is independent of its immutable user-content body.
@@ -55,12 +79,18 @@ pub struct QueuedInputMetadata {
 }
 impl QueuedInputMetadata {
     fn with_content(self, content: Value) -> Result<QueuedInput> {
-        if !self.origin.is_user_ingress() { return Err(RuntimeError::Invalid("message records use the read-only message API".into())); }
+        if !self.origin.is_user_ingress() {
+            return Err(RuntimeError::Invalid(
+                "message records use the read-only message API".into(),
+            ));
+        }
         Ok(QueuedInput {
             id: self.id,
             thread_id: self.thread_id,
             branch_id: self.branch_id,
-            run_id: self.run_id.ok_or_else(|| RuntimeError::Invalid("user input Run is missing".into()))?,
+            run_id: self
+                .run_id
+                .ok_or_else(|| RuntimeError::Invalid("user input Run is missing".into()))?,
             mode: self.mode,
             state: self.state,
             revision: self.revision,
@@ -121,9 +151,9 @@ pub(super) fn initialize(tx: &Transaction<'_>) -> Result<()> {
                     "input queue exists without its schema identity".into(),
                 ));
             }
-            tx.execute_batch("CREATE TABLE input_queue(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),run_id TEXT REFERENCES runs(id),mode TEXT NOT NULL,state TEXT NOT NULL,cursor INTEGER NOT NULL,origin TEXT NOT NULL,activation TEXT NOT NULL,sender_thread_id TEXT,sender_branch_id TEXT,body TEXT NOT NULL); CREATE INDEX input_queue_pending ON input_queue(branch_id,state,activation,cursor); CREATE INDEX input_queue_outgoing ON input_queue(sender_thread_id,sender_branch_id,cursor); INSERT INTO runtime_domains(name,version) VALUES('input_queue',4);")?;
+            tx.execute_batch("CREATE TABLE input_queue(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),run_id TEXT REFERENCES runs(id),mode TEXT NOT NULL,state TEXT NOT NULL,cursor INTEGER NOT NULL,origin TEXT NOT NULL,activation TEXT NOT NULL,sender_thread_id TEXT,sender_branch_id TEXT,body TEXT NOT NULL); CREATE INDEX input_queue_pending ON input_queue(branch_id,state,activation,cursor); CREATE INDEX input_queue_outgoing ON input_queue(sender_thread_id,sender_branch_id,cursor); INSERT INTO runtime_domains(name,version) VALUES('input_queue',5);")?;
         }
-        Some(4) => check_format(tx)?,
+        Some(5) => check_format(tx)?,
         Some(version) => {
             return Err(RuntimeError::Invalid(format!(
                 "unsupported input queue domain version {version}; data was preserved"
@@ -140,7 +170,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             |row| row.get(0),
         )
         .optional()?;
-    if version != Some(4) {
+    if version != Some(5) {
         return Err(RuntimeError::Invalid(
             "unsupported input queue format; data was preserved".into(),
         ));
@@ -190,13 +220,17 @@ pub(super) fn write_input(tx: &Transaction<'_>, input: &QueuedInputMetadata) -> 
         params![
             input.id,
             encode(&input.state)?.trim_matches('"'),
-            encode(input)?, input.run_id
+            encode(input)?,
+            input.run_id
         ],
     )?;
     Ok(())
 }
 impl Catalog {
-    pub fn admit_queued_input(&mut self, prepared: PreparedQueueInput) -> Result<QueuedInputAdmission> {
+    pub fn admit_queued_input(
+        &mut self,
+        prepared: PreparedQueueInput,
+    ) -> Result<QueuedInputAdmission> {
         let PreparedQueueInput {
             identity: command,
             epoch,
@@ -226,12 +260,24 @@ impl Catalog {
                     "input key has different content or mode".into(),
                 ));
             }
-            return Ok(QueuedInputAdmission { receipt: serde_json::from_str(&receipt)?, accepted: false });
+            return Ok(QueuedInputAdmission {
+                receipt: serde_json::from_str(&receipt)?,
+                accepted: false,
+            });
         }
         if let Some(expected) = checkpoint {
-            let active: Option<String> = tx.query_row("SELECT checkpoint_id FROM active_contexts WHERE branch_id=?1",
-                [&command.branch_id], |row| row.get(0)).optional()?;
-            if active != expected { return Err(RuntimeError::Conflict("input resource context changed during preparation".into())); }
+            let active: Option<String> = tx
+                .query_row(
+                    "SELECT checkpoint_id FROM active_contexts WHERE branch_id=?1",
+                    [&command.branch_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if active != expected {
+                return Err(RuntimeError::Conflict(
+                    "input resource context changed during preparation".into(),
+                ));
+            }
         }
         let delegated: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM child_tasks WHERE child_thread_id=?1)",
@@ -259,10 +305,34 @@ impl Catalog {
             return Err(RuntimeError::Conflict("active Run is closing".into()));
         }
         if delegated {
-            let run=owner.as_ref().filter(|_|command.mode!=InputMode::NextRun).ok_or_else(||RuntimeError::Invalid("delegated next Run requires an explicit continuation admission".into()))?;
-            let raw:Option<String>=tx.query_row("SELECT body FROM delegated_executions WHERE run_id=?1",[&run.id],|row|row.get(0)).optional()?;
-            let execution:delegated::DelegatedExecution=raw.map(|raw|serde_json::from_str(&raw)).transpose()?.ok_or_else(||RuntimeError::Conflict("active delegated Run has no exact execution admission".into()))?;
-            if execution.cancel_requested || execution.report.is_some(){return Err(RuntimeError::Conflict("delegated execution is closing".into()));}
+            let run = owner
+                .as_ref()
+                .filter(|_| command.mode != InputMode::NextRun)
+                .ok_or_else(|| {
+                    RuntimeError::Invalid(
+                        "delegated next Run requires an explicit continuation admission".into(),
+                    )
+                })?;
+            let raw: Option<String> = tx
+                .query_row(
+                    "SELECT body FROM delegated_executions WHERE run_id=?1",
+                    [&run.id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let execution: delegated::DelegatedExecution = raw
+                .map(|raw| serde_json::from_str(&raw))
+                .transpose()?
+                .ok_or_else(|| {
+                    RuntimeError::Conflict(
+                        "active delegated Run has no exact execution admission".into(),
+                    )
+                })?;
+            if execution.cancel_requested || execution.report.is_some() {
+                return Err(RuntimeError::Conflict(
+                    "delegated execution is closing".into(),
+                ));
+            }
         }
         let predecessor: Option<Run> = if owner.is_some() {
             owner.clone()
@@ -410,8 +480,8 @@ impl Catalog {
         )?;
         if immediate {
             let run: Run = record(&tx, "runs", &run_id)?;
-            super::messages::activation::bind_pending(&tx,&run)?;
-            super::goals::bind_admission(&tx,&run)?;
+            super::activation::bind_pending(&tx, &run)?;
+            super::goals::bind_admission(&tx, &run)?;
             deliver(&tx, &run, &input)?;
             tx.execute(
                 "UPDATE branches SET active_run=?2 WHERE id=?1",
@@ -436,12 +506,19 @@ impl Catalog {
             params![command.key, encoded, encode(&receipt)?],
         )?;
         tx.commit()?;
-        Ok(QueuedInputAdmission { receipt, accepted: true })
+        Ok(QueuedInputAdmission {
+            receipt,
+            accepted: true,
+        })
     }
     pub fn cancel_input(&mut self, id: &str, revision: u64) -> Result<QueuedInputRead> {
         let tx = self.db.transaction()?;
         let mut input: QueuedInputMetadata = record(&tx, "input_queue", id)?;
-        if !input.origin.is_user_ingress() { return Err(RuntimeError::Invalid("messages are immutable and cannot be cancelled as user input".into())); }
+        if !input.origin.is_user_ingress() {
+            return Err(RuntimeError::Invalid(
+                "messages are immutable and cannot be cancelled as user input".into(),
+            ));
+        }
         if input.state == InputState::Cancelled {
             drop(tx);
             return self.capture_queued_input(id);
@@ -455,7 +532,14 @@ impl Catalog {
         input.revision += 1;
         write_input(&tx, &input)?;
         if input.mode == InputMode::NextRun {
-            let mut run: Run = record(&tx, "runs", input.run_id.as_deref().ok_or_else(|| RuntimeError::Invalid("user input Run is missing".into()))?)?;
+            let mut run: Run = record(
+                &tx,
+                "runs",
+                input
+                    .run_id
+                    .as_deref()
+                    .ok_or_else(|| RuntimeError::Invalid("user input Run is missing".into()))?,
+            )?;
             super::policy_switch::close_run_candidate(&tx, &run.id, run.revision + 1)?;
             run.state = RunState::Cancelled;
             run.cancel_requested = true;
@@ -484,21 +568,33 @@ impl Catalog {
         }
         let tx = self.db.transaction()?;
         let run = bodies::validate_delivery(&tx, &captured.id, captured.epoch, head.as_deref())?;
-        if super::observations::next(&tx, &run.id)?.is_some() { return Ok(Some(InputBatch::default())); }
+        if super::observations::next(&tx, &run.id)?.is_some() {
+            return Ok(Some(InputBatch::default()));
+        }
         for input in &queued {
             let current: QueuedInputMetadata = record(&tx, "input_queue", &input.id)?;
             if current != *input
                 || current.state != InputState::Queued
                 || current.mode == InputMode::NextRun
                 || current.branch_id != run.branch_id
-                || (current.activation == InputActivation::Activating && current.run_id.as_deref() != Some(run.id.as_str()))
+                || (current.activation == InputActivation::Activating
+                    && current.run_id.as_deref() != Some(run.id.as_str()))
             {
                 return Ok(None);
             }
+            if followups::ingress_hold(&tx, input, Some(&run))?.is_some() {
+                return Ok(None);
+            }
         }
-        let input_ids = queued.iter().filter(|input| input.activation == InputActivation::Activating).map(|input| input.id.clone()).collect::<Vec<_>>();
+        let input_ids = queued
+            .iter()
+            .filter(|input| input.activation == InputActivation::Activating)
+            .map(|input| input.id.clone())
+            .collect::<Vec<_>>();
         let activating = !input_ids.is_empty();
-        if activating {super::goals::detach_ended_for_input(&tx,&run.id)?;}
+        if activating {
+            super::goals::detach_ended_for_input(&tx, &run.id)?;
+        }
         let superseding = input_ids.last().cloned();
         for input in queued {
             deliver(&tx, &run, &input)?;
@@ -519,7 +615,11 @@ impl Catalog {
             }
         }
         tx.commit()?;
-        Ok(Some(InputBatch { items, input_ids, activating }))
+        Ok(Some(InputBatch {
+            items,
+            input_ids,
+            activating,
+        }))
     }
 }
 fn deliver(tx: &Transaction<'_>, run: &Run, input: &QueuedInputMetadata) -> Result<()> {
@@ -535,7 +635,7 @@ fn deliver(tx: &Transaction<'_>, run: &Run, input: &QueuedInputMetadata) -> Resu
         |row| row.get(0),
     )?;
     let item = HistoryItem {
-                run_id: run.id.clone(),
+        run_id: run.id.clone(),
         id: input.id.clone(),
         thread_id: run.thread_id.clone(),
         parent,
@@ -559,11 +659,16 @@ fn deliver(tx: &Transaction<'_>, run: &Run, input: &QueuedInputMetadata) -> Resu
         tx,
         &run.id,
         run.revision,
-        if input.activation == InputActivation::Activating { "input.delivered" } else { "message.delivered" },
+        if input.activation == InputActivation::Activating {
+            "input.delivered"
+        } else {
+            "message.delivered"
+        },
         json!({"input_id":input.id,"mode":input.mode}),
     )?;
     input.delivered_cursor = Some(cursor);
     write_input(tx, &input)?;
+    followups::delivered(tx, &input)?;
     Ok(())
 }
 /// Called in the terminating Run's transaction, after releasing its branch execution owner.
@@ -582,15 +687,22 @@ pub(super) fn promote_next(tx: &Transaction<'_>, branch: &str) -> Result<Option<
             return Ok(None);
         };
         let mut input: QueuedInputMetadata = serde_json::from_str(&raw)?;
-        let mut run: Run = record(tx, "runs", input.run_id.as_deref().ok_or_else(|| RuntimeError::Invalid("queued Run is missing".into()))?)?;
+        let mut run: Run = record(
+            tx,
+            "runs",
+            input
+                .run_id
+                .as_deref()
+                .ok_or_else(|| RuntimeError::Invalid("queued Run is missing".into()))?,
+        )?;
         if run.cancel_requested || run.state.terminal() {
             input.state = InputState::Cancelled;
             input.revision += 1;
             write_input(tx, &input)?;
             continue;
         }
-        super::goals::bind_admission(tx,&run)?;
-        super::messages::activation::bind_pending(tx,&run)?;
+        super::goals::bind_admission(tx, &run)?;
+        super::activation::bind_pending(tx, &run)?;
         deliver(tx, &run, &input)?;
         run.revision += 1;
         put(tx, "runs", &run.id, &run)?;
@@ -609,14 +721,24 @@ pub(super) fn promote_next(tx: &Transaction<'_>, branch: &str) -> Result<Option<
     }
 }
 
-pub(super) fn has_boundary_inputs(tx: &Connection, run_id: &str) -> Result<bool> {
-    Ok(tx.query_row("SELECT EXISTS(SELECT 1 FROM input_queue WHERE run_id=?1 AND state='queued' AND mode!='next_run' AND activation='activating')",[run_id],|row|row.get(0))?)
+pub(super) fn has_boundary_inputs(db: &Connection, run_id: &str) -> Result<bool> {
+    let run: Run = record(db, "runs", run_id)?;
+    let mut q=db.prepare("SELECT body FROM input_queue WHERE run_id=?1 AND state='queued' AND mode!='next_run' AND activation='activating'")?;
+    let rows = q.query_map([run_id], |r| r.get::<_, String>(0))?;
+    for raw in rows {
+        let row: QueuedInputMetadata = serde_json::from_str(&raw?)?;
+        if followups::ingress_hold(db, &row, Some(&run))?.is_none() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 pub(super) fn cancel_current(tx: &Transaction<'_>, run_id: &str) -> Result<()> {
-    super::messages::activation::cancel_run(tx,run_id)?;
+    super::activation::cancel_run(tx, run_id)?;
     let inputs: Vec<QueuedInputMetadata> = {
-        let mut statement =
-            tx.prepare("SELECT body FROM input_queue WHERE run_id=?1 AND state='queued' AND origin='user'")?;
+        let mut statement = tx.prepare(
+            "SELECT body FROM input_queue WHERE run_id=?1 AND state='queued' AND origin='user'",
+        )?;
         let rows = statement.query_map([run_id], |row| row.get::<_, String>(0))?;
         let mut result = Vec::new();
         for row in rows {

@@ -85,9 +85,10 @@ it('public User continuation preserves exact predecessor and input without selec
   // Durable exactly-once acceptance remains the Rust owner's independently tested responsibility.
 });
 
-it.each(['user_continuation', 'message_request'] as const)('startup %s re-admits the exact fixed result and context without claiming the old handoff or promoting Agent input', async kind => {
+it.each(['user_continuation', 'message_request', 'followup'] as const)('startup %s re-admits the exact fixed result and context without claiming the old handoff or promoting Agent input', async kind => {
   const child = execution();
   if (kind === 'message_request') child.trigger = { kind, message_id: 'message:original', previous_execution_id: 'original-dispatch', previous_run_id: 'old-run', previous_run_revision: 9, expected_head: 'old-head' };
+  if (kind === 'followup') child.trigger = { kind, followup_id: 'followup:original', occurrence_id: 'occurrence:original', input_id: 'input:original', previous_execution_id: 'original-dispatch', previous_run_id: 'old-run', previous_run_revision: 9, expected_head: 'old-head' };
   const errors: unknown[] = [];
   const checkpoint = { id: 'checkpoint:original', revision: 4, proposal: { through_id: 'compacted-head', summary: 'Original summary' } };
   const context = { effectiveSystemPrompt: 'Original child role', instructionSources: [], memoryCheckpoint: 'old-memory', resources: { snapshot: { id: 'new-fixed-resources' } } };
@@ -126,7 +127,7 @@ it.each(['user_continuation', 'message_request'] as const)('startup %s re-admits
     expect(store.createBranchFromPin.mock.calls[0]![1]).toBe('child-source:execution:new');
     expect(runtime.prepareChild).toHaveBeenCalledWith(expect.objectContaining({ executionId: child.execution_id,
       expectedContextCheckpoint: checkpoint.id, context, ...(kind === 'user_continuation' ? { inputPreparation: { expectedContextCheckpoint: null, skill } } : {}) }), expect.any(AbortSignal));
-    if (kind === 'message_request') {
+    if (kind !== 'user_continuation') {
       expect(prepareSkillInput).not.toHaveBeenCalled();
       expect(runtime.prepareChild.mock.calls[0]![0]).not.toHaveProperty('inputPreparation');
     }

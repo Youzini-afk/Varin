@@ -992,66 +992,226 @@ fn new_user_execution_leaves_ended_goal_behind_but_preserves_active_pause_and_bu
     }
 }
 
-fn request_child(f:&mut Fixture,child:&ChildTask,key:&str)->varin_runtime::catalog::messages::MessageReceipt {
+fn request_child(
+    f: &mut Fixture,
+    child: &ChildTask,
+    key: &str,
+) -> varin_runtime::catalog::messages::MessageReceipt {
     use varin_runtime::catalog::messages::*;
-    let prepared=f.db.prepare_user_message(key.into(),child.parent_thread_id.clone(),child.parent_branch_id.clone(),MessageInput{wait:None,target_thread_id:Some(child.child_thread_id.clone()),target_branch_id:Some(child.child_branch_id.clone()),reply_to:None,kind:MessageKind::Request,text:"/skill:ordinary-text does not acquire an explicit User skill".into()}).unwrap().load().unwrap();
+    let prepared =
+        f.db.prepare_user_message(
+            key.into(),
+            child.parent_thread_id.clone(),
+            child.parent_branch_id.clone(),
+            MessageInput {
+                wait: None,
+                target_thread_id: Some(child.child_thread_id.clone()),
+                target_branch_id: Some(child.child_branch_id.clone()),
+                reply_to: None,
+                kind: MessageKind::Request,
+                text: "/skill:ordinary-text does not acquire an explicit User skill".into(),
+            },
+        )
+        .unwrap()
+        .load()
+        .unwrap();
     f.db.admit_message(prepared).unwrap().receipt
 }
 #[test]
 fn directed_request_reuses_delegated_source_and_original_message_history_without_user_conversion() {
-    use varin_runtime::catalog::messages::{MessageActivation,activation::RequestActivationAdmission};
-    for isolated in [false,true] {
-    let mut f=if isolated {Fixture::new_isolated()} else {Fixture::new()};let child=first(&mut f);finish(&mut f.db,&child,Some("first report"));
-    let fixed=isolated.then(||result(&mut f.db,&child,Effect::Unknown));
-    let previous=f.db.delegated_execution(&child.execution_id).unwrap();
-    let message=request_child(&mut f,&child,"child-request");
-    let candidate=f.db.capture_request_activations().unwrap().pop().unwrap().load().unwrap();
-    let RequestActivationAdmission::Delegated(id)=f.db.admit_request_activation(candidate).unwrap() else{panic!("delegated request")};
-    let next=f.db.delegated_execution(&id).unwrap();
-    if let Some(fixed)=&fixed {assert!(matches!(&next.source_basis,Some(ChildSourceBasis::WorkingResult{result,..}) if result==fixed));}
-    assert!(matches!(&next.trigger,DelegatedTrigger::MessageRequest{message_id,previous_run_id,..} if message_id==&message.identity.message_id && previous_run_id==&child.receipt.as_ref().unwrap().run_id));
-    let read=f.db.capture_message(&child.child_thread_id,&child.child_branch_id,&message.identity.message_id).unwrap().load().unwrap();
-    assert!(matches!(read.summary.activation,MessageActivation::Pending{execution_id:Some(ref execution),..} if execution==&id));
-    assert_eq!(read.summary.state,InputState::Queued);
-    let root=f.root.clone();drop(f);let mut db=Catalog::open(&root).unwrap();
-    let next=db.delegated_execution(&id).unwrap();let source=ready_source(&mut db,&next);let current=prepare(&mut db,&next,source);
-    let receipt=current.receipt.as_ref().unwrap();assert_eq!(receipt.input_id,message.identity.message_id);
-    let history=db.history(&child.child_branch_id).unwrap();assert_eq!(history.last().unwrap().id,message.identity.message_id);assert_eq!(history.last().unwrap().source,HistorySource::User);
-    let content=db.execution_history(&child.child_branch_id).unwrap();let item=content.last().unwrap();assert!(matches!(item.provenance,Provenance::UserInstruction{..}));assert!(item.resource_activation.is_none());
-    assert_eq!(db.delegated_execution(&child.execution_id).unwrap(),previous);
-    finish(&mut db,&current,None);
-    assert_eq!(db.delegated_execution(&id).unwrap().report.unwrap().outcome,Outcome::Failed);
-    assert_eq!(db.delegated_execution(&child.execution_id).unwrap(),previous);
-    assert!(db.capture_request_activations().unwrap().is_empty());drop(db);std::fs::remove_dir_all(root).unwrap();    }
+    use varin_runtime::catalog::{
+        activation::RequestActivationAdmission, messages::MessageActivation,
+    };
+    for isolated in [false, true] {
+        let mut f = if isolated {
+            Fixture::new_isolated()
+        } else {
+            Fixture::new()
+        };
+        let child = first(&mut f);
+        finish(&mut f.db, &child, Some("first report"));
+        let fixed = isolated.then(|| result(&mut f.db, &child, Effect::Unknown));
+        let previous = f.db.delegated_execution(&child.execution_id).unwrap();
+        let message = request_child(&mut f, &child, "child-request");
+        let candidate =
+            f.db.capture_request_activations()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .load()
+                .unwrap();
+        let RequestActivationAdmission::Delegated(id) =
+            f.db.admit_request_activation(candidate).unwrap()
+        else {
+            panic!("delegated request")
+        };
+        let next = f.db.delegated_execution(&id).unwrap();
+        if let Some(fixed) = &fixed {
+            assert!(
+                matches!(&next.source_basis,Some(ChildSourceBasis::WorkingResult{result,..}) if result==fixed)
+            );
+        }
+        assert!(
+            matches!(&next.trigger,DelegatedTrigger::MessageRequest{message_id,previous_run_id,..} if message_id==&message.identity.message_id && previous_run_id==&child.receipt.as_ref().unwrap().run_id)
+        );
+        let read =
+            f.db.capture_message(
+                &child.child_thread_id,
+                &child.child_branch_id,
+                &message.identity.message_id,
+            )
+            .unwrap()
+            .load()
+            .unwrap();
+        assert!(
+            matches!(read.summary.activation,MessageActivation::Pending{execution_id:Some(ref execution),..} if execution==&id)
+        );
+        assert_eq!(read.summary.state, InputState::Queued);
+        let root = f.root.clone();
+        drop(f);
+        let mut db = Catalog::open(&root).unwrap();
+        let next = db.delegated_execution(&id).unwrap();
+        let source = ready_source(&mut db, &next);
+        let current = prepare(&mut db, &next, source);
+        let receipt = current.receipt.as_ref().unwrap();
+        assert_eq!(receipt.input_id, message.identity.message_id);
+        let history = db.history(&child.child_branch_id).unwrap();
+        assert_eq!(history.last().unwrap().id, message.identity.message_id);
+        assert_eq!(history.last().unwrap().source, HistorySource::User);
+        let content = db.execution_history(&child.child_branch_id).unwrap();
+        let item = content.last().unwrap();
+        assert!(matches!(
+            item.provenance,
+            Provenance::UserInstruction { .. }
+        ));
+        assert!(item.resource_activation.is_none());
+        assert_eq!(
+            db.delegated_execution(&child.execution_id).unwrap(),
+            previous
+        );
+        finish(&mut db, &current, None);
+        assert_eq!(
+            db.delegated_execution(&id).unwrap().report.unwrap().outcome,
+            Outcome::Failed
+        );
+        assert_eq!(
+            db.delegated_execution(&child.execution_id).unwrap(),
+            previous
+        );
+        assert!(db.capture_request_activations().unwrap().is_empty());
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[test]
 fn pending_request_child_tree_cancel_fences_staged_source_and_later_new_intent_is_independent() {
-    use varin_runtime::catalog::messages::activation::RequestActivationAdmission;
-    let mut f=Fixture::new();let child=first(&mut f);finish(&mut f.db,&child,Some("fixed report"));
-    let old=request_child(&mut f,&child,"old-request");let late=f.db.capture_request_activations().unwrap().pop().unwrap().load().unwrap();
-    f.db.cancel_tree(TreeCancelTarget::Child{operation_id:child.operation_id.clone()}).unwrap();
-    assert_eq!(f.db.admit_request_activation(late).unwrap(),RequestActivationAdmission::Stale);
-    assert_eq!(f.db.capture_message(&child.child_thread_id,&child.child_branch_id,&old.identity.message_id).unwrap().load().unwrap().summary.state,InputState::Cancelled);
-    let newer=request_child(&mut f,&child,"new-request");let candidate=f.db.capture_request_activations().unwrap().pop().unwrap().load().unwrap();
-    let RequestActivationAdmission::Delegated(id)=f.db.admit_request_activation(candidate).unwrap() else{panic!("new intent")};
-    let execution=f.db.delegated_execution(&id).unwrap();assert!(matches!(execution.trigger,DelegatedTrigger::MessageRequest{message_id,..} if message_id==newer.identity.message_id));
-    let root=f.root.clone();drop(f);std::fs::remove_dir_all(root).unwrap();
+    use varin_runtime::catalog::activation::RequestActivationAdmission;
+    let mut f = Fixture::new();
+    let child = first(&mut f);
+    finish(&mut f.db, &child, Some("fixed report"));
+    let old = request_child(&mut f, &child, "old-request");
+    let late =
+        f.db.capture_request_activations()
+            .unwrap()
+            .pop()
+            .unwrap()
+            .load()
+            .unwrap();
+    f.db.cancel_tree(TreeCancelTarget::Child {
+        operation_id: child.operation_id.clone(),
+    })
+    .unwrap();
+    assert_eq!(
+        f.db.admit_request_activation(late).unwrap(),
+        RequestActivationAdmission::Stale
+    );
+    assert_eq!(
+        f.db.capture_message(
+            &child.child_thread_id,
+            &child.child_branch_id,
+            &old.identity.message_id
+        )
+        .unwrap()
+        .load()
+        .unwrap()
+        .summary
+        .state,
+        InputState::Cancelled
+    );
+    let newer = request_child(&mut f, &child, "new-request");
+    let candidate =
+        f.db.capture_request_activations()
+            .unwrap()
+            .pop()
+            .unwrap()
+            .load()
+            .unwrap();
+    let RequestActivationAdmission::Delegated(id) =
+        f.db.admit_request_activation(candidate).unwrap()
+    else {
+        panic!("new intent")
+    };
+    let execution = f.db.delegated_execution(&id).unwrap();
+    assert!(
+        matches!(execution.trigger,DelegatedTrigger::MessageRequest{message_id,..} if message_id==newer.identity.message_id)
+    );
+    let root = f.root.clone();
+    drop(f);
+    std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
 fn request_child_respects_active_goal_but_never_reinherits_ended_goal_from_the_family() {
-    use varin_runtime::catalog::{goals::*,messages::activation::RequestActivationAdmission};
-    for action in [GoalControlAction::Pause,GoalControlAction::Complete,GoalControlAction::Cancel] {
-        let mut f=Fixture::new();let child=first(&mut f);finish(&mut f.db,&child,Some("first goal work"));
-        let scope=GoalScope{thread_id:child.parent_thread_id.clone(),branch_id:child.parent_branch_id.clone()};
-        let prepared=f.db.prepare_goal_start("goal",&child.parent_run_id,scope.clone(),"Original Goal".into(),None).unwrap().load().unwrap();let goal=f.db.admit_goal_mutation(prepared).unwrap();f.db.control_goal(&goal.id,goal.revision,&scope,action).unwrap();
-        request_child(&mut f,&child,"goal-request");
-        let mut candidates=f.db.capture_request_activations().unwrap();
-        if action==GoalControlAction::Pause {assert!(candidates.is_empty())} else {
-            let RequestActivationAdmission::Delegated(id)=f.db.admit_request_activation(candidates.pop().unwrap().load().unwrap()).unwrap() else{panic!("new request")};
-            let next=f.db.delegated_execution(&id).unwrap();let source=ready_source(&mut f.db,&next);let next=prepare(&mut f.db,&next,source);let run=next.receipt.unwrap().run_id;
-            assert!(f.db.goal_binding(&run).unwrap().is_none());assert!(matches!(f.db.goal_boundary(&run,f.db.epoch()).unwrap(),GoalBoundary::Continue));
+    use varin_runtime::catalog::{activation::RequestActivationAdmission, goals::*};
+    for action in [
+        GoalControlAction::Pause,
+        GoalControlAction::Complete,
+        GoalControlAction::Cancel,
+    ] {
+        let mut f = Fixture::new();
+        let child = first(&mut f);
+        finish(&mut f.db, &child, Some("first goal work"));
+        let scope = GoalScope {
+            thread_id: child.parent_thread_id.clone(),
+            branch_id: child.parent_branch_id.clone(),
+        };
+        let prepared =
+            f.db.prepare_goal_start(
+                "goal",
+                &child.parent_run_id,
+                scope.clone(),
+                "Original Goal".into(),
+                None,
+            )
+            .unwrap()
+            .load()
+            .unwrap();
+        let goal = f.db.admit_goal_mutation(prepared).unwrap();
+        f.db.control_goal(&goal.id, goal.revision, &scope, action)
+            .unwrap();
+        request_child(&mut f, &child, "goal-request");
+        let mut candidates = f.db.capture_request_activations().unwrap();
+        if action == GoalControlAction::Pause {
+            assert!(candidates.is_empty())
+        } else {
+            let RequestActivationAdmission::Delegated(id) =
+                f.db.admit_request_activation(candidates.pop().unwrap().load().unwrap())
+                    .unwrap()
+            else {
+                panic!("new request")
+            };
+            let next = f.db.delegated_execution(&id).unwrap();
+            let source = ready_source(&mut f.db, &next);
+            let next = prepare(&mut f.db, &next, source);
+            let run = next.receipt.unwrap().run_id;
+            assert!(f.db.goal_binding(&run).unwrap().is_none());
+            assert!(matches!(
+                f.db.goal_boundary(&run, f.db.epoch()).unwrap(),
+                GoalBoundary::Continue
+            ));
         }
-        let root=f.root.clone();drop(f);std::fs::remove_dir_all(root).unwrap();
+        let root = f.root.clone();
+        drop(f);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

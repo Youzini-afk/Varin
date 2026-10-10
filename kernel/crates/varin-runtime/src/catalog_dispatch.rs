@@ -777,7 +777,8 @@ impl Catalog {
                 thread_id.clone()
             }
             TreeCancelTarget::Child { operation_id } => {
-                let child: super::delegated::ChildRelation = record(&tx, "child_tasks", operation_id)?;
+                let child: super::delegated::ChildRelation =
+                    record(&tx, "child_tasks", operation_id)?;
                 if expected_parent_thread_id.is_some_and(|thread| thread != child.parent_thread_id)
                 {
                     return Err(RuntimeError::Invalid(
@@ -791,8 +792,12 @@ impl Catalog {
         let children = {
             let mut statement = tx.prepare("SELECT body FROM child_tasks ORDER BY id")?;
             let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
-            rows.map(|row| Ok(serde_json::from_str::<super::delegated::ChildRelation>(&row?)?))
-                .collect::<Result<Vec<_>>>()?
+            rows.map(|row| {
+                Ok(serde_json::from_str::<super::delegated::ChildRelation>(
+                    &row?,
+                )?)
+            })
+            .collect::<Result<Vec<_>>>()?
         };
         // Fixed point over the original lineage, with no artificial depth limit. This lock
         // also fences new descendants until their original parent Run is cancelled below.
@@ -807,7 +812,9 @@ impl Catalog {
                 break;
             }
         }
-        for thread in &threads { super::messages::activation::cancel_thread(&tx,thread)?; }
+        for thread in &threads {
+            super::activation::cancel_thread(&tx, thread)?;
+        }
         let children = children
             .into_iter()
             .filter(|child| threads.contains(&child.child_thread_id))
@@ -843,18 +850,43 @@ impl Catalog {
             }
         }
         for child in &children {
-            super::request_cancel_operation_in(&tx,&child.operation_id)?;
-            let executions:Vec<super::delegated::DelegatedExecution>={let mut s=tx.prepare("SELECT body FROM delegated_executions WHERE child_operation_id=?1")?;
-                let rows=s.query_map([&child.operation_id],|row|row.get::<_,String>(0))?;rows.map(|row|Ok(serde_json::from_str(&row?)?)).collect::<Result<_>>()?};
+            super::request_cancel_operation_in(&tx, &child.operation_id)?;
+            let executions: Vec<super::delegated::DelegatedExecution> = {
+                let mut s = tx
+                    .prepare("SELECT body FROM delegated_executions WHERE child_operation_id=?1")?;
+                let rows = s.query_map([&child.operation_id], |row| row.get::<_, String>(0))?;
+                rows.map(|row| Ok(serde_json::from_str(&row?)?))
+                    .collect::<Result<_>>()?
+            };
             for mut execution in executions {
-                if execution.cancel_requested {continue;}
-                execution.cancel_requested=true;
-                if execution.receipt.is_none() && execution.report.is_none() {
-                    if !execution.code_result.settled(){execution.code_result=ChildCodeResult::Unavailable{code:"cancelled_before_launch".into(),effect:Effect::None};}
-                    execution.report=Some(ChildReport{outcome:Outcome::Cancelled,sender_thread_id:child.child_thread_id.clone(),run_id:None,history_ids:vec![],detail:Some("Child preparation was cancelled before launch.".into())});
+                if execution.cancel_requested {
+                    continue;
                 }
-                execution.revision+=1;super::delegated::write_execution(&tx,&execution)?;
-                event(&tx,&execution.execution_id,execution.revision,"child.cancel_requested",Value::Null)?;
+                execution.cancel_requested = true;
+                if execution.receipt.is_none() && execution.report.is_none() {
+                    if !execution.code_result.settled() {
+                        execution.code_result = ChildCodeResult::Unavailable {
+                            code: "cancelled_before_launch".into(),
+                            effect: Effect::None,
+                        };
+                    }
+                    execution.report = Some(ChildReport {
+                        outcome: Outcome::Cancelled,
+                        sender_thread_id: child.child_thread_id.clone(),
+                        run_id: None,
+                        history_ids: vec![],
+                        detail: Some("Child preparation was cancelled before launch.".into()),
+                    });
+                }
+                execution.revision += 1;
+                super::delegated::write_execution(&tx, &execution)?;
+                event(
+                    &tx,
+                    &execution.execution_id,
+                    execution.revision,
+                    "child.cancel_requested",
+                    Value::Null,
+                )?;
             }
         }
         let cursor: u64 =
