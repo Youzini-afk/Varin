@@ -293,7 +293,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 33, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
+Catalog version 34, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -563,9 +563,12 @@ pending requests. See the ordinary [SDK example](../../../examples/extensions/de
 
 ## Explicit one-shot follow-ups
 
-The ordinary `follow_up` tool supports register/list/get/control from the actual ModelStep or policy
+The ordinary `follow_up` tool (version 2) supports register/list/get/control from the actual ModelStep or policy
 invocation. `runtime.followup.register` is the authenticated User path. Each registration retains one
-explicit instruction and an absolute `at` instant or the original accepted `process_spawn` identity.
+explicit instruction and an absolute `at` instant, the original accepted `process_spawn` identity,
+or a flat `any`/`all` combination of these sources. Every process leaf is authorized even when another
+leaf is already satisfied. Empty combinations and nested conditions are invalid; there is no separate
+workflow executor or arbitrary source-count limit.
 Catalog derives the Thread/branch, actor and operation from the caller; Agent arguments cannot forge
 User authority. Original bodies live in ContentStore and are read on demand through `get`, while list
 and control use short metadata. Registration retries preserve the original identity and exact intent.
@@ -580,6 +583,16 @@ trigger once, and an observed but held occurrence no longer appears as a pending
 Control/source/Goal events subsequently reconsider it without a polling loop or a Host scheduler.
 Process terminal business outcome, EffectNone or missing occupancy cannot substitute for the original
 executor's stop evidence. Registration rechecks an already stored stop fact.
+
+Each source retains its original registration cursor and observed evidence by index. Partial `all`
+progress survives restart and GC, including a clock moving backwards after an observed deadline.
+Only unobserved time leaves remain in the native deadline selection. Source progress emits a durable
+event for the actual consumers. The transaction freezes the currently visible satisfied sources;
+an `any` does not reconstruct which source historically arrived first while offline. An observed
+time branch can satisfy `any` without waiting for its other processes to stop; `all` needs every
+source. Only the occurrence's actual process evidence contributes receipt bodies to preparation.
+One combination produces one occurrence. A time check followed by a later completion check needs
+two explicit registrations, preserving both intents rather than treating `any` as recurring permission.
 
 An occurrence enters the existing input queue with typed Followup provenance, original IDs and one
 referenced Environment history item. Active lawful work consumes it at its existing input boundary.
@@ -596,7 +609,8 @@ identity. Stop fences definitions already accepted at that time; a later explici
 from the stopped predecessor is new intent and survives the old Run's eventual terminal receipt.
 Manual Pause, questions, Goal control, budgets and unresolved usage retain their own authority.
 
-An explicit At input under the same current Goal generation can make one real check while that Goal
+An explicit input with an actually observed At source under the same current Goal generation can
+make one real check while that Goal
 is blocked on its original Dependency. The dependency and stop subscription remain intact. Other
 blocks and pause/cancel/complete/budget gates are not bypassed; a report or control generation change
 invalidates the old check. Finishing this check does not start an automatic polling chain.
@@ -612,7 +626,8 @@ No old file, stdin, resize, kill or new process Wait permission follows from a r
 Startup and stale preparation reuse original identities. Failures remain explicit while unrelated
 healthy continuations can advance. Shutdown fences old workers, publication leases protect staged
 bodies, and original instructions/input/history remain normal GC roots. This one-shot contract does
-not implement calendar recurrence, arbitrary event conditions or implicit continuing authorization.
+not grant implicit continuing authorization. Calendar definitions have their separate original asset
+and occurrence contract; file/log/metric/research and other event adapters remain separate work.
 
 ## Explicit continuing Goals
 
@@ -662,7 +677,8 @@ invalidates its old proposal without losing the real input or continuation; manu
 provider work until explicitly resumed. Already dispatched inference keeps its original attribution
 and is never reclassified as unsent to restart the Goal.
 
-Calendar recurrence and generic event conditions are separate remaining domains; these Goals do not
+Calendar occurrences use their original definition owner, and broader event sources remain separate
+domains; these Goals do not
 install another timer loop, scheduler, task tree or execution ledger. See
 [`goal_lifecycle.rs`](tests/goal_lifecycle.rs), the existing child/context/policy-model suites, and
 [`agent_goals.rs`](../varin-kernel/src/agent_goals.rs) for in-process behavior coverage. Their simulated

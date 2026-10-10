@@ -8,6 +8,7 @@ Last updated: 2026-10-11
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [组合条件与原发生项（2026-10-11）](runtime-composite-followups-2026-10-11.md) | 逐叶授权/耐久事实、Any/All、原输入/Goal/child/取消恢复及真实公开消费者 |
 | [日历资产与实际发生项（2026-10-11）](runtime-calendar-2026-10-11.md) | 原定义/UTC slot/ingress、冷工作与既有工作、跨 owner once 交接及真实公开消费者 |
 | [一次时间/进程续接（2026-10-11）](runtime-time-followups-2026-10-11.md) | 原登记/观察/输入、活动与空闲 root/child 接续、真实进程来源、正常退役及拒旧保留 |
 | [关联回复、期限与共同观察屏障（2026-10-11）](runtime-reply-waits-2026-10-11.md) | 原发送/JobAccepted、真实绝对期限、混合观察消费、逐报告故障隔离与公开恢复 |

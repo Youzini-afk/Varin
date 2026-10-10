@@ -154,7 +154,7 @@ it('slow startup launch cannot block the existing child/process pump or a later 
 
 it.each(['ingress.run_ready', 'goal.run_ready', 'observation.run_ready'] as const)('%s uses the same cold launch owner, while unrelated and repeated durable events cannot relaunch it', async kind => {
   const f = fixture();
-  const subject = kind === 'goal.run_ready' ? 'goal:one' : kind === 'ingress.run_ready' ? 'followup-input:original' : kind === 'observation.run_ready' ? 'reply-wait:send' : 'followup:process';
+  const subject = kind === 'goal.run_ready' ? 'goal:one' : kind === 'ingress.run_ready' ? 'followup-input:original' : 'reply-wait:send';
   const events: RuntimeEvent[] = [];
   let listener!: (event: AgentRuntimeStreamEvent) => void;
   const runtime = Object.assign(f.runtime, {
@@ -178,12 +178,10 @@ it.each(['ingress.run_ready', 'goal.run_ready', 'observation.run_ready'] as cons
     // Only the exact continuation admission wakes cold preparation. Generic accepted Runs may be children.
     f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable'; f.run.waiting_on = null;
     events.push({ cursor: 2, subject: 'run:unprepared-child', revision: 1, kind: 'run.accepted', data: { run_id: 'run:unprepared-child' } });
-    events.push({ cursor: 3, subject, revision: 1, kind: kind === 'goal.run_ready' ? 'goal.started' : kind === 'ingress.run_ready' ? 'followup.input_accepted' : kind === 'observation.run_ready' ? 'wait.registered' : 'followup.registered', data: { run_id: f.run.id } });
+    events.push({ cursor: 3, subject, revision: 1, kind: kind === 'goal.run_ready' ? 'goal.started' : kind === 'ingress.run_ready' ? 'followup.input_accepted' : 'wait.registered', data: { run_id: f.run.id } });
     notify(); await tick(); await tick(); expect(continues).toHaveBeenCalledOnce();
     events.push({ cursor: 4, subject, revision: 2, kind, data: {
-      run_id: f.run.id, ...(kind === 'goal.run_ready' ? { goal_id: subject } : kind === 'ingress.run_ready' ? { input_id: subject } : kind === 'observation.run_ready' ? { wait_id: subject } : {
-        followup_id: subject, occurrence_id: 'occurrence:process', source_run_id: 'run:source', operation_id: 'operation:process',
-      }),
+      run_id: f.run.id, ...(kind === 'goal.run_ready' ? { goal_id: subject } : kind === 'ingress.run_ready' ? { input_id: subject } : { wait_id: subject }),
     } });
     notify(); await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());
     expect(continues).toHaveBeenLastCalledWith(f.run.id, expect.any(AbortSignal));
@@ -215,7 +213,7 @@ it.each(['ingress.run_ready', 'goal.run_ready', 'observation.run_ready'] as cons
   try {
     const discovery = collaboration.recover();
     await vi.waitFor(() => expect(f.runtime.pendingLaunches).toHaveBeenCalledOnce());
-    events.push({ cursor: 1, subject: kind === 'goal.run_ready' ? 'goal:one' : kind === 'ingress.run_ready' ? 'followup-input:original' : kind === 'observation.run_ready' ? 'reply-wait:send' : 'followup:process', revision: 2, kind, data: { run_id: f.run.id } });
+    events.push({ cursor: 1, subject: kind === 'goal.run_ready' ? 'goal:one' : kind === 'ingress.run_ready' ? 'followup-input:original' : 'reply-wait:send', revision: 2, kind, data: { run_id: f.run.id } });
     listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 1 });
     release(); await discovery;
     await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());

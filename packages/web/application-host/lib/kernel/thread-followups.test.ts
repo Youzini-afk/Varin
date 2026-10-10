@@ -18,7 +18,7 @@ const instruction = '  Read the original process output.\nDo not start it again.
 const definition: Followup = { id: 'followup:process', revision: 1, generation: 1,
   thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: run.id,
   actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
-  goal_id: null, trigger: { kind: 'process_stopped', operation_id: operationId }, operation_id: operationId, state: 'active',
+  goal_id: null, trigger: { kind: 'process_stopped', operation_id: operationId }, sources: [{ source_index: 0, after_cursor: 4, observed: null }], state: 'active',
   wait: { id: 'wait:process', kind: 'process_stopped', after_cursor: 4, trigger_cursor: null, state: 'waiting' }, occurrence: null };
 
 /** These are transport contract tests: real HTTP/client/admission functions, with a controlled RPC boundary.
@@ -153,6 +153,10 @@ it('management routes enforce authentication, exact fields and revision conflict
     { ...register, runtime: 'pi' }, { ...register, actor: { kind: 'user' } }, { ...register, wait: {} },
     { ...register, trigger: { kind: 'at', atMs: -1 } }, { ...register, trigger: { kind: 'at', atMs: 1.5 } },
     { ...register, trigger: { kind: 'at', atMs: 123, timeZone: 'UTC' } },
+    { ...register, trigger: { kind: 'any', sources: [] } },
+    { ...register, trigger: { kind: 'all', sources: [{ kind: 'any', sources: [{ kind: 'at', atMs: 0 }] }] } },
+    { ...register, trigger: { kind: 'all', sources: [{ kind: 'process_stopped', operationId: 'one', actor: 'user' }] } },
+    { ...register, trigger: { kind: 'any', sources: [{ kind: 'at', atMs: 0 }], repeat: true } },
   ]) expect((await f.request('/api/threads/followup/register', body)).status).toBe(400);
   const control = { ...identity, followupId: definition.id, expectedRevision: 1, action: 'cancel' };
   for (const body of [
@@ -168,12 +172,16 @@ it('management routes enforce authentication, exact fields and revision conflict
 });
 
 
-it('time registration preserves the exact absolute instant, original text and User source without launching work in the Host', async () => {
+it('time and composite registration preserve exact leaf identities, original text and User source without Host launches', async () => {
   const f = fixture(); f.facts.source.state = 'cancelled'; f.facts.source.cancel_requested = true;
-  const original = { ...identity, key: 'at-once', runId: run.id, trigger: { kind: 'at' as const, atMs: 0 }, instruction };
-  await f.api.followups.register(original); await f.api.followups.register(original);
+  const inputs = [
+    { ...identity, key: 'at-once', runId: run.id, trigger: { kind: 'at' as const, atMs: 0 }, instruction },
+    ...(['any', 'all'] as const).map(kind => ({ ...identity, key: `${kind}-once`, runId: run.id,
+      trigger: { kind, sources: [{ kind: 'at' as const, atMs: 0 }, { kind: 'process_stopped' as const, operationId }] }, instruction })),
+  ];
+  for (const original of inputs) { await f.api.followups.register(original); await f.api.followups.register(original); }
   expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.register').map(([, params]) => params))
-    .toEqual([original, original].map(({ runtime: _runtime, threadId: _thread, branchId: _branch, ...params }) => params));
+    .toEqual(inputs.flatMap(original => [original, original]).map(({ runtime: _runtime, threadId: _thread, branchId: _branch, ...params }) => params));
   expect(f.models.resolveModel).not.toHaveBeenCalled(); expect(f.models.rebindModel).not.toHaveBeenCalled();
   expect(f.requests.mock.calls.some(([method]) => method.startsWith('runtime.run.') && method !== 'runtime.run.inspect')).toBe(false);
 });

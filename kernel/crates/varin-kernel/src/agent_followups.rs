@@ -13,7 +13,7 @@ pub(super) fn execute(
     match method {
         "runtime.followup.register" => {
             let p: FollowupRegisterParams = serde_json::from_value(params)?;
-            let process=if let varin_runtime::catalog::followups::FollowupRegistrationTrigger::ProcessStopped{operation_id}=&p.trigger{Some(operation_id.clone())}else{None};
+            let processes = p.trigger.process_operation_ids();
             let input = varin_runtime::catalog::followups::FollowupRegistration {
                 trigger: p.trigger,
                 instruction: p.instruction,
@@ -35,8 +35,8 @@ pub(super) fn execute(
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                 .admit_followup_registration(prepared)
                 .map_err(domain)?;
-            if let Some(process) = process {
-                resources.replay_process_terminals(vec![process])?;
+            if !processes.is_empty() {
+                resources.replay_process_terminals(processes)?;
             }
             Ok(serde_json::to_value(result.followup)?)
         }

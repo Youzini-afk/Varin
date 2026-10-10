@@ -178,7 +178,7 @@ it('registers a process follow-up through an uncertain reply and preserves the a
       kind: 'job_accepted', operation_id: 'process:original', phase: 'running', effect: 'dispatched', lifetime: 'environment',
     }, execution_owner: { kind: 'kernel' } }];
   const followup: ThreadSnapshot['followups'][number] = { id: 'followup:one', revision: 1, generation: 1,
-    thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', operation_id: 'process:original', state: 'active', goal_id: null,
+    thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', sources: [{ source_index: 0, after_cursor: 1, observed: null }], state: 'active', goal_id: null,
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
     trigger: { kind: 'process_stopped', operation_id: 'process:original' },
     wait: { id: 'wait:process', kind: 'process_stopped', after_cursor: 1, trigger_cursor: null, state: 'waiting' }, occurrence: null };
@@ -229,7 +229,7 @@ it('retains an exact absolute time across an uncertain retry and exposes explici
   const f = fixture(true); const source = { ...f.view.activeRun!, state: 'cancelled' as const, cancel_requested: true };
   f.view.activeRun = null; f.view.thread.branches[0]!.active_run_id = null; f.view.thread.branches[0]!.latest_run = source;
   const followup: ThreadSnapshot['followups'][number] = { id: 'followup:time', revision: 1, generation: 1, thread_id: identity.threadId,
-    branch_id: identity.branchId, source_run_id: source.id, operation_id: null, state: 'active', goal_id: 'goal:original',
+    branch_id: identity.branchId, source_run_id: source.id, sources: [{ source_index: 0, after_cursor: 0, observed: null }], state: 'active', goal_id: 'goal:original',
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
     trigger: { kind: 'at', at_ms: 0 }, wait: { id: 'time-wait', kind: 'at', after_cursor: 0, trigger_cursor: null, state: 'waiting' }, occurrence: null };
   const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValueOnce(new Error('reply lost')).mockImplementation(async input => {
@@ -246,6 +246,54 @@ it('retains an exact absolute time across an uncertain retry and exposes explici
   await act(async () => button('Retry original follow-up').click());
   expect(register.mock.calls[1]![0]).toEqual(register.mock.calls[0]![0]);
   expect(container.querySelector('[aria-label="Pending follow-up"]')?.textContent).toContain('registered by User');
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled(); expect(f.cancelRun).not.toHaveBeenCalled();
+});
+
+it.each(['any', 'all'] as const)('registers %s conditions as one retained intent and renders original partial source progress', async kind => {
+  const f = fixture(true);
+  f.view.operations = [{ id: 'process:original', run_id: 'ui-run', epoch: 1, revision: 1, phase: 'running', outcome: null,
+    effect: 'dispatched', cancel_requested: false, lifetime: 'environment', handed_off: true, executor: 'process_spawn', waiting_on: null,
+    intent: {}, result: null, external_receipt: null, call_completion: { kind: 'job_accepted', operation_id: 'process:original',
+      phase: 'running', effect: 'dispatched', lifetime: 'environment' }, execution_owner: { kind: 'kernel' } }];
+  const chosen = '2030-02-03T04:05:06'; const atMs = new Date(chosen).getTime();
+  const followup: ThreadSnapshot['followups'][number] = { id: `followup:${kind}`, revision: 1, generation: 1,
+    thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', state: 'active', goal_id: null,
+    actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
+    trigger: { kind, sources: [{ kind: 'at', at_ms: atMs }, { kind: 'process_stopped', operation_id: 'process:original' }] },
+    sources: [{ source_index: 0, after_cursor: 1, observed: null }, { source_index: 1, after_cursor: 1, observed: null }],
+    wait: { id: `wait:${kind}`, kind, after_cursor: 1, trigger_cursor: null, state: 'waiting' }, occurrence: null };
+  const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValueOnce(new Error('acceptance reply lost'))
+    .mockImplementation(async () => { f.view.followups = [followup]; return followup; });
+  f.api.followups.register = register;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Schedule a follow-up').click());
+  await edit('[aria-label="Follow-up trigger"]', kind, 'change');
+  await edit('[aria-label="Condition 1 time"]', chosen);
+  await edit('[aria-label="Condition 2 process"]', 'process:original', 'change');
+  await act(async () => button('Add condition').click());
+  expect(button('Register one-time follow-up').disabled).toBe(true);
+  await act(async () => button('Remove condition 3').click());
+  await edit('[aria-label="Follow-up instruction"]', 'Read the original evidence once.');
+  await act(async () => button('Register one-time follow-up').click());
+  expect(register.mock.calls[0]![0]).toMatchObject({ ...identity, runId: 'ui-run', trigger: { kind, sources: [
+    { kind: 'at', atMs }, { kind: 'process_stopped', operationId: 'process:original' },
+  ] } });
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Condition 1 time"]')!.disabled).toBe(true);
+  expect(button('Add condition').disabled).toBe(true);
+  f.view.activeRun = { ...f.view.activeRun!, id: 'later-run' };
+  await act(async () => f.emit({ cursor: 2, subject: 'later-run', revision: 1, kind: 'run.accepted', data: {} }));
+  await act(async () => button('Retry original follow-up').click());
+  expect(register.mock.calls[1]![0]).toEqual(register.mock.calls[0]![0]);
+  followup.sources[0]!.observed = { trigger_cursor: 3, evidence: { kind: 'at', at_ms: atMs, observed_at_ms: atMs + 1 } };
+  if (kind === 'any') {
+    followup.wait = { ...followup.wait, state: 'observed', trigger_cursor: 3 };
+    followup.occurrence = { id: 'occurrence:any', generation: 1, trigger_cursor: 3, state: 'held', hold_reason: 'manual_pause',
+      evidence: { kind: 'any', sources: [{ source_index: 0, ...followup.sources[0]!.observed }] }, delivery: null };
+  }
+  await act(async () => f.emit({ cursor: 3, subject: followup.id, revision: 2, kind: 'followup.sources_observed', data: {} }));
+  expect(container.textContent).toContain('observed at event 3');
+  expect(container.textContent).toContain('Condition 2: After process process:original actually stops · waiting');
+  expect(button('Cancel follow-up')).toBeDefined();
   expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled(); expect(f.cancelRun).not.toHaveBeenCalled();
 });
 

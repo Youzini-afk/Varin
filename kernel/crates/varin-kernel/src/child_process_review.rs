@@ -935,8 +935,11 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
                 "process-after-real-stop",
                 &child.binding.run_id,
                 FollowupRegistration {
-                    trigger: FollowupRegistrationTrigger::ProcessStopped {
-                        operation_id: child_process.clone(),
+                    trigger: FollowupRegistrationTrigger::All {
+                        sources: vec![
+                            FollowupRegistrationSource::At { at_ms: 0 },
+                            FollowupRegistrationSource::ProcessStopped { operation_id: child_process.clone() },
+                        ],
                     },
                     instruction:
                         "Read the stopped child process output in the new delegated execution"

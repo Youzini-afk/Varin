@@ -242,9 +242,30 @@ export interface MessagePage {
   nextCursor: string | null;
 }
 
-export type FollowupTrigger = { kind: 'process_stopped'; operation_id: string } | { kind: 'run_completed'; cursor: number } | { kind: 'goal_requested'; cursor: number } | { kind: 'at'; at_ms: number };
+export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string };
 
-export type FollowupEvidence = { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | { kind: 'run_completed'; run_revision: number } | { kind: 'goal_requested'; run_revision: number } | { kind: 'at'; at_ms: number; observed_at_ms: number };
+export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string };
+
+export interface FollowupSourceObservation {
+  trigger_cursor: number;
+  evidence: FollowupLeafEvidence;
+}
+
+export interface FollowupSourceState {
+  source_index: number;
+  after_cursor: number;
+  observed: FollowupSourceObservation | null;
+}
+
+export interface FollowupSourceEvidence {
+  source_index: number;
+  trigger_cursor: number;
+  evidence: FollowupLeafEvidence;
+}
+
+export type FollowupTrigger = FollowupSource | { kind: 'any' | 'all'; sources: FollowupSource[] } | { kind: 'run_completed'; cursor: number } | { kind: 'goal_requested'; cursor: number };
+
+export type FollowupEvidence = FollowupLeafEvidence | { kind: 'any' | 'all'; sources: FollowupSourceEvidence[] } | { kind: 'run_completed'; run_revision: number } | { kind: 'goal_requested'; run_revision: number };
 
 export type GoalState = 'active' | 'paused' | 'blocked' | 'budget_limited' | 'complete' | 'cancelled';
 
@@ -1200,7 +1221,9 @@ export interface RunContextScope {
 
 export type FollowupControlAction = 'pause' | 'resume' | 'cancel';
 
-export type FollowupRegistrationTrigger = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string };
+export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string };
+
+export type FollowupRegistrationTrigger = FollowupRegistrationSource | { kind: 'any' | 'all'; sources: FollowupRegistrationSource[] };
 
 export type FollowupActor = { kind: 'user' } | { kind: 'agent'; run_id: string; operation_id: string; origin: ToolOrigin } | { kind: 'goal'; goal_id: string };
 
@@ -1246,7 +1269,7 @@ export interface FollowupControlParams {
 
 export interface FollowupWait {
   id: string;
-  kind: 'process_stopped' | 'run_completed' | 'goal_requested' | 'at';
+  kind: 'process_stopped' | 'run_completed' | 'goal_requested' | 'at' | 'any' | 'all';
   after_cursor: number;
   trigger_cursor: number | null;
   state: 'waiting' | 'observed' | 'consumed' | 'cancelled';
@@ -1269,7 +1292,7 @@ export interface Followup {
   thread_id: string;
   branch_id: string;
   source_run_id: string;
-  operation_id: string | null;
+  sources: FollowupSourceState[];
   state: 'active' | 'paused' | 'cancelled';
   wait: FollowupWait;
   occurrence: FollowupOccurrence | null;
