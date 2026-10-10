@@ -1,5 +1,5 @@
 import { defineHostExtension, provideAgentPolicy } from '@varin/extension-sdk';
-import type { JsonValue, VarinAgentPolicyEvidenceRef, VarinAgentPolicyReadNode } from '@varin/extension-contract';
+import type { JsonValue, VarinAgentPolicyEvidenceRef, VarinAgentPolicyToolNode } from '@varin/extension-contract';
 
 // Author-declared example budgets, not core runtime limits.
 const configuration = { contextPath: 'planning-context.md', contextBytes: 16 * 1024, planBytes: 16 * 1024, maxReads: 3, answerBudget: 8 };
@@ -18,7 +18,7 @@ const record = (value: unknown): value is Record<string, unknown> => value !== n
 const exact = (value: Record<string, unknown>, keys: string[]) => Object.keys(value).length === keys.length && keys.every(key => key in value);
 const asJson = (value: State): JsonValue => value as unknown as JsonValue;
 const sameRef = (a: VarinAgentPolicyEvidenceRef, b: VarinAgentPolicyEvidenceRef) => a.action_id === b.action_id && a.node_id === b.node_id && a.content_ref === b.content_ref;
-function read(id: string, path: string, length?: number): VarinAgentPolicyReadNode {
+function read(id: string, path: string, length?: number): VarinAgentPolicyToolNode {
   return { id, depends_on: [], call: { call_id: id, name: 'file_read', schema_version: '1', arguments: { path, ...(length === undefined ? {} : { length }) } } };
 }
 function restore(value: JsonValue): State {
@@ -74,12 +74,12 @@ export default defineHostExtension({
           }
           return answer();
         }
-        if (event.kind === 'read_graph_completed') {
+        if (event.kind === 'tool_graph_completed') {
           if (!['context', 'evidence'].includes(state.phase) || event.receipts.length !== state.expectedNodes.length) return fail('Unexpected planning read graph');
           for (const id of state.expectedNodes) {
             const receipt = event.receipts.find(item => item.node_id === id);
-            if (!receipt || receipt.outcome !== 'succeeded' || !receipt.output) return fail('Planning evidence did not commit successfully');
-            state.evidence.push(receipt.output);
+            if (!receipt || receipt.completion.kind !== 'result' || receipt.completion.outcome !== 'succeeded') return fail('Planning evidence did not commit successfully');
+            state.evidence.push(receipt.completion.output);
           }
           if (state.phase === 'evidence') return answer();
           const capability = input.view.model_capabilities.find(item => item.purpose === 'planning' && item.supported_operation === 'tool_free_text');
@@ -121,9 +121,9 @@ export default defineHostExtension({
           state.phase = 'evidence';
           state.expectedNodes = paths.map((_, index) => `evidence-${index}`);
           // A parsed plan requests reads; only core admission can authorize and execute them.
-          return { action: { kind: 'read_graph', nodes: paths.map((path, index) => read(state.expectedNodes[index], path)) }, state: asJson(state) };
+          return { action: { kind: 'tool_graph', nodes: paths.map((path, index) => read(state.expectedNodes[index], path)) }, state: asJson(state) };
         }
-        if (state.phase === 'context') return { action: { kind: 'read_graph', nodes: [read('context', config.contextPath, config.contextBytes)] }, state: asJson(state) };
+        if (state.phase === 'context') return { action: { kind: 'tool_graph', nodes: [read('context', config.contextPath, config.contextBytes)] }, state: asJson(state) };
         return fail('Planning policy requires its committed operation event');
       },
     });

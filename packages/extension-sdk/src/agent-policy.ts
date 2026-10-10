@@ -11,7 +11,10 @@ export interface VarinAgentPolicyImplementation {
   capabilities?: readonly 'agentPlanning'[];
   /** Pure bounded decision. Request model/tool work through returned actions, never perform it here.
    * Inputs are detached and recursively frozen; private state advances only when core commits it.
-   * read_graph runs trusted fixed-source reads before/between models; read_result retrieves a
+   * tool_graph submits calls through the trusted executor before/between models. Check each
+   * tagged completion: result carries a required output reference (including JSON null),
+   * job_accepted confirms admission, not the eventual job outcome; not_dispatched has no
+   * output. Effects and job lifetimes come from the trusted capability. read_result retrieves a
    * committed own-Run chunk. Pass references to request_model_with_evidence instead of copying
    * whole evidence bodies into the checkpoint or model instructions. request_model_job selects
    * an admitted capability_id; core freezes context, executes tool-free inference, and returns a

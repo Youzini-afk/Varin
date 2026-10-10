@@ -36,7 +36,7 @@ pub(crate) struct ToolReceiptMetadata {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub(crate) enum ToolCompletionMetadata {
+pub enum ToolCompletionMetadata {
     NotDispatched {
         reason_ref: Value,
     },
@@ -60,31 +60,7 @@ impl ToolReceiptMetadata {
         Ok(Self {
             request_id: result.request_id.clone(),
             call_id: result.call_id.clone(),
-            completion: match &result.completion {
-                ToolCompletion::NotDispatched { reason } => ToolCompletionMetadata::NotDispatched {
-                    reason_ref: content.save(&json!(reason))?,
-                },
-                ToolCompletion::Result {
-                    outcome,
-                    effect,
-                    content: body,
-                } => ToolCompletionMetadata::Result {
-                    outcome: *outcome,
-                    effect: *effect,
-                    content_ref: content.save(body)?,
-                },
-                ToolCompletion::JobAccepted {
-                    operation_id,
-                    phase,
-                    effect,
-                    lifetime,
-                } => ToolCompletionMetadata::JobAccepted {
-                    operation_id: operation_id.clone(),
-                    phase: phase.clone(),
-                    effect: *effect,
-                    lifetime: *lifetime,
-                },
-            },
+            completion: ToolCompletionMetadata::write(content, &result.completion)?,
         })
     }
     /// Domain Job registration contains only control identities; no body write is needed.
@@ -115,34 +91,77 @@ impl ToolReceiptMetadata {
         Ok(ToolResult {
             request_id: self.request_id,
             call_id: self.call_id,
-            completion: match self.completion {
-                ToolCompletionMetadata::NotDispatched { reason_ref } => {
-                    ToolCompletion::NotDispatched {
-                        reason: serde_json::from_value(content.load(&reason_ref)?)?,
-                    }
-                }
-                ToolCompletionMetadata::Result {
-                    outcome,
-                    effect,
-                    content_ref,
-                } => ToolCompletion::Result {
-                    outcome,
-                    effect,
-                    content: content.load(&content_ref)?,
-                },
-                ToolCompletionMetadata::JobAccepted {
-                    operation_id,
-                    phase,
-                    effect,
-                    lifetime,
-                } => ToolCompletion::JobAccepted {
-                    operation_id,
-                    phase,
-                    effect,
-                    lifetime,
-                },
+            completion: self.completion.load(content)?,
+        })
+    }
+}
+impl ToolCompletionMetadata {
+    pub(crate) fn write(
+        content: &crate::content::ContentStore,
+        completion: &ToolCompletion,
+    ) -> Result<Self> {
+        Ok(match completion {
+            ToolCompletion::NotDispatched { reason } => ToolCompletionMetadata::NotDispatched {
+                reason_ref: content.save(&json!(reason))?,
+            },
+            ToolCompletion::Result {
+                outcome,
+                effect,
+                content: body,
+            } => ToolCompletionMetadata::Result {
+                outcome: *outcome,
+                effect: *effect,
+                content_ref: content.save(body)?,
+            },
+            ToolCompletion::JobAccepted {
+                operation_id,
+                phase,
+                effect,
+                lifetime,
+            } => ToolCompletionMetadata::JobAccepted {
+                operation_id: operation_id.clone(),
+                phase: phase.clone(),
+                effect: *effect,
+                lifetime: *lifetime,
             },
         })
+    }
+    pub(crate) fn load(self, content: &crate::content::ContentStore) -> Result<ToolCompletion> {
+        Ok(match self {
+            ToolCompletionMetadata::NotDispatched { reason_ref } => ToolCompletion::NotDispatched {
+                reason: serde_json::from_value(content.load(&reason_ref)?)?,
+            },
+            ToolCompletionMetadata::Result {
+                outcome,
+                effect,
+                content_ref,
+            } => ToolCompletion::Result {
+                outcome,
+                effect,
+                content: content.load(&content_ref)?,
+            },
+            ToolCompletionMetadata::JobAccepted {
+                operation_id,
+                phase,
+                effect,
+                lifetime,
+            } => ToolCompletion::JobAccepted {
+                operation_id,
+                phase,
+                effect,
+                lifetime,
+            },
+        })
+    }
+}
+pub struct ToolCompletionRead {
+    pub(super) completion: ToolCompletionMetadata,
+    pub(super) content: crate::content::ContentStore,
+    pub(super) _publication: crate::content::ContentPublication,
+}
+impl ToolCompletionRead {
+    pub fn load(self) -> Result<ToolCompletion> {
+        self.completion.load(&self.content)
     }
 }
 pub struct ResultContentPreparation {

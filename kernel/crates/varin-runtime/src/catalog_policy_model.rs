@@ -180,7 +180,7 @@ impl Catalog {
     ) -> Result<Option<PolicyModelRead>> {
         fence(&self.run(run_id)?, epoch)?;
         // The latest action across both domains owns the decision boundary.
-        let key:Option<String>=self.db.query_row("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_read_graph_v1','policy_model_job_v1') ORDER BY rowid DESC LIMIT 1",[run_id],|r|r.get(0)).optional()?;
+        let key:Option<String>=self.db.query_row("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_tool_graph_v1','policy_model_job_v1') ORDER BY rowid DESC LIMIT 1",[run_id],|r|r.get(0)).optional()?;
         let Some(key) = key else { return Ok(None) };
         let op: Operation = record(&self.db, "operations", &key)?;
         let Some(metadata) = model_metadata(&op)? else {
@@ -318,12 +318,13 @@ impl Catalog {
             intent: serde_json::to_value(&metadata)?,
             result: Some(OperationResultMetadata::Control { value: serde_json::to_value(&result)? }),
             external_receipt: None,
+                            call_completion: None,
         };
         let tx = self.db.transaction()?;
         if super::inputs::has_boundary_inputs(&tx, run_id)? {
             return Err(RuntimeError::InputPending);
         }
-        let unresolved:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state!='completed' AND json_extract(body,'$.superseded_by_input') IS NULL) OR EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0) OR EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_read_graph_v1','policy_model_job_v1') AND json_extract(body,'$.phase')!='terminal')",[run_id],|r|r.get(0))?;
+        let unresolved:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state!='completed' AND json_extract(body,'$.superseded_by_input') IS NULL) OR EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0) OR EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_tool_graph_v1','policy_model_job_v1') AND json_extract(body,'$.phase')!='terminal')",[run_id],|r|r.get(0))?;
         if unresolved {
             return Err(RuntimeError::Conflict(
                 "planning cannot bypass unsettled work".into(),

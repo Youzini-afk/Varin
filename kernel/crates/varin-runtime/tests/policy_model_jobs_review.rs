@@ -402,7 +402,7 @@ fn body_publication_preserves_model_output_usage_and_evidence_through_gc() {
     let evidence = f.db.policy_evidence(&run, epoch,
         saved.result.receipt.as_ref().unwrap().output.as_ref().unwrap()).unwrap();
     let Content::Text { text } = &output.items[0].content else { unreachable!() };
-    assert!(serde_json::to_string(&evidence.content).unwrap().contains(text));
+    assert!(serde_json::to_string(&evidence.item.content).unwrap().contains(text));
     assert!(f.db.dispatch_policy_model(&run, epoch, &action).is_err(), "settled paid work cannot redispatch");
 }
 
@@ -648,6 +648,7 @@ impl BoundaryPersistence {
     }
 }
 impl Persistence for BoundaryPersistence {
+    fn resume_tool(&self,context:&ToolExecutionContext,epoch:u64)->Result<ToolResume,ExecutionError>{self.db.resume_tool(context,epoch)}
     fn resource_admission(&self) -> Arc<varin_runtime::resource_admission::ResourceAdmission> {
         self.db.resource_admission()
     }
@@ -774,7 +775,7 @@ impl Persistence for BoundaryPersistence {
         r: &str,
         e: u64,
         p: &PolicyEvidenceRef,
-    ) -> Result<ConversationItem, ExecutionError> {
+    ) -> Result<PolicyEvidence, ExecutionError> {
         self.db.policy_evidence(r, e, p)
     }
     fn policy_chunk(
@@ -1032,9 +1033,9 @@ impl ToolExecutor for Reads {
     }
 }
 struct GraphPolicy;
-fn read_graph(path: &str) -> PolicyAction {
+fn tool_graph(path: &str) -> PolicyAction {
     action(
-        json!({"kind":"read_graph","nodes":[{"id":"read-node","depends_on":[],"call":{"call_id":"read-node","name":"read","schema_version":"1","arguments":{"path":path}}}]}),
+        json!({"kind":"tool_graph","nodes":[{"id":"read-node","depends_on":[],"call":{"call_id":"read-node","name":"read","schema_version":"1","arguments":{"path":path}}}]}),
     )
 }
 impl AgentPolicy for GraphPolicy {
@@ -1050,10 +1051,10 @@ impl AgentPolicy for GraphPolicy {
     ) -> Result<PolicyDecision, ExecutionError> {
         let e = serde_json::to_value(event).unwrap();
         let (a, s) = match e["kind"].as_str().unwrap() {
-            "started" => (read_graph("initial"), json!({"stage":"before"})),
-            "read_graph_completed" if state["stage"] == "before" => {
+            "started" => (tool_graph("initial"), json!({"stage":"before"})),
+            "tool_graph_completed" if state["stage"] == "before" => {
                 let mut j = job();
-                j["evidence"] = json!([e["receipts"][0]["output"]]);
+                j["evidence"] = json!([e["receipts"][0]["completion"]["output"]]);
                 (action(j), json!({"stage":"planning"}))
             }
             "model_job_completed" => (
@@ -1064,11 +1065,11 @@ impl AgentPolicy for GraphPolicy {
                 let bytes: Vec<u8> = serde_json::from_value(e["bytes"].clone()).unwrap();
                 let v: Value = serde_json::from_slice(&bytes).unwrap();
                 (
-                    read_graph(v["text"].as_str().unwrap()),
+                    tool_graph(v["text"].as_str().unwrap()),
                     json!({"stage":"after"}),
                 )
             }
-            "read_graph_completed" => (PolicyAction::Complete, state.clone()),
+            "tool_graph_completed" => (PolicyAction::Complete, state.clone()),
             _ => panic!("unexpected graph workflow {e}"),
         };
         Ok(PolicyDecision {

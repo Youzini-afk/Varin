@@ -115,12 +115,12 @@ async function installExample(f: Awaited<ReturnType<typeof fixture>>) {
 }
 async function route(f: Awaited<ReturnType<typeof fixture>>, providerKey: string, scope: {projectId?: string; sessionId?: string}) {
   return f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
-    rule: { allowFallback: false, providerKey, scope, serviceId: 'varin.agent.policy', version: 1 } });
+    rule: { allowFallback: false, providerKey, scope, serviceId: 'varin.agent.policy', version: 2 } });
 }
 it('real installed policy settles read exchange and completes with pinned durable identity', async () => {
   let turn=0;
   const f=await fixture((body,response)=>{ if(++turn===1){ response.writeHead(200,{'content-type':'text/event-stream'}); response.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[{id:'item-1',type:'function_call',call_id:'call-1',name:'file_read',arguments:JSON.stringify({path:'evidence.txt'})}]}})}\n\n`); } else complete(response,'done-item','done'); });
-  await installExample(f); await route(f,'example.evidence-policy:host:varin.agent.policy@1',{projectId:'selected-project'});
+  await installExample(f); await route(f,'example.evidence-policy:host:varin.agent.policy@2',{projectId:'selected-project'});
   const identity=await f.api.create('policy-review'); await fs.writeFile(path.join(f.workspace,'evidence.txt'),'SENSITIVE_EVIDENCE_BODY');
   const source=await f.api.prepareSource({...identity,key:'source',path:f.workspace,mode:'fixed_branch'});
   const first=await f.api.submit({...identity,key:'first',expectedHead:null,text:'PRIVATE_USER_BODY',model,source:source.source});
@@ -139,17 +139,17 @@ it('no selected policy uses default; explicit missing fails without inference', 
   const a=await f.api.create('default-review'); const first=await f.api.submit({...a,key:'default',expectedHead:null,text:'default',model});
   await expect.poll(async()=>(await f.api.run(first.run_id)).state).toBe('completed');
   expect((await f.runtime.launch(first.run_id))!.selection.policy.name).toBe('default+questions');
-  await route(f,'missing.policy:host:varin.agent.policy@1',{projectId:'selected-project'});
+  await route(f,'missing.policy:host:varin.agent.policy@2',{projectId:'selected-project'});
   const b=await f.api.create('missing-review'); await f.api.submit({...b,key:'missing',expectedHead:null,text:'missing',model});
   await expect.poll(()=>f.launchErrors.length).toBe(1); expect(f.requests).toHaveLength(1);
 });
 async function installCustom(f: Awaited<ReturnType<typeof fixture>>, id: string, handlers: string) {
   const folder=path.join(f.root,id); await fs.mkdir(folder);
   await fs.writeFile(path.join(folder,'package.json'), JSON.stringify({name:id,version:'1.0.0'}));
-  await fs.writeFile(path.join(folder,'varin.extension.json'),JSON.stringify({schemaVersion:1,id,version:'1.0.0',engines:{varin:'*'},entrypoints:{host:{file:'host.cjs',mode:'brokered',activation:['service-request']}},provides:{services:[{id:'varin.agent.policy',version:1,multiple:true}]}}));
-  await fs.writeFile(path.join(folder,'host.cjs'),`module.exports={activate(context){context.services.provide({id:'varin.agent.policy',version:1,multiple:true},{${handlers}})}}`);
+  await fs.writeFile(path.join(folder,'varin.extension.json'),JSON.stringify({schemaVersion:1,id,version:'1.0.0',engines:{varin:'*'},entrypoints:{host:{file:'host.cjs',mode:'brokered',activation:['service-request']}},provides:{services:[{id:'varin.agent.policy',version:2,multiple:true}]}}));
+  await fs.writeFile(path.join(folder,'host.cjs'),`module.exports={activate(context){context.services.provide({id:'varin.agent.policy',version:2,multiple:true},{${handlers}})}}`);
   await f.extensions.installOrStage({expectedRevision:(await f.extensions.state()).catalog.revision,source:{kind:'local',display:id,specifier:folder}});
-  await route(f,`${id}:host:varin.agent.policy@1`,{projectId:'selected-project'});
+  await route(f,`${id}:host:varin.agent.policy@2`,{projectId:'selected-project'});
 }
 it('cancel during hung broker describe releases preparing pin', async()=>{
   const f=await fixture((_body,response)=>complete(response,'unused','done'));
@@ -166,7 +166,7 @@ it('cancel hung decision releases Run and unrelated selected run still completes
   const a=await f.api.create('hung-decision'); const first=await f.api.submit({...a,key:'hung',expectedHead:null,text:'hang',model});
   await expect.poll(()=>f.decisions.length).toBe(1);
   await f.runtime.cancelRun(first.run_id); await expect.poll(async()=>(await f.runtime.run(first.run_id)).state).toBe('cancelled');
-  await installExample(f); await route(f,'example.evidence-policy:host:varin.agent.policy@1',{projectId:'selected-project'});
+  await installExample(f); await route(f,'example.evidence-policy:host:varin.agent.policy@2',{projectId:'selected-project'});
   const b=await f.api.create('other'); const source=await f.api.prepareSource({...b,key:'source',path:f.workspace,mode:'fixed_branch'}); const other=await f.api.submit({...b,key:'other',expectedHead:null,text:'done',model,source:source.source});
   await expect.poll(async()=>(await f.runtime.run(other.run_id)).state).toBe('completed');
 });
@@ -188,7 +188,7 @@ it('actual artifact replacement pins old implementation; later lease differs des
  const f=await fixture((_body,response)=>complete(response,'never','never'));
  await installCustom(f,'review.replace-policy',"describe(){return {identity:{name:'same',version:'1'},configuration:{budget:1}}},decide(){return {action:{kind:'complete'},state:{generation:1}}}");
  const prepare=createAgentPolicy(f.extensions);const old=await prepare({sessionId:'old',projectId:'selected-project'});expect(old).toBeDefined();
- const folder=path.join(f.root,'review.replace-policy');await fs.writeFile(path.join(folder,'host.cjs'),"module.exports={activate(context){context.services.provide({id:'varin.agent.policy',version:1,multiple:true},{describe(){return {identity:{name:'same',version:'1'},configuration:{budget:1}}},decide(){return {action:{kind:'complete'},state:{generation:2}}}})}}");
+ const folder=path.join(f.root,'review.replace-policy');await fs.writeFile(path.join(folder,'host.cjs'),"module.exports={activate(context){context.services.provide({id:'varin.agent.policy',version:2,multiple:true},{describe(){return {identity:{name:'same',version:'1'},configuration:{budget:1}}},decide(){return {action:{kind:'complete'},state:{generation:2}}}})}}");
  const staged=await f.extensions.reloadLocalSource({expectedRevision:(await f.extensions.state()).catalog.revision,extensionId:'review.replace-policy'}); if(staged.outcome!=='staged') throw new Error('not staged'); await f.extensions.requestCandidateApplication({extensionId:'review.replace-policy',candidateIntegrity:staged.candidateIntegrity,expectedRevision:(await f.extensions.state()).catalog.revision}); const selecting=f.extensions.selectCandidate({extensionId:'review.replace-policy',candidateIntegrity:staged.candidateIntegrity,expectedRevision:(await f.extensions.state()).catalog.revision}); await expect.poll(()=>f.extensions.services.getSnapshot().providers.find(p=>p.extensionId==='review.replace-policy'&&p.status==='active')?.providerId).not.toBe(old!.binding.reference);
  const timeout=AbortSignal.timeout(1500); const next=await prepare({sessionId:'new',projectId:'selected-project'},timeout);expect(next).toBeDefined();expect(next!.binding.identity.version).not.toBe(old!.binding.identity.version);
  const input={view:{run_id:'r',state:'runnable',history_count:0,history_head_id:null,pending_tool_calls:0,model_capabilities:[]},event:{kind:'started' as const},state:null};
@@ -197,7 +197,7 @@ it('actual artifact replacement pins old implementation; later lease differs des
  await expect(old!.decide(input,new AbortController().signal)).rejects.toThrow();await expect(next!.decide(input,new AbortController().signal)).rejects.toThrow();old!.release();next!.release();
 });
 it('retry launch while model in flight cannot detach policy lease of active Run',async()=>{
- let held!:ServerResponse;const f=await fixture((_body,response)=>{held=response});await installExample(f);await route(f,'example.evidence-policy:host:varin.agent.policy@1',{projectId:'selected-project'});
+ let held!:ServerResponse;const f=await fixture((_body,response)=>{held=response});await installExample(f);await route(f,'example.evidence-policy:host:varin.agent.policy@2',{projectId:'selected-project'});
  const a=await f.api.create('retry');const source=await f.api.prepareSource({...a,key:'source',path:f.workspace,mode:'fixed_branch'});const first=await f.api.submit({...a,key:'retry',expectedHead:null,text:'retry',model,source:source.source});await expect.poll(()=>f.requests.length).toBe(1);
  await f.runtime.rebindLaunch(first.run_id,{credentialOwner:f.owner}).catch(()=>undefined);
  expect(f.kernel.policyBinding(first.run_id)).toBeDefined();complete(held,'retry-complete','done');
@@ -205,7 +205,7 @@ it('retry launch while model in flight cannot detach policy lease of active Run'
 });
 it('restart accepts exact policy identity and rejects changed artifact or config with unchanged author version before inference',async()=>{
  const f=await fixture((_body,response)=>{response.writeHead(200,{'content-type':'text/event-stream'});response.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[{id:'ask',type:'function_call',call_id:'ask-call',name:'ask_user',arguments:JSON.stringify({question:'Choose',options:['A','B']})}]}})}\n\n`)});
- await installExample(f);await route(f,'example.evidence-policy:host:varin.agent.policy@1',{projectId:'selected-project'});
+ await installExample(f);await route(f,'example.evidence-policy:host:varin.agent.policy@2',{projectId:'selected-project'});
  const a=await f.api.create('restart');const source=await f.api.prepareSource({...a,key:'source',path:f.workspace,mode:'fixed_branch'});const first=await f.api.submit({...a,key:'restart',expectedHead:null,text:'ask',model,source:source.source});await expect.poll(async()=>(await f.runtime.run(first.run_id)).state).toBe('waiting');const saved=(await f.runtime.launch(first.run_id))!.selection.policy;
  await f.close();await f.extensions.stop();
  const second=await fixture((_body,response)=>complete(response,'unexpected','unexpected'),f.root,f.endpoint);

@@ -5,7 +5,7 @@
 import { waitWithSignal } from '../cancellation.js';
 import { createHash } from 'node:crypto';
 import { HostServiceBindingError, type ApplicationExtensionRuntime } from '@varin/extension-host';
-import { parseVarinAgentPolicyIdentity, parseVarinAgentPolicyInput, parseVarinAgentPolicyDecision,
+import { parseVarinAgentPolicyIdentity, parseVarinAgentPolicyInput, parseVarinAgentPolicyDecision, resolveVarinExtensionServiceRouting,
   VARIN_AGENT_POLICY_SERVICE_ID, VARIN_AGENT_POLICY_VERSION, type JsonValue, type VarinAgentPolicyDecision,
   type VarinAgentPolicyInput, type VarinAgentPolicyIdentity } from '@varin/extension-contract';
 export interface AgentPolicyBinding { reference: string; identity: VarinAgentPolicyIdentity }
@@ -20,12 +20,46 @@ const record = (value: unknown): value is Record<string, unknown> => value !== n
 export function createAgentPolicy(runtime: ApplicationExtensionRuntime): AgentPolicyPreparer {
   return async (scope, signal) => {
     signal?.throwIfAborted();
+    // Explicit version intent is checked before a default candidate can activate. An installed
+    // provider is not a selection of a new policy contract. Scope precedence and fallback remain
+    // with the ordinary routing owner; this check never probes or invokes an old implementation.
+    const routing = await waitWithSignal(runtime.routing.read(), signal);
+    if (!routing.authoritative) throw new Error('Cannot prepare a Host service from stale selection state');
+    const readSelections = () => Object.fromEntries(Object.entries(runtime.services.getSnapshot().selections)
+      .filter(([key]) => key.startsWith(`${VARIN_AGENT_POLICY_SERVICE_ID}@`)).sort(([a], [b]) => a.localeCompare(b)));
+    const selections = readSelections();
+    const assertSelectionsUnchanged = () => {
+      if (JSON.stringify(readSelections()) !== JSON.stringify(selections)) throw new Error('Policy selection changed during preparation');
+    };
+    const explicitRoute = (version: number) => {
+      const resolution = resolveVarinExtensionServiceRouting({ candidates: [], document: routing.document,
+        serviceId: VARIN_AGENT_POLICY_SERVICE_ID, version, context: scope });
+      return resolution.matchedRule !== undefined
+        || resolution.diagnostics.some(diagnostic => diagnostic.code.startsWith('service_selection_'));
+    };
+    if (!selections[`${VARIN_AGENT_POLICY_SERVICE_ID}@${VARIN_AGENT_POLICY_VERSION}`] && !explicitRoute(VARIN_AGENT_POLICY_VERSION)) {
+      const versions = new Set(routing.document.rules.filter(rule => rule.serviceId === VARIN_AGENT_POLICY_SERVICE_ID
+        && rule.version !== VARIN_AGENT_POLICY_VERSION).map(rule => rule.version));
+      for (const key of Object.keys(selections)) {
+        const prefix = `${VARIN_AGENT_POLICY_SERVICE_ID}@`;
+        if (key.startsWith(prefix) && key !== `${prefix}${VARIN_AGENT_POLICY_VERSION}`) versions.add(Number(key.slice(prefix.length)));
+      }
+      for (const version of versions) {
+        if (selections[`${VARIN_AGENT_POLICY_SERVICE_ID}@${version}`] || explicitRoute(version)) {
+          throw new HostServiceBindingError('selected_unavailable', `Selected agent policy service version ${version} is unsupported; version ${VARIN_AGENT_POLICY_VERSION} is required`);
+        }
+      }
+    }
     let selected;
     try { selected = await waitWithSignal(runtime.prepareService({ serviceId: VARIN_AGENT_POLICY_SERVICE_ID,
-      version: VARIN_AGENT_POLICY_VERSION, method: 'describe', args: [], routing: scope }), signal); }
-    catch (error) { if (error instanceof HostServiceBindingError && error.code === 'missing') return undefined; throw error; }
+      version: VARIN_AGENT_POLICY_VERSION, method: 'describe', args: [], routing: scope }, { expectedRoutingRevision: routing.document.revision }), signal); }
+    catch (error) {
+      if (error instanceof HostServiceBindingError && error.code === 'missing') { assertSelectionsUnchanged(); return undefined; }
+      throw error;
+    }
     const pin = selected.pin();
     try {
+      assertSelectionsUnchanged();
       const provider = runtime.services.getSnapshot().providers.find(provider => provider.providerId === selected.providerId && provider.status === 'active');
       const artifact = provider && runtime.supervisor.getActiveArtifactIdentity(provider);
       if (!provider || !artifact) throw new Error('Policy executing artifact identity is unavailable');
@@ -37,8 +71,9 @@ export function createAgentPolicy(runtime: ApplicationExtensionRuntime): AgentPo
       const requestedModelRoles = (description.capabilities ?? []) as 'agentPlanning'[];
       const identity = parseVarinAgentPolicyIdentity(description.identity);
       const current = await waitWithSignal(runtime.prepareService({ serviceId: VARIN_AGENT_POLICY_SERVICE_ID,
-        version: VARIN_AGENT_POLICY_VERSION, method: 'describe', args: [], routing: scope }), signal);
+        version: VARIN_AGENT_POLICY_VERSION, method: 'describe', args: [], routing: scope }, { expectedRoutingRevision: routing.document.revision }), signal);
       if (current.providerId !== selected.providerId || runtime.supervisor.getActiveArtifactIdentity(provider) !== artifact) throw new Error('Policy selection changed during preparation');
+      assertSelectionsUnchanged();
       pin.assertAvailable();
       const version = createHash('sha256').update(JSON.stringify({ artifact,
         configuration: description.configuration, version: identity.version, ...(requestedModelRoles.length ? { capabilities: requestedModelRoles } : {}) })).digest('hex');

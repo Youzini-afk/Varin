@@ -1,6 +1,6 @@
 # Bounded planning policy
 
-An ordinary installed `varin.agent.policy@1` extension that requests one auxiliary planning model
+An ordinary installed `varin.agent.policy@2` extension that requests one auxiliary planning model
 job, reads its committed plan, and chooses a real evidence graph from the plan's content. The main
 model answers using core-validated evidence. The existing evidence-policy v2 remains independent.
 
@@ -24,8 +24,8 @@ Select the provider through existing service routing, with the routing document'
 ```json
 {
   "serviceId": "varin.agent.policy",
-  "version": 1,
-  "providerKey": "example.planning-policy:host:varin.agent.policy@1",
+  "version": 2,
+  "providerKey": "example.planning-policy:host:varin.agent.policy@2",
   "scope": { "projectId": "YOUR_PROJECT_ID" },
   "allowFallback": false
 }

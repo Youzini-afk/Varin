@@ -800,9 +800,7 @@ fn early_external_terminal_and_model_job_acceptance_converge() {
     db.commit_execution(
         &r.run_id,
         epoch,
-        &ExecutionRecord::ToolsAdmitted {
-            request_id: "model-1".into(),
-            tools: vec![AdmittedTool {
+        &{let tool=AdmittedTool {
                 call,
                 contract: ToolContract {
                     name: "process-executor".into(),
@@ -812,17 +810,13 @@ fn early_external_terminal_and_model_job_acceptance_converge() {
                     lifetime: Lifetime::Thread,
                     resources: vec![],
                 },
-            }],
-        },
+            };ExecutionRecord::ToolAdmitted{context:{let request_id:String="model-1".into();let call_id:String=tool.call.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&r.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},tool}},
     )
     .unwrap();
     db.commit_execution(
         &r.run_id,
         epoch,
-        &ExecutionRecord::ToolDispatched {
-            request_id: "model-1".into(),
-            call_id: "job".into(),
-        },
+        &ExecutionRecord::ToolDispatched{context:{let request_id:String="model-1".into();let call_id:String="job".into();varin_runtime::execution::ToolExecutionContext{run_id:(&r.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}}},
     )
     .unwrap();
     let operation_id = "model-1:tool:job";
@@ -850,9 +844,7 @@ fn early_external_terminal_and_model_job_acceptance_converge() {
     db.commit_execution(
         &r.run_id,
         epoch,
-        &ExecutionRecord::ToolSettled {
-            result: result.clone(),
-        },
+        &{let result=result.clone();ExecutionRecord::ToolSettled{context:{let request_id:String=result.request_id.clone();let call_id:String=result.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&r.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},completion:result.completion}},
     )
     .unwrap();
     db.commit_execution(
@@ -1836,23 +1828,21 @@ fn dispatched_no_effect_requires_exact_durable_executor_evidence() {
         items:calls.iter().map(|call|ProviderItem { id:format!("item-{}",call.call_id), content:Content::ToolCall { call:call.clone() }, opaque:None }).collect(),
         interrupted_deltas:vec![], usage:UsageReceipt::default(), failure:None,
     }).unwrap();
-    db.commit_execution(&run.run_id, epoch, &ExecutionRecord::ToolsAdmitted {
-        request_id:"model-1".into(), tools:calls.into_iter().map(|call|AdmittedTool { call, contract:ToolContract {
-            name:"cas-owner".into(), schema_version:"1".into(), read_only:false, completion:CompletionKind::Result,
-            lifetime:Lifetime::Run, resources:vec![],
-        }}).collect(),
-    }).unwrap();
+    for call in calls {
+        let context=crate::execution::ToolExecutionContext{run_id:run.run_id.clone(),origin:crate::execution::ToolOrigin::ModelStep{request_id:"model-1".into()},operation_id:format!("model-1:tool:{}",call.call_id)};
+        db.commit_execution(&run.run_id,epoch,&ExecutionRecord::ToolAdmitted{context,tool:AdmittedTool{call,contract:ToolContract{name:"cas-owner".into(),schema_version:"1".into(),read_only:false,completion:CompletionKind::Result,lifetime:Lifetime::Run,resources:vec![]}}}).unwrap();
+    }
     for call_id in ["conflict", "other"] {
-        db.commit_execution(&run.run_id, epoch, &ExecutionRecord::ToolDispatched { request_id:"model-1".into(), call_id:call_id.into() }).unwrap();
+        db.commit_execution(&run.run_id, epoch, &ExecutionRecord::ToolDispatched{context:{let request_id:String="model-1".into();let call_id:String=call_id.into();varin_runtime::execution::ToolExecutionContext{run_id:(&run.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}}}).unwrap();
     }
     let owner = std::sync::Mutex::new(db);
     let context = ToolExecutionContext { run_id:run.run_id.clone(), operation_id:"model-1:tool:conflict".into(),
         origin:ToolOrigin::ModelStep { request_id:"model-1".into() } };
     let content = json!({"status":"conflict","currentRef":"user-version","permission":{"ordinary":"opaque tool field"},"data":"result-body-漢字".repeat(20000)});
     let completion = ToolCompletion::Result { outcome:Outcome::Failed, effect:Effect::None, content:content.clone() };
-    let settlement = |completion| ExecutionRecord::ToolSettled { result:ToolResult {
+    let settlement = |completion| {let result=ToolResult {
         request_id:"model-1".into(), call_id:"conflict".into(), completion,
-    }};
+    };ExecutionRecord::ToolSettled{context:{let request_id:String=result.request_id.clone();let call_id:String=result.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&run.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},completion:result.completion}};
     // A tool's no-effect claim alone must neither bypass normalization nor settle a dispatch.
     assert!(!owner.confirms_no_effect(&context, epoch, &completion).unwrap());
     assert!(owner.commit(&run.run_id, epoch, &settlement(completion.clone())).is_err());
@@ -1950,23 +1940,17 @@ fn recovery_preparation_discards_stale_failure_after_a_real_tool_receipt_arrives
         items:vec![ProviderItem { id:"call-item".into(), content:Content::ToolCall { call:call.clone() }, opaque:None }],
         interrupted_deltas:vec![], usage:UsageReceipt::default(), failure:None,
     }).unwrap();
-    catalog.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::ToolsAdmitted {
-        request_id:"model-1".into(), tools:vec![AdmittedTool { call, contract:ToolContract {
+    catalog.commit_execution(&receipt.run_id, epoch, &{let tool=AdmittedTool { call, contract:ToolContract {
             name:"read".into(), schema_version:"1".into(), read_only:false,
             completion:CompletionKind::Result, lifetime:Lifetime::Run, resources:vec![],
-        }}],
-    }).unwrap();
-    catalog.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::ToolDispatched {
-        request_id:"model-1".into(), call_id:"receipt-race".into(),
-    }).unwrap();
+        }};ExecutionRecord::ToolAdmitted{context:{let request_id:String="model-1".into();let call_id:String=tool.call.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&receipt.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},tool}}).unwrap();
+    catalog.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::ToolDispatched{context:{let request_id:String="model-1".into();let call_id:String="receipt-race".into();varin_runtime::execution::ToolExecutionContext{run_id:(&receipt.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}}}).unwrap();
     let policy = PolicyIdentity { name:"default".into(), version:"1".into() };
     let preparation = catalog.capture_recovered_execution(&receipt.run_id, binding.clone(), policy.clone(), Value::Null, true).unwrap();
     let identity = preparation.identity();
     assert!(preparation.load(&CancellationToken::default()).is_err(), "unconfirmed dispatch cannot replay");
-    catalog.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::ToolSettled {
-        result:ToolResult { request_id:"model-1".into(), call_id:"receipt-race".into(),
-            completion:ToolCompletion::Result { outcome:Outcome::Succeeded, effect:Effect::Confirmed, content:json!("actual receipt") } },
-    }).unwrap();
+    catalog.commit_execution(&receipt.run_id, epoch, &{let result=ToolResult { request_id:"model-1".into(), call_id:"receipt-race".into(),
+            completion:ToolCompletion::Result { outcome:Outcome::Succeeded, effect:Effect::Confirmed, content:json!("actual receipt") } };ExecutionRecord::ToolSettled{context:{let request_id:String=result.request_id.clone();let call_id:String=result.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&receipt.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},completion:result.completion}}).unwrap();
     assert!(!catalog.preparation_is_current(&identity).unwrap(), "a late real receipt supersedes the earlier recovery failure");
     let preparation = catalog.capture_recovered_execution(&receipt.run_id, binding, policy, Value::Null, true).unwrap();
     let prepared = preparation.load(&CancellationToken::default()).unwrap().unwrap();

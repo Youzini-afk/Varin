@@ -107,9 +107,7 @@ fn setup(kind: CompletionKind) -> (std::path::PathBuf, Catalog, String) {
     db.commit_execution(
         &r.run_id,
         epoch,
-        &ExecutionRecord::ToolsAdmitted {
-            request_id: "model-1".into(),
-            tools: vec![AdmittedTool {
+        &{let tool=AdmittedTool {
                 call,
                 contract: ToolContract {
                     name: "process-executor".into(),
@@ -119,17 +117,13 @@ fn setup(kind: CompletionKind) -> (std::path::PathBuf, Catalog, String) {
                     lifetime: Lifetime::Thread,
                     resources: vec![claim("file")],
                 },
-            }],
-        },
+            };ExecutionRecord::ToolAdmitted{context:{let request_id:String="model-1".into();let call_id:String=tool.call.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&r.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},tool}},
     )
     .unwrap();
     db.commit_execution(
         &r.run_id,
         epoch,
-        &ExecutionRecord::ToolDispatched {
-            request_id: "model-1".into(),
-            call_id: "job".into(),
-        },
+        &ExecutionRecord::ToolDispatched{context:{let request_id:String="model-1".into();let call_id:String="job".into();varin_runtime::execution::ToolExecutionContext{run_id:(&r.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}}},
     )
     .unwrap();
 
@@ -510,8 +504,7 @@ fn live_job_survives_run_cancel_and_restart_until_explicit_stop() {
     db.commit_execution(
         &run,
         epoch,
-        &ExecutionRecord::ToolSettled {
-            result: ToolResult {
+        &{let result=ToolResult {
                 request_id: "model-1".into(),
                 call_id: "job".into(),
                 completion: ToolCompletion::JobAccepted {
@@ -520,8 +513,7 @@ fn live_job_survives_run_cancel_and_restart_until_explicit_stop() {
                     effect: Effect::Dispatched,
                     lifetime: Lifetime::Thread,
                 },
-            },
-        },
+            };ExecutionRecord::ToolSettled{context:{let request_id:String=result.request_id.clone();let call_id:String=result.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&run).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},completion:result.completion}},
     )
     .unwrap();
     db.commit_execution(
@@ -590,8 +582,7 @@ fn early_stop_before_job_accepted_never_reacquires_occupancy() {
     db.commit_execution(
         &run,
         epoch,
-        &ExecutionRecord::ToolSettled {
-            result: ToolResult {
+        &{let result=ToolResult {
                 request_id: "model-1".into(),
                 call_id: "job".into(),
                 completion: ToolCompletion::JobAccepted {
@@ -600,8 +591,7 @@ fn early_stop_before_job_accepted_never_reacquires_occupancy() {
                     effect: Effect::Dispatched,
                     lifetime: Lifetime::Thread,
                 },
-            },
-        },
+            };ExecutionRecord::ToolSettled{context:{let request_id:String=result.request_id.clone();let call_id:String=result.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&run).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},completion:result.completion}},
     )
     .unwrap();
     drop(db);

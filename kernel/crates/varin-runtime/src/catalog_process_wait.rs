@@ -131,9 +131,13 @@ impl Catalog {
                 lifetime: Lifetime::Thread,
             },
         };
+        let accepted=super::result_content::ToolReceiptMetadata::job(&receipt)?;
+        if op.call_completion.as_ref().is_some_and(|previous|previous!=&accepted.completion) {return Err(RuntimeError::Conflict("original invocation acceptance changed".into()));}
+        op.call_completion=Some(accepted.completion.clone());
+        put(&tx,"operations",&op.id,&op)?;
         tx.execute(
             "UPDATE tool_calls SET receipt=?3 WHERE request_id=?1 AND call_id=?2",
-            params![receipt.request_id, receipt.call_id, encode(&super::result_content::ToolReceiptMetadata::job(&receipt)?)?],
+            params![receipt.request_id, receipt.call_id, encode(&accepted)?],
         )?;
         event(
             &tx,

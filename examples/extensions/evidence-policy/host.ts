@@ -1,5 +1,5 @@
 import { defineHostExtension, provideAgentPolicy } from '@varin/extension-sdk';
-import type { JsonValue, VarinAgentPolicyEvidenceRef, VarinAgentPolicyReadNode } from '@varin/extension-contract';
+import type { JsonValue, VarinAgentPolicyEvidenceRef, VarinAgentPolicyToolNode } from '@varin/extension-contract';
 
 // These are this example's declared research budgets, not runtime limits.
 const configuration = { modelBudget: 8, indexPath: 'evidence-index.json', indexBytes: 16 * 1024 };
@@ -12,7 +12,7 @@ interface State {
 }
 const asJson = (state: State): JsonValue => state as unknown as JsonValue;
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-function read(id: string, path: string, length?: number): VarinAgentPolicyReadNode {
+function read(id: string, path: string, length?: number): VarinAgentPolicyToolNode {
   return { id, depends_on: [], call: { call_id: id, name: 'file_read', schema_version: '1', arguments: { path, ...(length === undefined ? {} : { length }) } } };
 }
 function restore(value: JsonValue): State {
@@ -52,15 +52,15 @@ export default defineHostExtension({
           }
           return answer();
         }
-        if (event.kind === 'read_graph_completed') {
+        if (event.kind === 'tool_graph_completed') {
           const receipt = event.receipts.find(receipt => receipt.node_id === (state.phase === 'index' ? 'index' : 'evidence'));
-          if (!receipt || receipt.outcome !== 'succeeded' || !receipt.output) return fail('The evidence read did not commit a successful result');
-          state.evidence.push(receipt.output);
+          if (!receipt || receipt.completion.kind !== 'result' || receipt.completion.outcome !== 'succeeded') return fail('The evidence read did not commit a successful result');
+          state.evidence.push(receipt.completion.output);
           if (state.phase === 'evidence') return answer();
           if (state.phase !== 'index') return fail('Unexpected evidence graph boundary');
           state.phase = 'index_content';
           state.nextChunk = 0;
-          return { action: { kind: 'read_result', reference: receipt.output, index: 0 }, state: asJson(state) };
+          return { action: { kind: 'read_result', reference: receipt.completion.output, index: 0 }, state: asJson(state) };
         }
         if (event.kind === 'result_chunk') {
           const reference = state.evidence[0];
@@ -84,10 +84,10 @@ export default defineHostExtension({
           try { index = JSON.parse(result.content.text); } catch { return fail('Evidence index must contain a complete JSON object within its declared byte budget'); }
           if (!record(index) || typeof index.nextFile !== 'string' || !index.nextFile.trim()) return fail('Evidence index requires nextFile');
           state.phase = 'evidence';
-          return { action: { kind: 'read_graph', nodes: [read('evidence', index.nextFile)] }, state: asJson(state) };
+          return { action: { kind: 'tool_graph', nodes: [read('evidence', index.nextFile)] }, state: asJson(state) };
         }
         if (state.phase === 'index') return {
-          action: { kind: 'read_graph', nodes: [read('index', config.indexPath, config.indexBytes)] }, state: asJson(state),
+          action: { kind: 'tool_graph', nodes: [read('index', config.indexPath, config.indexBytes)] }, state: asJson(state),
         };
         if (state.phase === 'answer') return answer();
         return fail('Evidence collection requires its committed graph or chunk event');

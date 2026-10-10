@@ -139,9 +139,7 @@ impl Fixture {
         db.commit_execution(
             &run,
             epoch,
-            &ExecutionRecord::ToolsAdmitted {
-                request_id: "parent-request".into(),
-                tools: vec![AdmittedTool {
+            &{let tool=AdmittedTool {
                     call,
                     contract: ToolContract {
                         name: DISPATCH_TOOL.into(),
@@ -151,17 +149,13 @@ impl Fixture {
                         lifetime: Lifetime::Thread,
                         resources: vec![],
                     },
-                }],
-            },
+                };ExecutionRecord::ToolAdmitted{context:{let request_id:String="parent-request".into();let call_id:String=tool.call.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&run).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},tool}},
         )
         .unwrap();
         db.commit_execution(
             &run,
             epoch,
-            &ExecutionRecord::ToolDispatched {
-                request_id: "parent-request".into(),
-                call_id: "dispatch-call".into(),
-            },
+            &ExecutionRecord::ToolDispatched{context:{let request_id:String="parent-request".into();let call_id:String="dispatch-call".into();varin_runtime::execution::ToolExecutionContext{run_id:(&run).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}}},
         )
         .unwrap();
         let context = ToolExecutionContext {
@@ -283,9 +277,7 @@ impl Fixture {
             .commit_execution(
                 &self.context.run_id,
                 epoch,
-                &ExecutionRecord::ToolsAdmitted {
-                    request_id: request_id.clone(),
-                    tools: vec![AdmittedTool {
+                &{let tool=AdmittedTool {
                         call,
                         contract: ToolContract {
                             name: WAIT_TOOL.into(),
@@ -295,18 +287,14 @@ impl Fixture {
                             lifetime: Lifetime::Thread,
                             resources: vec![],
                         },
-                    }],
-                },
+                    };ExecutionRecord::ToolAdmitted{context:{let request_id:String=request_id.clone();let call_id:String=tool.call.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&self.context.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},tool}},
             )
             .unwrap();
         self.db
             .commit_execution(
                 &self.context.run_id,
                 epoch,
-                &ExecutionRecord::ToolDispatched {
-                    request_id: request_id.clone(),
-                    call_id: call_id.clone(),
-                },
+                &ExecutionRecord::ToolDispatched{context:{let request_id:String=request_id.clone();let call_id:String=call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&self.context.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}}},
             )
             .unwrap();
         let context = ToolExecutionContext {
@@ -334,9 +322,7 @@ impl Fixture {
             .commit_execution(
                 &self.context.run_id,
                 epoch,
-                &ExecutionRecord::ToolSettled {
-                    result: result.clone(),
-                },
+                &{let result=result.clone();ExecutionRecord::ToolSettled{context:{let request_id:String=result.request_id.clone();let call_id:String=result.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&self.context.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},completion:result.completion}},
             )
             .unwrap();
         self.db
@@ -376,9 +362,7 @@ impl Fixture {
             .commit_execution(
                 &self.context.run_id,
                 self.db.epoch(),
-                &ExecutionRecord::ToolSettled {
-                    result: result.clone(),
-                },
+                &{let result=result.clone();ExecutionRecord::ToolSettled{context:{let request_id:String=result.request_id.clone();let call_id:String=result.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&self.context.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},completion:result.completion}},
             )
             .unwrap();
         self.db

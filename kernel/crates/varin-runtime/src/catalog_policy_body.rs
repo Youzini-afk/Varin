@@ -7,7 +7,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum PolicyActionMetadata {
-    PolicyReadGraphV1 {
+    PolicyToolGraphV1 {
         action_id: String,
         boundary: PolicyBoundary,
         identity: PolicyIdentity,
@@ -24,45 +24,45 @@ pub(crate) enum PolicyActionMetadata {
 impl PolicyActionMetadata {
     pub fn identity(&self) -> &PolicyIdentity {
         match self {
-            Self::PolicyReadGraphV1 { identity, .. } | Self::PolicyModelJobV1 { identity, .. } => {
+            Self::PolicyToolGraphV1 { identity, .. } | Self::PolicyModelJobV1 { identity, .. } => {
                 identity
             }
         }
     }
     pub fn action_id(&self) -> &str {
         match self {
-            Self::PolicyReadGraphV1 { action_id, .. }
+            Self::PolicyToolGraphV1 { action_id, .. }
             | Self::PolicyModelJobV1 { action_id, .. } => action_id,
         }
     }
     pub fn body_ref(&self) -> &Value {
         match self {
-            Self::PolicyReadGraphV1 { body_ref, .. } | Self::PolicyModelJobV1 { body_ref, .. } => {
+            Self::PolicyToolGraphV1 { body_ref, .. } | Self::PolicyModelJobV1 { body_ref, .. } => {
                 body_ref
             }
         }
     }
     pub fn boundary(&self) -> &PolicyBoundary {
         match self {
-            Self::PolicyReadGraphV1 { boundary, .. } | Self::PolicyModelJobV1 { boundary, .. } => {
+            Self::PolicyToolGraphV1 { boundary, .. } | Self::PolicyModelJobV1 { boundary, .. } => {
                 boundary
             }
         }
     }
     pub fn graph_nodes(&self) -> Option<usize> {
         match self {
-            Self::PolicyReadGraphV1 { node_count, .. } => Some(*node_count),
+            Self::PolicyToolGraphV1 { node_count, .. } => Some(*node_count),
             _ => None,
         }
     }
     pub fn from_operation(op: &Operation) -> Result<Option<Self>> {
         let kind = op.intent.get("kind").and_then(Value::as_str).unwrap_or("");
-        if !kind.starts_with("policy_read_graph") && !kind.starts_with("policy_model_job") {
+        if !kind.starts_with("policy_tool_graph") && !kind.starts_with("policy_model_job") {
             return Ok(None);
         }
         let metadata: Self = serde_json::from_value(op.intent.clone())?;
         let executor = if metadata.graph_nodes().is_some() {
-            "policy-read-graph.v1"
+            "policy-tool-graph.v1"
         } else {
             "policy-model.v1"
         };
@@ -94,7 +94,7 @@ impl PolicyActionMetadata {
             ));
         }
         let tools = Arc::new(body.tools);
-        Ok(PolicyGraphIntent::PolicyReadGraphV1 {
+        Ok(PolicyGraphIntent::PolicyToolGraphV1 {
             action_id: body.action_id.clone(),
             boundary: body.boundary,
             identity: body.identity,
@@ -114,7 +114,6 @@ impl PolicyActionMetadata {
                         source: node.source,
                     },
                     node: node.node,
-                    contract: node.contract,
                 })
                 .collect(),
         })
@@ -148,14 +147,13 @@ pub(crate) struct PolicyGraphBody {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PolicyGraphNodeBody {
-    pub node: PolicyReadNode,
+    pub node: PolicyToolNode,
     pub tool_schema_generation: u64,
     pub source: Option<super::launches::SourceSelection>,
-    pub contract: ToolContract,
 }
 impl PolicyGraphBody {
     pub fn prepare(intent: &PolicyGraphIntent) -> Result<(Self, String)> {
-        let PolicyGraphIntent::PolicyReadGraphV1 {
+        let PolicyGraphIntent::PolicyToolGraphV1 {
             action_id,
             boundary,
             identity,
@@ -178,15 +176,6 @@ impl PolicyGraphBody {
                         action_id: action_id.clone(),
                         node_id: node.node.id.clone(),
                     })
-                || !node.contract.read_only
-                || node.contract.completion != CompletionKind::Result
-                || node.contract.name != node.node.call.name
-                || node.contract.schema_version != node.node.call.schema_version
-                || node
-                    .contract
-                    .resources
-                    .iter()
-                    .any(|resource| resource.access != Access::Read)
                 || !first.tools.iter().any(|schema| {
                     schema.name == node.node.call.name
                         && schema.version == node.node.call.schema_version
@@ -210,7 +199,6 @@ impl PolicyGraphBody {
                         node: node.node.clone(),
                         tool_schema_generation: node.context.tool_schema_generation,
                         source: node.context.source.clone(),
-                        contract: node.contract.clone(),
                     })
                     .collect(),
             },
@@ -228,10 +216,13 @@ pub(crate) struct PolicyGraphProgress {
 }
 impl PolicyGraphProgress {
     pub fn read(op: &Operation, metadata: &PolicyActionMetadata) -> Result<Self> {
-        let progress: Self =
-            serde_json::from_value(op.result.as_ref().ok_or_else(|| {
-                RuntimeError::Invalid("policy graph progress is missing".into())
-            })?.control()?.clone())?;
+        let progress: Self = serde_json::from_value(
+            op.result
+                .as_ref()
+                .ok_or_else(|| RuntimeError::Invalid("policy graph progress is missing".into()))?
+                .control()?
+                .clone(),
+        )?;
         if progress.failed + progress.cancelled > progress.settled
             || progress.settled > metadata.graph_nodes().unwrap_or(0)
             || (op.phase == OperationPhase::Terminal)

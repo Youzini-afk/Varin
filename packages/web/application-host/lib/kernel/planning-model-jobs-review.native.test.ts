@@ -196,15 +196,15 @@ async function install(f: Fixture, decision: string, capabilities: string[] = ['
   await fs.writeFile(path.join(folder, 'package.json'), JSON.stringify({ name: id, version: '1.0.0' }));
   await fs.writeFile(path.join(folder, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id, version: '1.0.0', engines: { varin: '*' },
     entrypoints: { host: { file: 'host.cjs', mode: 'brokered', activation: ['service-request'] } },
-    provides: { services: [{ id: 'varin.agent.policy', version: 1, multiple: true }] } }));
-  await fs.writeFile(path.join(folder, 'host.cjs'), `module.exports={activate(context){context.services.provide({id:'varin.agent.policy',version:1,multiple:true},{
+    provides: { services: [{ id: 'varin.agent.policy', version: 2, multiple: true }] } }));
+  await fs.writeFile(path.join(folder, 'host.cjs'), `module.exports={activate(context){context.services.provide({id:'varin.agent.policy',version:2,multiple:true},{
     describe(){return {identity:{name:'planning-review',version:'1'},configuration:{},capabilities:${JSON.stringify(capabilities)}}},
     decide([input]){${decision}}
   })}}`);
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision,
     source: { kind: 'local', display: id, specifier: folder } });
   await f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
-    rule: { serviceId: 'varin.agent.policy', version: 1, providerKey: `${id}:host:varin.agent.policy@1`, scope: { projectId: 'planning-review' }, allowFallback: false } });
+    rule: { serviceId: 'varin.agent.policy', version: 2, providerKey: `${id}:host:varin.agent.policy@2`, scope: { projectId: 'planning-review' }, allowFallback: false } });
 }
 async function installBundledExample(f: Fixture) {
   const folder = path.join(f.root, 'bundled-planning-policy'); await fs.mkdir(folder);
@@ -216,7 +216,7 @@ async function installBundledExample(f: Fixture) {
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision,
     source: { kind: 'local', display: 'Bundled planning example', specifier: folder } });
   await f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
-    rule: { serviceId: 'varin.agent.policy', version: 1, providerKey: 'example.planning-policy:host:varin.agent.policy@1',
+    rule: { serviceId: 'varin.agent.policy', version: 2, providerKey: 'example.planning-policy:host:varin.agent.policy@2',
       scope: { projectId: 'planning-review' }, allowFallback: false } });
 }
 async function submitBundledExample(f: Fixture, key: string) {
@@ -281,7 +281,7 @@ it.each(['first', 'second'] as const)('installed bundled planning example select
   expect(JSON.stringify(mainInput)).not.toContain(selected === 'first' ? 'IMMUTABLE_SECOND_FINDING' : 'IMMUTABLE_FIRST_FINDING');
   expect(JSON.stringify(mainInput)).not.toMatch(/MUTATED_LIVE_FIRST|MUTATED_LIVE_SECOND/);
   expect(mainInput.find(item => JSON.stringify(item).includes(`IMMUTABLE_${selected.toUpperCase()}_FINDING`))).toMatchObject({ role: 'user' });
-  expect(f.decisions.filter(input => input.event.kind === 'read_graph_completed')).toHaveLength(2);
+  expect(f.decisions.filter(input => input.event.kind === 'tool_graph_completed')).toHaveLength(2);
   expect(JSON.stringify((await f.api.snapshot(identity)).history)).toContain('MAIN_ANSWER');
   expect(f.launchErrors).toEqual([]);
 });
@@ -297,7 +297,7 @@ it.each([
   await terminal(f, run.run_id, 'failed');
   expect(f.planner.requests).toHaveLength(1); expect(f.main.requests).toHaveLength(0);
   expect(await graphPaths(f, run.run_id)).toEqual(['planning-context.md']);
-  expect(f.decisions.filter(input => input.event.kind === 'read_graph_completed')).toHaveLength(1);
+  expect(f.decisions.filter(input => input.event.kind === 'tool_graph_completed')).toHaveLength(1);
   expect(f.decisions.some(input => input.event.kind === 'result_chunk')).toBe(true);
   expect(JSON.stringify((await f.api.snapshot(identity)).history)).not.toContain('OUTSIDE_SOURCE_MUST_NOT_BE_READ');
 });
@@ -649,18 +649,22 @@ it('independent planning preparation carries pending memory facts without changi
   } finally { database.close(); }
 });
 
-it.each(['read', 'save'] as const)('policy read graphs treat memory %s according to its actual effect', async action => {
+it.each(['read', 'save'] as const)('policy tool graphs execute memory %s through its actual domain effect contract', async action => {
   const f = await fixture({ memory: true });
-  const graph = { kind: 'read_graph', nodes: [{ id: 'memory-node', depends_on: [], call: {
+  const graph = { kind: 'tool_graph', nodes: [{ id: 'memory-node', depends_on: [], call: {
     call_id: 'memory-node', name: 'memory', schema_version: '1', arguments: action === 'read'
-      ? { action: 'read' } : { action: 'save', content: 'POLICY_MUST_NOT_WRITE_MEMORY', revision: 0 },
+      ? { action: 'read' } : { action: 'save', content: 'POLICY_COMMITTED_MEMORY', revision: 0 },
   } }] };
   await install(f, `return {action:input.event.kind==='started'?${JSON.stringify(graph)}:{kind:'complete'},state:null};`);
-  const { run } = await submit(f, `memory-read-graph-${action}`);
-  await terminalFromEvents(f, run.run_id, action === 'read' ? 'completed' : 'failed');
+  const { run } = await submit(f, `memory-tool-graph-${action}`);
+  await terminalFromEvents(f, run.run_id, 'completed');
   expect(f.main.requests).toHaveLength(0); expect(f.planner.requests).toHaveLength(0);
-  expect(await f.personalization!.catalog()).toEqual({ memories: [], prompts: {}, revision: 0 });
-  expect(f.decisions.some(input => input.event.kind === 'read_graph_completed')).toBe(action === 'read');
+  const catalog = await f.personalization!.catalog();
+  expect(catalog.revision).toBe(action === 'read' ? 0 : 1);
+  expect(catalog.memories).toHaveLength(action === 'read' ? 0 : 1);
+  if (action === 'save') expect(catalog.memories[0]!.content).toBe('POLICY_COMMITTED_MEMORY');
+  const event = f.decisions.find(input => input.event.kind === 'tool_graph_completed')?.event;
+  expect(event).toMatchObject({ kind: 'tool_graph_completed', receipts: [{ node_id: 'memory-node', completion: { kind: 'result', outcome: 'succeeded', effect: action === 'read' ? 'none' : 'confirmed' } }] });
 });
 
 

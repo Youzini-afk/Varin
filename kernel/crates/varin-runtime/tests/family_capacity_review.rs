@@ -652,7 +652,7 @@ mod engines {
             _: &CancellationToken,
         ) -> Result<PolicyDecision, ExecutionError> {
             let action = if matches!(event, PolicyEvent::Started) {
-                json!({"kind":"read_graph","nodes":[{"id":"graph-call","depends_on":[],"call":{"call_id":"graph-call","name":"read","schema_version":"1","arguments":{}}}]})
+                json!({"kind":"tool_graph","nodes":[{"id":"graph-call","depends_on":[],"call":{"call_id":"graph-call","name":"read","schema_version":"1","arguments":{}}}]})
             } else {
                 json!({"kind":"complete"})
             };
