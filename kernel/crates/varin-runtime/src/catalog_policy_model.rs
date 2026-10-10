@@ -7,7 +7,7 @@ pub(crate) fn model_metadata(
 ) -> Result<Option<super::policy_body::PolicyActionMetadata>> {
     Ok(
         super::policy_body::PolicyActionMetadata::from_operation(op)?
-            .filter(|metadata| metadata.graph_nodes().is_none()),
+            .filter(|metadata| metadata.is_model()),
     )
 }
 pub(crate) fn model_result(op: &Operation) -> Result<PolicyModelResult> {
@@ -179,13 +179,13 @@ impl Catalog {
         epoch: u64,
     ) -> Result<Option<PolicyModelRead>> {
         fence(&self.run(run_id)?, epoch)?;
-        // The latest action across both domains owns the decision boundary.
-        let key:Option<String>=self.db.query_row("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_tool_graph_v1','policy_model_job_v1') ORDER BY rowid DESC LIMIT 1",[run_id],|r|r.get(0)).optional()?;
-        let Some(key) = key else { return Ok(None) };
-        let op: Operation = record(&self.db, "operations", &key)?;
-        let Some(metadata) = model_metadata(&op)? else {
-            return Ok(None);
-        };
+        let Some((op, metadata)) = super::policy_body::latest_action(&self.db, run_id, false)? else { return Ok(None) };
+        if !metadata.is_model() { return Ok(None); }
+        self.capture_model_action(op, metadata)
+    }
+    pub(crate) fn capture_model_action(&self, op: Operation, metadata: super::policy_body::PolicyActionMetadata) -> Result<Option<PolicyModelRead>> {
+        let run_id = op.run_id.as_str();
+        let key = op.id.clone();
         let result = model_result(&op)?;
         let admitted:u64=self.db.query_row("SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND kind='policy.model_admitted'",[&key],|r|read_number(r,0))?;
         let consumed:u64=self.db.query_row("SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND (kind='input.delivered' OR (kind='execution.committed' AND json_extract(data,'$.kind')='request_prepared'))",[run_id],|r|read_number(r,0))?;
@@ -324,7 +324,8 @@ impl Catalog {
         if super::inputs::has_boundary_inputs(&tx, run_id)? {
             return Err(RuntimeError::InputPending);
         }
-        let unresolved:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state!='completed' AND json_extract(body,'$.superseded_by_input') IS NULL) OR EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0) OR EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_tool_graph_v1','policy_model_job_v1') AND json_extract(body,'$.phase')!='terminal')",[run_id],|r|r.get(0))?;
+        let unresolved:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state!='completed' AND json_extract(body,'$.superseded_by_input') IS NULL) OR EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0)",[run_id],|r|r.get(0))?;
+        let unresolved = unresolved || super::policy_body::has_pending_action(&tx, run_id)?;
         if unresolved {
             return Err(RuntimeError::Conflict(
                 "planning cannot bypass unsettled work".into(),

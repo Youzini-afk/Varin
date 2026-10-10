@@ -45,7 +45,7 @@ function fixture(active = false) {
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
   const api: ThreadsAPI = { listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
-    selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, events: async () => [],
+    selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, retryPreparation: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
   };
   return { api, view, submit, enqueue, editInput, cancelInput, cancelRun, emit: (event: Parameters<ThreadsAPI['observe']>[1] extends (value: infer T) => void ? T : never) => listener?.(event) };
@@ -485,4 +485,99 @@ it.each(['fixed_branch', 'materialized'] as const)('reprepares %s from a live la
   await submitForm(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!);
   expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ source: fixed.source }));
   for (const tool of languageTools) expect(f.submit.mock.calls[0]![0].source?.tools).not.toContain(tool);
+});
+
+function pauseView(view: ThreadSnapshot, waitId = 'wait:policy-one') {
+  view.activeRun!.state = 'waiting'; view.activeRun!.waiting_on = waitId;
+  view.launch = { run_id: view.activeRun!.id, revision: 1, startable: false, requires_rebind: true, bound_epoch: null, preparation_failure: null,
+    pause: { action_id: `action:${waitId}`, wait_id: waitId, reason: 'Review the first delivered result.' },
+    selection: { policy_models: [], mcp_binding: null, credential_scope: null, connection_identity: 'fixture', provider_family: 'fixture', model: 'fixture',
+      configuration_generation: 1, tool_schema_generation: 1, tools: [], policy: { name: 'fixture', version: '1' }, source: null } };
+  view.operations = [{ id: view.launch.pause!.action_id, run_id: view.activeRun!.id, epoch: 1, revision: 1,
+    phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'run', handed_off: false,
+    executor: 'policy.pause', waiting_on: waitId, intent: {}, result: null, external_receipt: null, call_completion: null }];
+}
+
+it('shows the core Pause reason and exact resume control while input remains queued', async () => {
+  const f = fixture(true); pauseView(f.view);
+  const resume = vi.fn<ThreadsAPI['resume']>(); f.api.resume = resume;
+  f.api.retryPreparation = vi.fn();
+  await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  expect(container.querySelector('[aria-label="Policy pause"]')?.textContent).toContain('Review the first delivered result.');
+  expect(button('Resume run')).toBeDefined();
+  expect(button('Retry preparation')).toBeUndefined();
+  expect(button('Cancel operation')).toBeUndefined();
+  expect(container.textContent).not.toContain('Background operation');
+  expect(button('Stop run')).toBeDefined();
+  await edit('[aria-label="Message thread"]', 'Please keep this for the resumed run');
+  await submitForm(container.querySelector('form')!);
+  expect(f.enqueue).toHaveBeenCalledOnce();
+  expect(resume).not.toHaveBeenCalled();
+  expect(f.api.retryPreparation).not.toHaveBeenCalled();
+  let resolve!: (receipt: Awaited<ReturnType<ThreadsAPI['resume']>>) => void;
+  resume.mockImplementation(() => new Promise(done => { resolve = done; }));
+  await act(async () => { button('Resume run').click(); button('Resume run').click(); });
+  expect(resume).toHaveBeenCalledExactlyOnceWith('ui-run', 'wait:policy-one');
+  expect(button('Resume run').disabled).toBe(true);
+  await act(async () => {
+    f.view.activeRun!.state = 'runnable'; f.view.activeRun!.waiting_on = null;
+    f.view.launch!.pause = null; f.view.launch!.startable = true; f.view.launch!.preparation_failure = 'preparation_failed';
+    f.view.operations = [];
+    resolve({ run_id: 'ui-run', action_id: 'action:wait:policy-one', wait_id: 'wait:policy-one', cursor: 2 });
+  });
+  expect(button('Resume run')).toBeUndefined();
+  expect(button('Retry preparation')).toBeDefined();
+  await act(async () => { button('Retry preparation').click(); });
+  expect(f.api.retryPreparation).toHaveBeenCalledExactlyOnceWith('ui-run');
+  expect(resume).toHaveBeenCalledOnce();
+});
+
+it('a late old-Wait failure cannot refresh or alter the newly selected branch', async () => {
+  const first = fixture(true); pauseView(first.view);
+  let reject!: (error: Error) => void;
+  const resume = vi.fn<ThreadsAPI['resume']>(() => new Promise((_done, fail) => { reject = fail; })); first.api.resume = resume;
+  await act(async () => { root.render(<ThreadConversation api={first.api} identity={identity} />); });
+  await act(async () => { button('Resume run').click(); });
+  const next = fixture(true); const nextIdentity = { ...identity, branchId: 'branch:new-selection' };
+  next.view.identity = nextIdentity; next.view.activeRun!.id = 'new-run'; next.view.activeRun!.branch_id = nextIdentity.branchId;
+  next.view.thread.branches = [{ branch_id: nextIdentity.branchId, head: null, active_run_id: 'new-run', latest_run: next.view.activeRun }];
+  pauseView(next.view, 'wait:policy-new');
+  const snapshot = vi.fn(next.api.snapshot); next.api.snapshot = snapshot;
+  const nextResume = vi.fn<ThreadsAPI['resume']>().mockResolvedValue({ run_id: 'new-run', action_id: 'action:wait:policy-new', wait_id: 'wait:policy-new', cursor: 3 });
+  next.api.resume = nextResume;
+  await act(async () => { root.render(<ThreadConversation api={next.api} identity={nextIdentity} />); });
+  const snapshotsBefore = snapshot.mock.calls.length;
+  await act(async () => { reject(new Error('old resume response arrived late')); });
+  expect(container.textContent).not.toContain('old resume response arrived late');
+  expect(snapshot.mock.calls.length).toBe(snapshotsBefore);
+  expect(button('Resume run').disabled).toBe(false);
+  await act(async () => { button('Resume run').click(); });
+  expect(nextResume).toHaveBeenCalledExactlyOnceWith('new-run', 'wait:policy-new');
+  expect(resume).toHaveBeenCalledExactlyOnceWith('ui-run', 'wait:policy-one');
+});
+
+
+it('Stop run remains reachable during a blocked preparation retry and its late reply cannot reopen controls', async () => {
+  const f = fixture(true); pauseView(f.view);
+  f.view.activeRun!.state = 'runnable'; f.view.activeRun!.waiting_on = null; f.view.operations = [];
+  f.view.launch!.pause = null; f.view.launch!.startable = true; f.view.launch!.preparation_failure = 'preparation_failed';
+  let reject!: (error: Error) => void;
+  const retry = vi.fn<ThreadsAPI['retryPreparation']>(() => new Promise((_resolve, fail) => { reject = fail; })); f.api.retryPreparation = retry;
+  f.cancelRun.mockImplementationOnce(async () => {
+    const run = { ...f.view.activeRun!, state: 'cancelled' as const, cancel_requested: true };
+    f.view.activeRun = null; f.view.thread.branches[0]!.active_run_id = null; f.view.thread.branches[0]!.latest_run = run;
+    f.view.launch!.startable = false;
+    return run;
+  });
+  await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  await act(async () => { button('Retry preparation').click(); });
+  expect(retry).toHaveBeenCalledOnce();
+  expect(button('Stop run').disabled).toBe(false);
+  await act(async () => { button('Stop run').click(); });
+  expect(f.cancelRun).toHaveBeenCalledExactlyOnceWith('ui-run');
+  expect(button('Stop run')).toBeUndefined();
+  await act(async () => { reject(new Error('old cold preparation failed after cancellation')); });
+  expect(container.textContent).not.toContain('old cold preparation failed after cancellation');
+  expect(button('Retry preparation')).toBeUndefined();
+  expect(button('Send').disabled).toBe(true); // Empty composer, rather than the old pending request.
 });

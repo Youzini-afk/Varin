@@ -170,6 +170,8 @@ pub(super) fn validate_policy_models(models: &[PolicyModelCapability]) -> Result
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LaunchIntent {
+    pub startable: bool,
+    pub pause: Option<super::policy_control::PolicyPauseInfo>,
     #[serde(default)]
     pub preparation_failure: Option<String>,
     pub run_id: String,
@@ -233,7 +235,7 @@ impl Catalog {
         let mut launch: LaunchMetadata = record(&tx, "run_launches", run_id)?;
         launch.requires_rebind = launch.bound_epoch != Some(self.epoch);
         if launch.selection == prepared.selection {
-            drop(tx); return Ok(self.launch_read(launch));
+            drop(tx); return self.launch_read(launch);
         }
         if launch != prepared.expected { return Err(RuntimeError::Conflict("launch changed during preparation".into())); }
         let steps: i64 = tx.query_row("SELECT count(*) FROM model_steps WHERE run_id=?1", [run_id], |row| row.get(0))?;
@@ -249,7 +251,7 @@ impl Catalog {
         put(&tx, "run_launches", run_id, &launch)?;
         event(&tx, run_id, launch.revision, prepared.kind, serde_json::to_value(&launch)?)?;
         tx.commit()?;
-        Ok(self.launch_read(launch))
+        self.launch_read(launch)
     }
 
     /// Preparation can append one concrete MCP generation only before the launch is bound or used.
@@ -324,7 +326,7 @@ impl Catalog {
                         && intent.preparation_failure.is_none())
                 {
                     intent.requires_rebind = intent.bound_epoch != Some(self.epoch);
-                    drop(tx); return Ok(self.launch_read(intent));
+                    drop(tx); return self.launch_read(intent);
                 }
                 intent.revision += 1;
                 intent.preparation_failure = None;
@@ -375,11 +377,11 @@ impl Catalog {
             serde_json::to_value(&intent)?,
         )?;
         tx.commit()?;
-        Ok(self.launch_read(intent))
+        self.launch_read(intent)
     }
     pub fn fail_launch(&mut self, run_id: &str, code: &str) -> Result<LaunchIntent> {
         let metadata = self.fail_launch_metadata(run_id, code)?;
-        self.launch_read(metadata).load()
+        self.launch_read(metadata)?.load()
     }
     pub fn fail_launch_metadata(&mut self, run_id: &str, code: &str) -> Result<LaunchMetadata> {
         if !matches!(

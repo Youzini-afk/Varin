@@ -587,3 +587,33 @@ impl<
         })
     }
 }
+
+/// Core-owned durable actions that do not fabricate a model exchange or a tool invocation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PolicyControlIntent {
+    pub action_id: String,
+    pub boundary: PolicyBoundary,
+    pub identity: PolicyIdentity,
+    pub state: Value,
+    pub expected_head: Option<String>,
+    pub action: PolicyAction,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PolicyControlReceipt {
+    Delivered { action_id: String, item: ConversationItem },
+    Paused { action_id: String, wait_id: String },
+}
+#[derive(Debug, Clone)]
+pub struct PolicyControlState {
+    pub state: Value,
+    pub event: PolicyEvent,
+    pub decision: Option<PolicyDecision>,
+}
+#[derive(Debug, Clone)]
+pub enum PolicyActionState {
+    Graph(PolicyGraphState),
+    Model(PolicyModelState),
+    Control(PolicyControlState),
+}

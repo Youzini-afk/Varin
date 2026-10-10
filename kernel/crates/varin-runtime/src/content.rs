@@ -291,7 +291,8 @@ impl ContentStore {
             UNION ALL SELECT json_extract(body,'$.configuration_ref') FROM child_tasks
             UNION ALL SELECT json_extract(body,'$.launch.tools_ref') FROM child_tasks
             UNION ALL SELECT json_extract(body,'$.launch.base_tools_ref') FROM child_tasks");
-        roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.body_ref') FROM operations WHERE json_extract(body,'$.intent.kind') IN ('policy_tool_graph_v1','policy_model_job_v1')
+        roots.push_str(&format!(" UNION ALL SELECT json_extract(body,'$.intent.body_ref') FROM operations WHERE json_extract(body,'$.intent.kind') IN ({})", crate::catalog::policy_body::ACTION_KINDS));
+        roots.push_str("
             UNION ALL SELECT json_extract(receipt,'$.completion.content_ref') FROM policy_graph_nodes WHERE json_extract(receipt,'$.completion.kind')='result'
             UNION ALL SELECT json_extract(receipt,'$.completion.reason_ref') FROM policy_graph_nodes WHERE json_extract(receipt,'$.completion.kind')='not_dispatched'
             UNION ALL SELECT json_extract(call,'$.arguments_ref') FROM policy_graph_nodes");

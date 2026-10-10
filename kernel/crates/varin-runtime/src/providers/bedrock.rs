@@ -69,7 +69,7 @@ impl ModelProvider for BedrockProvider {
                     continue;
                 }
             }
-            let role = if matches!(item.provenance, Provenance::Assistant) {
+            let role = if matches!(item.provenance, Provenance::Assistant | Provenance::PolicyOutput { .. }) {
                 "assistant"
             } else {
                 "user"

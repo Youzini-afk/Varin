@@ -376,7 +376,7 @@ pub(crate) fn spawn(
                         runtime
                             .reap()
                             .map_err(|e| KernelError::Operation(e.to_string()))?;
-                        if matches!(method, "runtime.question.answer" | "runtime.run.cancel" | "runtime.operation.cancel"
+                        if matches!(method, "runtime.question.answer" | "runtime.run.resume" | "runtime.run.cancel" | "runtime.operation.cancel"
                             | "runtime.child.cancel" | "runtime.child.reconcile" | "runtime.child.wait.cancel" | "runtime.process.wait.reconcile") {
                             let commands = control_commands::ControlCommands { runtime: runtime.clone(), resources: resources.clone(),
                                 models: run_models.as_ref().expect("initialized runtime models").clone(),
@@ -545,13 +545,16 @@ pub(crate) fn spawn(
                                     if method == "runtime.launch.list" {
                                         let reads = owner.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?
                                             .capture_pending_launches().map_err(domain)?;
-                                        let launches = reads.into_iter().map(|read|read.load()).collect::<std::result::Result<Vec<_>,_>>().map_err(domain)?;
+                                        let mut launches = reads.into_iter().map(|read|read.load()).collect::<std::result::Result<Vec<_>,_>>().map_err(domain)?;
+                                        for launch in &mut launches { launch.startable &= runtime.start_available(&launch.run_id).map_err(|e|KernelError::Operation(e.to_string()))?; }
                                         return Ok(serde_json::to_value(launches)?);
                                     }
                                     if method == "runtime.launch.inspect" {
                                         let p: RunParams = serde_json::from_value(params)?;
                                         let read = owner.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?.capture_launch(&p.run_id).map_err(domain)?;
-                                        return Ok(serde_json::to_value(read.map(|read|read.load()).transpose().map_err(domain)?)?);
+                                        let mut launch = read.map(|read|read.load()).transpose().map_err(domain)?;
+                                        if let Some(launch) = &mut launch { launch.startable &= runtime.start_available(&launch.run_id).map_err(|e|KernelError::Operation(e.to_string()))?; }
+                                        return Ok(serde_json::to_value(launch)?);
                                     }
                                     let read = if method == "runtime.launch.mcp.prepare" {
                                         let p: McpPrepareParams = serde_json::from_value(params)?;

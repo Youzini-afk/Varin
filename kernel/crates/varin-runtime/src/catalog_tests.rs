@@ -252,6 +252,8 @@ fn wait_registration_checks_past_events_and_claims_once() {
         .register_wait("wait", &r.run_id, "op", "operation.settled", r.cursor)
         .unwrap();
     assert!(wait.trigger_cursor.is_some());
+    db.commit_execution(&r.run_id, epoch, &crate::execution::ExecutionRecord::StateChanged { state: RunState::Runnable, waiting_on: None }).unwrap();
+    db.commit_execution(&r.run_id, epoch, &crate::execution::ExecutionRecord::StateChanged { state: RunState::Waiting, waiting_on: Some("wait".into()) }).unwrap();
     assert!(db.claim_resumption("wait", epoch).unwrap());
     assert!(!db.claim_resumption("wait", epoch).unwrap());
     drop(db);

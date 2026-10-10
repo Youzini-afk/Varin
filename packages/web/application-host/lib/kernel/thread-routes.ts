@@ -47,7 +47,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     create: ['key'], list: [], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'expectedHead', 'model', 'source'],
     snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'mode'],
     'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
-    run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], events: ['cursor'],
+    run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId', 'waitId'], 'run/retry-preparation': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], events: ['cursor'],
   };
   const post = (method: string, action: (body: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>) => {
     app.post(`/api/threads/${method}`, requireAuth, async (request, response) => {
@@ -149,7 +149,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('input/cancel', async body => { await adapter.requireInput(text(body.inputId)); return adapter.runtime.cancelInput(text(body.inputId), revision(body.expectedRevision)); });
   post('run', body => adapter.requireRun(text(body.runId))); 
   post('run/cancel', async body => { await adapter.requireRun(text(body.runId)); return adapter.runtime.cancelRun(text(body.runId)); });
-  post('run/resume', async body => { await adapter.resume(text(body.runId)); return {}; });
+  post('run/resume', body => adapter.resume(text(body.runId), text(body.waitId)));
+  post('run/retry-preparation', async body => { await adapter.retryPreparation(text(body.runId)); return {}; });
   post('operation', body => adapter.requireOperation(text(body.operationId)));
   post('operation/cancel', body => adapter.cancelOperation(text(body.operationId)));
   post('events', body => adapter.runtime.events(revision(body.cursor), 256));

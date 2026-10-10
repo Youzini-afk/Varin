@@ -45,7 +45,8 @@ pub(crate) struct PolicyCheckpointRead {
     _publication: crate::content::ContentPublication,
 }
 impl PolicyCheckpointRead {
-    pub fn load_pending(self) -> Result<Option<PolicyDecision>> {
+    pub fn load_pending(self) -> Result<Option<PolicyDecision>> { Ok(self.load_pending_with_state()?.1) }
+    pub fn load_pending_with_state(self) -> Result<(Value, Option<PolicyDecision>)> {
         let decision = self.references.load(&self.content)?;
         if let PolicyAction::Wait { wait_id } = &decision.action {
             let database = Connection::open_with_flags(
@@ -60,10 +61,10 @@ impl PolicyCheckpointRead {
                 ));
             }
             if wait.trigger_cursor.is_some() || wait.cancelled {
-                return Ok(None);
+                return Ok((decision.state, None));
             }
         }
-        Ok(Some(decision))
+        Ok((decision.state.clone(), Some(decision)))
     }
 }
 impl Catalog {

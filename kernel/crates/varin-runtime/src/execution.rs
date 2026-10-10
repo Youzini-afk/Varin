@@ -149,6 +149,7 @@ pub enum Provenance {
     SystemInstruction { source: String },
     UserInstruction { input_id: String },
     Assistant,
+    PolicyOutput { action_id: String, identity: PolicyIdentity },
     ToolData { call_id: String },
     PolicyToolData { reference: PolicyEvidenceRef },
     ExternalData { source: String },
@@ -756,6 +757,9 @@ pub trait Persistence: Send + Sync {
     fn dispatch_policy_model(&self, _run: &str, _epoch: u64, _action: &str) -> Result<(), ExecutionError> { Err(ExecutionError::new("policy_model_unavailable", "durable model job authority required")) }
     fn record_policy_model(&self, _run: &str, _epoch: u64, _action: &str, _output: &PolicyModelOutput, _receipt: Option<&PolicyModelReceipt>) -> Result<(), ExecutionError> { Err(ExecutionError::new("policy_model_unavailable", "durable model job authority required")) }
 
+    /// Select the one latest durable action. Stores must explicitly implement recovery selection.
+    fn policy_action(&self, run: &str, epoch: u64) -> Result<Option<PolicyActionState>, ExecutionError>;
+    fn commit_policy_control(&self, _run: &str, _epoch: u64, _intent: &PolicyControlIntent) -> Result<PolicyControlReceipt, ExecutionError> { Err(ExecutionError::new("policy_action_unavailable", "durable policy action authority required")) }
     fn policy_boundary(&self, _run: &str, _epoch: u64) -> Result<PolicyBoundary, ExecutionError> { Err(ExecutionError::new("policy_graph_unavailable", "durable policy action authority required")) }
     fn policy_graph(&self, _run: &str, _epoch: u64) -> Result<Option<PolicyGraphState>, ExecutionError> { Ok(None) }
     fn admit_policy_graph(&self, _run: &str, _epoch: u64, _intent: &PolicyGraphIntent) -> Result<PolicyGraphState, ExecutionError> { Err(ExecutionError::new("policy_graph_unavailable", "durable graph authority required")) }
@@ -850,6 +854,8 @@ pub enum PolicyAction {
     ToolGraph { nodes: Vec<PolicyToolNode> },
     ReadResult { reference: PolicyEvidenceRef, index: usize },
     ExecuteTools,
+    Deliver { text: String },
+    Pause { reason: String },
     /// Persistence must verify that this wait references a durably registered event condition.
     Wait {
         wait_id: String,
@@ -873,6 +879,8 @@ pub enum PolicyEvent {
         input_ids: Vec<String>,
     },
     Started,
+    Delivered { action_id: String, item_id: String },
+    Resumed { action_id: String, wait_id: String },
     ToolGraphCompleted { action_id: String, receipts: Vec<PolicyNodeReceipt> },
     ModelJobCompleted { action_id: String, receipt: PolicyModelReceipt },
     ResultChunk { reference: PolicyEvidenceRef, index: usize, total_chunks: usize, total_bytes: u64, bytes: Vec<u8> },
@@ -931,7 +939,7 @@ impl AgentPolicy for DefaultAgentPolicy {
             PolicyEvent::ToolsCompleted { results } if results.iter().any(|result|
                 matches!(result.completion, ToolCompletion::Result { outcome: Outcome::Indeterminate, .. })) =>
                 PolicyAction::Fail { reason: "tool effect is indeterminate; reconcile the original operation before continuing".into() },
-            PolicyEvent::ToolsCompleted { .. } | PolicyEvent::ModelJobCompleted { .. } | PolicyEvent::ToolGraphCompleted { .. } | PolicyEvent::ResultChunk { .. } => PolicyAction::RequestModel,
+            PolicyEvent::Delivered { .. } | PolicyEvent::Resumed { .. } | PolicyEvent::ToolsCompleted { .. } | PolicyEvent::ModelJobCompleted { .. } | PolicyEvent::ToolGraphCompleted { .. } | PolicyEvent::ResultChunk { .. } => PolicyAction::RequestModel,
         };
         Ok(PolicyDecision {
             action,
@@ -1048,16 +1056,14 @@ impl<
         }
         let mut pending_tools = pending.as_ref().map(|(snapshot, _)| self.tools.freeze(&snapshot.view.binding.tools)).transpose()?.flatten();
         let mut pending_model: Option<Arc<dyn ModelProvider>> = None;
-        let resumed_graph = self.persistence.policy_graph(&input.run_id,input.owner_generation)?;
-        if pending.is_some() && resumed_graph.as_ref().is_some_and(|graph|!graph.terminal) { return Err(ExecutionError::new("unclosed_model_exchange","policy graph conflicts with model exchange")); }
-        if let Some(graph)=resumed_graph {
-            recovered_decision=graph.decision.clone();
-            event=self.execute_tool_graph(&input,graph,&cancel,None)?;
-        }
-        if let Some(job) = self.persistence.policy_model_job(&input.run_id,input.owner_generation)? {
-            if pending.is_some() { return Err(ExecutionError::new("unclosed_model_exchange","model job conflicts with model exchange")); }
-            recovered_decision = job.decision.clone();
-            event = self.execute_model_job(&input, job, &cancel)?;
+        let mut control_state = None;
+        if let Some(action) = self.persistence.policy_action(&input.run_id, input.owner_generation)? {
+            if pending.is_some() { return Err(ExecutionError::new("unclosed_model_exchange", "policy action conflicts with model exchange")); }
+            match action {
+                PolicyActionState::Graph(graph) => { recovered_decision = graph.decision.clone(); event = self.execute_tool_graph(&input, graph, &cancel, None)?; }
+                PolicyActionState::Model(job) => { recovered_decision = job.decision.clone(); event = self.execute_model_job(&input, job, &cancel)?; }
+                PolicyActionState::Control(control) => { policy_state = control.state; control_state = Some(policy_state.clone()); recovered_decision = control.decision; event = control.event; }
+            }
         }
         let mut steps = input.completed_model_steps;
         let mut interrupted_generation = false;
@@ -1120,7 +1126,11 @@ impl<
                         .map(|item| item.id.clone())
                         .or(history_cursor);
                     history.extend(incoming);
-                    event = PolicyEvent::InputDelivered { input_ids };
+                    if let Some(committed_state) = &control_state {
+                        // The input is real history. It invalidates a not-yet-executed decision,
+                        // not the original durable action's completion event or private state.
+                        policy_state = committed_state.clone();
+                    } else { event = PolicyEvent::InputDelivered { input_ids }; }
                     recovered_decision = None;
                     interrupted_generation = false;
                     if state != RunState::Runnable {
@@ -1168,7 +1178,7 @@ impl<
             // A policy can neither fabricate a closed exchange nor bypass the tool admission path.
             let legal = match &decision.action {
                 PolicyAction::ExecuteTools => pending.is_some(),
-                PolicyAction::RequestModel | PolicyAction::RequestModelJob { .. } | PolicyAction::RequestModelWithEvidence { .. } | PolicyAction::ToolGraph { .. } | PolicyAction::ReadResult { .. } | PolicyAction::Complete | PolicyAction::Wait { .. } => {
+                PolicyAction::RequestModel | PolicyAction::RequestModelJob { .. } | PolicyAction::RequestModelWithEvidence { .. } | PolicyAction::ToolGraph { .. } | PolicyAction::ReadResult { .. } | PolicyAction::Deliver { .. } | PolicyAction::Pause { .. } | PolicyAction::Complete | PolicyAction::Wait { .. } => {
                     pending.is_none()
                 }
                 PolicyAction::Fail { .. } => pending.is_none(),
@@ -1192,7 +1202,7 @@ impl<
                 finish!('agent, RunState::Failed, None,
                     Some(ExecutionError::new("illegal_policy_action", "unclosed tool exchange or no tools to execute")));
             }
-            if !matches!(decision.action,PolicyAction::ToolGraph{..}|PolicyAction::RequestModelJob{..}) { self.commit(
+            if !matches!(decision.action,PolicyAction::ToolGraph{..}|PolicyAction::RequestModelJob{..}|PolicyAction::Deliver{..}|PolicyAction::Pause{..}) { self.commit(
                 &input,
                 ExecutionRecord::PolicyCheckpoint {
                     identity: self.policy.identity(),
@@ -1212,6 +1222,25 @@ impl<
                     }
                     finish!('agent, RunState::Waiting, Some(wait_id), None);
                 }
+                action @ (PolicyAction::Deliver { .. } | PolicyAction::Pause { .. }) => {
+                    let boundary = self.persistence.policy_boundary(&input.run_id, input.owner_generation)?;
+                    let intent = PolicyControlIntent { action_id: format!("{}:policy:{}", input.run_id, boundary.id), boundary,
+                        identity: self.policy.identity(), state: policy_state.clone(), expected_head: history_cursor.clone(), action };
+                    let receipt = match self.persistence.commit_policy_control(&input.run_id, input.owner_generation, &intent) {
+                        Ok(receipt) => receipt,
+                        Err(error) if error.code == "input_pending" || cancel.is_cancelled() => { policy_state = previous_policy_state; continue 'agent; }
+                        Err(error) => return Err(error),
+                    };
+                    match receipt {
+                        PolicyControlReceipt::Delivered { action_id, item } => {
+                            history_cursor = Some(item.id.clone());
+                            event = PolicyEvent::Delivered { action_id, item_id: item.id.clone() };
+                            control_state = Some(policy_state.clone());
+                            history.push(item);
+                        }
+                        PolicyControlReceipt::Paused { wait_id, .. } => return Ok(ExecutionReport { state: RunState::Waiting, history, policy_state, model_steps: steps, waiting_on: Some(wait_id), failure: None }),
+                    }
+                }
                 PolicyAction::RequestModelJob { capability_id, instructions, evidence } => {
                     if self.context_preparation.prepare(&input.run_id, input.owner_generation, &cancel).is_err() {
                         policy_state = previous_policy_state;
@@ -1224,6 +1253,7 @@ impl<
                         Err(error) if error.code == "input_pending" => { policy_state = previous_policy_state; continue 'agent; },
                         Err(error) => { policy_state = previous_policy_state; finish!('agent,RunState::Failed,None,Some(error)); }
                     };
+                    control_state = None;
                     event = self.execute_model_job(&input, job, &cancel)?;
                 }
                 PolicyAction::ToolGraph { nodes } => {
@@ -1235,10 +1265,12 @@ impl<
                     if let Some(selected)=&selected {input.binding.tools=selected.schemas.clone();input.binding.tool_schema_generation=selected.generation;}
                     let retained=match selected {Some(selected)=>Some(selected.executor),None=>self.tools.freeze(&input.binding.tools)?};
                     let graph=match self.admit_tool_graph(&input,nodes,policy_state.clone(), &cancel) {Ok(graph)=>graph,Err(error) if error.code=="input_pending" || cancel.is_cancelled()=>{policy_state=previous_policy_state;continue 'agent},Err(error)=>{policy_state=previous_policy_state;finish!('agent,RunState::Failed,None,Some(error))}};
+                    control_state = None;
                     event=self.execute_tool_graph(&input,graph,&cancel,retained)?;
                 }
                 PolicyAction::ReadResult { reference,index } => {
                     let chunk=match self.persistence.policy_chunk(&input.run_id,input.owner_generation,&reference,index) {Ok(chunk)=>chunk,Err(error)=>finish!('agent,RunState::Failed,None,Some(error))};
+                    control_state = None;
                     event=PolicyEvent::ResultChunk{reference,index,total_chunks:chunk.chunk_count,total_bytes:chunk.total_bytes,bytes:chunk.bytes};
                 }
                 action @ (PolicyAction::RequestModel | PolicyAction::RequestModelWithEvidence { .. }) => {
@@ -1338,11 +1370,12 @@ impl<
                             snapshot: snapshot.clone(),
                         },
                     ) {
-                        Ok(()) => {}
+                        Ok(()) => { control_state = None; }
                         Err(error)
                             if error.code == "input_pending" || model_cancel.is_cancelled() =>
                         {
                             steps -= 1;
+                            policy_state = previous_policy_state;
                             continue 'agent;
                         }
                         Err(error) => return Err(error),

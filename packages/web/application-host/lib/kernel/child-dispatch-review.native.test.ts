@@ -24,7 +24,7 @@ import { ThreadCollaboration } from './thread-collaboration.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { createThreadContext, type ContextPreparer } from './thread-context.js';
 import { registerThreadRoutes } from './thread-routes.js';
-import { createThreadSourcePreparer } from './thread-sources.js';
+import { createThreadSourcePreparer, createThreadSourceAdmission } from './thread-sources.js';
 import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from './storage-adapter.js';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
@@ -175,10 +175,8 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
       if (selection.providerId !== model.providerId || selection.modelId !== model.modelId) throw new Error('Unknown fixture model');
       return { configuration, credentialOwner };
     }, rebindModel: async () => credentialOwner };
-    const adapter = new ThreadAdapter(runtime, models, async source => {
-      await documents.inspectWorkspace(source.workspaceId); await documents.inspectWorkspace(source.executionWorkspaceId);
-    }, (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ documents, workingStates }), prepareContext);
-    const collaboration = options.collaboration === false ? undefined : new ThreadCollaboration({ runtime, models, workingStates, prepareContext, admitSource: async source => { await documents.inspectWorkspace(source.workspaceId); await documents.inspectWorkspace(source.executionWorkspaceId); }, onError: (_operation, error) => { errors.push(error); } });
+    const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, workingStates, runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ documents, workingStates }), prepareContext);
+    const collaboration = options.collaboration === false ? undefined : new ThreadCollaboration({ runtime, workingStates, prepareContext, continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal), onError: (_operation, error) => { errors.push(error); } });
     const app = express();
     registerCommonRequestMiddleware(app, { express });
     registerThreadRoutes(app, adapter, (request, response, next) => {

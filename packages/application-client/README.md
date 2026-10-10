@@ -15,6 +15,12 @@ selection validation and object cleanup; the UI sends a frozen branch/revision s
 referenced by a version and bytes actually removed by cleanup are distinct fields. These DTOs do not
 add an Agent tool or a second state store.
 
+`ThreadsAPI.resume(runId, waitId)` explicitly consumes the displayed policy Pause and returns its
+durable receipt. Retrying the same command preserves that receipt and cannot resume a later Pause.
+`retryPreparation(runId)` is a separate launch-preparation retry; queueing input is not a resume
+command. The UI reads derived `LaunchIntent.startable`/`pause` projections rather than guessing
+eligibility from a waiting Run or a Wait ID prefix.
+
 The desktop contract defines:
 
 - `VarinDesktopCommandMap` — typed `{ args, result }` for all 58 `desktop_*` commands

@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import type { VarinAgentPolicyInput } from '@varin/extension-contract';
 import { afterEach, expect, it } from 'vitest';
 import { resolveVarinExtensionServiceRouting } from '@varin/extension-contract';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
@@ -32,7 +34,7 @@ async function fixture() {
   const route = async (version: number, providerKey: string, scope: { projectId?: string; sessionId?: string }, allowFallback = false) =>
     runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
       rule: { serviceId: 'varin.agent.policy', version, providerKey, scope, allowFallback } });
-  return { runtime, install, route, prepare: createAgentPolicy(runtime) };
+  return { root, runtime, install, route, prepare: createAgentPolicy(runtime) };
 }
 
 it('absence, unselected old installation and another scope do not block the default policy', async () => {
@@ -144,4 +146,41 @@ it('a registry selection arriving while v2 absence is being resolved cannot sile
     release();
     await expect(pending).rejects.toThrow(/Policy selection changed during preparation/);
   } finally { release(); }
+});
+
+
+it('an installed SDK artifact crosses the broker delivery/pause/resumed boundaries without a private control path', async () => {
+  const f = await fixture();
+  const example = path.join(f.root, 'delivery-pause-policy'); await fs.mkdir(example);
+  for (const file of ['package.json', 'varin.extension.json']) await fs.copyFile(path.join(repository, 'examples/extensions/delivery-pause-policy', file), path.join(example, file));
+  const { build } = createRequire(path.join(repository, 'packages/extension-builtins/package.json'))('esbuild');
+  await build({ entryPoints: [path.join(repository, 'examples/extensions/delivery-pause-policy/host.ts')], bundle: true, platform: 'node', format: 'cjs',
+    outfile: path.join(example, 'host.cjs'), alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
+  await f.runtime.installOrStage({ expectedRevision: (await f.runtime.state()).catalog.revision,
+    source: { kind: 'local', display: 'Delivery pause SDK example', specifier: example } });
+  await f.route(2, 'example.delivery-pause-policy:host:varin.agent.policy@2', { sessionId: 'thread:delivery' });
+  const lease = await f.prepare({ sessionId: 'thread:delivery' });
+  expect(lease?.binding.identity.name).toContain('example.delivery-pause-policy:host:varin.agent.policy@2:delivery-pause');
+  try {
+    const input: VarinAgentPolicyInput = { view: { run_id: 'run:delivery', state: 'runnable', history_count: 1,
+      history_head_id: 'user-input', pending_tool_calls: 0, model_capabilities: [] }, event: { kind: 'started' }, state: null };
+    const signal = new AbortController().signal;
+    const first = await lease!.decide(input, signal);
+    expect(first.action).toMatchObject({ kind: 'deliver', text: expect.stringContaining('first result') });
+    const pause = await lease!.decide({ ...input, state: first.state, event: { kind: 'delivered', action_id: 'delivery:first', item_id: 'history:first' } }, signal);
+    expect(pause.action).toMatchObject({ kind: 'pause', reason: expect.stringContaining('Resume run') });
+    const leaseIdentity = lease!.binding.identity;
+    lease!.release();
+    // Reacquiring the installed artifact keeps checkpoint identity; it grants no right to resume.
+    const rebound = await f.prepare({ sessionId: 'thread:delivery' });
+    try {
+      expect(rebound!.binding.identity).toEqual(leaseIdentity);
+      const unexpected = await rebound!.decide({ ...input, state: pause.state, event: { kind: 'input_delivered', input_ids: ['queued'] } }, signal);
+      expect(unexpected.action.kind).toBe('fail');
+      const second = await rebound!.decide({ ...input, state: pause.state, event: { kind: 'resumed', action_id: 'pause:first', wait_id: 'pause-wait:first' } }, signal);
+      expect(second.action).toMatchObject({ kind: 'deliver', text: expect.stringContaining('explicitly resumed') });
+      const end = await rebound!.decide({ ...input, state: second.state, event: { kind: 'delivered', action_id: 'delivery:second', item_id: 'history:second' } }, signal);
+      expect(end.action.kind).toBe('complete');
+    } finally { rebound?.release(); }
+  } finally { lease?.release(); }
 });

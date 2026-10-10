@@ -6,8 +6,8 @@
 export const KERNEL_PROTOCOL_VERSION = 1 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
-export const KERNEL_CONTROL_METHODS = ["kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.cancel","runtime.operation.inspect","runtime.operation.cancel","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
-export const KERNEL_CONTROL_RESPONSE_METHODS = ["kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.cancel","runtime.operation.cancel","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
+export const KERNEL_CONTROL_METHODS = ["kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
+export const KERNEL_CONTROL_RESPONSE_METHODS = ["kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.history.body"] as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
@@ -55,6 +55,7 @@ export type KernelMethod =
   | "runtime.input.submit"
   | "runtime.run.inspect"
   | "runtime.run.cancel"
+  | "runtime.run.resume"
   | "runtime.permission.open"
   | "runtime.permission.decide"
   | "runtime.permission.consume"
@@ -415,6 +416,8 @@ export interface LaunchIntent {
   selection: LaunchSelection;
   bound_epoch: number | null;
   requires_rebind: boolean;
+  startable: boolean;
+  pause: PolicyPauseInfo | null;
 }
 
 export interface KernelProcessSubscribeParams {
@@ -711,6 +714,24 @@ export interface InputSubmitParams {
 
 export interface RunParams {
   runId: string;
+}
+
+export interface RunResumeParams {
+  runId: string;
+  waitId: string;
+}
+
+export interface PolicyResumeReceipt {
+  run_id: string;
+  action_id: string;
+  wait_id: string;
+  cursor: number;
+}
+
+export interface PolicyPauseInfo {
+  action_id: string;
+  wait_id: string;
+  reason: string;
 }
 
 export interface PermissionOpenParams {
@@ -2120,6 +2141,7 @@ export type KernelMethodParams = {
   "runtime.input.submit": InputSubmitParams;
   "runtime.run.inspect": RunParams;
   "runtime.run.cancel": RunParams;
+  "runtime.run.resume": RunResumeParams;
   "runtime.permission.open": PermissionOpenParams;
   "runtime.permission.decide": PermissionDecideParams;
   "runtime.permission.consume": PermissionOpenParams;
@@ -2602,6 +2624,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.run.cancel";
       params: RunParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.run.resume";
+      params: RunResumeParams;
       epoch?: string;
       grantId?: string;
     }

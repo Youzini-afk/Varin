@@ -60,3 +60,26 @@ test('policy v2 rejects obsolete graphs and receipts without losing JSON-null to
     assert.throws(() => parseVarinAgentPolicyInput({ ...oldInput, event }));
   }
 });
+
+test('policy delivery and pause preserve text while validating their distinct receipts', () => {
+  for (const value of ['', '  ', '正文\n\u0000🙂']) {
+    for (const action of [{ kind: 'deliver', text: value }, { kind: 'pause', reason: value }]) {
+      const raw = { action, state: null };
+      assert.equal(validateDecision(raw), true, JSON.stringify(validateDecision.errors));
+      assert.deepEqual(parseVarinAgentPolicyDecision(raw), raw);
+    }
+  }
+  for (const action of [{ kind: 'deliver' }, { kind: 'deliver', text: null }, { kind: 'pause', reason: 0 }, { kind: 'pause', reason: 'Review', wait_id: 'private-wait' }]) {
+    assert.equal(validateDecision({ action, state: null }), false);
+    assert.throws(() => parseVarinAgentPolicyDecision({ action, state: null }));
+  }
+  for (const event of [{ kind: 'delivered', action_id: 'delivery', item_id: 'history' }, { kind: 'resumed', action_id: 'pause', wait_id: 'pause-wait' }]) {
+    const raw = { ...input({}), event };
+    assert.equal(validateInput([raw]), true, JSON.stringify(validateInput.errors));
+    assert.deepEqual(parseVarinAgentPolicyInput(raw), raw);
+    for (const malformed of [{ ...event, action_id: '' }, { ...event, cursor: 1 }, { kind: event.kind, action_id: event.action_id }]) {
+      assert.equal(validateInput([{ ...raw, event: malformed }]), false);
+      assert.throws(() => parseVarinAgentPolicyInput({ ...raw, event: malformed }));
+    }
+  }
+});

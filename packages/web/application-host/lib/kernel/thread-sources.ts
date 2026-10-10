@@ -1,6 +1,7 @@
+import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { LiveSourceOwner } from './live-source.js';
 import { createHash } from 'node:crypto';
-import type { ThreadPrepareSource, ThreadPreparedSource } from '@varin/application-client';
+import type { ThreadIdentity, ThreadSource, ThreadPrepareSource, ThreadPreparedSource } from '@varin/application-client';
 import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
 
 interface SourcePreparationOwners {
@@ -47,5 +48,26 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
     preparing.set(key, preparation);
     try { return await preparation; }
     finally { if (preparing.get(key) === preparation) preparing.delete(key); }
+  };
+}
+
+/** Submission and every continuation re-admit the same Host source authority. */
+export function createThreadSourceAdmission({ documents, workingStates, liveSources, runtime }: SourcePreparationOwners & { runtime: AgentRuntimeClient }) {
+  return async (source: ThreadSource, identity: ThreadIdentity): Promise<void> => {
+    if (source.mode === 'live_root') {
+      if (!liveSources) throw new Error('Live workspace access is unavailable');
+      await liveSources.admit(source, identity.threadId);
+      return;
+    }
+    await documents.inspectWorkspace(source.workspaceId);
+    await documents.inspectWorkspace(source.executionWorkspaceId);
+    const child = await runtime.childForThread(identity.threadId);
+    if (child && source.mode === 'fixed_branch') {
+      await workingStates.withBranchStore(source.workspaceId, 'child-source-check', async store => {
+        const pin = await store.pinBranch(source.branchId, { revision: source.revision });
+        try { if (pin.root !== child.source_pin.root) throw new Error('Child fixed source no longer matches its admitted root'); }
+        finally { await pin.release(); }
+      }, 'shared', { threadId: identity.threadId });
+    }
   };
 }

@@ -32,7 +32,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 16;
+pub(crate) const FORMAT: i64 = 17;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -477,8 +477,11 @@ impl Catalog {
         if run.revision != expected_revision || !run.state.permits(next) {
             return Err(RuntimeError::Conflict("run revision/state changed".into()));
         }
+        if run.state == RunState::Waiting && next == RunState::Runnable && !policy_control::run_startable(&tx, &run)? {
+            return Err(RuntimeError::Conflict("Run is waiting on another durable condition".into()));
+        }
         if next.terminal() {
-            if matches!(next, RunState::Cancelled | RunState::Failed) { questions::cancel_run_questions(&tx, id)?; }
+            if matches!(next, RunState::Cancelled | RunState::Failed) { questions::cancel_run_questions(&tx, id)?; policy_control::cancel_run_pause(&tx, &run)?; }
             if matches!(next,RunState::Completed|RunState::Failed)&&inputs::has_boundary_inputs(&tx,id)?{return Err(RuntimeError::InputPending);}
 
             let mut stmt = tx.prepare("SELECT body FROM operations WHERE run_id=?1")?;
@@ -527,7 +530,7 @@ impl Catalog {
             return Ok(run);
         }
         run.cancel_requested = true;
-        if run.state == RunState::Waiting { questions::cancel_run_questions(&tx, id)?; }
+        if run.state == RunState::Waiting { questions::cancel_run_questions(&tx, id)?; policy_control::cancel_run_pause(&tx, &run)?; }
         run.revision += 1;
         put(&tx, "runs", id, &run)?;
         event(&tx, id, run.revision, "run.cancel_requested", Value::Null)?;
@@ -670,7 +673,7 @@ impl Catalog {
     ) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let mut op: Operation = record(&tx, "operations", key)?;
-        if policy::graph_metadata(&op)?.is_some() || policy_model::model_metadata(&op)?.is_some(){return Err(RuntimeError::Invalid("policy actions require their typed dispatch owner".into()));}
+        if policy_body::PolicyActionMetadata::from_operation(&op)?.is_some(){return Err(RuntimeError::Invalid("policy actions require their typed dispatch owner".into()));}
         let run: Run = record(&tx, "runs", &op.run_id)?;
         if !op.handed_off {
             fence(&run, epoch)?;
@@ -715,7 +718,7 @@ impl Catalog {
         let result = OperationResultMetadata::Content { reference: prepared.reference };
         let tx = self.db.transaction()?;
         let mut op: Operation = record(&tx, "operations", key)?;
-        if policy::graph_metadata(&op)?.is_some() || policy_model::model_metadata(&op)?.is_some() {return Err(RuntimeError::Invalid("policy graph settles through node receipts only".into()));}
+        if policy_body::PolicyActionMetadata::from_operation(&op)?.is_some() {return Err(RuntimeError::Invalid("policy actions settle through their typed owner".into()));}
         if op.epoch != epoch {
             return Err(RuntimeError::Conflict("stale operation executor".into()));
         }
@@ -765,6 +768,9 @@ impl Catalog {
     pub fn request_cancel_operation(&mut self, key: &str) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let mut op: Operation = record(&tx, "operations", key)?;
+        if matches!(policy_body::PolicyActionMetadata::from_operation(&op)?, Some(policy_body::PolicyActionMetadata::PolicyPauseV1 { .. })) {
+            return Err(RuntimeError::Invalid("policy pause requires explicit Run resume or Run cancellation".into()));
+        }
         if (op.phase == OperationPhase::Terminal && op.outcome!=Some(Outcome::Indeterminate)) || op.cancel_requested {
             return Ok(op);
         }
@@ -811,8 +817,8 @@ impl Catalog {
     ) -> Result<ModelStep> {
         let request_ref = self.content.save(&request)?;
         let tx = self.db.transaction()?;
-        let graph_pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_tool_graph_v1','policy_model_job_v1') AND json_extract(body,'$.phase')!='terminal')",[run_id],|r|r.get(0))?;
-        if graph_pending {return Err(RuntimeError::Conflict("policy graph is unsettled".into()));}
+        let graph_pending = policy_body::has_pending_action(&tx, run_id)?;
+        if graph_pending {return Err(RuntimeError::Conflict("policy action is unsettled".into()));}
         let run: Run = record(&tx, "runs", run_id)?;
         fence(&run, epoch)?;
         if run.cancel_requested {
@@ -1032,9 +1038,11 @@ impl Catalog {
         let wait: Wait = record(&tx, "waits", key)?;
         let mut run: Run = record(&tx, "runs", &wait.run_id)?;
         fence(&run, epoch)?;
-        if wait.cancelled || run.cancel_requested {
-            return Err(RuntimeError::Conflict("wait cancelled".into()));
+        if wait.cancelled || run.cancel_requested || run.state != RunState::Waiting || run.waiting_on.as_deref() != Some(key) || wait.trigger_cursor.is_none() || wait.kind == "policy.resumed" {
+            return Err(RuntimeError::Conflict("wait no longer owns this Run continuation".into()));
         }
+        let active: Option<String> = tx.query_row("SELECT active_run FROM branches WHERE id=?1", [&run.branch_id], |row| row.get(0))?;
+        if active.as_deref() != Some(&run.id) { return Err(RuntimeError::Conflict("resumption branch owner changed".into())); }
         let claimed: i64 = tx.query_row(
             "SELECT claimed FROM resumptions WHERE wait_id=?1 AND acknowledged=0",
             [key],
@@ -1131,7 +1139,7 @@ impl Catalog {
         Ok(result)
     }
     fn recover(&mut self) -> Result<()> {
-        let interrupted_read: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE json_extract(body,'$.phase')='running' AND json_extract(body,'$.effect')='none' AND coalesce(json_extract(body,'$.intent.kind'),'') NOT IN ('policy_tool_graph_v1','policy_model_job_v1'))", [], |row|row.get(0))?;
+        let interrupted_read: bool = self.db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM operations WHERE json_extract(body,'$.phase')='running' AND json_extract(body,'$.effect')='none' AND coalesce(json_extract(body,'$.intent.kind'),'') NOT IN ({}))", policy_body::ACTION_KINDS), [], |row|row.get(0))?;
         let interrupted_result = interrupted_read.then(|| self.content.save(&json!({"reason":"executor interrupted"}))).transpose()?;
         let tx = self.db.transaction()?;
         tx.execute("UPDATE resumptions SET claimed=0 WHERE acknowledged=0", [])?;
@@ -1193,6 +1201,9 @@ impl Catalog {
                 op.epoch=self.epoch;
                 put(&tx,"operations",&op.id,&op)?;
                 continue;
+            }
+            if policy_body::PolicyActionMetadata::from_operation(&op)?.is_some() {
+                op.epoch = self.epoch; put(&tx, "operations", &op.id, &op)?; continue;
             }
             // A Result contract owns a local dispatch window, whose executor died with the
             // previous Catalog process. This proves occupancy ended, not that its effect is known.
@@ -1381,3 +1392,6 @@ pub mod result_content;
 
 #[path = "catalog_process_delivery.rs"]
 pub mod process_delivery;
+
+#[path="catalog_policy_control.rs"]
+pub mod policy_control;

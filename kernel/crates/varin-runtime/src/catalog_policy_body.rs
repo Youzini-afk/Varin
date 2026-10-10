@@ -14,6 +14,12 @@ pub(crate) enum PolicyActionMetadata {
         body_ref: Value,
         node_count: usize,
     },
+    PolicyDeliverV1 {
+        action_id: String, boundary: PolicyBoundary, identity: PolicyIdentity, body_ref: Value,
+    },
+    PolicyPauseV1 {
+        action_id: String, boundary: PolicyBoundary, identity: PolicyIdentity, body_ref: Value,
+    },
     PolicyModelJobV1 {
         action_id: String,
         boundary: PolicyBoundary,
@@ -24,7 +30,7 @@ pub(crate) enum PolicyActionMetadata {
 impl PolicyActionMetadata {
     pub fn identity(&self) -> &PolicyIdentity {
         match self {
-            Self::PolicyToolGraphV1 { identity, .. } | Self::PolicyModelJobV1 { identity, .. } => {
+            Self::PolicyToolGraphV1 { identity, .. } | Self::PolicyModelJobV1 { identity, .. } | Self::PolicyDeliverV1 { identity, .. } | Self::PolicyPauseV1 { identity, .. } => {
                 identity
             }
         }
@@ -32,21 +38,30 @@ impl PolicyActionMetadata {
     pub fn action_id(&self) -> &str {
         match self {
             Self::PolicyToolGraphV1 { action_id, .. }
-            | Self::PolicyModelJobV1 { action_id, .. } => action_id,
+            | Self::PolicyModelJobV1 { action_id, .. } | Self::PolicyDeliverV1 { action_id, .. } | Self::PolicyPauseV1 { action_id, .. } => action_id,
         }
     }
     pub fn body_ref(&self) -> &Value {
         match self {
-            Self::PolicyToolGraphV1 { body_ref, .. } | Self::PolicyModelJobV1 { body_ref, .. } => {
+            Self::PolicyToolGraphV1 { body_ref, .. } | Self::PolicyModelJobV1 { body_ref, .. } | Self::PolicyDeliverV1 { body_ref, .. } | Self::PolicyPauseV1 { body_ref, .. } => {
                 body_ref
             }
         }
     }
     pub fn boundary(&self) -> &PolicyBoundary {
         match self {
-            Self::PolicyToolGraphV1 { boundary, .. } | Self::PolicyModelJobV1 { boundary, .. } => {
+            Self::PolicyToolGraphV1 { boundary, .. } | Self::PolicyModelJobV1 { boundary, .. } | Self::PolicyDeliverV1 { boundary, .. } | Self::PolicyPauseV1 { boundary, .. } => {
                 boundary
             }
+        }
+    }
+    pub fn is_model(&self) -> bool { matches!(self, Self::PolicyModelJobV1 { .. }) }
+    pub fn executor(&self) -> &'static str {
+        match self {
+            Self::PolicyToolGraphV1 { .. } => "policy-tool-graph.v1",
+            Self::PolicyModelJobV1 { .. } => "policy-model.v1",
+            Self::PolicyDeliverV1 { .. } => "policy-deliver.v1",
+            Self::PolicyPauseV1 { .. } => "policy-pause.v1",
         }
     }
     pub fn graph_nodes(&self) -> Option<usize> {
@@ -57,15 +72,11 @@ impl PolicyActionMetadata {
     }
     pub fn from_operation(op: &Operation) -> Result<Option<Self>> {
         let kind = op.intent.get("kind").and_then(Value::as_str).unwrap_or("");
-        if !kind.starts_with("policy_tool_graph") && !kind.starts_with("policy_model_job") {
+        if !["policy_tool_graph", "policy_model_job", "policy_deliver", "policy_pause"].iter().any(|prefix| kind.starts_with(prefix)) {
             return Ok(None);
         }
         let metadata: Self = serde_json::from_value(op.intent.clone())?;
-        let executor = if metadata.graph_nodes().is_some() {
-            "policy-tool-graph.v1"
-        } else {
-            "policy-model.v1"
-        };
+        let executor = metadata.executor();
         if op.id != metadata.action_id()
             || op.lifetime != Lifetime::Run
             || op.effect != Effect::None
@@ -121,7 +132,7 @@ impl PolicyActionMetadata {
     pub fn load_model(&self, content: &crate::content::ContentStore) -> Result<PolicyModelIntent> {
         let intent: PolicyModelIntent = serde_json::from_value(content.load(self.body_ref())?)?;
         let PolicyModelIntent::PolicyModelJobV1 { boundary, .. } = &intent;
-        if self.graph_nodes().is_some()
+        if !self.is_model()
             || intent.action_id() != self.action_id()
             || boundary != self.boundary()
             || intent.checkpoint().0 != self.identity()
@@ -234,4 +245,19 @@ impl PolicyGraphProgress {
         }
         Ok(progress)
     }
+}
+
+/// Every policy action shares this selection authority, including terminal continuation boundaries.
+pub(crate) const ACTION_KINDS: &str = "'policy_tool_graph_v1','policy_model_job_v1','policy_deliver_v1','policy_pause_v1'";
+pub(crate) fn latest_action(db: &Connection, run_id: &str, terminal: bool) -> Result<Option<(Operation, PolicyActionMetadata)>> {
+    let sql = format!("SELECT body FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ({ACTION_KINDS}) {} ORDER BY rowid DESC LIMIT 1", if terminal { "AND json_extract(body,'$.phase')='terminal'" } else { "" });
+    let raw: Option<String> = db.query_row(&sql, [run_id], |row| row.get(0)).optional()?;
+    raw.map(|raw| {
+        let op: Operation = serde_json::from_str(&raw)?;
+        let metadata = PolicyActionMetadata::from_operation(&op)?.ok_or_else(|| RuntimeError::Invalid("policy action metadata missing".into()))?;
+        Ok((op, metadata))
+    }).transpose()
+}
+pub(crate) fn has_pending_action(db: &Connection, run_id: &str) -> Result<bool> {
+    Ok(db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ({ACTION_KINDS}) AND json_extract(body,'$.phase')!='terminal')"), [run_id], |row| row.get(0))?)
 }

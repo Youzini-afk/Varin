@@ -104,7 +104,7 @@ impl ModelProvider for GoogleProvider {
                 }
                 // Signatures are model-bound even within a protocol family. Keep only semantics.
             }
-            let role = if matches!(item.provenance, Provenance::Assistant) {
+            let role = if matches!(item.provenance, Provenance::Assistant | Provenance::PolicyOutput { .. }) {
                 "model"
             } else {
                 "user"

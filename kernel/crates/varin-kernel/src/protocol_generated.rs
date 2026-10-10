@@ -17,6 +17,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.tools.select",
     "runtime.run.inspect",
     "runtime.run.cancel",
+    "runtime.run.resume",
     "runtime.operation.inspect",
     "runtime.operation.cancel",
     "runtime.input.cancel",
@@ -37,6 +38,7 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "runtime.status",
     "runtime.tools.select",
     "runtime.run.cancel",
+    "runtime.run.resume",
     "runtime.operation.cancel",
     "process.resize",
     "process.release",
@@ -284,6 +286,13 @@ pub(crate) struct InputSubmitParams {
     pub(crate) expected_head: RequiredNullable<String>,
     pub(crate) input: Value,
     pub(crate) configuration: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RunResumeParams {
+    pub(crate) run_id: String,
+    pub(crate) wait_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1827,6 +1836,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.run.cancel" => serde_json::from_value::<RunParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.run.resume" => serde_json::from_value::<RunResumeParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.permission.open" => serde_json::from_value::<PermissionOpenParams>(params.clone())

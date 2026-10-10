@@ -253,7 +253,7 @@ impl Catalog {
                 |r| r.get(0),
             )
             .optional()?;
-        let previous:Option<String>=self.db.query_row("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_tool_graph_v1','policy_model_job_v1') AND json_extract(body,'$.phase')='terminal' ORDER BY rowid DESC LIMIT 1",[run_id],|r|r.get(0)).optional()?;
+        let previous = super::policy_body::latest_action(&self.db, run_id, true)?.map(|(op, _)| op.id);
         let id = hex::encode(Sha256::digest(serde_json::to_vec(&(
             run_id,
             self.head(&run.branch_id)?,
@@ -296,12 +296,13 @@ impl Catalog {
         epoch: u64,
     ) -> Result<Option<PolicyGraphRead>> {
         fence(&self.run(run_id)?, epoch)?;
-        let key:Option<String>=self.db.query_row("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_tool_graph_v1','policy_model_job_v1') ORDER BY rowid DESC LIMIT 1",[run_id],|r|r.get(0)).optional()?;
-        let Some(key) = key else { return Ok(None) };
-        let op: Operation = record(&self.db, "operations", &key)?;
-        let Some(metadata) = graph_metadata(&op)? else {
-            return Ok(None);
-        };
+        let Some((op, metadata)) = super::policy_body::latest_action(&self.db, run_id, false)? else { return Ok(None) };
+        if metadata.graph_nodes().is_none() { return Ok(None); }
+        self.capture_graph_action(op, metadata)
+    }
+    pub(crate) fn capture_graph_action(&self, op: Operation, metadata: PolicyActionMetadata) -> Result<Option<PolicyGraphRead>> {
+        let run_id = op.run_id.as_str();
+        let key = op.id.clone();
         let admitted:u64=self.db.query_row("SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND kind='policy.graph_admitted'",[&key],|r|read_number(r,0))?;
         let delivered:u64=self.db.query_row("SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND kind='input.delivered'",[run_id],|r|read_number(r,0))?;
         let model:u64=self.db.query_row("SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND kind='execution.committed' AND json_extract(data,'$.kind')='request_prepared'",[run_id],|r|read_number(r,0))?;
@@ -406,7 +407,7 @@ impl Catalog {
         if super::inputs::has_boundary_inputs(&tx, run_id)? {
             return Err(RuntimeError::InputPending);
         }
-        let unresolved:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.intent.kind') IN ('policy_tool_graph_v1','policy_model_job_v1') AND json_extract(body,'$.phase')!='terminal') OR EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0) OR EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state!='completed' AND json_extract(body,'$.superseded_by_input') IS NULL)",[run_id],|r|r.get(0))?;
+        let unresolved = super::policy_body::has_pending_action(&tx, run_id)? || tx.query_row("SELECT EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0) OR EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state!='completed' AND json_extract(body,'$.superseded_by_input') IS NULL)",[run_id],|r|r.get::<_, bool>(0))?;
         if unresolved {
             return Err(RuntimeError::Conflict(
                 "policy graph cannot bypass unsettled work".into(),

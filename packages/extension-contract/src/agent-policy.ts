@@ -52,6 +52,8 @@ export interface VarinAgentPolicyInput {
   event: { kind: 'started' } | { kind: 'input_delivered'; input_ids: string[] }
     | { kind: 'model_completed'; reason: 'stop' | 'tool_calls' | 'length' | 'content_filter'; tool_calls: number }
     | { kind: 'tools_completed'; results: { request_id: string; call_id: string; completion: JsonValue }[] }
+    | { kind: 'delivered'; action_id: string; item_id: string }
+    | { kind: 'resumed'; action_id: string; wait_id: string }
     | { kind: 'model_job_completed'; action_id: string; receipt: VarinAgentPolicyModelReceipt }
     | { kind: 'tool_graph_completed'; action_id: string; receipts: VarinAgentPolicyNodeReceipt[] }
     | { kind: 'result_chunk'; reference: VarinAgentPolicyEvidenceRef; index: number; total_chunks: number; total_bytes: number; bytes: number[] };
@@ -63,6 +65,7 @@ export type VarinAgentPolicyAction = { kind: 'request_model' | 'execute_tools' |
   | { kind: 'tool_graph'; nodes: VarinAgentPolicyToolNode[] }
   | { kind: 'read_result'; reference: VarinAgentPolicyEvidenceRef; index: number }
   | { kind: 'request_model_with_evidence'; evidence: VarinAgentPolicyEvidenceRef[] }
+  | { kind: 'deliver'; text: string } | { kind: 'pause'; reason: string }
   | { kind: 'fail'; reason: string } | { kind: 'wait'; wait_id: string };
 export interface VarinAgentPolicyDecision { action: VarinAgentPolicyAction; state: JsonValue }
 const stringSchema = { type: 'string', minLength: 1 } as const;
@@ -91,6 +94,8 @@ const modelReceiptSchema = objectSchema({ dispatch: { enum: ['prepared', 'dispat
     provider_request_id: { type: ['string', 'null'] } }), { type: 'null' }] }, usable: { type: 'boolean' } });
 const eventSchema = { oneOf: [
   objectSchema({ kind: { const: 'started' } }),
+  objectSchema({ kind: { const: 'delivered' }, action_id: stringSchema, item_id: stringSchema }),
+  objectSchema({ kind: { const: 'resumed' }, action_id: stringSchema, wait_id: stringSchema }),
   objectSchema({ kind: { const: 'model_job_completed' }, action_id: stringSchema, receipt: modelReceiptSchema }),
   objectSchema({ kind: { const: 'input_delivered' }, input_ids: arraySchema(stringSchema) }),
   objectSchema({ kind: { const: 'model_completed' }, reason: { enum: ['stop', 'tool_calls', 'length', 'content_filter'] }, tool_calls: integerSchema }),
@@ -105,6 +110,8 @@ const actionSchema = { oneOf: [
   objectSchema({ kind: { const: 'tool_graph' }, nodes: arraySchema(nodeSchema) }),
   objectSchema({ kind: { const: 'read_result' }, reference: referenceSchema, index: integerSchema }),
   objectSchema({ kind: { const: 'request_model_with_evidence' }, evidence: arraySchema(referenceSchema) }),
+  objectSchema({ kind: { const: 'deliver' }, text: { type: 'string' } }),
+  objectSchema({ kind: { const: 'pause' }, reason: { type: 'string' } }),
   objectSchema({ kind: { const: 'fail' }, reason: stringSchema }),
   objectSchema({ kind: { const: 'wait' }, wait_id: stringSchema }),
 ] };
@@ -115,7 +122,7 @@ export const VARIN_AGENT_POLICY_CONTRACT = {
     view: objectSchema({ run_id: stringSchema, state: stringSchema, history_count: integerSchema, history_head_id: { type: ['string', 'null'] }, pending_tool_calls: integerSchema, model_capabilities: arraySchema(capabilitySchema) }), event: eventSchema, state: {},
   }) }, outputSchema: objectSchema({ action: actionSchema, state: {} }) },
   boundary: 'between_committed_execution_events',
-  actions: ['request_model', 'request_model_job', 'execute_tools', 'tool_graph', 'read_result', 'request_model_with_evidence', 'wait', 'complete', 'fail'],
+  actions: ['request_model', 'request_model_job', 'execute_tools', 'tool_graph', 'read_result', 'request_model_with_evidence', 'wait', 'deliver', 'pause', 'complete', 'fail'],
   outputAccess: 'own_run_action_node_committed_content_chunks',
   checkpoint: 'identity_versioned_private_json', cancellation: 'abort_discards_decision_without_claiming_tool_cancellation',
 } as const;
@@ -187,6 +194,10 @@ export function parseVarinAgentPolicyDecision(value: unknown): VarinAgentPolicyD
     if (!exact(action, ['kind', 'reference', 'index']) || !reference(action.reference) || !integer(action.index)) throw new Error('Invalid policy result read');
   } else if (action.kind === 'request_model_with_evidence') {
     if (!exact(action, ['kind', 'evidence']) || !Array.isArray(action.evidence) || !action.evidence.every(reference)) throw new Error('Invalid policy evidence');
+  } else if (action.kind === 'deliver') {
+    if (!exact(action, ['kind', 'text']) || typeof action.text !== 'string') throw new Error('Invalid policy delivery');
+  } else if (action.kind === 'pause') {
+    if (!exact(action, ['kind', 'reason']) || typeof action.reason !== 'string') throw new Error('Invalid policy pause');
   } else if (action.kind === 'fail') {
     if (!exact(action, ['kind', 'reason']) || !text(action.reason)) throw new Error('Invalid policy failure');
   } else if (action.kind === 'wait') {
@@ -202,6 +213,8 @@ export function parseVarinAgentPolicyInput(value: unknown): VarinAgentPolicyInpu
     || !integer(view.history_count) || !(view.history_head_id === null || text(view.history_head_id)) || !integer(view.pending_tool_calls) || !Array.isArray(view.model_capabilities) || !view.model_capabilities.every(capability)) throw new Error('Invalid agent policy view');
   switch (event.kind) {
     case 'started': if (!exact(event, ['kind'])) throw new Error('Invalid policy event'); break;
+    case 'delivered': if (!exact(event, ['kind', 'action_id', 'item_id']) || !text(event.action_id) || !text(event.item_id)) throw new Error('Invalid policy delivery receipt'); break;
+    case 'resumed': if (!exact(event, ['kind', 'action_id', 'wait_id']) || !text(event.action_id) || !text(event.wait_id)) throw new Error('Invalid policy resume receipt'); break;
     case 'input_delivered': if (!exact(event, ['kind', 'input_ids']) || !Array.isArray(event.input_ids) || !event.input_ids.every(text)) throw new Error('Invalid policy input event'); break;
     case 'model_job_completed': if (!exact(event, ['kind', 'action_id', 'receipt']) || !text(event.action_id) || !modelReceipt(event.receipt)) throw new Error('Invalid policy model job receipt'); break;
     case 'model_completed': if (!exact(event, ['kind', 'reason', 'tool_calls']) || typeof event.reason !== 'string' || !['stop', 'tool_calls', 'length', 'content_filter'].includes(event.reason)

@@ -260,6 +260,12 @@ impl Catalog {
             "UPDATE resumptions SET claimed=?2,acknowledged=1 WHERE wait_id=?1",
             params![wait_id, sql_number(run.epoch)?],
         )?;
+        if let Some(mut launch) = optional_record::<super::launch_content::LaunchMetadata>(&tx, "run_launches", &run.id)? {
+            launch.bound_epoch = None;
+            launch.requires_rebind = true;
+            launch.revision += 1;
+            put(&tx, "run_launches", &run.id, &launch)?;
+        }
         run.state = RunState::Runnable;
         run.waiting_on = None;
         run.revision += 1;

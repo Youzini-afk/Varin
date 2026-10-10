@@ -224,3 +224,42 @@ it('late old-epoch response send failure cannot close replacement kernel',async(
  bridge.consume({v:1,kind:'agent-policy-request',id:'decision1',kernelEpoch:'one',runId:'r',binding:{reference:'p',identity:{name:'policy',version:'1'}},input:{view:{run_id:'r',state:'runnable',history_count:0,history_head_id:null,pending_tool_calls:0,model_capabilities:[]},event:{kind:'started'},state:null}});
  await expect.poll(()=>sent).toBe(1);epoch='two';bridge.close();rejectOld(new Error('old pipe closed'));await new Promise(resolve=>setTimeout(resolve,20));expect(failures).toBe(0);
 });
+
+
+it('installed SDK policy delivers real assistant history, pauses through queued input and resumes through the public exact-Wait command', async () => {
+  const f = await fixture((_body, response) => complete(response, 'unexpected-model', 'A policy delivery must not request this model'));
+  const example = path.join(f.root, 'delivery-pause-policy'); await fs.mkdir(example);
+  for (const file of ['package.json', 'varin.extension.json']) await fs.copyFile(path.join(repository, 'examples/extensions/delivery-pause-policy', file), path.join(example, file));
+  await build({ entryPoints: [path.join(repository, 'examples/extensions/delivery-pause-policy/host.ts')], bundle: true, platform: 'node', format: 'cjs',
+    outfile: path.join(example, 'host.cjs'), alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
+  await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision,
+    source: { kind: 'local', display: 'Delivery pause SDK example', specifier: example } });
+  await route(f, 'example.delivery-pause-policy:host:varin.agent.policy@2', { projectId: 'selected-project' });
+  const identity = await f.api.create('delivery-pause-native');
+  const admitted = await f.api.submit({ ...identity, key: 'delivery-pause', expectedHead: null, text: 'Show a result and wait for me', model });
+  await expect.poll(async () => (await f.api.snapshot(identity)).launch?.pause?.reason).toContain('Review the first result');
+  const paused = await f.api.snapshot(identity);
+  const pause = paused.launch!.pause!;
+  expect(paused.activeRun).toMatchObject({ state: 'waiting', waiting_on: pause.wait_id });
+  expect(paused.launch).toMatchObject({ startable: false });
+  expect(JSON.stringify(paused.history)).toContain('first result');
+  expect(paused.history.filter(item => item.source === 'assistant')).toHaveLength(1);
+  expect(JSON.stringify(paused.history)).toContain('policy_output');
+  await f.api.enqueue({ ...identity, key: 'queued-during-pause', text: 'Keep this queued', mode: 'boundary' });
+  await f.adapter.recover();
+  expect((await f.api.run(admitted.run_id)).waiting_on).toBe(pause.wait_id);
+  await expect(f.runtime.startRun(admitted.run_id)).rejects.toThrow();
+  expect((await f.api.run(admitted.run_id)).waiting_on).toBe(pause.wait_id);
+  const receipt = await f.api.resume(admitted.run_id, pause.wait_id);
+  expect(receipt).toMatchObject({ run_id: admitted.run_id, action_id: pause.action_id, wait_id: pause.wait_id });
+  expect(await f.api.resume(admitted.run_id, pause.wait_id)).toEqual(receipt);
+  await expect.poll(async () => (await f.api.run(admitted.run_id)).state).toBe('completed');
+  const completed = await f.api.snapshot(identity);
+  expect(completed.history.filter(item => item.source === 'assistant')).toHaveLength(2);
+  expect(JSON.stringify(completed.history)).toContain('second result');
+  expect(completed.inputs.find(input => input.content && JSON.stringify(input.content).includes('Keep this queued'))?.state).toBe('delivered');
+  expect(await f.api.resume(admitted.run_id, pause.wait_id)).toEqual(receipt);
+  expect(f.requests).toEqual([]);
+  expect(f.launchErrors).toEqual([]);
+  expect(f.decisions.some(input => (input as { event: { kind: string } }).event.kind === 'resumed')).toBe(true);
+});

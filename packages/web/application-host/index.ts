@@ -11,7 +11,7 @@ import { createRetrievalOwner } from './lib/kernel/retrieval-owner.js';
 import { createRetrievalComposition } from './lib/kernel/retrieval-composition.js';
 import { createLanguageOwner } from './lib/kernel/language-owner.js';
 import { createLiveSourceOwner } from './lib/kernel/live-source.js';
-import { createThreadSourcePreparer } from './lib/kernel/thread-sources.js';
+import { createThreadSourcePreparer, createThreadSourceAdmission } from './lib/kernel/thread-sources.js';
 import { createThreadContext } from './lib/kernel/thread-context.js';
 import { createContextComposition } from './lib/kernel/context-composition.js';
 import { createPolicyModelPreparer } from './lib/kernel/policy-models.js';
@@ -2963,35 +2963,30 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     });
   kernelClient.setPlanOwner(createPlanOwner(getUserKnowledgeStore, agentRuntime));
   kernelClient.setMemoryOwner(createMemoryOwner({ personalization: agentPersonalization, prepareContext: threadContext }));
-  const contextService=new ContextService(agentRuntime,modelAuthority,threadContext,async(run,launch)=>{
+  const contextService=new ContextService(agentRuntime,threadContext,async(run,launch)=>{
     const source=launch?.selection.source;
     const root=source ? (await documentsAuthority.inspectWorkspace(source.workspace_id)).root : undefined;
     const model=run.configuration as {providerId?:string;model:string};
     return readContextPolicy({agentDir:mcpAgentDir,...(root?{projectRoot:root}:{}),projectTrusted:root!==undefined && mcpHostProjectTrusted(mcpAgentDir,root),
       ...(model.providerId?{providerId:model.providerId}:{}),modelId:model.model});
-  },runId=>threads.continueContext(runId));
+  },(runId,signal)=>threads.continueLaunch(runId,{signal}));
   kernelClient.setContextOwner(contextService);
   const threads = new ThreadAdapter(agentRuntime,
-    modelAuthority, async (source, identity) => {
-      if (source.mode === 'live_root') return liveSources.admit(source, identity.threadId);
-      // Public source coordinates identify existing Host workspaces, never arbitrary roots/grants.
-      await documentsAuthority.inspectWorkspace(source.workspaceId);
-      await documentsAuthority.inspectWorkspace(source.executionWorkspaceId);
-    }, (runId, _error) => {
+    modelAuthority, createThreadSourceAdmission({ documents: documentsAuthority, liveSources,
+      workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter), runtime: agentRuntime }), (runId, _error) => {
       // Durable launch remains inspectable/resumable. Never log credentials or provider responses.
       console.error('[Thread] Launch preparation requires attention:', runId);
     }, createThreadSourcePreparer({ documents: documentsAuthority, liveSources: liveSources, workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter) }),
     threadContext, new PlanService(agentRuntime, getUserKnowledgeStore));
-  const collaboration = new ThreadCollaboration({ runtime: agentRuntime, models: modelAuthority,
+  const collaboration = new ThreadCollaboration({ runtime: agentRuntime,
+    continueRun: (runId, signal) => threads.continueLaunch(runId, { signal }), recoverLaunches: signal => threads.recover(signal),
     workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter), prepareContext: threadContext,
-    admitSource: async source => { await documentsAuthority.inspectWorkspace(source.workspaceId); await documentsAuthority.inspectWorkspace(source.executionWorkspaceId); },
     onError: (operationId, _error) => console.error('[Collaboration] Preparation or delivery requires attention:', operationId ?? 'discovery'),
   });
   void collaboration.recover();
   const refreshThreadPersonalization = () => threads.refreshPersonalization();
   void refreshThreadPersonalization().catch(() => console.error('[Thread] Personalization refresh requires attention'));
   void contextService.recover().catch(() => console.error('[Thread] Saved context job discovery requires attention'));
-  void threads.recover().catch(() => console.error('[Thread] Saved launch discovery requires attention'));
   registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerHarnessThreadRoutes(app, {
     registry: threadRegistry,

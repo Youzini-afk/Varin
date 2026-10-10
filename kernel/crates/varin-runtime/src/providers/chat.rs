@@ -63,7 +63,7 @@ impl ModelProvider for ChatProvider {
             }
             let role = match item.provenance {
                 Provenance::SystemInstruction { .. } => "system",
-                Provenance::Assistant => "assistant",
+                Provenance::Assistant | Provenance::PolicyOutput { .. } => "assistant",
                 _ => "user",
             };
             match item.content {

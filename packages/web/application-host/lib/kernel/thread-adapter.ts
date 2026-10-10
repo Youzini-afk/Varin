@@ -3,8 +3,9 @@ import type { ImageAttachment } from '@varin/protocol';
 import { threadInput } from './thread-images.js';
 import { createHash } from 'node:crypto';
 import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadSubmit, ThreadSource, ThreadSnapshot, ThreadHistoryPage, ThreadCompact, ThreadContextState, ThreadPrepareSource, ThreadPreparedSource } from '@varin/application-client';
-import type { InputMode, InitialContext, ModelSessionConfiguration, CredentialScope, AgentRuntimeStreamEvent } from './protocol.generated.js';
+import type { InputMode, InitialContext, ModelSessionConfiguration, CredentialScope, AgentRuntimeStreamEvent, PolicyResumeReceipt } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
+import { isAbortError, waitWithSignal } from '../cancellation.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { ContextPreparer } from './thread-context.js';
 
@@ -23,33 +24,74 @@ export class ThreadAdapter {
     private readonly prepareContext?: ContextPreparer, private readonly plans?: PlanService) {}
 
   private readonly contextRefreshes = new Map<string, Promise<void>>();
-  private readonly admittedLaunches = new Map<string, Promise<void>>();
-  private launchAdmitted(runId: string, prepare: () => Promise<void>): void {
-    if (this.admittedLaunches.has(runId)) return;
-    const work = Promise.resolve().then(prepare).catch(error => this.recordLaunchFailure(runId, error));
-    this.admittedLaunches.set(runId, work);
-    void work.finally(() => {
-      if (this.admittedLaunches.get(runId) === work) this.admittedLaunches.delete(runId);
-    }).catch(() => undefined);
+  private readonly admittedLaunches = new Map<string, {
+    pending: Map<AbortSignal | undefined, { signal: AbortSignal | undefined; prepare: () => Promise<void> }>;
+    work: Promise<void>;
+  }>();
+  private launchAdmitted(runId: string, prepare: () => Promise<void>, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return Promise.reject(signal.reason ?? new DOMException('Launch caller cancelled', 'AbortError'));
+    const existing = this.admittedLaunches.get(runId);
+    if (existing) {
+      // Repeated wakes from one caller epoch need one fresh authority read after the current
+      // attempt drains. Keep other live epochs: cancelling the newest caller cannot erase them.
+      existing.pending.delete(signal);
+      existing.pending.set(signal, { signal, prepare });
+      return waitWithSignal(existing.work, signal);
+    }
+    const flight = { pending: new Map([[signal, { signal, prepare }]]), work: Promise.resolve() };
+    flight.work = Promise.resolve().then(async () => {
+      let failed = false;
+      let failure: unknown;
+      try {
+        while (flight.pending.size) {
+          const candidates = [...flight.pending.values()].filter(wake => !wake.signal?.aborted);
+          flight.pending.clear();
+          const next = candidates.pop();
+          if (!next) continue;
+          try { await next.prepare(); failed = false; }
+          catch (error) {
+            failed = true; failure = error;
+            if (!isAbortError(error)) await this.recordLaunchFailure(runId, error);
+            else {
+              // The selected epoch may have ended while another coalesced caller is still
+              // valid. Preserve its own closure/credentials, behind any newer recorded wake.
+              const newer = flight.pending;
+              flight.pending = new Map(candidates.filter(wake => !wake.signal?.aborted).map(wake => [wake.signal, wake]));
+              for (const [key, wake] of newer) { flight.pending.delete(key); flight.pending.set(key, wake); }
+            }
+          }
+        }
+        if (failed) throw failure;
+      } finally {
+        // Delete before settling the Promise, so a wake in its completion microtasks cannot
+        // join an already drained flight and disappear.
+        if (this.admittedLaunches.get(runId) === flight) this.admittedLaunches.delete(runId);
+      }
+    });
+    this.admittedLaunches.set(runId, flight);
+    return waitWithSignal(flight.work, signal);
   }
   /** Serialize refresh reads per branch; an edit arriving during a read gets another fresh read. */
-  private async refreshContext(identity: ThreadIdentity): Promise<void> {
+  private async refreshContext(identity: ThreadIdentity, signal?: AbortSignal): Promise<void> {
     if (!this.prepareContext?.refresh) return;
     const previous = this.contextRefreshes.get(identity.branchId) ?? Promise.resolve();
-    const work = previous.catch(() => undefined).then(async () => {
+    const work = waitWithSignal(previous.catch(() => undefined), signal).then(async () => {
       for (;;) {
-        const checkpoint = await this.runtime.context(identity.branchId);
+        signal?.throwIfAborted();
+        const checkpoint = await this.runtime.context(identity.branchId, signal);
         if (!checkpoint) return;
-        const context = await this.prepareContext!.refresh!(checkpoint);
+        const context = await waitWithSignal(this.prepareContext!.refresh!(checkpoint), signal);
+        signal?.throwIfAborted();
         if (context.effectiveSystemPrompt === checkpoint.proposal.effective_system_prompt
           && JSON.stringify(context.instructionSources) === JSON.stringify(checkpoint.proposal.instruction_sources)
           && context.memoryCheckpoint === checkpoint.proposal.memory_checkpoint
           && JSON.stringify(context.personalization) === JSON.stringify(checkpoint.personalization)) return;
         try {
-          await this.runtime.refreshContext({ branchId: identity.branchId, expectedRevision: checkpoint.revision, context });
+          await this.runtime.refreshContext({ branchId: identity.branchId, expectedRevision: checkpoint.revision, context }, signal);
           return;
         } catch (error) {
-          const latest = await this.runtime.context(identity.branchId);
+          signal?.throwIfAborted();
+          const latest = await this.runtime.context(identity.branchId, signal);
           // Only a real concurrent context commit warrants re-reading/retrying. Other failures
           // remain visible, and later input admission retries from the durable authority.
           if (!latest || latest.revision === checkpoint.revision) throw error;
@@ -68,25 +110,6 @@ export class ThreadAdapter {
     if (results.some(result => result.status === 'rejected')) throw new Error('Personalization refresh requires attention');
   }
 
-  private readonly resumptions = new Map<string, Promise<void>>();
-  private async continueParked(runId: string): Promise<void> {
-    const existing = this.resumptions.get(runId);
-    if (existing) return existing;
-    const work = (async () => {
-      const run = await this.runtime.run(runId);
-      if (run.state === 'runnable') {
-        // Wait delivery follows parked-worker quiescence. Resume verifies the persisted owner.
-        this.runtime.releaseRunCredentialOwner(runId);
-        await this.resume(runId);
-      }
-    })();
-    this.resumptions.set(runId, work);
-    try { await work; } finally { if (this.resumptions.get(runId) === work) this.resumptions.delete(runId); }
-  }
-  async continueContext(runId:string):Promise<void> {
-    try {await this.continueParked(runId);}
-    catch(error) {await this.recordLaunchFailure(runId,error);throw error;}
-  }
   async decidePermission(input: ThreadIdentity & { operationId: string; permissionId: string; decision: 'allow_once' | 'deny' }) {
     await this.requireIdentity(input);
     const operation = await this.requireOperation(input.operationId);
@@ -100,7 +123,7 @@ export class ThreadAdapter {
     const run = await this.requireRun(operation.run_id);
     if (run.branch_id !== input.branchId || run.thread_id !== input.threadId) throw new Error('Question belongs to another branch');
     const result = await this.runtime.answerQuestion(input.operationId, input.answer);
-    await this.continueParked(result.run_id);
+    await this.continueLaunch(result.run_id);
     return result;
   }
   async cancelOperation(operationId: string) {
@@ -113,7 +136,7 @@ export class ThreadAdapter {
       await this.runtime.cancelChildWait(current.waiting_on); return this.runtime.operation(operationId);
     }
     const result = await this.runtime.cancelOperation(operationId);
-    if (result.executor === 'ask_user') await this.continueParked(result.run_id);
+    if (result.executor === 'ask_user') await this.continueLaunch(result.run_id);
     return result;
   }
   async readChildReport(identity: ThreadIdentity, operationId: string, itemId: string, offset = 0, maxBytes = 65536) {
@@ -202,10 +225,7 @@ export class ThreadAdapter {
       instructionSources: recipe?.instruction_sources ?? [], memoryCheckpoint: recipe?.memory_checkpoint ?? null,
       ...(personalization ? { personalization } : {}),
       configuration: model.configuration, credentialScope: await model.credentialOwner.scope() });
-    const run = await this.runtime.run(job.receipt.run_id);
-    if (['accepted', 'preparing', 'runnable'].includes(run.state)) {
-      void this.runtime.startRunWithCredentialOwner(run.id, model.credentialOwner).catch(error => this.recordLaunchFailure(run.id, error));
-    }
+    void this.continueLaunch(job.receipt.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
     return job;
   }
 
@@ -236,15 +256,7 @@ export class ThreadAdapter {
 
   async resumeContext(identity: ThreadIdentity, runId: string): Promise<void> {
     await this.requireContextJob(identity, runId);
-    await this.resumeContextRun(runId);
-  }
-
-  private async resumeContextRun(runId: string): Promise<void> {
-    const run = await this.runtime.run(runId);
-    const launch = await this.runtime.launch(runId);
-    if (!launch?.selection.credential_scope) throw new Error('Context job has no durable credential binding');
-    const owner = await this.models.rebindModel(run.configuration as ModelSessionConfiguration, launch.selection.credential_scope);
-    await this.runtime.startRunWithCredentialOwner(runId, owner);
+    await this.continueLaunch(runId);
   }
 
   assertIdentity(identity: ThreadIdentity): void {
@@ -285,15 +297,8 @@ export class ThreadAdapter {
         branchId: input.source.branchId ?? null, revision: input.source.revision ?? null, mode: input.source.mode, liveRoot: input.source.liveRoot ?? null,
       } : null, enabledTools: input.source?.tools ?? [], credentialScope: await model.credentialOwner.scope() },
     });
-    // Close the first-admission gap: a note commit can occur after assembly while no checkpoint
-    // yet exists for the background refresh. Never launch that missed revision indefinitely.
-    this.launchAdmitted(receipt.run_id, async () => {
-      await this.refreshContext(input);
-      const run = await this.runtime.run(receipt.run_id);
-      if (run.state === 'accepted' || run.state === 'preparing' || run.state === 'runnable') {
-        await this.runtime.rebindLaunch(receipt.run_id, { credentialOwner: model.credentialOwner });
-      }
-    });
+    // The shared launch owner closes the initial context-refresh gap before preparation.
+    void this.continueLaunch(receipt.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
     return receipt;
   }
 
@@ -308,17 +313,7 @@ export class ThreadAdapter {
       mode: input.mode, input: threadInput(input.text, input.images) });
     // Context is synchronized by the Run's request preparation. An accepted input receipt
     // must not wait for extension/MCP startup, source materialization or credential rebinding.
-    this.launchAdmitted(receipt.run_id, async () => {
-      const launch = await this.runtime.launch(receipt.run_id);
-      if (launch?.requires_rebind) {
-        const run = await this.runtime.run(receipt.run_id);
-        if (run.cancel_requested || ['completed', 'failed', 'cancelled'].includes(run.state)) return;
-        await this.refreshContext(input);
-        if (!launch.selection.credential_scope) throw new Error('Selected credential binding is unavailable');
-        const owner = await this.models.rebindModel(run.configuration as ModelSessionConfiguration, launch.selection.credential_scope);
-        await this.runtime.rebindLaunch(receipt.run_id, { credentialOwner: owner });
-      }
-    });
+    void this.continueLaunch(receipt.run_id).catch(() => undefined);
     return receipt;
   }
 
@@ -416,40 +411,74 @@ export class ThreadAdapter {
     this.onLaunchError(runId, error);
   }
 
-  async recover(): Promise<void> {
-    const pending = await this.runtime.pendingLaunches();
-    await Promise.all(pending.map(async launch => {
-      const run = await this.runtime.run(launch.run_id);
-      if (['completed', 'failed', 'cancelled'].includes(run.state) || (run.state === 'waiting' && (run.waiting_on?.startsWith('question:') || run.waiting_on?.startsWith('child-wait:') || run.waiting_on?.startsWith('process-wait:') || run.waiting_on?.startsWith('context-wait:')))) return;
-      if (await this.runtime.childForThread(run.thread_id)) return;
-      try {
-        if (run.thread_id.startsWith('thread:')) await this.resume(run.id);
-        else if (run.thread_id.startsWith('context-job-thread:')) {
-          const job = await this.runtime.contextJob(run.id);
-          if(job.request.owner_run_id) return;
-          const sources = await this.runtime.threads();
-          if (!sources.some(thread => thread.thread_id.startsWith('thread:') && thread.branches.some(branch => branch.branch_id === job.request.branch_id))) return;
-          await this.resumeContextRun(run.id);
-        }
+  async recover(signal?: AbortSignal): Promise<void> {
+    const pending = await this.runtime.pendingLaunches(signal);
+    await Promise.all(pending.filter(launch => launch.startable && launch.requires_rebind).map(async launch => {
+      const run = await this.runtime.run(launch.run_id, signal);
+      if (!run.thread_id.startsWith('thread:') && !run.thread_id.startsWith('context-job-thread:')) return;
+      if (await this.runtime.childForThread(run.thread_id, signal)) return;
+      if (run.thread_id.startsWith('context-job-thread:')) {
+        const job = await this.runtime.contextJob(run.id, signal);
+        // Automatic summaries retain their ContextService publication owner.
+        if (job.request.owner_run_id) return;
+        const sources = await this.runtime.threads(signal);
+        if (!sources.some(thread => thread.thread_id.startsWith('thread:') && thread.branches.some(branch => branch.branch_id === job.request.branch_id))) return;
       }
-      catch (error) { await this.recordLaunchFailure(run.id, error); }
+      void this.continueLaunch(run.id, { signal }).catch(() => undefined);
     }));
   }
 
-  async resume(runId: string): Promise<void> {
-    const run = await this.runtime.run(runId);
-    if (!run.thread_id.startsWith('thread:')) throw new Error('Run is not owned by a thread');
-    await this.refreshContext({ runtime: 'agent', threadId: run.thread_id, branchId: run.branch_id });
+  /** User command consumes this exact Pause. Its durable receipt does not await cold assembly. */
+  async resume(runId: string, waitId: string): Promise<PolicyResumeReceipt> {
+    await this.requireRun(runId);
+    const receipt = await this.runtime.resumeRun(runId, waitId);
+    void this.continueLaunch(runId).catch(() => undefined);
+    return receipt;
+  }
+
+  async retryPreparation(runId: string): Promise<void> {
+    await this.requireRun(runId);
     const launch = await this.runtime.launch(runId);
-    if (!launch?.selection.credential_scope) throw new Error('Run has no durable credential binding; resubmit its original input key');
-    const owner = await this.models.rebindModel(run.configuration as ModelSessionConfiguration, launch.selection.credential_scope);
-    const selected = await this.runtime.modelSelections(run.id);
-    const desired = selected.desired;
-    if (desired?.credential_scope && desired.id !== selected.active?.id && desired.status !== 'failed') {
-      const credentialOwner = await this.models.rebindModel(desired.configuration,desired.credential_scope);
-      await this.runtime.selectModel(run.id,desired.id,desired.configuration,credentialOwner);
-    }
-    await this.runtime.rebindLaunch(runId, { credentialOwner: owner });
+    if (!launch?.startable || !launch.requires_rebind || launch.pause) throw new Error('Run is not eligible for preparation retry');
+    await this.continueLaunch(runId);
+  }
+
+  /** The single Host launch entry for submission, recovered input and domain continuations.
+   * The kernel projection includes worker/quiescence ownership, including asynchronous cold
+   * assembly after start acknowledgement. A stale notification never releases that owner. */
+  continueLaunch(runId: string, options: { signal?: AbortSignal | undefined; credentialOwner?: ExistingHostCredentialOwner } = {}): Promise<void> {
+    return this.launchAdmitted(runId, () => this.runtime.withRunPreparation(runId, options.signal, async signal => {
+      signal.throwIfAborted();
+      let launch = await this.runtime.launch(runId, signal);
+      if (!launch?.startable || !launch.requires_rebind) return;
+      const run = await this.runtime.run(runId, signal);
+      if (!run.thread_id.startsWith('thread:') && !run.thread_id.startsWith('context-job-thread:')) throw new Error('Run is not owned by a thread');
+      const identity: ThreadIdentity = { runtime: 'agent', threadId: run.thread_id, branchId: run.branch_id };
+      if (run.thread_id.startsWith('thread:')) await this.refreshContext(identity, signal);
+      const source = launch.selection.source;
+      if (source && source.mode !== 'live_root' && source.branch_id !== null && source.revision !== null) {
+        const admission = this.admitSource({ mode: source.mode, workspaceId: source.workspace_id,
+          executionWorkspaceId: source.execution_workspace_id, branchId: source.branch_id, revision: source.revision, tools: [] }, identity);
+        await waitWithSignal(admission, signal);
+      }
+      // live_root is validated by rebindLaunch's existing LiveSource owner.
+      const scope = launch.selection.credential_scope;
+      if (!scope && !run.thread_id.startsWith('context-job-thread:')) throw new Error('Run has no durable credential binding; resubmit its original input key');
+      const owner = options.credentialOwner ?? (scope ? await waitWithSignal(this.models.rebindModel(run.configuration as ModelSessionConfiguration, scope), signal) : undefined);
+      const selected = await this.runtime.modelSelections(runId, signal);
+      const desired = selected.desired;
+      const desiredOwner = desired?.credential_scope && desired.id !== selected.active?.id && desired.status !== 'failed'
+        ? await waitWithSignal(this.models.rebindModel(desired.configuration, desired.credential_scope), signal) : undefined;
+      signal?.throwIfAborted();
+      launch = await this.runtime.launch(runId, signal);
+      if (!launch?.startable || !launch.requires_rebind) return;
+      this.runtime.releaseRunCredentialOwner(runId);
+      if (desired && desiredOwner) await this.runtime.selectModel(runId, desired.id, desired.configuration, desiredOwner, signal);
+      if (run.thread_id.startsWith('context-job-thread:')) {
+        if (owner) await this.runtime.startRunWithCredentialOwner(runId, owner, signal);
+        else await this.runtime.startRun(runId, signal);
+      } else await this.runtime.rebindLaunch(runId, { ...(owner ? { credentialOwner: owner } : {}), signal });
+    }), options.signal);
   }
 
   /** Listener registration precedes replay. Notifications only wake the durable cursor reader. */

@@ -126,7 +126,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 16, input domain 2 and collaboration domain 2 store input intents/queue bodies and context-job ownership,
+Catalog version 17, input domain 2 and collaboration domain 2 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. `Catalog::collect_content_objects` marks requests, provider originals,
@@ -255,8 +255,41 @@ Memory mutations and fixed-source child dispatch/observation use their existing 
 receipt recovery. A policy can dispatch a child, continue independent work and later observe it through
 `wait_child`, using ordinary graph nodes rather than a second child-action API. MCP permissions, plan
 tools, process observation and questions retain their explicit origin restrictions until their own
-policy-origin consumers are connected. Independent delivery and pause remain unfinished PolicyAction
-work; a general graph and child collaboration alone do not complete the design.
+policy-origin consumers are connected. Independent delivery and explicit pause use the control actions
+below. Safe policy replacement, ordinary extension tools and other design domains remain unfinished.
+
+## Independent policy delivery and explicit pause
+
+`Deliver { text }` appends an immutable assistant history item without creating a ModelStep, provider
+original or tool exchange. Its `PolicyOutput` provenance retains the original action and policy identity;
+all provider adapters serialize it as assistant/model output. Empty text is a real value. The worker
+stages its history envelope, action body and private checkpoint before one Catalog transaction commits
+the original head, action receipt and `policy.delivered` fact. Lost replies/reopening reuse that action.
+
+`Pause { reason }` atomically commits the same policy-action owner, checkpoint, registered Wait and
+waiting Run. The reason is immutable content, not control metadata. Input may queue, independent jobs
+may finish, and the Host may reconnect while that Run stays paused. Only `runtime.run.resume` with the
+original Run and Wait consumes the pause. It checks the original receipt before touching a newer
+worker, joins the original parked worker outside shared locks, then commits the triggered Wait,
+terminal action, runnable Run, existing launch rebind requirement and stable `PolicyResumeReceipt`.
+Duplicate commands return its original cursor; they cannot release a later pause. Generic Wait
+resumption and Run transitions cannot bypass this boundary. Run cancellation ends its owned Pause;
+generic operation cancellation cannot silently resume it, and neither control needs the reason body.
+
+The recovery reader selects the latest real policy action across graphs, model jobs and control
+actions. An unconsumed `Delivered`/`Resumed` event remains the continuation boundary if queued input
+is appended to history. A decision whose admission loses to that input does not advance private
+state. Recovery distinguishes the original executed checkpoint from a later pending decision using
+the existing action, checkpoint and input facts; an admitted model request consumes that boundary.
+
+Launch inspection exposes derived `startable` and `pause` views; the kernel combines Catalog
+eligibility with the actual worker/quiescence owner. Host submission, recovery and domain continuations
+share one cancellable launch entry. Durable `policy.resumed` facts wake that entry without making
+child/process observation wait for cold preparation. Wakes received during a delayed earlier start
+acknowledgement survive in that same transient launch owner and recheck eligibility after it drains;
+a cancelled old epoch cannot erase a newer valid wake. The client separates `resume(runId, waitId)` from
+`retryPreparation(runId)`, and the UI uses the exact displayed pause while preserving Stop run during
+pending requests. See the ordinary [SDK example](../../../examples/extensions/delivery-pause-policy/README.md).
 
 ## Policy-originated planning models
 

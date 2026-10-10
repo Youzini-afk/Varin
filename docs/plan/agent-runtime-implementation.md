@@ -6,6 +6,17 @@
 
 目标是完整实现[完整运行时设计](../design/agent-runtime-design.md)和[能力组合设计](../design/runtime-extensibility-design.md)共同定义的长期运行底座：及时交互、低开销执行、按真实资源调度、深层能力组合和可替换策略。完成聊天循环、迁移已有工具或删除 Pi 都不是单独的完成标准；Pi 退出是这套设计落地后的一个结果。当前生产仍使用 Pi session worker、TypeScript Host 协调和 Rust 资源内核；现有权威见[架构](../architecture.md)。
 
+## 2026-10-10 增量：独立交付与显式暂停续接
+
+- `varin.agent.policy@2` 已接通 `deliver`、`pause` 及 `delivered`、`resumed`。交付直接沿既有不可变历史写入，来源保留原 PolicyAction 和策略身份；所有 provider 将其序列化为同一 Agent 的 assistant/model 输出，不制造 ModelStep、工具配对或 provider opaque 原文。空串和 Unicode 均保留真实值。正文、历史 envelope 和私有 checkpoint 在 worker 持久化，短事务同次提交原 head、动作和事实。
+- Pause 同次提交原策略动作、checkpoint、Wait 与 Run waiting 状态。暂停中输入仅排队，独立 child/job 可以完成，Host 重连和 Catalog 重开都不自动续跑。`runtime.run.resume` 必须指定原 Run/Wait，先查原成功回执，再在公共锁外等待原停靠 worker 退出，原子提交 `policy.resumed`、Wait 消费、Run runnable 和原 launch 的重绑要求。重复旧命令返回原 cursor，不能打断新 worker 或解除下一次 Pause。一般 Wait 续接、Supervisor 准入和最终 Run 状态 writer 共用实际条件，不能越过 Pause；Run 取消按原 owner 结束 Pause，不读取 reason 正文。
+- 统一恢复读取最新的实际 graph/model/control action。排队输入进入真实历史时，不覆盖尚未消费的 Delivered/Resumed 边界；下一动作准入败给输入时，未执行动作的私有状态不会提前生效。已有 action/checkpoint/input 事实足以区分原已执行状态和待执行决定，不加第二套事件队列。真实反例覆盖交付已提交而丢回复、Resume 后模型决定已存而新输入先交付再崩溃、原已存决定恢复及旧 resume 命令面对新活 worker。
+- Launch 公开 `startable`、`pause` 派生视图，组合 Catalog 与真实 worker/quiescence 状态；Host 提交、恢复、提问/上下文/协作续接汇入原按 Run 单飞入口。现有事件泵启动/重连发现 launch，此后按持久 cursor 定点消费 `policy.resumed`，不等待冷凭据/扩展准备才观察 child/process。冷 context 准备与发布沿同一取消生命周期，旧异步结果不能迟到发布或重绑。独立审查复现了旧 start 回执未返回期间明确 resume 的新唤醒被单飞吞掉：原单飞现在合并期间的新 wake，退场前按有效调用者的 signal/凭据重读同一启动条件，不新增轮询或恢复队列。
+- 客户端与 HTTP 分开 `resume(runId, waitId)` 和 `retryPreparation(runId)`，UI 显示原 Pause reason/Wait，重复点击和分支晚响应隔离，排队输入不冒充恢复；pending 准备期间 Stop run 和取消仍可达。新增普通 SDK 示例 `examples/extensions/delivery-pause-policy`，不自行写历史、维护 Wait 或开恢复传输。Catalog 格式为 **17**，旧内部格式直接拒绝；两设计正文仍保留完整目标，页首改为实施中并链接本台账。
+- 最终完整 runtime **245 passed、0 failed、2 个既有手动诊断 ignored**；其中真实控制/恢复用例 6 项、provider 角色序列化 1 项。Kernel `policy_review` **3/3** 验证真实 Engine/Catalog/Storage 的原观察/取消及新增 child 完成后父仍 Pause、重开后显式恢复并观察原报告。合同 **3/3**、SDK **2/2**、真实安装 broker **9/9** 与 portable Host/HTTP 消费 **8/8**（分别执行）、UI 行为 **22/22**；最后示例简化后重建安装窄验 **1/1**。Host 全源码/测试类型、UI 类型、定点 lint、协议生成、文档链接和真实 Host bundle 通过。Linux 开发内核 identity `0.9.25` 构建通过，SHA-256 `e70f33144f9d0b2f1e617b486dcdbe720b43ef0d4c81fd07980b7b3834a8edb4`。
+- 独立审查按设计复核真实原子性、恢复和取消，并以仓库外原探针完成 Host 丢唤醒修前失败/修后通过；另通过 child 受理 → Deliver → Pause → 子任务完成与重开 → 显式 resume → 原 Wait 报告交付与再重开 → Deliver/Complete 的真实 Engine/Catalog 组合，确认原受理不变、无伪 ModelStep 或重复历史。该探针的源受理为 fixture，不替代 Host 授权验收。本阶段无剩余源码行为阻断。
+- **真实 Host 端到端缺口仍保留**：新增已安装 SDK → HTTP 显式恢复 → Catalog/history 的 native 场景仅通过类型检查，未运行。前述 Unix socket `EPERM` 和官方提升初始化失败未解除；未更换产品 transport，也不把 broker 提供事件和原生 fixture 拼成端到端成功。安全策略切换、普通扩展工具/发现、其余领域、实际跨平台及默认产品迁移仍未完成。
+
 ## 2026-10-10 增量：策略直接派生与观察子任务
 
 - 已安装策略可在父 ModelStep 之前通过普通 `tool_graph` 调用 `dispatch`，继续自己的独立读取，再用 `wait_child` 观察原任务。核心核对真实 PolicyAction/node、原 ToolIntent、父 Run/Thread、源授权及冻结调用；沿原 ChildTask、独立 Thread、源 pin 与模型/凭据 owner 受理。没有伪造模型调用，也没有增加第二套子任务动作或状态表。子任务仍限定已实现的 `model: parent`、`read_only` 与固定源合同。

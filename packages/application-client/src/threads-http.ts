@@ -50,7 +50,8 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     cancelOperation: operationId => post('operation/cancel', { operationId }),
     decidePermission: input => post('permission/decide', input),
     answerQuestion: input => post('question/answer', input),
-    async resume(runId) { await post('run/resume', { runId }); }, events: cursor => post('events', { cursor }),
+    resume: (runId, waitId) => post('run/resume', { runId, waitId }),
+    async retryPreparation(runId) { await post('run/retry-preparation', { runId }); }, events: cursor => post('events', { cursor }),
     async observe(cursor, listener, { signal }) {
       const controller = new AbortController();
       const abort = () => controller.abort();
