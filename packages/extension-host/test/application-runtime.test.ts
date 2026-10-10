@@ -71,7 +71,8 @@ const writeRoutingProvider = async (directory: string, providerExtensionId: stri
   await writeFile(join(directory, "host.cjs"), `
 module.exports = {
   activate(context) {
-    context.services.provide({ id: '${serviceId}', multiple: true, version: 1 }, {
+    // Ordinary service activation identifies its implementation; multiplicity belongs to the manifest.
+    context.services.provide({ id: '${serviceId}', version: 1 }, {
       read() { return '${value}'; }
     });
   }
@@ -404,7 +405,7 @@ test("candidate Host storage rolls back every committed document when storage sy
       candidateIntegrity: integrity,
       expectedRevision: requested.revision,
       extensionId,
-    }), /Brokered Host process (?:exited|is disconnected)/);
+    }), /Brokered Host (?:process (?:exited|is disconnected)|IPC disconnected)/);
 
     const afterFailure = await runtime.state();
     assert.equal(afterFailure.catalog.revision, requested.revision);
@@ -561,6 +562,8 @@ test("persistent routes select different real providers by session and isolate p
     const betaProvider = providers.find((provider) => provider.extensionId === "dev.example.beta");
     assert.ok(alphaProvider);
     assert.ok(betaProvider);
+    assert.equal(alphaProvider.descriptor.multiple, true);
+    assert.equal(betaProvider.descriptor.multiple, true);
     const alphaRoute = await runtime.upsertServiceRoutingRule({
       expectedRevision: 0,
       rule: {

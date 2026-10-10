@@ -66,3 +66,57 @@ for (const failure of ["callback", "throw"] as const) {
     assert.equal(drained, true);
   });
 }
+
+for (const failure of ["request-callback", "request-throw", "process-error", "disconnect"] as const) {
+  test(`${failure} retains callback and pin ownership until the unreliable broker actually exits`, async () => {
+    const registry = new HostServiceRegistry("request-failure-fixture");
+    const owner = { extensionId: "dev.example.channel", entrypointId: "host", extensionVersion: "1", generation: 1 };
+    let killed = false;
+    let requestId = "";
+    let crashCount = 0;
+    const child = Object.assign(new EventEmitter(), {
+      pid: 12345,
+      connected: true,
+      kill() { killed = true; return true; },
+      send(message: { kind: string; id: string }, callback: (error: Error | null) => void) {
+        if (message.kind === "cancel") { callback(null); return true; }
+        requestId = message.id;
+        const error = new Error("injected IPC failure while the callback may still run");
+        if (failure === "request-throw") throw error;
+        if (failure === "request-callback") callback(error);
+        else callback(null);
+        return true;
+      },
+    });
+    const transport = new ChildBrokeredHostTransport({
+      brokerScript: "unused-fixture",
+      forkProcess: (() => child as unknown as ChildProcess) as typeof fork,
+      onCrash: () => { crashCount++; registry.revokeOwner(owner); },
+      requestFromChild: async () => null,
+    });
+    child.emit("message", { kind: "event", event: "ready" });
+    await registry.replaceOwner(owner, [{ descriptor: { id: "dev.example.channel", version: 1 },
+      handler: async (method, args, context) => await transport.request("service.invoke", { method, args }, context.signal) as string }]);
+    const pin = registry.bind("dev.example.channel", 1).pin();
+    let settled = false;
+    const pending = pin.invoke("wait", []).then(value => ({ value }), (error: unknown) => ({ error }))
+      .finally(() => { settled = true; });
+    await setImmediate();
+    assert.ok(requestId);
+    if (failure === "process-error") child.emit("error", new Error("injected live-process error"));
+    if (failure === "disconnect") { child.connected = false; child.emit("disconnect"); }
+    await setImmediate();
+    assert.equal(killed, true);
+    assert.equal(crashCount, 1);
+    assert.equal(pin.revocationSignal.aborted, true);
+    assert.equal(settled, false, "a kill request is not execution-stopped evidence");
+    assert.equal(registry.hasPendingOwnerCalls(owner), true);
+    let drained = false;
+    const draining = registry.drainOwner(owner).then(() => { drained = true; });
+    await setImmediate(); assert.equal(drained, false);
+    child.connected = false; child.emit("exit", null, "SIGKILL");
+    const result = await pending;
+    assert.ok("error" in result); assert.match(String(result.error), /process exited/);
+    await draining; assert.equal(drained, true); pin.release();
+  });
+}

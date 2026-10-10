@@ -174,7 +174,7 @@ test(`forced native owner cannot regain captured privileges on ${refresh} catalo
     if (refresh === 'unchanged') await h.runtime.reconcile();
     else await h.runtime.reviewCapabilities({ extensionId: id, expectedRevision: (await h.runtime.catalog.snapshot()).revision, decisions: [{ capability: gateCapability, realm: 'host', granted: false }] });
     h.release.resolve(); const outcome = await pending;
-    assert.match(outcome.error, /not granted|inactive|cancel|abort/i);
+    assert.match(outcome.error, /not granted|inactive|cancel|abort|revoked/i);
     assert.equal(h.privilegedCalls(), 1, 'reconcile must not re-grant a force-disabled captured context');
   } finally { await h.cleanup(); }
 });

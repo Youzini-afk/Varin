@@ -1,6 +1,10 @@
+import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { fork, type ChildProcess } from "node:child_process";
 import {
   parseVarinExtensionServiceInvocationRequest,
+  parseVarinExtensionServiceProvision,
+  parseVarinToolJson,
   parseVarinExtensionStorageOpenRequest,
   type JsonObject,
   type JsonValue,
@@ -24,6 +28,7 @@ import { NativeHostTransport } from "./native-host-transport.js";
 import {
   HostServiceRegistry,
   type HostServiceOwnerIdentity,
+  type HostInvocationScope,
   type HostServiceProvision,
 } from "./service-registry.js";
 import {
@@ -132,11 +137,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === "object" && value !== null && !Array.isArray(value)
 );
 
-const asJsonValue = (value: unknown): JsonValue => {
-  const serialized = JSON.stringify(value);
-  if (serialized === undefined) throw new Error("Broker RPC value is not JSON-safe");
-  return JSON.parse(serialized) as JsonValue;
-};
+const asJsonValue = (value: unknown): JsonValue => parseVarinToolJson(value, "Broker RPC value");
 
 const diagnosticState = (
   hostId: string,
@@ -170,6 +171,7 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
   readonly #requestFromChild: (method: string, params: unknown, signal: AbortSignal) => Promise<JsonValue>;
   #intentional = false;
   #crashed = false;
+  #channelFailure: Error | undefined;
   #requestId = 0;
 
   constructor(options: {
@@ -214,10 +216,17 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
       this.#childRequests.clear();
       if (!this.#intentional && !this.#crashed) { this.#crashed = true; this.#onCrash(error); }
     });
-    this.#child.once("error", (error) => {
-      if (!this.#child.pid) resolveExited();
-      for (const pending of this.#pending.values()) pending.reject(error);
-      this.#pending.clear();
+    this.#child.on("error", (error) => {
+      if (!this.#child.pid) {
+        // Spawn failed: there was no execution process to retain.
+        resolveExited();
+        rejectReadyRequest(error);
+        for (const pending of this.#pending.values()) pending.reject(error);
+        this.#pending.clear();
+      } else this.#failChannel(error);
+    });
+    this.#child.on("disconnect", () => {
+      if (!this.#intentional) this.#failChannel(new Error("Brokered Host IPC disconnected"));
     });
   }
 
@@ -231,6 +240,7 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
       });
     } else await this.#ready;
     signal?.throwIfAborted();
+    if (this.#channelFailure) throw this.#channelFailure;
     if (!this.#child.connected) throw new Error("Brokered Host process is disconnected");
     const id = `parent-${process.pid}-${++this.#requestId}`;
     return new Promise((resolveRequest, reject) => {
@@ -241,8 +251,9 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
       const send = (message: BrokerRequestMessage | BrokerCancelMessage) => {
         const failed = (error: Error | null) => {
           if (!error || message.kind === "cancel") return;
-          this.#pending.delete(id);
-          rejectRequest(error);
+          // Delivery failure does not establish whether the child received or ran the request.
+          // Stop the unreliable owner, but retain its callback until a response or actual exit.
+          this.#failChannel(error);
         };
         // A failed cancel delivery says nothing about whether the original handler stopped.
         // Preserve its pending ownership until the original response or actual process exit.
@@ -288,6 +299,16 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
     this.#child.kill("SIGKILL");
   }
 
+  #failChannel(error: Error): void {
+    if (this.#channelFailure) return;
+    this.#channelFailure = error;
+    if (!this.#intentional && !this.#crashed) {
+      this.#crashed = true;
+      this.#onCrash(error);
+    }
+    this.forceTerminate();
+  }
+
   async #onMessage(message: BrokerMessage): Promise<void> {
     if (!message || typeof message !== "object") return;
     if (message.kind === "response") {
@@ -300,8 +321,7 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
     }
     if (message.kind === "event") {
       if (message.event === "fatal" && !this.#intentional && !this.#crashed) {
-        this.#crashed = true;
-        this.#onCrash(new Error(message.error || "Brokered Host process failed"));
+        this.#failChannel(new Error(message.error || "Brokered Host process failed"));
       }
       return;
     }
@@ -337,6 +357,8 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
 
 export class BrokeredHostSupervisor {
   readonly #active = new Map<string, BrokeredHostInstance>();
+  // Authority stays in the Host and is retained until the real callback settles or its broker exits.
+  readonly #invocations = new Map<string, { scope: HostInvocationScope; signal: AbortSignal }>();
   readonly #brokerScript: string;
   readonly #capabilities: HostCapabilityRegistry;
   readonly #catalog: ApplicationExtensionCatalog;
@@ -1083,25 +1105,49 @@ export class BrokeredHostSupervisor {
     raw: unknown,
     manifest: VarinExtensionManifest,
   ): HostServiceProvision[] {
-    const values = Array.isArray(raw) ? raw : [];
+    if (!Array.isArray(raw)) throw new Error("Host activation must return service provisions");
+    const values = raw;
     const declared = new Map((manifest.provides?.services ?? []).map((service) => [serviceKey(service.id, service.version), service]));
-    return values.map((value) => {
+    const provisions = values.map<HostServiceProvision>((value) => {
       if (!isRecord(value) || typeof value.id !== "string" || !Number.isSafeInteger(value.version)) {
         throw new Error("Host service provision is invalid");
       }
       const key = serviceKey(value.id, Number(value.version));
       const descriptor = declared.get(key);
       if (!descriptor) throw new Error(`Host provided undeclared service: ${key}`);
+      if (descriptor.tool !== undefined || value.tool !== undefined) {
+        const provided = parseVarinExtensionServiceProvision(value);
+        if (!isDeepStrictEqual(provided, descriptor)) throw new Error(`Host service declaration differs from manifest: ${key}`);
+      }
       return {
         descriptor: { ...descriptor },
-        handler: (method, args, context) => broker.request("service.invoke", {
-          args,
-          method,
-          serviceId: descriptor.id,
-          version: descriptor.version,
-        }, context.signal).then(asJsonValue),
+        handler: async (method, args, context) => {
+          const invocationId = context.invocation ? randomUUID() : undefined;
+          const lifetime = context.invocation ? new AbortController() : undefined;
+          const invocationKey = invocationId ? `${ownerStorageKey(owner)}\0${invocationId}` : undefined;
+          if (invocationKey && context.invocation && lifetime) {
+            this.#invocations.set(invocationKey, { scope: context.invocation, signal: AbortSignal.any([context.signal, lifetime.signal]) });
+          }
+          try {
+            return asJsonValue(await broker.request("service.invoke", {
+              args,
+              method,
+              serviceId: descriptor.id,
+              version: descriptor.version,
+              ...(invocationId ? { invocationId } : {}),
+            }, context.signal));
+          } finally {
+            lifetime?.abort(new Error("Host capability invocation has expired"));
+            if (invocationKey) this.#invocations.delete(invocationKey);
+          }
+        },
       };
     });
+    const registered = new Set(provisions.map(({ descriptor }) => serviceKey(descriptor.id, descriptor.version)));
+    for (const [key, descriptor] of declared) {
+      if (descriptor.tool && !registered.has(key)) throw new Error(`Host activation did not register declared tool service: ${key}`);
+    }
+    return provisions;
   }
 
   #providerId(owner: HostServiceOwnerIdentity, descriptor: VarinExtensionServiceProvision): string {
@@ -1300,13 +1346,20 @@ export class BrokeredHostSupervisor {
   ): Promise<JsonValue> {
     const params = isRecord(paramsValue) ? paramsValue : {};
     if (method === "capability.call") {
+      const scoped = params.invocationId === undefined ? undefined
+        : typeof params.invocationId === "string"
+          ? this.#invocations.get(`${ownerStorageKey(owner)}\0${params.invocationId}`)
+          : undefined;
+      if (params.invocationId !== undefined && !scoped) throw new Error("Host capability invocation is expired or belongs to another owner");
+      const callSignal = scoped ? AbortSignal.any([signal, scoped.signal]) : signal;
       return this.#capabilities.invoke(
         owner,
         grants,
         String(params.capability ?? ""),
         String(params.method ?? ""),
-        asJsonValue(params.params ?? null),
-        signal,
+        asJsonValue(params.params),
+        callSignal,
+        scoped?.scope,
       );
     }
     if (method === "storage.open") {

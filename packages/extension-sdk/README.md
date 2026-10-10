@@ -91,3 +91,12 @@ filesystem, model, index or other external work during declaration. The Host sup
 keeps a generation pin for each native query; ordinary extension replacement preserves existing
 queries, while explicit disable/crash revokes their bindings. See the
 [authoring guide](../../docs/ops/varin-extension-authoring.md#native-retrieval-plans) for routing.
+
+`provideTool(context, declaration, execute)` registers an ordinary Host service with `inspect` and
+`execute` methods. Import the service descriptor directly from the package's `varin.extension.json`
+so cold discovery and activation use one declaration. `execute(input, call)` receives normal JSON,
+cooperative cancellation and `call.capabilities`, a client bound to that invocation. Schema compilation
+and admission remain with the executing Host; the SDK never owns history, Operations or resource facts.
+Return the tool's JSON result directly. Null and empty results are valid; missing/non-JSON results fail.
+The first slice supports `completion: result`; it does not expose a job API. A declared read operation
+still needs its ordinary capability grants and the Host's current invocation authority.

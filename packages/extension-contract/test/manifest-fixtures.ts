@@ -39,6 +39,28 @@ const shellManifest = (seams: Record<string, { replacementTargets: string[]; slo
   }],
 });
 
+const tool = {
+  name: "search", description: "Search a scoped source", inputSchema: { type: "object" },
+  outputSchema: true, completion: "result", operation: "read", examples: [null, {}],
+};
+const toolFixtures: readonly ManifestFixture[] = ([
+  ["tool contract", tool, true],
+  ["null input schema", { ...tool, inputSchema: null }, false],
+  ["missing output schema", { ...tool, outputSchema: undefined }, false],
+  ["unsupported job completion", { ...tool, completion: "job" }, false],
+  ["unknown tool authority claim", { ...tool, executor_stopped: true }, false],
+  ["invalid source location", { ...tool, source: { path: "host.ts", line: 0 } }, false],
+] as const).map(([label, value, valid]) => ({
+  label,
+  manifest: {
+    ...baseManifest(),
+    entrypoints: { host: { file: "host.cjs", mode: "brokered" } },
+    provides: { services: [{ id: "dev.example.search", version: 1, tool: value }] },
+  },
+  schemaValid: valid,
+  runtimeValid: valid,
+}));
+
 export const manifestFixtures: readonly ManifestFixture[] = [
   {
     label: "valid declarative entrypoint without file",
@@ -450,4 +472,5 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     schemaValid: false, // schema now rejects when on transition-scene contributions
     runtimeValid: false, // runtime rejects when on transition-scene contributions
   },
+  ...toolFixtures,
 ];

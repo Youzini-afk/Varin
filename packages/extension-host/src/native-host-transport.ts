@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createRequire } from "node:module";
 import { isAbsolute, relative, resolve } from "node:path";
 import type {
@@ -8,7 +9,9 @@ import type {
 } from "@varin/extension-contract";
 import type { BrokeredHostTransport } from "./broker-supervisor.js";
 
-type NativeServiceHandler = Record<string, (args: JsonValue[], call: { signal: AbortSignal; callId: string }) => unknown>;
+interface NativeInvocationContext { signal: AbortSignal; invocationId?: string; active: boolean }
+type NativeCapabilityClient = { call(capability: string, method: string, params: JsonValue): Promise<JsonValue> };
+type NativeServiceHandler = Record<string, (args: JsonValue[], call: { signal: AbortSignal; callId: string; capabilities: NativeCapabilityClient }) => unknown>;
 
 interface NativeHostExtension {
   activate(context: NativeHostContext): unknown | Promise<unknown>;
@@ -89,6 +92,7 @@ const resolveExtension = (moduleValue: unknown): NativeHostExtension => {
 };
 
 export class NativeHostTransport implements BrokeredHostTransport {
+  readonly #invocationContext = new AsyncLocalStorage<NativeInvocationContext>();
   readonly #disposers: Array<() => void | Promise<void>> = [];
   readonly #requestFromExtension: NativeHostTransportOptions["requestFromExtension"];
   readonly #serviceHandlers = new Map<string, NativeServiceHandler>();
@@ -168,11 +172,7 @@ export class NativeHostTransport implements BrokeredHostTransport {
             path: (logicalPath) => packageAssetPath(packageRoot, logicalPath),
           },
           capabilities: {
-            call: (capability, capabilityMethod, capabilityParams) => this.#requestFromExtension(
-              "capability.call",
-              { capability, method: capabilityMethod, params: capabilityParams },
-              this.#controller?.signal ?? new AbortController().signal,
-            ),
+            call: (capability, method, params) => this.#callCapability(this.#invocationContext.getStore(), capability, method, params),
           },
           effect: (disposer) => {
             if (typeof disposer !== "function") throw new Error("Trusted-native Host effect disposer must be a function");
@@ -233,9 +233,16 @@ export class NativeHostTransport implements BrokeredHostTransport {
           ? AbortSignal.any([signal, this.#controller.signal])
           : signal ?? this.#controller?.signal ?? new AbortController().signal;
         callSignal.throwIfAborted();
-        return methodHandler(Array.isArray(params.args) ? params.args as JsonValue[] : [], {
-          signal: callSignal, callId: `native-${++this.#callId}`,
-        });
+        const scope: NativeInvocationContext = {
+          signal: callSignal, active: true,
+          ...(typeof params.invocationId === "string" ? { invocationId: params.invocationId } : {}),
+        };
+        try {
+          return await this.#invocationContext.run(scope, () => methodHandler(Array.isArray(params.args) ? params.args as JsonValue[] : [], {
+            signal: callSignal, callId: `native-${++this.#callId}`,
+            capabilities: { call: (capability, method, params) => this.#callCapability(scope, capability, method, params) },
+          }));
+        } finally { scope.active = false; }
       }
       case "storage.sync":
         for (const snapshot of Array.isArray(params.storages)
@@ -260,6 +267,16 @@ export class NativeHostTransport implements BrokeredHostTransport {
   forceTerminate(): void {
     this.#controller?.abort("Trusted-native Host entrypoint force-disabled");
     this.#terminated = true;
+  }
+
+  #callCapability(scope: NativeInvocationContext | undefined, capability: string, method: string, params: JsonValue): Promise<JsonValue> {
+    if (scope && !scope.active) return Promise.reject(new Error("Host capability invocation has expired"));
+    const signal = scope?.signal ?? this.#controller?.signal ?? AbortSignal.abort(new Error("Host extension is inactive"));
+    if (signal.aborted) return Promise.reject(signal.reason);
+    return this.#requestFromExtension("capability.call", {
+      capability, method, params,
+      ...(scope?.invocationId !== undefined ? { invocationId: scope.invocationId } : {}),
+    }, signal);
   }
 
   #load(modulePath: string): NativeHostExtension {

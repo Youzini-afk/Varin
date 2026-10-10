@@ -50,10 +50,23 @@ export interface VarinExtensionServiceRequirement {
   version: number;
 }
 
+/** One service declaration also supplies its tool projection; read is a claim, never a grant. */
+export interface VarinExtensionToolDeclaration {
+  name: string;
+  description: string;
+  inputSchema: JsonObject | boolean;
+  outputSchema: JsonObject | boolean;
+  completion: "result";
+  operation: "read" | "effect";
+  examples?: JsonValue[];
+  source?: { path: string; line?: number };
+}
+
 export interface VarinExtensionServiceProvision {
   id: string;
   multiple?: boolean;
   version: number;
+  tool?: VarinExtensionToolDeclaration;
 }
 
 export type VarinExtensionContributionKind =

@@ -84,3 +84,9 @@ Version 1 graph actions and receipt shapes are not accepted by version 2.
 fields, including model selectors. The selected native Host owns keyword/structure implementations,
 the semantic backend/published-reader lease, and all Run-granted reads; the extension gets no query,
 source text, root, filesystem or model capability through this contract.
+
+A service provision may carry a single `tool` declaration: name, description, input/output JSON
+Schema, `completion: result`, and `operation: read | effect`, with optional examples and source
+location. Its service ID/version remain the stable contract identity. Manifest parsing preserves and
+validates this metadata; the executing Host compiles schemas before admitting calls. The declaration
+is inspectable metadata and never permission, trusted replay evidence, or a resource/execution receipt.

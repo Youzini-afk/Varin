@@ -6,6 +6,14 @@
 
 目标是完整实现[完整运行时设计](../design/agent-runtime-design.md)和[能力组合设计](../design/runtime-extensibility-design.md)共同定义的长期运行底座：及时交互、低开销执行、按真实资源调度、深层能力组合和可替换策略。完成聊天循环、迁移已有工具或删除 Pi 都不是单独的完成标准；Pi 退出是这套设计落地后的一个结果。当前生产仍使用 Pi session worker、TypeScript Host 协调和 Rust 资源内核；现有权威见[架构](../architecture.md)。
 
+## 2026-10-10 增量：普通工具 SDK 与调用域边界
+
+- 普通 Host service provision 可携带单份 `tool` 声明；`provideTool` 从同一 manifest descriptor 注册 `inspect`/`execute`，保留真实 JSON null/空值，缺失与非 JSON 结果明确失败。工具声明的输入/输出 schema、说明、完成种类和 operation 提示不是权限或可重放证据。本增量只开放 Result 作者合同，没有伪造 Job 接口。
+- 工具 activation 必须与冷声明完全一致，漏注册或不匹配的候选不替换旧世代。普通非 tool 服务仍按原 id/version 取 manifest 权威，不因新工具规则要求作者重复声明 `multiple`。整合以真实双 broker 既有路由反例复现并收窄了这项过宽限制。
+- 原 `HostServicePin` 增加撤权 signal；正常更新保留被冻结世代，disable/crash/revoke 唤醒调用。Host-only invocation scope 的值不跨 wire，child 仅携带按原 extension owner/generation 核对的 opaque token；SDK 提供调用级 capability client，callback 结束后句柄失效。原 pending/inFlight 等真实 callback response 或 process exit，取消等待和发送 kill 都不冒充已停止。通信失败请求原 supervisor 停止失效 broker，但仍保留其在途 callback 到实际结束。
+- 三包 build/typecheck/lint 通过。最后完整合同/SDK/Host source suite **200 项中 199 直接通过**；另一项既有候选 storage 回滚测试仅因新增明确 `IPC disconnected` 文案不在原断言内失败，窄修该断言后原 case **1/1 通过**，候选/catalog/三文档回滚及重试行为断言均保留。已有本地 npm/Git fixture 使用 workspace npm cache，不新增产品依赖。独立真实安装探针验证取消中的 v1 callback 尚活时 v2 可发布和执行，释放旧 model/service pin 后 retirement 仍等待真实旧 callback 返回；本层无剩余行为阻断。
+- **本次提交只闭合 SDK/扩展 Host 层**。原生 ToolDirectory、真实 ModelStep/PolicyAction 权限、执行端停止证据及迟到回执恢复、材料 snapshot 入口正在下一增量接线，未计为本层已交付。实际 Host/kernel 全链仍受已记录 Unix socket 环境限制，组件证据不能拼成未运行的端到端成功；Catalog 格式不在本次提交中改变。
+
 ## 2026-10-10 增量：独立交付与显式暂停续接
 
 - `varin.agent.policy@2` 已接通 `deliver`、`pause` 及 `delivered`、`resumed`。交付直接沿既有不可变历史写入，来源保留原 PolicyAction 和策略身份；所有 provider 将其序列化为同一 Agent 的 assistant/model 输出，不制造 ModelStep、工具配对或 provider opaque 原文。空串和 Unicode 均保留真实值。正文、历史 envelope 和私有 checkpoint 在 worker 持久化，短事务同次提交原 head、动作和事实。

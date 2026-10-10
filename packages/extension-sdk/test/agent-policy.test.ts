@@ -33,7 +33,7 @@ test('registered v2 policy gets immutable typed completions and passes only resu
       },
     });
     configuration.path = 'mutated';
-    const call = { signal: new AbortController().signal, callId: 'decision' };
+    const call = { signal: new AbortController().signal, callId: 'decision', capabilities: context.capabilities };
     const completion = { kind: 'result', outcome: 'succeeded', effect: 'confirmed', output: reference };
     const decision = await handler.decide!([input(completion)], call);
     assert.deepEqual(decision, { action: { kind: 'request_model_with_evidence', evidence: [reference] }, state: null });
@@ -55,6 +55,6 @@ test('cancellation after an awaited policy decision discards its returned graph'
     provideAgentPolicy(context, { identity: { name: 'cancelled', version: '1' }, configuration: null,
       async decide() { await Promise.resolve(); abort.abort(); return { action: { kind: 'tool_graph', nodes: [] }, state: null }; },
     });
-    await assert.rejects(async () => handler.decide!([input({ kind: 'not_dispatched', reason: 'Denied' })], { signal: abort.signal, callId: 'decision' }), { name: 'AbortError' });
+    await assert.rejects(async () => handler.decide!([input({ kind: 'not_dispatched', reason: 'Denied' })], { signal: abort.signal, callId: 'decision', capabilities: context.capabilities }), { name: 'AbortError' });
   } });
 });
