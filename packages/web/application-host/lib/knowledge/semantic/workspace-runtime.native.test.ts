@@ -113,7 +113,7 @@ describe('production workspace semantic assembly lifecycle', () => {
     const harness = await setup({
       watchDocuments: (_workspaceId, listener) => {
         notify = listener;
-        return { ready: Promise.resolve(true), settle: async () => undefined, close() {} };
+        return { ready: Promise.resolve(true), position: null, settle: async () => undefined, close() {} };
       },
       searchFilesystemFiles: async () => {
         const stat = fs.statSync(file, { bigint: true });
@@ -145,7 +145,7 @@ describe('production workspace semantic assembly lifecycle', () => {
     const selection = createProjectIndexScope([]);
     const inventory = vi.fn(async () => []);
     const closed = vi.fn();
-    const watchDocuments = vi.fn(() => ({ ready: Promise.resolve(true), settle: async () => undefined, close: closed }));
+    const watchDocuments = vi.fn(() => ({ ready: Promise.resolve(true), position: null, settle: async () => undefined, close: closed }));
     const harness = await setup({ getIndexScope: selection.get, searchFilesystemFiles: inventory, watchDocuments });
     harness.runtime.observeDocumentMutation({ workspaceId: harness.workspaceId, resourceId: 'a.ts', kind: 'modified' });
     await harness.runtime.drain();
@@ -383,7 +383,7 @@ describe('production workspace semantic assembly lifecycle', () => {
     // Keep the document watch quiet to simulate a file creation missed by
     // Documents observation.
     const controlled = await setup({
-      watchDocuments: () => ({ ready: Promise.resolve(true), settle: async () => undefined, close() {} }),
+      watchDocuments: () => ({ ready: Promise.resolve(true), position: null, settle: async () => undefined, close() {} }),
       searchFilesystemFiles: async () => {
         scans += 1;
         if (scans === 2) {
@@ -456,7 +456,7 @@ describe('production workspace semantic assembly lifecycle', () => {
   it('cancels the pending reconcile timer when the Host runtime is disposed', async () => {
     let scans = 0;
     const harness = await setup({
-      watchDocuments: () => ({ ready: Promise.resolve(true), settle: async () => undefined, close() {} }),
+      watchDocuments: () => ({ ready: Promise.resolve(true), position: null, settle: async () => undefined, close() {} }),
       searchFilesystemFiles: async () => { scans += 1; return []; },
       reconcileMinimumIntervalMs: 1_000,
     });

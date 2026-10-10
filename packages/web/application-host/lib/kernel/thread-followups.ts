@@ -41,3 +41,16 @@ export async function controlThreadFollowup(owner: FollowupOwner,
   return owner.runtime.controlFollowup({ followupId: input.followupId,
     expectedRevision: input.expectedRevision, action: input.action }, signal);
 }
+
+/** Storage's original User acceptance is discoverable even if Catalog admission lost its caller. */
+export async function pendingThreadFollowupRegistrations(owner: FollowupOwner, identity: ThreadIdentity, signal?: AbortSignal) {
+  await owner.requireIdentity(identity, signal);
+  return owner.runtime.pendingFollowupRegistrations(identity.threadId, identity.branchId, signal);
+}
+export async function cancelThreadFollowupRegistration(owner: FollowupOwner,
+  input: Parameters<ThreadFollowupsAPI['cancelRegistration']>[0], signal?: AbortSignal) {
+  await owner.requireIdentity(input, signal);
+  const run = await owner.runtime.run(input.runId, signal);
+  if (run.thread_id !== input.threadId || run.branch_id !== input.branchId) throw new Error('Follow-up source Run belongs to another Thread branch');
+  return owner.runtime.cancelFollowupRegistration({ key: input.key, runId: input.runId }, signal);
+}

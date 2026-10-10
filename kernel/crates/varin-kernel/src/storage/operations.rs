@@ -124,7 +124,7 @@ impl Storage {
         let blocked: Option<String> = self
             .conn
             .query_row(
-                "SELECT 'pending-operation' FROM operations WHERE operation_id = ?1 AND state = 'started' UNION SELECT 'temporary-object' FROM object_owners WHERE operation_id = ?1 UNION SELECT 'revision' FROM revisions WHERE operation_id = ?1 LIMIT 1",
+                "SELECT 'file-observation-receipt' FROM operations WHERE operation_id = ?1 AND kind='file.observation.accept' UNION SELECT 'pending-operation' FROM operations WHERE operation_id = ?1 AND state = 'started' UNION SELECT 'temporary-object' FROM object_owners WHERE operation_id = ?1 UNION SELECT 'revision' FROM revisions WHERE operation_id = ?1 LIMIT 1",
                 params![operation_id],
                 |row| row.get(0),
             )

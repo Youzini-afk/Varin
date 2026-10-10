@@ -5,7 +5,7 @@ import type { Express, RequestHandler } from 'express';
 import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel } from '@varin/application-client';
 import { KernelClientError } from './kernel-client.js';
 import { ThreadAdapter } from './thread-adapter.js';
-import { controlThreadFollowup, getThreadFollowup, listThreadFollowups, registerThreadFollowup } from './thread-followups.js';
+import { pendingThreadFollowupRegistrations, cancelThreadFollowupRegistration, controlThreadFollowup, getThreadFollowup, listThreadFollowups, registerThreadFollowup } from './thread-followups.js';
 import { controlThreadGoal, listThreadGoals, startThreadGoal, updateThreadGoal } from './thread-goals.js';
 
 const object = (value: unknown): Record<string, unknown> => {
@@ -38,6 +38,10 @@ const followupSource = (value: unknown): FollowupRegistrationSource => {
   }
   if (trigger.kind === 'process_stopped' && Object.keys(trigger).every(key => key === 'kind' || key === 'operationId')) {
     return { kind: 'process_stopped', operationId: text(trigger.operationId) };
+  }
+  if (trigger.kind === 'file' && Object.keys(trigger).every(key => ['kind', 'path', 'condition'].includes(key))
+    && (trigger.condition === 'exists' || trigger.condition === 'changed' || trigger.condition === 'ready')) {
+    return { kind: 'file', path: text(trigger.path), condition: trigger.condition };
   }
   throw new Error('Invalid one-shot follow-up trigger');
 };
@@ -93,6 +97,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'child/list': ['runtime', 'threadId', 'branchId'], 'child/cancel': ['runtime', 'threadId', 'branchId', 'operationId'],
     'child/wait/cancel': ['runtime', 'threadId', 'branchId', 'waitId'], 'tree/cancel': ['runtime', 'threadId', 'branchId'],
     'resources/refresh': ['runtime', 'threadId', 'branchId', 'expectedRevision', 'instructionDirectories', 'supportingFiles'],
+    'followup/registrations/pending': ['runtime', 'threadId', 'branchId'],
+    'followup/registration/cancel': ['runtime', 'threadId', 'branchId', 'key', 'runId'],
     'followup/register': ['runtime', 'threadId', 'branchId', 'key', 'runId', 'trigger', 'instruction'],
     'followup/get': ['runtime', 'threadId', 'branchId', 'followupId'],
     'followup/list': ['runtime', 'threadId', 'branchId'],
@@ -202,6 +208,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     return adapter.refreshResources({ ...identity(body), expectedRevision: revision(body.expectedRevision),
       ...(instructionDirectories ? { instructionDirectories } : {}), ...(supportingFiles ? { supportingFiles } : {}) }, signal);
   });
+  post('followup/registrations/pending', (body, signal) => pendingThreadFollowupRegistrations(adapter, identity(body), signal));
+  post('followup/registration/cancel', (body, signal) => cancelThreadFollowupRegistration(adapter, { ...identity(body), key: text(body.key), runId: text(body.runId) }, signal));
   post('followup/register', (body, signal) => registerThreadFollowup(adapter,
     { ...identity(body), key: text(body.key), runId: text(body.runId), trigger: followupTrigger(body.trigger), instruction: text(body.instruction) }, signal));
   post('followup/get', (body, signal) => getThreadFollowup(adapter, identity(body), text(body.followupId), signal));

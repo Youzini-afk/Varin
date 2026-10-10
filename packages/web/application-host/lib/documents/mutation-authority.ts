@@ -321,6 +321,7 @@ export const createWorkspaceMutationAuthority = ({
   const authorityInstanceId = randomUUID();
   const runtimes = new Map<string, WorkspaceRuntime>();
   const queues = new Map<string, Promise<unknown>>();
+  const stateListeners = new Set<(workspaceId: string) => void>();
   let disposed = false;
   let disposePromise: Promise<void> | null = null;
   liveAuthorityInstances.add(authorityInstanceId);
@@ -392,10 +393,19 @@ export const createWorkspaceMutationAuthority = ({
       result: {
         entry: structuredClone(entry),
         value: outcome.result,
+        changed,
       },
       write: changed,
     };
-  }, signal ? { signal } : {});
+  }, signal ? { signal } : {}).then(({ entry, value, changed }) => {
+    // A writer can finish without another filesystem event. Publish only a hint,
+    // after the original durable transaction; readers still inspect this owner.
+    if (changed) for (const listener of stateListeners) {
+      try { listener(workspaceId); }
+      catch { console.warn('[Documents] Mutation state observer failed'); }
+    }
+    return { entry, value };
+  });
 
   const run = <Result>(workspaceId: string, operation: (runtime: WorkspaceRuntime) => Promise<Result>, signal?: AbortSignal): Promise<Result> => {
     if (typeof workspaceId !== 'string' || !workspaceId) {
@@ -670,12 +680,18 @@ export const createWorkspaceMutationAuthority = ({
       });
       liveAuthorityInstances.delete(authorityInstanceId);
       runtimes.clear();
+      stateListeners.clear();
     })();
     return disposePromise;
   };
 
   return {
     inspect,
+    subscribe(listener: (workspaceId: string) => void) {
+      assertAvailable();
+      stateListeners.add(listener);
+      return () => { stateListeners.delete(listener); };
+    },
     registerWriter,
     observeWatchEvent,
     setWatchBaseline,

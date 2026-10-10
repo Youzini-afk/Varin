@@ -195,6 +195,7 @@ pub(crate) enum Command {
     Request {
         value: Value,
         cancellation: Arc<AtomicBool>,
+        wake_cancel: Option<varin_runtime::execution::CancellationToken>,
         input_order: Option<varin_runtime::resource_admission::ResourceReservation>,
     },
 }
@@ -523,6 +524,7 @@ pub(crate) fn spawn(
                 Command::Request {
                     mut value,
                     cancellation,
+                    wake_cancel,
                     input_order,
                 } => {
                     let id = value
@@ -536,6 +538,7 @@ pub(crate) fn spawn(
                         waiting.push_back(Command::Request {
                             value,
                             cancellation,
+                            wake_cancel,
                             input_order,
                         });
                         continue;
@@ -689,7 +692,16 @@ pub(crate) fn spawn(
                                 &cancellation,
                             );
                         }
-                        if matches!(method, "runtime.followup.register" | "runtime.followup.get") {
+                        if matches!(
+                            method,
+                            "runtime.followup.register"
+                                | "runtime.followup.get"
+                                | "runtime.followup.files"
+                                | "runtime.followup.registrations.pending"
+                                | "runtime.followup.registration.cancel"
+                                | "runtime.followup.file.observe"
+                                | "runtime.followup.file.release"
+                        ) {
                             let runtime = runtime.clone();
                             let resources = resources.clone();
                             let method = method.to_owned();
@@ -699,7 +711,12 @@ pub(crate) fn spawn(
                             let cancelled = cancellation.clone();
                             thread::spawn(move || {
                                 let result = followup_commands::execute(
-                                    runtime, resources, &method, params, &cancelled,
+                                    runtime,
+                                    resources,
+                                    &method,
+                                    params,
+                                    &cancelled,
+                                    wake_cancel,
                                 );
                                 let response = match result {
                                     Ok(value) => response_ok(&response_id, value),
@@ -2765,3 +2782,7 @@ impl FamilyCommand {
 #[cfg(test)]
 #[path = "family_public_review.rs"]
 mod family_public_review;
+
+#[cfg(test)]
+#[path = "file_observation_review.rs"]
+mod file_observation_review;

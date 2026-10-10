@@ -242,9 +242,74 @@ export interface MessagePage {
   nextCursor: string | null;
 }
 
-export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string };
+export type FileCondition = 'exists' | 'changed' | 'ready';
 
-export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string };
+export type FileState = { kind: 'regular-file'; objectHash: string; byteLength: number; mode: number | null } | { kind: 'directory'; mode: number | null } | { kind: 'symlink'; symlinkTarget: string; mode: number | null } | { kind: 'missing' } | { kind: 'unsupported' };
+
+export interface FileWatchPosition {
+  sourceId: string;
+  generation: number;
+  sequence: number;
+}
+
+export type FileProof = 'exists' | 'snapshot_difference' | 'targeted_invalidation' | 'managed_ready';
+
+export interface FollowupFileEvidence {
+  kind: 'file';
+  receipt_id: string;
+  condition: FileCondition;
+  path: string;
+  state: FileState;
+  proof: FileProof;
+  position: FileWatchPosition | null;
+  gap: boolean;
+  observed_at_ms: number;
+}
+
+export interface FollowupFileSourceState {
+  receipt_id: string;
+  revision: number;
+  baseline: FileState | null;
+  current: FileState | null;
+  immutable: boolean;
+  watch_id: string | null;
+  position: FileWatchPosition | null;
+  gap: boolean;
+  failure_code: string | null;
+  released: boolean;
+}
+
+export interface FollowupPendingRegistration {
+  id: string;
+  sourceRunId: string;
+  threadId: string;
+  branchId: string;
+  paths: string[];
+}
+
+export interface FollowupPendingParams {
+  threadId: string;
+  branchId: string;
+  after?: string;
+}
+
+export interface FollowupPendingResult {
+  registrations: FollowupPendingRegistration[];
+  nextCursor: string | null;
+}
+
+export interface FollowupRegistrationCancelParams {
+  key: string;
+  runId: string;
+}
+
+export interface FollowupRegistrationCancelResult {
+  followup: Followup | null;
+}
+
+export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string } | { kind: 'file'; path: string; condition: FileCondition };
+
+export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | FollowupFileEvidence;
 
 export interface FollowupSourceObservation {
   trigger_cursor: number;
@@ -255,6 +320,7 @@ export interface FollowupSourceState {
   source_index: number;
   after_cursor: number;
   observed: FollowupSourceObservation | null;
+  file: FollowupFileSourceState | null;
 }
 
 export interface FollowupSourceEvidence {
@@ -1221,7 +1287,7 @@ export interface RunContextScope {
 
 export type FollowupControlAction = 'pause' | 'resume' | 'cancel';
 
-export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string };
+export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string } | { kind: 'file'; path: string; condition: FileCondition };
 
 export type FollowupRegistrationTrigger = FollowupRegistrationSource | { kind: 'any' | 'all'; sources: FollowupRegistrationSource[] };
 
@@ -1269,7 +1335,7 @@ export interface FollowupControlParams {
 
 export interface FollowupWait {
   id: string;
-  kind: 'process_stopped' | 'run_completed' | 'goal_requested' | 'at' | 'any' | 'all';
+  kind: 'process_stopped' | 'run_completed' | 'goal_requested' | 'at' | 'any' | 'all' | 'file';
   after_cursor: number;
   trigger_cursor: number | null;
   state: 'waiting' | 'observed' | 'consumed' | 'cancelled';

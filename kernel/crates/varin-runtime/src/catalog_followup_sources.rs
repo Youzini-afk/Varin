@@ -6,12 +6,30 @@ use super::*;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FollowupSource {
-    At { at_ms: u64 },
-    ProcessStopped { operation_id: String },
+    At {
+        at_ms: u64,
+    },
+    ProcessStopped {
+        operation_id: String,
+    },
+    File {
+        path: String,
+        condition: FileCondition,
+    },
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FollowupLeafEvidence {
+    File {
+        receipt_id: String,
+        condition: FileCondition,
+        path: String,
+        state: FileState,
+        proof: FileProof,
+        position: Option<FileWatchPosition>,
+        gap: bool,
+        observed_at_ms: u64,
+    },
     At {
         at_ms: u64,
         observed_at_ms: u64,
@@ -33,6 +51,7 @@ pub struct FollowupSourceState {
     pub source_index: usize,
     pub after_cursor: u64,
     pub observed: Option<FollowupSourceObservation>,
+    pub file: Option<FollowupFileSourceState>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -47,6 +66,10 @@ impl FollowupTrigger {
             Self::At { at_ms } => vec![FollowupSource::At { at_ms: *at_ms }],
             Self::ProcessStopped { operation_id } => vec![FollowupSource::ProcessStopped {
                 operation_id: operation_id.clone(),
+            }],
+            Self::File { path, condition } => vec![FollowupSource::File {
+                path: path.clone(),
+                condition: *condition,
             }],
             Self::Any { sources } | Self::All { sources } => sources.clone(),
             Self::RunCompleted { .. } | Self::GoalRequested { .. } => vec![],
@@ -91,6 +114,7 @@ fn observe_leaf(
     now: u64,
 ) -> Result<Option<FollowupSourceObservation>> {
     let (trigger_cursor, evidence) = match source {
+        FollowupSource::File { .. } => return Ok(None),
         FollowupSource::At { at_ms } => {
             if now < *at_ms {
                 return Ok(None);
@@ -201,6 +225,25 @@ pub(super) fn observe_sources(
         FollowupTrigger::Any { .. } => TriggerEvidence::Any { sources: observed },
         FollowupTrigger::All { .. } => TriggerEvidence::All { sources: observed },
         _ => match &observed[0].evidence {
+            FollowupLeafEvidence::File {
+                receipt_id,
+                condition,
+                path,
+                state,
+                proof,
+                position,
+                gap,
+                observed_at_ms,
+            } => TriggerEvidence::File {
+                receipt_id: receipt_id.clone(),
+                condition: *condition,
+                path: path.clone(),
+                state: state.clone(),
+                proof: *proof,
+                position: position.clone(),
+                gap: *gap,
+                observed_at_ms: *observed_at_ms,
+            },
             FollowupLeafEvidence::At {
                 at_ms,
                 observed_at_ms,
@@ -238,7 +281,7 @@ fn process_settled(db: &Connection, identity: &str, epoch: &str) -> Result<bool>
 }
 fn leaf_settled(db: &Connection, evidence: &FollowupLeafEvidence) -> Result<bool> {
     match evidence {
-        FollowupLeafEvidence::At { .. } => Ok(true),
+        FollowupLeafEvidence::At { .. } | FollowupLeafEvidence::File { .. } => Ok(true),
         FollowupLeafEvidence::ProcessStopped {
             receipt_identity,
             receipt_epoch,

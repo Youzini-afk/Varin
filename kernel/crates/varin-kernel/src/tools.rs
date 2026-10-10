@@ -595,6 +595,7 @@ pub(crate) struct IntegrationReceiptRead {
 /// The Kernel actor injects this sender. Sending does not create another resource authority.
 #[derive(Clone)]
 pub(crate) struct KernelResourceClient {
+    pub(crate) file_observations: Option<crate::file_observation::Client>,
     pub(crate) interactions: Option<crate::storage::process_interactions::Client>,
     integration_receipts:
         Option<Arc<dyn Fn(IntegrationReceiptRead) -> Result<(), KernelError> + Send + Sync>>,
@@ -610,6 +611,7 @@ impl KernelResourceClient {
         controls: crate::process::ProcessControlRegistry,
     ) -> Self {
         Self {
+            file_observations: None,
             send: Arc::new(send),
             interactions: None,
             integration_receipts: None,
@@ -617,6 +619,13 @@ impl KernelResourceClient {
             controls,
             admission_control: None,
         }
+    }
+    pub(crate) fn with_file_observations(
+        mut self,
+        client: crate::file_observation::Client,
+    ) -> Self {
+        self.file_observations = Some(client);
+        self
     }
     pub(crate) fn with_process_interactions(
         mut self,

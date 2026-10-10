@@ -348,7 +348,11 @@ impl RunAssembly {
             declarations.push(crate::questions::declaration(runtime.catalog()));
             declarations.extend(crate::family_tools::declarations(runtime.catalog()));
             declarations.push(crate::message_tools::declaration(runtime.catalog()));
-            declarations.push(crate::followup_tools::declaration(runtime.catalog()));
+            declarations.push(crate::followup_tools::declaration(
+                runtime.catalog(),
+                collaboration_source.clone(),
+                Some(resources.clone()),
+            ));
             declarations.push(crate::questions::status_declaration(runtime.catalog()));
             if !is_child {
                 declarations.push(crate::agent_goals::declaration(runtime.catalog()));

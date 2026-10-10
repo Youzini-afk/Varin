@@ -971,10 +971,10 @@ describe('DocumentRegistry', () => {
     registry.dispose();
   });
 
-  test('reset events re-read open documents and preserve dirty conflicts', async () => {
+  test.each(['reset', 'invalidated'] as const)('%s events re-read open documents and preserve dirty conflicts', async kind => {
     const { api, files } = createMemoryDocuments();
-    const clean = resource('clean.txt');
-    const dirty = resource('dirty.txt');
+    const clean = resource('folder/clean.txt');
+    const dirty = resource('folder/dirty.txt');
     await api.write({ token: mutationToken(), resource: clean, content: 'one', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     await api.write({ token: mutationToken(), resource: dirty, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '2' });
     const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
@@ -983,7 +983,9 @@ describe('DocumentRegistry', () => {
     registry.applyTransaction(dirty, 'local', { origin: 'view' });
     files.set(documentKey(clean), { content: 'two', revision: 'external-clean' });
     files.set(documentKey(dirty), { content: 'disk', revision: 'external-dirty' });
-    registry.handleWatchEvent({ sourceId: 'test', generation: 2, kind: 'reset', sequence: 1, reason: 'reconnected' }, clean.workspaceId);
+    registry.handleWatchEvent(kind === 'reset'
+      ? { sourceId: 'test', generation: 2, kind: 'reset', sequence: 1, reason: 'reconnected' }
+      : { sourceId: 'test', generation: 1, kind: 'invalidated', sequence: 1, resource: resource('folder'), reason: 'entry-changed' }, clean.workspaceId);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(registry.get(clean)?.buffer).toBe('two');
     expect(registry.get(dirty)?.buffer).toBe('local');

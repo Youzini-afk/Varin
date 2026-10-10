@@ -339,7 +339,10 @@ impl Sender {
                 .unwrap_or(Lane::Data),
             "process-event" if value["stream"] != "data" => Lane::Control,
             "runtime-event" if value["stream"] == "durable" => Lane::Control,
-            "credential-request" | "host-tool-receipt-ack" => Lane::Control,
+            "credential-request"
+            | "host-tool-receipt-ack"
+            | "file-observation-request"
+            | "file-observation-invalidated" => Lane::Control,
             "host-tool-binding-retain"
             | "host-tool-binding-activate"
             | "host-tool-binding-deactivate" => Lane::Control,

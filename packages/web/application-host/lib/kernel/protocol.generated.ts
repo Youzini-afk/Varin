@@ -6,8 +6,8 @@
 export const KERNEL_PROTOCOL_VERSION = 1 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
-export const KERNEL_CONTROL_METHODS = ["runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
-export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
+export const KERNEL_CONTROL_METHODS = ["runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
+export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.history.body"] as const;
@@ -79,6 +79,11 @@ export type KernelMethod =
   | "runtime.model.select"
   | "runtime.model.inspect"
   | "runtime.status"
+  | "runtime.followup.files"
+  | "runtime.followup.file.observe"
+  | "runtime.followup.file.release"
+  | "runtime.followup.registrations.pending"
+  | "runtime.followup.registration.cancel"
   | "runtime.followup.register"
   | "runtime.followup.get"
   | "runtime.followup.list"
@@ -479,9 +484,161 @@ export interface MessagePage {
   nextCursor: string | null;
 }
 
-export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string };
+export type FileCondition = 'exists' | 'changed' | 'ready';
 
-export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string };
+export type FileState = { kind: 'regular-file'; objectHash: string; byteLength: number; mode: number | null } | { kind: 'directory'; mode: number | null } | { kind: 'symlink'; symlinkTarget: string; mode: number | null } | { kind: 'missing' } | { kind: 'unsupported' };
+
+export interface FileWatchPosition {
+  sourceId: string;
+  generation: number;
+  sequence: number;
+}
+
+export type FileProof = 'exists' | 'snapshot_difference' | 'targeted_invalidation' | 'managed_ready';
+
+export interface FollowupFileEvidence {
+  kind: 'file';
+  receipt_id: string;
+  condition: FileCondition;
+  path: string;
+  state: FileState;
+  proof: FileProof;
+  position: FileWatchPosition | null;
+  gap: boolean;
+  observed_at_ms: number;
+}
+
+export interface FollowupFileSourceState {
+  receipt_id: string;
+  revision: number;
+  baseline: FileState | null;
+  current: FileState | null;
+  immutable: boolean;
+  watch_id: string | null;
+  position: FileWatchPosition | null;
+  gap: boolean;
+  failure_code: string | null;
+  released: boolean;
+}
+
+export interface FollowupPendingRegistration {
+  id: string;
+  sourceRunId: string;
+  threadId: string;
+  branchId: string;
+  paths: string[];
+}
+
+export interface FollowupPendingParams {
+  threadId: string;
+  branchId: string;
+  after?: string;
+}
+
+export interface FollowupPendingResult {
+  registrations: FollowupPendingRegistration[];
+  nextCursor: string | null;
+}
+
+export interface FollowupRegistrationCancelParams {
+  key: string;
+  runId: string;
+}
+
+export interface FollowupRegistrationCancelResult {
+  followup: Followup | null;
+}
+
+export interface FollowupFileAuthority {
+  grantId: string;
+}
+
+export interface FollowupRegisterAdmissionParams {
+  key: string;
+  runId: string;
+  trigger: FollowupRegistrationTrigger;
+  instruction: string;
+  fileAuthority?: FollowupFileAuthority;
+}
+
+export interface FileObservationTarget {
+  receiptId: string;
+  followupId: string;
+  sourceIndex: number;
+  sourceRunId: string;
+  threadId: string;
+  source: LaunchSource;
+  physicalRoot: LiveRoot | null;
+  path: string;
+  immutable: boolean;
+}
+
+export interface FileObservationKey {
+  followupId: string;
+  generation: number;
+  sourceIndex: number;
+  receiptId: string;
+  observationRevision: number;
+}
+
+export interface FileObservationBinding {
+  followupId: string;
+  generation: number;
+  sourceIndex: number;
+  receiptId: string;
+  observationRevision: number;
+  target: FileObservationTarget | null;
+  watchId: string | null;
+  position: FileWatchPosition | null;
+  action: 'observe' | 'paused' | 'release';
+  definitionRevision: number;
+  failureCode: string | null;
+}
+
+export interface FollowupFilesParams {
+  after?: string;
+}
+
+export interface FollowupFilesResult {
+  bindings: FileObservationBinding[];
+  nextCursor: string | null;
+}
+
+export interface FollowupFileObserveParams {
+  followupId: string;
+  generation: number;
+  sourceIndex: number;
+  receiptId: string;
+  observationRevision: number;
+  reopen?: boolean;
+}
+
+export interface FollowupFileObserveResult {
+  accepted: boolean;
+  followup: Followup;
+}
+
+export interface FollowupFileReleaseParams {
+  followupId: string;
+  generation: number;
+  sourceIndex: number;
+  receiptId: string;
+  observationRevision: number;
+}
+
+export interface FollowupFileReleaseResult {
+  released: boolean;
+}
+
+export type FileObservationOwnerQuery = { action: 'open'; target: FileObservationTarget } | { action: 'begin'; target: FileObservationTarget; watchId: string; after: FileWatchPosition | null } | { action: 'finish'; target: FileObservationTarget; watchId: string; token: string; after: FileWatchPosition | null } | { action: 'close'; receiptId: string; watchId: string } | { action: 'discard'; receiptId: string; watchId: string; token: string };
+
+export type FileObservationOwnerResult = { ok: false; code: string } | { ok: true; watchId: string; position: FileWatchPosition } | { ok: true; token: string; position: FileWatchPosition } | { ok: true; position: FileWatchPosition; managedIdle: boolean; stable: boolean; gap: boolean; targetedChange: boolean } | { ok: true; closed: boolean } | { ok: true; discarded: boolean };
+
+export type FileObservationOwnerHint = {v: 1; kind: 'file-observation-invalidated'; kernelEpoch: string} & ({scope: 'root'; rootId: string; canonicalRoot: string} | {scope: 'receipt'; receiptId: string});
+
+export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string } | { kind: 'file'; path: string; condition: FileCondition };
+
+export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | FollowupFileEvidence;
 
 export interface FollowupSourceObservation {
   trigger_cursor: number;
@@ -492,6 +649,7 @@ export interface FollowupSourceState {
   source_index: number;
   after_cursor: number;
   observed: FollowupSourceObservation | null;
+  file: FollowupFileSourceState | null;
 }
 
 export interface FollowupSourceEvidence {
@@ -1530,7 +1688,7 @@ export interface RunContextScope {
 
 export type FollowupControlAction = 'pause' | 'resume' | 'cancel';
 
-export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string };
+export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string } | { kind: 'file'; path: string; condition: FileCondition };
 
 export type FollowupRegistrationTrigger = FollowupRegistrationSource | { kind: 'any' | 'all'; sources: FollowupRegistrationSource[] };
 
@@ -1578,7 +1736,7 @@ export interface FollowupControlParams {
 
 export interface FollowupWait {
   id: string;
-  kind: 'process_stopped' | 'run_completed' | 'goal_requested' | 'at' | 'any' | 'all';
+  kind: 'process_stopped' | 'run_completed' | 'goal_requested' | 'at' | 'any' | 'all' | 'file';
   after_cursor: number;
   trigger_cursor: number | null;
   state: 'waiting' | 'observed' | 'consumed' | 'cancelled';
@@ -3430,7 +3588,12 @@ export type KernelMethodParams = {
   "runtime.goal.list": ThreadParams;
   "runtime.resources.refresh": ResourceRefreshParams;
   "runtime.resources.snapshot": ResourceSnapshotParams;
-  "runtime.followup.register": FollowupRegisterParams;
+  "runtime.followup.registrations.pending": FollowupPendingParams;
+  "runtime.followup.registration.cancel": FollowupRegistrationCancelParams;
+  "runtime.followup.register": FollowupRegisterAdmissionParams;
+  "runtime.followup.files": FollowupFilesParams;
+  "runtime.followup.file.observe": FollowupFileObserveParams;
+  "runtime.followup.file.release": FollowupFileReleaseParams;
   "runtime.followup.list": ThreadParams;
   "runtime.followup.get": FollowupGetParams;
   "runtime.followup.control": FollowupControlParams;
@@ -3803,8 +3966,53 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "runtime.followup.registrations.pending";
+      params: FollowupPendingParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.registration.cancel";
+      params: FollowupRegistrationCancelParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "runtime.followup.register";
-      params: FollowupRegisterParams;
+      params: FollowupRegisterAdmissionParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.files";
+      params: FollowupFilesParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.file.observe";
+      params: FollowupFileObserveParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.file.release";
+      params: FollowupFileReleaseParams;
       epoch?: string;
       grantId?: string;
     }

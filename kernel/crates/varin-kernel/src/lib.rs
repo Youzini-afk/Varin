@@ -11,6 +11,7 @@ mod continuation_wake;
 mod credential_bridge;
 mod error;
 mod family_tools;
+mod file_observation;
 mod followup_tools;
 mod host_query;
 mod host_tools;

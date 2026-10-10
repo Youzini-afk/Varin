@@ -293,7 +293,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 34, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
+Catalog version 35, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -563,11 +563,11 @@ pending requests. See the ordinary [SDK example](../../../examples/extensions/de
 
 ## Explicit one-shot follow-ups
 
-The ordinary `follow_up` tool (version 2) supports register/list/get/control from the actual ModelStep or policy
+The ordinary `follow_up` tool (version 3) supports register/list/get/control from the actual ModelStep or policy
 invocation. `runtime.followup.register` is the authenticated User path. Each registration retains one
 explicit instruction and an absolute `at` instant, the original accepted `process_spawn` identity,
-or a flat `any`/`all` combination of these sources. Every process leaf is authorized even when another
-leaf is already satisfied. Empty combinations and nested conditions are invalid; there is no separate
+an exact original-source file condition, or a flat `any`/`all` combination of these sources. Every
+process/file leaf is authorized even when another leaf is already satisfied. Empty combinations and nested conditions are invalid; there is no separate
 workflow executor or arbitrary source-count limit.
 Catalog derives the Thread/branch, actor and operation from the caller; Agent arguments cannot forge
 User authority. Original bodies live in ContentStore and are read on demand through `get`, while list
@@ -627,7 +627,64 @@ Startup and stale preparation reuse original identities. Failures remain explici
 healthy continuations can advance. Shutdown fences old workers, publication leases protect staged
 bodies, and original instructions/input/history remain normal GC roots. This one-shot contract does
 not grant implicit continuing authorization. Calendar definitions have their separate original asset
-and occurrence contract; file/log/metric/research and other event adapters remain separate work.
+and occurrence contract; log/metric/research and other event adapters remain separate work.
+
+### File conditions and source ownership
+
+A `file` leaf names a source-relative path and `exists`, `changed` or `ready`. Catalog owns its
+registration cursor, accepted baseline/current FileState, observation revision and occurrence;
+Storage owns the original source, read authority, actual read lease and durable observer receipt in
+its existing operations tables. ContentStore remains the instruction/evidence body owner. The
+receipt binds the original User or tool invocation, source selection, exact path and original grant.
+Retirement preserves creation provenance; revocation still denies every later observation. A fresh
+registration retry cannot renew the original receipt with another grant. User admission receives a
+private, exact-path read grant and retires it after the request; public arguments cannot supply it.
+
+Fixed branches read and pin their exact immutable revision. Their `changed` condition is valid but
+cannot be satisfied by an unrelated disk write. Materialized sources retain their original run root;
+a later continuation or WorkingResult cannot redirect the observer. Live sources require the original
+Documents/Storage Host and canonical root. A missing leaf differs from an unavailable or denied root.
+The watcher is ready before the first capture. Each open receives its own transient handle, while the
+underlying root watcher is shared; a lost same-key admission closes only its own losing handle.
+
+`exists` accepts a verified regular file, directory or symlink. `changed` uses an actual FileState
+difference or a continuous exact-path invalidation since the last durably accepted watch position.
+A restart or reset exposes a gap, never inventing offline A-to-B-to-A history. Directory invalidation
+wakes descendants for a new read; it is not evidence that every descendant changed. `ready` requires
+a regular file, stable original Documents capture and no actual managed writer/Storage lease/process
+activity. It does not certify semantic completion or the absence of every external OS writer.
+There is no quiet-period timer. Overlapping read-only observers do not become writers or block each
+other, while ordinary mutations continue to honor their real read leases.
+Recovered guardians use one temporary native subscription to the original receipt directory,
+registered before rechecking original process records. Atomic receipt publication wakes the original
+Storage/process owner without another target-file write or a polling loop. Reconciliation validates
+the original identity/epoch/tree evidence (or existing Windows named-Job disappearance proof), never
+scans output spools for stop evidence, and preserves errors per original process while healthy roots
+continue. No directory event alone clears a writer. The subscription drains when no recovered writer
+remains or its Storage owner shuts down.
+
+A busy exact lease or changing capture may be accepted with a null baseline/current and explicit
+`baseline_pending`. Null means unknown, not a missing file. The original writer/lease-release hint
+causes a new capture; its first stable result establishes the baseline without fabricating a change.
+Continuous exact-path evidence from registration can still satisfy `changed`. Root and permission
+failures cannot be converted into pending successful admission. Short metadata discovery and release
+remain on the control lane while file bodies are hashed outside Catalog locks.
+
+Host observation handles, in-flight tokens and wake coalescing are transient. Catalog exposes the
+original observe/paused/release action; cancellation fences that identity before its exact resource
+cleanup. The bridge drains in-flight owner work and disposes successful allocations even if their
+request was cancelled before the response. Definition cancellation does not stop a target process;
+optional tool-Wait cancellation does not withdraw the file condition. Restart resumes from the
+original Storage receipt and durable cursor, not from a new scope or a Host condition database.
+An accepted User source can outlive a request lost before Catalog admission. Its inert receipt is
+projected through `runtime.followup.registrations.pending`; it cannot execute or manufacture a
+Followup. Explicit `runtime.followup.registration.cancel` first verifies that original User/Run
+acceptance (or an existing definition), commits the original command cancellation fence, then releases
+only those observer resources. Capture and final admission both honor the fence; late acceptance
+checks it again before opening the source. No timeout infers that the user abandoned an unknown
+request. Existing definitions keep their original cancellation/delivery semantics. Pending metadata
+read failures stay errors rather than a successful empty list. Receipt-scoped revocation hints wake
+immutable observers too, without inventing a physical root.
 
 ## Explicit continuing Goals
 

@@ -13,13 +13,25 @@ use crate::execution::{
     deny_unknown_fields
 )]
 pub enum FollowupRegistrationSource {
-    At { at_ms: u64 },
-    ProcessStopped { operation_id: String },
+    At {
+        at_ms: u64,
+    },
+    ProcessStopped {
+        operation_id: String,
+    },
+    File {
+        path: String,
+        condition: FileCondition,
+    },
 }
 impl FollowupRegistrationSource {
     fn source(&self) -> FollowupSource {
         match self {
             Self::At { at_ms } => FollowupSource::At { at_ms: *at_ms },
+            Self::File { path, condition } => FollowupSource::File {
+                path: path.clone(),
+                condition: *condition,
+            },
             Self::ProcessStopped { operation_id } => FollowupSource::ProcessStopped {
                 operation_id: operation_id.clone(),
             },
@@ -34,6 +46,10 @@ impl FollowupRegistrationSource {
     deny_unknown_fields
 )]
 pub enum FollowupRegistrationTrigger {
+    File {
+        path: String,
+        condition: FileCondition,
+    },
     At {
         at_ms: u64,
     },
@@ -48,9 +64,27 @@ pub enum FollowupRegistrationTrigger {
     },
 }
 impl FollowupRegistrationTrigger {
+    fn normalize_paths(&mut self) -> Result<()> {
+        match self {
+            Self::File { path, .. } => *path = normalized_file_path(path)?,
+            Self::Any { sources } | Self::All { sources } => {
+                for source in sources {
+                    if let FollowupRegistrationSource::File { path, .. } = source {
+                        *path = normalized_file_path(path)?;
+                    }
+                }
+            }
+            _ => (),
+        }
+        Ok(())
+    }
     fn trigger(&self) -> FollowupTrigger {
         match self {
             Self::At { at_ms } => FollowupTrigger::At { at_ms: *at_ms },
+            Self::File { path, condition } => FollowupTrigger::File {
+                path: path.clone(),
+                condition: *condition,
+            },
             Self::ProcessStopped { operation_id } => FollowupTrigger::ProcessStopped {
                 operation_id: operation_id.clone(),
             },
@@ -74,7 +108,7 @@ impl FollowupRegistrationTrigger {
             .into_iter()
             .filter_map(|source| match source {
                 FollowupSource::ProcessStopped { operation_id } => Some(operation_id),
-                FollowupSource::At { .. } => None,
+                FollowupSource::At { .. } | FollowupSource::File { .. } => None,
             })
             .collect()
     }
@@ -105,6 +139,7 @@ impl FollowupRegistration {
         }
         for source in sources {
             match source {
+                FollowupSource::File { path, .. } => validate_file_path(&path)?,
                 FollowupSource::At { at_ms } if at_ms > observations::MAX_DEADLINE_MS => {
                     return Err(RuntimeError::Invalid(
                         "follow-up instant exceeds the native wall-clock timer representation"
@@ -175,6 +210,7 @@ pub struct FollowupRegistrationPreparation {
     existing: Option<Value>,
     invocation: Option<(ToolInvocationRead, ToolCall, ToolSchema)>,
     operation: Option<Operation>,
+    source: Option<launches::SourceSelection>,
     content: crate::content::ContentStore,
     publication: crate::content::ContentPublication,
 }
@@ -189,6 +225,9 @@ pub struct PreparedFollowupRegistration {
     invocation: Option<ToolInvocationSnapshot>,
     operation: Option<Operation>,
     completion: Option<(ToolCompletion, result_content::ToolCompletionMetadata)>,
+    source: Option<launches::SourceSelection>,
+    files: Vec<PreparedFileObservation>,
+    already_accepted: bool,
     _publication: crate::content::ContentPublication,
 }
 pub struct FollowupRegistrationAdmission {
@@ -256,6 +295,7 @@ impl Catalog {
         invocation: Option<(ToolInvocationRead, ToolCall, ToolSchema)>,
         operation: Option<Operation>,
     ) -> Result<FollowupRegistrationPreparation> {
+        registration_cancel::require_registration_open(&self.db, &id, &actor)?;
         let existing: Option<String> = self
             .db
             .query_row("SELECT intent FROM commands WHERE id=?1", [key(&id)], |r| {
@@ -271,11 +311,18 @@ impl Catalog {
             existing: existing.map(|s| serde_json::from_str(&s)).transpose()?,
             invocation,
             operation,
+            source: optional_record::<launch_content::LaunchMetadata>(
+                &self.db,
+                "run_launches",
+                run,
+            )?
+            .and_then(|l| l.selection.source),
             content: self.content.clone(),
             publication: self.content.begin_publication(),
         })
     }
     pub fn authorize_followup_registration(&self, p: &PreparedFollowupRegistration) -> Result<()> {
+        registration_cancel::require_registration_open(&self.db, &p.id, &p.actor)?;
         if p.epoch != self.epoch || self.continuation_stopping.load(Ordering::Acquire) {
             return Err(RuntimeError::Conflict(
                 "follow-up owner changed or stopped".into(),
@@ -283,6 +330,14 @@ impl Catalog {
         }
         if let Some(i) = &p.invocation {
             self.validate_tool_invocation(i, true)?;
+        }
+        let source =
+            optional_record::<launch_content::LaunchMetadata>(&self.db, "run_launches", &p.run.id)?
+                .and_then(|l| l.selection.source);
+        if source != p.source {
+            return Err(RuntimeError::Conflict(
+                "file observation source changed during registration".into(),
+            ));
         }
         for operation_id in p.input.trigger.process_operation_ids() {
             require_process(&self.db, &p.run, &operation_id)?;
@@ -293,6 +348,7 @@ impl Catalog {
         &mut self,
         p: PreparedFollowupRegistration,
     ) -> Result<FollowupRegistrationAdmission> {
+        registration_cancel::require_registration_open(&self.db, &p.id, &p.actor)?;
         if p.epoch != self.epoch || self.continuation_stopping.load(Ordering::Acquire) {
             return Err(RuntimeError::Conflict(
                 "follow-up owner changed or stopped".into(),
@@ -341,7 +397,9 @@ impl Catalog {
         if p.input.wait.is_some() {
             d.observation_operation_id = p.operation.as_ref().map(|o| o.id.clone());
         }
+        files::bind_registration(&mut d, &p.files)?;
         insert(&tx, &d)?;
+        files::observe_registration(&tx, &mut d, &p.files)?;
         observe(&tx, &mut d, observations::wall_time_ms()?)?;
         if let Some(mut op) = p.operation {
             let completion = &p.completion.as_ref().expect("prepared completion").1;
@@ -391,7 +449,7 @@ fn validate_invocation(
     Ok(snapshot)
 }
 impl FollowupRegistrationPreparation {
-    pub fn load(self) -> Result<PreparedFollowupRegistration> {
+    pub fn load(mut self) -> Result<PreparedFollowupRegistration> {
         self.input.validate()?;
         let intent = self
             .content
@@ -419,6 +477,7 @@ impl FollowupRegistrationPreparation {
                 )
             })
             .transpose()?;
+        self.input.trigger.normalize_paths()?;
         let instruction = self.content.save(&json!(self.input.instruction))?;
         let completion=invocation.as_ref().map(|_|->Result<_>{
             let completion=if self.input.wait.is_some(){ToolCompletion::JobAccepted{operation_id:self.operation.as_ref().expect("operation").id.clone(),phase:"awaiting_followup".into(),effect:Effect::Confirmed,lifetime:Lifetime::Thread}}else{ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::Confirmed,content:json!({"accepted":true,"followupId":self.id,"threadId":self.run.thread_id,"branchId":self.run.branch_id,"trigger":self.input.trigger})}};
@@ -435,6 +494,9 @@ impl FollowupRegistrationPreparation {
             invocation,
             operation: self.operation,
             completion,
+            source: self.source,
+            files: Vec::new(),
+            already_accepted: self.existing.is_some(),
             _publication: self.publication,
         })
     }
@@ -733,5 +795,63 @@ impl FollowupControlPreparation {
             completion,
             metadata,
         })
+    }
+}
+
+impl PreparedFollowupRegistration {
+    pub fn already_accepted(&self) -> bool {
+        self.already_accepted
+    }
+    pub fn file_requests(&self) -> Result<Vec<FileObservationRequest>> {
+        self.input
+            .trigger
+            .trigger()
+            .sources()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(source_index, source)| {
+                let FollowupSource::File { path, condition } = source else {
+                    return None;
+                };
+                Some(
+                    self.source
+                        .clone()
+                        .ok_or_else(|| {
+                            RuntimeError::Invalid(
+                                "file condition requires an admitted source".into(),
+                            )
+                        })
+                        .map(|source| FileObservationRequest {
+                            followup_id: self.id.clone(),
+                            source_index,
+                            source_run_id: self.run.id.clone(),
+                            thread_id: self.run.thread_id.clone(),
+                            actor: self.actor.clone(),
+                            source,
+                            path,
+                            condition,
+                            intent_ref: self.intent.clone(),
+                        }),
+                )
+            })
+            .collect()
+    }
+    pub fn bind_file_observations(
+        &mut self,
+        observations: Vec<PreparedFileObservation>,
+    ) -> Result<()> {
+        let requests = self.file_requests()?;
+        if requests.len() != observations.len()
+            || requests
+                .iter()
+                .zip(&observations)
+                .any(|(r, o)| r.source_index != o.source_index || r.receipt_id() != o.receipt_id)
+        {
+            return Err(RuntimeError::Conflict(
+                "file observation preparation changed source binding".into(),
+            ));
+        }
+        self.files = observations;
+        Ok(())
     }
 }

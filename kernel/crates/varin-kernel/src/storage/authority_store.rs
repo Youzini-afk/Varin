@@ -205,6 +205,11 @@ impl Storage {
                 let process_stop = self.revoke_processes_for_grant(grant_id).unwrap_or_else(|error| {
                     json!({"pendingProcesses": [], "processStopFailures": [{"reason": error.to_string()}]})
                 });
+                // Revocation is already committed. A notification failure cannot undo it
+                // or turn a successful authority transition into an RPC failure.
+                if let Err(error) = self.cancel_file_observation_grant(grant_id) {
+                    eprintln!("file observation revocation hint failed: {error}");
+                }
                 Ok(json!({"grantId": grant_id, "revoked": true,
                     "pendingProcesses": process_stop["pendingProcesses"],
                     "processStopFailures": process_stop["processStopFailures"]}))

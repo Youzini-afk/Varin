@@ -93,11 +93,21 @@ impl Storage {
             .transpose()
     }
     fn persist_process_record(&self, id: &str, value: &Value) -> Result<(), KernelError> {
+        let previous = self.process_record(id)?;
+        let stopped = previous
+            .as_ref()
+            .is_some_and(|p| p["writerActive"] != false)
+            && value["writerActive"] == false;
         let raw = serde_json::to_string(value)?;
         self.conn.execute(
             "UPDATE process_records SET status_json=?2 WHERE process_id=?1 AND status_json<>?2",
             params![id, raw],
         )?;
+        if stopped {
+            if let Some(cwd) = value["sourceRoot"].as_str().or(value["cwd"].as_str()) {
+                self.hint_file_path(Path::new(cwd));
+            }
+        }
         Ok(())
     }
     pub(super) fn refresh_process_record(
@@ -130,39 +140,173 @@ impl Storage {
             for (key, value) in output.as_object().into_iter().flatten() {
                 record[key] = value.clone();
             }
-            if record["writerActive"].as_bool() != Some(false) {
-                let epoch = string(&record, "kernelEpoch")?;
-                let receipt = process::read_receipt(&self.root, id, epoch)?;
-                #[cfg(windows)]
-                let gone = process::platform::prior_tree_gone(&process::job_name(&self.root, id))?;
-                #[cfg(unix)]
-                let gone = receipt.is_some();
-                if gone {
-                    if let Some(receipt) = receipt {
-                        self.processes.replay_terminal(id, epoch, receipt.clone());
-                        for key in [
-                            "status",
-                            "pid",
-                            "exitCode",
-                            "signal",
-                            "reason",
-                            "stopApplied",
-                        ] {
-                            record[key] = receipt[key].clone();
-                        }
-                    } else {
-                        record["status"] = json!("exited");
-                        record["reason"]=json!("prior native Job is gone; command is not replayed and exit code is unknown");
-                    }
-                    record["writerActive"] = json!(false);
-                } else {
-                    record["status"] = json!("unknown");
-                    record["reason"]=json!("prior process tree has no confirmed exit receipt; execution directory is retained");
-                }
-            }
+            self.reconcile_recovered_process_receipt(id, &mut record)?;
         }
         self.persist_process_record(id, &record)?;
         Ok(Some(record))
+    }
+    /// Stop-receipt reconciliation only: never restores or scans retained output.
+    fn reconcile_recovered_process_receipt(
+        &self,
+        id: &str,
+        record: &mut Value,
+    ) -> Result<(), KernelError> {
+        if record["writerActive"] == false {
+            return Ok(());
+        }
+        let epoch = string(&record, "kernelEpoch")?;
+        let receipt = process::read_receipt(&self.root, id, epoch)?;
+        #[cfg(windows)]
+        let gone = process::platform::prior_tree_gone(&process::job_name(&self.root, id))?;
+        #[cfg(unix)]
+        let gone = receipt.is_some();
+        if gone {
+            if let Some(receipt) = receipt {
+                self.processes.replay_terminal(id, epoch, receipt.clone());
+                for key in [
+                    "status",
+                    "pid",
+                    "exitCode",
+                    "signal",
+                    "reason",
+                    "stopApplied",
+                ] {
+                    record[key] = receipt[key].clone();
+                }
+            } else {
+                record["status"] = json!("exited");
+                record["reason"] = json!(
+                    "prior native Job is gone; command is not replayed and exit code is unknown"
+                );
+            }
+            record["writerActive"] = json!(false);
+        } else {
+            record["status"] = json!("unknown");
+            record["reason"] = json!(
+                "prior process tree has no confirmed exit receipt; execution directory is retained"
+            );
+        }
+        record
+            .as_object_mut()
+            .expect("process record")
+            .remove("receiptRecoveryError");
+        Ok(())
+    }
+    pub(super) fn refresh_process_writer_record(
+        &mut self,
+        id: &str,
+    ) -> Result<Option<Value>, KernelError> {
+        let Some(mut record) = self.process_record(id)? else {
+            return Ok(None);
+        };
+        if record["status"] == "released" || record["writerActive"] == false {
+            return Ok(Some(record));
+        }
+        if let Some(observed) = self.processes.observation(id)? {
+            for (key, value) in observed.as_object().into_iter().flatten() {
+                record[key] = value.clone();
+            }
+        } else {
+            self.reconcile_recovered_process_receipt(id, &mut record)?;
+        }
+        self.persist_process_record(id, &record)?;
+        Ok(Some(record))
+    }
+    fn recovered_process_ids(&self) -> Result<Vec<String>, KernelError> {
+        let mut query=self.conn.prepare("SELECT process_id FROM process_records WHERE json_extract(status_json,'$.writerActive') = 1")?;
+        let ids = query
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ids
+            .into_iter()
+            .filter(|id| !self.processes.is_live(id))
+            .collect())
+    }
+    pub(crate) fn set_recovered_process_receipt_wake(
+        &mut self,
+        notify: impl Fn() + Send + Sync + 'static,
+    ) {
+        self.process_receipt_notify = Some(Arc::new(notify));
+        self.ensure_recovered_process_receipt_wake();
+    }
+    pub(super) fn ensure_recovered_process_receipt_wake(&mut self) {
+        if self.process_receipt_wake.is_some() || self.process_receipt_notify.is_none() {
+            return;
+        }
+        let needed = match self.recovered_process_ids() {
+            Ok(ids) => !ids.is_empty(),
+            Err(e) => {
+                self.process_receipt_wake_failure = Some(e.to_string());
+                return;
+            }
+        };
+        if !needed {
+            self.process_receipt_wake_failure = None;
+            return;
+        }
+        let directory = self.root.join("process-receipts");
+        let result = fs::create_dir_all(&directory).and_then(|_| {
+            process::receipt_wake::Watch::open(
+                &directory,
+                self.process_receipt_notify.as_ref().unwrap().clone(),
+            )
+        });
+        match result {
+            Ok(watch) => {
+                self.process_receipt_wake = Some(watch);
+                self.process_receipt_wake_failure = None;
+            }
+            Err(error) => {
+                self.process_receipt_wake_failure = Some(error.to_string());
+            }
+        }
+        // Watch registration is complete before this mandatory receipt recheck.
+        self.recheck_recovered_process_receipts();
+    }
+    pub(crate) fn recheck_recovered_process_receipts(&mut self) {
+        if let Some(error) = self
+            .process_receipt_wake
+            .as_ref()
+            .and_then(|watch| watch.acknowledge())
+        {
+            self.process_receipt_wake_failure = Some(error);
+            self.process_receipt_wake.take();
+        }
+        let ids = match self.recovered_process_ids() {
+            Ok(ids) => ids,
+            Err(error) => {
+                self.process_receipt_wake_failure = Some(error.to_string());
+                return;
+            }
+        };
+        for id in ids {
+            let error = self
+                .refresh_process_writer_record(&id)
+                .err()
+                .map(|e| e.to_string())
+                .or_else(|| self.process_receipt_wake_failure.clone());
+            if let Some(error) = error {
+                if let Ok(Some(mut record)) = self.process_record(&id) {
+                    if record["writerActive"] == false {
+                        continue;
+                    }
+                    let changed = record["receiptRecoveryError"].as_str() != Some(error.as_str());
+                    record["receiptRecoveryError"] = json!(error);
+                    record["status"] = json!("unknown");
+                    let _ = self.persist_process_record(&id, &record);
+                    if changed {
+                        if let Some(root) = record["sourceRoot"].as_str().or(record["cwd"].as_str())
+                        {
+                            self.hint_file_path(Path::new(root));
+                        }
+                    }
+                }
+            }
+        }
+        if self.recovered_process_ids().is_ok_and(|ids| ids.is_empty()) {
+            self.process_receipt_wake.take();
+            self.process_receipt_wake_failure = None;
+        }
     }
     pub(crate) fn refresh_process_records(&mut self) -> Result<(), KernelError> {
         let ids = self

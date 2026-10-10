@@ -248,7 +248,7 @@ export const createPiWorkspaceWriterTracker = ({
             state.watchCoverageComplete = true;
             state.watch = documents.watch(workspaceId, (event) => {
               state.mutationObserved = true;
-              if (event?.kind === 'reset') {
+              if (event?.kind === 'reset' || event?.kind === 'invalidated') {
                 state.watchCoverageComplete = false;
               } else if (event?.resource?.workspaceId === workspaceId
                 && typeof event.resource.resourceId === 'string'

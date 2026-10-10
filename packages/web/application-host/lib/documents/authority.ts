@@ -158,6 +158,7 @@ export interface ResolveWorkspaceResult {
 
 interface WatchSubscription {
   ready: Promise<boolean>;
+  readonly position: import('./watch.js').WatchPosition | null;
   settle: () => Promise<void>;
   close: () => void;
 }
@@ -1292,6 +1293,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     rec.listeners.add(listener);
     return {
       ready: Promise.resolve(rec.ready).then((controller) => Boolean(controller)),
+      get position() { return rec.controller?.position ?? null; },
       settle: () => Promise.resolve(rec.ready).then((controller) => controller?.settle()),
       close() {
         rec.listeners.delete(listener);
@@ -1331,6 +1333,13 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
   };
 
+  const discardCapture = (capture: unknown): void => {
+    const captureId = (capture as { captureId?: string })?.captureId;
+    const tracked = captureId ? captureWatches.get(captureId) : undefined;
+    if (captureId) captureWatches.delete(captureId);
+    tracked?.subscription.close();
+  };
+
   const completeCapture = async (capture: unknown, signal?: AbortSignal) => {
     const captureId = (capture as { captureId?: string })?.captureId;
     const tracked = captureId ? captureWatches.get(captureId) : undefined;
@@ -1339,8 +1348,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       await waitWithSignal(Promise.resolve(tracked?.controller.settle()), signal);
       return await waitWithSignal(mutations.completeCapture(capture as never), signal);
     } finally {
-      if (captureId) captureWatches.delete(captureId);
-      tracked?.subscription.close();
+      discardCapture(capture);
     }
   };
 
@@ -2393,8 +2401,10 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     ),
     mutationAuthority: mutations,
     inspectMutation: mutations.inspect,
+    subscribeMutationState: mutations.subscribe,
     beginCapture,
     completeCapture,
+    discardCapture,
     dispose,
     advanceEpoch: mutations.advanceEpoch,
     setMaintenance: mutations.setMaintenance,
