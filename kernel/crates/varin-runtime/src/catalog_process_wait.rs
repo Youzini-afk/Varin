@@ -1,9 +1,6 @@
 //! Durable observation of an existing process Operation. No process state is owned here.
 use super::*;
-use crate::execution::{
-    CompletionKind, ToolCompletion,
-    ToolExecutionContext, ToolOrigin, ToolResult,
-};
+use crate::execution::ToolExecutionContext;
 
 pub const WAIT_TOOL: &str = "wait_process";
 pub(super) const PREFIX: &str = "process-wait:";
@@ -32,47 +29,23 @@ impl Catalog {
         context: &ToolExecutionContext,
         process_id: &str,
     ) -> Result<Wait> {
-        if self.require_process_observation(&context.run_id, process_id)?.run_id != context.run_id {
-            return Err(RuntimeError::Conflict("follow-up process delegation is read-only, not a new process wait".into()));
+        if self
+            .require_process_observation(&context.run_id, process_id)?
+            .run_id
+            != context.run_id
+        {
+            return Err(RuntimeError::Conflict(
+                "follow-up process delegation is read-only, not a new process wait".into(),
+            ));
         }
-        let request_id = match &context.origin {
-            ToolOrigin::ModelStep { request_id } => request_id,
-            _ => {
-                return Err(RuntimeError::Invalid(
-                    "process wait requires an actual model tool origin".into(),
-                ))
-            }
-        };
         let tx = self.db.transaction()?;
         let run: Run = record(&tx, "runs", &context.run_id)?;
         let mut op: Operation = record(&tx, "operations", &context.operation_id)?;
-        fence(&run, op.epoch)?;
-        if run.cancel_requested
-            || op.cancel_requested
-            || op.run_id != run.id
-            || op.executor.as_deref() != Some(WAIT_TOOL)
-            || op.phase == OperationPhase::Terminal
-        {
-            return Err(RuntimeError::Conflict(
-                "process observation is not an active admitted call".into(),
-            ));
-        }
-        let admitted=super::tool_content::ToolIntent::from_operation(&op)?;
-        let step: ModelStep = record(&tx, "model_steps", request_id)?;
-        let expected: String = tx.query_row(
-            "SELECT body FROM tool_calls WHERE request_id=?1 AND call_id=?2",
-            params![request_id, admitted.call().call_id],
-            |row| row.get(0),
-        )?;
-        if step.run_id != run.id
-            || step.epoch != run.epoch
-            || context.operation_id != format!("{request_id}:tool:{}", admitted.call().call_id)
-            || serde_json::from_str::<super::tool_content::ToolCallMetadata>(&expected)? != *admitted.call()
-            || admitted.call().name != WAIT_TOOL
-            || admitted.contract().name != WAIT_TOOL
-            || admitted.contract().completion != CompletionKind::Job
-            || !admitted.contract().read_only
-            || admitted.call().arguments_ref != crate::content::ContentStore::reference(&json!({"processId":process_id}))?
+        let admitted = super::tool_content::ToolIntent::from_operation(&op)?;
+        if op.run_id != context.run_id
+            || admitted.origin() != &context.origin
+            || admitted.call().arguments_ref
+                != crate::content::ContentStore::reference(&json!({"processId":process_id}))?
         {
             return Err(RuntimeError::Conflict(
                 "process wait origin or target changed".into(),
@@ -88,8 +61,20 @@ impl Catalog {
                     "process wait identity reused".into(),
                 ));
             }
-            wait
+            // An already accepted observation is immutable, even after delivery or cancellation.
+            return Ok(wait);
         } else {
+            fence(&run, self.epoch)?;
+            super::tool_content::require_job_invocation(&tx, &run, &op, context, WAIT_TOOL)?;
+            if run.cancel_requested
+                || run.state.terminal()
+                || op.cancel_requested
+                || op.phase != OperationPhase::Running
+            {
+                return Err(RuntimeError::Conflict(
+                    "process observation is not an active admitted call".into(),
+                ));
+            }
             // The Operation identity is unique. Looking back from its beginning handles an exit
             // that committed before this model decided to wait, without a registration race.
             let trigger_cursor = tx.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind='operation.settled' ORDER BY cursor DESC LIMIT 1",
@@ -124,24 +109,8 @@ impl Catalog {
         op.handed_off = true;
         op.revision += 1;
         put(&tx, "operations", &op.id, &op)?;
-        let receipt = ToolResult {
-            request_id: request_id.clone(),
-            call_id: admitted.call().call_id.clone(),
-            completion: ToolCompletion::JobAccepted {
-                operation_id: op.id.clone(),
-                phase: "awaiting_process".into(),
-                effect: Effect::None,
-                lifetime: Lifetime::Thread,
-            },
-        };
-        let accepted=super::result_content::ToolReceiptMetadata::job(&receipt)?;
-        if op.call_completion.as_ref().is_some_and(|previous|previous!=&accepted.completion) {return Err(RuntimeError::Conflict("original invocation acceptance changed".into()));}
-        op.call_completion=Some(accepted.completion.clone());
-        put(&tx,"operations",&op.id,&op)?;
-        tx.execute(
-            "UPDATE tool_calls SET receipt=?3 WHERE request_id=?1 AND call_id=?2",
-            params![receipt.request_id, receipt.call_id, encode(&accepted)?],
-        )?;
+        super::result_content::publish_job_acceptance(&tx, &mut op, &admitted, "awaiting_process")?;
+        put(&tx, "operations", &op.id, &op)?;
         event(
             &tx,
             &op.id,
@@ -236,7 +205,9 @@ impl Catalog {
             operation.effect = Effect::None;
             operation.cancel_requested = true;
             operation.revision += 1;
-            operation.result = Some(OperationResultMetadata::Control { value: json!({"observation_cancelled":true,"reason":"run_finished"}) });
+            operation.result = Some(OperationResultMetadata::Control {
+                value: json!({"observation_cancelled":true,"reason":"run_finished"}),
+            });
             put(&tx, "operations", &operation.id, &operation)?;
             tx.execute(
                 "DELETE FROM resource_occupancy WHERE operation_id=?1",
@@ -257,5 +228,41 @@ impl Catalog {
         }
         Ok(())
     }
+}
 
+/// A cancelled observer may still need to park before publishing its own cancellation fact.
+/// This never authorizes a different Wait or changes the observed process.
+pub(super) fn pending_cancelled_observation(
+    db: &Connection,
+    run: &Run,
+    wait: &Wait,
+) -> Result<bool> {
+    let Some(id) = wait.id.strip_prefix(PREFIX) else {
+        return Ok(false);
+    };
+    if !wait.cancelled || wait.run_id != run.id || wait.kind != "operation.settled" {
+        return Ok(false);
+    }
+    let Some(op) = optional_record::<Operation>(db, "operations", id)? else {
+        return Ok(false);
+    };
+    if op.run_id != run.id
+        || op.epoch != run.epoch
+        || op.executor.as_deref() != Some(WAIT_TOOL)
+        || op.phase != OperationPhase::Waiting
+        || !op.handed_off
+        || op.waiting_on.as_deref() != Some(wait.id.as_str())
+        || !matches!(&op.call_completion, Some(super::result_content::ToolCompletionMetadata::JobAccepted {
+            operation_id, phase, effect: Effect::None, lifetime: Lifetime::Thread,
+        }) if operation_id == &op.id && phase == "awaiting_process")
+    {
+        return Ok(false);
+    }
+    let admitted = super::tool_content::ToolIntent::from_operation(&op)?;
+    let Some(process) = optional_record::<Operation>(db, "operations", &wait.subject)? else {
+        return Ok(false);
+    };
+    Ok(admitted.call().name == WAIT_TOOL
+        && process.run_id == run.id
+        && process.executor.as_deref() == Some("process_spawn"))
 }

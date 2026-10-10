@@ -7,6 +7,9 @@ import type { PlanView, PlanMutationInput, PlanOrigin, PlanChanged, PlanForkCapt
 import { parseTodoPlan, renderTodoPlan } from '@varin/protocol';
 import { openKnowledgeStoreEngine } from './store-engine.js';
 import { openWorkspaceKnowledge, type KnowledgeStore } from './store.js';
+import { createPlanOwner, type PlanQuery } from '../kernel/plan-owner.js';
+import { PlanBridge, type PrivatePlanResponse } from '../kernel/plan-bridge.js';
+import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 
 const require = createRequire(import.meta.url);
 const { TriviumDB } = require('triviumdb') as typeof import('triviumdb');
@@ -65,7 +68,11 @@ const captureFork = async (store: KnowledgeStore, command: PlanForkInput) => sto
 });
 const input = (v: PlanView, key: string, expectedRef: string | null, content = key): PlanMutationInput =>
   ({ view: v, origin: { kind: 'user', key }, expectedRef, content });
-const tool = (): PlanOrigin => ({ kind: 'tool', operationId: 'req:tool:call', runId: 'run', requestId: 'req', callId: 'call', epoch: 1 });
+const tool = (kind: 'model_step' | 'policy_action' = 'model_step'): Extract<PlanOrigin, { kind: 'tool' }> => ({
+  kind: 'tool', operationId: kind === 'model_step' ? 'req:tool:call' : 'action:node:call', runId: 'run',
+  toolOrigin: kind === 'model_step' ? { kind, request_id: 'req' } : { kind, action_id: 'action', node_id: 'call' },
+  callId: 'call', epoch: 1,
+});
 const write = (s: KnowledgeStore, v: PlanView, key: string, expectedRef: string | null, content = key) => mutatePlan(s, input(v, key, expectedRef, content));
 
 describe('plan independent owner review, real TriviumDB', () => {
@@ -102,9 +109,9 @@ describe('plan independent owner review, real TriviumDB', () => {
     expect(await captureFork(reopened, { source: a, targetBranchId: 'b' })).toEqual(capture);
     expect(await readPlan(reopened, forkView(capture, ['h1']))).toBeNull();
   });
-  it('replays the original operation receipt after a later user edit and owner reopen', async () => {
+  it.each(['model_step', 'policy_action'] as const)('replays the original %s receipt after a later user edit and owner reopen', async kind => {
     const f = await fixture(); const v = view();
-    const command = { ...input(v, 'unused', null, 'tool p1'), origin: tool() };
+    const command = { ...input(v, 'unused', null, 'tool p1'), origin: tool(kind) };
     const committed = await mutatePlan(f.store, command);
     await write(f.store, v, 'user p2', committed.plan!.ref);
     await f.store.close(); const s = await f.open();
@@ -126,11 +133,12 @@ describe('plan independent owner review, real TriviumDB', () => {
     await expect(mutatePlan(store, { ...command, view: view('a', ['h1'], null, 'other') })).rejects.toThrow(/intent|owner|Thread|branch/);
     expect(await readPlan(store, view('b'))).toBeNull();
   });
-  it('does not create a second effect when the original operation epoch changes', async () => {
-    const { store } = await fixture(); const command = { ...input(view(), 'unused', null), origin: tool() };
+  it.each(['model_step', 'policy_action'] as const)('does not create a second effect when the original %s admission changes', async kind => {
+    const { store } = await fixture(); const command = { ...input(view(), 'unused', null), origin: tool(kind) };
     const first = await mutatePlan(store, command);
     // A changed admission is not a fresh Operation. It must be rejected, not receive a new durable conflict receipt.
-    for (const origin of [{ ...tool(), epoch: 2 }, { ...tool(), runId: 'different-run' }] as PlanOrigin[]) {
+    for (const origin of [{ ...tool(kind), epoch: 2 }, { ...tool(kind), runId: 'different-run' },
+      { ...tool(kind), callId: 'different-call' }] as PlanOrigin[]) {
       await expect(mutatePlan(store, { ...command, origin })).rejects.toThrow(/intent|origin|epoch/);
     }
     expect((await readPlan(store, view()))?.ref).toBe(first.plan!.ref);
@@ -197,12 +205,48 @@ describe('plan independent owner review, real TriviumDB', () => {
   });
   it('passes an actual conflict and original receipt through the private worker pipe', async () => {
     const { store, changes } = await fixture(true); const v = view();
-    const first = await write(store, v, 'pipe-first', null);
+    const command = { ...input(v, 'unused', null, 'pipe-first'), origin: tool('policy_action') };
+    const first = await mutatePlan(store, command);
+    expect(await store.readPlanMutation(command)).toEqual(first);
     const conflict = await write(store, v, 'pipe-conflict', null);
     expect(conflict).toMatchObject({ receipt: { status: 'conflict', ref: first.plan!.ref }, plan: { content: 'pipe-first' } });
     expect(await store.readPlanMutation(input(v, 'pipe-conflict', null))).toEqual(conflict);
     expect(changes).toEqual([{ threadId: v.threadId, branchId: v.branchId, ref: first.plan!.ref }]);
     await expect(mutatePlan(store, input(v, 'pipe-conflict', null, 'altered'))).rejects.toThrow(/intent/);
+  });
+  it('carries a policy invocation through the private Host bridge and reads its old receipt after owner reopen', async () => {
+    const f = await fixture(true); const v = view();
+    // Only Catalog ancestry is a fixture. Bridge dispatch, plan owner, worker pipe and database are real.
+    const runtime = { planContains: async (_branch: string, head: string | null, candidate: string | null) => ({
+      status: 'ready', visible: candidate === null || fixtureHistory.get(historyKey({ threadId: v.threadId, headId: head }))?.includes(candidate),
+    }) } as unknown as AgentRuntimeClient;
+    const query: PlanQuery = { action: 'mutate', view: v, origin: tool('policy_action'),
+      arguments: { action: 'update', expectedRef: null, items: [{ text: 'Policy plan', status: 'pending' }] } };
+    const channel = (store: KnowledgeStore, authority: AgentRuntimeClient) => {
+      const responses = new Map<string, (response: PrivatePlanResponse) => void>();
+      const bridge = new PlanBridge(() => 'kernel-epoch', async response => { responses.get(response.id)!(response); },
+        () => { throw new Error('Unexpected private bridge failure'); });
+      bridge.setOwner(createPlanOwner(async () => store, authority));
+      return { bridge, request: (id: string, value: PlanQuery) => new Promise<PrivatePlanResponse>(resolve => {
+        responses.set(id, resolve);
+        expect(bridge.consume({ v: 1, kind: 'plan-request', id, kernelEpoch: 'kernel-epoch', query: value })).toBe(true);
+      }) };
+    };
+    const firstChannel = channel(f.store, runtime);
+    const response = await firstChannel.request('write', query);
+    expect(response.result.status).toBe('ready');
+    if (response.result.status !== 'ready' || !response.result.mutation) throw new Error('Plan mutation receipt missing');
+    const committed = response.result.mutation;
+    expect(committed.receipt.origin).toEqual(query.origin);
+    expect(committed.plan?.content).toBe('- [ ] Policy plan');
+    await write(f.store, v, 'later-user-edit', committed.receipt.ref, 'Newer user plan');
+    firstChannel.bridge.close(); await f.store.close();
+    const reopened = await f.open();
+    const receiptChannel = channel(reopened, { planContains: async () => { throw new Error('An original receipt must not resolve a new history view'); } } as unknown as AgentRuntimeClient);
+    const recovered = await receiptChannel.request('original-receipt', { ...query, action: 'receipt' });
+    expect(recovered.result).toEqual({ status: 'ready', plan: committed.plan, mutation: committed });
+    expect((await readPlan(reopened, v))?.content).toBe('Newer user plan');
+    receiptChannel.bridge.close();
   });
   it('keeps plans out of legacy blocks and global knowledge views', async () => {
     const { store } = await fixture();

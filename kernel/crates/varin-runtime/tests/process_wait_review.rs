@@ -76,7 +76,8 @@ impl Fixture {
             schema: json!({"type":"object"}),
         };
         let binding = RequestBinding {
-            goal: None, resource_activations: Vec::new(),
+            goal: None,
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "fixture".into(),
             provider_family: "fixture".into(),
@@ -409,6 +410,168 @@ fn prepared_process_result_cannot_undo_observer_cancel_and_cancel_needs_no_resul
         Some(Outcome::Cancelled)
     );
     assert_eq!(f.db.operation("process").unwrap(), process);
+    assert_eq!(f.facts().len(), 1);
+    f.cleanup();
+}
+
+impl Fixture {
+    fn policy_observation(&mut self, node: &str) -> (Wait, ToolExecutionContext, ToolCompletion) {
+        let epoch = self.db.epoch();
+        let boundary = self.db.policy_boundary(&self.run, epoch).unwrap();
+        let action_id = format!("{}:policy:{}", self.run, boundary.id);
+        let origin = ToolOrigin::PolicyAction {
+            action_id: action_id.clone(),
+            node_id: node.into(),
+        };
+        let call = ToolCall {
+            call_id: node.into(),
+            name: WAIT_TOOL.into(),
+            schema_version: "1".into(),
+            arguments: json!({"processId":"process"}),
+        };
+        let launch = self.db.launch_intent(&self.run).unwrap().unwrap().selection;
+        let context = FrozenToolContext {
+            resource_activations: vec![],
+            resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),
+            run_id: self.run.clone(),
+            origin: origin.clone(),
+            tool_schema_generation: launch.tool_schema_generation,
+            tools: std::sync::Arc::new(launch.tools),
+            source: None,
+        };
+        self.db
+            .admit_policy_graph(
+                &self.run,
+                epoch,
+                &PolicyGraphIntent::PolicyToolGraphV1 {
+                    action_id,
+                    boundary,
+                    identity: launch.policy,
+                    state: json!({"stage":1}),
+                    nodes: vec![PolicyAdmittedNode {
+                        node: PolicyToolNode {
+                            id: node.into(),
+                            depends_on: vec![],
+                            call: call.clone(),
+                        },
+                        context,
+                    }],
+                },
+            )
+            .unwrap();
+        let context = ToolExecutionContext {
+            run_id: self.run.clone(),
+            operation_id: origin.operation_id(node),
+            origin,
+        };
+        self.record(ExecutionRecord::ToolAdmitted {
+            context: context.clone(),
+            tool: AdmittedTool {
+                call,
+                contract: ToolContract {
+                    name: WAIT_TOOL.into(),
+                    schema_version: "1".into(),
+                    read_only: true,
+                    completion: CompletionKind::Job,
+                    lifetime: Lifetime::Thread,
+                    resources: vec![],
+                },
+            },
+        });
+        self.record(ExecutionRecord::ToolDispatched {
+            context: context.clone(),
+            executor_owner: ExecutorOwner::Kernel,
+        });
+        let wait = self.db.wait_for_process(&context, "process").unwrap();
+        let completion = ToolCompletion::JobAccepted {
+            operation_id: context.operation_id.clone(),
+            phase: "awaiting_process".into(),
+            effect: Effect::None,
+            lifetime: Lifetime::Thread,
+        };
+        (wait, context, completion)
+    }
+    fn consume_policy_observation(
+        &mut self,
+        context: &ToolExecutionContext,
+        completion: ToolCompletion,
+    ) -> PolicyNodeReceipt {
+        self.record(ExecutionRecord::ToolSettled {
+            context: context.clone(),
+            completion: completion.clone(),
+            executor_stopped: false,
+        });
+        let ToolOrigin::PolicyAction { action_id, node_id } = &context.origin else {
+            panic!("policy origin")
+        };
+        self.db
+            .settle_policy_node(&self.run, self.db.epoch(), action_id, node_id, &completion)
+            .unwrap()
+    }
+}
+#[test]
+fn policy_process_fact_waits_for_original_graph_acceptance_consumption_after_reopen() {
+    let mut f = Fixture::new();
+    f.terminal();
+    let (wait, context, completion) = f.policy_observation("observe");
+    // Reproduce acceptance committed but not consumed, even if the Run's parked projection is visible.
+    f.state(RunState::Waiting, Some(wait.id.clone()));
+    assert!(f.db.deliver_process_waits().unwrap().is_empty());
+    assert!(f.facts().is_empty());
+    let mut f = f.reopen();
+    assert!(f.db.deliver_process_waits().unwrap().is_empty());
+    f.consume_policy_observation(&context, completion);
+    assert_eq!(f.db.deliver_process_waits().unwrap(), vec![f.run.clone()]);
+    assert_eq!(f.facts().len(), 1);
+    assert!(matches!(
+        f.db.operation(&context.operation_id)
+            .unwrap()
+            .call_completion,
+        Some(varin_runtime::catalog::result_content::ToolCompletionMetadata::JobAccepted { .. })
+    ));
+    let duplicate = f.db.wait_for_process(&context, "process").unwrap();
+    assert_eq!(duplicate.id, wait.id);
+    assert_eq!(
+        f.db.operation(&context.operation_id).unwrap().phase,
+        OperationPhase::Terminal
+    );
+    f.cleanup();
+}
+#[test]
+fn policy_process_observer_cancel_before_park_is_delivered_without_stopping_process() {
+    let mut f = Fixture::new();
+    let (wait, context, completion) = f.policy_observation("observe-cancel");
+    let process = f.db.operation("process").unwrap();
+    f.db.cancel_process_wait(&context.operation_id).unwrap();
+    let receipt = f.consume_policy_observation(&context, completion);
+    f.record(ExecutionRecord::PolicyCheckpoint {
+        identity: PolicyIdentity {
+            name: "fixture".into(),
+            version: "1".into(),
+        },
+        previous_state: json!({"stage":1}),
+        state: json!({"stage":1}),
+        action: PolicyAction::Wait {
+            wait_id: wait.id.clone(),
+        },
+        event: PolicyEvent::ToolGraphCompleted {
+            action_id: match &context.origin {
+                ToolOrigin::PolicyAction { action_id, .. } => action_id.clone(),
+                _ => unreachable!(),
+            },
+            receipts: vec![receipt],
+        },
+    });
+    f.state(RunState::Waiting, Some(wait.id));
+    assert_eq!(f.db.deliver_process_waits().unwrap(), vec![f.run.clone()]);
+    assert_eq!(f.db.operation("process").unwrap(), process);
+    assert_eq!(
+        f.db.operation(&context.operation_id).unwrap().outcome,
+        Some(Outcome::Cancelled)
+    );
+    assert_eq!(f.facts().len(), 1);
+    f.terminal();
+    f.db.deliver_process_waits().unwrap();
     assert_eq!(f.facts().len(), 1);
     f.cleanup();
 }

@@ -756,11 +756,35 @@ impl Catalog {
                      IN ('policy_tool_graph_v1','policy_model_job_v1','policy_deliver_v1','policy_pause_v1'))",
                 [run_id], |row| read_number(row, 0),
             )?;
+            // Parking consumes a Wait checkpoint in StateChanged, without a separate
+            // PolicyDecisionConsumed record. Its saved event remains the continuation when
+            // that same durable condition wakes the Run (including a question's user history).
+            let parked_wait = if !saved.decision_pending {
+                if let Some(wait_id) = &saved.wait_id {
+                    let wait: Wait = record(&self.db, "waits", wait_id)?;
+                    if wait.run_id != run_id {
+                        return Err(RuntimeError::Invalid(
+                            "policy wait owner differs from its checkpoint".into(),
+                        ));
+                    }
+                    self.db.query_row(
+                        "SELECT coalesce(max(cursor),0) > ?2
+                         FROM events WHERE subject=?1 AND kind='execution.committed'
+                            AND json_extract(data,'$.kind')='policy_checkpoint'",
+                        params![run_id, sql_number(work)?], |row| row.get::<_, bool>(0),
+                    )?
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
             saved.continuation.is_some()
                 && !unresolved
                 && !super::policy_body::has_pending_action(&self.db, run_id)?
                 && (saved.kind == super::policy_checkpoint::PolicyCheckpointKind::Activation
                     || saved.decision_pending
+                    || parked_wait
                     || consumed > work)
         } else {
             false

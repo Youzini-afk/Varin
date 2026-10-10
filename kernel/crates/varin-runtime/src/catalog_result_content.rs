@@ -1,6 +1,6 @@
 //! Immutable tool and executor bodies are prepared/read by workers; Catalog commits metadata.
 use super::*;
-use crate::execution::{ToolCompletion, ToolResult};
+use crate::execution::{ToolCompletion, ToolOrigin, ToolResult};
 use serde::Deserialize;
 
 impl OperationResultMetadata {
@@ -61,30 +61,6 @@ impl ToolReceiptMetadata {
             request_id: result.request_id.clone(),
             call_id: result.call_id.clone(),
             completion: ToolCompletionMetadata::write(content, &result.completion)?,
-        })
-    }
-    /// Domain Job registration contains only control identities; no body write is needed.
-    pub(crate) fn job(result: &ToolResult) -> Result<Self> {
-        let ToolCompletion::JobAccepted {
-            operation_id,
-            phase,
-            effect,
-            lifetime,
-        } = &result.completion
-        else {
-            return Err(RuntimeError::Invalid(
-                "job registration requires a Job receipt".into(),
-            ));
-        };
-        Ok(Self {
-            request_id: result.request_id.clone(),
-            call_id: result.call_id.clone(),
-            completion: ToolCompletionMetadata::JobAccepted {
-                operation_id: operation_id.clone(),
-                phase: phase.clone(),
-                effect: *effect,
-                lifetime: *lifetime,
-            },
         })
     }
     pub(crate) fn load(self, content: &crate::content::ContentStore) -> Result<ToolResult> {
@@ -262,4 +238,65 @@ impl Catalog {
             _publication: self.content.begin_publication(),
         })
     }
+}
+
+/// Canonical invocation acceptance is separate from the eventual Job terminal fact.
+pub(super) fn publish_job_acceptance(
+    tx: &Transaction<'_>,
+    op: &mut Operation,
+    admitted: &super::tool_content::ToolIntent,
+    phase: &str,
+) -> Result<()> {
+    let completion = super::result_content::ToolCompletionMetadata::JobAccepted {
+        operation_id: op.id.clone(),
+        phase: phase.into(),
+        effect: Effect::None,
+        lifetime: Lifetime::Thread,
+    };
+    if op
+        .call_completion
+        .as_ref()
+        .is_some_and(|previous| previous != &completion)
+    {
+        return Err(RuntimeError::Conflict(
+            "original invocation acceptance changed".into(),
+        ));
+    }
+    op.call_completion = Some(completion.clone());
+    if let ToolOrigin::ModelStep { request_id } = admitted.origin() {
+        let receipt = super::result_content::ToolReceiptMetadata {
+            request_id: request_id.clone(),
+            call_id: admitted.call().call_id.clone(),
+            completion,
+        };
+        tx.execute(
+            "UPDATE tool_calls SET receipt=?3 WHERE request_id=?1 AND call_id=?2",
+            params![request_id, admitted.call().call_id, encode(&receipt)?],
+        )?;
+    }
+    Ok(())
+}
+
+/// The invocation receipt must be consumed by its real caller before a Job can append history.
+/// A model pairs its tool row; a policy graph consumes the same canonical completion at its node.
+pub(super) fn job_acceptance_consumed(db: &Connection, op: &Operation) -> Result<bool> {
+    let admitted = super::tool_content::ToolIntent::from_operation(op)?;
+    let Some(completion) = &op.call_completion else {
+        return Ok(false);
+    };
+    let receipt: Option<String> = match admitted.origin() {
+        ToolOrigin::ModelStep { request_id } => db.query_row(
+            "SELECT receipt FROM tool_calls WHERE request_id=?1 AND call_id=?2 AND committed=1",
+            params![request_id, admitted.call().call_id], |row| row.get(0),
+        ).optional()?.flatten(),
+        ToolOrigin::PolicyAction { action_id, node_id } => db.query_row(
+            "SELECT receipt FROM policy_graph_nodes WHERE action_id=?1 AND node_id=?2 AND call_id=?3",
+            params![action_id, node_id, admitted.call().call_id], |row| row.get(0),
+        ).optional()?.flatten(),
+    };
+    let Some(receipt) = receipt else {
+        return Ok(false);
+    };
+    let receipt: Value = serde_json::from_str(&receipt)?;
+    Ok(receipt.get("completion") == Some(&serde_json::to_value(completion)?))
 }

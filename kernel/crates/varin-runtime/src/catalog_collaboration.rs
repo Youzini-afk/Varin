@@ -237,7 +237,7 @@ impl Catalog {
         let run: Run = record(&tx, "runs", &context.run_id)?;
         fence(&run, self.epoch)?;
         let mut op: Operation = record(&tx, "operations", &context.operation_id)?;
-        let admitted = require_child_invocation(&tx, &run, &op, context, DISPATCH_TOOL)?;
+        let admitted = super::tool_content::require_job_invocation(&tx, &run, &op, context, DISPATCH_TOOL)?;
         if admitted.call().call_id != prepared.call_id
             || op.revision != prepared.operation_revision
             || op.phase != OperationPhase::Running
@@ -293,7 +293,7 @@ impl Catalog {
         };
         // The original invocation completes at acceptance. A fast child may independently
         // finish before the model exchange or policy graph consumes this immutable fact.
-        publish_child_acceptance(&tx, &mut op, &admitted, "preparing_child")?;
+        super::result_content::publish_job_acceptance(&tx, &mut op, &admitted, "preparing_child")?;
         op.handed_off = true;
         op.phase = OperationPhase::Preparing;
         op.effect = Effect::None;
@@ -318,105 +318,6 @@ impl Catalog {
 
 /// Validate a dispatched call against the original invocation and its real caller owner.
 /// Arguments were checked on the worker; only immutable identities are compared here.
-fn require_child_invocation(
-    db: &Connection,
-    run: &Run,
-    op: &Operation,
-    context: &ToolExecutionContext,
-    tool: &str,
-) -> Result<super::tool_content::ToolIntent> {
-    let admitted = super::tool_content::ToolIntent::from_operation(op)?;
-    if op.id != context.operation_id
-        || context.operation_id != context.origin.operation_id(&admitted.call().call_id)
-        || op.run_id != run.id
-        || op.epoch != run.epoch
-        || context.run_id != run.id
-        || admitted.origin() != &context.origin
-        || admitted.call().name != tool
-        || op.executor.as_deref() != Some(tool)
-        || admitted.contract().completion != crate::execution::CompletionKind::Job
-        || admitted.contract().lifetime != Lifetime::Thread
-        || !admitted.contract().read_only
-    {
-        return Err(RuntimeError::Conflict(
-            "child invocation owner or contract changed".into(),
-        ));
-    }
-    let expected: String = match &context.origin {
-        ToolOrigin::ModelStep { request_id } => {
-            let step: ModelStep = record(db, "model_steps", request_id)?;
-            if step.run_id != run.id || step.state != ModelStepState::Completed {
-                return Err(RuntimeError::Conflict(
-                    "child call has no completed model owner".into(),
-                ));
-            }
-            db.query_row(
-                "SELECT body FROM tool_calls WHERE request_id=?1 AND call_id=?2",
-                params![request_id, admitted.call().call_id],
-                |row| row.get(0),
-            )?
-        }
-        ToolOrigin::PolicyAction { action_id, node_id } => {
-            let graph: Operation = record(db, "operations", action_id)?;
-            if graph.run_id != run.id
-                || graph.epoch != run.epoch
-                || graph.cancel_requested
-                || graph.phase == OperationPhase::Terminal
-                || super::policy::graph_metadata(&graph)?.is_none()
-            {
-                return Err(RuntimeError::Conflict(
-                    "child call has no active policy graph owner".into(),
-                ));
-            }
-            db.query_row("SELECT call FROM policy_graph_nodes WHERE action_id=?1 AND node_id=?2 AND receipt IS NULL",
-                params![action_id, node_id], |row| row.get(0))?
-        }
-    };
-    if serde_json::from_str::<super::tool_content::ToolCallMetadata>(&expected)? != *admitted.call()
-    {
-        return Err(RuntimeError::Conflict(
-            "child call differs from its caller's frozen invocation".into(),
-        ));
-    }
-    Ok(admitted)
-}
-
-fn publish_child_acceptance(
-    tx: &Transaction<'_>,
-    op: &mut Operation,
-    admitted: &super::tool_content::ToolIntent,
-    phase: &str,
-) -> Result<()> {
-    let completion = super::result_content::ToolCompletionMetadata::JobAccepted {
-        operation_id: op.id.clone(),
-        phase: phase.into(),
-        effect: Effect::None,
-        lifetime: Lifetime::Thread,
-    };
-    if op
-        .call_completion
-        .as_ref()
-        .is_some_and(|previous| previous != &completion)
-    {
-        return Err(RuntimeError::Conflict(
-            "original invocation acceptance changed".into(),
-        ));
-    }
-    op.call_completion = Some(completion.clone());
-    if let ToolOrigin::ModelStep { request_id } = admitted.origin() {
-        let receipt = super::result_content::ToolReceiptMetadata {
-            request_id: request_id.clone(),
-            call_id: admitted.call().call_id.clone(),
-            completion,
-        };
-        tx.execute(
-            "UPDATE tool_calls SET receipt=?3 WHERE request_id=?1 AND call_id=?2",
-            params![request_id, admitted.call().call_id, encode(&receipt)?],
-        )?;
-    }
-    Ok(())
-}
-
 /// Cancelling an observation does not consume its pending delivery. A parent that has not
 /// parked yet must still relinquish its history writer so this domain can publish that fact.
 /// Other cancelled Waits remain unavailable to policy/checkpoint transitions.
@@ -941,7 +842,7 @@ impl Catalog {
             return Ok(wait);
         }
         fence(&run, self.epoch)?;
-        require_child_invocation(&tx, &run, &op, context, WAIT_TOOL)?;
+        super::tool_content::require_job_invocation(&tx, &run, &op, context, WAIT_TOOL)?;
         if run.state.terminal()
             || run.cancel_requested
             || op.cancel_requested
@@ -983,7 +884,7 @@ impl Catalog {
         op.phase = OperationPhase::Waiting;
         op.handed_off = true;
         op.revision += 1;
-        publish_child_acceptance(&tx, &mut op, &admitted, "awaiting_child")?;
+        super::result_content::publish_job_acceptance(&tx, &mut op, &admitted, "awaiting_child")?;
         put(&tx, "operations", &op.id, &op)?;
         event(
             &tx,

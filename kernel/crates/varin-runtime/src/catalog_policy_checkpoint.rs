@@ -40,9 +40,10 @@ impl PolicyCheckpointMetadata {
         }
         Ok(true)
     }
-    /// Input is core history; it invalidates an unconsumed proposal, never committed state.
+    /// Input supersedes an unconsumed proposal or a parked Wait's continuation, never committed
+    /// state. This includes delivery followed by a crash before the next decision checkpoint.
     pub fn invalidating_inputs(&self, db: &Connection, run: &str) -> Result<Vec<String>> {
-        if !self.decision_pending {
+        if !self.decision_pending && self.wait_id.is_none() {
             return Ok(Vec::new());
         }
         let mut statement = db.prepare(

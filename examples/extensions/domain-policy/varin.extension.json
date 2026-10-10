@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "example.domain-policy",
+  "displayName": "Plan, Question and Process Policy",
+  "version": "1.0.0",
+  "engines": { "varin": "*" },
+  "entrypoints": { "host": { "file": "host.cjs", "mode": "brokered", "activation": ["service-request"] } },
+  "provides": { "services": [{ "id": "varin.agent.policy", "version": 3, "multiple": true }] }
+}

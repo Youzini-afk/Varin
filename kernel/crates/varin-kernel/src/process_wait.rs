@@ -82,13 +82,14 @@ impl ProcessWaitTools {
         call: &ToolCall,
     ) -> Result<String, ExecutionError> {
         if context.run_id != self.binding.run_id
-            || !matches!(context.origin, ToolOrigin::ModelStep { .. })
             || !self
                 .binding
                 .enabled_tools
                 .contains(&ToolKind::ProcessInspect)
         {
-            return Err(error("process wait requires the bound Run's model origin and process observation capability"));
+            return Err(error(
+                "process wait requires the bound Run and process observation capability",
+            ));
         }
         let handle: Handle = serde_json::from_value(call.arguments.clone()).map_err(error)?;
         if handle.process_id.is_empty() {
@@ -99,7 +100,8 @@ impl ProcessWaitTools {
     }
     fn check_owner(&self, c: &ToolExecutionContext, id: &str) -> Result<String, ExecutionError> {
         let db = self.catalog.lock().map_err(error)?;
-        let source = db.require_process_observation(&c.run_id, id)
+        let source = db
+            .require_process_observation(&c.run_id, id)
             .map_err(error)?;
         let launch = db
             .launch_metadata(&c.run_id)
@@ -159,11 +161,28 @@ impl ProcessWaitTools {
             (h.process_id, None)
         };
         let source_run_id = self.check_owner(c, &id)?;
-        self.resources
-            .observe_process(&self.binding, c, &id, &source_run_id, read, authorize_only, cancel)
+        self.resources.observe_process(
+            &self.binding,
+            c,
+            &id,
+            &source_run_id,
+            read,
+            authorize_only,
+            cancel,
+        )
     }
 }
 impl ToolExecutor for ProcessWaitTools {
+    fn supports_policy_read(
+        &self,
+        frozen: &FrozenToolContext,
+        call: &ToolCall,
+        contract: &ToolContract,
+    ) -> bool {
+        observes(&call.name)
+            && crate::tools::KernelToolExecutor::new(self.binding.clone(), self.resources.clone())
+                .is_ok_and(|executor| executor.supports_policy_read(frozen, call, contract))
+    }
     fn plan(
         &self,
         call: &ToolCall,
@@ -192,11 +211,8 @@ impl ToolExecutor for ProcessWaitTools {
         .into_iter()
         .find(|tool| tool.name == WAIT_TOOL)
         .ok_or_else(|| error("process wait is not selected"))?;
-        if call.schema_version != "1"
-            || !frozen.tools.contains(&schema)
-            || !matches!(frozen.origin, ToolOrigin::ModelStep { .. })
-        {
-            return Err(error("process wait schema/origin is not frozen"));
+        if call.schema_version != "1" || !frozen.tools.contains(&schema) {
+            return Err(error("process wait schema is not frozen"));
         }
         let handle: Handle = serde_json::from_value(call.arguments.clone()).map_err(error)?;
         if handle.process_id.is_empty() {
@@ -314,24 +330,39 @@ impl AgentPolicy for ProcessWaitPolicy {
         state: &Value,
         cancel: &CancellationToken,
     ) -> Result<PolicyDecision, ExecutionError> {
-        let decision = self.inner.decide(view, event, state, cancel)?;
-        if !matches!(
-            decision.action,
-            PolicyAction::Fail { .. } | PolicyAction::Wait { .. }
-        ) && view.pending_tool_calls == 0
-        {
-            if let Some(wait_id) = self
-                .catalog
+        let wait = if view.pending_tool_calls == 0 {
+            self.catalog
                 .lock()
                 .map_err(error)?
                 .pending_process_wait(view.run_id)
                 .map_err(error)?
-            {
+        } else {
+            None
+        };
+        if let Some(wait_id) = &wait {
+            if !event.has_execution_failure() {
                 return Ok(PolicyDecision {
-                    action: PolicyAction::Wait { wait_id },
-                    state: decision.state,
+                    action: PolicyAction::Wait {
+                        wait_id: wait_id.clone(),
+                    },
+                    state: state.clone(),
                 });
             }
+        }
+        let decision = self.inner.decide(view, event, state, cancel)?;
+        if matches!(
+            decision.action,
+            PolicyAction::Fail { .. } | PolicyAction::Wait { .. }
+        ) {
+            return Ok(decision);
+        }
+        if let Some(wait_id) = wait {
+            // This proposal did not execute. Keep the committed private baseline and let the
+            // core checkpoint retain the original event for the resumed, newly informed decision.
+            return Ok(PolicyDecision {
+                action: PolicyAction::Wait { wait_id },
+                state: state.clone(),
+            });
         }
         Ok(decision)
     }

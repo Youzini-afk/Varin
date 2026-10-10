@@ -11,6 +11,7 @@ import { createKernelClient } from './kernel-client.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { ThreadAdapter } from './thread-adapter.js';
+import { sourceToolSchemas } from './source-launch.js';
 import { registerThreadRoutes } from './thread-routes.js';
 import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
 
@@ -118,6 +119,7 @@ it('first public submit without a source completes without resource capabilities
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state).toBe('completed');
   const launch = (await f.runtime.launch(receipt.run_id))!;
   expect(launch.selection.source).toBeNull();
-  expect(launch.selection.tools.map(tool => tool.name)).toEqual(['ask_user', 'child_status', 'wait_child', 'child_report', 'memory']);
+  expect(sourceToolSchemas(launch.selection)).toEqual([]);
+  expect(launch.selection.tools.map(tool => tool.name)).toEqual(expect.arrayContaining(['ask_user', 'question_status', 'memory']));
   expect(f.launchErrors).toEqual([]);
 });

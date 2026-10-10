@@ -427,7 +427,7 @@ it('a real oversized UTF-8 MCP result keeps its remote-effect receipt, preserves
   const f = await fixture((body, response) => {
     const independent = JSON.stringify(body.input).includes('independent small run');
     const result = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
-    const selected = (body.tools as Array<{ name: string }>).find(tool => !['ask_user', 'mcp_discover', 'mcp_call'].includes(tool.name))!;
+    const selected = (body.tools as Array<{ name: string }>).find(tool => tool.name.startsWith('mcp__fixture__'))!;
     const output = !independent && !result
       ? { id: 'large-mcp-item', type: 'function_call', call_id: 'large-mcp-call', name: selected.name, arguments: JSON.stringify({ text: 'large unicode response' }) }
       : { id: `final-${crypto.randomUUID()}`, type: 'message', content: [{ type: 'output_text', text: independent ? 'independent run completed' : 'full large output received' }] };
@@ -462,7 +462,7 @@ it('a real oversized UTF-8 MCP result keeps its remote-effect receipt, preserves
 it('the default MCP framing limit cannot invent a receipt or break the kernel when a remote result is oversized', async () => {
   let turn = 0;
   const f = await fixture((body, response) => {
-    const name = (body.tools as Array<{ name: string }>).find(tool => !['ask_user', 'mcp_discover', 'mcp_call'].includes(tool.name))!.name;
+    const name = (body.tools as Array<{ name: string }>).find(tool => tool.name.startsWith('mcp__fixture__'))!.name;
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     const output = ++turn === 1 ? { id: 'framing-call', type: 'function_call', call_id: 'framing-call-id', name, arguments: JSON.stringify({ text: 'large unicode response' }) }
       : { id: 'framing-final', type: 'message', content: [{ type: 'output_text', text: 'remote receipt unavailable; do not replay' }] };

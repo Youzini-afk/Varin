@@ -245,7 +245,7 @@ impl RunAssembly {
             start.binding.tools = crate::tools::KernelToolExecutor::selected_schemas(&kinds);
             start.binding.tools.push(crate::agent_resources::schema());
             if !is_child {
-                start.binding.tools.push(crate::questions::schema());
+                start.binding.tools = crate::questions::schemas(start.binding.tools);
                 start.binding.tools.push(crate::agent_goals::schema());
                 start.binding.tools = crate::collaboration::schemas(
                     start.binding.tools,
@@ -344,6 +344,7 @@ impl RunAssembly {
         }
         if !is_context_job && !is_child {
             declarations.push(crate::questions::declaration(runtime.catalog()));
+            declarations.push(crate::questions::status_declaration(runtime.catalog()));
             declarations.push(crate::agent_goals::declaration(runtime.catalog()));
             declarations.extend(crate::collaboration::declarations(
                 runtime.catalog(),

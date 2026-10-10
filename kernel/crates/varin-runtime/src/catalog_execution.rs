@@ -1049,7 +1049,8 @@ impl Catalog {
                             || (wait.cancelled
                                 && !super::collaboration::pending_cancelled_observation(
                                     &tx, &run, &wait,
-                                )?)
+                                )?
+                                && !super::process_wait::pending_cancelled_observation(&tx, &run, &wait)?)
                         {
                             return Err(RuntimeError::Conflict(
                                 "wait ownership or status changed".into(),
@@ -1722,7 +1723,8 @@ impl Catalog {
                         || (wait.cancelled
                             && !super::collaboration::pending_cancelled_observation(
                                 &tx, &run, &wait,
-                            )?)
+                            )?
+                            && !super::process_wait::pending_cancelled_observation(&tx, &run, &wait)?)
                     {
                         return Err(RuntimeError::Conflict("policy wait unavailable".into()));
                     }

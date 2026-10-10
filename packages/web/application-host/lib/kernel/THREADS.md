@@ -210,6 +210,12 @@ acceptance, not an answer. The policy parks on the matching existing Wait before
 model request. No Pi session, Promise-owned question store, or additional database is involved.
 Compaction jobs do not receive this tool.
 
+The same operation/Wait path serves a model call or a policy tool-graph node. A policy can read
+`question_status` for its accepted question in the same Run; only `answered` returns the original
+user answer and history ID, while `awaiting_user` and `cancelled` remain distinct. Pending domain
+Waits retain the policy's committed private state and original continuation. The UI and authenticated
+answer route address the original operation directly and do not require a fabricated model request.
+
 The authenticated `question/answer` route requires the explicit thread/branch identity,
 `operationId` and nonempty `answer`. Rust accepts an answer only for the currently waiting question.
 The answer history item, terminal Operation, acknowledged Wait and runnable continuation commit

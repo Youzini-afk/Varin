@@ -18,13 +18,14 @@ export type SourceLaunch = Omit<ThreadSource, 'mode' | 'branchId' | 'revision' |
 );
 
 /** Project only source-owned declarations from the same frozen launch directory. */
+const sourceToolNames = new Set(['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect',
+  'process_read', 'process_spawn', 'language_definition', 'language_references', 'language_diagnostics', 'code_retrieval']);
 export function sourceToolSchemas(selection: LaunchIntent['selection']) {
   const external = new Set([
     ...(selection.mcp_binding?.tools.map(tool => tool.name) ?? []),
     ...selection.extension_bindings.map(binding => binding.tool.name),
   ]);
-  return selection.tools.filter(tool => !external.has(tool.name)
-    && !['ask_user', 'dispatch', 'child_status', 'wait_child', 'child_report', 'wait_process', 'memory', 'todo', 'resource_read'].includes(tool.name));
+  return selection.tools.filter(tool => !external.has(tool.name) && sourceToolNames.has(tool.name));
 }
 
 /** Uses the existing Storage authority for source reads, materialization and process containment.
@@ -49,7 +50,7 @@ export async function startRunFromSource(
     throw new Error('Fixed source requires a complete branch revision');
   }
   const tools = [...new Set(selection.tools)];
-  if (tools.some(tool => !['file_read', 'file_list', 'file_search', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn', 'language_definition', 'language_references', 'language_diagnostics', 'code_retrieval'].includes(tool))) throw new Error('Source launch selected an unavailable tool');
+  if (tools.some(tool => !sourceToolNames.has(tool))) throw new Error('Source launch selected an unavailable tool');
   if (selection.mode !== 'live_root' && tools.some(tool => tool.startsWith('language_'))) throw new Error('Language tools require live_root; fixed dependency closure is unavailable');
   if (selection.mode !== 'live_root' && tools.includes('code_retrieval')) throw new Error('Code retrieval requires live_root; fixed retrieval inputs are unavailable');
   if (selection.mode === 'fixed_branch' && tools.some(tool => ['process_spawn', 'file_write', 'file_edit'].includes(tool))) throw new Error('Mutating tools require an explicitly selected physical source');
