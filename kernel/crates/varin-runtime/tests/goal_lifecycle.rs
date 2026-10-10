@@ -89,6 +89,7 @@ impl Fixture {
                         history_range: range.clone(),
                     },
                     binding: RequestBinding {
+                        child_dispatch: None,
                         goal,
                         resource_activations: vec![],
                         resource_checkpoint_id: None,

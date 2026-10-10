@@ -11,23 +11,7 @@ pub const STATUS_TOOL: &str = "child_status";
 pub const REPORT_TOOL: &str = "child_report";
 pub const WAIT_TOOL: &str = "wait_child";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct DispatchInput {
-    pub task: String,
-    pub model: String,
-    pub profile: String,
-}
-impl DispatchInput {
-    pub fn validate(&self) -> Result<()> {
-        if self.task.trim().is_empty() || self.model != "parent" || !matches!(self.profile.as_str(), "read_only" | "isolated_write") {
-            return Err(RuntimeError::Invalid(
-                "dispatch requires a task, explicit parent model and a supported child profile".into(),
-            ));
-        }
-        Ok(())
-    }
-}
+pub use super::dispatch::DispatchInput;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildSourcePin {
@@ -120,6 +104,8 @@ pub struct ChildTask {
     pub project_id: Option<String>,
     pub input_ref: Value,
     pub configuration_ref: Value,
+    pub selected_profile_ref: Value,
+    pub dispatch_context_ref: Value,
     pub launch: launch_content::LaunchSelectionMetadata,
     pub source: ChildSource,
     pub code_result: ChildCodeResult,
@@ -203,7 +189,8 @@ impl Catalog {
         child_launch: launches::LaunchSelection,
     ) -> Result<ChildTask> {
         let _synchronous = self.content.begin_synchronous()?;
-        let prepared = self.prepare_child_launch(&context.run_id, child_launch)?.load()?;
+        let selected = self.capture_child_dispatch_invocation(context)?.load()?.resolve(&input)?;
+        let prepared = self.prepare_child_launch(&context.run_id, child_launch, selected)?.load()?;
         self.accept_prepared_child(context, input, pin, prepared)
     }
     /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
@@ -250,11 +237,6 @@ impl Catalog {
         }
         let parent: launch_content::LaunchMetadata = record(&tx, "run_launches", &run.id)?;
         if parent.selection.source.as_ref() != Some(&handoff.source)
-            || parent.selection.connection_identity != child_launch.connection_identity
-            || parent.selection.credential_scope != child_launch.credential_scope
-            || parent.selection.model != child_launch.model
-            || parent.selection.provider_family != child_launch.provider_family
-            || parent.selection.configuration_generation != child_launch.configuration_generation
             || parent.selection.tool_schema_generation != child_launch.tool_schema_generation
             || parent.selection.tools_ref != prepared.parent_tools_ref
         {
@@ -281,9 +263,11 @@ impl Catalog {
             project_id,
             input_ref: prepared.input_ref,
             configuration_ref: prepared.configuration_ref,
+            selected_profile_ref: prepared.selected_profile_ref,
+            dispatch_context_ref: prepared.frozen_reference,
             launch: prepared.launch,
             source: ChildSource::Pending { handoff: prepared.handoff },
-            code_result: if prepared.profile == "read_only" { ChildCodeResult::NoChanges } else { ChildCodeResult::Pending },
+            code_result: if prepared.work_mode == super::dispatch::ChildWorkMode::ReadOnly { ChildCodeResult::NoChanges } else { ChildCodeResult::Pending },
             state: "preparing".into(),
             revision: 1,
             cursor: 0,
@@ -697,26 +681,8 @@ impl Catalog {
         self.publish_child_report(child)
     }
     pub fn cancel_child(&mut self, operation_id: &str) -> Result<ChildTask> {
-        let child = self.child_task(operation_id)?;
-        if child.report.is_some() {
-            return Ok(child);
-        }
-        self.request_cancel_operation(operation_id)?;
-        if let Some(receipt) = &child.receipt {
-            self.request_cancel_run(&receipt.run_id)?;
-            return self.child_task(operation_id);
-        }
-        let mut child = child;
-        child.state = "cancelled".into();
-        if !child.code_result.settled() { child.code_result=ChildCodeResult::Unavailable{code:"cancelled_before_launch".into(),effect:Effect::None}; }
-        child.report = Some(ChildReport {
-            outcome: Outcome::Cancelled,
-            sender_thread_id: child.child_thread_id.clone(),
-            run_id: None,
-            history_ids: vec![],
-            detail: Some("Child preparation was cancelled before launch.".into()),
-        });
-        self.publish_child_report(child)
+        self.cancel_tree(super::dispatch::TreeCancelTarget::Child { operation_id: operation_id.into() })?;
+        self.child_task(operation_id)
     }
     pub fn mark_child_resources_released(&mut self, operation_id: &str) -> Result<ChildTask> {
         let tx = self.db.transaction()?;
@@ -1068,11 +1034,13 @@ impl Catalog {
         let mut child=self.child_task(operation_id)?;
         let receipt=child.receipt.as_ref().ok_or_else(||RuntimeError::Conflict("child has no admitted Run".into()))?;
         if !self.run(&receipt.run_id)?.state.terminal(){return Err(RuntimeError::Conflict("child execution is still active".into()));}
+        self.require_child_process_writers_stopped(operation_id)?;
         if !matches!(child.code_result,ChildCodeResult::Pending){return Ok(child);}
         child.code_result=ChildCodeResult::Settling{publication_id:format!("child-result:{operation_id}")};
         child.state="settling".into();self.commit_child_metadata(child,"child.settling")
     }
     pub fn attach_child_candidate(&mut self,operation_id:&str,candidate:crate::KernelWorkingResultCandidate)->Result<ChildTask> {
+        self.require_child_process_writers_stopped(operation_id)?;
         let mut child=self.child_task(operation_id)?;
         let publication_id=format!("child-result:{operation_id}");
         if candidate.publication_id!=publication_id || candidate.candidate_operation_id!=format!("result-prepare:{publication_id}")
@@ -1083,6 +1051,7 @@ impl Catalog {
         child.code_result=ChildCodeResult::Candidate{candidate};self.commit_child_metadata(child,"child.result_candidate")
     }
     pub fn attach_child_result(&mut self,operation_id:&str,result:ChildWorkingResultRef,effect:Effect)->Result<ChildTask> {
+        self.require_child_process_writers_stopped(operation_id)?;
         let mut child=self.child_task(operation_id)?;
         match &child.code_result {
             ChildCodeResult::Candidate{candidate} if candidate.publication_id==result.publication_id && candidate.workspace_id==result.workspace_id
@@ -1095,11 +1064,21 @@ impl Catalog {
         if let Some(report)=&child.report {child.state=match report.outcome{Outcome::Succeeded=>"completed",Outcome::Cancelled=>"cancelled",_=>"failed"}.into();}
         self.commit_child_metadata(child,"child.result_ready")
     }
+    pub fn require_child_process_writers_stopped(&self, operation_id: &str) -> Result<()> {
+        if !self.child_process_writers_stopped(operation_id)? { return Err(RuntimeError::Conflict("child process owner has not confirmed stop".into())); }
+        Ok(())
+    }
+    pub fn child_process_writers_stopped(&self, operation_id: &str) -> Result<bool> {
+        let child = self.child_task(operation_id)?;
+        let Some(receipt) = child.receipt else { return Ok(true); };
+        let live: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.executor')='process_spawn' AND json_extract(body,'$.effect')!='none' AND coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0)", [&receipt.run_id], |row| row.get(0))?;
+        Ok(!live)
+    }
     pub fn child_file_effect(&self,operation_id:&str)->Result<Effect> {
         let child=self.child_task(operation_id)?;
         let Some(receipt)=&child.receipt else{return Ok(Effect::None);};
         let mut confirmed=false;let mut partial=false;
-        let mut statement=self.db.prepare("SELECT json_extract(body,'$.effect') FROM operations WHERE run_id=?1 AND json_extract(body,'$.executor') IN ('file_write','file_edit')")?;
+        let mut statement=self.db.prepare("SELECT json_extract(body,'$.effect') FROM operations WHERE run_id=?1 AND json_extract(body,'$.executor') IN ('file_write','file_edit','process_spawn')")?;
         let effects=statement.query_map([&receipt.run_id],|row|row.get::<_,String>(0))?;
         for effect in effects {
             let effect:Effect=serde_json::from_value(Value::String(effect?))?;

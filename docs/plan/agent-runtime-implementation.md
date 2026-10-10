@@ -8,6 +8,16 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-10 增量：子任务执行配置、递归协作与真实进程结果
+
+- 原 harness settings / preset resolver 现在编译 native dispatch 的冻结目录，配置仍只有原 owner；模型与 UI 看同一目录、原指令和不可用原因。`dispatch` schema **2** 接 `task/preset/workMode/tools`，替换旧 `model/profile` 内部格式。normal 继承实际父模型和工具，显式工具可缩减；配置 preset 先检查完整定义，不能用缩减掩盖不支持项。继承与显式选择的模型来源分开，thinking/temperature 由原模型 owner 规范化，显式零值不被 catalog 默认温度覆盖。
+- 目录正文归原 ContentStore，Launch/模型选择/ModelStep/PolicyAction/ChildTask 冻结引用，后代共享而不递归复制。原输入与模型选择回执先于后来配置候选准备；相同 key 保留第一次选择。模型切换与目录按原世代原子生效。原 child profile 指令在 context 刷新、压缩和切源中保留。Catalog 内部格式 **25**，旧格式直接拒绝。
+- 原生子任务支持所选文件/资源/问题/协作及完整现有进程工具，可从实际子任务工作目录递归 dispatch。私有副本不是 OS 沙箱；process 能力来自原配置/委派、source/grant 和当前权限，不由工作视图字符串制造。report 与进程寿命分开，独立进程仍活跃时文件结果保持 pending；真实写入租约排空与 guardian 停止证据齐备后才固定 WorkingResult。
+- Catalog 原谱系承担指定子树取消，覆盖准备中后代、报告已结束但作业仍存续的 Run 及未消费续接，旁支不变。原事务同时核 expectedParentThreadId；短 ACK 不代表已经停机。新增短 `runtime.operation.status` 供取消预检，不依赖大正文可读。Host 由原 run.cancel_requested 中止冷准备，原 operation 事件即使 ChildTask revision 不变也唤醒结果核对；UI 在 report 后仍保留子树停止入口。
+- 独审复现并修好固定结果恢复缺口：已有候选/发布回执时错误要求旧 cwd；现在只有首次实际目录捕获检查目录写入空闲，receipt-only 恢复仍核原 Storage 回执和 Catalog 停止事实。三种崩溃窗口删 cwd 重开复用同一结果。另一独立真实 Catalog 探针验证四层/两旁支、中间子树取消、错 scope 拒绝、旧派发和 source/context 迟到拒绝，重开后旁支继续。
+- 冻结完整 Rust 组合 **376 passed / 0 failed / 12 ignored**（runtime 317、kernel lib 59）；后续局部恢复修复独立 red/green 通过；最终 kernel lib **59/0、11 ignored**、runtime 子域 **40/0** 重跑通过，不重复累计。真实 Linux guardian 组合 **1/1**，覆盖 report 后后代仍写文件、定向停止 A/G 而旁支继续、原 Storage 固定实际 bytes、删 cwd 重开复用结果且不重跑。Portable Host **58/58**、UI **30/30**，共享 protocol **5/5** 与 Pi dispatch **4/4**；另一个既有 Pi 非阻塞提问用例同基线失败，未算通过。生成协议、类型、lint、实际 Host bundle 与文档检查通过。Linux x64 开发二进制 identity `0.9.25` 已 stage，SHA-256 `3b1ae65ddc73c6b8610e2c1d1846f5d36f0cbe1e086d1b41ee64213cef87e37e`。
+- 本阶段可执行的是 native 工具名配置的 custom/override 或 normal 的明确缩减。现有 Pi worker/retrieval 工具组不会被静默映射；MCP、扩展、自定义策略、语言/Computer/远端等 child 绑定仍需继续。Native Thread 尚无持久 work focus，限制该作用域的配置明确不可用。实际 Host IPC 产品链与跨平台证据仍待补，默认切换交用户验收后执行。具体边界和复跑命令见[本阶段验收记录](../reviews/runtime-child-profiles-2026-10-10.md)。
+
 ## 2026-10-10 增量：交互进程回执与原任务终端
 
 - `process_write`、`process_resize` 现在沿真实 ModelStep 或 PolicyAction/node、冻结 schema、原 source/grant 与 Operation 执行。ProcessManager 统一分配进程序号并串行 stdin，resize 不排在阻塞写入后；调用者不再维护独立 sequence。底层 `process.write` / `process.resize` 直接以 operationId 和原始意图取代旧 queued 成功合同，所有现有 shell、远程 shell、LSP/终端与 stream 消费者都等待实际回执，没有旧协议兼容分支。

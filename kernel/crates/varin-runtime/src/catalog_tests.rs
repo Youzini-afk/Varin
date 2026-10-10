@@ -386,6 +386,7 @@ fn request_snapshot(receipt: &Receipt) -> crate::execution::RequestSnapshot {
                 },
             },
             binding: RequestBinding {
+                child_dispatch: None,
                 goal: None, resource_activations: Vec::new(),
                 resource_checkpoint_id: None,
                 connection_identity: "fixture-connection".into(),

@@ -132,6 +132,7 @@ impl ModelProvider for Provider {
 }
 fn binding() -> RequestBinding {
     RequestBinding {
+        child_dispatch: None,
         goal: None, resource_activations: Vec::new(),
         resource_checkpoint_id: None,
         connection_identity: "fixture".into(),

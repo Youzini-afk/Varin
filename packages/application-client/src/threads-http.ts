@@ -33,7 +33,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
       readReport: (identity, operationId, itemId, offset, maxBytes) => post('child/report', { ...identity, operationId, itemId, offset, maxBytes }),
       cancelChild: (identity, operationId) => post('child/cancel', { ...identity, operationId }),
       cancelWait: (identity, waitId) => post('child/wait/cancel', { ...identity, waitId }),
-      async cancelTree(identity) { await post('tree/cancel', identity); },
+      cancelTree: identity => post('tree/cancel', identity),
     },
     resources: { refresh: input => post('resources/refresh', input) },
     followups: {

@@ -23,6 +23,7 @@ import { createKernelClient } from './kernel-client.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { ThreadCollaboration } from './thread-collaboration.js';
+import { createChildProfilePreparer } from './child-profiles.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { createThreadContext, type ContextPreparer } from './thread-context.js';
 import { registerThreadRoutes } from './thread-routes.js';
@@ -109,7 +110,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
   }));
   cleanup.push(provider.close);
   const endpoint = `${provider.url}/${providerFamily === 'anthropic-messages' ? 'messages' : 'responses'}`;
-  const configuration = { providerFamily, model: model.modelId, endpoint,
+  const configuration = { providerId: model.providerId, providerFamily, model: model.modelId, endpoint,
     credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 128 };
   let projectId = 'child-review-project'; let trusted = true;
   async function openHost(options: { context?: (original: ContextPreparer) => ContextPreparer; collaboration?: boolean; sourceGrantScopes?: string[]; policyExample?: boolean } = {}) {
@@ -182,7 +183,8 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
       if (selection.providerId !== model.providerId || selection.modelId !== model.modelId) throw new Error('Unknown fixture model');
       return { configuration, credentialOwner };
     }, rebindModel: async () => credentialOwner };
-    const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, workingStates, runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ documents, workingStates, prepareResources: resources.prepareSourceCapture }), prepareContext);
+    const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, workingStates, runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ documents, workingStates, prepareResources: resources.prepareSourceCapture }), prepareContext, undefined, undefined, undefined,
+      createChildProfilePreparer({ settings: async () => ({}), capabilities: signal => runtime.childCapabilities(signal), models }));
     const collaboration = options.collaboration === false ? undefined : new ThreadCollaboration({ kernel, storageAdapter: storage, resolveLiveSource: async () => { throw new Error("Fixed source fixture"); }, sourceCaptureOwners: { documents, prepareResources: resources.prepareSourceCapture, inspectInventory: async () => { throw new Error("Fixed source fixture"); } }, runtime, workingStates, prepareContext, continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal), onError: (_operation, error) => { errors.push(error); } });
     const app = express();
     registerCommonRequestMiddleware(app, { express });
@@ -216,8 +218,9 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
 }
 
 
-const dispatch = { task: 'CHILD_TASK: inspect source.txt and send a report', model: 'parent', profile: 'read_only' };
-const isParent = (body: Record<string, unknown>) => (body.tools as Array<{ name: string }>).some(item => item.name === 'dispatch');
+const dispatch = { task: 'CHILD_TASK: inspect source.txt and send a report', workMode: 'read_only' };
+// Normal children may themselves delegate; identify the admitted role from the actual context.
+const isParent = (body: Record<string, unknown>) => !JSON.stringify(body.input ?? body.system).includes('Your admitted role is worker');
 const job = (body: Record<string, unknown>) => {
   const receipt = result(body, 'dispatch');
   expect(receipt?.kind).toBe('job_accepted');
@@ -307,7 +310,7 @@ it('a fixed read-only parent dispatches a private writable child, waits for its 
   const f = await fixture(({ body, response }) => {
     assertPairing(body);
     if (isParent(body)) {
-      if (++parentSteps === 1) complete(response, [tool('dispatch', { task: 'Read source.txt, write alpha/beta, edit beta to gamma, and report', model: 'parent', profile: 'isolated_write' }, 'dispatch-write')]);
+      if (++parentSteps === 1) complete(response, [tool('dispatch', { task: 'Read source.txt, write alpha/beta, edit beta to gamma, and report', workMode: 'isolated_write' }, 'dispatch-write')]);
       else if (parentSteps === 2) { operationId = job(body); complete(response, [tool('wait_child', { operationId }, 'wait-written-child')]); }
       else {
         expect(JSON.stringify(body.input)).toContain('child-result:');

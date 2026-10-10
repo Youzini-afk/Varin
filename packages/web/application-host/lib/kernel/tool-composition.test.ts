@@ -104,7 +104,7 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     selection: {
       extension_bindings: [],
       mcp_binding: null,
-      policy_models: [],
+      child_dispatch: null, policy_models: [],
       credential_scope: null,
       connection_identity: 'fixture',
       provider_family: 'fixture',

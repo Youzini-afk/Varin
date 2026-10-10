@@ -45,6 +45,11 @@ describe("Harness model slots", () => {
     assert.equal(resolvePresets({}, main, settings.agents, "code").some(profile => profile.id === "custom:facts"), false);
     const profile = resolvePresets({}, main, settings.agents, "research").find(profile => profile.id === "custom:facts")!;
     assert.deepEqual(profile.model, main);
+    assert.equal(profile.modelSource, "inherit");
+    const explicitlySame = resolvePresets({}, main, { facts: { ...agent, model: main } }, "research").find(profile => profile.id === "custom:facts")!;
+    assert.equal(explicitlySame.modelSource, "selected");
+    assert.equal(resolvePresets({ worker: { ...main } }, main).find(profile => profile.id === "worker")!.modelSource, "selected");
+    assert.equal(resolvePresets({}, main).find(profile => profile.id === "worker")!.modelSource, "inherit");
     assert.deepEqual(profile.definition.tools, ["read", "grep"]);
     assert.equal(profile.definition.systemPromptFragment, agent.instructions);
     assert.equal(resolvePresets({}, main, { facts: { ...agent, enabled: false } }, "research").some(profile => profile.id === "custom:facts"), false);

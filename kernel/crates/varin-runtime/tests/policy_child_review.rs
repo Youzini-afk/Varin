@@ -142,6 +142,7 @@ fn binding(f: &Fixture) -> RequestBinding {
             .unwrap()
             .selection;
     RequestBinding {
+        child_dispatch: None,
         goal: None, resource_activations: Vec::new(),
         resource_checkpoint_id: None,
         connection_identity: launch.connection_identity,
@@ -350,7 +351,7 @@ fn policy_wait_cancellation_keeps_child_and_late_report_available_for_new_observ
 fn graph_cancel_fences_new_child_and_wait_publication_but_keeps_accepted_child() {
     let mut f = Fixture::new_policy();
     let launch =
-        f.db.prepare_child_launch(&f.context.run_id, f.launch.clone())
+        f.db.prepare_child_launch(&f.context.run_id, f.launch.clone(), f.db.capture_child_dispatch_invocation(&f.context).unwrap().load().unwrap().resolve(&f.input).unwrap())
             .unwrap()
             .load()
             .unwrap();

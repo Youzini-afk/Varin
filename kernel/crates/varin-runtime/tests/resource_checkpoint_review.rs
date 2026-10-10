@@ -74,6 +74,7 @@ fn proposal(text: &str) -> ContextProposal {
 }
 fn binding(branch: &str, head: Option<String>) -> RequestBinding {
     RequestBinding {
+        child_dispatch: None,
         goal: None, resource_activations: Vec::new(),
         resource_checkpoint_id: None,
         connection_identity: "connection".into(),
@@ -304,6 +305,7 @@ fn policy_graph_freezes_original_resource_checkpoint_without_model_step() {
                 },
             },
             context: FrozenToolContext {
+                child_dispatch: None,
                 resource_activations: Vec::new(),
                 resource_checkpoint_id: Some(old.id.clone()),
                 run_id: receipt.run_id.clone(),
@@ -880,7 +882,7 @@ fn explicit_skill_survives_refresh_compaction_fork_reopen_and_real_request_tool_
         nodes:vec![PolicyAdmittedNode { node:PolicyToolNode { id:"inherited-skill".into(),depends_on:vec![],
             call:ToolCall { call_id:"inherited-skill".into(),name:"resource_read".into(),schema_version:"2".into(),
                 arguments:json!({"kind":"skill-resource","resourceId":"skill","relativePath":"support.txt","activationId":activation.activation_id}) } },
-            context:FrozenToolContext { resource_activations:vec![activation.clone()],resource_checkpoint_id:boundary.resource_checkpoint_id.clone(),
+            context:FrozenToolContext { child_dispatch: None, resource_activations:vec![activation.clone()],resource_checkpoint_id:boundary.resource_checkpoint_id.clone(),
                 run_id:fork_receipt.run_id.clone(),origin:origin.clone(),tool_schema_generation:1,tools:Arc::new(vec![schema()]),source:None } }] };
     let mut forged = intent.clone();
     let PolicyGraphIntent::PolicyToolGraphV1 { nodes, .. } = &mut forged;

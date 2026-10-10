@@ -182,6 +182,7 @@ impl Fixture {
             })
             .unwrap();
         let binding = RequestBinding {
+            child_dispatch: None,
             goal: None, resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "local-review".into(),
@@ -717,6 +718,7 @@ fn admitted(f: &Fixture, nodes: Vec<Value>) -> PolicyGraphIntent {
         .map(|value| {
             let node: PolicyToolNode = serde_json::from_value(value).unwrap();
             let context = FrozenToolContext {
+                child_dispatch: None,
                 resource_activations: Vec::new(),
                 resource_checkpoint_id: None,
                 run_id: f.input.run_id.clone(),

@@ -1,4 +1,4 @@
-import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildWait, Followup, LiveRoot, ContextPersonalization, ContextResources, ResourceActivation, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
+import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildWait, TreeCancellationReceipt, Followup, LiveRoot, ContextPersonalization, ContextResources, ResourceActivation, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
 
 import type { RunModelSelection, RunModelSelections } from '@varin/protocol';
 import type { FollowupControlAction } from '@varin/protocol';
@@ -10,7 +10,7 @@ import type { VarinExtensionServiceProvision } from '@varin/extension-contract';
 /** Explicit authority selection. A thread never opens a Pi session. */
 export interface ThreadIdentity { runtime: 'agent'; threadId: string; branchId: string }
 export type ThreadThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-export interface ThreadModel { providerId: string; modelId: string; thinkingLevel?: ThreadThinkingLevel }
+export interface ThreadModel { providerId: string; modelId: string; thinkingLevel?: ThreadThinkingLevel; temperature?: number }
 export interface ThreadModelInfo extends ThreadModel { name?: string; acceptsImages?: boolean; contextWindowTokens?: number; thinkingLevels?: ThreadThinkingLevel[] }
 interface ThreadSourceBase {
   workspaceId: string;
@@ -71,9 +71,9 @@ export interface ThreadCompact extends ThreadIdentity {
 export interface ThreadCollaborationAPI {
   readReport(identity: ThreadIdentity, operationId: string, itemId: string, offset?: number, maxBytes?: number): Promise<ChildTextPage>;
   children(identity: ThreadIdentity): Promise<ChildTask[]>;
-  cancelChild(identity: ThreadIdentity, operationId: string): Promise<ChildTask>;
+  cancelChild(identity: ThreadIdentity, operationId: string): Promise<TreeCancellationReceipt>;
   cancelWait(identity: ThreadIdentity, waitId: string): Promise<ChildWait>;
-  cancelTree(identity: ThreadIdentity): Promise<void>;
+  cancelTree(identity: ThreadIdentity): Promise<TreeCancellationReceipt>;
 }
 /** Prepare and atomically publish instructions and skills for this Thread branch. */
 export interface ThreadResourceRefresh extends ThreadIdentity {

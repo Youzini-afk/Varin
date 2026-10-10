@@ -1122,7 +1122,8 @@ impl Catalog {
                     "run_launches",
                     run_id,
                 )? {
-                    if launch.selection.tool_schema_generation
+                    if launch.dispatch_context_ref != snapshot.view.binding.child_dispatch
+                        || launch.selection.tool_schema_generation
                         != snapshot.view.binding.tool_schema_generation
                         || Some(&launch.selection.tools_ref) != tools_ref.as_ref()
                     {
@@ -2347,7 +2348,7 @@ impl Catalog {
         rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
     }
     pub fn pending_external_operations(&self, executor: &str) -> Result<Vec<String>> {
-        let mut statement=self.db.prepare("SELECT id FROM operations WHERE json_extract(body,'$.executor')=?1 AND (json_extract(body,'$.phase')!='terminal' OR json_extract(body,'$.outcome')='indeterminate' OR (?1='process_spawn' AND coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 AND EXISTS(SELECT 1 FROM followups f WHERE f.operation_id=operations.id AND json_extract(f.body,'$.wait.state') IN ('waiting','observed')))) ORDER BY id")?;
+        let mut statement=self.db.prepare("SELECT id FROM operations WHERE json_extract(body,'$.executor')=?1 AND (json_extract(body,'$.phase')!='terminal' OR json_extract(body,'$.outcome')='indeterminate' OR (?1='process_spawn' AND coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 AND (EXISTS(SELECT 1 FROM followups f WHERE f.operation_id=operations.id AND json_extract(f.body,'$.wait.state') IN ('waiting','observed')) OR EXISTS(SELECT 1 FROM child_tasks c WHERE json_extract(c.body,'$.receipt.run_id')=operations.run_id AND json_extract(c.body,'$.code_result.kind') IN ('pending','settling','candidate'))))) ORDER BY id")?;
         let rows = statement.query_map([executor], |row| row.get(0))?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }

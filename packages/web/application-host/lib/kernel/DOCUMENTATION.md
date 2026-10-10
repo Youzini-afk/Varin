@@ -665,9 +665,26 @@ were used. The model reranking and fixed-source limits above remain in force; se
 
 `ThreadCollaboration` consumes committed Catalog collaboration facts. Its maps only coalesce live
 preparation, launch and receipt reconciliation. It never starts a Pi session or adds a native child to
-ThreadRegistry. `read_only` and `isolated_write` both require explicit parent-model selection. Neither
-profile acquires process, recursive-dispatch or arbitrary extension capabilities. The writable profile
-permits the admitted text tools only inside its separate materialized environment.
+ThreadRegistry. `child-profiles.ts` compiles the original global harness settings and shared
+`observePresets` resolver against `runtime.child.capabilities`, which projects the real native child
+tool declarations. It creates no profile registry. Missing, disabled, invalid, unsupported and
+unavailable selections remain distinct; the entire explicit preset is validated before overrides.
+Native Threads do not infer a work focus from a project or shell: a focus-restricted preset is
+unavailable while that scope is unknown. No Pi Session is created to read user settings.
+
+New input and explicit model selection prepare the immutable child catalog before original Catalog
+admission. Matching input/model keys retain their first prepared catalog. Model configuration and
+credential scope use the existing model authority, including temperature zero and original thinking
+settings; configuration changes cannot silently enter an inherited override. The child profile's
+original instruction section/provenance survives refresh, compaction and source/resource replacement.
+
+Schema-2 dispatch takes task/preset?/workMode?/tools?. Native children can use the selected implemented
+file, resource, question, recursive collaboration and managed process capabilities. The read-only
+source projection and private text-write projection remain explicit; process capability additionally
+requires real configured/delegated authority and existing permission gates. A private cwd is not an
+OS sandbox. Arbitrary extension/MCP, LSP, memory/planning/Goal, Computer and remote child bindings remain
+unavailable until their complete owner contracts are connected; no unsupported list is silently trimmed.
+The UI shows the actual frozen choices, selected child model/tools, and precise unavailable reasons.
 
 A durable accepted child precedes slow source capture and context preparation. A fixed source reuses
 its original pin. A physical source uses the shared Documents capture window, complete inventory and
@@ -677,8 +694,11 @@ registered with Documents; a historical workspace ID never substitutes its unrel
 The branch-create transaction retains provenance through the existing blob/record references. Recovery
 reads the original fixed source receipt before attempting any current directory or Git observation.
 
-Child Run termination, report production and file settlement are separate facts. Actual worker/root
-lease drainage and original file receipts determine when a fixed file candidate may be published.
+Child Run termination, report production, process lifetime and file settlement are separate facts.
+Actual worker/root leases, original file receipts and guardian-confirmed process stop determine when
+a fixed file candidate may be published. The Host stops before directory capture if child settlement
+still reports pending. Original process receipts wake settlement even when ChildTask revision does
+not change, including a receipt arriving while an earlier attempt drains.
 Storage atomically fixes a candidate and base pins, then prepares its result document on a readonly
 worker before the short original branch revision/WorkingResult/receipt commit. An existing candidate
 can be published after its physical directory disappears. Cancellation cannot invent no-effect, and
@@ -689,6 +709,15 @@ The authenticated child routes verify native Thread ownership. Snapshot/UI disti
 preparation, profile, report outcome, file settlement, fixed publication and uncertain effect. Resource
 release follows actual evidence; a parent completing does not terminate its independently admitted
 child. The original common context preparer still owns role/project and personalization selection.
+
+Child and tree cancellation use the same original Catalog lineage transaction and return short
+TreeCancellationReceipt acknowledgements. They include preparing descendants, completed reports with
+live processes and original still-active followups, without walking a Host-maintained child registry.
+The parent scope is checked with the child target in Catalog. `runtime.operation.status` reads short
+original metadata, so missing intent/result bodies cannot block the ordinary cancel preflight.
+The event pump cancels local cold preparation from run.cancel_requested and child reports, while
+settlement keeps its own lifetime. UI subtree-stop controls remain available after a final report;
+neither a cancellation ACK nor a report is displayed as actual process stop.
 
 Parent integration is explicit through the ordinary installed
 [child integration tool](../../../../../examples/extensions/child-integration-tool/README.md).

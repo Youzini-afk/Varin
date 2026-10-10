@@ -1,3 +1,4 @@
+import type { ChildCapabilityDescriptor, ChildDispatchCatalog, TreeCancelTarget, TreeCancellationReceipt } from './protocol.generated.js';
 import { savedSourceLaunch } from './source-launch.js';
 import type { PlanView, PlanForkCapture } from '@varin/protocol';
 import { randomUUID } from 'node:crypto';
@@ -560,9 +561,7 @@ export class AgentRuntimeClient {
   async cancelChild(
     operationId: string,
     signal?: AbortSignal,
-  ): Promise<ChildTask> {
-    const child = await this.child(operationId, signal);
-    if (child.receipt) this.kernel.cancelRunPreparation(child.receipt.run_id);
+  ): Promise<TreeCancellationReceipt> {
     return this.kernel.agentRuntimeRequest(
       'runtime.child.cancel',
       { operationId },
@@ -876,6 +875,12 @@ export class AgentRuntimeClient {
       { runId, code },
       signal,
     );
+  }
+  childCapabilities(signal?: AbortSignal): Promise<ChildCapabilityDescriptor[]> {
+    return this.kernel.agentRuntimeRequest('runtime.child.capabilities', {}, signal);
+  }
+  cancelTree(target: TreeCancelTarget, signal?: AbortSignal, expectedParentThreadId?: string): Promise<TreeCancellationReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.tree.cancel', { target, ...(expectedParentThreadId ? { expectedParentThreadId } : {}) }, signal);
   }
   selectLaunch(
     params: LaunchSelectParams,
@@ -1555,6 +1560,7 @@ export class AgentRuntimeClient {
     configuration: ModelSessionConfiguration,
     owner: ExistingHostCredentialOwner,
     signal?: AbortSignal,
+    childDispatch?: ChildDispatchCatalog,
   ): Promise<RunModelSelection> {
     const bindingId = `model:${key}`;
     const credentialScope = await this.kernel.registerCredentialOwner(
@@ -1566,7 +1572,7 @@ export class AgentRuntimeClient {
     try {
       return await this.kernel.agentRuntimeRequest(
         'runtime.model.select',
-        { runId, key, configuration, credentialScope },
+        { runId, key, configuration, credentialScope, ...(childDispatch ? { childDispatch } : {}) },
         signal,
         { settleCancellation: true },
       );
@@ -1628,6 +1634,9 @@ export class AgentRuntimeClient {
       { operationId },
       signal,
     );
+  }
+  operationStatus(operationId: string, signal?: AbortSignal): Promise<OperationCancellationReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.operation.status', { operationId }, signal);
   }
   cancelOperation(
     operationId: string,

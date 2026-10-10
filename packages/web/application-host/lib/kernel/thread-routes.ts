@@ -34,10 +34,12 @@ const goalBudget = (value: unknown): { maxOutputTokens: number } | null => {
 };
 const modelSelection = (value: unknown): ThreadModel => {
   const model = object(value);
-  if (Object.keys(model).some(key => !['providerId', 'modelId', 'thinkingLevel'].includes(key))) throw new Error('Unsupported model selection field');
+  if (Object.keys(model).some(key => !['providerId', 'modelId', 'thinkingLevel', 'temperature'].includes(key))) throw new Error('Unsupported model selection field');
+  if (model.temperature !== undefined && (typeof model.temperature !== 'number' || !Number.isFinite(model.temperature) || model.temperature < 0)) throw new Error('Invalid temperature');
   if (model.thinkingLevel !== undefined && (typeof model.thinkingLevel !== 'string' || !['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(model.thinkingLevel))) throw new Error('Invalid thinking level');
   return { providerId: text(model.providerId), modelId: text(model.modelId),
-    ...(model.thinkingLevel === undefined ? {} : { thinkingLevel: model.thinkingLevel as ThreadThinkingLevel }) };
+    ...(model.thinkingLevel === undefined ? {} : { thinkingLevel: model.thinkingLevel as ThreadThinkingLevel }),
+    ...(model.temperature === undefined ? {} : { temperature: model.temperature as number }) };
 };
 
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
@@ -108,7 +110,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('child/list', body => adapter.children(identity(body)));
   post('child/cancel', body => adapter.cancelChild(identity(body), text(body.operationId)));
   post('child/wait/cancel', body => adapter.cancelChildWait(identity(body), text(body.waitId)));
-  post('tree/cancel', async body => { await adapter.cancelTree(identity(body)); return {}; });
+  post('tree/cancel', body => adapter.cancelTree(identity(body)));
   post('resources/refresh', (body, signal) => {
     let instructionDirectories: string[] | undefined;
     if (body.instructionDirectories !== undefined) {

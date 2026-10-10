@@ -79,7 +79,7 @@ impl AgentPolicy for Sequence {
                 call: ToolCall {
                     call_id: id.into(),
                     name: name.into(),
-                    schema_version: "1".into(),
+                    schema_version: if name == "dispatch" { "2" } else { "1" }.into(),
                     arguments,
                 },
             }],
@@ -89,7 +89,7 @@ impl AgentPolicy for Sequence {
                 node(
                     "delegate",
                     "dispatch",
-                    json!({"task":"Read the fixed source and report","model":"parent","profile":"read_only"}),
+                    json!({"task":"Read the fixed source and report","workMode":"read_only","tools":["file_read"]}),
                 ),
                 json!({"stage":1}),
             ),
@@ -304,6 +304,7 @@ fn execution_input(db: &Mutex<Catalog>, run: &str, policy: PolicyIdentity) -> Ex
     let launch = owner.launch_intent(run).unwrap().unwrap().selection;
     let run_record = owner.run(run).unwrap();
     let binding = RequestBinding {
+        child_dispatch: owner.launch_metadata(run).unwrap().unwrap().dispatch_context_ref,
         goal: None, resource_activations: Vec::new(),
         resource_checkpoint_id: None,
         connection_identity: launch.connection_identity,
@@ -343,10 +344,15 @@ fn run_sequence(cancel_before_park: bool, pause_before_observation: bool) {
         pause_before_observation,
     });
     let identity = policy_identity(sequence.identity());
-    let launch: LaunchSelection = serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"frozen-connection","provider_family":"fixture","model":"fixture-model",
+    let mut launch: LaunchSelection = serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"frozen-connection","provider_family":"openai-responses","model":"fixture-model",
         "configuration_generation":2,"tool_schema_generation":1,"tools":tools,"policy":identity,
         "source":{"mode":"fixed_branch","live_root":null,"workspace_id":"workspace-A","execution_workspace_id":"workspace-A","branch_id":"fixed-parent","revision":0},
         "credential_scope":{"reference":"credential-ref","authority":"credential-owner","account":"account-A","generation":3}})).unwrap();
+    let configuration = json!({"providerFamily":"openai-responses","endpoint":"http://127.0.0.1:1/model","allowAnonymous":false,"model":"fixture-model","configurationGeneration":2});
+    let model = varin_runtime::catalog::dispatch::ChildModelBinding { configuration: serde_json::from_value(configuration.clone()).unwrap(), credential_scope: launch.credential_scope.clone() };
+    launch.connection_identity = model.connection_identity().unwrap();
+    launch.child_dispatch = Some(varin_runtime::catalog::dispatch::ChildDispatchCatalog { identity: "test-profiles".into(), normal_unavailable: None, presets: Vec::new() });
+    let selected_tools = launch.tools.clone();
     let receipt = catalog
         .submit_with_launch(
             &SubmitInput {
@@ -355,12 +361,14 @@ fn run_sequence(cancel_before_park: bool, pause_before_observation: bool) {
                 branch_id: "main".into(),
                 expected_head: None,
                 input: json!("delegate then observe"),
-                configuration: json!({}),
+                configuration,
             },
             Some(launch),
         )
         .unwrap();
     let run = receipt.run_id;
+    let prepared = catalog.prepare_child_dispatch_binding(&run, model, selected_tools).unwrap().load().unwrap();
+    catalog.bind_child_dispatch(&run, prepared).unwrap();
     let mut db = Arc::new(Mutex::new(catalog));
     let storage_root = root.join("storage");
     let mut storage = Storage::open(&storage_root, HOST).unwrap();

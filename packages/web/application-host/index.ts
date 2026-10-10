@@ -1,3 +1,4 @@
+import { createChildProfilePreparer } from './lib/kernel/child-profiles.js';
 import { createPlanOwner } from './lib/kernel/plan-owner.js';
 import { PlanService } from './lib/kernel/plan-service.js';
 import { createPersonalizationContextResolver } from './lib/memory/personalization-context.js';
@@ -2954,7 +2955,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       ...(input.projectId ? { projectId: input.projectId } : {}) }, changed, signal),
   }, createPolicyModelPreparer({ models: modelAuthority,
     // This is a user-scoped role. Native Threads do not impersonate Pi sessions.
-    settings: () => piRuntimeBroker.requestCatalog('settings.get', {}),
+    settings: async () => ({ global: await hostCredentialAuthority.readGlobalInferenceSettings() }),
   }), liveSources.validate, createExtensionTools({runtime:extensionRuntime,kernel:kernelClient,currentPolicy:async runId=>{
     const launch=await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent|null,'runtime.launch.inspect'>('runtime.launch.inspect',{runId});
     const workspace=launch?.selection.source?await documentsAuthority.inspectWorkspace(launch.selection.source.workspace_id):undefined;
@@ -3002,6 +3003,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     threadContext, new PlanService(agentRuntime, getUserKnowledgeStore), createThreadSkillInputPreparer(threadResources), createThreadProcesses({ runtime: agentRuntime, kernel: kernelClient,
       terminal: () => terminalRuntime, resolveLiveSource: liveSources.validate,
       onError: () => console.error('[Thread] Original process terminal requires attention'),
+    }), createChildProfilePreparer({ models: modelAuthority,
+      settings: () => hostCredentialAuthority.readGlobalInferenceSettings(),
+      capabilities: signal => agentRuntime.childCapabilities(signal),
     }));
   const collaboration = new ThreadCollaboration({ runtime: agentRuntime,
     kernel: kernelClient, storageAdapter: kernelStorageAdapter, resolveLiveSource: liveSources.validate,

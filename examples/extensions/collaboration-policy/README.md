@@ -36,12 +36,12 @@ Use the selected native runtime path; installing this example does not switch th
 default or grant a tool/source capability. Prepare a `fixed_branch` source with an authorized
 whole-root read grant and the ordinary `file_read` tool. Create `source.txt` before capturing its
 fixed revision. Choose the parent model through normal model/credential settings. The child uses
-that exact admitted model and credential scope, with `profile: read_only`. Running the example
+that exact admitted model and credential scope, with `workMode: read_only` and an explicit file-read tool subset. Running the example
 can make model calls on that configured provider; building and installing it do not.
 
 ## Sequence and ownership
 
-1. Submit one `dispatch` graph with the declared task, `model: parent` and `profile: read_only`.
+1. Submit one `dispatch` graph with the declared task, `workMode: read_only` and `tools: [file_read, file_list, file_search]` using dispatch schema version 2.
    The core commits the real policy-action/node origin, independent child Thread, source pin and
    preparation owner. `job_accepted.operation_id` identifies the original dispatch operation.
 2. Keep that handle and submit a separate `file_read(source.txt)` graph. It can finish while
@@ -69,8 +69,9 @@ read evidence references only. Core owns child status, Wait state, history, sour
 call/terminal receipts and recovery. Child context remains independent of parent session notes,
 and its tool subset remains file-only and read-only: no recursive dispatch, writes or new grants.
 In-flight work retains the selected policy artifact/configuration; this example does not promise
-hot migration of incompatible private state. Independent delivery/pause actions and broader child
-profiles are outside this example.
+hot migration of incompatible private state. The runtime also supports frozen configured presets and independent child processes; this deliberately
+read-only example does not exercise them. Unsupported configured tool names remain explicit unavailable
+choices rather than being silently removed.
 
 ## Verification boundary
 

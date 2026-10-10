@@ -383,6 +383,7 @@ export interface SubmitLaunch {
   source: LaunchSourceParams | null;
   enabledTools: string[];
   credentialScope?: CredentialScope;
+  childDispatch?: ChildDispatchCatalog;
 }
 
 export interface LaunchFailedParams {
@@ -437,6 +438,7 @@ export interface LaunchSelectParams {
   source: LaunchSourceParams | null;
   enabledTools: string[];
   credentialScope?: CredentialScope;
+  childDispatch?: ChildDispatchCatalog;
 }
 
 export interface LaunchSource {
@@ -642,6 +644,7 @@ export interface LaunchSelection {
   tools: LaunchTool[];
   policy: LaunchPolicy;
   source: LaunchSource | null;
+  child_dispatch: ChildDispatchCatalog | null;
 }
 
 export interface LaunchIntent {
@@ -773,6 +776,7 @@ export interface ModelSelectParams {
   key: string;
   configuration: unknown;
   credentialScope?: CredentialScope;
+  childDispatch?: ChildDispatchCatalog;
 }
 
 export interface RunModelSelection {
@@ -1247,10 +1251,70 @@ export interface ChildWaitParams {
   waitId: string;
 }
 
+export interface ChildCapabilityDescriptor {
+  name: string;
+  version: string;
+  source_requirement: 'none' | 'source' | 'physical';
+}
+
+export type ChildWorkMode = 'read_only' | 'isolated_write';
+
+export interface ChildModelBinding {
+  configuration: ModelSessionConfiguration;
+  credential_scope: CredentialScope | null;
+}
+
+export interface ChildCapabilityFailure {
+  code: string;
+  capabilities: string[];
+}
+
+export interface ChildPreset {
+  id: string;
+  name: string;
+  instructions: string;
+  tools: string[];
+  work_mode: ChildWorkMode;
+  model: ChildModelBinding | null;
+  unavailable: ChildCapabilityFailure | null;
+  model_source: 'inherit' | 'selected';
+  inherit_base: ChildModelBinding | null;
+}
+
+export interface ChildDispatchCatalog {
+  identity: string;
+  presets: ChildPreset[];
+  normal_unavailable: ChildCapabilityFailure | null;
+}
+
+export interface ChildSelectedProfile {
+  preset_id: string | null;
+  catalog_identity: string | null;
+  work_mode: ChildWorkMode;
+  tools: string[];
+  instructions: string;
+}
+
+export type TreeCancelTarget = { kind: 'thread'; thread_id: string } | { kind: 'child'; operation_id: string };
+
+export interface TreeCancelParams {
+  target: TreeCancelTarget;
+  expectedParentThreadId?: string;
+}
+
+export interface TreeCancellationReceipt {
+  target: TreeCancelTarget;
+  cursor: number;
+  run_count: number;
+  child_count: number;
+  process_count: number;
+}
+
 export interface ChildInput {
   task: string;
-  model: string;
-  profile: string;
+  preset?: string;
+  workMode?: ChildWorkMode;
+  tools?: string[];
 }
 
 export interface ChildSourcePin {
@@ -1304,6 +1368,7 @@ export interface ChildTask {
   resources_released: boolean;
   source: ChildSource;
   code_result: ChildCodeResult;
+  selected_profile: ChildSelectedProfile;
 }
 
 export interface ChildWait {

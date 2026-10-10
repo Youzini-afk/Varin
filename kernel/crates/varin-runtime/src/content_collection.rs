@@ -21,6 +21,12 @@ impl ContentCollectionAdmission {
     }
 }
 
+struct CollectionRoots {
+    references: Vec<Reference>,
+    requests: Vec<Value>,
+    graphs: Vec<Value>,
+    dispatches: Vec<Value>,
+}
 struct CollectorLease {
     coordination: Arc<ContentCoordination>,
     sequence: u64,
@@ -202,6 +208,30 @@ impl ContentCollection {
             roots
         }; // The same-database WAL read snapshot ends before any file verification or sweep.
         result.phase = Phase::Verify;
+        let CollectionRoots { mut references, requests, graphs, mut dispatches } = references;
+        // These bodies are read only after the SQLite snapshot has closed. Follow only typed
+        // owner references, never arbitrary user text that happens to resemble a content ref.
+        for request in requests {
+            self.check()?;
+            let body = self.load_body(&request)?;
+            if let Some(reference) = body.pointer("/view/binding/child_dispatch").filter(|v| !v.is_null()) { dispatches.push(reference.clone()); }
+        }
+        for graph in graphs {
+            self.check()?;
+            let body = self.load_body(&graph)?;
+            if let Some(nodes) = body.get("nodes").and_then(Value::as_array) {
+                for node in nodes { if let Some(reference) = node.get("child_dispatch").filter(|v| !v.is_null()) { dispatches.push(reference.clone()); } }
+            }
+        }
+        let mut seen_dispatches = HashSet::new();
+        for dispatch in dispatches {
+            self.check()?;
+            let reference: Reference = serde_json::from_value(dispatch.clone())?;
+            if !seen_dispatches.insert(reference.content_object.clone()) { continue; }
+            let frozen: crate::catalog::dispatch::FrozenChildDispatch = serde_json::from_value(self.load_body(&dispatch)?)?;
+            references.push(reference);
+            references.push(serde_json::from_value(frozen.catalog_ref)?);
+        }
         let mut live = HashSet::new();
         let mut verified = HashSet::new();
         for reference in references {
@@ -261,7 +291,18 @@ impl ContentCollection {
         self.staging(result)?;
         Ok(())
     }
-    fn roots(&self, db: &Connection) -> WorkResult<Vec<Reference>> {
+    fn load_body(&self, value: &Value) -> WorkResult<Value> {
+        self.check()?;
+        let reference: Reference = serde_json::from_value(value.clone())?;
+        let manifest: Manifest = serde_json::from_slice(&self.content.read_bytes(&reference.content_object)?)?;
+        if manifest.version != 1 { return Err(RuntimeError::Invalid("unsupported content manifest".into()).into()); }
+        let mut bytes = Vec::new();
+        for hash in manifest.chunks { self.check()?; bytes.extend(self.content.read_bytes(&hash)?); }
+        if bytes.len() as u64 != manifest.bytes { return Err(RuntimeError::Invalid("content manifest length mismatch".into()).into()); }
+        self.check()?;
+        Ok(serde_json::from_slice(&bytes)?)
+    }
+    fn roots(&self, db: &Connection) -> WorkResult<CollectionRoots> {
         let mut roots = "SELECT json_extract(body,'$.request') FROM model_steps
              UNION ALL SELECT json_extract(o.value,'$.item') FROM model_steps m, json_each(m.body,'$.original') o
              UNION ALL SELECT json_extract(body,'$.content') FROM history
@@ -316,6 +357,11 @@ impl ContentCollection {
             UNION ALL SELECT json_extract(body,'$.call_completion.reason_ref') FROM operations WHERE json_extract(body,'$.call_completion.kind')='not_dispatched'
             UNION ALL SELECT json_extract(data,'$.call_completion.content_ref') FROM events WHERE json_extract(data,'$.call_completion.kind')='result'
             UNION ALL SELECT json_extract(data,'$.call_completion.reason_ref') FROM events WHERE json_extract(data,'$.call_completion.kind')='not_dispatched'");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.selection.child_dispatch_ref') FROM run_launches WHERE json_extract(body,'$.selection.child_dispatch_ref') IS NOT NULL
+            UNION ALL SELECT json_extract(body,'$.launch.selection.child_dispatch_ref') FROM followups WHERE json_extract(body,'$.launch.selection.child_dispatch_ref') IS NOT NULL
+            UNION ALL SELECT json_extract(body,'$.launch.child_dispatch_ref') FROM child_tasks WHERE json_extract(body,'$.launch.child_dispatch_ref') IS NOT NULL
+            UNION ALL SELECT json_extract(body,'$.selected_profile_ref') FROM child_tasks
+            UNION ALL SELECT json_extract(body,'$.child_dispatch_ref') FROM model_selections WHERE json_extract(body,'$.child_dispatch_ref') IS NOT NULL");
         let mut references = Vec::new();
         let mut stmt = db.prepare(&roots)?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
@@ -342,7 +388,17 @@ impl ContentCollection {
                 });
             }
         }
-        Ok(references)
+        let capture = |sql: &str| -> WorkResult<Vec<Value>> {
+            let mut statement = db.prepare(sql)?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            let mut values = Vec::new();
+            for row in rows { self.check()?; values.push(serde_json::from_str(&row?)?); }
+            Ok(values)
+        };
+        let requests = capture("SELECT json_extract(body,'$.request') FROM model_steps")?;
+        let graphs = capture("SELECT json_extract(body,'$.intent.body_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='policy_tool_graph_v1'")?;
+        let dispatches = capture("SELECT json_extract(body,'$.dispatch_context_ref') FROM run_launches WHERE json_extract(body,'$.dispatch_context_ref') IS NOT NULL UNION ALL SELECT json_extract(body,'$.dispatch_context_ref') FROM child_tasks UNION ALL SELECT json_extract(body,'$.launch.dispatch_context_ref') FROM followups WHERE json_extract(body,'$.launch.dispatch_context_ref') IS NOT NULL")?;
+        Ok(CollectionRoots { references, requests, graphs, dispatches })
     }
     fn sweep(
         &self,

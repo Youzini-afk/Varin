@@ -120,7 +120,7 @@ impl RunAssembly {
                 || p.policy_binding.is_some())
         {
             return Err(KernelError::Authorization(
-                "read-only child cannot expand its admitted capabilities".into(),
+                "child cannot expand its admitted capabilities".into(),
             ));
         }
         if is_context_job
@@ -231,7 +231,7 @@ impl RunAssembly {
             start =
                 crate::memory::configure_context(start, runtime.catalog(), memory_bridge.clone());
         }
-        if !is_context_job && !is_child {
+        if !is_context_job {
             start = crate::questions::configure(start, runtime.catalog());
             start = crate::collaboration::configure(start, runtime.catalog());
             start = crate::process_wait::configure(start, runtime.catalog());
@@ -249,9 +249,7 @@ impl RunAssembly {
                 start.binding.tools.push(crate::agent_goals::schema());
                 start.binding.tools = crate::collaboration::schemas(
                     start.binding.tools,
-                    selected.source.0.as_ref().is_some_and(|source| {
-                        source.mode == varin_runtime::SourceMode::FixedBranch
-                    }),
+                    selected.source.0.is_some(),
                 );
                 start.binding.tools = crate::process_wait::schemas(start.binding.tools);
                 start.binding.tools.push(crate::memory::schema(true));
@@ -302,6 +300,7 @@ impl RunAssembly {
                 source,
             );
             selection.credential_scope = selected_credential_scope;
+            selection.child_dispatch = selected.child_dispatch;
             check_cancelled()?;
             let preparation = runtime
                 .catalog()
@@ -336,16 +335,16 @@ impl RunAssembly {
                 .with_retrieval(retrieval_bridge.clone(), retrieval_project_id);
             start.binding.tool_schema_generation =
                 saved_schema_generation.unwrap_or(start.binding.configuration_generation);
-            declarations.extend(tools.declarations(!is_child));
+            declarations.extend(tools.declarations(true));
             collaboration_source = Some(collaboration_binding);
         }
         if !is_context_job {
             declarations.push(crate::agent_resources::declaration(runtime.catalog(),self.resource.clone()));
         }
-        if !is_context_job && !is_child {
+        if !is_context_job {
             declarations.push(crate::questions::declaration(runtime.catalog()));
             declarations.push(crate::questions::status_declaration(runtime.catalog()));
-            declarations.push(crate::agent_goals::declaration(runtime.catalog()));
+            if !is_child { declarations.push(crate::agent_goals::declaration(runtime.catalog())); }
             declarations.extend(crate::collaboration::declarations(
                 runtime.catalog(),
                 collaboration_source.clone(),
@@ -358,17 +357,27 @@ impl RunAssembly {
                     resources.clone(),
                 ));
             }
-            declarations.push(crate::memory::declaration(
+            if !is_child { declarations.push(crate::memory::declaration(
                 runtime.catalog(),
                 memory_bridge.clone(),
                 true,
-            ));
+            )); }
         }
-        if plan_eligible {
+        if plan_eligible && !is_child {
             declarations.push(crate::plan::declaration(
                 runtime.catalog(),
                 plan_bridge.clone(),
             ));
+        }
+        let saved_launch = runtime.catalog().lock()
+            .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+            .capture_launch(&p.run_id).map_err(domain)?;
+        let saved_launch = saved_launch.map(|read| read.load()).transpose().map_err(domain)?;
+        if is_child {
+            let admitted = &saved_launch.as_ref().ok_or_else(|| KernelError::Authorization("Child launch missing".into()))?.selection.tools;
+            crate::child_capabilities::select(&admitted.iter().map(|tool| tool.name.clone()).collect::<Vec<_>>()).map_err(domain)?;
+            declarations.retain(|declaration| admitted.contains(&declaration.schema));
+            if declarations.len() != admitted.len() { return Err(KernelError::Authorization("Child capability rebind does not match admitted declarations".into())); }
         }
         let mcp_live = p.mcp_binding.map(live_mcp_binding).transpose()?;
         let mcp_binding = mcp_live.as_ref().map(|live| live.binding.clone());
@@ -447,6 +456,7 @@ impl RunAssembly {
             selection.extension_bindings = extension_bindings;
             selection.credential_scope = selected_credential_scope;
             selection.policy_models = policy_models;
+            selection.child_dispatch = saved_launch.as_ref().and_then(|launch| launch.selection.child_dispatch.clone());
             check_cancelled()?;
             let preparation = runtime
                 .catalog()
@@ -471,6 +481,7 @@ impl RunAssembly {
         };
         if !is_context_job {
             start.provider = self.models.wrap(start.provider);
+            start.context_preparation = Arc::new(crate::child_capabilities::BindingPreparation { inner: start.context_preparation, catalog: runtime.catalog() });
             start.context_preparation = Arc::new(crate::context::CapacityPreparation::new(
                 start.context_preparation,
                 runtime.catalog(),

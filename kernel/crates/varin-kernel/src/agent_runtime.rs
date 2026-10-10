@@ -734,6 +734,7 @@ pub(crate) fn spawn(
                                 | "runtime.run.cancel"
                                 | "runtime.operation.cancel"
                                 | "runtime.child.cancel"
+                                | "runtime.tree.cancel"
                                 | "runtime.child.reconcile"
                                 | "runtime.child.wait.cancel"
                                 | "runtime.process.wait.reconcile"
@@ -998,7 +999,24 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
+                        if method == "runtime.operation.status" {
+                            let p: OperationParams = serde_json::from_value(params)?;
+                            let operation = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.operation(&p.operation_id).map_err(domain)?;
+                            return Ok(operation_cancellation_receipt(&operation));
+                        }
+                        if method == "runtime.child.capabilities" {
+                            if !params.as_object().is_some_and(|value| value.is_empty()) { return Err(KernelError::Protocol("child capabilities takes an empty object".into())); }
+                            return Ok(serde_json::to_value(crate::child_capabilities::descriptors())?);
+                        }
                         if method == "runtime.model.select" {
+                            let runtime = runtime.clone();
+                            let run_models = run_models.as_ref().expect("initialized runtime models").clone();
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            thread::spawn(move || {
+                                let result = (|| -> Result<Value, KernelError> {
                             let p: ModelSelectParams = serde_json::from_value(params)?;
                             let configuration = serde_json::from_value(p.configuration)?;
                             let scope = p
@@ -1021,18 +1039,26 @@ pub(crate) fn spawn(
                                     )
                                 })
                                 .transpose()?;
+                            let preparation = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.prepare_child_catalog(p.child_dispatch);
+                            let prepared = preparation.load().map_err(domain)?;
+                            if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
                             let selection = runtime
                                 .catalog()
                                 .lock()
                                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                                .select_model(&p.run_id, &p.key, configuration, scope)
+                                .select_model_prepared(&p.run_id, &p.key, configuration, scope, Some(prepared))
                                 .map_err(domain)?;
                             run_models
-                                .as_ref()
-                                .expect("initialized runtime models")
                                 .prepare(selection.clone())
                                 .map_err(|error| KernelError::Operation(error.to_string()))?;
-                            return Ok(serde_json::to_value(selection)?);
+                            Ok(serde_json::to_value(selection)?)
+                                })();
+                                let response = match result { Ok(value) => response_ok(&response_id, value), Err(error) => response_error(&response_id, &error) };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
+                            });
+                            deferred = true;
+                            return Ok(Value::Null);
                         }
                         if matches!(
                             method,
@@ -2293,6 +2319,7 @@ fn prepare_context_job(
     }
     .map_err(|error| KernelError::Protocol(error.to_string()))?;
     let launch = varin_runtime::catalog::launches::LaunchSelection {
+        child_dispatch: None,
         policy_models: Vec::new(),
         extension_bindings: Vec::new(),
         mcp_binding: None,
@@ -2431,6 +2458,10 @@ mod run_scope_review {
 #[cfg(test)]
 #[path = "followup_process_review.rs"]
 mod followup_process_review;
+
+#[cfg(test)]
+#[path = "child_process_review.rs"]
+mod child_process_review;
 
 #[cfg(test)]
 #[path = "policy_domains_review.rs"]

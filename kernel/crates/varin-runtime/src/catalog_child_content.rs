@@ -8,7 +8,7 @@ pub struct ChildAdmissionPreparation {
     input: DispatchInput,
     handoff: ChildSourceHandoff,
     launch: launch_content::PreparedChildLaunch,
-    configuration: Value,
+    invocation: super::dispatch::ChildInvocationRead,
     database: std::path::PathBuf,
     content: crate::content::ContentStore,
     publication: crate::content::ContentPublication,
@@ -19,7 +19,9 @@ pub struct PreparedChildAdmission {
     pub(super) configuration_ref: Value,
     pub(super) launch: launch_content::LaunchSelectionMetadata,
     pub(super) handoff: ChildSourceHandoff,
-    pub(super) profile: String,
+    pub(super) work_mode: super::dispatch::ChildWorkMode,
+    pub(super) selected_profile_ref: Value,
+    pub(super) frozen_reference: Value,
     pub(super) parent_tools_ref: Value,
     pub(super) operation_revision: u64,
     pub(super) call_id: String,
@@ -28,6 +30,13 @@ pub struct PreparedChildAdmission {
 impl ChildAdmissionPreparation {
     pub fn load(self) -> Result<PreparedChildAdmission> {
         self.input.validate()?;
+        let original = self.invocation.load()?;
+        let resolved = original.resolve(&self.input)?;
+        if resolved.frozen_reference != self.launch.frozen_reference
+            || resolved.profile != self.launch.selected_profile
+            || serde_json::to_value(&resolved.model.configuration)? != self.launch.configuration {
+            return Err(RuntimeError::Conflict("child selection differs from its original invocation".into()));
+        }
         let database = Connection::open_with_flags(
             &self.database,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -54,34 +63,18 @@ impl ChildAdmissionPreparation {
         }
         let mut launch = self.launch.selection;
         launch.source = Some(self.handoff.source.clone());
-        launch.mcp_binding = None;
-        launch.policy_models.clear();
-        if launch.policy
-            != (crate::execution::PolicyIdentity {
-                name: "default".into(),
-                version: "1".into(),
-            })
-            || launch.tools.iter().any(|tool| {
-                !matches!(
-                    tool.name.as_str(),
-                    "file_read" | "file_list" | "file_search" | "resource_read"
-                ) && !(self.input.profile=="isolated_write" && matches!(tool.name.as_str(),"file_write"|"file_edit"))
-            })
-        {
-            return Err(RuntimeError::Conflict(
-                "child exceeds its admitted file profile".into(),
-            ));
-        }
         let input_ref = self.content.save(&serde_json::to_value(&self.input)?)?;
         Ok(PreparedChildAdmission {
             context: self.context,
             input_ref,
             operation_revision: operation.revision,
             call_id: admitted.call.call_id,
-            configuration_ref: self.content.save(&self.configuration)?,
+            configuration_ref: self.content.save(&self.launch.configuration)?,
             launch: launch_content::LaunchSelectionMetadata::stage(&self.content, launch)?,
             handoff: self.handoff,
-            profile: self.input.profile,
+            work_mode: self.launch.selected_profile.work_mode,
+            selected_profile_ref: self.content.save(&serde_json::to_value(&self.launch.selected_profile)?)?,
+            frozen_reference: self.launch.frozen_reference,
             parent_tools_ref: self.launch.parent_tools_ref,
             _publication: self.publication,
         })
@@ -101,6 +94,7 @@ pub struct ChildTaskView {
     pub project_id: Option<String>,
     pub input: DispatchInput,
     pub configuration: Value,
+    pub selected_profile: super::dispatch::ChildSelectedProfile,
     pub launch: launches::LaunchSelection,
     pub source: Value,
     pub code_result: ChildCodeResult,
@@ -134,6 +128,7 @@ impl ChildRead {
             project_id: child.project_id,
             input,
             configuration,
+            selected_profile: serde_json::from_value(self.content.load(&child.selected_profile_ref)?)?,
             launch,
             source: {
                 let mut source=serde_json::to_value(&child.source)?;
@@ -168,13 +163,13 @@ impl Catalog {
         handoff: ChildSourceHandoff,
         launch: launch_content::PreparedChildLaunch,
     ) -> Result<ChildAdmissionPreparation> {
-        let run = self.run(&context.run_id)?;
+        let invocation = self.capture_child_dispatch_invocation(context)?;
         Ok(ChildAdmissionPreparation {
             context: context.clone(),
             input,
             handoff,
             launch,
-            configuration: run.configuration,
+            invocation,
             database: self
                 .db
                 .path()

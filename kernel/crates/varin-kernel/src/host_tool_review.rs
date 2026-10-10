@@ -74,6 +74,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
                 .unwrap(),
         );
         let binding = RequestBinding {
+            child_dispatch: None,
             goal: None, resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "fixture".into(),
@@ -138,6 +139,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
                 node_id: call.call_id.clone(),
             };
             let frozen = FrozenToolContext {
+                child_dispatch: None,
                 resource_activations: Vec::new(),
                 resource_checkpoint_id: None,
                 run_id: run.clone(),
@@ -212,6 +214,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
             .unwrap();
             let origin = ToolOrigin::ModelStep { request_id };
             let frozen = FrozenToolContext {
+                child_dispatch: None,
                 resource_activations: Vec::new(),
                 resource_checkpoint_id: None,
                 run_id: run.clone(),
@@ -463,6 +466,7 @@ fn rejected_newer_candidate_can_restore_the_prior_ready_directory_before_next_re
         .unwrap();
     let run = submitted.run_id.clone();
     let binding = RequestBinding {
+        child_dispatch: None,
         goal: None, resource_activations: Vec::new(),
         resource_checkpoint_id: None,
         connection_identity: "fixture".into(),

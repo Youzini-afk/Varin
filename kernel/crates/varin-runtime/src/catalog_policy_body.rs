@@ -115,6 +115,7 @@ impl PolicyActionMetadata {
                 .into_iter()
                 .map(|node| PolicyAdmittedNode {
                     context: FrozenToolContext {
+                        child_dispatch: node.child_dispatch,
                         resource_activations: node.resource_activations,
                         resource_checkpoint_id: node.resource_checkpoint_id,
                         run_id: run_id.into(),
@@ -160,6 +161,7 @@ pub(crate) struct PolicyGraphBody {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PolicyGraphNodeBody {
+    pub child_dispatch: Option<Value>,
     pub resource_activations: Vec<resources::ResourceActivation>,
     pub resource_checkpoint_id: Option<String>,
     pub node: PolicyToolNode,
@@ -184,7 +186,8 @@ impl PolicyGraphBody {
         .map_err(|error| RuntimeError::Invalid(error.to_string()))?;
         let first = &nodes[0].context;
         for node in nodes {
-            if node.context.resource_checkpoint_id != boundary.resource_checkpoint_id
+            if node.context.child_dispatch != first.child_dispatch
+                || node.context.resource_checkpoint_id != boundary.resource_checkpoint_id
                 || node.context.resource_activations != first.resource_activations
                 || node.context.run_id != first.run_id
                 || node.context.tools != first.tools
@@ -213,6 +216,7 @@ impl PolicyGraphBody {
                 nodes: nodes
                     .iter()
                     .map(|node| PolicyGraphNodeBody {
+                        child_dispatch: node.context.child_dispatch.clone(),
                         resource_activations: node.context.resource_activations.clone(),
                         resource_checkpoint_id: node.context.resource_checkpoint_id.clone(),
                         node: node.node.clone(),

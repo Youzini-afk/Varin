@@ -58,6 +58,7 @@ impl Fixture {
             leaf_id: fixture.db.head("branch").unwrap(),
         };
         let binding = RequestBinding {
+            child_dispatch: None,
             goal: None, resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "original-connection".into(),
@@ -672,4 +673,24 @@ fn goal_owned_process_occurrence_honors_goal_pause_and_actual_stop_after_reopen(
     assert!(f.db.control_followup("authorization",1,FollowupControlAction::Pause).is_err());
     f.db.control_goal("goal",1,&scope,GoalControlAction::Pause).unwrap();f.state(RunState::Completed);f.terminal(true);assert!(f.reconcile().is_empty());
     let mut f=f.reopen();assert!(f.reconcile().is_empty());f.db.control_goal("goal",2,&scope,GoalControlAction::Resume).unwrap();let runs=f.reconcile();assert_eq!(runs.len(),1);assert_eq!(f.db.followup_process_source(&runs[0],&f.process).unwrap().as_deref(),Some(f.run.as_str()));assert!(f.reconcile().is_empty());f.cleanup();
+}
+
+#[test]
+fn tree_stop_cancels_terminal_source_triggers_before_process_stop_can_restart_a_run() {
+    use varin_runtime::catalog::dispatch::TreeCancelTarget;
+    for goal_owned in [false,true] {
+        let mut f=Fixture::new();
+        if goal_owned {
+            use varin_runtime::catalog::goals::*;
+            let prepared=f.db.prepare_goal_start("goal",&f.run,GoalScope { thread_id:"thread".into(),branch_id:"branch".into() },"Observe process result".into(),None).unwrap().load().unwrap();
+            f.db.admit_goal_mutation(prepared).unwrap();
+        }
+        f.register();f.state(RunState::Completed);let original=f.db.run(&f.run).unwrap();
+        let capture=f.db.cancel_tree(TreeCancelTarget::Thread {thread_id:"thread".into()}).unwrap();
+        assert_eq!(capture.receipt.run_count,1);
+        assert_eq!(f.db.run(&f.run).unwrap(),original);
+        assert_eq!(f.db.followup("authorization").unwrap().state,FollowupState::Cancelled);
+        f.terminal(true);assert!(f.reconcile().is_empty());
+        let mut f=f.reopen();assert!(f.reconcile().is_empty());f.cleanup();
+    }
 }

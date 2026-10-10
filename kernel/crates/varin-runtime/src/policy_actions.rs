@@ -256,6 +256,7 @@ impl<
                 ));
             }
             let context = FrozenToolContext {
+                child_dispatch: input.binding.child_dispatch.clone(),
                 resource_activations: resource_activations.clone(),
                 resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),
                 run_id: input.run_id.clone(),

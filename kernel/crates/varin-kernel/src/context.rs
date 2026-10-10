@@ -68,6 +68,10 @@ impl CapacityPreparation {
     }
 }
 impl ContextPreparation for CapacityPreparation {
+    fn prepare_binding(&self, run_id: &str, epoch: u64, binding: &mut RequestBinding, cancel: &CancellationToken) -> Result<Vec<ConversationItem>, ExecutionError> {
+        self.inner.prepare_binding(run_id, epoch, binding, cancel)
+    }
+
     fn prepare(
         &self,
         run_id: &str,

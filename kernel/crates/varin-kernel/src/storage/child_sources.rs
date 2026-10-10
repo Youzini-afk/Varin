@@ -10,17 +10,20 @@ impl Storage {
         &mut self,
         binding: &ToolBinding,
         context: &ToolExecutionContext,
-        profile: &str,
+        delegation: &varin_runtime::catalog::dispatch::ChildSourceDelegation,
         grant: &Grant,
         host_id: &str,
         authorize_only: bool,
     ) -> Result<Value, KernelError> {
-        if !matches!(profile, "read_only" | "isolated_write")
-            || !grant.path_scopes.iter().any(String::is_empty)
+        if !grant.path_scopes.iter().any(String::is_empty)
             || !(grant.capabilities.contains("storage.read")
                 || grant.capabilities.contains("storage.admin"))
         {
             return Err(KernelError::Authorization("child source handoff requires whole-root read authority and an explicit supported profile".into()));
+        }
+        if delegation.process && (delegation.work_mode != varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite
+            || (!delegation.configured_preset && !grant.capabilities.contains("process"))) {
+            return Err(KernelError::Authorization("process delegation requires the frozen configured capability or original parent process authority".into()));
         }
         let source = binding.source_selection()?;
         let physical = if source.mode != varin_runtime::SourceMode::FixedBranch {
@@ -43,7 +46,7 @@ impl Storage {
         }
         let operation_id = format!("child-source-handoff:{}", context.operation_id);
         let identity = json!({"operationId":operation_id,"workspaceId":binding.workspace_id,"source":source,"physicalRoot":physical,
-            "parentRunId":context.run_id,"parentThreadId":binding.thread_id,"childThreadId":format!("thread:child:{}",context.operation_id),"profile":profile});
+            "parentRunId":context.run_id,"parentThreadId":binding.thread_id,"childThreadId":format!("thread:child:{}",context.operation_id),"delegation":delegation});
         idempotent(self, "source.handoff", &identity, |storage| {
             let root = if let Some(root) = physical {
                 json!({"kind":"physical","root":root})
@@ -91,7 +94,7 @@ impl Storage {
         Ok(receipt["result"].clone())
     }
     pub(crate) fn require_child_root_idle(
-        &self,
+        &mut self,
         binding: &ToolBinding,
         grant: &Grant,
     ) -> Result<Value, KernelError> {
@@ -109,7 +112,9 @@ impl Storage {
             None,
         )?;
         let registered = self.registered_file_root(root, grant)?;
-        Ok(json!({"rootId":root,"canonicalRoot":registered.canonical_root,"writerStopped":true}))
+        let path = std::path::PathBuf::from(&registered.canonical_root);
+        let stopped = self.process_directory_writer(&path)?.is_none();
+        Ok(json!({"rootId":root,"canonicalRoot":path,"writerStopped":stopped}))
     }
 }
 
@@ -631,7 +636,7 @@ mod handoff_tests {
             operation_id: "request:tool:dispatch".into(),
         };
         let original = storage
-            .child_source_handoff(&binding, &context, "isolated_write", &parent, "host", false)
+            .child_source_handoff(&binding, &context, &varin_runtime::catalog::dispatch::ChildSourceDelegation { work_mode: varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite, process: false, configured_preset: false, selection_ref: json!({"content_object":"fixture"}) }, &parent, "host", false)
             .unwrap();
         let handoff = serde_json::from_value(original).unwrap();
         storage

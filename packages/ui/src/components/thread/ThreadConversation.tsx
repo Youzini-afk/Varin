@@ -1,4 +1,5 @@
 import { attachProcessTerminal } from '@/lib/attachProcessTerminal';
+import { ThreadChildProfiles } from './ThreadChildProfiles';
 import { ThreadPlan } from './ThreadPlan';
 import { ThreadGoal } from './ThreadGoal';
 import { ThreadFollowups } from './ThreadFollowups';
@@ -182,6 +183,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         {historyView && <span className="text-xs text-muted-foreground">Viewing saved history</span>}
       </div>
       {snapshot && <ThreadGoal api={api.goals} identity={identity} goals={snapshot.goals} sourceRunId={run?.id} refresh={async () => { await projection.current?.refresh(); }} />}
+      {launch && <ThreadChildProfiles catalog={launch.selection.child_dispatch} />}
       {api.plan && <ThreadPlan api={api.plan} identity={identity} contextRevision={snapshot?.context.checkpoint?.revision} />}
       {visibleHistory.map(item => <article key={item.id} className="mx-auto max-w-3xl">
         <div className="mb-1 text-xs text-muted-foreground">{item.source}</div>
@@ -201,7 +203,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       </article>)}
       {!historyView && progress && <article className="mx-auto max-w-3xl" aria-label="Streaming assistant response"><MarkdownRenderer messageId={`${identity.threadId}:progress`} isStreaming content={progress} /></article>}
       {snapshot?.children?.map(child => <div key={child.operation_id} className="mx-auto max-w-3xl rounded border p-3 text-sm" aria-label="Child task">
-        <div>{child.input.profile === 'read_only' ? 'Read-only child' : child.input.profile === 'isolated_write' ? 'Isolated writable child' : child.input.profile} · {child.state}</div>
+        <div>{child.selected_profile.preset_id ?? 'Normal child'} · {child.selected_profile.work_mode === 'read_only' ? 'Read-only source' : 'Private working copy'} · {child.state}</div>
         <div className="text-xs text-muted-foreground">{child.source.kind === 'pending' ? 'Preparing a stable source' : `Source ready · ${child.source.provenance.consistency}`}</div>
         {child.source.kind === 'ready' && child.source.provenance.consistency !== 'fixed-root' && <div className="text-xs text-muted-foreground">{child.source.provenance.contentMode === 'saved-files' ? 'Saved files' : 'Fixed draft baseline'}{child.source.provenance.omittedDraftPaths.length > 0 ? ` · ${child.source.provenance.omittedDraftPaths.length} unsaved overlays omitted` : ''}</div>}
         <div className="text-xs text-muted-foreground">{child.code_result.kind === 'published'
@@ -210,14 +212,15 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           : child.code_result.kind === 'unavailable' ? `File result unavailable · ${child.code_result.code} · effect: ${child.code_result.effect}`
           : child.code_result.kind === 'candidate' ? 'File result fixed; publication pending'
           : child.code_result.kind === 'settling' ? 'Waiting for child writers and original receipts before fixing the file result'
-          : 'File result pending'}</div>
+          : child.report ? 'Report complete; file result waiting for writers and original receipts' : 'File result pending'}</div>
+        <div className="text-xs text-muted-foreground">{child.launch.model} · {child.selected_profile.tools.join(', ') || 'No tools'}</div>
         <div className="text-xs text-muted-foreground">{child.child_thread_id}</div>
         <p>{child.input.task}</p>
         {child.report && <><div className="text-xs text-muted-foreground">Report · {child.report.outcome}</div><MarkdownRenderer messageId={`child:${child.operation_id}`} content={child.report.detail ?? "Report stored in child history."} /></>}
         {child.report?.history_ids.map(itemId => <ChildReportPage key={itemId} api={api} identity={identity} operationId={child.operation_id} itemId={itemId} />)}
-        {!child.report && api.collaboration && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelChild(identity, child.operation_id))}>Cancel child task</Button>}
+        {api.collaboration && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelChild(identity, child.operation_id))}>Stop child subtree</Button>}
       </div>)}
-      {snapshot?.children?.some(child => !child.report) && api.collaboration && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelTree(identity))}>Stop task and children</Button>}
+      {Boolean(snapshot?.children?.length) && api.collaboration && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelTree(identity))}>Stop task and children</Button>}
       {snapshot && <ThreadFollowups key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.followups} identity={identity}
         operations={snapshot.operations} followups={snapshot.followups} pending={pending} act={act} />}
       {snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">

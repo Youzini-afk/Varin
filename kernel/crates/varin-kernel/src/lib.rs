@@ -4,6 +4,7 @@ mod agent_resources;
 mod agent_runtime;
 mod authority;
 mod collaboration;
+mod child_capabilities;
 mod compute;
 mod context;
 mod credential_bridge;

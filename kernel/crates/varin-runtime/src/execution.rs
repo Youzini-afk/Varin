@@ -294,6 +294,8 @@ pub struct HistoryRange {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RequestBinding {
     #[serde(default)]
+    pub child_dispatch: Option<Value>,
+    #[serde(default)]
     pub goal: Option<crate::catalog::goals::FrozenGoal>,
     pub resource_activations: Vec<crate::catalog::resources::ResourceActivation>,
     pub resource_checkpoint_id: Option<String>,
@@ -686,6 +688,7 @@ impl ToolOrigin {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FrozenToolContext {
+    pub child_dispatch: Option<Value>,
     pub resource_activations: Vec<crate::catalog::resources::ResourceActivation>,
     pub resource_checkpoint_id: Option<String>,
     pub run_id: String,
@@ -1442,6 +1445,11 @@ pub enum ContextRequestPreparation {
     Waiting { wait_id: String },
 }
 pub trait ContextPreparation: Send + Sync {
+    /// Freeze configuration-derived tool context at the actual ModelStep or PolicyAction
+    /// boundary, after model/tool activation. Restored prepared work keeps its original body.
+    fn prepare_binding(&self, _run_id: &str, _owner_generation: u64, _binding: &mut RequestBinding,
+        _cancel: &CancellationToken) -> Result<Vec<ConversationItem>, ExecutionError> { Ok(Vec::new()) }
+
     fn prepare(
         &self,
         run_id: &str,
@@ -1845,6 +1853,7 @@ impl<
                     instructions,
                     evidence,
                 } => {
+
                     if self
                         .context_preparation
                         .prepare(&input.run_id, input.owner_generation, &cancel)
@@ -1901,6 +1910,9 @@ impl<
                     if let Some(selected) = &selected {
                         input.binding.tools = selected.schemas.clone();
                         input.binding.tool_schema_generation = selected.generation;
+                    }
+                    if let Err(error) = self.context_preparation.prepare_binding(&input.run_id, input.owner_generation, &mut input.binding, &cancel) {
+                        finish!('agent,RunState::Failed,None,Some(error));
                     }
                     let retained = match selected {
                         Some(selected) => Some(selected.executor),
@@ -1969,6 +1981,7 @@ impl<
                         Err(error) => finish!('agent,RunState::Failed,None,Some(error)),
                     };
                     if let Some(selected) = &selected_model {
+                        input.binding.child_dispatch = selected.binding.child_dispatch.clone();
                         input.binding.connection_identity =
                             selected.binding.connection_identity.clone();
                         input.binding.provider_family = selected.binding.provider_family.clone();
@@ -1995,7 +2008,10 @@ impl<
                         input.binding.tools = selected.schemas.clone();
                         input.binding.tool_schema_generation = selected.generation;
                     }
-                    if self
+                    let binding_context = match self.context_preparation.prepare_binding(&input.run_id, input.owner_generation, &mut input.binding, &cancel) {
+                        Ok(context) => context,
+                        Err(error) => finish!('agent,RunState::Failed,None,Some(error)),
+                    };                    if self
                         .context_preparation
                         .prepare(&input.run_id, input.owner_generation, &cancel)
                         .is_err()
@@ -2059,6 +2075,7 @@ impl<
                     let goal=self.persistence.goal_context(&input.run_id,input.owner_generation)?;
                     binding.goal=goal.as_ref().map(|g|g.binding.clone());
                     if let Some(item)=goal.and_then(|g|g.item){request_history.push(item);}
+                    request_history.extend(binding_context);
                     let view = RequestView {
                         request_id: format!(
                             "{}:{}:{}",
@@ -2438,6 +2455,7 @@ impl<
         tools: Option<Arc<dyn ToolExecutor>>,
     ) -> Result<Vec<ToolResult>, ExecutionError> {
         let frozen = FrozenToolContext {
+            child_dispatch: snapshot.view.binding.child_dispatch.clone(),
             resource_activations: snapshot.view.binding.resource_activations.clone(),
             resource_checkpoint_id: snapshot.view.binding.resource_checkpoint_id.clone(),
             run_id: input.run_id.clone(),

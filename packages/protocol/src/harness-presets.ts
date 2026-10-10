@@ -103,8 +103,51 @@ export function isPresetId(value: string): value is PresetId {
 
 export interface ResolvedPreset {
   id: string;
+  /** The original choice; equal model IDs do not imply inheritance. */
+  modelSource: "inherit" | "selected";
   model: ModelSelection;
   definition: ExecutionPreset;
+}
+
+/** Preparation/discovery can retain unavailable choices without authorizing them. */
+export interface PresetObservation {
+  id: string;
+  model: ModelSelection | null;
+  modelSource: "inherit" | "selected";
+  definition: ExecutionPreset;
+  availability: "available" | "disabled" | "unconfigured" | "scope_unavailable";
+}
+
+export function observePresets(
+  slots: Partial<Record<HarnessModelRole, HarnessModelBinding | null>>,
+  mainModel: ModelSelection | null,
+  custom: Record<string, HarnessCustomAgent> = {},
+  focus?: WorkFocusId,
+): PresetObservation[] {
+  const observations: PresetObservation[] = [];
+  for (const preset of Object.values(EXECUTION_PRESETS)) {
+    const binding = slots[preset.slot];
+    const model = resolveHarnessModelSlot(preset.slot, slots, mainModel);
+    const definition = customizeHarnessAgent(preset, binding?.agent);
+    if (definition.description !== undefined) definition.teamDescription = definition.description;
+    observations.push({ id: preset.id, model, definition,
+      modelSource: binding?.providerId && binding.modelId ? "selected" : "inherit",
+      availability: binding?.enabled === false ? "disabled"
+        : focus && definition.workFocus?.length && !definition.workFocus.includes(focus) ? "scope_unavailable"
+          : model ? "available" : "unconfigured" });
+  }
+  for (const [key, agent] of Object.entries(custom)) {
+    const model = agent.model ?? mainModel;
+    const id = `custom:${key}`;
+    observations.push({ id, model, modelSource: agent.model ? "selected" : "inherit",
+      availability: !agent.enabled ? "disabled"
+        : focus && agent.workFocus.length && !agent.workFocus.includes(focus) ? "scope_unavailable"
+          : model ? "available" : "unconfigured",
+      definition: { id, tools: agent.tools, worktree: agent.worktree,
+        systemPromptFragment: agent.instructions, teamDescription: `${agent.name}: ${agent.description}`,
+        name: agent.name, workFocus: [...agent.workFocus], ...(agent.modelSettings ? { modelSettings: { ...agent.modelSettings } } : {}) } });
+  }
+  return observations;
 }
 
 export function resolvePresets(
@@ -113,24 +156,8 @@ export function resolvePresets(
   custom: Record<string, HarnessCustomAgent> = {},
   focus?: WorkFocusId,
 ): ResolvedPreset[] {
-  const resolved: ResolvedPreset[] = [];
-  for (const preset of Object.values(EXECUTION_PRESETS)) {
-    if (focus && preset.workFocus?.length && !preset.workFocus.includes(focus)) continue;
-    const model = resolveHarnessModelSlot(preset.slot, slots, mainModel);
-    const definition = customizeHarnessAgent(preset, slots[preset.slot]?.agent);
-    if (definition.description !== undefined) definition.teamDescription = definition.description;
-    if (model) resolved.push({ id: preset.id, model, definition });
-  }
-  for (const [key, agent] of Object.entries(custom)) {
-    if (!agent.enabled || (focus && agent.workFocus.length && !agent.workFocus.includes(focus))) continue;
-    const model = agent.model ?? mainModel;
-    if (!model) continue;
-    const id = `custom:${key}`;
-    resolved.push({ id, model, definition: { id, tools: agent.tools, worktree: agent.worktree,
-      systemPromptFragment: agent.instructions, teamDescription: `${agent.name}: ${agent.description}`,
-      name: agent.name, ...(agent.modelSettings ? { modelSettings: { ...agent.modelSettings } } : {}) } });
-  }
-  return resolved;
+  return observePresets(slots, mainModel, custom, focus).flatMap(entry => entry.availability === "available" && entry.model
+    ? [{ id: entry.id, model: entry.model, modelSource: entry.modelSource, definition: entry.definition }] : []);
 }
 
 // ── Team prompt ────────────────────────────────────────────────────

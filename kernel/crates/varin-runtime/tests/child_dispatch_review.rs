@@ -713,3 +713,44 @@ fn ended_goal_detaches_new_primary_input_but_retains_admitted_child_attribution(
     let root=f.root.clone();drop(f);std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[test]
+fn completed_report_does_not_stop_process_tree_cancel_is_scoped_and_waits_for_original_stop() {
+    use varin_runtime::catalog::dispatch::TreeCancelTarget;
+    let mut f=Fixture::new_isolated(); let child=f.accept(); f.settle_exchange();
+    let (mut source,proposal,basis)=child_context(&child); source.mode=SourceMode::Materialized;
+    let child=f.db.prepare_child(&child.operation_id,source,proposal,basis).unwrap();
+    let run=child.receipt.as_ref().unwrap().run_id.clone(); let epoch=f.db.epoch();
+    f.db.admit_operation("child-process",&run,epoch,Lifetime::Thread,json!({"fixture":"original process owner"})).unwrap();
+    f.db.dispatch_operation("child-process",epoch,"process_spawn",true).unwrap();
+    f.db.handoff_operation("child-process",epoch).unwrap();
+    f.db.settle_operation("child-process",epoch,Outcome::Indeterminate,Effect::Unknown,json!({"status":"unknown"})).unwrap();
+    f.db.commit_execution(&run,epoch,&ExecutionRecord::StateChanged {state:RunState::Runnable,waiting_on:None}).unwrap();
+    f.db.commit_execution(&run,epoch,&ExecutionRecord::StateChanged {state:RunState::Completed,waiting_on:None}).unwrap();
+    f.db.reconcile_child_reports().unwrap();
+    let report=f.db.child_task(&child.operation_id).unwrap().report.unwrap();
+    assert!(!f.db.child_process_writers_stopped(&child.operation_id).unwrap());
+    assert!(f.db.begin_child_settlement(&child.operation_id).is_err());
+    assert!(f.db.pending_external_operations("process_spawn").unwrap().contains(&"child-process".into()));
+    let target=TreeCancelTarget::Child { operation_id:child.operation_id.clone() };
+    assert!(f.db.cancel_tree_checked(target.clone(),Some("unrelated-parent")).is_err());
+    assert!(!f.db.operation("child-process").unwrap().cancel_requested);
+    let before=f.db.run(&run).unwrap();
+    let capture=f.db.cancel_tree_checked(target.clone(),Some("thread:parent")).unwrap();
+    assert_eq!((capture.receipt.run_count,capture.receipt.child_count,capture.receipt.process_count),(1,1,1));
+    assert_eq!(capture.process_ids,vec!["child-process"]);
+    assert_eq!(f.db.run(&run).unwrap(),before,"a terminal report is not rewritten as fake cancellation");
+    assert!(!f.db.run(&f.context.run_id).unwrap().cancel_requested);
+    assert!(f.db.operation("child-process").unwrap().cancel_requested);
+    assert_eq!(f.db.child_task(&child.operation_id).unwrap().report,Some(report));
+    let revision=f.db.operation("child-process").unwrap().revision;
+    f.db.cancel_tree(target).unwrap();assert_eq!(f.db.operation("child-process").unwrap().revision,revision);
+    f.db.record_external_receipt_with_stop("child-process",ExternalReceipt {identity:"child-process".into(),executor:"process_spawn".into(),epoch:"original-process".into(),outcome:Outcome::Indeterminate,effect:Effect::Unknown,result:json!({"treeConfirmed":true,"writerActive":false})},true).unwrap();
+    assert!(f.db.child_process_writers_stopped(&child.operation_id).unwrap());
+    f.db.begin_child_settlement(&child.operation_id).unwrap();
+    assert_eq!(f.db.child_file_effect(&child.operation_id).unwrap(),Effect::Unknown);
+    let root=f.root.clone();drop(f);let db=Catalog::open(&root).unwrap();
+    assert!(db.child_process_writers_stopped(&child.operation_id).unwrap());
+    assert_eq!(db.child_file_effect(&child.operation_id).unwrap(),Effect::Unknown);
+    drop(db);std::fs::remove_dir_all(root).unwrap();
+}

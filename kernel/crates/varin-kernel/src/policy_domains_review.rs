@@ -903,6 +903,7 @@ fn accepted_question_before_graph_receipt_reopen_consumes_original_job_once() {
             arguments: json!({"question":"Original question"}),
         };
         let frozen = FrozenToolContext {
+            child_dispatch: None,
             resource_activations: vec![],
             resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),
             run_id: f.run.clone(),
@@ -1033,6 +1034,7 @@ fn policy_todo_committed_before_tool_settlement_reconciles_original_epoch_and_he
             node_id: "plan".into(),
         };
         let frozen = FrozenToolContext {
+            child_dispatch: None,
             resource_activations: vec![],
             resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),
             run_id: f.run.clone(),

@@ -15,6 +15,7 @@ pub struct PolicyModelReference {
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchSelectionMetadata {
+    pub child_dispatch_ref: Option<Value>,
     pub credential_scope: Option<crate::providers::auth::CredentialScope>,
     pub connection_identity: String,
     pub provider_family: String,
@@ -32,6 +33,7 @@ pub struct LaunchSelectionMetadata {
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchMetadata {
+    pub dispatch_context_ref: Option<Value>,
     pub policy_generation: u64,
     pub policy_target: super::policy_switch::PolicyTarget,
     pub preparation_failure: Option<String>,
@@ -81,6 +83,7 @@ impl LaunchSelectionMetadata {
             .transpose()?;
         let policy_models = stage_policy_models(content, &selection.policy_models)?;
         Ok(Self {
+            child_dispatch_ref: selection.child_dispatch.as_ref().map(|catalog| content.save(&serde_json::to_value(catalog)?)).transpose()?,
             credential_scope: selection.credential_scope,
             connection_identity: selection.connection_identity,
             provider_family: selection.provider_family,
@@ -98,6 +101,7 @@ impl LaunchSelectionMetadata {
     }
     pub(super) fn load(self, content: &crate::content::ContentStore) -> Result<LaunchSelection> {
         let selection = LaunchSelection {
+            child_dispatch: self.child_dispatch_ref.as_ref().map(|reference| serde_json::from_value(content.load(&reference)?).map_err(RuntimeError::from)).transpose()?,
             extension_bindings: serde_json::from_value(
                 content.load(&self.extension_bindings_ref)?,
             )?,
@@ -215,27 +219,36 @@ pub struct LaunchChangePreparation {
 pub struct ChildLaunchPreparation {
     read: LaunchRead,
     child: LaunchSelection,
+    selected: super::dispatch::ResolvedChildSelection,
 }
 pub struct PreparedChildLaunch {
     pub(super) selection: LaunchSelection,
     pub(super) parent_tools_ref: Value,
+    pub(super) selected_profile: super::dispatch::ChildSelectedProfile,
+    pub(super) configuration: Value,
+    pub(super) frozen_reference: Value,
     _publication: crate::content::ContentPublication,
 }
 impl ChildLaunchPreparation {
-    pub fn load(mut self) -> Result<PreparedChildLaunch> {
-        let tools: Vec<ToolSchema> = serde_json::from_value(
-            self.read
-                .content
-                .load(&self.read.metadata.selection.tools_ref)?,
-        )?;
-        if self.child.tools.iter().any(|tool| !tools.contains(tool) && !matches!(tool.name.as_str(),"file_write"|"file_edit")) {
-            return Err(RuntimeError::Conflict("child exceeds parent tools".into()));
+    pub fn load(self) -> Result<PreparedChildLaunch> {
+        let mut names: Vec<_> = self.child.tools.iter().map(|tool| tool.name.clone()).collect();
+        names.sort();
+        if names != self.selected.profile.tools
+            || self.child.connection_identity != self.selected.model.connection_identity()?
+            || self.child.credential_scope != self.selected.model.credential_scope
+            || self.child.model != self.selected.model.configuration.model
+            || self.child.provider_family != self.selected.model.configuration.provider_family
+            || self.child.configuration_generation != self.selected.model.configuration.configuration_generation
+            || self.child.mcp_binding.is_some() || !self.child.extension_bindings.is_empty() || !self.child.policy_models.is_empty()
+            || self.child.child_dispatch.as_ref().map(|catalog| crate::content::ContentStore::reference(&serde_json::to_value(catalog)?)).transpose()?.as_ref() != Some(&self.selected.catalog_ref)
+        {
+            return Err(RuntimeError::Conflict("child launch differs from its frozen selection".into()));
         }
-        self.child.mcp_binding = None;
-        self.child.extension_bindings.clear();
-        self.child.policy_models.clear();
         Ok(PreparedChildLaunch {
             selection: self.child,
+            selected_profile: self.selected.profile,
+            configuration: serde_json::to_value(self.selected.model.configuration)?,
+            frozen_reference: self.selected.frozen_reference,
             parent_tools_ref: self.read.metadata.selection.tools_ref,
             _publication: self.read._publication,
         })
@@ -450,12 +463,14 @@ impl Catalog {
         &self,
         run_id: &str,
         child: LaunchSelection,
+        selected: super::dispatch::ResolvedChildSelection,
     ) -> Result<ChildLaunchPreparation> {
         Ok(ChildLaunchPreparation {
             read: self
                 .capture_launch(run_id)?
                 .ok_or_else(|| RuntimeError::NotFound(run_id.into()))?,
             child,
+            selected,
         })
     }
 }
