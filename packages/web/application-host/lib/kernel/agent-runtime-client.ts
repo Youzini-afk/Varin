@@ -1424,7 +1424,7 @@ export class AgentRuntimeClient {
       const run = await this.run(runId, signal);
       if (run.cancel_requested || ['completed', 'failed', 'cancelled'].includes(run.state)) throw new Error('Run is no longer eligible for policy preparation');
       let saved = await this.launch(runId, signal);
-      if (saved?.selection.policy.name === 'context_compaction' || await this.childForThread(run.thread_id, signal)) return undefined;
+      if (saved?.selection.policy.name === 'context_compaction') return undefined;
       const generation = saved?.policy_generation ?? 0;
       const existing = this.kernel.policyBinding(runId, generation);
       if (existing) return existing;

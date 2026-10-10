@@ -17,7 +17,8 @@ const cleanups: Array<() => void> = [];
 afterEach(() => { for (const close of cleanups.splice(0).reverse()) close(); });
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 
-function fixture() {
+function fixture(child = false) {
+  const runId = child ? 'child-run' : 'run';
   let current = artifact('old'), prepareFailure = false, changed!: () => void, beforeSelect: (() => void) | undefined;
   const replies: PrivatePolicyResponse[] = [], leases: Array<AgentPolicyLease & { released: boolean; revoke: AbortController }> = [];
   const requests: Array<{ method: string; params: unknown }> = [], scopes: unknown[] = [], credentials = new Set<string>();
@@ -28,7 +29,7 @@ function fixture() {
   const bridge = new AgentPolicyBridge(() => epoch, async response => { replies.push(response); }, () => { throw new Error('Unexpected transport error'); });
   cleanups.push(() => bridge.close());
   const selection: PolicySelections = { active: { generation: 0, target: { kind: 'extension', artifact: current }, identity: current.identity, activation_cursor: null }, desired: null };
-  const run: Run = { id: 'run', thread_id: 'thread:original', branch_id: 'branch', state: 'waiting', waiting_on: 'wait', revision: 1, epoch: 1, configuration: {}, cancel_requested: false };
+  const run: Run = { id: runId, thread_id: child ? 'thread:child' : 'thread:original', branch_id: 'branch', state: 'waiting', waiting_on: 'wait', revision: 1, epoch: 1, configuration: {}, cancel_requested: false };
   const launch: LaunchIntent = { policy_preparable: false, policy_generation: 0, policy_target: selection.active.target, run_id: run.id,
     revision: 1, startable: false, requires_rebind: false, bound_epoch: 1, preparation_failure: null, pause: { action_id: 'pause', wait_id: 'wait', reason: 'Explicit resume required' },
     selection: { policy: current.identity, child_dispatch: null, policy_models: [], extension_bindings: [], mcp_binding: null, credential_scope: null, connection_identity: 'model', provider_family: 'model',
@@ -59,7 +60,8 @@ function fixture() {
       const controller = new AbortController(); preparations.add(controller);
       return { signal: controller.signal, release() { preparations.delete(controller); } };
     },
-    registerCredentialOwner: async (_run: string, _owner: ExistingHostCredentialOwner, _signal: AbortSignal, bindingId: string) => {
+    registerCredentialOwner: async (credentialRun: string, _owner: ExistingHostCredentialOwner, _signal: AbortSignal, bindingId: string) => {
+      if (credentialRun !== runId) throw new Error('Credentials must bind this Run');
       if (credentials.has(bindingId)) throw new Error('Credential collision'); credentials.add(bindingId);
       return { reference: 'credential', authority: 'owner', account: 'account', generation: 1 };
     },
@@ -73,7 +75,7 @@ function fixture() {
       if (method === 'runtime.run.inspect') return structuredClone(run);
       if (method === 'runtime.launch.inspect') return structuredClone(launch);
       if (method === 'runtime.run.scope') return { projectId: 'original-project' };
-      if (method === 'runtime.child.for_thread') return null;
+      if (method === 'runtime.child.for_thread') return child ? { parent_run_id: 'parent-run', child_thread_id: run.thread_id, receipt: { run_id: runId } } : null;
       if (method === 'runtime.launch.policy.prepare') {
         const pending = nextLaunchPreparation; nextLaunchPreparation = undefined;
         return pending ? await pending() : structuredClone(launch);
@@ -83,8 +85,8 @@ function fixture() {
         beforeSelect?.(); beforeSelect = undefined;
         const request = params as PolicySelectParams;
         if (request.expectedGeneration !== selection.active.generation || request.expectedSelectionId !== (selection.desired?.selection_id ?? null)) throw new Error('policy_selection_changed');
-        if (selection.desired) bridge.unregister('run', selection.desired.generation);
-        selection.desired = { selection_id: request.selectionId, run_id: 'run', generation: ++generation, expected_generation: request.expectedGeneration, expected_selection_id: request.expectedSelectionId,
+        if (selection.desired) bridge.unregister(runId, selection.desired.generation);
+        selection.desired = { selection_id: request.selectionId, run_id: runId, generation: ++generation, expected_generation: request.expectedGeneration, expected_selection_id: request.expectedSelectionId,
           target: request.target, state_mode: request.stateMode, status: 'preparing', failure: null, activation_cursor: null };
         return structuredClone(selection.desired);
       }
@@ -97,7 +99,7 @@ function fixture() {
           selection.desired.status = 'active'; selection.desired.activation_cursor = 9;
           selection.active = { generation: request.generation, target: selection.desired.target, identity: selection.desired.target.kind === 'extension' ? selection.desired.target.artifact.identity : artifact('default').identity, activation_cursor: 9 };
           launch.policy_generation = request.generation; launch.policy_target = selection.desired.target;
-          bridge.unregister('run', old); throw new Error('Ready reply lost after commit');
+          bridge.unregister(runId, old); throw new Error('Ready reply lost after commit');
         }
         return structuredClone(selection.desired);
       }
@@ -106,7 +108,7 @@ function fixture() {
         if (selection.desired?.selection_id !== request.selectionId) throw new Error('policy_selection_changed');
         selection.desired.status = method === 'runtime.policy.cancel' ? 'cancelled' : 'failed';
         selection.desired.failure = 'code' in request ? request.code : null;
-        bridge.unregister('run', selection.desired.generation);
+        bridge.unregister(runId, selection.desired.generation);
         const receipt = structuredClone(selection.desired);
         if (method === 'runtime.policy.cancel') { const delay = nextCancelReply; nextCancelReply = undefined; await delay?.(); }
         return receipt;
@@ -300,4 +302,46 @@ it('a delayed cancellation acknowledgement cannot abort a newer route preparatio
   expect(f.selection.desired?.target).toEqual({ kind: 'extension', artifact: artifact('second') });
   expect(f.bridge.binding('run', 2)).toBeDefined(); expect(f.bridge.binding('run', 0)).toBeDefined();
   expect(f.credentials).toEqual(new Set(['policy:0:agentPlanning:configuration', 'policy:2:agentPlanning:configuration']));
+});
+
+
+it('an admitted child prepares and restores its own policy scope and planning generations without inheriting parent state', async () => {
+  const f = fixture(true), runId = f.run.id;
+  f.launch.policy_preparable = true;
+  f.launch.policy_target = { kind: 'default' };
+  f.launch.selection.policy = { name: 'default', version: '1' };
+  f.selection.active.target = { kind: 'default' };
+  f.selection.active.identity = f.launch.selection.policy;
+  f.holdNextLaunch(async () => {
+    f.launch.policy_preparable = false;
+    f.launch.policy_target = { kind: 'extension', artifact: f.current() };
+    f.launch.selection.policy = f.current().identity;
+    const preparedModels = await f.prepareModels.mock.results[0]!.value as Awaited<ReturnType<PolicyModelPreparer>>;
+    f.launch.selection.policy_models = preparedModels.map(entry => entry.capability);
+    f.selection.active.target = f.launch.policy_target;
+    f.selection.active.identity = f.launch.selection.policy;
+    return structuredClone(f.launch);
+  });
+  const first = await f.runtime.preparePolicy(runId);
+  expect(first?.artifact.identity).toEqual(f.current().identity);
+  expect(f.scopes[0]).toEqual({ runId, threadId: 'thread:child', projectId: 'original-project' });
+  expect(f.prepareModels).toHaveBeenCalledWith({ threadId: 'thread:child', generation: 0, requestedModelRoles: ['agentPlanning'] }, expect.any(AbortSignal));
+  const fresh: VarinAgentPolicyInput = { view: { ...input.view, run_id: runId }, event: { kind: 'started' }, state: null };
+  f.bridge.consume({ v: 1, kind: 'agent-policy-request', kernelEpoch: 'epoch', runId, generation: 0, id: 'child-first', binding: first, input: fresh });
+  await tick();
+  expect(f.replies.find(reply => reply.id === 'child-first')).toMatchObject({ ok: true, decision: { state: 'old' } });
+  f.route('new-route');
+  f.reconnect();
+  const recovered = await f.runtime.preparePolicy(runId);
+  expect(recovered?.artifact).toEqual(first!.artifact);
+  expect(f.prepareModels).toHaveBeenLastCalledWith({ threadId: 'thread:child', generation: 0, requestedModelRoles: ['agentPlanning'], savedCapabilities: f.launch.selection.policy_models }, expect.any(AbortSignal));
+  expect(f.scopes).toContainEqual({ runId, threadId: 'thread:child', projectId: 'original-project', requiredBinding: first!.artifact });
+  await f.runtime.refreshPolicy(runId);
+  expect(f.selection.active.generation).toBe(0);
+  expect(f.selection.desired?.target).toEqual({ kind: 'extension', artifact: f.current() });
+  expect(f.credentials).toEqual(new Set(['policy:0:agentPlanning:configuration', 'policy:1:agentPlanning:configuration']));
+  await f.runtime.cancelPolicyUpdate(runId, f.selection.desired!.selection_id);
+  expect(f.bridge.binding(runId, 0)).toEqual(recovered);
+  expect(f.credentials).toEqual(new Set(['policy:0:agentPlanning:configuration']));
+  expect(f.requests.some(request => ['runtime.launch.tools.prepare', 'runtime.launch.mcp.prepare', 'runtime.run.start', 'runtime.run.resume'].includes(request.method))).toBe(false);
 });

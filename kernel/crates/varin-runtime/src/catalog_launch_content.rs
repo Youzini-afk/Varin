@@ -382,11 +382,8 @@ impl LaunchChangePreparation {
                 models,
                 target,
             } => {
-                if self.child_selection.is_some() {
-                    return Err(RuntimeError::Invalid(
-                        "child policy replacement is not supported".into(),
-                    ));
-                }
+                // A child resolves its own policy after acceptance. This changes neither the
+                // original delegation nor the independently frozen tool/source selection.
                 target.validate()?;
                 policy_target = target;
                 if identity.name.is_empty() || identity.version.is_empty() {

@@ -685,9 +685,22 @@ file, resource, question, recursive collaboration and managed process capabiliti
 source projection and private text-write projection remain explicit; process capability additionally
 requires real configured/delegated authority and existing permission gates. A private cwd is not an
 OS sandbox. Ordinary extensions and MCP use the exact original frozen Host declarations. LSP,
-memory/planning/Goal, custom policies, Computer and remote child bindings remain unavailable until
+memory/plan/Goal, Computer and remote child bindings remain unavailable until
 their complete owner contracts are connected; no unsupported list is silently trimmed. The UI displays
 the frozen native descriptors together with actual Launch Host bindings and selected profile facts.
+
+A child uses the ordinary AgentPolicy lifecycle after durable task admission. `preparePolicy` resolves
+its actual Thread/project routing scope, then commits the original artifact and generation through the
+same launch preparation. It neither copies the parent's private checkpoint nor acquires additional tools.
+Policy candidates may change at closed decision boundaries while the child ToolDirectory remains static.
+Declared planning roles bind credentials and model Operations to that child Run/generation; saved roles
+restore their exact original configuration. Planning usage remains attributed to the original delegated
+Goal where one exists; no primary Goal or automatic continuation authority is inherited.
+Compaction jobs keep their internal fixed strategy. A policy
+can pause/deliver/complete through the existing Thread controls and child report/result consumers.
+`createAgentPolicy` derives an independent pin from a still-retained exact policy artifact across ordinary
+replacement; after final release or explicit revocation it cannot resurrect the old artifact. The same
+full described configuration/identity check applies to retained and freshly installed original bindings.
 
 Child extension scopes hold selected original service pins without subscribing to new routing candidates.
 The original supervisor supplies artifact identity for live draining owners as well as active owners;

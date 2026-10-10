@@ -393,7 +393,8 @@ Their content references and prepared publication leases participate in normal G
 can retain state; a different target must accept the original private state explicitly. Incompatibility
 leaves the active generation intact. The user's `restart_state` command resets only strategy-private
 state, retaining history and independent jobs. Preparing, cancelling or restarting a strategy update
-does not resume a paused Run. Fixed child/context policies retain their admitted profile.
+does not resume a paused Run. A child uses this same policy lifecycle while its admitted tool/source
+profile remains fixed. Internal context jobs retain their fixed tool-free strategy.
 
 Private policy requests, replies, cancellation and release identify their actual generation and
 transport epoch. Planning credentials are likewise generation-scoped and exact saved configuration
@@ -652,8 +653,9 @@ resources, questions, child dispatch/status/report/wait and managed process spaw
 and wait. Process access requires the frozen configured capability or actual parent delegation, source
 authority and ordinary permission gates. A process cwd is not an OS sandbox. Selected ordinary
 extension and MCP tools retain the actual parent request's exact bindings; the child does not discover
-new capabilities from later routing or configuration. Planning/memory/Goal, custom policies, LSP,
-Computer and remote child bindings remain separate work. Explicit parent Integration is a separate
+new capabilities from later routing or configuration. Ordinary AgentPolicy and its declared planning
+roles use the child Run's own policy generations and credentials; the policy cannot expand this frozen
+tool directory. Memory/plan/Goal, LSP, Computer and remote child bindings remain separate work. Explicit parent Integration is a separate
 authorized action.
 
 The frozen dispatch body retains original tool declarations, schema generation, MCP provenance and
