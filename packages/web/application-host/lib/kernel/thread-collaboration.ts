@@ -24,7 +24,7 @@ export interface ThreadCollaborationOwners {
   reconcileDomainReceipts?(signal: AbortSignal): Promise<void>;
   onError(operationId: string | undefined, error: unknown): void;
 }
-/** Consumes committed child/process-wait facts, including startup backlog. Maps hold only cancellable live
+/** Consumes committed child/process-wait/follow-up facts, including startup backlog. Maps hold only cancellable live
  * work; Catalog owns task identities, preparation receipts, reports and Wait delivery. */
 export class ThreadCollaboration {
   private readonly tasks = new Map<string, { controller: AbortController; work: Promise<void>; revision: number; recheck: boolean }>();
@@ -127,7 +127,7 @@ export class ThreadCollaboration {
   private async discoverLaunches(signal: AbortSignal): Promise<void> {
     const { runtime } = this.owners;
     if (this.launchCursor === undefined) {
-      // Capture before discovery so a resume committed during discovery is read on the next pass.
+      // Capture before discovery so a resume or follow-up admitted during discovery is replayed.
       const cursor = (await runtime.status(signal)).eventCursor;
       await this.owners.recoverLaunches(signal);
       signal.throwIfAborted();
@@ -140,7 +140,7 @@ export class ThreadCollaboration {
       for (const event of events) {
         if (event.kind.startsWith('operation.')) { this.domainRecoveryNeeded = true; this.dirty = true; }
         const data = event.data as { run_id?: unknown } | null;
-        if (event.kind === 'policy.resumed' && data && typeof data.run_id === 'string') {
+        if ((event.kind === 'policy.resumed' || event.kind === 'followup.admitted') && data && typeof data.run_id === 'string') {
           void this.owners.continueRun(data.run_id, signal).catch(error => {
             if (!signal.aborted) this.owners.onError(undefined, error);
           });

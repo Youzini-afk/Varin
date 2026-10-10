@@ -1,6 +1,7 @@
-import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildWait, LiveRoot, ContextPersonalization, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
+import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildWait, Followup, LiveRoot, ContextPersonalization, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
 
 import type { RunModelSelection, RunModelSelections } from '@varin/protocol';
+import type { FollowupControlAction } from '@varin/protocol';
 import type { PolicySelection, PolicySelections } from '@varin/protocol';
 import type { ExtensionToolBinding, LaunchTool, McpBinding } from '@varin/protocol';
 import type { VarinExtensionServiceProvision } from '@varin/extension-contract';
@@ -71,6 +72,13 @@ export interface ThreadCollaborationAPI {
   cancelWait(identity: ThreadIdentity, waitId: string): Promise<ChildWait>;
   cancelTree(identity: ThreadIdentity): Promise<void>;
 }
+/** One continuation of the original work after the exact native process has stopped. */
+export interface ThreadFollowupsAPI {
+  register(input: ThreadIdentity & { key: string; runId: string; operationId: string }): Promise<Followup>;
+  list(identity: ThreadIdentity): Promise<Followup[]>;
+  /** Revision-checked definition control; a consumed occurrence returns its existing receipt. */
+  control(input: ThreadIdentity & { followupId: string; expectedRevision: number; action: FollowupControlAction }): Promise<Followup>;
+}
 export interface ThreadSnapshot {
   identity: ThreadIdentity;
   /** Read before the snapshot's component queries. Replay after this cursor covers concurrent commits. */
@@ -81,6 +89,7 @@ export interface ThreadSnapshot {
   historyPage: Pick<ThreadHistoryPage, 'head' | 'previous'>;
   inputs: QueuedInput[];
   operations: Operation[];
+  followups: Followup[];
   launch: LaunchIntent | null;
   modelSelection: RunModelSelections;
   policySelection: ThreadPolicyInspection | null;
@@ -126,6 +135,7 @@ export interface ThreadPolicyInspection extends PolicySelections {
 export interface ThreadsAPI {
   plan?: ThreadPlanAPI;
   collaboration?: ThreadCollaborationAPI;
+  followups: ThreadFollowupsAPI;
   listModels(): Promise<ThreadModelInfo[]>;
   selectModel(input: ThreadIdentity & { runId: string; key: string; model: ThreadModel }): Promise<RunModelSelection>;
   list(): Promise<ThreadSummary[]>;

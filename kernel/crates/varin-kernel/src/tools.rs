@@ -227,6 +227,7 @@ enum ResourceOperation {
         executor: String,
     },
     ProcessObservation {
+        source_run_id: String,
         process_id: String,
         read: Option<(u64, Option<u64>)>,
     },
@@ -347,7 +348,7 @@ impl ResourceOperation {
     ) -> (&'static str, Value) {
         match self {
             Self::ChildSourceHandoff{..}|Self::ChildStorageReceipt{..}|Self::ChildRootIdle => ("storage.health",json!({"workspaceId":binding.workspace_id})),
-            Self::ProcessObservation { process_id, read } => {
+            Self::ProcessObservation { process_id, read, .. } => {
                 let mut params = json!({"workspaceId":binding.workspace_id,"processId":process_id});
                 if let Some((cursor, limit)) = read {
                     params["cursor"] = json!(cursor);
@@ -573,6 +574,7 @@ impl KernelResourceClient {
         binding: &ToolBinding,
         context: &ToolExecutionContext,
         process_id: &str,
+        source_run_id: &str,
         read: Option<(u64, Option<u64>)>,
         authorize_only: bool,
         cancel: &CancellationToken,
@@ -581,6 +583,7 @@ impl KernelResourceClient {
             binding,
             context,
             ResourceOperation::ProcessObservation {
+                source_run_id: source_run_id.into(),
                 process_id: process_id.into(),
                 read,
             },
@@ -598,7 +601,7 @@ impl KernelResourceClient {
         process_id: &str,
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
-        self.observe_process(binding, context, process_id, None, true, cancel)
+        self.observe_process(binding, context, process_id, &context.run_id, None, true, cancel)
             .map(|_| ())
     }
     pub(crate) fn with_integration_receipts(mut self,send:impl Fn(IntegrationReceiptRead)->Result<(),KernelError>+Send+Sync+'static)->Self {
@@ -1711,15 +1714,13 @@ pub(crate) fn serve_resource(
                 result
             });
         }
-        if matches!(
-            &request.operation,
-            ResourceOperation::ProcessObservation { .. }
-        ) {
+        if let ResourceOperation::ProcessObservation { source_run_id, .. } = &request.operation {
             return storage.observe_run_process(
                 method,
                 &authorized,
                 &grant,
                 request.binding.root_id.as_deref(),
+                source_run_id,
                 request.authorize_only,
             );
         }

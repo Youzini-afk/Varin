@@ -9,6 +9,7 @@ pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 1;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
+    "runtime.followup.control",
     "runtime.policy.select",
     "runtime.policy.cancel",
     "runtime.policy.fail",
@@ -36,6 +37,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "process.subscription.unsubscribe",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "runtime.followup.control",
     "runtime.policy.select",
     "runtime.policy.cancel",
     "runtime.policy.fail",
@@ -67,6 +69,28 @@ pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &["runtime.history.body"
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupRegisterParams {
+    pub(crate) key: String,
+    pub(crate) run_id: String,
+    pub(crate) operation_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ThreadParams {
+    pub(crate) thread_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupControlParams {
+    pub(crate) followup_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) action: varin_runtime::FollowupControlAction,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -172,12 +196,6 @@ pub(crate) struct RunReconcileParams {
 pub(crate) struct LaunchFailedParams {
     pub(crate) run_id: String,
     pub(crate) code: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct ThreadParams {
-    pub(crate) thread_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1898,6 +1916,19 @@ pub(crate) struct KernelVerificationInputIdentity {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.followup.register" => {
+            serde_json::from_value::<FollowupRegisterParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.list" => serde_json::from_value::<ThreadParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.followup.control" => {
+            serde_json::from_value::<FollowupControlParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.branch.fork" => serde_json::from_value::<BranchForkParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

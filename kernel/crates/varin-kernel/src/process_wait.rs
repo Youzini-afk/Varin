@@ -97,9 +97,9 @@ impl ProcessWaitTools {
         self.check_owner(context, &handle.process_id)?;
         Ok(handle.process_id)
     }
-    fn check_owner(&self, c: &ToolExecutionContext, id: &str) -> Result<(), ExecutionError> {
+    fn check_owner(&self, c: &ToolExecutionContext, id: &str) -> Result<String, ExecutionError> {
         let db = self.catalog.lock().map_err(error)?;
-        db.require_process_observation(&c.run_id, id)
+        let source = db.require_process_observation(&c.run_id, id)
             .map_err(error)?;
         let launch = db
             .launch_metadata(&c.run_id)
@@ -110,7 +110,7 @@ impl ProcessWaitTools {
         {
             return Err(error("process observation source changed"));
         }
-        Ok(())
+        Ok(source.run_id)
     }
     fn validate_contract(
         &self,
@@ -158,9 +158,9 @@ impl ProcessWaitTools {
             let h: Handle = serde_json::from_value(call.arguments.clone()).map_err(error)?;
             (h.process_id, None)
         };
-        self.check_owner(c, &id)?;
+        let source_run_id = self.check_owner(c, &id)?;
         self.resources
-            .observe_process(&self.binding, c, &id, read, authorize_only, cancel)
+            .observe_process(&self.binding, c, &id, &source_run_id, read, authorize_only, cancel)
     }
 }
 impl ToolExecutor for ProcessWaitTools {

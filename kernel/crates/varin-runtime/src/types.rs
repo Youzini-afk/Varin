@@ -84,6 +84,8 @@ pub enum OperationResultMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ExternalReceiptMetadata {
+    /// Original execution-end evidence, independent of business outcome or resource bookkeeping.
+    pub executor_stopped: bool,
     pub executor: String,
     pub identity: String,
     pub epoch: String,

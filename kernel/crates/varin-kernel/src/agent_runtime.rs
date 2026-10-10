@@ -242,6 +242,7 @@ pub(crate) fn spawn(
                 Command::Stop => {
                     if let Some(runtime) = runtime.as_ref() {
                         if let Ok(catalog) = runtime.catalog().lock() {
+                            catalog.stop_followup_admission();
                             catalog.cancel_content_collection();
                         }
                     }
@@ -316,6 +317,7 @@ pub(crate) fn spawn(
                     }
                     if let Some(runtime) = runtime.as_ref() {
                         if let Ok(catalog) = runtime.catalog().lock() {
+                            catalog.stop_followup_admission();
                             catalog.cancel_content_collection();
                         }
                     }
@@ -356,6 +358,24 @@ pub(crate) fn spawn(
                         let catalog = result?;
                         let owner = Arc::new(RunSupervisor::new(catalog));
                         let (notify, notifications) = mpsc::sync_channel(1);
+                        let (continuation_notify, continuation_wakes) = mpsc::sync_channel(1);
+                        let continuation_owner = Arc::downgrade(&owner);
+                        thread::Builder::new().name("thread-continuations".into()).spawn(move || {
+                            let mut failed = false;
+                            while continuation_wakes.recv().is_ok() {
+                                let Some(owner) = continuation_owner.upgrade() else { break; };
+                                match varin_runtime::catalog::followups::reconcile(&owner.catalog()) {
+                                    Ok(_) => failed = false,
+                                    Err(_) if !failed => {
+                                        failed = true;
+                                        if let Ok(mut catalog) = owner.catalog().lock() {
+                                            let _ = catalog.record_recovery_failure("followups", "continuation_reconciliation_failed");
+                                        };
+                                    }
+                                    Err(_) => (),
+                                }
+                            }
+                        })?;
                         owner
                             .catalog()
                             .lock()
@@ -375,8 +395,13 @@ pub(crate) fn spawn(
                                     .lock()
                                     .ok()
                                     .and_then(|catalog| catalog.event_cursor().ok());
+                                // Subscribe before the first capture. Notifications coalesce but
+                                // the worker always rechecks durable facts; its own held state emits
+                                // no repeat events and a concurrent commit retains the next wake.
+                                let _ = continuation_notify.try_send(());
                                 if let Some(cursor) = cursor {
-                                    if event_responses.send(json!({"v":PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":event_epoch,"stream":"durable","cursor":cursor})).is_err() { break; }
+                                    // A disconnected Host projection cannot stop native durable work.
+                                    let _ = event_responses.send(json!({"v":PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":event_epoch,"stream":"durable","cursor":cursor}));
                                 }
                             }
                         });
@@ -552,6 +577,20 @@ pub(crate) fn spawn(
                                 }
                             }
                         }
+                        if method == "runtime.followup.register" {
+                            let p: FollowupRegisterParams = serde_json::from_value(params)?;
+                            let value = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                                .register_followup(&p.key, &p.run_id, &p.operation_id).map_err(domain)?;
+                            // The original Storage receipt may already exist, including when the
+                            // Catalog's metadata became terminal before real stop evidence arrived.
+                            resources.replay_process_terminals(vec![p.operation_id])?;
+                            return Ok(serde_json::to_value(value)?);
+                        }
+                        if method == "runtime.followup.list" {
+                            let p: ThreadParams = serde_json::from_value(params)?;
+                            return Ok(serde_json::to_value(runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                                .followups(&p.thread_id).map_err(domain)?)?);
+                        }
                         if matches!(
                             method,
                             "runtime.policy.select"
@@ -609,6 +648,7 @@ pub(crate) fn spawn(
                                 | "runtime.child.reconcile"
                                 | "runtime.child.wait.cancel"
                                 | "runtime.process.wait.reconcile"
+                                | "runtime.followup.control"
                         ) {
                             let commands = control_commands::ControlCommands {
                                 runtime: runtime.clone(),
@@ -2121,3 +2161,7 @@ mod run_scope_review {
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "followup_process_review.rs"]
+mod followup_process_review;

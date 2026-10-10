@@ -2,6 +2,7 @@ import type { ThreadToolInspection } from '@varin/application-client';
 import type { PlanService } from './plan-service.js';
 import type { ImageAttachment } from '@varin/protocol';
 import { threadInput } from './thread-images.js';
+import { listThreadFollowups } from './thread-followups.js';
 import { createHash } from 'node:crypto';
 import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadSubmit, ThreadSource, ThreadSnapshot, ThreadHistoryPage, ThreadCompact, ThreadContextState, ThreadPrepareSource, ThreadPreparedSource } from '@varin/application-client';
 import type { InputMode, InitialContext, ModelSessionConfiguration, CredentialScope, AgentRuntimeStreamEvent, PolicyResumeReceipt } from './protocol.generated.js';
@@ -377,9 +378,10 @@ export class ThreadAdapter {
     const { eventCursor } = await this.runtime.status();
     const thread = await this.requireIdentity(identity);
     const branch = thread.branches.find(branch => branch.branch_id === identity.branchId)!;
-    const [page, inputs, activeOperations, context] = await Promise.all([
+    const [page, inputs, activeOperations, context, followups] = await Promise.all([
       this.readHistoryPage(identity.branchId, branch.head ? { headId: branch.head } : undefined),
       this.runtime.inputs(identity.branchId), this.runtime.activeOperations(identity.threadId, identity.branchId), this.context(identity),
+      listThreadFollowups(this, identity),
     ]);
     const history = page.items;
     if (history.some(item => item.thread_id !== identity.threadId) || inputs.some(item => item.thread_id !== identity.threadId)) {
@@ -406,7 +408,7 @@ export class ThreadAdapter {
     const modelSelection = shownRun ? await this.runtime.modelSelections(shownRun.id) : {desired:null,active:null};
     const policySelection = shownRun && launch ? await this.runtime.inspectPolicy(shownRun.id) : null;
     return { identity, eventCursor, thread, activeRun, history, historyPage: { head: page.head, previous: page.previous }, inputs,
-      operations: [...operations.values()], launch, modelSelection, policySelection, context, children: await this.children(identity) };
+      operations: [...operations.values()], followups, launch, modelSelection, policySelection, context, children: await this.children(identity) };
   }
 
   private async recordLaunchFailure(runId: string, error: unknown): Promise<void> {

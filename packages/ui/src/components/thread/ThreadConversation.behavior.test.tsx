@@ -25,7 +25,7 @@ const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:ui-fixtur
 function initialSnapshot(active = false): ThreadSnapshot {
   const run = { id: 'ui-run', thread_id: identity.threadId, branch_id: identity.branchId, state: 'generating' as const, revision: 1, epoch: 1, configuration: { providerId: 'fixture-provider', model: 'fixture-model' }, cancel_requested: false, waiting_on: null };
   return { identity, eventCursor: 0, thread: { thread_id: identity.threadId, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: null, active_run_id: active ? run.id : null, latest_run: active ? run : null }] }, activeRun: active ? run : null,
-    history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], launch: null, modelSelection: {desired:null,active:null}, policySelection: null, context: { checkpoint: null, jobs: [] } };
+    history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], followups: [], launch: null, modelSelection: {desired:null,active:null}, policySelection: null, context: { checkpoint: null, jobs: [] } };
 }
 function fixture(active = false) {
   const view = initialSnapshot(active);
@@ -43,7 +43,7 @@ function fixture(active = false) {
   });
   let listener: Parameters<ThreadsAPI['observe']>[1] | undefined;
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
-  const api: ThreadsAPI = { listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
+  const api: ThreadsAPI = { followups: { register: unused, list: unused, control: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, retryPreparation: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
@@ -137,6 +137,49 @@ it('active-thread controls queue the chosen mode, save/cancel queued text, and s
   expect(f.cancelRun).toHaveBeenCalledWith('ui-run');
   expect(container.textContent).toContain('cancelled');
   expect(button('Stop run')).toBeUndefined();
+});
+
+it('registers one process follow-up through an uncertain reply and controls only its current definition', async () => {
+  const f = fixture(true);
+  f.view.operations = [{ id: 'process:original', run_id: 'ui-run', epoch: 1, revision: 1,
+    phase: 'running', outcome: null, effect: 'dispatched', cancel_requested: false,
+    lifetime: 'environment', handed_off: true, executor: 'process_spawn', waiting_on: null,
+    intent: {}, result: null, external_receipt: null, call_completion: {
+      kind: 'job_accepted', operation_id: 'process:original', phase: 'running', effect: 'dispatched', lifetime: 'environment',
+    }, execution_owner: null }];
+  const followup: ThreadSnapshot['followups'][number] = { id: 'followup:one', revision: 1, generation: 1,
+    thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', operation_id: 'process:original', state: 'active',
+    wait: { id: 'wait:process', kind: 'process_stopped', after_cursor: 1, trigger_cursor: null, state: 'waiting' }, occurrence: null };
+  const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValueOnce(new Error('uncertain follow-up reply'))
+    .mockImplementation(async () => { f.view.followups = [followup]; return followup; });
+  const control = vi.fn<ThreadsAPI['followups']['control']>(async input => {
+    expect(input.expectedRevision).toBe(followup.revision);
+    followup.revision += 1;
+    followup.state = input.action === 'pause' ? 'paused' : input.action === 'resume' ? 'active' : 'cancelled';
+    return structuredClone(followup);
+  });
+  const resumeRun = vi.fn(f.api.resume); f.api.resume = resumeRun;
+  f.api.followups = { register, control, list: async () => f.view.followups };
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Continue once when process ends').click());
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('uncertain follow-up reply');
+  await act(async () => button('Continue once when process ends').click());
+  expect(register.mock.calls[1]![0]).toEqual(register.mock.calls[0]![0]);
+  expect(register.mock.calls[0]![0]).toMatchObject({ ...identity, runId: 'ui-run', operationId: 'process:original' });
+  expect(button('Continue once when process ends')).toBeUndefined();
+  await act(async () => button('Pause follow-up').click());
+  await act(async () => button('Resume follow-up').click());
+  expect(control.mock.calls.map(([input]) => [input.action, input.expectedRevision])).toEqual([['pause', 1], ['resume', 2]]);
+  expect(resumeRun).not.toHaveBeenCalled();
+  followup.wait = { ...followup.wait, state: 'consumed', trigger_cursor: 4 };
+  followup.occurrence = { id: 'occurrence:one', generation: 1, trigger_cursor: 4, receipt_identity: 'receipt:process', receipt_epoch: 'kernel:original',
+    state: 'admitted', hold_reason: null, receipt: { thread_id: identity.threadId, branch_id: identity.branchId,
+      run_id: 'continuation:run', input_id: 'environment:input', cursor: 5 } };
+  await act(async () => f.emit({ cursor: 5, subject: followup.id, revision: 4, kind: 'followup.admitted', data: { run_id: 'continuation:run' } }));
+  expect(container.querySelector('[aria-label="Pending process follow-up"]')).toBeNull();
+  expect(button('Cancel follow-up')).toBeUndefined();
+  expect(container.textContent).toContain('continuation run continuation:run');
+  expect(f.cancelRun).not.toHaveBeenCalled();
 });
 
 

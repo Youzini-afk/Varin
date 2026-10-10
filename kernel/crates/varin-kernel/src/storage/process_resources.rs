@@ -40,6 +40,10 @@ fn contains(parent: &Path, child: &Path) -> bool {
     }
 }
 impl Storage {
+    #[cfg(test)]
+    pub(crate) fn set_test_process_worker_executable(&mut self, executable: PathBuf) {
+        self.processes.set_test_worker_executable(executable);
+    }
     pub(crate) fn set_process_subscriptions(&mut self, subscriptions: process::subscriptions::ProcessSubscriptions) {
         self.processes.set_subscriptions(subscriptions);
     }
@@ -314,11 +318,12 @@ impl Storage {
         self.refresh_process_record(id)?
             .ok_or_else(|| KernelError::Storage("process intent disappeared".into()))
     }
-    /// Exact read-only delegation for a Catalog-validated process of the same Run.
+    /// Exact read-only delegation for a Catalog-validated original process Run. A one-shot
+    /// continuation may read only its trigger process; the Catalog supplies source_run_id.
     /// The current grant was authorized by the Storage actor; the original grant is never
     /// revived or substituted as the caller. No persisted observer or control authority exists.
     pub(crate) fn observe_run_process(&mut self, method: &str, params_value: &Value,
-        grant: &Grant, root_id: Option<&str>, authorize_only: bool) -> Result<Value, KernelError> {
+        grant: &Grant, root_id: Option<&str>, source_run_id: &str, authorize_only: bool) -> Result<Value, KernelError> {
         if !matches!(method,"process.inspect"|"process.read") {
             return Err(KernelError::Authorization("process delegation is observation-only".into()));
         }
@@ -327,7 +332,7 @@ impl Storage {
         let actor:String=self.conn.query_row("SELECT grant_id FROM process_records WHERE process_id=?1",[id],|row|row.get(0))?;
         let original=self.load_grant(&actor)?;
         if original.revoked || grant.revoked || original.run_id.is_none() || original.thread_id.is_none()
-            || original.run_id != grant.run_id || original.thread_id != grant.thread_id
+            || original.run_id.as_deref() != Some(source_run_id) || original.thread_id != grant.thread_id
             || original.owning_workspace.as_deref() != Some(workspace)
             || original.owning_workspace != grant.owning_workspace || original.execution_workspace != grant.execution_workspace
             || original.storage_identity != grant.storage_identity || original.host_id != grant.host_id

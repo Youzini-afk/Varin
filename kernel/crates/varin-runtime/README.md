@@ -130,7 +130,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 19, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
+Catalog version 20, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -363,6 +363,37 @@ acknowledgement survive in that same transient launch owner and recheck eligibil
 a cancelled old epoch cannot erase a newer valid wake. The client separates `resume(runId, waitId)` from
 `retryPreparation(runId)`, and the UI uses the exact displayed pause while preserving Stop run during
 pending requests. See the ordinary [SDK example](../../../examples/extensions/delivery-pause-policy/README.md).
+
+## One-shot process follow-ups
+
+`runtime.followup.register` explicitly authorizes one continuation of the original work after a
+selected accepted `process_spawn` has really stopped and its original Run has ended. The Catalog
+requires the canonical JobAccepted or original executor receipt; a tool intent alone is not an
+accepted process. The definition freezes the original Thread/branch, launch, configuration and
+context scope. Its next-Run Wait and occurrence are distinct from the existing Run-bound process Wait.
+No Goal, calendar rule, arbitrary user prompt or restored old Run is created by this command.
+
+The original executor receipt retains monotonic stop evidence; terminal phase, EffectNone and absent
+occupancy do not establish it. Registration records the source cursor and rechecks an already stored
+stop fact. A Kernel event worker observes durable facts even without an attached Host. It prepares the
+typed Environment history on a content worker, then one transaction consumes the occurrence and
+admits its new input, Run and frozen launch. Startup discovery and stale preparation reuse those
+identities. Current user work, queued inputs, explicit Pause and changed context/source scope hold the
+occurrence rather than being overwritten. Same-source head/context refresh does not invalidate an
+authorization simply because history advanced.
+
+Definition pause/resume/cancel checks its revision. Cancelling the original Run cancels its unconsumed
+authorizations in the same transaction. Once consumed, definition controls return the original receipt;
+the new Run has its own cancellation identity. Its actual terminal transition settles the occurrence.
+Shutdown fences old-worker admission; a later owner can recover unconsumed work. Held states do not
+emit repeated events or drive a polling loop. Preparation failures remain visible and explicitly retryable.
+
+The continuation can inspect/read only its exact original process when the retained tool selection
+already permits that operation. The Catalog derives the original Run from the consumed occurrence;
+Storage checks both original and current grants, Thread, workspace and physical source. No other process,
+stdin, kill or new process Wait is delegated, and revoked original authority stays revoked. Process
+output remains in its existing owner, not in a second follow-up output store. Definition launch content
+and original receipt/history references remain normal ContentStore roots.
 
 ## Policy-originated planning models
 

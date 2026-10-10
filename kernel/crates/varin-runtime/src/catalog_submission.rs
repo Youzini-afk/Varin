@@ -29,6 +29,10 @@ pub(super) enum SubmissionOrigin {
         parent_thread_id: String,
         checkpoint: Option<String>,
     },
+    Continuation {
+        occurrence_id: String,
+        checkpoint: Option<String>,
+    },
     Summary,
 }
 pub struct PreparedSubmission {
@@ -176,7 +180,8 @@ impl PreparedSubmission {
         }
         execution_persistence::user_input_items("admission", &command.input)?;
         let checkpoint = match &origin {
-            SubmissionOrigin::User { checkpoint } | SubmissionOrigin::Child { checkpoint, .. } => {
+            SubmissionOrigin::User { checkpoint } | SubmissionOrigin::Child { checkpoint, .. }
+            | SubmissionOrigin::Continuation { checkpoint, .. } => {
                 checkpoint
             }
             SubmissionOrigin::Summary => &None,

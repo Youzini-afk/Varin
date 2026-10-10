@@ -1092,6 +1092,8 @@ impl Catalog {
                     super::policy_checkpoint::consume(&tx, run_id)?;
                 }
                 run.state = *state;
+                if *state == RunState::Cancelled { super::followups::cancel_source_run(&tx, run_id)?; }
+                if state.terminal() { super::followups::settle_run(&tx, &run)?; }
                 run.waiting_on = waiting_on.clone();
                 run.revision += 1;
                 put(&tx, "runs", run_id, &run)?;
@@ -2024,6 +2026,25 @@ fn confirmed_no_effect_receipt(operation: &Operation, outcome: Outcome, content:
     })
 }
 
+/// This event indexes the original receipt; it is not a second writable process state.
+/// The only caller is the trusted original executor-receipt transaction.
+fn record_executor_stopped(
+    tx: &Transaction<'_>,
+    operation: &Operation,
+    receipt: &ExternalReceiptMetadata,
+) -> Result<()> {
+    if receipt.executor_stopped {
+        event(
+            tx,
+            &operation.id,
+            operation.revision,
+            "operation.executor_stopped",
+            json!({"operation_id":operation.id,"executor":receipt.executor,"receipt_identity":receipt.identity,"receipt_epoch":receipt.epoch}),
+        )?;
+    }
+    Ok(())
+}
+
 pub(super) fn apply_external_terminal(op: &mut Operation, receipt: &ExternalReceiptMetadata) {
     op.phase = OperationPhase::Terminal;
     op.outcome = Some(receipt.outcome);
@@ -2062,7 +2083,8 @@ impl Catalog {
         prepared: super::result_content::PreparedExternalReceipt,
         executor_stopped: bool,
     ) -> Result<Operation> {
-        let receipt = prepared.receipt;
+        let mut receipt = prepared.receipt;
+        receipt.executor_stopped = executor_stopped;
         let tx = self.db.transaction()?;
         let mut op: Operation = super::record(&tx, "operations", operation_id)?;
         if super::policy_body::PolicyActionMetadata::from_operation(&op)?.is_some() {
@@ -2087,7 +2109,17 @@ impl Catalog {
         let settle = op.handed_off
             || (op.phase == OperationPhase::Terminal && op.outcome == Some(Outcome::Indeterminate));
         if let Some(previous) = &op.external_receipt {
-            if previous == &receipt {
+            let mut same_receipt = receipt.clone();
+            same_receipt.executor_stopped = previous.executor_stopped;
+            if previous == &same_receipt {
+                let newly_stopped = executor_stopped && !previous.executor_stopped;
+                receipt.executor_stopped |= previous.executor_stopped;
+                if newly_stopped {
+                    op.external_receipt = Some(receipt.clone());
+                    op.revision += 1;
+                    put(&tx, "operations", operation_id, &op)?;
+                    record_executor_stopped(&tx, &op, &receipt)?;
+                }
                 // The receipt can precede ToolSettled/handoff and survive a crash. Recovery's
                 // uncertain Operation is not proof that this already-known fact was applied.
                 let applied = op.phase == OperationPhase::Terminal
@@ -2144,6 +2176,8 @@ impl Catalog {
                 "job is already settled with another receipt".into(),
             ));
         }
+        let previously_stopped = op.external_receipt.as_ref().is_some_and(|old| old.executor_stopped);
+        receipt.executor_stopped |= previously_stopped;
         op.external_receipt = Some(receipt.clone());
         op.revision += 1;
         if settle {
@@ -2161,6 +2195,9 @@ impl Catalog {
             },
             serde_json::to_value(&op)?,
         )?;
+        if receipt.executor_stopped && !previously_stopped {
+            record_executor_stopped(&tx, &op, &receipt)?;
+        }
         if executor_stopped {
             tx.execute(
                 "DELETE FROM resource_occupancy WHERE operation_id=?1",
@@ -2210,7 +2247,7 @@ impl Catalog {
         rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
     }
     pub fn pending_external_operations(&self, executor: &str) -> Result<Vec<String>> {
-        let mut statement=self.db.prepare("SELECT id FROM operations WHERE json_extract(body,'$.executor')=?1 AND (json_extract(body,'$.phase')!='terminal' OR json_extract(body,'$.outcome')='indeterminate') ORDER BY id")?;
+        let mut statement=self.db.prepare("SELECT id FROM operations WHERE json_extract(body,'$.executor')=?1 AND (json_extract(body,'$.phase')!='terminal' OR json_extract(body,'$.outcome')='indeterminate' OR (?1='process_spawn' AND coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 AND EXISTS(SELECT 1 FROM followups f WHERE f.operation_id=operations.id AND json_extract(f.body,'$.wait.state') IN ('waiting','observed')))) ORDER BY id")?;
         let rows = statement.query_map([executor], |row| row.get(0))?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }

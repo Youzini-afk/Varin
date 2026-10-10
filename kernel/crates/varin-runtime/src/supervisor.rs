@@ -797,7 +797,10 @@ impl RunSupervisor {
     }
     pub fn shutdown(&self) -> Result<()> {
         self.stopping.store(true, Ordering::Release);
-        self.catalog.lock().map_err(error)?.cancel_content_collection();
+        { let catalog = self.catalog.lock().map_err(error)?;
+            catalog.stop_followup_admission();
+            catalog.cancel_content_collection();
+        }
         let workers = {
             let mut workers = self.workers.lock().map_err(error)?;
             for worker in workers.values() {

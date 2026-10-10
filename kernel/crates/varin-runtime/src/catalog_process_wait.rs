@@ -13,7 +13,8 @@ impl Catalog {
         let run = self.run(run_id)?;
         let process = self.operation(process_id)?;
         let owner = self.run(&process.run_id)?;
-        if owner.id != run.id
+        let delegated = self.followup_process_source(run_id, process_id)?;
+        if (owner.id != run.id && delegated.as_deref() != Some(owner.id.as_str()))
             || owner.thread_id != run.thread_id
             || process.executor.as_deref() != Some("process_spawn")
         {
@@ -31,7 +32,9 @@ impl Catalog {
         context: &ToolExecutionContext,
         process_id: &str,
     ) -> Result<Wait> {
-        self.require_process_observation(&context.run_id, process_id)?;
+        if self.require_process_observation(&context.run_id, process_id)?.run_id != context.run_id {
+            return Err(RuntimeError::Conflict("follow-up process delegation is read-only, not a new process wait".into()));
+        }
         let request_id = match &context.origin {
             ToolOrigin::ModelStep { request_id } => request_id,
             _ => {

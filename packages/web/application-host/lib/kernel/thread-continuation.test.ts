@@ -151,6 +151,76 @@ it('slow startup launch cannot block the existing child/process pump or a later 
   } finally { release(); collaboration.stop(); await tick(); }
 });
 
+it('a committed follow-up uses the same cold launch owner, while unrelated and repeated durable events cannot relaunch it', async () => {
+  const f = fixture();
+  const events: RuntimeEvent[] = [];
+  let listener!: (event: AgentRuntimeStreamEvent) => void;
+  const runtime = Object.assign(f.runtime, {
+    onEvent: (handler: typeof listener) => { listener = handler; return () => {}; }, onExit: () => () => {}, onReady: () => () => {},
+    reconcileChildren: async () => [], reconcileProcessWaits: async () => [], children: async () => [], unacceptedChildSources: async () => [],
+    status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
+  });
+  const continues = vi.fn((runId: string, signal: AbortSignal) => f.adapter.continueLaunch(runId, { signal }));
+  const collaboration = new ThreadCollaboration({ kernel: {} as never, storageAdapter: {} as never,
+    resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
+    runtime: runtime as unknown as AgentRuntimeClient, workingStates: {} as never, prepareContext: {} as never,
+    continueRun: continues, recoverLaunches: signal => f.adapter.recover(signal), onError: (_id, error) => { f.errors.push(error); } });
+  const notify = () => listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: events.at(-1)!.cursor });
+  try {
+    await collaboration.recover();
+    // A prior manual Pause is still authoritative even if an old admitted notification replays.
+    events.push({ cursor: 1, subject: 'followup:old', revision: 2, kind: 'followup.admitted', data: { run_id: f.run.id } });
+    notify(); await vi.waitFor(() => expect(continues).toHaveBeenCalledOnce()); await tick();
+    expect(f.run.waiting_on).toBe('wait:one'); expect(f.runtime.resumeRun).not.toHaveBeenCalled();
+    expect(f.runtime.rebindLaunch).not.toHaveBeenCalled();
+    // Only the exact follow-up admission wakes cold preparation. Generic accepted Runs may be children.
+    f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable'; f.run.waiting_on = null;
+    events.push({ cursor: 2, subject: 'run:unprepared-child', revision: 1, kind: 'run.accepted', data: { run_id: 'run:unprepared-child' } });
+    events.push({ cursor: 3, subject: 'followup:process', revision: 1, kind: 'followup.registered', data: { run_id: f.run.id } });
+    notify(); await tick(); await tick(); expect(continues).toHaveBeenCalledOnce();
+    events.push({ cursor: 4, subject: 'followup:process', revision: 2, kind: 'followup.admitted', data: {
+      run_id: f.run.id, followup_id: 'followup:process', occurrence_id: 'occurrence:process', source_run_id: 'run:source', operation_id: 'operation:process',
+    } });
+    notify(); await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());
+    expect(f.models.rebindModel).toHaveBeenCalledWith(f.run.configuration, f.launch.selection.credential_scope);
+    notify(); await tick(); await tick();
+    expect(continues).toHaveBeenCalledTimes(2); expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce();
+    expect(f.runtime.resumeRun).not.toHaveBeenCalled(); expect(f.errors).toEqual([]);
+  } finally { collaboration.stop(); }
+});
+
+it('startup cursor discovery retains a follow-up admitted during the saved-launch scan and discovers saved work after an epoch change', async () => {
+  const f = fixture(); f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable'; f.run.waiting_on = null;
+  let release!: () => void; const scanned = new Promise<void>(resolve => { release = resolve; });
+  f.runtime.pendingLaunches.mockImplementationOnce(async () => { await scanned; return []; });
+  let listener!: (event: AgentRuntimeStreamEvent) => void; let exit!: () => void; let ready!: () => void;
+  const events: RuntimeEvent[] = [];
+  const runtime = Object.assign(f.runtime, {
+    onEvent: (handler: typeof listener) => { listener = handler; return () => {}; },
+    onExit: (handler: () => void) => { exit = handler; return () => {}; }, onReady: (handler: () => void) => { ready = handler; return () => {}; },
+    reconcileChildren: async () => [], reconcileProcessWaits: async () => [], children: async () => [], unacceptedChildSources: async () => [],
+    status: async () => ({ eventCursor: events.at(-1)?.cursor ?? 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
+  });
+  const collaboration = new ThreadCollaboration({ kernel: {} as never, storageAdapter: {} as never,
+    resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
+    runtime: runtime as unknown as AgentRuntimeClient, workingStates: {} as never, prepareContext: {} as never,
+    continueRun: (runId, signal) => f.adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => f.adapter.recover(signal),
+    onError: (_id, error) => { f.errors.push(error); } });
+  try {
+    const discovery = collaboration.recover();
+    await vi.waitFor(() => expect(f.runtime.pendingLaunches).toHaveBeenCalledOnce());
+    events.push({ cursor: 1, subject: 'followup:process', revision: 2, kind: 'followup.admitted', data: { run_id: f.run.id } });
+    listener({ v: 1, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 1 });
+    release(); await discovery;
+    await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());
+    // A new Host epoch discovers the Catalog's saved launch even with no new event notification.
+    exit(); f.launch.startable = true; ready();
+    await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledTimes(2));
+    expect(f.runtime.pendingLaunches).toHaveBeenCalledTimes(2);
+    expect(f.runtime.resumeRun).not.toHaveBeenCalled(); expect(f.errors).toEqual([]);
+  } finally { release(); collaboration.stop(); }
+});
+
 
 it('Run or epoch cancellation detaches cold credential preparation before it can release or rebind an owner', async () => {
   const f = fixture(); f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable';
