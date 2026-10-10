@@ -227,7 +227,7 @@ impl RunAssembly {
         }
         if !is_context_job {
             // Context ownership is independent of the selected tool profile.
-            // Read-only children synchronize their own admitted notes without gaining memory tools.
+            // Children synchronize their own notes even when no memory tool was selected.
             start =
                 crate::memory::configure_context(start, runtime.catalog(), memory_bridge.clone());
         }
@@ -358,13 +358,13 @@ impl RunAssembly {
                     resources.clone(),
                 ));
             }
-            if !is_child { declarations.push(crate::memory::declaration(
+            declarations.push(crate::memory::declaration(
                 runtime.catalog(),
                 memory_bridge.clone(),
                 true,
-            )); }
+            ));
         }
-        if plan_eligible && !is_child {
+        if plan_eligible {
             declarations.push(crate::plan::declaration(
                 runtime.catalog(),
                 plan_bridge.clone(),

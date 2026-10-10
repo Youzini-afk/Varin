@@ -22,7 +22,7 @@ export class PlanService {
     const basis = context?.personalization;
     if (!basis) throw new PlanScopeUnavailable('plan-not-ready');
     if (basis.sessionId !== identity.threadId) throw new Error('Context belongs to another Thread');
-    if (basis.mode !== 'agent' || basis.threadRole !== 'main' || await this.runtime.childForThread(identity.threadId)) {
+    if (basis.mode !== 'agent' || (basis.threadRole !== 'main' && !await this.runtime.childForThread(identity.threadId))) {
       throw new PlanScopeUnavailable('plan-unsupported');
     }
   }

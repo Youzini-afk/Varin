@@ -8,6 +8,15 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-10 增量：子任务普通记忆、自身计划与报告事实
+
+- 已冻结选择的 child memory/todo 通过原声明、ToolDirectory、ModelStep 或 PolicyAction 执行。普通继承可包含父目录中实际存在的 ordinary memory/plan；明确未选不自动补回。`read_only` 只描述来源/工作目录，不禁止已选择的普通 notes/plan 更新。Bot/context/伪造角色不借此成为真实 child 受理。
+- `currentThread` 笔记归实际 child Thread；project/global 仍按原普通权限，父/兄弟私有笔记不继承。AgentPersonalization/Storage 与 KnowledgeStore 继续唯一拥有正文、CAS、原 mutation receipt。child 初始计划为空，不复制父计划；公共 Thread 计划读写/fork 与 Agent 工具使用相同 revision/历史选择。用户编辑计划不依赖 Agent 是否选 todo。
+- 真实两 origin CAS 冲突链暴露既有 child 报告的次级推断：历史任一失败模型工具曾永久使报告失败，而策略图没有同样历史形状。本次按设计删除该永久聚合，由原 Run 终态与真实文本报告决定结果。冲突后读新 ref、合法更新、正常完成可交报告；原冲突 Failed/None、未知效果及文件停止屏障仍原样保留。报告完成不宣称每个工具成功。
+- 最终 runtime **324/0、2 ignored**，kernel **70/0、11 ignored**；真实两 origin、未选工具、在途取消→重开原 receipt、不覆盖之后 UI 修改，以及既有策略/协作消费者均通过。Fresh binary 的真实 guardian/WorkingResult **1/1** 保持独立文件结果事实。准确 Linux x64 identity `0.9.25` stage SHA-256 `63458e925f0c85cfffc2fcf4dde02d0476b171376d759f41e6ed996e54f00a9c`；构建前后 Rust 输入清单一致。
+- Host **34/34**、ThreadPlan UI **12/12**，Host 类型/lint/实际 bundle、all-targets 与生成协议/文档检查通过。独审原 Host 两 origin 红例复验通过，另验证 shared global/project 写删和 parent/sibling/外项目私有 ID 拒绝。组件中的 Catalog scope/history 与 notes Storage 原语明确为 fixture；计划数据库/private worker 是实际 owner。完整 Host IPC 组合已补复跑入口但未执行，不计成功。
+- 后续继续同任务发现/会话互读、定向消息/等待/新续接，以及 Goal/LSP/Computer/远端等剩余领域。用户验收后负责全面迁移的边界不变。见[本阶段验收记录](../reviews/runtime-child-memory-plan-2026-10-10.md)。
+
 ## 2026-10-10 增量：子任务独立策略与规划模型
 
 - 已受理 child Run 现在使用原 AgentPolicy/PolicyBridge，而非固定默认循环。首次准备按真实 child Thread 与已准入 project 路由，原 Launch/generation 提交完整 artifact/configuration；不复制父策略私有状态、不增加 preset 配置源。恢复先恢复原提交身份与保存的 planning 模型，再按原候选协议处理后来路由。

@@ -1,6 +1,6 @@
 //! Report selection and Wait history bodies are prepared by workers, then fenced by Catalog.
 use super::*;
-use crate::execution::{Content, ConversationItem, ToolCompletion};
+use crate::execution::{Content, ConversationItem};
 use collaboration::{ChildReport, ChildTask, WAIT_TOOL};
 
 pub struct ChildReportPreparation {
@@ -39,7 +39,6 @@ impl ChildReportPreparation {
             )?;
             let mut ancestor = head.clone();
             let mut history_ids = Vec::new();
-            let mut failed_tool = false;
             while let Some(id) = ancestor {
                 let item = self
                     .content
@@ -55,22 +54,15 @@ impl ChildReportPreparation {
                     {
                         history_ids.push(item.id)
                     }
-                    Content::ToolResult { result } => match result.completion {
-                        ToolCompletion::Result { outcome, .. } if outcome != Outcome::Succeeded => {
-                            failed_tool = true
-                        }
-                        ToolCompletion::NotDispatched { .. } => failed_tool = true,
-                        _ => (),
-                    },
                     _ => (),
                 }
             }
             history_ids.reverse();
             let outcome = match run.state {
                 RunState::Cancelled => Outcome::Cancelled,
-                RunState::Completed if !history_ids.is_empty() && !failed_tool => {
-                    Outcome::Succeeded
-                }
+                // The report describes the Run's terminal result. Individual tool failures
+                // and uncertain effects retain their own original receipts and file barrier.
+                RunState::Completed if !history_ids.is_empty() => Outcome::Succeeded,
                 _ => Outcome::Failed,
             };
             let report = ChildReport {
@@ -123,11 +115,16 @@ impl Catalog {
         {
             return Ok(false);
         }
-        child.state = if !child.code_result.settled() { "settling" } else { match prepared.report.outcome {
-            Outcome::Succeeded => "completed",
-            Outcome::Cancelled => "cancelled",
-            _ => "failed",
-        } }.into();
+        child.state = if !child.code_result.settled() {
+            "settling"
+        } else {
+            match prepared.report.outcome {
+                Outcome::Succeeded => "completed",
+                Outcome::Cancelled => "cancelled",
+                _ => "failed",
+            }
+        }
+        .into();
         child.report = Some(prepared.report);
         self.publish_child_report(child)?;
         Ok(true)
@@ -179,10 +176,15 @@ pub fn reconcile_reports(catalog: &std::sync::Mutex<Catalog>) -> Result<()> {
             owner.attach_child_result_bound(&operation_id, result, effect, &bindings)?;
         }
     }
-    let receipts = catalog.lock().map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?.capture_child_receipts()?;
+    let receipts = catalog
+        .lock()
+        .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?
+        .capture_child_receipts()?;
     for receipt in receipts {
         let (identity, prepared) = receipt.load()?;
-        catalog.lock().map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?
+        catalog
+            .lock()
+            .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?
             .record_external_receipt_prepared(&identity, prepared, true)?;
     }
     Ok(())
@@ -412,12 +414,15 @@ impl Catalog {
             Outcome::Succeeded
         });
         op.effect = Effect::None;
-        op.result = Some(OperationResultMetadata::Control { value:
-            json!({"child_operation_id":child.operation_id,"report_history_id":item_id,"wait_cancelled":wait.cancelled}),
-         });
+        op.result = Some(OperationResultMetadata::Control {
+            value: json!({"child_operation_id":child.operation_id,"report_history_id":item_id,"wait_cancelled":wait.cancelled}),
+        });
         op.revision += 1;
         put(&tx, "operations", &op.id, &op)?;
-        tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1", [operation_id])?;
+        tx.execute(
+            "DELETE FROM resource_occupancy WHERE operation_id=?1",
+            [operation_id],
+        )?;
         let cursor = event(
             &tx,
             &op.id,
@@ -491,11 +496,23 @@ pub struct ChildReceiptPreparation {
 }
 impl ChildReceiptPreparation {
     pub fn load(self) -> Result<(String, super::result_content::PreparedExternalReceipt)> {
-        let report = self.child.report.as_ref().expect("captured immutable report");
+        let report = self
+            .child
+            .report
+            .as_ref()
+            .expect("captured immutable report");
         let identity = self.child.operation_id;
         let prepared = self.content.write_external_receipt(ExternalReceipt {
-            executor: collaboration::DISPATCH_TOOL.into(), identity: identity.clone(), epoch: "collaboration-v1".into(),
-            outcome: if self.child.code_result.effect()==Effect::Unknown {Outcome::Indeterminate}else{report.outcome}, effect: self.child.code_result.effect(), result: json!({"report":report,"code_result":self.child.code_result}),
+            executor: collaboration::DISPATCH_TOOL.into(),
+            identity: identity.clone(),
+            epoch: "collaboration-v1".into(),
+            outcome: if self.child.code_result.effect() == Effect::Unknown {
+                Outcome::Indeterminate
+            } else {
+                report.outcome
+            },
+            effect: self.child.code_result.effect(),
+            result: json!({"report":report,"code_result":self.child.code_result}),
         })?;
         Ok((identity, prepared))
     }
@@ -503,8 +520,20 @@ impl ChildReceiptPreparation {
 impl Catalog {
     pub fn capture_child_receipts(&self) -> Result<Vec<ChildReceiptPreparation>> {
         let mut statement=self.db.prepare("SELECT c.body FROM child_tasks c JOIN operations o ON o.id=c.id WHERE json_extract(c.body,'$.report') IS NOT NULL AND (json_extract(o.body,'$.external_receipt') IS NULL OR (json_extract(o.body,'$.effect')='unknown' AND json_extract(c.body,'$.code_result.effect')!='unknown')) AND json_extract(o.body,'$.call_completion.kind')='job_accepted'")?;
-        let rows=statement.query_map([],|row|row.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
-        rows.into_iter().map(|row|serde_json::from_str::<ChildTask>(&row).map_err(Into::into)).collect::<Result<Vec<_>>>()?
-            .into_iter().filter(|child|child.code_result.settled()).map(|child|Ok(ChildReceiptPreparation{child,content:self.prepare_result_content()})).collect()
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .map(|row| serde_json::from_str::<ChildTask>(&row).map_err(Into::into))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .filter(|child| child.code_result.settled())
+            .map(|child| {
+                Ok(ChildReceiptPreparation {
+                    child,
+                    content: self.prepare_result_content(),
+                })
+            })
+            .collect()
     }
 }

@@ -1,4 +1,4 @@
-//! Main-Thread plans. Catalog supplies frozen identity; KnowledgeStore owns bodies and receipts.
+//! Ordinary Thread plans. Catalog supplies frozen identity; KnowledgeStore owns bodies and receipts.
 use super::plan_bridge::PlanBridge;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -67,19 +67,24 @@ pub(crate) fn schema() -> ToolSchema {
             "required":["action"],"additionalProperties":false}),
     }
 }
-/// Both schema exposure and execution revalidate the real ordinary main Thread admission.
+/// Both schema exposure and execution revalidate the real ordinary Thread admission.
 pub(crate) fn eligible(catalog: &Catalog, run_id: &str) -> Result<bool, ExecutionError> {
     let run = catalog.run(run_id).map_err(error)?;
     if catalog.is_context_job(run_id).map_err(error)? {
         return Ok(false);
     }
     let basis = catalog.run_context_scope(run_id).map_err(error)?;
-    Ok(basis.is_some_and(|basis| {
-        basis.mode == "agent" && basis.thread_role == "main" && basis.session_id == run.thread_id
-    }) && catalog
-        .child_task_for_thread(&run.thread_id)
-        .map_err(error)?
-        .is_none())
+    let Some(basis) = basis else { return Ok(false) };
+    if basis.mode != "agent" || basis.session_id != run.thread_id {
+        return Ok(false);
+    }
+    // A display role cannot manufacture child admission. Historical/cancelled child
+    // identity remains valid for original-receipt reconciliation and user plan reads.
+    Ok(basis.thread_role == "main"
+        || catalog
+            .child_task_for_thread(&run.thread_id)
+            .map_err(error)?
+            .is_some())
 }
 pub(crate) fn declaration(
     catalog: Arc<Mutex<Catalog>>,
@@ -127,7 +132,7 @@ fn query(
     let (epoch, run, read) = {
         let catalog = owner.lock().map_err(error)?;
         if !eligible(&catalog, &context.run_id)? {
-            return Err(error("plan requires an ordinary main Thread"));
+            return Err(error("plan requires an admitted ordinary Thread"));
         }
         (
             catalog.epoch(),

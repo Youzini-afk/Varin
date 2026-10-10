@@ -31,7 +31,10 @@ struct Fixture {
 }
 impl Fixture {
     fn new(goal: bool) -> Self {
-        let mut f = dispatch::Fixture::new_host_child(true, None, vec!["helper".into()]);
+        Self::with_tools(goal, Vec::new(), vec!["helper".into()])
+    }
+    fn with_tools(goal: bool, native: Vec<ToolSchema>, selected: Vec<String>) -> Self {
+        let mut f = dispatch::Fixture::new_host_child_with_native(true, false, None, selected, native);
         f.launch.policy = crate::process_wait::default_policy_identity();
         // The real parent policy graph already committed private {"stage": 1}; the child must
         // nevertheless start with null. No checkpoint is copied or fabricated for the child.
@@ -103,7 +106,7 @@ impl Fixture {
             "toolBinding":{"grantId":"child-source-grant","runId":run.id,"threadId":run.thread_id,
                 "workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,
                 "sourceMode":"fixed_branch","fileSource":{"branchId":source.branch_id,"revision":source.revision},"enabledTools":[]},
-            "extensionBindings":[{"ownerId":"child-host-owner","generation":1,"binding":original.extension_bindings[0]}]});
+            "extensionBindings":original.extension_bindings.iter().map(|binding| json!({"ownerId":"child-host-owner","generation":1,"binding":binding})).collect::<Vec<_>>()});
         Self::from_catalog(f.root, child, run, original, params, f.db)
     }
     fn from_catalog(
@@ -125,6 +128,8 @@ impl Fixture {
         policy.set_catalog(runtime.catalog());
         let memory = crate::host_query::OwnerChannel::new("memory", output.clone());
         memory.initialize(EPOCH);
+        let plan = crate::plan_bridge::PlanBridge::new(output.clone());
+        plan.initialize(EPOCH);
         let assembly = RunAssembly {
             runtime: runtime.clone(),
             resources: crate::tools::KernelResourceClient::new(
@@ -138,7 +143,7 @@ impl Fixture {
             memory,
             context: crate::host_query::OwnerChannel::new("context", output.clone()),
             resource: crate::host_query::OwnerChannel::new("resource", output.clone()),
-            plan: crate::plan_bridge::PlanBridge::new(output.clone()),
+            plan,
             policy,
             models: crate::run_models::RunModels::new(runtime.catalog(), credentials),
             tools: crate::run_tools::RunTools::new(runtime.catalog(), tools),
@@ -208,11 +213,7 @@ impl Fixture {
                 .is_none(),
             "policy changes must not make the child's tools dynamic"
         );
-        assert!(start
-            .binding
-            .tools
-            .iter()
-            .all(|t| !matches!(t.name.as_str(), "memory" | "todo" | "goal_report")));
+        assert!(start.binding.tools.iter().all(|t| t.name != "goal_report"));
         start
     }
     fn ready(&self, generation: u64, endpoint: &str) -> PolicySelection {
@@ -309,6 +310,7 @@ impl Fixture {
         assembly.policy.close();
         assembly.credentials.close();
         assembly.memory.close();
+        assembly.plan.close();
         drop(assembly);
         drop(frames);
         let db = Catalog::open(&root).unwrap();
@@ -320,6 +322,7 @@ impl Fixture {
         self.assembly.policy.close();
         self.assembly.credentials.close();
         self.assembly.memory.close();
+        self.assembly.plan.close();
         drop(self);
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -972,3 +975,6 @@ fn child_policy_graph_cannot_add_an_undelegated_memory_tool() {
     assert_eq!(launch.selection.tools, f.original.tools);
     f.finish();
 }
+
+#[path = "child_memory_plan_review.rs"]
+mod memory_plan_review;

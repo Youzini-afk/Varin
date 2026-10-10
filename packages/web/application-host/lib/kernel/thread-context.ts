@@ -55,7 +55,7 @@ const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(va
   return Object.fromEntries(Object.entries(item).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0));
 })).digest('hex');
 
-/** Ordinary main-thread context only. The basis fixes source/scope provenance; the existing
+/** Ordinary admitted Thread context, including independently scoped children. The basis fixes source/scope provenance; the existing
  * personalization catalog remains the sole writable authority for ordinary notes and profiles.
  */
 export function createThreadContext(owners: ContextOwners): ContextPreparer {
