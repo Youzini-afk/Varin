@@ -388,7 +388,7 @@ fn body_publication_preserves_model_output_usage_and_evidence_through_gc() {
     content_window::during_write(&f.root, &f.db,
         move |db| db.record_policy_model(&worker_run, epoch, &worker_action, &worker_output, Some(&receipt)),
         |catalog| {
-            let result: PolicyModelResult = serde_json::from_value(catalog.operation(&action).unwrap().result.unwrap()).unwrap();
+            let result: PolicyModelResult = serde_json::from_value(control_result(catalog.operation(&action).unwrap().result.unwrap())).unwrap();
             assert!(result.original_ref.is_none(), "body must precede output reference publication");
             assert_eq!(catalog.collect_content_objects().unwrap(), 0);
             catalog.create_thread("independent", "independent-main").unwrap();
@@ -1287,7 +1287,7 @@ fn durable_cancel_between_job_load_and_control_registration_is_not_lost() {
             .operation(events.last().unwrap()["action_id"].as_str().unwrap())
             .unwrap();
     assert_eq!(operation.phase, OperationPhase::Terminal);
-    let result: PolicyModelResult = serde_json::from_value(operation.result.unwrap()).unwrap();
+    let result: PolicyModelResult = serde_json::from_value(control_result(operation.result.unwrap())).unwrap();
     assert_eq!(result.dispatch, PolicyModelDispatch::Prepared);
     assert_eq!(result.receipt.as_ref().unwrap().dispatch, result.dispatch);
     assert_eq!(f.counts(), (1, 0));
@@ -1372,7 +1372,7 @@ fn local_dispatch_failure_preserves_actual_marker_and_settled_receipt_on_reopen(
     assert_eq!(event["receipt"]["outcome"], "failed");
     assert_eq!(event["receipt"]["failure"]["code"], "storage_reply_lost");
     let op = f.db.lock().unwrap().operation(&action).unwrap();
-    let result: PolicyModelResult = serde_json::from_value(op.result.clone().unwrap()).unwrap();
+    let result: PolicyModelResult = serde_json::from_value(control_result(op.result.clone().unwrap())).unwrap();
     assert_eq!(result.dispatch, PolicyModelDispatch::Dispatched);
     assert_eq!(result.receipt.as_ref().unwrap().dispatch, result.dispatch);
     drop(events);
@@ -1385,4 +1385,11 @@ fn local_dispatch_failure_preserves_actual_marker_and_settled_receipt_on_reopen(
     );
     assert!(planner.requests.lock().unwrap().is_empty());
     assert!(main.requests.lock().unwrap().is_empty());
+}
+
+fn control_result(result: varin_runtime::OperationResultMetadata) -> Value {
+    match result {
+        varin_runtime::OperationResultMetadata::Control { value } => value,
+        varin_runtime::OperationResultMetadata::Content { .. } => panic!("policy result is domain control state"),
+    }
 }

@@ -87,7 +87,7 @@ fn permission_is_exact_one_use_and_denial_or_cancellation_never_authorizes_dispa
         f.db.open_permission(&f.op, "permission-1", f.call.clone(), f.scope.clone())
             .unwrap();
     assert_eq!(
-        opened.result.as_ref().unwrap()["permission"]["actor"]["account"],
+        f.db.capture_operation_read(opened.clone()).load().unwrap().result.as_ref().unwrap()["permission"]["actor"]["account"],
         "selected-account"
     );
     f.db.decide_permission(&f.op, "permission-1", "allow_once")

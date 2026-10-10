@@ -104,7 +104,7 @@ impl Catalog {
         };
         tx.execute(
             "UPDATE tool_calls SET receipt=?3 WHERE request_id=?1 AND call_id=?2",
-            params![receipt.request_id, receipt.call_id, encode(&receipt)?],
+            params![receipt.request_id, receipt.call_id, encode(&super::result_content::ToolReceiptMetadata::job(&receipt)?)?],
         )?;
         op.handed_off = true;
         op.phase = OperationPhase::Waiting;
@@ -189,7 +189,7 @@ impl Catalog {
         }
         let mut run: Run = record(&tx, "runs", &op.run_id)?;
         if op.phase == OperationPhase::Terminal {
-            if op.outcome == Some(outcome) && op.result.as_ref() == Some(&result) {
+            if op.outcome == Some(outcome) && op.result.as_ref().map(OperationResultMetadata::control).transpose()? == Some(&result) {
                 return Ok(op);
             }
             return Err(RuntimeError::Conflict("question already closed".into()));
@@ -239,7 +239,7 @@ impl Catalog {
         op.phase = OperationPhase::Terminal;
         op.outcome = Some(outcome);
         op.effect = Effect::None;
-        op.result = Some(result);
+        op.result = Some(OperationResultMetadata::Control { value: result });
         op.revision += 1;
         put(&tx, "operations", &operation_id, &op)?;
         let cursor = event(
@@ -290,7 +290,7 @@ pub(super) fn cancel_run_questions(tx: &Transaction<'_>, run_id: &str) -> Result
         op.outcome = Some(Outcome::Cancelled);
         op.cancel_requested = true;
         op.revision += 1;
-        op.result = Some(json!({"cancelled":true}));
+        op.result = Some(OperationResultMetadata::Control { value: json!({"cancelled":true}) });
         if let Some(wait_id) = &op.waiting_on {
             let mut wait: Wait = record(tx, "waits", wait_id)?;
             wait.cancelled = true;

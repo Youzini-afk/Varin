@@ -57,7 +57,7 @@ impl ControlCommands {
         operation: &str,
         answer: Option<String>,
         cancelled: &AtomicBool,
-    ) -> Result<varin_runtime::Operation, KernelError> {
+    ) -> Result<varin_runtime::OperationMetadata, KernelError> {
         let answering = answer.is_some();
         self.runtime
             .quiesce_question(operation)
@@ -90,11 +90,10 @@ impl ControlCommands {
         match method {
             "runtime.question.answer" => {
                 let p: QuestionAnswerParams = serde_json::from_value(params)?;
-                Ok(serde_json::to_value(self.finish_question(
-                    &p.operation_id,
-                    Some(p.answer),
-                    cancelled,
-                )?)?)
+                let operation = self.finish_question(&p.operation_id, Some(p.answer), cancelled)?;
+                let owner = runtime.catalog();
+                let read = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.capture_operation_read(operation);
+                Ok(serde_json::to_value(read.load().map_err(domain)?)?)
             }
             "runtime.run.cancel" => {
                 let p: RunParams = serde_json::from_value(params)?;
@@ -245,11 +244,7 @@ impl ControlCommands {
                 runtime
                     .quiesce_process_waits()
                     .map_err(|e| KernelError::Operation(e.to_string()))?;
-                let owner = runtime.catalog();
-                let mut catalog = owner
-                    .lock()
-                    .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-                dispatch(&mut catalog, method, params)
+                Ok(serde_json::to_value(varin_runtime::catalog::process_delivery::deliver_waits(&runtime.catalog()).map_err(domain)?)?)
             }
             _ => Err(KernelError::Protocol(
                 "unknown worker control command".into(),

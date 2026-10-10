@@ -609,7 +609,7 @@ impl ContextRead {
                         | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
                 )?;
                 let trusted_receipts =
-                    super::memory::trusted_memory_receipts(&database, &thread_id)?;
+                    super::memory::trusted_memory_receipts(&database, &content, &thread_id)?;
                 let memory = memory
                     .map(super::memory_state::MemoryStateRead::load)
                     .transpose()?;

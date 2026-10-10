@@ -2,12 +2,14 @@
 use super::*;
 use crate::execution::*;
 use super::tool_content::{ToolCallMetadata,ToolIntent};
+use super::result_content::{ToolReceiptMetadata, ToolCompletionMetadata};
 use std::sync::Mutex;
 
 impl Persistence for Mutex<Catalog> {
     fn confirms_no_effect(&self, context: &ToolExecutionContext, epoch: u64, completion: &ToolCompletion)
         -> std::result::Result<bool, ExecutionError> {
         let ToolCompletion::Result { outcome, effect: Effect::None, content } = completion else { return Ok(false); };
+        let content_identity = crate::content::ContentStore::reference(content).map_err(policy_error)?;
         let catalog = self.lock().map_err(|_| ExecutionError::new("catalog_poisoned", "catalog owner failed"))?;
         let run = catalog.run(&context.run_id).map_err(policy_error)?;
         fence(&run, epoch).map_err(policy_error)?;
@@ -18,7 +20,7 @@ impl Persistence for Mutex<Catalog> {
         Ok(catalog.epoch() == epoch && operation.epoch == epoch && operation.run_id == run.id
             && operation.id == format!("{request_id}:tool:{}", admitted.call().call_id)
             && operation.executor.as_deref() == Some(admitted.call().name.as_str())
-            && confirmed_no_effect_receipt(&operation, *outcome, content))
+            && confirmed_no_effect_receipt(&operation, *outcome, &content_identity))
     }
 
     fn task_family(&self, run: &str, epoch: u64) -> std::result::Result<String, ExecutionError> {
@@ -256,6 +258,8 @@ struct PreparedExecutionBodies {
     history: std::collections::HashMap<String, Value>,
     originals: Option<Vec<ProviderOriginal>>,
     output: Option<Value>,
+    receipts: std::collections::HashMap<String, ToolReceiptMetadata>,
+    results: std::collections::HashMap<String, OperationResultMetadata>,
 }
 impl ExecutionBodyPreparation {
     fn write(self, record: &ExecutionRecord) -> Result<PreparedExecutionBodies> {
@@ -312,7 +316,27 @@ impl ExecutionBodyPreparation {
             (Some(self.content.save_originals(&provider_originals(items))?),
              Some(self.content.save(&json!({"status":"committed","record":record}))?))
         } else { (None, None) };
-        Ok(PreparedExecutionBodies { _publication: self.publication, request, tools_ref, policy_checkpoint, calls, admitted, frozen_history_range, memory_deliveries, history, originals, output })
+        let mut receipts = std::collections::HashMap::new();
+        let mut results = std::collections::HashMap::new();
+        let tool_results: &[ToolResult] = match record {
+            ExecutionRecord::ToolSettled { result } => std::slice::from_ref(result),
+            ExecutionRecord::ToolBatchCommitted { results, .. } => results,
+            _ => &[],
+        };
+        for result in tool_results {
+            let receipt = ToolReceiptMetadata::write(&self.content, result)?;
+            let body = match &result.completion {
+                ToolCompletion::Result { .. } => match &receipt.completion {
+                    ToolCompletionMetadata::Result { content_ref, .. } => OperationResultMetadata::Content { reference: content_ref.clone() },
+                    _ => unreachable!(),
+                },
+                ToolCompletion::NotDispatched { reason } => OperationResultMetadata::Content { reference: self.content.save(&json!({"not_dispatched":reason}))? },
+                ToolCompletion::JobAccepted { operation_id, phase, .. } => OperationResultMetadata::Control { value: json!({"operation_id":operation_id,"phase":phase}) },
+            };
+            results.insert(result.call_id.clone(), body);
+            receipts.insert(result.call_id.clone(), receipt);
+        }
+        Ok(PreparedExecutionBodies { _publication: self.publication, request, tools_ref, policy_checkpoint, calls, admitted, frozen_history_range, memory_deliveries, history, originals, output, receipts, results })
     }
 }
 impl Catalog {
@@ -352,7 +376,7 @@ impl Catalog {
     ) -> Result<()> {
         let PreparedExecutionBodies {
             _publication, request: prepared_request, tools_ref, policy_checkpoint, calls:prepared_calls, admitted:prepared_admitted, frozen_history_range, memory_deliveries, history: prepared_history,
-            originals: prepared_originals, output: prepared_output,
+            originals: prepared_originals, output: prepared_output, receipts: prepared_receipts, results: prepared_results,
         } = prepared;
         // A receipt retry confirms the original completion. Keep exact request/owner fencing,
         // reject altered output, and never rewrite history or resubmit a provider request.
@@ -697,6 +721,8 @@ impl Catalog {
                 {
                     return Err(RuntimeError::Conflict("tool completion is stale".into()));
                 }
+                let prepared_result = prepared_results.get(&result.call_id).ok_or_else(|| RuntimeError::Invalid("prepared tool result missing".into()))?;
+                let receipt = prepared_receipts.get(&result.call_id).ok_or_else(|| RuntimeError::Invalid("prepared tool receipt missing".into()))?;
                 // Settle the permission rendezvous even when cancellation prevented a decision.
                 if let Some(wait_id) = op.waiting_on.clone().filter(|id| id.starts_with("permission:")) {
                     let mut wait: Wait = super::record(&tx, "waits", &wait_id)?;
@@ -705,22 +731,22 @@ impl Catalog {
                     op.waiting_on = None;
                 }
                 match &result.completion {
-                    ToolCompletion::NotDispatched { reason } => {
+                    ToolCompletion::NotDispatched { .. } => {
                         op.phase = OperationPhase::Terminal;
                         op.outcome = Some(Outcome::Failed);
                         op.effect = Effect::None;
                         op.effect = Effect::None;
-                        op.result = Some(json!({"not_dispatched":reason}));
+                        op.result = Some(prepared_result.clone());
                     }
                     ToolCompletion::Result {
                         outcome,
                         effect,
-                        content,
+                        content: _,
                     } => {
                         // Dispatched work may prove a genuine no-effect terminal result (for
                         // example an owner's CAS conflict). Only the already authenticated
                         // executor receipt can supply that evidence; tool JSON alone cannot.
-                        let confirmed_no_effect = confirmed_no_effect_receipt(&op, *outcome, content);
+                        let confirmed_no_effect = confirmed_no_effect_receipt(&op, *outcome, prepared_result.reference()?);
                         if (*effect == Effect::None && op.effect != Effect::None && !confirmed_no_effect)
                             || (*outcome == Outcome::Succeeded
                                 && op.phase != OperationPhase::Running)
@@ -732,7 +758,7 @@ impl Catalog {
                         op.phase = OperationPhase::Terminal;
                         op.outcome = Some(*outcome);
                         op.effect = *effect;
-                        op.result = Some(content.clone());
+                        op.result = Some(prepared_result.clone());
                         if *effect == Effect::Unknown && *outcome != Outcome::Indeterminate {
                             return Err(RuntimeError::Invalid(
                                 "unknown effects require reconciliation".into(),
@@ -741,7 +767,7 @@ impl Catalog {
                     }
                     ToolCompletion::JobAccepted {
                         operation_id,
-                        phase,
+                        phase: _,
                         effect,
                         lifetime,
                     } => {
@@ -753,7 +779,7 @@ impl Catalog {
                         }
                         op.handed_off = true;
                         op.effect = *effect;
-                        op.result = Some(json!({"operation_id":operation_id,"phase":phase}));
+                        op.result = Some(prepared_result.clone());
                     }
                 }
                 if op.handed_off
@@ -784,7 +810,7 @@ impl Catalog {
                 }
                 tx.execute(
                     "UPDATE tool_calls SET receipt=?3 WHERE request_id=?1 AND call_id=?2",
-                    params![result.request_id, result.call_id, encode(result)?],
+                    params![result.request_id, result.call_id, encode(receipt)?],
                 )?;
             }
             ExecutionRecord::ToolBatchCommitted {
@@ -806,7 +832,9 @@ impl Catalog {
                             "tool result identity duplicated".into(),
                         ));
                     }
-                    let serialized_result = encode(result)?;
+                    let receipt = prepared_receipts.get(&result.call_id).ok_or_else(|| RuntimeError::Invalid("prepared tool receipt missing".into()))?;
+                    let prepared_result = prepared_results.get(&result.call_id).ok_or_else(|| RuntimeError::Invalid("prepared tool result missing".into()))?;
+                    let serialized_result = encode(receipt)?;
                     let previous: Option<String> = tx.query_row(
                         "SELECT receipt FROM tool_calls WHERE request_id=?1 AND call_id=?2",
                         params![request_id, result.call_id],
@@ -822,14 +850,14 @@ impl Catalog {
                     if let Some(mut op)=optional_record::<Operation>(&tx,"operations",&key)? {
                         if op.phase==OperationPhase::Accepted && op.effect==Effect::None {
                             let closure=match &result.completion {
-                                ToolCompletion::NotDispatched{reason} => Some((Outcome::Failed,json!({"not_dispatched":reason}))),
-                                ToolCompletion::Result{outcome: outcome @ (Outcome::Cancelled|Outcome::Failed),effect:Effect::None,content} => Some((*outcome,content.clone())),
+                                ToolCompletion::NotDispatched{..} => Some(Outcome::Failed),
+                                ToolCompletion::Result{outcome: outcome @ (Outcome::Cancelled|Outcome::Failed),effect:Effect::None,..} => Some(*outcome),
                                 _=>None,
                             };
-                            if let Some((outcome,content))=closure {op.phase=OperationPhase::Terminal;op.outcome=Some(outcome);op.result=Some(content);op.revision+=1;put(&tx,"operations",&key,&op)?;event(&tx,&key,op.revision,"operation.settled",serde_json::to_value(&op)?)?;}
+                            if let Some(outcome)=closure {op.phase=OperationPhase::Terminal;op.outcome=Some(outcome);op.result=Some(prepared_result.clone());op.revision+=1;put(&tx,"operations",&key,&op)?;event(&tx,&key,op.revision,"operation.settled",serde_json::to_value(&op)?)?;}
                         }
                     }
-                    tx.execute("UPDATE tool_calls SET receipt=?3,committed=1 WHERE request_id=?1 AND call_id=?2",params![request_id,result.call_id,encode(result)?])?;
+                    tx.execute("UPDATE tool_calls SET receipt=?3,committed=1 WHERE request_id=?1 AND call_id=?2",params![request_id,result.call_id,serialized_result])?;
                     append_item(
                         &tx,
                         &run,
@@ -1127,37 +1155,25 @@ fn confirmed_no_effect_receipt(operation: &Operation, outcome: Outcome, content:
             && operation.executor.as_deref() == Some(receipt.executor.as_str())
             && receipt.outcome == outcome
             && receipt.effect == Effect::None
-            && receipt.result == *content)
+            && receipt.result_ref == *content)
 }
 
-pub(super) fn apply_external_terminal(op: &mut Operation, receipt: &ExternalReceipt) {
+pub(super) fn apply_external_terminal(op: &mut Operation, receipt: &ExternalReceiptMetadata) {
     op.phase = OperationPhase::Terminal;
     op.outcome = Some(receipt.outcome);
     op.effect = receipt.effect;
-    op.result = Some(receipt.result.clone());
+    op.result = Some(OperationResultMetadata::Content { reference: receipt.result_ref.clone() });
 }
 impl Catalog {
     /// Only a trusted execution-end receipt consumer may call this. It is not exposed as a
     /// model/tool/Host wire command. Receipt identity belongs to the actual resource authority.
-    pub fn record_external_receipt(
+    pub fn record_external_receipt_prepared(
         &mut self,
         operation_id: &str,
-        receipt: ExternalReceipt,
-    ) -> Result<Operation> {
-        // An unambiguous terminal outcome establishes stop; disappearance/unknown does not.
-        // Consumers with independent liveness evidence must use the explicit method below.
-        let executor_stopped = receipt.outcome != Outcome::Indeterminate;
-        self.record_external_receipt_with_stop(operation_id, receipt, executor_stopped)
-    }
-
-    /// Trusted executor liveness evidence, independent of the business outcome/effect. Never
-    /// infer `executor_stopped` from cancellation, connection loss, or a model-supplied result.
-    pub fn record_external_receipt_with_stop(
-        &mut self,
-        operation_id: &str,
-        receipt: ExternalReceipt,
+        prepared: super::result_content::PreparedExternalReceipt,
         executor_stopped: bool,
     ) -> Result<Operation> {
+        let receipt = prepared.receipt;
         let tx = self.db.transaction()?;
         let mut op: Operation = super::record(&tx, "operations", operation_id)?;
         if super::policy::graph_metadata(&op)?.is_some() || super::policy_model::model_metadata(&op)?.is_some() {return Err(RuntimeError::Invalid("policy graph cannot accept external executor receipts".into()));}
@@ -1174,8 +1190,22 @@ impl Catalog {
                 "unknown external effect requires indeterminate outcome".into(),
             ));
         }
+        let settle = op.handed_off
+            || (op.phase == OperationPhase::Terminal && op.outcome == Some(Outcome::Indeterminate));
         if let Some(previous) = &op.external_receipt {
             if previous == &receipt {
+                // The receipt can precede ToolSettled/handoff and survive a crash. Recovery's
+                // uncertain Operation is not proof that this already-known fact was applied.
+                let applied = op.phase == OperationPhase::Terminal
+                    && op.outcome == Some(receipt.outcome)
+                    && op.effect == receipt.effect
+                    && op.result.as_ref() == Some(&OperationResultMetadata::Content { reference: receipt.result_ref.clone() });
+                if settle && !applied {
+                    apply_external_terminal(&mut op, &receipt);
+                    op.revision += 1;
+                    put(&tx, "operations", operation_id, &op)?;
+                    event(&tx, operation_id, op.revision, "operation.settled", serde_json::to_value(&op)?)?;
+                }
                 // Stop evidence may arrive after an identical uncertain business receipt.
                 if executor_stopped {
                     tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1", [operation_id])?;
@@ -1200,8 +1230,6 @@ impl Catalog {
                 "job is already settled with another receipt".into(),
             ));
         }
-        let settle = op.handed_off
-            || (op.phase == OperationPhase::Terminal && op.outcome == Some(Outcome::Indeterminate));
         op.external_receipt = Some(receipt.clone());
         op.revision += 1;
         if settle {

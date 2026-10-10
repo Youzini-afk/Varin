@@ -629,7 +629,7 @@ impl Catalog {
             if let Some(receipt) = receipt {
                 receipts.insert(
                     call.call_id.clone(),
-                    serde_json::from_str::<ToolResult>(&receipt)?,
+                    serde_json::from_str::<super::result_content::ToolReceiptMetadata>(&receipt)?.load(content)?,
                 );
             }
             if done != 0 {
@@ -693,7 +693,7 @@ impl Catalog {
                                     )
                                 })?,
                                 effect: op.effect,
-                                content: op.result.unwrap_or(Value::Null),
+                                content: op.result.ok_or_else(|| RuntimeError::Invalid("terminal tool operation has no result".into()))?.load(content)?,
                             },
                         },
                     );

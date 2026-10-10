@@ -78,9 +78,9 @@ impl Catalog {
         )?;
         op.phase = OperationPhase::Waiting;
         op.waiting_on = Some(wait_id);
-        op.result = Some(
+        op.result = Some(OperationResultMetadata::Control { value:
             json!({"permission":{"id":permission_id,"call_ref":prepared.call_ref,"scope_ref":prepared.scope_ref,"actor":launch.selection.credential_scope,"epoch":run.epoch,"decision":null,"consumed":false}}),
-        );
+         });
         op.revision += 1;
         put(&tx, "operations", &op.id, &op)?;
         event(
@@ -115,7 +115,7 @@ impl Catalog {
             return Err(RuntimeError::Conflict("permission already decided".into()));
         }
         permission["decision"] = json!(decision);
-        op.result = Some(json!({"permission":permission}));
+        op.result = Some(OperationResultMetadata::Control { value: json!({"permission":permission}) });
         op.revision += 1;
         put(&tx, "operations", &op.id, &op)?;
         let cursor = event(
@@ -163,7 +163,7 @@ impl Catalog {
             ));
         }
         permission["consumed"] = json!(true);
-        op.result = Some(json!({"permission":permission}));
+        op.result = Some(OperationResultMetadata::Control { value: json!({"permission":permission}) });
         op.phase = OperationPhase::Accepted;
         op.waiting_on = None;
         op.revision += 1;
@@ -183,6 +183,7 @@ fn permission_record(op: &Operation, id: &str) -> Result<Value> {
     let value = op
         .result
         .as_ref()
+        .map(OperationResultMetadata::control).transpose()?
         .and_then(|v| v.get("permission"))
         .cloned()
         .ok_or_else(|| RuntimeError::Conflict("permission unavailable".into()))?;

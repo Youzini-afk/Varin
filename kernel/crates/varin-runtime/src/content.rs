@@ -279,34 +279,42 @@ impl ContentStore {
             UNION ALL SELECT json_extract(body,'$.selection.base_tools_ref') FROM run_launches
             UNION ALL SELECT json_extract(body,'$.selection.mcp_binding_ref') FROM run_launches WHERE json_extract(body,'$.selection.mcp_binding_ref') IS NOT NULL
             UNION ALL SELECT json_extract(p.value,'$.body') FROM run_launches l,json_each(l.body,'$.selection.policy_models') p");
-        roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.answer_ref') FROM operations WHERE json_extract(body,'$.executor')='ask_user' AND json_extract(body,'$.result.answer_ref') IS NOT NULL");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.value.answer_ref') FROM operations WHERE json_extract(body,'$.executor')='ask_user' AND json_extract(body,'$.result.value.answer_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT state_ref FROM policy_checkpoints UNION ALL SELECT action_ref FROM policy_checkpoints");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.arguments_ref') FROM tool_calls
             UNION ALL SELECT json_extract(body,'$.intent.call.arguments_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='tool'");
-        roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.permission.call_ref') FROM operations WHERE json_extract(body,'$.result.permission.call_ref') IS NOT NULL
-            UNION ALL SELECT json_extract(body,'$.result.permission.scope_ref') FROM operations WHERE json_extract(body,'$.result.permission.scope_ref') IS NOT NULL
-            UNION ALL SELECT json_extract(data,'$.result.permission.call_ref') FROM events WHERE kind='permission.opened'
-            UNION ALL SELECT json_extract(data,'$.result.permission.scope_ref') FROM events WHERE kind='permission.opened'");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.value.permission.call_ref') FROM operations WHERE json_extract(body,'$.result.value.permission.call_ref') IS NOT NULL
+            UNION ALL SELECT json_extract(body,'$.result.value.permission.scope_ref') FROM operations WHERE json_extract(body,'$.result.value.permission.scope_ref') IS NOT NULL
+            UNION ALL SELECT json_extract(data,'$.result.value.permission.call_ref') FROM events WHERE kind='permission.opened'
+            UNION ALL SELECT json_extract(data,'$.result.value.permission.scope_ref') FROM events WHERE kind='permission.opened'");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.input_ref') FROM child_tasks
             UNION ALL SELECT json_extract(body,'$.configuration_ref') FROM child_tasks
             UNION ALL SELECT json_extract(body,'$.launch.tools_ref') FROM child_tasks
             UNION ALL SELECT json_extract(body,'$.launch.base_tools_ref') FROM child_tasks");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.body_ref') FROM operations WHERE json_extract(body,'$.intent.kind') IN ('policy_read_graph_v1','policy_model_job_v1')
             UNION ALL SELECT json_object('content_object',json_extract(receipt,'$.output.content_ref')) FROM policy_graph_nodes WHERE json_extract(receipt,'$.output.content_ref') IS NOT NULL");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.reference') FROM operations WHERE json_extract(body,'$.result.kind')='content'
+            UNION ALL SELECT json_extract(body,'$.external_receipt.result_ref') FROM operations WHERE json_extract(body,'$.external_receipt') IS NOT NULL
+            UNION ALL SELECT json_extract(data,'$.result.reference') FROM events WHERE json_extract(data,'$.result.kind')='content'
+            UNION ALL SELECT json_extract(data,'$.external_receipt.result_ref') FROM events WHERE json_extract(data,'$.external_receipt') IS NOT NULL
+            UNION ALL SELECT json_extract(receipt,'$.completion.content_ref') FROM tool_calls WHERE json_extract(receipt,'$.completion.kind')='result'
+            UNION ALL SELECT json_extract(receipt,'$.completion.reason_ref') FROM tool_calls WHERE json_extract(receipt,'$.completion.kind')='not_dispatched'");
         let mut references=Vec::new();
         let mut stmt=db.prepare(&roots)?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         for row in rows { references.push(serde_json::from_str::<Reference>(&row?)?); }
         let mut jobs=db.prepare("SELECT body FROM operations WHERE json_extract(body,'$.intent.kind')='policy_model_job_v1'")?;
         for row in jobs.query_map([],|r|r.get::<_,String>(0))? {
-            let op:crate::types::Operation=serde_json::from_str(&row?)?;
+            let op:crate::types::OperationMetadata=serde_json::from_str(&row?)?;
             crate::catalog::policy_model::model_metadata(&op)?.ok_or_else(||RuntimeError::Invalid("planning intent missing".into()))?;
             let result=crate::catalog::policy_model::model_result(&op)?;
             references.push(serde_json::from_value(result.request_ref)?);
             if let Some(original)=result.original_ref{references.push(serde_json::from_value(original)?);}
             if let Some(output)=result.receipt.and_then(|r|r.output){references.push(Reference{content_object:output.content_ref});}
         }
+        let mut verified = HashSet::new();
         for reference in references {
+            if !verified.insert(reference.content_object.clone()) { continue; }
             let manifest: Manifest =
                 serde_json::from_slice(&self.read_bytes(&reference.content_object)?)?;
             if manifest.version != 1 {

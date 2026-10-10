@@ -147,10 +147,13 @@ pub fn reconcile_reports(catalog: &std::sync::Mutex<Catalog>) -> Result<()> {
             .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?
             .admit_child_report(prepared)?;
     }
-    catalog
-        .lock()
-        .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?
-        .settle_child_receipts()
+    let receipts = catalog.lock().map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?.capture_child_receipts()?;
+    for receipt in receipts {
+        let (identity, prepared) = receipt.load()?;
+        catalog.lock().map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?
+            .record_external_receipt_prepared(&identity, prepared, true)?;
+    }
+    Ok(())
 }
 
 pub struct ChildWaitPreparation {
@@ -211,7 +214,8 @@ impl ChildWaitPreparation {
     }
 }
 impl Catalog {
-    pub fn capture_child_waits(&self) -> Result<Vec<ChildWaitPreparation>> {
+    pub fn capture_child_waits(&mut self) -> Result<Vec<ChildWaitPreparation>> {
+        self.close_finished_parent_waits()?;
         let mut preparations = Vec::new();
         for wait in read_all::<Wait>(&self.db, "waits")? {
             let Some(operation_id) = wait.id.strip_prefix("child-wait:") else {
@@ -374,9 +378,9 @@ impl Catalog {
             Outcome::Succeeded
         });
         op.effect = Effect::None;
-        op.result = Some(
+        op.result = Some(OperationResultMetadata::Control { value:
             json!({"child_operation_id":child.operation_id,"report_history_id":item_id,"wait_cancelled":wait.cancelled}),
-        );
+         });
         op.revision += 1;
         put(&tx, "operations", &op.id, &op)?;
         let cursor = event(
@@ -413,7 +417,7 @@ impl Catalog {
         tx.commit()?;
         Ok(Some(run.id))
     }
-    pub(super) fn pending_child_continuations(&self) -> Result<Vec<String>> {
+    pub fn pending_child_continuations(&self) -> Result<Vec<String>> {
         // Delivered-but-not-launched work remains discoverable after a lost Host notification.
         let mut statement=self.db.prepare("SELECT DISTINCT r.id FROM operations o JOIN runs r ON r.id=o.run_id JOIN run_launches l ON l.id=r.id WHERE json_extract(o.body,'$.executor')=?1 AND json_extract(o.body,'$.phase')='terminal' AND json_extract(r.body,'$.state')='runnable' AND json_extract(r.body,'$.cancel_requested')=0 AND json_extract(l.body,'$.requires_rebind')=1 ORDER BY r.id")?;
         let rows = statement
@@ -428,7 +432,6 @@ pub fn deliver_waits(catalog: &std::sync::Mutex<Catalog>) -> Result<Vec<String>>
         let mut owner = catalog
             .lock()
             .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?;
-        owner.close_finished_parent_waits()?;
         owner.capture_child_waits()?
     };
     for preparation in preparations {
@@ -442,4 +445,29 @@ pub fn deliver_waits(catalog: &std::sync::Mutex<Catalog>) -> Result<Vec<String>>
         .lock()
         .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))?
         .pending_child_continuations()
+}
+
+/// Reports are immutable after publication. Capture only reports whose original model exchange
+/// is committed; content staging cannot prematurely terminalize a fast child Job.
+pub struct ChildReceiptPreparation {
+    child: ChildTask,
+    content: super::result_content::ResultContentPreparation,
+}
+impl ChildReceiptPreparation {
+    pub fn load(self) -> Result<(String, super::result_content::PreparedExternalReceipt)> {
+        let report = self.child.report.as_ref().expect("captured immutable report");
+        let identity = self.child.operation_id;
+        let prepared = self.content.write_external_receipt(ExternalReceipt {
+            executor: collaboration::DISPATCH_TOOL.into(), identity: identity.clone(), epoch: "collaboration-v1".into(),
+            outcome: report.outcome, effect: Effect::None, result: serde_json::to_value(report)?,
+        })?;
+        Ok((identity, prepared))
+    }
+}
+impl Catalog {
+    pub fn capture_child_receipts(&self) -> Result<Vec<ChildReceiptPreparation>> {
+        let mut statement=self.db.prepare("SELECT c.body FROM child_tasks c JOIN operations o ON o.id=c.id JOIN tool_calls t ON t.request_id=json_extract(c.body,'$.origin.request_id') AND t.call_id=json_extract(c.body,'$.call_id') WHERE json_extract(c.body,'$.report') IS NOT NULL AND json_extract(o.body,'$.external_receipt') IS NULL AND t.committed=1")?;
+        let rows=statement.query_map([],|row|row.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        rows.into_iter().map(|row| Ok(ChildReceiptPreparation { child: serde_json::from_str(&row)?, content: self.prepare_result_content() })).collect()
+    }
 }
