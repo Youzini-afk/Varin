@@ -6,6 +6,18 @@
 
 目标是完整实现[完整运行时设计](../design/agent-runtime-design.md)和[能力组合设计](../design/runtime-extensibility-design.md)共同定义的长期运行底座：及时交互、低开销执行、按真实资源调度、深层能力组合和可替换策略。完成聊天循环、迁移已有工具或删除 Pi 都不是单独的完成标准；Pi 退出是这套设计落地后的一个结果。当前生产仍使用 Pi session worker、TypeScript Host 协调和 Rust 资源内核；现有权威见[架构](../architecture.md)。
 
+## 2026-10-10 增量：进程停止后的显式一次续接
+
+- 用户可在真实 `process_spawn` Job 受理或原执行回执存在后，登记一次 follow-up。定义、独立 next-Run Wait、实际 occurrence 与新 Run 准入全部归原 Catalog；定义冻结原模型、策略、工具、来源选择及上下文作用域。没有从普通输入自动推导 Goal，也不复活已结束 Run 或放宽 run-bound Wait。Catalog 现为格式 **20**，旧内部格式拒绝。
+- 触发只认原执行 owner 的真实停止证据。原回执首次确认 executor stopped 时发布通用 `operation.executor_stopped` 短事实；效果未知、JobAccepted、Operation 终态或占用行缺失都不单独证明停止。停止先于登记、甚至先于 JobAccepted 或崩溃，原 identity/opaque epoch 的事实仍可回找；重复回执保持幂等。原 Run 尚活跃、当前 branch 有工作/排队输入、来源或作用域已改变时 occurrence 明确 held，不抢用户输入或偷换来源。
+- 内核事件唤醒独立、合并的 continuation worker。先锁外读取原回执并 staging typed EnvironmentFact，再在同一短事务核定义代、原 Operation、当前 head/checkpoint/source、取消与 owner fence，消费 Wait/occurrence 并调用原输入准入事务创建一个 Accepted Run。重复唤醒和准入后/Host 启动前崩溃复用原 receipt；worker 不依赖 Host timer、UI callback 或通知通道可写。原 Run 用户取消原子撤销未消费授权；显式 follow-up pause/resume 不消费策略 Pause。Agent 停止 fence 拦住旧 worker 发布，新 owner 可继续原未消费授权。
+- 新 Run 只获得精确原 process 的 inspect/read 关系。Catalog 从原消费 occurrence 推导 source Run，Storage 同时核当前与原 grant、Thread、workspace/物理 root/cwd 和 source 身份；其他 process、同 Thread 无关 Run、stdin/kill 和新的 cross-Run process Wait 不因这个关系获权。换 kernel epoch 后按正常 source 准入重登记原 root，读取既有持久输出，不重发原 process 或旧 grant。
+- 认证 HTTP、`ThreadsAPI.followups`、Thread snapshot 与会话 UI 已接同一原生定义。未确认登记回复重试沿原 key，控制带显示 revision，展示 held 原因与实际新 Run receipt；已消费项不再展示误导性取消按钮。Host 仅从特定 `followup.admitted` 事件继续 launch，启动恢复沿已有 pending-launch 枚举，不把所有 run.accepted 都当自动工作。旧 Pi follow-up/日历存储仍是其当前产品路径，未为本次原生 occurrence 双写。
+- 冻结验证：完整 runtime **270 passed、0 failed、2 个既有 ignored**，包含 11 项原 Catalog 续接组合；kernel lib **39 passed、0 failed、1 个显式集成 ignored**。Host 组合 **16/16**，UI/投影 **25/25**，完整 Host 声明/测试类型、application-client 构建/类型、UI 类型、定点 lint、生成协议一致性、文档检查及实际 Host bundle 通过。Linux 开发内核 identity `0.9.25` 构建并 stage，SHA-256 `0cc452e083a638d38bed0ebc8319e7469c6309af9b50e27b20f422f1a0eed9b4`。
+- 额外显式执行的真实 ProcessManager 组件链 **1/1**：KernelToolExecutor → Storage/ProcessManager 启动真实 OS 进程，原守护回执驱动一次准入，精确新 Run 读取原 stdout；同时实测当前/原 grant 撤销、其他 process/无关 Run 拒绝和新 epoch 正常 root 重登记后的持久输出。测试第一次重开漏登记 root、第二次 read 结算漏原调用准入，均由生产权限/事实检查拒绝；补齐真实调用顺序后通过，未放宽生产授权。它不使用 Host IPC 或模型 provider。
+- 独立审查先从设计形成条件/取消/恢复/原子准入/单一权威验收，冻结后核完整消费链。仓库外 **3/3** 原生探针分别确认 JobAccepted 前早到停止、停止后/受理前重开仍等待原 Run 终态并复用原回执，以及 continuation 先提交时后到用户输入进入原队列；本阶段无已知生产行为阻断。审查所复跑 Host/UI 子集与上述组合重叠，不重复累计。
+- 本轮新增的实际 Host HTTP → kernel → process → 自动新 Run → 模型读取原输出 fixture 已通过类型检查，受现有 IPC 环境限制未执行；其证据不能与 portable Host fixture 或原生组件测试拼成完整端到端通过。通用日历/事件触发、Goal、完整指令/skills 与后续领域、默认 Pi 迁移仍在推进，两份设计尚未整体完成。
+
 ## 2026-10-10 增量：ContentStore 显式回收与控制隔离
 
 - Catalog 只准入一轮有归属的 collection，原 conversation.sqlite 的一致只读根扫描、正文校验、目录枚举、删除与 fsync 全部在独立 worker。只读事务在根捕获完成后结束，不用第二数据库、持久 root mirror 或 GC 操作日志。所有既有 history、原始调用/审计回执、policy/context/child 正文根沿原 owner 保留。

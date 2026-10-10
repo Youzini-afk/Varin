@@ -189,6 +189,7 @@ impl ResultContentPreparation {
     ) -> Result<PreparedExternalReceipt> {
         Ok(PreparedExternalReceipt {
             receipt: ExternalReceiptMetadata {
+                executor_stopped: false,
                 executor: receipt.executor,
                 identity: receipt.identity,
                 epoch: receipt.epoch,

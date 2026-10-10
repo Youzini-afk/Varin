@@ -2126,11 +2126,22 @@ fn read_only_job_recovery_waits_for_original_executor_at_both_completion_cuts() 
         let stopped = varin_runtime::catalog::result_content::record_external_receipt(
             &f.db,
             &context.operation_id,
-            receipt,
+            receipt.clone(),
             true,
         )
         .unwrap();
-        assert_eq!(stopped.revision, after.revision);
+        assert_eq!(stopped.revision, after.revision + 1);
+        assert!(stopped.external_receipt.as_ref().unwrap().executor_stopped);
+        let stop_events = f.db.lock().unwrap().events_after(cursor, 1000).unwrap();
+        assert_eq!(stop_events.len(), 1);
+        assert_eq!(stop_events[0].kind, "operation.executor_stopped");
+        assert_eq!(stop_events[0].data["receipt_identity"], context.operation_id);
+        assert_eq!(stop_events[0].data["receipt_epoch"], receipt.epoch);
+        let repeated_stop = varin_runtime::catalog::result_content::record_external_receipt(
+            &f.db, &context.operation_id, receipt, true,
+        ).unwrap();
+        assert_eq!(repeated_stop.revision, stopped.revision);
+        assert!(f.db.lock().unwrap().events_after(stop_events[0].cursor, 1000).unwrap().is_empty());
         assert!(f
             .db
             .resource_admission()

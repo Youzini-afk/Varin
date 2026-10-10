@@ -12,6 +12,12 @@ impl ControlCommands {
     /// and body work are deferred; dispatch cancellation remains tied to the durable command.
     pub fn admit_cancellation(&self, method: &str, params: &Value) -> Result<(), KernelError> {
         match method {
+            "runtime.followup.control" => {
+                let p: FollowupControlParams = serde_json::from_value(params.clone())?;
+                let revision = u64::try_from(p.expected_revision).map_err(|_| KernelError::Protocol("follow-up revision must be nonnegative".into()))?;
+                self.runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                    .control_followup(&p.followup_id, revision, p.action).map_err(domain)?;
+            }
             "runtime.child.wait.cancel" => {
                 let p: ChildWaitParams = serde_json::from_value(params.clone())?;
                 self.runtime
@@ -88,6 +94,11 @@ impl ControlCommands {
     ) -> Result<Value, KernelError> {
         let runtime = &self.runtime;
         match method {
+            "runtime.followup.control" => {
+                let p: FollowupControlParams = serde_json::from_value(params)?;
+                Ok(serde_json::to_value(runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                    .followup(&p.followup_id).map_err(domain)?)?)
+            }
             "runtime.run.resume" => {
                 let p: RunResumeParams = serde_json::from_value(params)?;
                 if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }

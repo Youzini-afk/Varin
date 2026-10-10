@@ -247,6 +247,8 @@ struct SpoolCursor {
 }
 #[derive(Default)]
 pub(crate) struct ProcessManager {
+    #[cfg(test)]
+    worker_executable: Option<PathBuf>,
     outputs: HashMap<String, OutputHandle>,
     live: HashMap<String, LiveProcess>,
     terminal: Option<mpsc::Sender<ProcessTerminal>>,
@@ -297,6 +299,10 @@ pub(crate) fn read_receipt(
     Ok(Some(value))
 }
 impl ProcessManager {
+    #[cfg(test)]
+    pub(crate) fn set_test_worker_executable(&mut self, executable: PathBuf) {
+        self.worker_executable = Some(executable);
+    }
     pub(crate) fn set_subscriptions(&mut self, subscriptions: subscriptions::ProcessSubscriptions) {
         self.subscriptions = Some(subscriptions);
     }
@@ -442,7 +448,10 @@ impl ProcessManager {
         if self.live.contains_key(id) {
             return Err(failure("process identity is already live"));
         }
-        let mut command = Command::new(std::env::current_exe()?);
+        let executable = std::env::current_exe()?;
+        #[cfg(test)]
+        let executable = self.worker_executable.clone().unwrap_or(executable);
+        let mut command = Command::new(executable);
         command
             .arg("--process-worker")
             .stdin(Stdio::piped())

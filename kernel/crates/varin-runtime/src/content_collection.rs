@@ -276,6 +276,11 @@ impl ContentCollection {
             UNION ALL SELECT json_extract(body,'$.selection.extension_bindings_ref') FROM run_launches
             UNION ALL SELECT json_extract(body,'$.selection.mcp_binding_ref') FROM run_launches WHERE json_extract(body,'$.selection.mcp_binding_ref') IS NOT NULL
             UNION ALL SELECT json_extract(p.value,'$.body') FROM run_launches l,json_each(l.body,'$.selection.policy_models') p");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.launch.selection.tools_ref') FROM followups
+            UNION ALL SELECT json_extract(body,'$.launch.selection.base_tools_ref') FROM followups
+            UNION ALL SELECT json_extract(body,'$.launch.selection.extension_bindings_ref') FROM followups
+            UNION ALL SELECT json_extract(body,'$.launch.selection.mcp_binding_ref') FROM followups WHERE json_extract(body,'$.launch.selection.mcp_binding_ref') IS NOT NULL
+            UNION ALL SELECT json_extract(p.value,'$.body') FROM followups f,json_each(f.body,'$.launch.selection.policy_models') p");
         roots.push_str(" UNION ALL SELECT json_extract(m.value,'$.body') FROM policy_selections p,json_each(p.body,'$.models') m");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.value.answer_ref') FROM operations WHERE json_extract(body,'$.executor')='ask_user' AND json_extract(body,'$.result.value.answer_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT state_ref FROM policy_checkpoints UNION ALL SELECT pending_state_ref FROM policy_checkpoints WHERE pending_state_ref IS NOT NULL UNION ALL SELECT action_ref FROM policy_checkpoints WHERE action_ref IS NOT NULL UNION ALL SELECT continuation_ref FROM policy_checkpoints WHERE continuation_ref IS NOT NULL");

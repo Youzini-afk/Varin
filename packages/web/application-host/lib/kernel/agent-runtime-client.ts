@@ -44,6 +44,9 @@ import type {
   ChildPrepareParams,
   ChildSourceReadyParams, ChildSettleParams, ChildResultCandidateParams, ChildResultPublishedParams, HostToolReconcileParams,
   ChildWait,
+  Followup,
+  FollowupRegisterParams,
+  FollowupControlParams,
   ContextRefreshParams,
   ContextJobCreateParams,
   HistoryPage,
@@ -578,6 +581,15 @@ export class AgentRuntimeClient {
       {},
       signal,
     );
+  }
+  registerFollowup(input: FollowupRegisterParams, signal?: AbortSignal): Promise<Followup> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.register', input, signal);
+  }
+  followups(threadId: string, signal?: AbortSignal): Promise<Followup[]> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.list', { threadId }, signal);
+  }
+  controlFollowup(input: FollowupControlParams, signal?: AbortSignal): Promise<Followup> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.control', input, signal);
   }
   reconcileChildren(signal?: AbortSignal): Promise<string[]> {
     return this.kernel.agentRuntimeRequest(

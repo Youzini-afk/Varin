@@ -621,6 +621,52 @@ export interface RunContextScope {
   projectId: string | null;
 }
 
+export type FollowupControlAction = 'pause' | 'resume' | 'cancel';
+
+export interface FollowupRegisterParams {
+  key: string;
+  runId: string;
+  operationId: string;
+}
+
+export interface FollowupControlParams {
+  followupId: string;
+  expectedRevision: number;
+  action: FollowupControlAction;
+}
+
+export interface FollowupWait {
+  id: string;
+  kind: 'process_stopped';
+  after_cursor: number;
+  trigger_cursor: number | null;
+  state: 'waiting' | 'observed' | 'consumed' | 'cancelled';
+}
+
+export interface FollowupOccurrence {
+  id: string;
+  generation: number;
+  trigger_cursor: number;
+  receipt_identity: string;
+  receipt_epoch: string;
+  state: 'observed' | 'held' | 'admitted' | 'completed' | 'failed' | 'cancelled';
+  hold_reason: 'control_paused' | 'source_run_active' | 'source_unsettled' | 'branch_active' | 'context_scope_changed' | 'preparation_failed' | null;
+  receipt: InputSubmitReceipt | null;
+}
+
+export interface Followup {
+  id: string;
+  revision: number;
+  generation: number;
+  thread_id: string;
+  branch_id: string;
+  source_run_id: string;
+  operation_id: string;
+  state: 'active' | 'paused' | 'cancelled';
+  wait: FollowupWait;
+  occurrence: FollowupOccurrence | null;
+}
+
 export interface RunParams {
   runId: string;
 }

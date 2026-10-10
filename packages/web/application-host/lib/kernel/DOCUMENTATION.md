@@ -37,11 +37,34 @@ to receive the eventual partial report. Native request credit remains owned unti
 The worker retains the original runtime file owner until it stops. This maintenance path is separate
 from workspace `storage.gc` and adds no persistent job ledger, automatic retry or shared execution barrier.
 
+## Explicit one-time process follow-ups
+
+The authenticated `/api/threads/followup/register`, `/list` and `/control` POST routes are exposed as
+`ThreadsAPI.followups`. Registration supplies the selected Thread/branch and exact source Run/Operation;
+the Host verifies Run ownership and the Catalog validates the accepted process in its transaction.
+The Host does not hydrate the Operation body for this control check. Listing and Thread snapshots
+project only the selected branch; definition controls carry the displayed revision.
+
+The Catalog owns the one-shot authorization, next-Run Wait and occurrence. Its independent Kernel
+worker consumes real stop evidence and atomically admits the new Run even when the Host is offline.
+The Host only discovers `followup.admitted` through its existing durable cursor, or finds the original
+pending launch at startup, then calls the shared `continueLaunch` entry. Frozen source/model/credential/
+tool/policy selections are rebound through their current authorities. A generic `run.accepted` event is
+not a new automatic launch instruction, and no follow-up control consumes an independent policy Pause.
+
+The Thread UI offers registration only for an accepted process, retains a registration key across an
+uncertain response, displays held/paused state and removes consumed/cancelled controls from active cards.
+Past occurrences retain their actual continuation Run identity. Cancelling an unconsumed definition
+does not cancel its process; after consumption the new Run is cancelled separately. Cancelling the
+source Run cancels its pending follow-up authorization. This native control path does not write the
+older Pi follow-up/calendar ledger or create an implicit Goal.
+
 ## Responsibility table
 
 | Resource | Current authority | Kernel boundary after Stage R |
 | --- | --- | --- |
 | Thread/Run product catalog | TS `ThreadRegistry` | remains TS; kernel receives an actor/grant and operation IDs |
+| Explicit native Thread/Run and follow-up control | Rust runtime `Catalog` | Native identities use their own atomic admission and original execution receipts; no duplicate TS control ledger |
 | Pi sessions, models, credentials, extensions | Pi worker/native Pi | remains Pi; kernel never reads provider secrets |
 | Unsaved editor buffers and grouped undo | Document Registry | remains Registry; surface receipts are not kernel text authority |
 | Knowledge graph/vector stores | Separate private Node storage owners + Host facades | TriviumDB remains authoritative for its domain; native database work does not run in the Host thread |

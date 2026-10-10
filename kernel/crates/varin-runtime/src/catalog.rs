@@ -32,7 +32,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 19;
+pub(crate) const FORMAT: i64 = 20;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -114,6 +114,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
     }
     if version == FORMAT {
         inputs::check_format(db)?;
+        followups::check_format(db)?;
         db.prepare("SELECT run_id,identity,kind,state_ref,pending_state_ref,action_ref,continuation_ref,activation_cursor,pending,wait_id FROM policy_checkpoints")?;
         db.prepare("SELECT action_id,node_id,call_id,position,call,receipt,outcome FROM policy_graph_nodes")?;
         db.prepare("SELECT action_id,node_id,dependency_id FROM policy_graph_dependencies")?;
@@ -158,6 +159,7 @@ fn initialize_metadata(
     context::initialize(&tx)?;
     if version == 0 {
         collaboration::initialize_new(&tx)?;
+        followups::initialize_new(&tx)?;
     }
     let epoch = tx.query_row(
         "UPDATE runtime_meta SET epoch=epoch+1 WHERE id=1 RETURNING epoch",
@@ -180,6 +182,7 @@ pub struct Catalog {
     database_path: std::path::PathBuf,
     epoch: u64,
     plan_cursor_key: [u8; 32],
+    continuation_stopping: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 impl Catalog {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
@@ -229,6 +232,7 @@ impl Catalog {
             _owner: std::sync::Arc::new(owner),
             database_path,
             epoch,
+            continuation_stopping: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             plan_cursor_key: {
                 let mut key = [0; 32];
                 key[..16].copy_from_slice(Uuid::new_v4().as_bytes());
@@ -296,18 +300,28 @@ impl Catalog {
         prepared: submissions::PreparedSubmission,
         context_job: Option<(&context_jobs::ContextJobAdmission, &[Value])>,
     ) -> Result<Receipt> {
-        let submissions::PreparedSubmission {
-            identity: command,
-            epoch,
-            intent: input,
-            history: history_content,
-            mut launch,
-            inherit_source,
-            initial: initial_context,
-            origin,
-            _publication,
-        } = prepared;
-        if epoch != self.epoch {
+        let tx = self.db.transaction()?;
+        let receipt = Self::submit_admission_tx(&tx, self.epoch, &prepared, context_job)?;
+        tx.commit()?;
+        Ok(receipt)
+    }
+    pub(super) fn submit_admission_tx(
+        tx: &Transaction<'_>,
+        catalog_epoch: u64,
+        prepared: &submissions::PreparedSubmission,
+        context_job: Option<(&context_jobs::ContextJobAdmission, &[Value])>,
+    ) -> Result<Receipt> {
+        // The caller retains the publication lease through its outer commit. Taking this by
+        // value would drop that lease before a consume-and-admit transaction commits its roots.
+        let command = &prepared.identity;
+        let epoch = prepared.epoch;
+        let input = prepared.intent.clone();
+        let history_content = prepared.history.clone();
+        let mut launch = prepared.launch.clone();
+        let inherit_source = prepared.inherit_source;
+        let initial_context = prepared.initial.as_ref();
+        let origin = &prepared.origin;
+        if epoch != catalog_epoch {
             return Err(RuntimeError::Conflict(
                 "input preparation belongs to a previous owner".into(),
             ));
@@ -319,7 +333,6 @@ impl Catalog {
             _ => None,
         };
         let create_thread = matches!(origin, submissions::SubmissionOrigin::Summary);
-        let tx = self.db.transaction()?;
         let duplicate: Option<(String, String)> = tx
             .query_row(
                 "SELECT intent,receipt FROM commands WHERE id=?1",
@@ -340,7 +353,8 @@ impl Catalog {
             collaboration::validate_submission(&tx, operation_id, &command)?;
         }
         if let submissions::SubmissionOrigin::User { checkpoint }
-        | submissions::SubmissionOrigin::Child { checkpoint, .. } = &origin
+        | submissions::SubmissionOrigin::Child { checkpoint, .. }
+        | submissions::SubmissionOrigin::Continuation { checkpoint, .. } = &origin
         {
             let active: Option<String> = tx
                 .query_row(
@@ -405,15 +419,18 @@ impl Catalog {
                 }
             }
         }
-        let input_id = child_operation
-            .map(|id| format!("child-input:{id}"))
-            .unwrap_or_else(id);
+        let input_id = match &origin {
+            submissions::SubmissionOrigin::Continuation { occurrence_id, .. } => format!("continuation-input:{occurrence_id}"),
+            _ => child_operation.map(|id| format!("child-input:{id}")).unwrap_or_else(id),
+        };
         let run_id = id();
         let history = HistoryItem {
             id: input_id.clone(),
             thread_id: thread.clone(),
             parent: head,
-            source: if child_operation.is_some() {
+            source: if matches!(&origin, submissions::SubmissionOrigin::Continuation { .. }) {
+                HistorySource::Environment
+            } else if child_operation.is_some() {
                 HistorySource::Agent
             } else {
                 HistorySource::User
@@ -432,7 +449,7 @@ impl Catalog {
             branch_id: command.branch_id.clone(),
             state: RunState::Accepted,
             revision: 1,
-            epoch: self.epoch,
+            epoch: catalog_epoch,
             configuration: command.configuration.clone(),
             cancel_requested: false,
         };
@@ -505,7 +522,6 @@ impl Catalog {
         if let Some((job, parts)) = context_job {
             job.publish(&tx, &receipt.run_id, parts)?;
         }
-        tx.commit()?;
         Ok(receipt)
     }
     pub fn run(&self, id: &str) -> Result<Run> {
@@ -570,6 +586,8 @@ impl Catalog {
             policy_switch::close_run_candidate(&tx, id, run.revision + 1)?;
         }
         run.state = next;
+        if next == RunState::Cancelled { followups::cancel_source_run(&tx, id)?; }
+        if next.terminal() { followups::settle_run(&tx, &run)?; }
         if next != RunState::Waiting {
             run.waiting_on = None;
         }
@@ -602,6 +620,7 @@ impl Catalog {
             return Ok(run);
         }
         run.cancel_requested = true;
+        followups::cancel_source_run(&tx, id)?;
         if run.state == RunState::Waiting {
             questions::cancel_run_questions(&tx, id)?;
             policy_control::cancel_run_pause(&tx, &run)?;
@@ -1543,6 +1562,9 @@ mod execution_persistence;
 
 #[path = "catalog_inputs.rs"]
 pub mod inputs;
+
+#[path = "catalog_followups.rs"]
+pub mod followups;
 
 #[path = "catalog_submission.rs"]
 pub mod submissions;

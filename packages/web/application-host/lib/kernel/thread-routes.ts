@@ -4,6 +4,7 @@ import type { Express, RequestHandler } from 'express';
 import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel } from '@varin/application-client';
 import { KernelClientError } from './kernel-client.js';
 import { ThreadAdapter } from './thread-adapter.js';
+import { controlThreadFollowup, listThreadFollowups, registerThreadFollowup } from './thread-followups.js';
 
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Request must be an object');
@@ -41,6 +42,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'child/report': ['runtime', 'threadId', 'branchId', 'operationId', 'itemId', 'offset', 'maxBytes'],
     'child/list': ['runtime', 'threadId', 'branchId'], 'child/cancel': ['runtime', 'threadId', 'branchId', 'operationId'],
     'child/wait/cancel': ['runtime', 'threadId', 'branchId', 'waitId'], 'tree/cancel': ['runtime', 'threadId', 'branchId'],
+    'followup/register': ['runtime', 'threadId', 'branchId', 'key', 'runId', 'operationId'],
+    'followup/list': ['runtime', 'threadId', 'branchId'],
+    'followup/control': ['runtime', 'threadId', 'branchId', 'followupId', 'expectedRevision', 'action'],
     'plan/read': ['runtime', 'threadId', 'branchId'],
     'plan/update': ['runtime', 'threadId', 'branchId', 'key', 'expectedHeadId', 'expectedRef', 'content'],
     fork: ['runtime', 'threadId', 'branchId', 'key', 'headId'],
@@ -88,6 +92,14 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('child/cancel', body => adapter.cancelChild(identity(body), text(body.operationId)));
   post('child/wait/cancel', body => adapter.cancelChildWait(identity(body), text(body.waitId)));
   post('tree/cancel', async body => { await adapter.cancelTree(identity(body)); return {}; });
+  post('followup/register', (body, signal) => registerThreadFollowup(adapter,
+    { ...identity(body), key: text(body.key), runId: text(body.runId), operationId: text(body.operationId) }, signal));
+  post('followup/list', (body, signal) => listThreadFollowups(adapter, identity(body), signal));
+  post('followup/control', (body, signal) => {
+    if (body.action !== 'pause' && body.action !== 'resume' && body.action !== 'cancel') throw new Error('Invalid follow-up control');
+    return controlThreadFollowup(adapter, { ...identity(body), followupId: text(body.followupId),
+      expectedRevision: revision(body.expectedRevision), action: body.action }, signal);
+  });
   post('tools/inspect',(body,signal)=>adapter.inspectTools(identity(body),text(body.runId),signal));
   post('policy/inspect', body => adapter.inspectPolicy(identity(body), text(body.runId)));
   post('policy/restart', (body, signal) => adapter.restartPolicy(identity(body), text(body.runId), text(body.selectionId), signal));

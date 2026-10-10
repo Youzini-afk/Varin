@@ -318,3 +318,90 @@ it('rebuilds only Host continuation service while its kernel keeps the original 
     replacement?.stop();
   }
 }, 60_000);
+
+it('admits one process follow-up without the Host pump, then cold-prepares and reads the original process output', async () => {
+  let turn = 0; let processId = ''; let readResult = ''; let finishSource: (() => void) | undefined;
+  const failures: unknown[] = [];
+  const f = await fixture((body, response) => {
+    try {
+      turn++;
+      const last = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
+      if (turn === 1) tool(response, 'process_spawn', { cwd: '', command: process.execPath,
+        args: ['-e', `const fs=require('node:fs');const root=${JSON.stringify(f.root)};const release=${JSON.stringify(path.join(f.root, 'release-process'))};fs.appendFileSync(${JSON.stringify(path.join(f.root, 'spawn-count'))},'1');let released=false;const watcher=fs.watch(root,(_event,name)=>{if(String(name)==='release-process')finish();});function finish(){if(released||!fs.existsSync(release))return;released=true;watcher.close();process.stdout.write('one-shot-process-output');}finish();`], mode: 'pipe' }, 1);
+      else if (turn === 2) {
+        const accepted = JSON.parse(String(last?.output)) as { kind: string; operation_id: string };
+        expect(accepted.kind).toBe('job_accepted');
+        processId = accepted.operation_id;
+        // Keep the source Run active until the real management API has recorded authorization.
+        finishSource = () => { if (!response.writableEnded) done(response); };
+      } else if (turn === 3) {
+        expect(JSON.stringify(body.input)).toContain('outputReader');
+        expect(JSON.stringify(body.input)).toContain(processId);
+        tool(response, 'process_read', { processId, cursor: 0 }, 3);
+      } else {
+        expect(turn).toBe(4);
+        readResult = String(last?.output); done(response);
+      }
+    } catch (error) { failures.push(error); response.writeHead(500); response.end('fixture assertion failed'); }
+  });
+  const identity = await f.api.create('process-followup-once');
+  const prepared = await f.api.prepareSource({ ...identity, key: 'capture', path: f.workspace, mode: 'materialized' });
+  const source = await f.api.submit({ ...identity, key: 'original-work', expectedHead: null,
+    text: 'Continue this work once after its process ends and inspect the result.', model, source: prepared.source });
+  let replacement: ThreadCollaboration | undefined;
+  let continuedRunId: string | undefined;
+  try {
+    await expect.poll(() => processId, { timeout: 15_000 }).not.toBe('');
+    f.collaboration.stop();
+    const command = { ...identity, key: 'continue-process-once', runId: source.run_id, operationId: processId };
+    const registered = await f.api.followups.register(command);
+    expect(registered.wait.state).toBe('waiting'); expect(registered.occurrence).toBeNull();
+    expect(await f.api.followups.register(command)).toEqual(registered);
+    finishSource!();
+    await expect.poll(async () => (await f.runtime.run(source.run_id)).state, { timeout: 15_000 }).toBe('completed');
+    expect((await f.runtime.operation(processId)).phase).not.toBe('terminal');
+    // No Host continuation service is running. Only the native process receipt and the independent
+    // kernel event worker can consume this authorization and atomically admit the next Run.
+    await fs.writeFile(path.join(f.root, 'release-process'), 'release');
+    await expect.poll(async () => Boolean((await f.api.followups.list(identity))[0]?.occurrence?.receipt), { timeout: 15_000 }).toBe(true);
+    const admitted = (await f.api.followups.list(identity))[0]!;
+    const continuation = admitted.occurrence!.receipt!; continuedRunId = continuation.run_id;
+    expect(continuedRunId).not.toBe(source.run_id); expect(admitted.wait.state).toBe('consumed');
+    expect(admitted.occurrence!.receipt_identity).toBe(processId);
+    expect(typeof admitted.occurrence!.receipt_epoch).toBe('string');
+    expect((await f.runtime.operation(processId)).outcome).toBe('succeeded');
+    expect(await f.runtime.run(continuedRunId)).toMatchObject({ state: 'accepted', thread_id: identity.threadId, branch_id: identity.branchId });
+    expect(await f.runtime.launch(continuedRunId)).toMatchObject({ startable: true, requires_rebind: true });
+    expect(turn).toBe(2);
+    const fact = (await f.runtime.history(identity.branchId)).find(item => item.id === continuation.input_id);
+    expect(fact).toMatchObject({ source: 'environment', content: { provenance: { kind: 'environment_fact' } } });
+    const errors: unknown[] = [];
+    replacement = new ThreadCollaboration({ kernel: f.kernel, storageAdapter: f.storage,
+      resolveLiveSource: async () => { throw new Error('No live child expected'); },
+      sourceCaptureOwners: { documents: f.documents, inspectInventory: async () => { throw new Error('No child capture expected'); } },
+      runtime: f.runtime, workingStates: f.workingStates, prepareContext: f.context.prepareContext,
+      continueRun: (runId, signal) => f.adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => f.adapter.recover(signal),
+      onError: (_operation, error) => { errors.push(error); } });
+    await replacement.recover();
+    await expect.poll(async () => (await f.runtime.run(continuedRunId!)).state, { timeout: 15_000 }).toBe('completed');
+    expect(readResult).toContain('succeeded');
+    expect(readResult).toContain(Buffer.from('one-shot-process-output').toString('base64'));
+    expect((await f.api.followups.register(command)).occurrence!.receipt).toEqual(continuation);
+    for (const action of ['pause', 'resume', 'cancel'] as const) {
+      expect((await f.api.followups.control({ ...identity, followupId: registered.id,
+        expectedRevision: registered.revision, action })).occurrence!.receipt).toEqual(continuation);
+    }
+    await replacement.recover(); await f.adapter.continueLaunch(continuedRunId);
+    expect((await f.runtime.run(continuedRunId)).state).toBe('completed');
+    expect((await f.runtime.events(registered.wait.after_cursor, 256)).filter(event => event.kind === 'followup.admitted' && event.subject === registered.id)).toHaveLength(1);
+    expect((await f.runtime.history(identity.branchId)).filter(item => item.id === continuation.input_id)).toHaveLength(1);
+    expect(await fs.readFile(path.join(f.root, 'spawn-count'), 'utf8')).toBe('1');
+    expect(turn).toBe(4); expect(failures).toEqual([]); expect(errors).toEqual([]); expect(f.launchErrors).toEqual([]);
+  } finally {
+    finishSource?.();
+    await fs.writeFile(path.join(f.root, 'release-process'), 'release');
+    if (continuedRunId) await f.runtime.cancelRun(continuedRunId).catch(() => undefined);
+    if (processId) await f.runtime.cancelOperation(processId).catch(() => undefined);
+    replacement?.stop();
+  }
+}, 60_000);

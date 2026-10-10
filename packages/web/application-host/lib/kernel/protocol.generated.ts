@@ -6,8 +6,8 @@
 export const KERNEL_PROTOCOL_VERSION = 1 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
-export const KERNEL_CONTROL_METHODS = ["runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
-export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
+export const KERNEL_CONTROL_METHODS = ["runtime.followup.control","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
+export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.followup.control","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.history.body"] as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
@@ -59,6 +59,9 @@ export type KernelMethod =
   | "runtime.model.select"
   | "runtime.model.inspect"
   | "runtime.status"
+  | "runtime.followup.register"
+  | "runtime.followup.list"
+  | "runtime.followup.control"
   | "runtime.content.collect"
   | "runtime.admission.inspect"
   | "runtime.thread.create"
@@ -885,6 +888,52 @@ export interface RunContextScope {
   threadRole: string;
   sessionId: string;
   projectId: string | null;
+}
+
+export type FollowupControlAction = 'pause' | 'resume' | 'cancel';
+
+export interface FollowupRegisterParams {
+  key: string;
+  runId: string;
+  operationId: string;
+}
+
+export interface FollowupControlParams {
+  followupId: string;
+  expectedRevision: number;
+  action: FollowupControlAction;
+}
+
+export interface FollowupWait {
+  id: string;
+  kind: 'process_stopped';
+  after_cursor: number;
+  trigger_cursor: number | null;
+  state: 'waiting' | 'observed' | 'consumed' | 'cancelled';
+}
+
+export interface FollowupOccurrence {
+  id: string;
+  generation: number;
+  trigger_cursor: number;
+  receipt_identity: string;
+  receipt_epoch: string;
+  state: 'observed' | 'held' | 'admitted' | 'completed' | 'failed' | 'cancelled';
+  hold_reason: 'control_paused' | 'source_run_active' | 'source_unsettled' | 'branch_active' | 'context_scope_changed' | 'preparation_failed' | null;
+  receipt: InputSubmitReceipt | null;
+}
+
+export interface Followup {
+  id: string;
+  revision: number;
+  generation: number;
+  thread_id: string;
+  branch_id: string;
+  source_run_id: string;
+  operation_id: string;
+  state: 'active' | 'paused' | 'cancelled';
+  wait: FollowupWait;
+  occurrence: FollowupOccurrence | null;
 }
 
 export interface RunParams {
@@ -2399,6 +2448,9 @@ export interface ChildWait {
 }
 
 export type KernelMethodParams = {
+  "runtime.followup.register": FollowupRegisterParams;
+  "runtime.followup.list": ThreadParams;
+  "runtime.followup.control": FollowupControlParams;
   "runtime.branch.fork": BranchForkParams;
   "runtime.plan.view": PlanViewParams;
   "runtime.plan.contains": PlanContainsParams;
@@ -2583,6 +2635,33 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.register";
+      params: FollowupRegisterParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.list";
+      params: ThreadParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.control";
+      params: FollowupControlParams;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
