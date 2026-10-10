@@ -1,3 +1,4 @@
+import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createMemoryOwner } from './memory-owner.js';
 import { createThreadContext } from './thread-context.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
@@ -59,9 +60,10 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const documents = createDocumentAuthority({ hostId: 'http-review', dataDir: path.join(root, 'documents'), isAllowedRoot: async () => true, isTrusted: async () => true });
   const storage = new KernelStorageAdapter({ client: kernel, hostId: 'http-review', storageRoot: root, resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
-  const prepare = createThreadSourcePreparer({ documents, workingStates });
+  const resources = resourceScopeFixture(root, workingStates, documents);
+  const prepare = createThreadSourcePreparer({ documents, workingStates, prepareResources: resources.prepareSourceCapture });
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }) });
-  const prepareContext = createThreadContext({ personalization, workingStates, projectForWorkspace: async () => 'selected-project' });
+  const prepareContext = createThreadContext({ personalization, resources, projectForWorkspace: async () => 'selected-project' });
   kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
   let closed = false;
   const close = async () => { if (closed) return; closed = true; await storage.dispose(); await documents.dispose(); await kernel.close(); };
@@ -123,7 +125,8 @@ it('initial context preserves pinned AGENTS and request roles while current pers
   for (const text of ['GLOBAL PROFILE RULE', 'SELECTED PROJECT RULE', 'GLOBAL NOTE FROZEN', 'SELECTED PROJECT NOTE', 'THIS SESSION NOTE', 'PINNED WORKSPACE INSTRUCTIONS']) expect(prompt).toContain(text);
   for (const text of ['LATER DISK INSTRUCTIONS', 'MUST NOT LEAK OTHER PROJECT', 'USER TEXT MUST STAY USER']) expect(prompt).not.toContain(text);
   expect(JSON.stringify(messages(f.requests[0]!.body).filter(value => value.role === 'user'))).toContain('USER TEXT MUST STAY USER');
-  expect(frozen.proposal.instruction_sources.some(value => value.includes('AGENTS.md:sha256-'))).toBe(true);
+  expect(frozen.resources?.snapshot.instructions.some(entry => entry.reference.path === 'AGENTS.md' && entry.reference.version.startsWith('sha256-'))).toBe(true);
+  expect(frozen.proposal.instruction_sources).toContain(frozen.resources!.snapshot.id);
   expect(frozen.proposal.memory_checkpoint).toContain('agent.personalization:');
   await f.personalization.savePrompt({ kind: 'global' }, { sections: { global_rule: 'CHANGED GLOBAL PROFILE' } }, (await f.personalization.catalog()).revision);
   await f.personalization.saveNote({ scope: { kind: 'global' }, content: 'NEW NOTE AFTER ACCEPTANCE' });

@@ -229,6 +229,7 @@ impl BranchForkPreparation {
                         revision: 1,
                         proposal,
                         personalization: original.personalization,
+                        resources: original.resources,
                     };
                     let reference = contents.content.save(&serde_json::to_value(&body)?)?;
                     Ok((context::CheckpointMetadata::from(&body), reference))

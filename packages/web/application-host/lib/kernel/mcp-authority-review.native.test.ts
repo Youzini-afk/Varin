@@ -1,3 +1,4 @@
+import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { resolvePiSdkSpecifier } from '@varin/pi-host/sdk';
 import { createMcpLease } from './mcp-owner.js';
 import { McpAuthority, McpCompositions, type McpAuthorityLease, type McpCompositionScope } from '@varin/pi-host/mcp-authority';
@@ -62,9 +63,10 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const documents = createDocumentAuthority({ hostId: 'http-review', dataDir: path.join(root, 'documents'), isAllowedRoot: async () => true, isTrusted: async () => true });
   const storage = new KernelStorageAdapter({ client: kernel, hostId: 'http-review', storageRoot: root, resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
-  const prepare = createThreadSourcePreparer({ documents, workingStates });
+  const resources = resourceScopeFixture(root, workingStates, documents);
+  const prepare = createThreadSourcePreparer({ documents, workingStates, prepareResources: resources.prepareSourceCapture });
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }) });
-  const prepareContext = createThreadContext({ personalization, workingStates, projectForWorkspace: async () => 'selected-project' });
+  const prepareContext = createThreadContext({ personalization, resources, projectForWorkspace: async () => 'selected-project' });
   kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
   let closed = false;
   const close = async () => { if (closed) return; closed = true; await storage.dispose(); await documents.dispose(); await kernel.close(); compositions?.close(); await mcp.close(); };

@@ -163,6 +163,7 @@ impl Fixture {
                     history_range: range.clone(),
                 },
                 binding: RequestBinding {
+                    resource_checkpoint_id: None,
                     connection_identity: launch.connection_identity.clone(),
                     provider_family: launch.provider_family.clone(),
                     model: launch.model.clone(),
@@ -331,6 +332,7 @@ impl Fixture {
                     history_range: range.clone(),
                 },
                 binding: RequestBinding {
+                    resource_checkpoint_id: None,
                     connection_identity: self.launch.connection_identity.clone(),
                     provider_family: self.launch.provider_family.clone(),
                     model: self.launch.model.clone(),
@@ -530,6 +532,7 @@ impl Fixture {
             state: json!({"stage": 1}),
             nodes: vec![PolicyAdmittedNode {
                 context: FrozenToolContext {
+                    resource_checkpoint_id: None,
                     run_id: run_id.clone(),
                     origin,
                     tool_schema_generation: launch.tool_schema_generation,

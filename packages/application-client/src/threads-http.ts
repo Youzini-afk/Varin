@@ -34,6 +34,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
       cancelWait: (identity, waitId) => post('child/wait/cancel', { ...identity, waitId }),
       async cancelTree(identity) { await post('tree/cancel', identity); },
     },
+    resources: { refresh: input => post('resources/refresh', input) },
     followups: {
       register: input => post('followup/register', input),
       list: identity => post('followup/list', identity),

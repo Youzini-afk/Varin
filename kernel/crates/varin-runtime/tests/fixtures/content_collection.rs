@@ -1,6 +1,6 @@
 //! Existing retention fixtures use the same owned maintenance pass as the production worker.
 //! The closure returns admission before run(), dropping temporary Catalog mutex guards.
-use varin_runtime::{ContentCollectionStatus, RuntimeError, content::ContentCollectionAdmission};
+use varin_runtime::{content::ContentCollectionAdmission, ContentCollectionStatus, RuntimeError};
 pub fn collect(admit: impl FnOnce() -> ContentCollectionAdmission) -> Result<u64, RuntimeError> {
     let report = admit().run();
     match report.status {

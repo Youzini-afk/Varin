@@ -6,6 +6,17 @@
 
 目标是完整实现[完整运行时设计](../design/agent-runtime-design.md)和[能力组合设计](../design/runtime-extensibility-design.md)共同定义的长期运行底座：及时交互、低开销执行、按真实资源调度、深层能力组合和可替换策略。完成聊天循环、迁移已有工具或删除 Pi 都不是单独的完成标准；Pi 退出是这套设计落地后的一个结果。当前生产仍使用 Pi session worker、TypeScript Host 协调和 Rust 资源内核；现有权威见[架构](../architecture.md)。
 
+## 2026-10-10 增量：原生指令与 skills 冻结资源纵切
+
+- Host 新 `agent-resources` owner 统一解释已准入的 SYSTEM/APPEND、目录指令、skill 元数据、包过滤与版本。配置、ProjectTrustStore、安装包和编辑器仍是原有 owner；不执行扩展、不安装包、不创建第二资源库。用户配置与受信项目配置分开，空值、缺失、损坏、无权限、不可用和取消保留各自结果。
+- main source 使用原 Documents 协调的稳定完整捕获；Git child 在原 source receipt 同事务补精确资源范围、外部 ancestor/capsule 与 absence/coverage，固定继承复制原 provenance。用户资产、独立安装包由自己的只读 owner 捕获，不假称属于项目 pin。冻结的类型化 `ContextResources` 和完整正文放入既有 ContextCheckpoint ContentStore 对象，GC 复用原 checkpoint 根。
+- ModelStep、policy graph 冻结原 `resource_checkpoint_id`。普通 `resource_read` 通过既有工具目录、原调用身份、私有 owner channel 与七态结果消费快照；模型不能选择任意 checkpoint/source/grant。已捕获正文不再开原文件或重新解析 settings。额外固定视图材料按原 branch/revision/root/receipt 重开窄 `storage.read` view，pin/read/release 不授予 file/process 或写权限。目录指令的合法 symlink 沿原 pin 解析，只派生具体最终候选文件 scope；不会给父目录/整根权限。项目 trust 只约束实际依赖它的选中资源，撤销不会阻断独立用户 skill 或目录指令。
+- 独立资源 refresh CAS 保留 summary/history anchor、原即时记忆快照、profile/composition、Thread 角色/项目及 source。显式切换 input source 时，Host 准备依据的 checkpoint ID 跟随候选进入原 input/Run/source 事务，覆盖了 Host await 期间的刷新竞争。`runtime.input.receipt` 复用原 command/launch 身份校验，已接受输入的重试不受后来损坏的资源配置影响，也不维护 Host 去重表。fork、compaction、重开及旧调用继续使用原资源正文，fork 不复制执行 source 授权。
+- 认证 HTTP、`ThreadsAPI.resources.refresh`、实际 Host index 与 Thread UI 已接同一 owner。UI 只展示版本、来源、指令/skills 元数据及诊断，按显示 revision 显式刷新；冲突保留旧内容。此阶段还未接显式 `/skill:name args` 的输入/队列版本绑定，也未收敛旧 Pi catalog/command/editor 消费，不能称完整 skills 产品迁移完成。
+- 最终原生组件验证：runtime **279 passed / 0 failed / 2 既有 ignored**；kernel lib **42 passed / 0 failed / 1 既有 ignored**。新 Linux x64 kernel 已按 build identity `0.9.25` 编译及 manifest/ELF 校验，SHA-256 `d9dd3411be346851baf68818dfd51086d4187c2c5cb4a4607fa0b772c7cf2e34`。覆盖原版本读取/GC/恢复、policy 无 ModelStep 调用、policy 单独取消、只读 pin/ancestor metadata、fixed handoff 原 provenance、原子切源与输入重试；不推断为完整 Host IPC 端到端通过。
+- 独立审查先从设计形成验收，再追调用/持久化/取消/只读权限链。仓库外探针复现并复核 Host 准备 CAS、重开原 receipt、fork 无执行 source 仍保原正文、多级同 pin alias、兄弟文件拒绝、取消后租约释放和外部 capsule 不越 bundle 捕获。Windows 路径、显式空 package manifest、FIFO 非阻塞失败也已独立复验。本 H1 范围无剩余已知行为阻断；不以这些探针替代 H2 或 Host IPC 验收。
+- 最终 portable Host 组合 **51/51**、原 source receipt 行为 **8/8**、Thread UI 行为 **37/37**、只读 SDK 配置 **2/2** 通过；Host 生产/测试类型、UI 类型、实际 Host bundle、生成协议一致性、变更 lint 和文档链接检查通过。其 source/pin fixture 的严格权限模拟与原生 Storage 行为证据分别记录，不拼接成未执行的 Host IPC 验收。完整 `/skill` 语义、Goal/通用日历与后续领域、默认 Pi 产品迁移继续推进。
+
 ## 2026-10-10 增量：进程停止后的显式一次续接
 
 - 用户可在真实 `process_spawn` Job 受理或原执行回执存在后，登记一次 follow-up。定义、独立 next-Run Wait、实际 occurrence 与新 Run 准入全部归原 Catalog；定义冻结原模型、策略、工具、来源选择及上下文作用域。没有从普通输入自动推导 Goal，也不复活已结束 Run 或放宽 run-bound Wait。Catalog 现为格式 **20**，旧内部格式拒绝。

@@ -1,3 +1,4 @@
+import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
 import { createThreadContext } from './thread-context.js';
 import { createMemoryOwner } from './memory-owner.js';
@@ -170,7 +171,7 @@ it('retrieval routing uses the accepted Run project even when the visible projec
   const storage = new KernelStorageAdapter({ client: f.kernel, hostId: 'process-consumer', storageRoot: f.documents.root,
     resolveWorkspaceRoot: async id => (await f.documents.authority.inspectWorkspace(id)).root });
   cleanups.push(() => storage.dispose());
-  const prepareContext = createThreadContext({ personalization, workingStates: createKernelWorkspaceWorkingStateAccess(storage), projectForWorkspace: async () => 'accepted-project' });
+  const prepareContext = createThreadContext({ personalization, resources: resourceScopeFixture(f.documents.root, createKernelWorkspaceWorkingStateAccess(storage), f.documents.authority, f.liveSources.validate), projectForWorkspace: async () => 'accepted-project' });
   f.kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
   const observedProjects: Array<string | null> = [];
   let visibleProject = 'accepted-project';

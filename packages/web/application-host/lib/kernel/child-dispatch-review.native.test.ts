@@ -1,3 +1,4 @@
+import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createMemoryOwner, type MemoryQuery } from './memory-owner.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
@@ -130,7 +131,8 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
     const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
     const personalization = createAgentPersonalization({ client: kernel,
       context: async () => ({ bot: false, projectId }) });
-    const originalContext = createThreadContext({ personalization, workingStates,
+    const resources = resourceScopeFixture(root, workingStates, documents);
+    const originalContext = createThreadContext({ personalization, resources,
       projectForWorkspace: async () => projectId });
     const prepareContext = options.context?.(originalContext) ?? originalContext;
     const memoryQueries: MemoryQuery[] = [];
@@ -180,8 +182,8 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
       if (selection.providerId !== model.providerId || selection.modelId !== model.modelId) throw new Error('Unknown fixture model');
       return { configuration, credentialOwner };
     }, rebindModel: async () => credentialOwner };
-    const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, workingStates, runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ documents, workingStates }), prepareContext);
-    const collaboration = options.collaboration === false ? undefined : new ThreadCollaboration({ kernel, storageAdapter: storage, resolveLiveSource: async () => { throw new Error("Fixed source fixture"); }, sourceCaptureOwners: { documents, inspectInventory: async () => { throw new Error("Fixed source fixture"); } }, runtime, workingStates, prepareContext, continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal), onError: (_operation, error) => { errors.push(error); } });
+    const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, workingStates, runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ documents, workingStates, prepareResources: resources.prepareSourceCapture }), prepareContext);
+    const collaboration = options.collaboration === false ? undefined : new ThreadCollaboration({ kernel, storageAdapter: storage, resolveLiveSource: async () => { throw new Error("Fixed source fixture"); }, sourceCaptureOwners: { documents, prepareResources: resources.prepareSourceCapture, inspectInventory: async () => { throw new Error("Fixed source fixture"); } }, runtime, workingStates, prepareContext, continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal), onError: (_operation, error) => { errors.push(error); } });
     const app = express();
     registerCommonRequestMiddleware(app, { express });
     registerThreadRoutes(app, adapter, (request, response, next) => {

@@ -59,6 +59,7 @@ fn model_call(
         },
     );
     let binding = RequestBinding {
+        resource_checkpoint_id: None,
         connection_identity: "fixture".into(),
         provider_family: "fixture".into(),
         model: "fixture".into(),
@@ -125,6 +126,7 @@ fn model_call(
             origin: origin.clone(),
         },
         FrozenToolContext {
+            resource_checkpoint_id: None,
             run_id: run.into(),
             origin,
             tool_schema_generation: 1,

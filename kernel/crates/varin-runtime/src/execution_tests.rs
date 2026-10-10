@@ -44,6 +44,7 @@ fn input(db: &Arc<Mutex<Catalog>>) -> ExecutionInput {
         run_id: receipt.run_id,
         owner_generation: db.epoch(),
         binding: RequestBinding {
+            resource_checkpoint_id: None,
             connection_identity: "fixture-connection".into(),
             provider_family: "test".into(),
             model: "test-model".into(),

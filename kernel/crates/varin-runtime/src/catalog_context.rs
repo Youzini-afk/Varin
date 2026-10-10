@@ -16,6 +16,8 @@ pub struct ContextProposal {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ContextCheckpoint {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resources: Option<super::resources::ContextResources>,
     pub id: String,
     pub revision: u64,
     pub proposal: ContextProposal,
@@ -303,7 +305,7 @@ impl Catalog {
     pub fn capture_admitted_checkpoint(&self, run_id: &str) -> Result<Option<CheckpointRead>> {
         self.capture_checkpoint("SELECT c.id,c.revision,c.body,c.scope FROM runs r JOIN context_checkpoints c ON c.id=r.context_checkpoint_id WHERE r.id=?1",run_id)
     }
-    fn capture_checkpoint(&self, sql: &str, id: &str) -> Result<Option<CheckpointRead>> {
+    pub(super) fn capture_checkpoint(&self, sql: &str, id: &str) -> Result<Option<CheckpointRead>> {
         let metadata: Option<(String, u64, String, Option<String>)> = self
             .db
             .query_row(sql, [id], |row| {
@@ -396,6 +398,7 @@ impl Catalog {
             .expected_revision
             .checked_add(1)
             .ok_or_else(|| RuntimeError::Invalid("context revision exhausted".into()))?;
+        let resources = self.active_context(&proposal.branch_id)?.and_then(|context| context.resources);
         let personalization = match personalization {
             Some(basis) => Some(basis),
             None => self
@@ -407,6 +410,7 @@ impl Catalog {
             revision,
             proposal,
             personalization,
+            resources,
         };
         let reference = self.content.save(&serde_json::to_value(&checkpoint)?)?;
         Ok((checkpoint, reference))
@@ -552,6 +556,9 @@ impl CheckpointRead {
                 "context checkpoint differs from its ownership metadata".into(),
             ));
         }
+        if let Some(resources) = &checkpoint.resources {
+            resources.validate(checkpoint.personalization.as_ref().ok_or_else(|| RuntimeError::Invalid("resource checkpoint has no owned scope".into()))?)?;
+        }
         Ok(checkpoint)
     }
 }
@@ -676,6 +683,7 @@ impl ContextRead {
                     opaque: None,
                 });
                 return Ok(ContextProjection {
+                    resource_checkpoint_id: None,
                     checkpoint_id: format!("context-job:{}", request.key),
                     history,
                     instruction_sources: vec!["context_compaction:v2".into()],
@@ -752,6 +760,7 @@ impl ContextRead {
             &trusted_receipts,
         )?);
         Ok(ContextProjection {
+            resource_checkpoint_id: checkpoint.resources.as_ref().map(|_| checkpoint_id.clone()),
             checkpoint_id,
             history,
             instruction_sources,

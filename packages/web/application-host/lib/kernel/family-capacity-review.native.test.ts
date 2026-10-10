@@ -1,3 +1,4 @@
+import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -36,7 +37,7 @@ it.each([1, 3])('real FileSearch uses configured %i-worker budget and scoped adm
     resolveWorkspaceRoot: async () => root });
   cleanup.push(() => storage.dispose());
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'family-project' }) });
-  const prepareContext = createThreadContext({ personalization, workingStates: createKernelWorkspaceWorkingStateAccess(storage),
+  const prepareContext = createThreadContext({ personalization, resources: resourceScopeFixture(root, createKernelWorkspaceWorkingStateAccess(storage)),
     projectForWorkspace: async () => 'family-project' });
   const memoryQueries: MemoryQuery[] = [];
   const memoryOwner = createMemoryOwner({ personalization, prepareContext });

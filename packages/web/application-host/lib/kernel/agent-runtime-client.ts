@@ -48,6 +48,7 @@ import type {
   FollowupRegisterParams,
   FollowupControlParams,
   ContextRefreshParams,
+  ResourceRefreshParams, ResourceSnapshotParams, ContextResources,
   ContextJobCreateParams,
   HistoryPage,
   HistoryPageParams,
@@ -694,6 +695,12 @@ export class AgentRuntimeClient {
       signal,
     );
   }
+  refreshResources(input: ResourceRefreshParams, signal?: AbortSignal): Promise<ContextCheckpoint> {
+    return this.kernel.agentRuntimeRequest('runtime.resources.refresh', input, signal);
+  }
+  resourceSnapshot(input: ResourceSnapshotParams, signal?: AbortSignal): Promise<ContextResources> {
+    return this.kernel.agentRuntimeRequest('runtime.resources.snapshot', input, signal);
+  }
   refreshContext(
     input: ContextRefreshParams,
     signal?: AbortSignal,
@@ -754,6 +761,9 @@ export class AgentRuntimeClient {
       { runId },
       signal,
     );
+  }
+  inputReceipt(input: InputSubmitParams, signal?: AbortSignal): Promise<InputSubmitReceipt | null> {
+    return this.kernel.agentRuntimeRequest('runtime.input.receipt', input, signal);
   }
   submit(
     input: InputSubmitParams,

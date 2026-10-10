@@ -87,7 +87,7 @@ impl Catalog {
         personalization: PersonalizationBasis) -> Result<PersonalizationRefresh> {
         let current = self.capture_active_checkpoint(branch_id)?.ok_or_else(|| RuntimeError::Conflict("context has not been initialized".into()))?;
         Ok(PersonalizationRefresh {current,content:self.content.clone(),branch_id:branch_id.into(),expected_revision,
-            effective_system_prompt,instruction_sources,memory_checkpoint,personalization,_publication:self.content.begin_publication()})
+            effective_system_prompt,instruction_sources,memory_checkpoint,personalization,resources:None,_publication:self.content.begin_publication()})
     }
     pub fn publish_personalization_refresh(&mut self, prepared: PreparedPersonalizationRefresh) -> Result<context::ContextCheckpoint> {
         let current: Option<String> = self.db.query_row("SELECT checkpoint_id FROM active_contexts WHERE branch_id=?1",
@@ -107,6 +107,7 @@ pub struct PersonalizationRefresh {
     content: crate::content::ContentStore,
     branch_id: String, expected_revision: u64, effective_system_prompt: String, instruction_sources: Vec<String>,
     memory_checkpoint: Option<String>, personalization: PersonalizationBasis,
+    resources: Option<Option<super::resources::ContextResources>>,
     _publication: crate::content::ContentPublication,
 }
 pub struct PreparedPersonalizationRefresh {
@@ -114,13 +115,20 @@ pub struct PreparedPersonalizationRefresh {
     _publication: crate::content::ContentPublication,
 }
 impl PersonalizationRefresh {
+    pub fn require_resources(mut self, resources: Option<super::resources::ContextResources>) -> Self {
+        self.resources = Some(resources);
+        self
+    }
     pub fn load(self) -> Result<PreparedPersonalizationRefresh> {
-        let Self {current,content,branch_id,expected_revision,effective_system_prompt,instruction_sources,memory_checkpoint,personalization,_publication} = self;
+        let Self {current,content,branch_id,expected_revision,effective_system_prompt,instruction_sources,memory_checkpoint,personalization,resources,_publication} = self;
         personalization.validate()?;
         if !instruction_sources.starts_with(&personalization.instruction_sources) {
             return Err(RuntimeError::Conflict("personalization refresh omitted frozen instruction identities".into()));
         }
         let current = current.load()?;
+        if resources.as_ref().is_some_and(|resources| resources != &current.resources) {
+            return Err(RuntimeError::Conflict("ordinary personalization refresh cannot change resources".into()));
+        }
         let previous = current.personalization.as_ref().ok_or_else(|| RuntimeError::Invalid("context has no owned personalization basis".into()))?;
         if !previous.same_scope_and_source(&personalization) {
             return Err(RuntimeError::Conflict("personalization scope or frozen instruction source changed".into()));
@@ -153,7 +161,7 @@ impl PersonalizationRefresh {
             expected_revision, summary: current.proposal.summary,
             effective_system_prompt, instruction_sources, memory_checkpoint,
         };
-        let checkpoint = context::ContextCheckpoint {id:proposal.key.clone(),revision:current.revision+1,proposal,personalization:Some(personalization)};
+        let checkpoint = context::ContextCheckpoint {id:proposal.key.clone(),revision:current.revision+1,proposal,personalization:Some(personalization),resources:current.resources};
         let reference = content.save(&serde_json::to_value(&checkpoint)?)?;
         Ok(PreparedPersonalizationRefresh {previous_id:current.id,checkpoint,reference,unchanged:false,_publication})
     }

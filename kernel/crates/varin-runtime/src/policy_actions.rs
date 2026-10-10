@@ -63,6 +63,7 @@ impl PolicyNodeReceipt {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PolicyBoundary {
+    pub resource_checkpoint_id: Option<String>,
     pub id: String,
     pub source: Option<crate::catalog::launches::SourceSelection>,
 }
@@ -249,6 +250,7 @@ impl<
                 ));
             }
             let context = FrozenToolContext {
+                resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),
                 run_id: input.run_id.clone(),
                 origin: ToolOrigin::PolicyAction {
                     action_id: action_id.clone(),

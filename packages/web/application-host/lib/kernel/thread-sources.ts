@@ -1,3 +1,4 @@
+import { captureStableSourceBaseline, type StableSourcePreparationOwners, type SourceCaptureDocuments } from '../harness/working-state/source-preparation.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { LiveSourceOwner } from './live-source.js';
 import { createHash } from 'node:crypto';
@@ -5,10 +6,8 @@ import type { ThreadIdentity, ThreadSource, ThreadPrepareSource, ThreadPreparedS
 import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
 
 interface SourcePreparationOwners {
-  documents: {
-    resolveWorkspace(input: { path: string }): Promise<{ workspaceId: string }>;
-    inspectWorkspace(workspaceId: string): Promise<{ root: string }>;
-  };
+  documents: SourceCaptureDocuments;
+  prepareResources?: StableSourcePreparationOwners['prepareResources'];
   workingStates: WorkspaceWorkingStateRootAccess;
   liveSources?: LiveSourceOwner;
 }
@@ -16,7 +15,7 @@ interface SourcePreparationOwners {
 /** Preparation uses the existing Documents admission and immutable WorkingState owner.
  * The map only joins concurrent requests; the branch's fixed base is the durable receipt.
  */
-export function createThreadSourcePreparer({ documents, workingStates, liveSources }: SourcePreparationOwners) {
+export function createThreadSourcePreparer({ documents, workingStates, liveSources, prepareResources }: SourcePreparationOwners) {
   const preparing = new Map<string, Promise<ThreadPreparedSource>>();
   return async (input: ThreadPrepareSource): Promise<ThreadPreparedSource> => {
     const workspace = await documents.resolveWorkspace({ path: input.path });
@@ -35,8 +34,10 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
       const branchId = `source:${key}`;
       let branch = await store.getBranchRoot(branchId);
       if (!branch) {
-        const captured = await store.captureDirectory(root);
-        branch = await store.createBranch(workspace.workspaceId, branchId, captured);
+        const captured = await captureStableSourceBaseline({ store, directory: root, workspaceId: workspace.workspaceId,
+          captureWorkspaceId: workspace.workspaceId, branchId, captureScopes: [], content: { mode: 'saved-files' } },
+        { documents, inspectInventory: async () => ({ kind: 'directory' }), ...(prepareResources ? { prepareResources } : {}) });
+        branch = captured.branch;
       }
       // Branch creation durably publishes its immutable baseline at revision zero. Later retries
       // do not recapture a changed directory or substitute the branch's mutable write root.

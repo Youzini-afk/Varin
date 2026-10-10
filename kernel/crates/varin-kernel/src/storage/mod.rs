@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::authority::{path_allowed, path_allowed_scopes, require_capability};
+use crate::authority::{path_allowed, path_allowed_scopes, path_metadata_allowed_scopes, require_capability};
 use crate::error::KernelError;
 use crate::model::{
     BlobStream, BranchBuilder, BranchRow, BranchWriteBuilder, BuildTree, FileLease,

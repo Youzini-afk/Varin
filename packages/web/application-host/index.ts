@@ -13,6 +13,9 @@ import { createLanguageOwner } from './lib/kernel/language-owner.js';
 import { createLiveSourceOwner } from './lib/kernel/live-source.js';
 import { createThreadSourcePreparer, createThreadSourceAdmission } from './lib/kernel/thread-sources.js';
 import { createThreadContext } from './lib/kernel/thread-context.js';
+import { createThreadResourceScope } from './lib/kernel/thread-resource-scope.js';
+import { createResourceOwner } from './lib/kernel/resource-owner.js';
+import { readAgentResourceConfiguration } from '@varin/pi-host/agent-resource-configuration';
 import { createContextComposition } from './lib/kernel/context-composition.js';
 import { createPolicyModelPreparer } from './lib/kernel/policy-models.js';
 import { createAgentPolicy } from './lib/kernel/agent-policy.js';
@@ -177,7 +180,7 @@ import { createKernelSettingsActionOperationStore } from './lib/harness/settings
 import * as gitIdentityStorage from './lib/git/identity-storage.js';
 import { getGitHubAuth, getGitHubAuthAccounts, isGhCliActive, isGhCliDisabled } from './lib/github/auth.js';
 import { getGhCliToken } from './lib/github/gh-cli-credential.js';
-import { getStatus as getGitStatus } from './lib/git/service.js';
+import { getStatus as getGitStatus, resolvePrimaryWorktreeRoot } from './lib/git/service.js';
 import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
 import { createSourceViewStore, SOURCE_VIEW_STORAGE_SCOPE } from './lib/harness/source-view-store.js';
 import { createKernelClient, type KernelClient } from './lib/kernel/kernel-client.js';
@@ -2960,16 +2963,24 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     console.error('[RunObserver] Activity projection requires attention:', threadId ?? 'selection');
   });
   personalizationRuntime = agentRuntime;
+  const threadWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter);
+  const threadResources = createThreadResourceScope({
+    agentDir: mcpAgentDir, documents: documentsAuthority, workingStates: threadWorkingStates, resolvePrimaryWorktreeRoot,
+    validateLiveSource: liveSources.validate,
+    projectTrusted: root => mcpHostProjectTrusted(mcpAgentDir, root),
+    configuration: root => readAgentResourceConfiguration({ agentDir: mcpAgentDir, ...(root ? { cwd: root } : {}) }),
+    withSourceRead: (input, consume) => kernelStorageAdapter.withResourceRead(input, consume),
+  });
   const threadContext = createThreadContext({ personalization: agentPersonalization,
-      liveSource: { documents: documentsAuthority, validate: liveSources.validate },
+      resources: threadResources,
       composition: createContextComposition(extensionRuntime),
-      workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter),
       projectForWorkspace: async workspaceId => {
         const { root } = await documentsAuthority.inspectWorkspace(workspaceId);
         const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
         return projects.find(project => projectContainsPath(project, root))?.id;
       },
     });
+  kernelClient.setResourceOwner(createResourceOwner({ runtime: agentRuntime, resources: threadResources }));
   kernelClient.setPlanOwner(createPlanOwner(getUserKnowledgeStore, agentRuntime));
   kernelClient.setMemoryOwner(createMemoryOwner({ personalization: agentPersonalization, prepareContext: threadContext }));
   const contextService=new ContextService(agentRuntime,threadContext,async(run,launch)=>{
@@ -2985,11 +2996,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter), runtime: agentRuntime }), (runId, _error) => {
       // Durable launch remains inspectable/resumable. Never log credentials or provider responses.
       console.error('[Thread] Launch preparation requires attention:', runId);
-    }, createThreadSourcePreparer({ documents: documentsAuthority, liveSources: liveSources, workingStates: createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter) }),
+    }, createThreadSourcePreparer({ documents: documentsAuthority, liveSources, workingStates: threadWorkingStates, prepareResources: threadResources.prepareSourceCapture }),
     threadContext, new PlanService(agentRuntime, getUserKnowledgeStore));
   const collaboration = new ThreadCollaboration({ runtime: agentRuntime,
     kernel: kernelClient, storageAdapter: kernelStorageAdapter, resolveLiveSource: liveSources.validate,
-    sourceCaptureOwners: { documents: documentsAuthority, inspectInventory: (directory, signal) => threadWorktreeRuntime.inspectGitBaselineInventory(directory, signal) },
+    sourceCaptureOwners: { documents: documentsAuthority, prepareResources: threadResources.prepareSourceCapture, inspectInventory: (directory, signal) => threadWorktreeRuntime.inspectGitBaselineInventory(directory, signal) },
     reconcileDomainReceipts: createIntegrationReceiptReconciler({ runtime: agentRuntime,
       onError: (_operationId, _error) => console.error('[Integration] Original effect receipt requires attention') }),
     continueRun: (runId, signal) => threads.continueLaunch(runId, { signal }), recoverLaunches: signal => threads.recover(signal),

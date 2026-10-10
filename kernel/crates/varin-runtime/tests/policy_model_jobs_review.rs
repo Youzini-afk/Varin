@@ -35,6 +35,7 @@ impl Fixture {
             })
             .unwrap();
         let binding = RequestBinding {
+            resource_checkpoint_id: None,
             connection_identity: "main-account".into(),
             provider_family: "test".into(),
             model: "main".into(),

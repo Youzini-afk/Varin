@@ -37,6 +37,29 @@ to receive the eventual partial report. Native request credit remains owned unti
 The worker retains the original runtime file owner until it stops. This maintenance path is separate
 from workspace `storage.gc` and adds no persistent job ledger, automatic retry or shared execution barrier.
 
+## Frozen instruction and skill resources
+
+The Host prepares instruction/skill candidates through the [resource owner](../agent-resources/DOCUMENTATION.md),
+using actual Thread scope and the original source capture. ContextCheckpoint is their sole publication
+owner. `runtime.resources.snapshot` resolves only the exact checkpoint bound by a real ModelStep or policy
+call; the private resource bridge supplies call identity rather than accepting model-selected source handles.
+The existing tool directory registers `resource_read`; neither the Host nor that builtin creates a second
+resource execution ledger.
+
+`POST /api/threads/resources/refresh` is authenticated and exposed as `ThreadsAPI.resources.refresh`.
+It prepares a new candidate and publishes against the displayed context revision. It preserves the original
+Thread/project/role, source, summary, memory snapshot and profile composition. Input with an explicit new
+source prepares its replacement context before atomic input/Run/source admission. Old calls, forks and
+summary recipes retain their original snapshot. Failed or stale candidates leave the active checkpoint intact.
+
+Captured resource bodies read directly from the checkpoint. Additional immutable files use
+`KernelStorageAdapter.withResourceRead`: exact branch/revision, original source receipt, scoped read-only
+grant, owner pin and finally release/revoke, with no physical root or file-effect authority. The current
+execution workspace need not equal the resource's original source. User configuration and installed assets
+are captured through their existing owners; unknown capture-only paths require a new candidate.
+
+Explicit user `/skill` activation and older Pi consumers remain a subsequent convergence step.
+
 ## Explicit one-time process follow-ups
 
 The authenticated `/api/threads/followup/register`, `/list` and `/control` POST routes are exposed as

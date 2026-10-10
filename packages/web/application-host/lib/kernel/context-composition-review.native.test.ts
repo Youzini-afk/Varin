@@ -1,3 +1,4 @@
+import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createMemoryOwner } from './memory-owner.js';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { createContextComposition } from './context-composition.js';
@@ -63,7 +64,8 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const documents = createDocumentAuthority({ hostId: 'http-review', dataDir: path.join(root, 'documents'), isAllowedRoot: async () => true, isTrusted: async () => true });
   const storage = new KernelStorageAdapter({ client: kernel, hostId: 'http-review', storageRoot: root, resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
-  const prepare = createThreadSourcePreparer({ documents, workingStates });
+  const resources = resourceScopeFixture(root, workingStates, documents);
+  const prepare = createThreadSourcePreparer({ documents, workingStates, prepareResources: resources.prepareSourceCapture });
   let refresh = () => Promise.resolve();
   const refreshTasks: Promise<void>[] = [];
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }), onChanged: () => { const task = refresh(); void task.catch(() => undefined); refreshTasks.push(task); } });
@@ -71,7 +73,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
     brokerScript: path.join(repository, 'packages/extension-host/broker/broker-child.mjs') });
   await extensions.start(); cleanups.push(() => extensions.stop());
   const composition = createContextComposition(extensions);
-  const prepareContext = createThreadContext({ composition, personalization, workingStates, projectForWorkspace: async () => 'selected-project' });
+  const prepareContext = createThreadContext({ composition, personalization, resources, projectForWorkspace: async () => 'selected-project' });
   kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
   let closed = false;
   const close = async () => { if (closed) return; closed = true; await storage.dispose(); await documents.dispose(); await kernel.close(); };
@@ -154,6 +156,7 @@ it('packaged default and installable scoped example reach captured model request
   expect(prior.personalization!.contextComposition!.providerId).not.toBe(beforeRestart.personalization!.contextComposition!.providerId);
   const { contextComposition, ...basis } = prior.personalization!;
   await expect(f.runtime.refreshContext({ branchId: identity.branchId, expectedRevision: prior.revision, context: {
+    ...(prior.resources ? { resources: prior.resources } : {}),
     effectiveSystemPrompt: prior.proposal.effective_system_prompt + ' UNAUTHORIZED SAME REVISION',
     instructionSources: prior.proposal.instruction_sources, memoryCheckpoint: prior.proposal.memory_checkpoint,
     personalization: { ...basis, contextComposition: { ...contextComposition!, contentVersion: 'changed', sections: [] } },

@@ -681,7 +681,7 @@ impl ContextJobPreparation {
             if let Some(boundary) = &self.source.through_id {
                 let visible: bool = database.query_row("WITH RECURSIVE ancestors(id,parent) AS (SELECT id,parent FROM history WHERE id=?1 UNION ALL SELECT h.id,h.parent FROM history h JOIN ancestors a ON h.id=a.parent) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=?2)",params![self.request.through_id,boundary],|row|row.get(0))?;
                 if !visible {
-                    self.source = SummarySource::default();
+                    self.source.through_id = None;
                 }
             }
             let source = source_metadata_until(
@@ -732,7 +732,7 @@ impl ContextJobPreparation {
                     thread_id:format!("context-job-thread:{}",self.request.key),
                     branch_id:format!("context-job-branch:{}",self.request.key),expected_head:None,
                     input:Value::String(crate::context_job::SUMMARY_REQUEST.into()),configuration:self.configuration.clone()},
-                launch:Some(self.launch.clone()),inherit_source:false,initial:None,personalization:None,
+                launch:Some(self.launch.clone()),inherit_source:false,initial:None,current:None,personalization:None,resources:None,
                 origin:submissions::SubmissionOrigin::Summary,epoch:self.epoch,content:self.content,publication:self.publication,
             })?;
         let launch = submission.launch.clone().ok_or_else(||RuntimeError::Invalid("context job launch is missing".into()))?;
@@ -764,6 +764,11 @@ pub struct PreparedContextCheckpoint {
 }
 impl ContextJobPublication {
     pub fn load(self) -> Result<PreparedContextCheckpoint> {
+        let resource_checkpoint = self.job.recipe()?.source.checkpoint;
+        let resources = resource_checkpoint.map(|reference| -> Result<_> {
+            let checkpoint: context::ContextCheckpoint = serde_json::from_value(self.content.load(&reference)?)?;
+            Ok(checkpoint.resources)
+        }).transpose()?.flatten();
         let job = self.job.load()?;
         let database = Connection::open_with_flags(
             &self.database,
@@ -792,6 +797,7 @@ impl ContextJobPublication {
                 memory_checkpoint: request.memory_checkpoint.clone(),
             },
             personalization: request.personalization.clone(),
+            resources,
         };
         let reference = self.content.save(&serde_json::to_value(&checkpoint)?)?;
         Ok(PreparedContextCheckpoint {

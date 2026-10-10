@@ -134,6 +134,7 @@ fn boundary(revoke_before: bool, policy: bool) {
         arguments: serde_json::to_value(f.input).unwrap(),
     };
     let frozen = FrozenToolContext {
+        resource_checkpoint_id: None,
         run_id: f.context.run_id.clone(),
         origin: f.context.origin.clone(),
         tool_schema_generation: 1,

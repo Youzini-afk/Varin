@@ -1,3 +1,4 @@
+import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
 import { createThreadContext } from './thread-context.js';
@@ -125,13 +126,14 @@ async function fixture(options: { main?: Reply; planner?: Reply; planningAuth?: 
     isAllowedRoot: async () => true, isTrusted: async () => true }) : undefined;
   const storage = documents ? new KernelStorageAdapter({ client: kernel, hostId: 'planning-host-review', storageRoot: root,
     resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root }) : undefined;
-  const prepareSource = documents && storage ? createThreadSourcePreparer({ documents, workingStates: createKernelWorkspaceWorkingStateAccess(storage) }) : undefined;
+  const resources = documents && storage ? resourceScopeFixture(root, createKernelWorkspaceWorkingStateAccess(storage), documents) : undefined;
+  const prepareSource = documents && storage && resources ? createThreadSourcePreparer({ documents, workingStates: createKernelWorkspaceWorkingStateAccess(storage), prepareResources: resources.prepareSourceCapture }) : undefined;
   if (documents && storage) {
     await fs.mkdir(workspace);
     cleanups.push(async () => { if (!closed) { await storage.dispose(); await documents.dispose(); } });
   }
   const personalization = options.memory ? createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'planning-review' }) }) : undefined;
-  const prepareContext = personalization && storage ? createThreadContext({ personalization, workingStates: createKernelWorkspaceWorkingStateAccess(storage), projectForWorkspace: async () => 'planning-review' }) : undefined;
+  const prepareContext = personalization && resources ? createThreadContext({ personalization, resources, projectForWorkspace: async () => 'planning-review' }) : undefined;
   const memoryControl = { synchronizeFailure: undefined as 'reject' | 'throw' | undefined };
   if (personalization && prepareContext) {
     const owner = createMemoryOwner({ personalization, prepareContext });

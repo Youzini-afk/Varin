@@ -149,6 +149,7 @@ pub fn build_provider(
     connection.accepts_images = configuration.accepts_images;
     let provider = selected.bind(&configuration, connection)?;
     let binding = RequestBinding {
+        resource_checkpoint_id: None,
         connection_identity: identity,
         provider_family: configuration.provider_family,
         model: configuration.model,

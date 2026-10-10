@@ -9,6 +9,8 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         "storage.health"
         | "storage.snapshot"
         | "storage.getBlob"
+        | "branch.pin"
+        | "branch.unpin"
         | "branch.read"
         | "branch.diff"
         | "pin.read"
@@ -40,8 +42,6 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "branch.write.finish"
         | "branch.write.abort"
         | "branch.publish"
-        | "branch.pin"
-        | "branch.unpin"
         | "branch.delete"
         | "operation.release"
         | "file.root.register"
@@ -112,4 +112,10 @@ pub(crate) fn path_allowed_scopes(scopes: &[String], path: &str) -> bool {
     scopes
         .iter()
         .any(|scope| scope.is_empty() || path == scope || path.starts_with(&format!("{scope}/")))
+}
+
+/// Exact branch/pin path metadata may expose the ancestors needed to traverse an admitted
+/// subtree. This never grants ancestor bytes, tree enumeration, or mutation authority.
+pub(crate) fn path_metadata_allowed_scopes(scopes: &[String], path: &str) -> bool {
+    path_allowed_scopes(scopes,path) || scopes.iter().any(|scope| !scope.is_empty() && (path.is_empty() || scope.starts_with(&format!("{path}/"))))
 }

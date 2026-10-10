@@ -502,8 +502,9 @@ impl Storage {
                                 "grant path subject is malformed".to_string(),
                             )
                         })?;
-                    let canonical = Self::validate_path(path)?.join("/");
-                    if !path_allowed(&grant, &canonical) {
+                    let metadata = field == "paths" && matches!(method,"branch.read"|"pin.read");
+                    let canonical = if metadata && path.is_empty() { String::new() } else { Self::validate_path(path)?.join("/") };
+                    if !(if metadata { path_metadata_allowed_scopes(&grant.path_scopes,&canonical) } else { path_allowed(&grant,&canonical) }) {
                         return Err(KernelError::Authorization(format!(
                             "path is outside grant scope: {canonical}"
                         )));

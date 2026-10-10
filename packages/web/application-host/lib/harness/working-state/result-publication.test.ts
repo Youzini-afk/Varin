@@ -113,7 +113,7 @@ describe('source preparation receipt recovery', () => {
       branchId: 'branch', workspaceId: 'workspace', root: 'fixed', writeRevision: 0, headRevision: 0,
       sourceProvenance: { objectHash: 'body-hash', recordId: 'working-source:branch', slot: 'source-provenance' },
     } });
-    vi.spyOn(f.store, 'getBranchRoot').mockResolvedValue({ branchId: 'branch', workspaceId: 'workspace', root: 'fixed', baseRoot: 'fixed',
+    const branch = vi.spyOn(f.store, 'getBranchRoot').mockResolvedValue({ branchId: 'branch', workspaceId: 'workspace', root: 'fixed', baseRoot: 'fixed',
       writeRevision: 0, headRevision: 0, captureScopes: [], draftBasePaths: [], createdAt: 1, updatedAt: 1 });
     const getBlob = vi.fn(async (_hash: string, _source: unknown, input: { offset: number }) => ({
       bytesBase64: body.subarray(input.offset, input.offset ? undefined : 20).toString('base64'),
@@ -124,6 +124,10 @@ describe('source preparation receipt recovery', () => {
     expect(recovered?.provenance).toMatchObject({ omittedDraftPaths: ['dirty.txt'] });
     expect(getBlob).toHaveBeenCalledTimes(2);
     expect(getBlob.mock.calls.every(([, source]) => JSON.stringify(source) === JSON.stringify({ recordId: 'working-source:branch', slot: 'source-provenance' }))).toBe(true);
+    branch.mockResolvedValue({ branchId: 'branch', workspaceId: 'workspace', root: 'later', baseRoot: 'later-base',
+      writeRevision: 2, headRevision: 1, captureScopes: [], draftBasePaths: [], createdAt: 1, updatedAt: 2 });
+    expect(await f.store.readOriginalSource('branch')).toMatchObject({ root: 'fixed', provenance: { omittedDraftPaths: ['dirty.txt'] } });
+    await expect(f.store.readSourcePreparation('branch')).rejects.toThrow('changed after preparation');
     f.operations.set('branch-create:branch', { kind: 'branch.create', state: 'committed', result: { branchId: 'branch' } });
     await expect(f.store.readSourcePreparation('branch')).rejects.toThrow('inconsistent provenance');
     f.operations.delete('branch-create:branch');

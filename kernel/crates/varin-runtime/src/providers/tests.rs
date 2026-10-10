@@ -122,6 +122,7 @@ fn view(family: &str) -> RequestView {
             },
         },
         binding: RequestBinding {
+            resource_checkpoint_id: None,
             connection_identity: "fixture-connection".into(),
             provider_family: family.into(),
             model: "model".into(),

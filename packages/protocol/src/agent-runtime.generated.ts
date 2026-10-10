@@ -1,5 +1,195 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export interface SourceResourceLink {
+  path: string;
+  target: SourceResourceTarget;
+}
+
+export interface AgentResourceFailure {
+  domainId: string;
+  viewId: string;
+  path: string;
+  status: 'missing' | 'invalid' | 'denied' | 'unavailable' | 'stale' | 'cancelled';
+  reason: string;
+}
+
+export interface AgentResourceDirectoryEntry {
+  name: string;
+  kind: 'file' | 'directory' | 'symlink' | 'unsupported';
+}
+
+export interface SourceResourceDirectory {
+  path: string;
+  entries: AgentResourceDirectoryEntry[];
+  version: string;
+  canonicalId?: string;
+}
+
+export interface SourceResourceCapsule {
+  domainId: string;
+  viewId: string;
+  displayRoot: string;
+  files: AgentResourceCapture[];
+  directories: SourceResourceDirectory[];
+  missing: string[];
+  failures: AgentResourceFailure[];
+}
+
+export type SourceResourceCoverage = { kind: 'complete' } | { kind: 'selected'; paths: string[]; subtrees: string[] };
+
+export type SourceResourceTarget = { kind: 'source'; directory: string } | { kind: 'capsule'; capsule: SourceResourceCapsule; directory: string };
+
+export interface SourceResourceAncestor {
+  capsule: SourceResourceCapsule;
+  appliesTo: string;
+  includeSkills: boolean;
+}
+
+export interface SourceResourceConfiguredPath {
+  configuredPath: string;
+  target: SourceResourceTarget;
+}
+
+export interface SourceResourcePackage {
+  identity: string;
+  source: string;
+  target: SourceResourceTarget;
+}
+
+export interface SourceResourceCapture {
+  root: string;
+  cwd: string;
+  skillAncestorBoundary: string;
+  coverage: SourceResourceCoverage;
+  ancestors: SourceResourceAncestor[];
+  configuredPaths: SourceResourceConfiguredPath[];
+  installedPackages: SourceResourcePackage[];
+  shadowedContextCanonicalIds: string[];
+  sourceLinks: SourceResourceLink[];
+}
+
+export interface AgentResourceLocation {
+  domainId: string;
+  viewId: string;
+  path: string;
+}
+
+export interface AgentResourceReference {
+  domainId: string;
+  viewId: string;
+  path: string;
+  canonicalId: string;
+  version: string;
+}
+
+export interface AgentResourceCapture {
+  reference: AgentResourceReference;
+  content: string;
+}
+
+export interface AgentResourceScope {
+  threadId: string;
+  branchId: string;
+  mode: 'agent' | 'bot';
+  threadRole: string;
+  projectId: string | null;
+  sourceIdentity: string | null;
+  cwd: string;
+  projectTrusted: boolean;
+  projectRoot: string | null;
+}
+
+export interface AgentResourceReader {
+  domainId: string;
+  viewId: string;
+  consistency: 'immutable' | 'capture-only';
+}
+
+export interface AgentResourceProject {
+  domainId: string;
+  viewId: string;
+  cwd: string;
+}
+
+export interface AgentResourceInstruction {
+  origin: 'user' | 'project' | 'ancestor';
+  kind: 'user-config' | 'project-instruction';
+  appliesTo: string | null;
+  reference: AgentResourceReference;
+}
+
+export interface AgentResourceInstructionScope {
+  directory: string;
+  instructions: AgentResourceInstruction[];
+}
+
+export interface AgentResourceSkill {
+  id: string;
+  name: string;
+  description: string;
+  disableModelInvocation: boolean;
+  requiresProjectTrust: boolean;
+  origin: 'user' | 'project' | 'package';
+  reference: AgentResourceReference;
+  basePath: string;
+  baseCanonicalId: string;
+  priority: number;
+  packageIdentity?: string;
+}
+
+export interface AgentResourceDiagnostic {
+  kind: 'read' | 'invalid' | 'warning' | 'disabled' | 'collision' | 'duplicate';
+  message: string;
+  location: AgentResourceLocation;
+  status?: 'missing' | 'invalid' | 'denied' | 'unavailable' | 'stale' | 'cancelled';
+  winner?: AgentResourceReference;
+}
+
+export interface AgentResourceObservation {
+  domainId: string;
+  viewId: string;
+  path: string;
+  status: 'ready' | 'missing' | 'invalid' | 'denied' | 'unavailable' | 'stale' | 'cancelled';
+  version?: string;
+}
+
+export interface AgentResourceSnapshot {
+  id: string;
+  scope: AgentResourceScope;
+  readers: AgentResourceReader[];
+  project: AgentResourceProject | null;
+  configurationDigest: string;
+  shadowedContextCanonicalIds: string[];
+  system: AgentResourceInstruction | null;
+  appendSystem: AgentResourceInstruction | null;
+  instructions: AgentResourceInstruction[];
+  instructionScopes: AgentResourceInstructionScope[];
+  skills: AgentResourceSkill[];
+  diagnostics: AgentResourceDiagnostic[];
+  capturedFiles: AgentResourceCapture[];
+  observations: AgentResourceObservation[];
+}
+
+export interface ContextResources {
+  source: LaunchSource | null;
+  snapshot: AgentResourceSnapshot;
+}
+
+export type AgentResourceRequest = { kind: 'skill'; resourceId: string } | { kind: 'skill-resource'; resourceId: string; relativePath: string } | { kind: 'instruction-scope'; targetPath: string; targetType?: 'file' | 'directory' };
+
+export interface ResourceRefreshParams {
+  branchId: string;
+  expectedRevision: number;
+  context: InitialContext;
+}
+
+export interface ResourceSnapshotParams {
+  runId: string;
+  origin: ToolOrigin;
+  callId: string;
+  resourceCheckpointId: string;
+}
+
 export type RetrievalInvocation = { kind: 'model_step'; requestId: string; toolCallId: string } | { kind: 'policy_action'; actionId: string; nodeId: string; toolCallId: string };
 
 export interface RetrievalQuery {
@@ -597,6 +787,7 @@ export interface ContextRefreshParams {
 }
 
 export interface InitialContext {
+  resources?: ContextResources;
   personalization?: ContextPersonalization;
   effectiveSystemPrompt: string;
   instructionSources: string[];
@@ -604,6 +795,7 @@ export interface InitialContext {
 }
 
 export interface InputSubmitParams {
+  expectedContextCheckpoint?: string;
   initialContext?: InitialContext;
   launch?: SubmitLaunch;
   key: string;
@@ -881,7 +1073,7 @@ export interface ChildSourceHandoff {
 
 export type ChildSourceRoot = { kind: 'fixed'; pin: ChildSourcePin } | { kind: 'physical'; root: LiveRoot };
 
-export type ChildSourceProvenance = { consistency: 'fixed-root'; root: string } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[] };
+export type ChildSourceProvenance = { consistency: 'fixed-root'; root: string; resources?: SourceResourceCapture } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; resources?: SourceResourceCapture };
 
 export type ChildSource = { kind: 'pending'; handoff: ChildSourceHandoff } | { kind: 'ready'; handoff: ChildSourceHandoff; pin: ChildSourcePin; selection: LaunchSource; provenance: ChildSourceProvenance };
 

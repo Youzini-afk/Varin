@@ -377,6 +377,7 @@ fn request_snapshot(receipt: &Receipt) -> crate::execution::RequestSnapshot {
                 },
             },
             binding: RequestBinding {
+                resource_checkpoint_id: None,
                 connection_identity: "fixture-connection".into(),
                 provider_family: "test".into(),
                 model: "mock".into(),

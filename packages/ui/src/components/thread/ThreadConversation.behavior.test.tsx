@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ThreadRequestError } from '@varin/application-client';
-import type { ThreadIdentity, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
+import type { ContextCheckpoint, ThreadIdentity, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
 import { ThreadConversation } from './ThreadConversation';
 import { AgentWorkspaceShell } from '@/workbenches/agent/AgentWorkspaceShell';
 
@@ -43,7 +43,7 @@ function fixture(active = false) {
   });
   let listener: Parameters<ThreadsAPI['observe']>[1] | undefined;
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
-  const api: ThreadsAPI = { followups: { register: unused, list: unused, control: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
+  const api: ThreadsAPI = { resources: { refresh: unused }, followups: { register: unused, list: unused, control: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, retryPreparation: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
@@ -320,6 +320,74 @@ it('does not navigate to a late fork result after the user selects another branc
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={next} onBranchCreated={open} />); });
   await act(async () => { resolveFork({ ...identity, branchId: 'late-created-fork' }); });
   expect(open).not.toHaveBeenCalled();
+});
+
+it('keeps frozen resource metadata on conflict and refreshes once with the current checkpoint revision', async () => {
+  const f = fixture(true);
+  const instruction = { origin: 'project' as const, kind: 'project-instruction' as const, appliesTo: '.',
+    reference: { domainId: 'project:fixture', viewId: 'source:fixed', path: 'AGENTS.md', canonicalId: 'resource:instructions', version: 'instructions:one' } };
+  const skill = { id: 'skill:review', name: 'review-code', description: 'Review code', disableModelInvocation: false, requiresProjectTrust: true,
+    origin: 'project' as const, basePath: '.pi/skills/review', baseCanonicalId: 'resource:review', priority: 1,
+    reference: { ...instruction.reference, path: '.pi/skills/review/SKILL.md', canonicalId: 'resource:review:skill', version: 'skill:one' } };
+  const checkpoint: ContextCheckpoint = { id: 'context:original', revision: 3,
+    proposal: { key: 'context:original', branch_id: identity.branchId, through_id: null, expected_revision: 2,
+      summary: '', effective_system_prompt: 'Private composed prompt', instruction_sources: [], memory_checkpoint: null },
+    resources: {
+      source: { workspace_id: 'workspace:fixture', execution_workspace_id: 'workspace:fixture', branch_id: 'source:branch', revision: 7, mode: 'fixed_branch', live_root: null },
+      snapshot: { id: 'resources:original', scope: { threadId: identity.threadId, branchId: identity.branchId, mode: 'agent', threadRole: 'main',
+        projectId: 'project:fixture', sourceIdentity: 'source:fixed', cwd: '/workspace/project', projectTrusted: true, projectRoot: '/workspace/project' },
+        readers: [{ domainId: 'project:fixture', viewId: 'source:fixed', consistency: 'immutable' }],
+        project: { domainId: 'project:fixture', viewId: 'source:fixed', cwd: '.' }, configurationDigest: 'configuration:one', shadowedContextCanonicalIds: [],
+        system: null, appendSystem: null, instructions: [instruction], instructionScopes: [], skills: [skill],
+        diagnostics: [{ kind: 'read', status: 'missing', message: 'Optional resource is missing', location: { domainId: 'project:fixture', viewId: 'source:fixed', path: '.pi/skills/optional' } }],
+        capturedFiles: [{ reference: instruction.reference, content: 'Private instruction body' }, { reference: skill.reference, content: 'Private skill body' }], observations: [] },
+    },
+  };
+  f.view.context.checkpoint = checkpoint;
+  let completeRefresh!: (checkpoint: ContextCheckpoint) => void;
+  const refresh = vi.fn<ThreadsAPI['resources']['refresh']>()
+    .mockRejectedValueOnce(new ThreadRequestError(409, 'thread-conflict'))
+    .mockImplementation(() => new Promise(resolve => { completeRefresh = resolve; }));
+  f.api.resources.refresh = refresh;
+  const snapshot = vi.fn(f.api.snapshot); f.api.snapshot = snapshot;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  const resources = () => container.querySelector('[aria-label="Instructions and skills"]')!;
+  expect(resources().textContent).toContain('resources:original');
+  expect(resources().textContent).toContain('review-code');
+  expect(resources().textContent).toContain('AGENTS.md');
+  expect(resources().textContent).toContain('source:fixed');
+  expect(resources().querySelector('[aria-label="Resource diagnostics"]')?.textContent).toContain('Optional resource is missing');
+  expect(container.textContent).not.toContain('Private instruction body');
+  expect(container.textContent).not.toContain('Private skill body');
+  expect(container.textContent).not.toContain('Private composed prompt');
+  // Another context update has committed without changing the frozen resources.
+  f.view.context.checkpoint = { ...checkpoint, id: 'context:other-update', revision: 4 };
+  const snapshotsBefore = snapshot.mock.calls.length;
+  await act(async () => button('Refresh instructions and skills').click());
+  expect(refresh).toHaveBeenCalledExactlyOnceWith({ ...identity, expectedRevision: 3 });
+  expect(snapshot.mock.calls.length).toBe(snapshotsBefore + 1);
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('409');
+  expect(resources().textContent).toContain('resources:original');
+  expect(resources().textContent).toContain('context:other-update');
+  await act(async () => { button('Refresh instructions and skills').click(); button('Refresh instructions and skills').click(); });
+  expect(refresh).toHaveBeenCalledTimes(2);
+  expect(refresh).toHaveBeenLastCalledWith({ ...identity, expectedRevision: 4 });
+  expect(button('Refresh instructions and skills').disabled).toBe(true);
+  expect(resources().textContent).toContain('resources:original');
+  await act(async () => {
+    const next = structuredClone(f.view.context.checkpoint!);
+    next.id = 'context:refreshed'; next.revision = 5; next.resources!.snapshot.id = 'resources:refreshed';
+    next.resources!.snapshot.skills[0]!.name = 'review-revised-code'; next.resources!.snapshot.diagnostics = [];
+    f.view.context.checkpoint = next; completeRefresh(next);
+  });
+  expect(resources().textContent).toContain('resources:refreshed');
+  expect(resources().textContent).toContain('review-revised-code');
+  expect(resources().textContent).not.toContain('resources:original');
+  expect(resources().querySelector('[aria-label="Resource diagnostics"]')).toBeNull();
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+  expect(button('Refresh instructions and skills').disabled).toBe(false);
+  expect(f.view.activeRun?.state).toBe('generating');
+  expect(f.cancelRun).not.toHaveBeenCalled();
 });
 
 it('retries summary generation without duplicating the job and applies its completed checkpoint without hiding history', async () => {

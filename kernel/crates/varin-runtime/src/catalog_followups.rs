@@ -226,7 +226,7 @@ fn held(
     )?;
     Ok(())
 }
-fn normalized_source(
+pub(super) fn normalized_source(
     mut source: Option<launches::SourceSelection>,
     run_id: &str,
 ) -> Option<launches::SourceSelection> {
@@ -737,6 +737,7 @@ impl Catalog {
             }
         }
         let submission = submissions::PreparedSubmission {
+            run_id: id(),
             identity: submissions::SubmissionIdentity {
                 key: format!("followup-command:{}", value.id),
                 thread_id: definition.thread_id.clone(),

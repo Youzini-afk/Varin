@@ -130,6 +130,10 @@ export interface WorkingStatePin extends WorkingStatePinnedRoot {
  */
 /** The protocol owns candidate identity; both runtimes use the same Storage receipt. */
 export type WorkingResultCandidate = KernelWorkingResultCandidate;
+export interface WorkingOriginalSource {
+  root: string;
+  provenance: ChildSourceProvenance;
+}
 export interface WorkingSourcePreparation {
   branch: WorkingBranchRoot;
   provenance: ChildSourceProvenance;
@@ -178,7 +182,9 @@ export interface WorkingStateRootStore {
   deleteDraftBaseline(id: string): Promise<void>;
   createBranch(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, baseRef?: string, draftBasePaths?: string[], captureScopes?: string[], options?: WorkingBranchCreateOptions): Promise<WorkingBranchRoot>;
   readSourcePreparation(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingSourcePreparation | null>;
-  createBranchFromPin(workspaceId: string, branchId: string, pin: WorkingStatePin, parentRef: string, draftBaselineId?: string | null, captureScopes?: string[]): Promise<WorkingBranchRoot>;
+  /** Original branch-create receipt, independent of subsequent writes or rebase. Never recaptures disk. */
+  readOriginalSource(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingOriginalSource | null>;
+  createBranchFromPin(workspaceId: string, branchId: string, pin: WorkingStatePin, parentRef: string, draftBaselineId?: string | null, captureScopes?: string[], options?: WorkingBranchCreateOptions): Promise<WorkingBranchRoot>;
   captureDirectory(directory: string, relativePaths?: string[], options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; store?: boolean; indexModes?: Map<string, string> | Record<string, string> }): Promise<Record<string, RecoveryState>>;
   /** Release only transient capture owners; retained branch/result objects remain owned. */
   releaseCapturedStates(states: Record<string, RecoveryState>): Promise<void>;

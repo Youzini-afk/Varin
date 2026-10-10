@@ -24,7 +24,7 @@ export function sourceToolSchemas(selection: LaunchIntent['selection']) {
     ...selection.extension_bindings.map(binding => binding.tool.name),
   ]);
   return selection.tools.filter(tool => !external.has(tool.name)
-    && !['ask_user', 'dispatch', 'child_status', 'wait_child', 'child_report', 'wait_process', 'memory', 'todo'].includes(tool.name));
+    && !['ask_user', 'dispatch', 'child_status', 'wait_child', 'child_report', 'wait_process', 'memory', 'todo', 'resource_read'].includes(tool.name));
 }
 
 /** Uses the existing Storage authority for source reads, materialization and process containment.

@@ -404,6 +404,7 @@ export class LegacyWorkingStateRootAdapter implements WorkingStateRootStore {
   directoryMatchesResult(...args: Parameters<WorkingStateStore["directoryMatchesResult"]>): ReturnType<WorkingStateStore["directoryMatchesResult"]> { return this.store.directoryMatchesResult(...args); }
   captureBranchCandidateIdentity(...args: Parameters<WorkingStateStore["captureBranchCandidateIdentity"]>): ReturnType<WorkingStateStore["captureBranchCandidateIdentity"]> { return this.store.captureBranchCandidateIdentity(...args); }
   captureSeededPathIdentity(...args: Parameters<WorkingStateStore["captureSeededPathIdentity"]>): ReturnType<WorkingStateStore["captureSeededPathIdentity"]> { return this.store.captureSeededPathIdentity(...args); }
+  async readOriginalSource(_branchId: string): Promise<import("./types.js").WorkingOriginalSource | null> { return null; }
   async readSourcePreparation(_branchId: string): Promise<import("./types.js").WorkingSourcePreparation | null> { return null; }
   async readResultCandidate(_branchId: string, _publicationId: string): Promise<import("./types.js").WorkingResultCandidate | null> { return null; }
   async prepareResultCandidate(_input: import("./types.js").PrepareWorkingResultCandidate): Promise<import("./types.js").WorkingResultCandidate> {

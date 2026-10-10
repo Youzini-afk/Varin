@@ -19,6 +19,7 @@ pub(crate) struct RunAssembly {
     pub retrieval: crate::retrieval::RetrievalBridge,
     pub memory: crate::host_query::OwnerChannel,
     pub context: crate::host_query::OwnerChannel,
+    pub resource: crate::host_query::OwnerChannel,
     pub plan: crate::plan_bridge::PlanBridge,
     pub policy: crate::policy::PolicyBridge,
     pub models: Arc<crate::run_models::RunModels>,
@@ -242,6 +243,7 @@ impl RunAssembly {
                 .map(|kind| serde_json::from_value(Value::String(kind)))
                 .collect::<std::result::Result<_, _>>()?;
             start.binding.tools = crate::tools::KernelToolExecutor::selected_schemas(&kinds);
+            start.binding.tools.push(crate::agent_resources::schema());
             if !is_child {
                 start.binding.tools.push(crate::questions::schema());
                 start.binding.tools = crate::collaboration::schemas(
@@ -335,6 +337,9 @@ impl RunAssembly {
                 saved_schema_generation.unwrap_or(start.binding.configuration_generation);
             declarations.extend(tools.declarations(!is_child));
             collaboration_source = Some(collaboration_binding);
+        }
+        if !is_context_job {
+            declarations.push(crate::agent_resources::declaration(runtime.catalog(),self.resource.clone()));
         }
         if !is_context_job && !is_child {
             declarations.push(crate::questions::declaration(runtime.catalog()));

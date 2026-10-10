@@ -36,6 +36,10 @@
       "types": "./dist/tool-schema.d.ts",
       "import": "./dist/tool-schema.js"
     },
+    "./agent-resource-configuration": {
+      "types": "./dist/agent-resource-configuration.d.ts",
+      "import": "./dist/agent-resource-configuration.js"
+    },
     "./mcp-authority": {
       "types": "./dist/mcp-authority.d.ts",
       "import": "./dist/mcp-authority.js"

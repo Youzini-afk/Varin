@@ -1,6 +1,7 @@
 import { ThreadPlan } from './ThreadPlan';
 import { ThreadFollowups } from './ThreadFollowups';
 import { ThreadMemory } from './ThreadMemory';
+import { ThreadResources } from './ThreadResources';
 import { ThreadPermission } from './ThreadPermission';
 import { ThreadQuestion } from './ThreadQuestion';
 import { ThreadSourcePicker } from './ThreadSourcePicker';
@@ -209,6 +210,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       </div>)}
     </div>
     {snapshot?.context.checkpoint?.personalization && <ThreadMemory key={identity.threadId} identity={identity} basis={snapshot.context.checkpoint.personalization} />}
+    {snapshot?.context.checkpoint && <ThreadResources checkpoint={snapshot.context.checkpoint} pending={pending}
+      onRefresh={() => void act(() => api.resources.refresh({ ...identity, expectedRevision: snapshot.context.checkpoint!.revision }))} />}
     <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={initialWorkspacePath}
       active={active || pending} launch={snapshot?.launch ?? null} prepared={preparedSource} onPrepared={setPreparedSource} onPreparingChange={setPreparingSource} />
     {snapshot && <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">
