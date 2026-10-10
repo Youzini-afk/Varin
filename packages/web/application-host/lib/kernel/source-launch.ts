@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { KernelClient } from './kernel-client.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
-import type { RunStartReceipt } from './protocol.generated.js';
+import type { LaunchIntent, RunStartReceipt } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import { canonicalizePathIdentity, isPathWithinRoot } from '../workspace/path-safety.js';
 
@@ -16,6 +16,16 @@ export type SourceLaunch = Omit<ThreadSource, 'mode' | 'branchId' | 'revision' |
   | { mode: 'fixed_branch' | 'materialized'; branchId: string; revision: number; environmentRunId?: string; liveRoot?: never }
   | { mode: 'live_root'; liveRoot: import('./protocol.generated.js').LiveRoot; branchId?: never; revision?: never; environmentRunId?: never }
 );
+
+/** Project only source-owned declarations from the same frozen launch directory. */
+export function sourceToolSchemas(selection: LaunchIntent['selection']) {
+  const external = new Set([
+    ...(selection.mcp_binding?.tools.map(tool => tool.name) ?? []),
+    ...selection.extension_bindings.map(binding => binding.tool.name),
+  ]);
+  return selection.tools.filter(tool => !external.has(tool.name)
+    && !['ask_user', 'dispatch', 'child_status', 'wait_child', 'child_report', 'wait_process', 'memory', 'todo'].includes(tool.name));
+}
 
 /** Uses the existing Storage authority for source reads, materialization and process containment.
  * Only an explicitly selected live_root uses the original workspace; fixed revisions never fall back to disk.
@@ -54,7 +64,7 @@ export async function startRunFromSource(
       || source.live_root?.hostId !== selection.liveRoot?.hostId || source.live_root?.canonicalRoot !== selection.liveRoot?.canonicalRoot || source.live_root?.rootId !== selection.liveRoot?.rootId
       || (source.environment_run_id ?? undefined) !== selection.environmentRunId) throw new Error('Rebind cannot change its durable source selection');
     const selectedNames = [...tools].sort();
-    if (JSON.stringify(selectedNames) !== JSON.stringify(saved.selection.tools.filter(tool => !['ask_user', 'dispatch', 'child_status', 'wait_child', 'child_report', 'wait_process', 'memory', 'todo'].includes(tool.name) && !saved.selection.mcp_binding?.tools.some(mcp => mcp.name === tool.name)).map(tool => tool.name).sort())) throw new Error('Rebind cannot change its durable tools');
+    if (JSON.stringify(selectedNames) !== JSON.stringify(sourceToolSchemas(saved.selection).map(tool => tool.name).sort())) throw new Error('Rebind cannot change its durable tools');
   }
   const credentialScope = options.credentialOwner ? await options.credentialOwner.scope() : undefined;
   if (!saved) await runtime.selectLaunch({ runId: run.id,

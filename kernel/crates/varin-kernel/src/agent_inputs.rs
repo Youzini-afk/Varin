@@ -119,6 +119,7 @@ fn submit_input(
                 ));
             }
             Ok::<_, KernelError>(varin_runtime::catalog::launches::LaunchSelection {
+                extension_bindings: Vec::new(),
                 policy_models: Vec::new(),
                 mcp_binding: None,
                 credential_scope: scope,

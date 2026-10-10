@@ -46,6 +46,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     cancelInput: (inputId, expectedRevision) => post('input/cancel', { inputId, expectedRevision }),
     historyPage: (identity, cursor) => post('history/page', { ...identity, ...cursor }),
     snapshot: selected => post('snapshot', selected), run: runId => post('run', { runId }),
+    inspectTools: (identity, runId) => post('tools/inspect', { ...identity, runId }),
     cancelRun: runId => post('run/cancel', { runId }), operation: operationId => post('operation', { operationId }),
     cancelOperation: operationId => post('operation/cancel', { operationId }),
     decidePermission: input => post('permission/decide', input),

@@ -1,4 +1,4 @@
-#[path="fixtures/input_admission.rs"]
+#[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
 use serde_json::json;
@@ -19,7 +19,14 @@ fn request_snapshot(receipt: &Receipt) -> varin_runtime::execution::RequestSnaps
         view: RequestView {
             request_id: "model-1".into(),
             run_id: receipt.run_id.clone(),
-            origin: RequestOrigin::Conversation { step: 1, history_range: HistoryRange { branch_id: receipt.branch_id.clone(), ancestor_id: None, leaf_id: Some(receipt.input_id.clone()) } },
+            origin: RequestOrigin::Conversation {
+                step: 1,
+                history_range: HistoryRange {
+                    branch_id: receipt.branch_id.clone(),
+                    ancestor_id: None,
+                    leaf_id: Some(receipt.input_id.clone()),
+                },
+            },
             binding: RequestBinding {
                 connection_identity: "fixture-connection".into(),
                 provider_family: "test".into(),
@@ -62,6 +69,9 @@ fn setup(kind: CompletionKind) -> (std::path::PathBuf, Catalog, String) {
     let epoch = db.epoch();
     let mut snapshot = request_snapshot(&r);
     snapshot.view.binding.tools = vec![ToolSchema {
+        description: String::new(),
+        output_schema: None,
+        metadata: None,
         name: "process-executor".into(),
         version: "1".into(),
         schema: json!({"type":"object"}),
@@ -104,26 +114,47 @@ fn setup(kind: CompletionKind) -> (std::path::PathBuf, Catalog, String) {
         },
     )
     .unwrap();
-    db.commit_execution(
-        &r.run_id,
-        epoch,
-        &{let tool=AdmittedTool {
-                call,
-                contract: ToolContract {
-                    name: "process-executor".into(),
-                    schema_version: "1".into(),
-                    read_only: false,
-                    completion: kind,
-                    lifetime: Lifetime::Thread,
-                    resources: vec![claim("file")],
-                },
-            };ExecutionRecord::ToolAdmitted{context:{let request_id:String="model-1".into();let call_id:String=tool.call.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&r.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},tool}},
-    )
+    db.commit_execution(&r.run_id, epoch, &{
+        let tool = AdmittedTool {
+            call,
+            contract: ToolContract {
+                name: "process-executor".into(),
+                schema_version: "1".into(),
+                read_only: false,
+                completion: kind,
+                lifetime: Lifetime::Thread,
+                resources: vec![claim("file")],
+            },
+        };
+        ExecutionRecord::ToolAdmitted {
+            context: {
+                let request_id: String = "model-1".into();
+                let call_id: String = tool.call.call_id.clone();
+                varin_runtime::execution::ToolExecutionContext {
+                    run_id: (&r.run_id).to_string(),
+                    operation_id: format!("{request_id}:tool:{call_id}"),
+                    origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                }
+            },
+            tool,
+        }
+    })
     .unwrap();
     db.commit_execution(
         &r.run_id,
         epoch,
-        &ExecutionRecord::ToolDispatched{context:{let request_id:String="model-1".into();let call_id:String="job".into();varin_runtime::execution::ToolExecutionContext{run_id:(&r.run_id).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}}},
+        &ExecutionRecord::ToolDispatched {
+            executor_owner: varin_runtime::ExecutorOwner::Kernel,
+            context: {
+                let request_id: String = "model-1".into();
+                let call_id: String = "job".into();
+                varin_runtime::execution::ToolExecutionContext {
+                    run_id: (&r.run_id).to_string(),
+                    operation_id: format!("{request_id}:tool:{call_id}"),
+                    origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                }
+            },
+        },
     )
     .unwrap();
 
@@ -244,6 +275,9 @@ mod actual_engines {
                 configuration_generation: 1,
                 tool_schema_generation: 1,
                 tools: vec![ToolSchema {
+                    description: String::new(),
+                    output_schema: None,
+                    metadata: None,
                     name: "read".into(),
                     version: "1".into(),
                     schema: json!({"type":"object"}),
@@ -311,9 +345,17 @@ mod actual_engines {
         read_only: bool,
     }
     impl ToolExecutor for Tools {
-        fn plan(&self, call: &varin_runtime::execution::ToolCall, context: &varin_runtime::execution::FrozenToolContext,
-            cancel: &varin_runtime::execution::CancellationToken) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError> {
-            self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+        fn plan(
+            &self,
+            call: &varin_runtime::execution::ToolCall,
+            context: &varin_runtime::execution::FrozenToolContext,
+            cancel: &varin_runtime::execution::CancellationToken,
+        ) -> Result<
+            varin_runtime::execution::ToolPreparation,
+            varin_runtime::execution::ExecutionError,
+        > {
+            self.prepare(call, context, cancel)
+                .map(varin_runtime::execution::ToolPreparation::Ready)
         }
 
         fn prepare(
@@ -501,20 +543,31 @@ mod actual_engines {
 fn live_job_survives_run_cancel_and_restart_until_explicit_stop() {
     let (root, mut db, run) = setup(CompletionKind::Job);
     let epoch = db.epoch();
-    db.commit_execution(
-        &run,
-        epoch,
-        &{let result=ToolResult {
-                request_id: "model-1".into(),
-                call_id: "job".into(),
-                completion: ToolCompletion::JobAccepted {
-                    operation_id: "model-1:tool:job".into(),
-                    phase: "running".into(),
-                    effect: Effect::Dispatched,
-                    lifetime: Lifetime::Thread,
-                },
-            };ExecutionRecord::ToolSettled{context:{let request_id:String=result.request_id.clone();let call_id:String=result.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&run).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},completion:result.completion}},
-    )
+    db.commit_execution(&run, epoch, &{
+        let result = ToolResult {
+            request_id: "model-1".into(),
+            call_id: "job".into(),
+            completion: ToolCompletion::JobAccepted {
+                operation_id: "model-1:tool:job".into(),
+                phase: "running".into(),
+                effect: Effect::Dispatched,
+                lifetime: Lifetime::Thread,
+            },
+        };
+        ExecutionRecord::ToolSettled {
+            executor_stopped: false,
+            context: {
+                let request_id: String = result.request_id.clone();
+                let call_id: String = result.call_id.clone();
+                varin_runtime::execution::ToolExecutionContext {
+                    run_id: (&run).to_string(),
+                    operation_id: format!("{request_id}:tool:{call_id}"),
+                    origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                }
+            },
+            completion: result.completion,
+        }
+    })
     .unwrap();
     db.commit_execution(
         &run,
@@ -579,20 +632,31 @@ fn early_stop_before_job_accepted_never_reacquires_occupancy() {
         true,
     )
     .unwrap();
-    db.commit_execution(
-        &run,
-        epoch,
-        &{let result=ToolResult {
-                request_id: "model-1".into(),
-                call_id: "job".into(),
-                completion: ToolCompletion::JobAccepted {
-                    operation_id: "model-1:tool:job".into(),
-                    phase: "running".into(),
-                    effect: Effect::Dispatched,
-                    lifetime: Lifetime::Thread,
-                },
-            };ExecutionRecord::ToolSettled{context:{let request_id:String=result.request_id.clone();let call_id:String=result.call_id.clone();varin_runtime::execution::ToolExecutionContext{run_id:(&run).to_string(),operation_id:format!("{request_id}:tool:{call_id}"),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id}}},completion:result.completion}},
-    )
+    db.commit_execution(&run, epoch, &{
+        let result = ToolResult {
+            request_id: "model-1".into(),
+            call_id: "job".into(),
+            completion: ToolCompletion::JobAccepted {
+                operation_id: "model-1:tool:job".into(),
+                phase: "running".into(),
+                effect: Effect::Dispatched,
+                lifetime: Lifetime::Thread,
+            },
+        };
+        ExecutionRecord::ToolSettled {
+            executor_stopped: false,
+            context: {
+                let request_id: String = result.request_id.clone();
+                let call_id: String = result.call_id.clone();
+                varin_runtime::execution::ToolExecutionContext {
+                    run_id: (&run).to_string(),
+                    operation_id: format!("{request_id}:tool:{call_id}"),
+                    origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                }
+            },
+            completion: result.completion,
+        }
+    })
     .unwrap();
     drop(db);
     let db = Mutex::new(Catalog::open(&root).unwrap());

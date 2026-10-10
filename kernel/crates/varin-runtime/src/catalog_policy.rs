@@ -253,7 +253,8 @@ impl Catalog {
                 |r| r.get(0),
             )
             .optional()?;
-        let previous = super::policy_body::latest_action(&self.db, run_id, true)?.map(|(op, _)| op.id);
+        let previous =
+            super::policy_body::latest_action(&self.db, run_id, true)?.map(|(op, _)| op.id);
         let id = hex::encode(Sha256::digest(serde_json::to_vec(&(
             run_id,
             self.head(&run.branch_id)?,
@@ -296,11 +297,20 @@ impl Catalog {
         epoch: u64,
     ) -> Result<Option<PolicyGraphRead>> {
         fence(&self.run(run_id)?, epoch)?;
-        let Some((op, metadata)) = super::policy_body::latest_action(&self.db, run_id, false)? else { return Ok(None) };
-        if metadata.graph_nodes().is_none() { return Ok(None); }
+        let Some((op, metadata)) = super::policy_body::latest_action(&self.db, run_id, false)?
+        else {
+            return Ok(None);
+        };
+        if metadata.graph_nodes().is_none() {
+            return Ok(None);
+        }
         self.capture_graph_action(op, metadata)
     }
-    pub(crate) fn capture_graph_action(&self, op: Operation, metadata: PolicyActionMetadata) -> Result<Option<PolicyGraphRead>> {
+    pub(crate) fn capture_graph_action(
+        &self,
+        op: Operation,
+        metadata: PolicyActionMetadata,
+    ) -> Result<Option<PolicyGraphRead>> {
         let run_id = op.run_id.as_str();
         let key = op.id.clone();
         let admitted:u64=self.db.query_row("SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND kind='policy.graph_admitted'",[&key],|r|read_number(r,0))?;
@@ -395,6 +405,7 @@ impl Catalog {
             lifetime: Lifetime::Run,
             handed_off: false,
             executor: Some("policy-tool-graph.v1".into()),
+            execution_owner: None,
             waiting_on: None,
             intent: serde_json::to_value(metadata)?,
             result: Some(OperationResultMetadata::Control {

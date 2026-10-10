@@ -72,6 +72,7 @@ const snakeCase = (value) => value
   .replace(/[-.]/g, '_')
   .toLowerCase();
 const rustType = (type) => {
+  if (schema.dto?.[type]?.rustType) return schema.dto[type].rustType;
   if (schema.runtimeEnums?.[type]) return `varin_runtime::${type}`;
   if (type.endsWith('[]')) return `Vec<${rustType(type.slice(0, -2))}>`;
   if (type === 'string') return 'String';
@@ -106,7 +107,8 @@ const renderRustDto = (name) => {
   const fields = Object.entries(spec.fields ?? {}).map(([field, descriptor]) => {
     const type = rustType(descriptor.type);
     const rendered = descriptor.optional ? `Option<${type}>` : type;
-    return `    pub(crate) ${snakeCase(field)}: ${rendered},`;
+    const wireName = field.includes("_") ? `    #[serde(rename = ${JSON.stringify(field)})]\n` : "";
+    return `${wireName}    pub(crate) ${snakeCase(field)}: ${rendered},`;
   });
   return `#[derive(Clone, Debug, Deserialize)]\n#[serde(rename_all = "camelCase", deny_unknown_fields)]\npub(crate) struct ${name} {\n${fields.join('\n')}\n}`;
 };

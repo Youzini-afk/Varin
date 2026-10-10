@@ -297,6 +297,39 @@ The owning Rust tests count successful query compilations across distinct docume
 replacement/revisit semantics, corrupt content rejection and cancellation; latency by itself is not a
 compilation/hash counter.
 
+## Ordinary extension tools
+
+`extension-tool-owner.ts` adapts an installed service's single `tool` declaration and exact service
+pin into the native ToolDirectory. It reuses the existing catalog, routing and supervisor; it does
+not create an MCP server or a second extension lifecycle. Input/output schemas compile once for the
+retained binding through the same `@varin/pi-host/tool-schema` compiler used by MCP. The declaration's
+read/effect hint never grants permission or proves replay safety.
+
+`AgentRuntimeClient` owns the Run's combined ready MCP/extension snapshot. Cold contributions prepare
+independently; the short select/ready publication merges the latest ready set. The kernel activates
+that candidate at a closed request/action boundary. A frozen request keeps its actual old endpoint;
+explicit revocation still rejects it. Recovery verifies the original package/declaration identity,
+and does not substitute a newer artifact when the original is unavailable.
+
+`tool-bridge.ts` and Rust `host_tools.rs` carry real ModelStep or PolicyAction origins. The existing
+permission owner checks the exact operation, arguments, schema and selected owner. Host-only invocation
+scope is derived from that admitted operation and its immutable Run source. Only the opaque scope ID
+crosses the broker boundary; the original owner/generation and active callback determine capability
+access. `material-tool-owner.ts` exposes `materials.snapshot` through the existing WebMaterialStore,
+snapshot grants, persisted collections and native byte-range reader. The runnable authoring example is
+[`material-snapshot-tool`](../../../../../examples/extensions/material-snapshot-tool/README.md).
+
+Cancellation detaches the observer without fabricating a stopped callback or no-effect result.
+The existing bridge call retains its actual callback and unacknowledged receipt across a kernel-channel
+replacement, using the original external execution identity. Catalog durably commits that evidence
+before acknowledgment; reconnect retransmits the fact without re-executing the tool. Full results use
+the existing content stream rather than a total-result frame-size clamp.
+
+Authenticated `POST /api/threads/tools/inspect` and `ThreadsAPI.inspectTools` project the activated
+directory, selected durable bindings and independent preparation states. Revoked or unrebound owners
+are not callable. This metadata is not a permission grant and not a second tool registry. Actual
+Host/kernel acceptance and its current environment limitations are recorded in the implementation plan.
+
 ## Selected native policy planning models
 
 The installed `varin.agent.policy` service may declare `capabilities: ['agentPlanning']` in its
@@ -380,7 +413,8 @@ Fixed-branch and materialized language selection is explicitly unavailable. Mate
 pin external symlinks, project configuration outside the copy, or compiler libraries; a workspace cwd
 and didOpen overlay do not establish a fixed dependency closure.
 
-The experimental native `run_launches` domain is now format 2; catalog/content remain 3/3.
+The native `run_launches` domain is format 3; current Catalog/content versions are recorded in the
+[runtime README](../../../../../kernel/crates/varin-runtime/README.md).
 This is an intentional incompatible internal encoding change from the old `materialized` boolean.
 Existing format 1, missing or malformed launch metadata is rejected before writable SQLite access,
 epoch advancement or recovery. Read-only preflight observes committed WAL pages. Original database,

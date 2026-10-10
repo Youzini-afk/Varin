@@ -60,7 +60,14 @@ fn subscription_tool_names_roundtrip_without_rewriting_signed_thinking_or_api_ke
     let mut view = RequestView {
         request_id: "request".into(),
         run_id: "run".into(),
-        origin: RequestOrigin::Conversation { step: 1, history_range: HistoryRange { branch_id: "main".into(), ancestor_id: None, leaf_id: None } },
+        origin: RequestOrigin::Conversation {
+            step: 1,
+            history_range: HistoryRange {
+                branch_id: "main".into(),
+                ancestor_id: None,
+                leaf_id: None,
+            },
+        },
         binding: RequestBinding {
             connection_identity: "fixture".into(),
             provider_family: "anthropic-messages".into(),
@@ -69,6 +76,9 @@ fn subscription_tool_names_roundtrip_without_rewriting_signed_thinking_or_api_ke
             configuration_generation: 1,
             tool_schema_generation: 1,
             tools: vec![ToolSchema {
+                description: String::new(),
+                output_schema: None,
+                metadata: None,
                 name: "read".into(),
                 version: "1".into(),
                 schema: json!({"type":"object"}),

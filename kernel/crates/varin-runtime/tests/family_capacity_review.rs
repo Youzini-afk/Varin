@@ -1,10 +1,10 @@
 //! Independent deterministic admission counterexamples. Gates represent executor completion,
 //! not elapsed-time guesses or artificially large file payloads.
-#[path="fixtures/input_admission.rs"]
+#[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
 use std::num::NonZeroUsize;
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 use varin_runtime::execution::*;
 use varin_runtime::execution_capacity::*;
@@ -223,18 +223,18 @@ fn committed_child_lineage_owns_family_after_parent_completion_and_inspection_is
         // accept_child has already persisted the original dispatch receipt.
         "settled"
     );
-    assert!(
-        f.db.inspect_admission(&child_run, epoch, &origin, "dispatch-call")
-            .is_err()
-    );
-    assert!(
-        f.db.inspect_admission(&f.context.run_id, epoch + 1, &origin, "dispatch-call")
-            .is_err()
-    );
-    assert!(
-        f.db.inspect_admission(&f.context.run_id, epoch, &origin, "unknown")
-            .is_err()
-    );
+    assert!(f
+        .db
+        .inspect_admission(&child_run, epoch, &origin, "dispatch-call")
+        .is_err());
+    assert!(f
+        .db
+        .inspect_admission(&f.context.run_id, epoch + 1, &origin, "dispatch-call")
+        .is_err());
+    assert!(f
+        .db
+        .inspect_admission(&f.context.run_id, epoch, &origin, "unknown")
+        .is_err());
     f.settle_exchange();
     assert_eq!(
         f.db.inspect_admission(&f.context.run_id, epoch, &origin, "dispatch-call")
@@ -284,9 +284,9 @@ fn child_context(
 
 mod engines {
     use super::*;
-    use serde_json::{Value, json};
-    use std::sync::Mutex;
+    use serde_json::{json, Value};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
     use varin_runtime::*;
     fn input(db: &Arc<Mutex<Catalog>>, name: &str) -> ExecutionInput {
         let mut db = db.lock().unwrap();
@@ -312,6 +312,9 @@ mod engines {
                 configuration_generation: 1,
                 tool_schema_generation: 1,
                 tools: vec![ToolSchema {
+                    description: String::new(),
+                    output_schema: None,
+                    metadata: None,
                     name: "read".into(),
                     version: "1".into(),
                     schema: json!({"type":"object"}),
@@ -380,9 +383,17 @@ mod engines {
         read_only: bool,
     }
     impl ToolExecutor for Tools {
-        fn plan(&self, call: &varin_runtime::execution::ToolCall, context: &varin_runtime::execution::FrozenToolContext,
-            cancel: &varin_runtime::execution::CancellationToken) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError> {
-            self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+        fn plan(
+            &self,
+            call: &varin_runtime::execution::ToolCall,
+            context: &varin_runtime::execution::FrozenToolContext,
+            cancel: &varin_runtime::execution::CancellationToken,
+        ) -> Result<
+            varin_runtime::execution::ToolPreparation,
+            varin_runtime::execution::ExecutionError,
+        > {
+            self.prepare(call, context, cancel)
+                .map(varin_runtime::execution::ToolPreparation::Ready)
         }
 
         fn supports_policy_read(
@@ -520,9 +531,17 @@ mod engines {
         registrations: Arc<AtomicUsize>,
     }
     impl ToolExecutor for WatchedTools {
-        fn plan(&self, call: &varin_runtime::execution::ToolCall, context: &varin_runtime::execution::FrozenToolContext,
-            cancel: &varin_runtime::execution::CancellationToken) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError> {
-            self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+        fn plan(
+            &self,
+            call: &varin_runtime::execution::ToolCall,
+            context: &varin_runtime::execution::FrozenToolContext,
+            cancel: &varin_runtime::execution::CancellationToken,
+        ) -> Result<
+            varin_runtime::execution::ToolPreparation,
+            varin_runtime::execution::ExecutionError,
+        > {
+            self.prepare(call, context, cancel)
+                .map(varin_runtime::execution::ToolPreparation::Ready)
         }
 
         fn execution_class(&self, call: &ToolCall, contract: &ToolContract) -> ExecutionClass {
@@ -753,9 +772,17 @@ mod engines {
         dropped: Arc<AtomicUsize>,
     }
     impl ToolExecutor for WatchGateTools {
-        fn plan(&self, call: &varin_runtime::execution::ToolCall, context: &varin_runtime::execution::FrozenToolContext,
-            cancel: &varin_runtime::execution::CancellationToken) -> Result<varin_runtime::execution::ToolPreparation, varin_runtime::execution::ExecutionError> {
-            self.prepare(call, context, cancel).map(varin_runtime::execution::ToolPreparation::Ready)
+        fn plan(
+            &self,
+            call: &varin_runtime::execution::ToolCall,
+            context: &varin_runtime::execution::FrozenToolContext,
+            cancel: &varin_runtime::execution::CancellationToken,
+        ) -> Result<
+            varin_runtime::execution::ToolPreparation,
+            varin_runtime::execution::ExecutionError,
+        > {
+            self.prepare(call, context, cancel)
+                .map(varin_runtime::execution::ToolPreparation::Ready)
         }
 
         fn supports_policy_read(

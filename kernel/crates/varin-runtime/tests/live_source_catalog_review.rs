@@ -1,5 +1,5 @@
 //! Independent admission and no-write format rejection counterexamples.
-#[path="fixtures/input_admission.rs"]
+#[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
 use rusqlite::Connection;
@@ -29,7 +29,7 @@ fn source() -> Value {
     json!({"workspace_id":"workspace","execution_workspace_id":"execution","mode":"live_root","branch_id":null,"revision":null,"live_root":{"hostId":"host","canonicalRoot":"/fixture/root","rootId":"root"}})
 }
 fn selection(source: Value) -> LaunchSelection {
-    serde_json::from_value(json!({"connection_identity":"fixture-connection","provider_family":"fixture","model":"fake-model","configuration_generation":1,"tool_schema_generation":1,"tools":[],"policy":{"name":"agent","version":"1"},"source":source})).unwrap()
+    serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"fixture-connection","provider_family":"fixture","model":"fake-model","configuration_generation":1,"tool_schema_generation":1,"tools":[],"policy":{"name":"agent","version":"1"},"source":source})).unwrap()
 }
 fn command(db: &Catalog, key: &str) -> SubmitInput {
     SubmitInput {

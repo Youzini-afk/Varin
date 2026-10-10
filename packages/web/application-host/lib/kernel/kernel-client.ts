@@ -8,7 +8,7 @@ import type { RetrievalOwner } from './retrieval-owner.js';
 import { LanguageBridge, type PrivateLanguageResponse } from './language-bridge.js';
 import type { LanguageToolOwner } from './language-owner.js';
 import { AgentPolicyBridge, type AgentPolicyLease, type AgentPolicyBinding, type PrivatePolicyResponse } from './agent-policy.js';
-import { McpBridge, type McpLease, type McpBinding, type LiveMcpBinding, type PrivateMcpResponse } from './mcp-bridge.js';
+import { ToolBridge, type HostToolLease, type HostToolBinding, type LiveHostToolBinding, type PrivateToolFrame } from './tool-bridge.js';
 import { CredentialBridge, type PrivateCredentialResponse } from "./credential-bridge.js";
 import type { ExistingHostCredentialOwner, CredentialScope } from "./credential-owner.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -551,7 +551,7 @@ export class KernelClient {
     return () => this.agentRuntimeListeners.delete(listener);
   }
   private readonly credentialBridge: CredentialBridge;
-  private readonly mcpBridge: McpBridge;
+  private readonly toolBridge: ToolBridge;
   private readonly mcpReleaseListeners = new Set<(runId: string) => void>();
   private readonly languageBridge: LanguageBridge;
   private readonly memoryBridge: MemoryBridge;
@@ -596,7 +596,7 @@ export class KernelClient {
       () => this.failAll(new KernelClientError({ code: "plan-channel-failed", message: "Private plan channel failed", retryable: false }), true));
     this.languageBridge = new LanguageBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "language-channel-failed", message: "Private language channel failed", retryable: false }), true));
-    this.mcpBridge = new McpBridge(() => this.epoch, response => this.write(response),
+    this.toolBridge = new ToolBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "mcp-channel-failed", message: "Private MCP channel failed", retryable: false }), true),
       runId => { for (const listener of this.mcpReleaseListeners) { try { listener(runId); } catch { this.mcpReleaseListeners.delete(listener); } } });
     this.credentialBridge = new CredentialBridge(() => this.epoch,
@@ -618,16 +618,24 @@ export class KernelClient {
     return this.credentialBridge.register(runId, owner, signal, bindingId);
   }
   unregisterCredentialOwner(runId: string, bindingId?: string): void { this.credentialBridge.unregister(runId, bindingId); }
-  async registerMcpOwner(runId: string, lease: McpLease): Promise<McpBinding> {
+  async registerMcpOwner(runId: string, lease: HostToolLease): Promise<HostToolBinding> {
     if (!this.handshakeResult) await this.start();
-    return this.mcpBridge.register(runId, lease).binding;
+    return this.toolBridge.register(runId, lease).binding;
   }
-  async registerMcpCandidate(runId: string, lease: McpLease): Promise<LiveMcpBinding> {
+  async registerMcpCandidate(runId: string, lease: HostToolLease): Promise<LiveHostToolBinding> {
     if (!this.handshakeResult) await this.start();
-    return this.mcpBridge.register(runId, lease, false);
+    return this.toolBridge.register(runId, lease, false);
   }
-  discardMcpCandidate(runId: string, binding: LiveMcpBinding): void { this.mcpBridge.discard(runId, binding); }
-  onMcpReleased(listener: (runId: string) => void): () => void {
+  discardMcpCandidate(runId: string, binding: LiveHostToolBinding): void { this.toolBridge.discard(runId, binding); }
+  async registerExtensionTool(runId:string, retained:import('./extension-tool-owner.js').ExtensionToolLease):Promise<import('./protocol.generated.js').LiveExtensionToolBinding> {
+    if(!this.handshakeResult)await this.start();
+    const live=this.toolBridge.register(runId,retained.lease,false);
+    return {ownerId:live.ownerId,generation:retained.generation,binding:retained.binding};
+  }
+  discardExtensionTool(runId:string,live:import('./protocol.generated.js').LiveExtensionToolBinding):void {
+    this.toolBridge.discard(runId,{ownerId:live.ownerId,binding:{reference:live.binding.providerKey,generation:live.generation,resources:{},tools:[live.binding.tool]}});
+  }
+  onToolReleased(listener: (runId: string) => void): () => void {
     this.mcpReleaseListeners.add(listener); return () => { this.mcpReleaseListeners.delete(listener); };
   }
   setRetrievalOwner(owner: RetrievalOwner): void { this.retrievalBridge.setOwner(owner); }
@@ -648,10 +656,11 @@ export class KernelClient {
   setContextOwner(owner: ContextOwner): void { this.contextBridge.setOwner(owner); }
   setPlanOwner(owner: PlanOwner): void { this.planBridge.setOwner(owner); }
   setLanguageOwner(owner: LanguageToolOwner): void { this.languageBridge.setOwner(owner); }
-  mcpBinding(runId: string): McpBinding | undefined { return this.mcpBridge.binding(runId); }
-  mcpLiveBinding(runId:string):LiveMcpBinding|undefined {return this.mcpBridge.liveBinding(runId);}
-  mcpImplementationIdentity(runId:string):string|undefined {return this.mcpBridge.implementationIdentity(runId);}
-  unregisterMcpOwner(runId: string): void { this.mcpBridge.unregister(runId); }
+  toolAvailability(runId:string,name:string,version:string):boolean|undefined{return this.toolBridge.availability(runId,name,version);}
+  mcpBinding(runId: string): HostToolBinding | undefined { return this.toolBridge.binding(runId); }
+  mcpLiveBinding(runId:string):LiveHostToolBinding|undefined {return this.toolBridge.liveBinding(runId);}
+  mcpImplementationIdentity(runId:string):string|undefined {return this.toolBridge.implementationIdentity(runId);}
+  unregisterToolOwners(runId: string): void { this.toolBridge.unregister(runId); }
 
   /** Ephemeral launch waits share the existing Run cancellation and kernel lifetime. */
   beginRunPreparation(runId: string): { signal: AbortSignal; release(): void } {
@@ -854,6 +863,7 @@ export class KernelClient {
       pathScopes: [""],
     }, { allowBootstrap: true });
     this.managementGrant = this.grantFromResponse(managementGrant);
+    this.toolBridge.reconnect();
     for (const listener of this.readyListeners) {
       try { listener(); } catch { this.readyListeners.delete(listener); }
     }
@@ -866,7 +876,7 @@ export class KernelClient {
       return;
     }
     const response = value as KernelResponse | KernelProcessStreamEvent | AgentRuntimeStreamEvent;
-      if (this.credentialBridge.consume(response) || this.contextBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.mcpBridge.consume(response) || this.policyBridge.consume(response)) return;
+      if (this.credentialBridge.consume(response) || this.contextBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.toolBridge.consume(response) || this.policyBridge.consume(response)) return;
       if (response.kind === "runtime-event") {
         if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch
           || !["durable", "progress"].includes(response.stream)
@@ -935,7 +945,7 @@ export class KernelClient {
     }
     this.transportFailed = true;
     this.credentialBridge.close();
-    this.mcpBridge.close();
+    this.toolBridge.reset();
     this.languageBridge.close();
     this.memoryBridge.close();
     this.contextBridge.close();
@@ -962,10 +972,10 @@ export class KernelClient {
     if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
-  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateMcpResponse | PrivatePolicyResponse | PrivateMemoryResponse | PrivateContextResponse | PrivatePlanResponse | PrivateLanguageResponse | PrivateRetrievalResponse): Promise<void> {
+  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateToolFrame | PrivatePolicyResponse | PrivateMemoryResponse | PrivateContextResponse | PrivatePlanResponse | PrivateLanguageResponse | PrivateRetrievalResponse): Promise<void> {
     const transport = this.transport;
     if (!transport) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel transport is unavailable", retryable: true });
-    const control = request.kind === "cancel" || request.kind === "credential-response"
+    const control = request.kind === "cancel" || request.kind === "credential-response" || request.kind === "host-tool-revoked"
       || (request.kind === "request" && CONTROL_METHODS.has(request.method));
     await transport.send(request as unknown as Record<string, unknown>, control ? "control" : "data");
   }
@@ -1567,7 +1577,7 @@ export class KernelClient {
   private async closeInternal(): Promise<void> {
     this.closed = true;
     this.credentialBridge.close();
-    this.mcpBridge.close();
+    this.toolBridge.reset();
     this.languageBridge.close();
     this.memoryBridge.close();
     this.contextBridge.close();

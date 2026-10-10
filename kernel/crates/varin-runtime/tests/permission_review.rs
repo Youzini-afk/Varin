@@ -19,7 +19,7 @@ impl Fixture {
             std::env::temp_dir().join(format!("varin-permission-review-{}", uuid::Uuid::new_v4()));
         let mut db = Catalog::open(&root).unwrap();
         db.create_thread("thread", "branch").unwrap();
-        let launch:LaunchSelection=serde_json::from_value(json!({"connection_identity":"fixture","provider_family":"fixture","model":"fixture","configuration_generation":1,"tool_schema_generation":1,"tools":[],"policy":{"name":"agent","version":"1"},"source":null,"credential_scope":{"reference":"actor-ref","authority":"fixture-auth","account":"selected-account","generation":1}})).unwrap();
+        let launch:LaunchSelection=serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"fixture","provider_family":"fixture","model":"fixture","configuration_generation":1,"tool_schema_generation":1,"tools":[],"policy":{"name":"agent","version":"1"},"source":null,"credential_scope":{"reference":"actor-ref","authority":"fixture-auth","account":"selected-account","generation":1}})).unwrap();
         let receipt = db
             .submit_with_launch(
                 &SubmitInput {
@@ -50,9 +50,17 @@ impl Fixture {
                 resources: vec![],
             },
         };
-        db.admit_tool_operation(&op, &receipt.run_id, db.epoch(), &varin_runtime::execution::ToolOrigin::ModelStep{request_id:"request-1".into()}, &tool)
-            .unwrap();
-        let call = json!({"runId":receipt.run_id,"requestId":"request-1","operationId":op,"callId":"call-1","name":"fixture_send","schemaVersion":"schema-1","arguments":{"target":"chosen","text":"approved content"}});
+        db.admit_tool_operation(
+            &op,
+            &receipt.run_id,
+            db.epoch(),
+            &varin_runtime::execution::ToolOrigin::ModelStep {
+                request_id: "request-1".into(),
+            },
+            &tool,
+        )
+        .unwrap();
+        let call = json!({"runId":receipt.run_id,"origin":{"kind":"model_step","request_id":"request-1"},"operationId":op,"callId":"call-1","name":"fixture_send","schemaVersion":"schema-1","arguments":{"target":"chosen","text":"approved content"}});
         let scope = json!({"ownerReference":"owner-1","ownerGeneration":3,"toolSchemaVersion":"schema-1","policyGeneration":"policy-1","reason":"external effect"});
         Self {
             root,
@@ -69,7 +77,10 @@ fn permission_is_exact_one_use_and_denial_or_cancellation_never_authorizes_dispa
     let mut f = Fixture::new();
     for (field, value) in [
         ("runId", json!("other-run")),
-        ("requestId", json!("other-request")),
+        (
+            "origin",
+            json!({"kind":"model_step","request_id":"other-request"}),
+        ),
         ("name", json!("other-tool")),
         (
             "arguments",
@@ -87,7 +98,12 @@ fn permission_is_exact_one_use_and_denial_or_cancellation_never_authorizes_dispa
         f.db.open_permission(&f.op, "permission-1", f.call.clone(), f.scope.clone())
             .unwrap();
     assert_eq!(
-        f.db.capture_operation_read(opened.clone()).load().unwrap().result.as_ref().unwrap()["permission"]["actor"]["account"],
+        f.db.capture_operation_read(opened.clone())
+            .load()
+            .unwrap()
+            .result
+            .as_ref()
+            .unwrap()["permission"]["actor"]["account"],
         "selected-account"
     );
     f.db.decide_permission(&f.op, "permission-1", "allow_once")
@@ -132,7 +148,8 @@ fn permission_is_exact_one_use_and_denial_or_cancellation_never_authorizes_dispa
     .unwrap();
     f.db.collect_content_objects().unwrap();
     let view = f.db.capture_operation_read(opened).load().unwrap();
-    let tool: varin_runtime::execution::ToolInvocation = serde_json::from_value(view.intent).unwrap();
+    let tool: varin_runtime::execution::ToolInvocation =
+        serde_json::from_value(view.intent).unwrap();
     assert_eq!(tool.call.arguments, f.call["arguments"]);
     let permission = &view.result.as_ref().unwrap()["permission"];
     assert_eq!(permission["call"], f.call);

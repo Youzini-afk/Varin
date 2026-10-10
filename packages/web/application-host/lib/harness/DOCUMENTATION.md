@@ -284,6 +284,17 @@ absent optional identities; JSON null is not a thread owner. Missing/released or
 snapshots remain unavailable; malformed metadata, missing blob references and storage failures
 propagate as failures, including through both web and PDF readers.
 
+`../kernel/material-tool-owner.ts` adapts the same store to the call-scoped
+`materials.snapshot/read` capability. The shared tool invocation supplies the original Run launch's
+owning workspace and Thread; extension parameters cannot supply either identity, and no Pi session is
+invented. Existing material grants and persisted collections still authorize sharing. Reads return an
+immutable snapshot/hash revision and UTF-8 byte page with an exact next cursor; invalid boundaries or
+budgets smaller than the next codepoint fail explicitly. Empty bodies, unavailable snapshots, conflicts
+and corrupt data stay distinct. Storage/transport failures reject, and cancelled or retired invocations
+cannot publish late content. The production blob owner reads the requested range, but its initial full
+object hash verification is not bounded by the response byte budget. This capability performs no fetch,
+document parsing or OCR.
+
 Harness deadline/cancellation diagnostics record the request method, admission/service/response
 phase, elapsed time, service completion and pending storage method counts. They contain no tool
 arguments or material contents. A late completion is recorded separately. Worker response rejection

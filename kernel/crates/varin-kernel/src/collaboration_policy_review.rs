@@ -271,15 +271,21 @@ impl PreparedToolCall for HookCall {
         x: &ToolExecutionContext,
         c: &ToolContract,
         t: &CancellationToken,
-    ) -> ToolCompletion {
+    ) -> varin_runtime::execution::ToolExecutionReceipt {
         let completion = self.inner.execute(x, c, t);
         if self.name == "dispatch" {
-            assert!(matches!(completion, ToolCompletion::JobAccepted { .. }));
+            assert!(matches!(
+                completion.completion,
+                ToolCompletion::JobAccepted { .. }
+            ));
             self.accepted.send(x.operation_id.clone()).unwrap();
             self.release.lock().unwrap().recv().unwrap();
         }
         if self.name == "wait_child" && self.cancel_wait {
-            assert!(matches!(completion, ToolCompletion::JobAccepted { .. }));
+            assert!(matches!(
+                completion.completion,
+                ToolCompletion::JobAccepted { .. }
+            ));
             let mut owner = self.catalog.lock().unwrap();
             assert_ne!(
                 owner.run(&x.run_id).unwrap().state,
@@ -335,7 +341,7 @@ fn run_sequence(cancel_before_park: bool, pause_before_observation: bool) {
         pause_before_observation,
     });
     let identity = policy_identity(sequence.identity());
-    let launch: LaunchSelection = serde_json::from_value(json!({"connection_identity":"frozen-connection","provider_family":"fixture","model":"fixture-model",
+    let launch: LaunchSelection = serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"frozen-connection","provider_family":"fixture","model":"fixture-model",
         "configuration_generation":2,"tool_schema_generation":1,"tools":tools,"policy":identity,
         "source":{"mode":"fixed_branch","live_root":null,"workspace_id":"workspace-A","execution_workspace_id":"workspace-A","branch_id":"fixed-parent","revision":0},
         "credential_scope":{"reference":"credential-ref","authority":"credential-owner","account":"account-A","generation":3}})).unwrap();

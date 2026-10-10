@@ -69,7 +69,7 @@ impl ModelProvider for ResponsesProvider {
             .binding
             .tools
             .iter()
-            .map(|t| json!({"type":"function","name":t.name,"parameters":t.schema}))
+            .map(|t| json!({"type":"function","name":t.name,"description":t.description,"parameters":t.schema}))
             .collect();
         let mut value = json!({"model":view.binding.model,"input":input,"tools":tools,"stream":true,"store":false,"include":["reasoning.encrypted_content"]});
         if let Some(max) = self.max_output_tokens {

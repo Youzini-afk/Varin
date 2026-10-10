@@ -58,10 +58,10 @@ fn args(call: &ToolCall) -> Result<Arguments, ExecutionError> {
     Ok(args)
 }
 pub(crate) fn schema() -> ToolSchema {
-    ToolSchema {
+    ToolSchema { description: "Read or replace this conversation's plan. Read first, then update using the exact returned plan ref (null when absent). A conflicting update changes nothing; read again before revising. Owner identity is fixed by the runtime.".into(), output_schema: None, metadata: None,
         name: TOOL.into(),
         version: "1".into(),
-        schema: json!({"type":"object","description":"Read or replace this conversation's plan. Read first, then update using the exact returned plan ref (null when absent). A conflicting update changes nothing; read again before revising. Owner identity is fixed by the runtime.",
+        schema: json!({"type":"object",
             "properties":{"action":{"type":"string","enum":["read","update"]},"expectedRef":{"type":["string","null"]},
                 "items":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string"},"status":{"type":"string","description":"Shared TodoItem status: pending, in_progress, completed, or blocked."}},"required":["text","status"],"additionalProperties":false}}},
             "required":["action"],"additionalProperties":false}),
@@ -121,8 +121,12 @@ fn query(
     {
         return Err(error("plan call does not match its admitted contract"));
     }
-    let intent = varin_runtime::catalog::tool_content::ToolIntent::fingerprint(&context.origin, call, contract)
-        .map_err(error)?;
+    let intent = varin_runtime::catalog::tool_content::ToolIntent::fingerprint(
+        &context.origin,
+        call,
+        contract,
+    )
+    .map_err(error)?;
     let (epoch, run, read) = {
         let catalog = owner.lock().map_err(error)?;
         if !eligible(&catalog, &context.run_id)? {
@@ -318,9 +322,12 @@ impl ToolExecutor for PlanTools {
             // A real CAS rejection is not "not dispatched". Retain the domain's
             // exact receipt before allowing the dispatched Operation to settle None.
             let recorded = (|| -> Result<(), ExecutionError> {
-                let intent =
-                    varin_runtime::catalog::tool_content::ToolIntent::fingerprint(&context.origin, call, contract)
-                        .map_err(error)?;
+                let intent = varin_runtime::catalog::tool_content::ToolIntent::fingerprint(
+                    &context.origin,
+                    call,
+                    contract,
+                )
+                .map_err(error)?;
                 let catalog = self.catalog.lock().map_err(error)?;
                 let run = catalog.run(&context.run_id).map_err(error)?;
                 let operation = catalog.operation(&context.operation_id).map_err(error)?;
@@ -338,17 +345,19 @@ impl ToolExecutor for PlanTools {
                 }
                 drop(catalog);
                 varin_runtime::catalog::result_content::record_external_receipt(
-                        &self.catalog, &operation.id,
-                        varin_runtime::ExternalReceipt {
-                            identity: operation.id.clone(),
-                            executor: TOOL.into(),
-                            epoch: operation.epoch.to_string(),
-                            outcome,
-                            effect,
-                            result: value.clone(),
-                        }, outcome != Outcome::Indeterminate,
-                    )
-                    .map_err(error)?;
+                    &self.catalog,
+                    &operation.id,
+                    varin_runtime::ExternalReceipt {
+                        identity: operation.id.clone(),
+                        executor: TOOL.into(),
+                        epoch: operation.epoch.to_string(),
+                        outcome,
+                        effect,
+                        result: value.clone(),
+                    },
+                    outcome != Outcome::Indeterminate,
+                )
+                .map_err(error)?;
                 Ok(())
             })();
             if let Err(failure) = recorded {
@@ -405,11 +414,17 @@ pub(crate) fn reconcile(
                     let operation = read.load().map_err(error)?;
                     let admitted: ToolInvocation =
                         serde_json::from_value(operation.intent.clone()).map_err(error)?;
-                    if !matches!(admitted.origin,ToolOrigin::ModelStep{..}) || operation.id!=admitted.origin.operation_id(&admitted.call.call_id) {
-                        return Err(error("plan recovery currently requires its original model invocation"));
+                    if !matches!(admitted.origin, ToolOrigin::ModelStep { .. })
+                        || operation.id != admitted.origin.operation_id(&admitted.call.call_id)
+                    {
+                        return Err(error(
+                            "plan recovery currently requires its original model invocation",
+                        ));
                     }
                     let context = ToolExecutionContext {
-                        run_id: run_id.clone(), operation_id: operation.id.clone(), origin:admitted.origin.clone(),
+                        run_id: run_id.clone(),
+                        operation_id: operation.id.clone(),
+                        origin: admitted.origin.clone(),
                     };
                     let query = query(
                         &runtime.catalog(),
@@ -430,17 +445,19 @@ pub(crate) fn reconcile(
                     }
                     drop(catalog);
                     varin_runtime::catalog::result_content::record_external_receipt(
-                            &owner, &operation.id,
-                            varin_runtime::ExternalReceipt {
-                                identity: operation.id.clone(),
-                                executor: TOOL.into(),
-                                epoch: operation.epoch.to_string(),
-                                outcome,
-                                effect,
-                                result: response,
-                            }, outcome != Outcome::Indeterminate,
-                        )
-                        .map_err(error)?;
+                        &owner,
+                        &operation.id,
+                        varin_runtime::ExternalReceipt {
+                            identity: operation.id.clone(),
+                            executor: TOOL.into(),
+                            epoch: operation.epoch.to_string(),
+                            outcome,
+                            effect,
+                            result: response,
+                        },
+                        outcome != Outcome::Indeterminate,
+                    )
+                    .map_err(error)?;
                     reconciled.push(operation.id);
                 }
                 Ok(json!({"reconciled":reconciled,"unresolved":unresolved}))

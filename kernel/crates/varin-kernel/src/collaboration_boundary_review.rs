@@ -1,8 +1,8 @@
 //! Independent real Storage/wrapper breakpoint checks; no model or shared process.
 use super::*;
 use std::sync::{
-    Mutex,
     atomic::{AtomicBool, Ordering},
+    Mutex,
 };
 #[allow(dead_code)]
 #[path = "../../varin-runtime/tests/fixtures/child_dispatch.rs"]
@@ -28,7 +28,9 @@ fn boundary(revoke_before: bool, policy: bool) {
     let f = if policy {
         let mut fixture = fixture::Fixture::new_policy_parent_with_schemas(0, read, schema.clone());
         fixture.context = fixture.admit_policy_call(ToolCall {
-            call_id: "dispatch-call".into(), name: "dispatch".into(), schema_version: "1".into(),
+            call_id: "dispatch-call".into(),
+            name: "dispatch".into(),
+            schema_version: "1".into(),
             arguments: serde_json::to_value(&fixture.input).unwrap(),
         });
         fixture
@@ -75,9 +77,12 @@ fn boundary(revoke_before: bool, policy: bool) {
                 }
                 let result = serve_resource(&mut owner, EPOCH, HOST, GENERATION, &request);
                 if is_pin && !revoke_before {
-                    let pin = result
-                        .as_ref()
-                        .unwrap_or_else(|failure| panic!("source transfer failed before breakpoint: {}", failure.error));
+                    let pin = result.as_ref().unwrap_or_else(|failure| {
+                        panic!(
+                            "source transfer failed before breakpoint: {}",
+                            failure.error
+                        )
+                    });
                     assert_eq!(
                         pin["pinId"],
                         format!("child-pin:{}", request.context.operation_id)
@@ -116,9 +121,12 @@ fn boundary(revoke_before: bool, policy: bool) {
         environment_run_id: None,
         enabled_tools: kinds,
     };
-    let directory = Arc::new(varin_runtime::composition::tools::ToolDirectory::assemble(
-        crate::collaboration::declarations(db.clone(), Some(binding), resources),
-    ).unwrap());
+    let directory = Arc::new(
+        varin_runtime::composition::tools::ToolDirectory::assemble(
+            crate::collaboration::declarations(db.clone(), Some(binding), resources),
+        )
+        .unwrap(),
+    );
     let call = ToolCall {
         call_id: "dispatch-call".into(),
         name: "dispatch".into(),
@@ -132,19 +140,27 @@ fn boundary(revoke_before: bool, policy: bool) {
         tools: Arc::new(vec![schema]),
         source: Some(f.pin.source),
     };
-    let executor = directory.bind_call(&call, &frozen, &CancellationToken::default()).unwrap();
+    let executor = directory
+        .bind_call(&call, &frozen, &CancellationToken::default())
+        .unwrap();
     let contract = executor.prepare(&CancellationToken::default()).unwrap();
     executor
         .authorize(&f.context, &contract, &CancellationToken::default())
         .unwrap();
     let completion = executor.execute(&f.context, &contract, &CancellationToken::default());
     if revoke_before {
-        assert!(!matches!(completion, ToolCompletion::JobAccepted { .. }));
+        assert!(!matches!(
+            completion.completion,
+            ToolCompletion::JobAccepted { .. }
+        ));
         assert!(db.lock().unwrap().child_tasks().unwrap().is_empty());
         assert!(!crossed.load(Ordering::SeqCst));
     } else {
         assert!(crossed.load(Ordering::SeqCst));
-        assert!(matches!(completion, ToolCompletion::JobAccepted { .. }));
+        assert!(matches!(
+            completion.completion,
+            ToolCompletion::JobAccepted { .. }
+        ));
         let children = db.lock().unwrap().child_tasks().unwrap();
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].parent_run_id, f.context.run_id);

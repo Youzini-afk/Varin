@@ -1,3 +1,4 @@
+import type { ThreadToolInspection } from '@varin/application-client';
 import type { PlanService } from './plan-service.js';
 import type { ImageAttachment } from '@varin/protocol';
 import { threadInput } from './thread-images.js';
@@ -317,6 +318,11 @@ export class ThreadAdapter {
     return receipt;
   }
 
+  async inspectTools(identity:ThreadIdentity,runId:string,signal?:AbortSignal):Promise<ThreadToolInspection>{
+    await this.requireIdentity(identity);const run=await this.runtime.run(runId,signal);
+    if(run.thread_id!==identity.threadId||run.branch_id!==identity.branchId)throw new Error('Run does not belong to the selected Thread branch');
+    return this.runtime.inspectTools(runId,signal);
+  }
   async selectModel(input: ThreadIdentity & { runId: string; key: string; model: ThreadModel }) {
     await this.requireIdentity(input);
     const run = await this.requireRun(input.runId);

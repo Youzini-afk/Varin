@@ -450,6 +450,7 @@ impl<
                                             ExecutionRecord::ToolSettled {
                                                 context: context.clone(),
                                                 completion: completion.clone(),
+                                                executor_stopped: false,
                                             },
                                         )?;
                                     }
@@ -496,6 +497,7 @@ impl<
                                                     ExecutionRecord::ToolSettled {
                                                         context: context.clone(),
                                                         completion: completion.clone(),
+                                                        executor_stopped: true,
                                                     },
                                                 )?;
                                             }
@@ -602,8 +604,14 @@ pub struct PolicyControlIntent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PolicyControlReceipt {
-    Delivered { action_id: String, item: ConversationItem },
-    Paused { action_id: String, wait_id: String },
+    Delivered {
+        action_id: String,
+        item: ConversationItem,
+    },
+    Paused {
+        action_id: String,
+        wait_id: String,
+    },
 }
 #[derive(Debug, Clone)]
 pub struct PolicyControlState {

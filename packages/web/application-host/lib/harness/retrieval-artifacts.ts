@@ -90,7 +90,7 @@ type KernelBlobClient = {
   getBlob(
     hash: string,
     source: { recordId: string; slot: string },
-    options?: { offset?: number; length?: number },
+    options?: { offset?: number; length?: number; signal?: AbortSignal },
   ): Promise<{ byteLength: number; bytesBase64: string }>;
 };
 

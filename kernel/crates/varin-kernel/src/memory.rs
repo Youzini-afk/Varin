@@ -3,7 +3,9 @@ use super::host_query::OwnerChannel;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
-use varin_runtime::catalog::{context::ContextScope,memory::MemoryState, personalization::PersonalizationBasis};
+use varin_runtime::catalog::{
+    context::ContextScope, memory::MemoryState, personalization::PersonalizationBasis,
+};
 use varin_runtime::execution::*;
 use varin_runtime::{Catalog, Effect, Lifetime, Outcome};
 const TOOL: &str = "memory";
@@ -38,19 +40,27 @@ fn args(call: &ToolCall, mutations: bool) -> Result<Arguments, ExecutionError> {
     Ok(args)
 }
 pub(crate) fn schema(mutations: bool) -> ToolSchema {
-    ToolSchema {
+    ToolSchema { description: "Read or explicitly maintain ordinary persistent notes. Reads return the current catalog revision; writes require that revision. Scopes are resolved from this conversation's admitted identity. Saved notes commit immediately; system memory snapshots change only at successful compaction.".into(), output_schema: None, metadata: None,
         name: TOOL.into(),
         version: if mutations { "1" } else { "1-read" }.into(),
-        schema: json!({"type":"object","description":"Read or explicitly maintain ordinary persistent notes. Reads return the current catalog revision; writes require that revision. Scopes are resolved from this conversation's admitted identity. Saved notes commit immediately; system memory snapshots change only at successful compaction.",
+        schema: json!({"type":"object",
         "properties":{"action":{"type":"string","enum":if mutations {vec!["read","search","save","delete"]} else {vec!["read","search"]}},"scope":{"type":"string","enum":["global","project","currentThread"]},"id":{"type":"integer","minimum":1},"content":{"type":"string"},"query":{"type":"string"},"revision":{"type":"integer","minimum":0}},"required":["action"],"additionalProperties":false}),
     }
 }
 fn scope(basis: &ContextScope) -> Value {
     json!({"mode":basis.mode,"sessionId":basis.session_id,"projectId":basis.project_id})
 }
-fn basis(catalog: &Arc<Mutex<Catalog>>, run_id: &str) -> Result<Option<ContextScope>, ExecutionError> {
-    let (run, basis) = {let catalog = catalog.lock().map_err(error)?;
-        (catalog.run(run_id).map_err(error)?, catalog.run_context_scope(run_id).map_err(error)?)};
+fn basis(
+    catalog: &Arc<Mutex<Catalog>>,
+    run_id: &str,
+) -> Result<Option<ContextScope>, ExecutionError> {
+    let (run, basis) = {
+        let catalog = catalog.lock().map_err(error)?;
+        (
+            catalog.run(run_id).map_err(error)?,
+            catalog.run_context_scope(run_id).map_err(error)?,
+        )
+    };
     if basis
         .as_ref()
         .is_some_and(|basis| basis.session_id != run.thread_id)
@@ -59,16 +69,41 @@ fn basis(catalog: &Arc<Mutex<Catalog>>, run_id: &str) -> Result<Option<ContextSc
     }
     Ok(basis)
 }
-fn observe_receipt(catalog:&Arc<Mutex<Catalog>>,run_id:&str,receipt:&Value)->Result<(),ExecutionError> {
+fn observe_receipt(
+    catalog: &Arc<Mutex<Catalog>>,
+    run_id: &str,
+    receipt: &Value,
+) -> Result<(), ExecutionError> {
     loop {
-        let preparation=catalog.lock().map_err(error)?.prepare_memory_receipt(run_id,receipt.clone()).map_err(error)?;
-        let prepared=preparation.load().map_err(error)?;
-        if catalog.lock().map_err(error)?.publish_memory_state(prepared).map_err(error)? {return Ok(());}
+        let preparation = catalog
+            .lock()
+            .map_err(error)?
+            .prepare_memory_receipt(run_id, receipt.clone())
+            .map_err(error)?;
+        let prepared = preparation.load().map_err(error)?;
+        if catalog
+            .lock()
+            .map_err(error)?
+            .publish_memory_state(prepared)
+            .map_err(error)?
+        {
+            return Ok(());
+        }
     }
 }
-pub(crate) fn declaration(catalog: Arc<Mutex<Catalog>>, bridge: OwnerChannel, mutations: bool)
-    -> varin_runtime::composition::tools::ToolDeclaration {
-    varin_runtime::composition::tools::ToolDeclaration::new(schema(mutations), Arc::new(MemoryTools { catalog, bridge, mutations }))
+pub(crate) fn declaration(
+    catalog: Arc<Mutex<Catalog>>,
+    bridge: OwnerChannel,
+    mutations: bool,
+) -> varin_runtime::composition::tools::ToolDeclaration {
+    varin_runtime::composition::tools::ToolDeclaration::new(
+        schema(mutations),
+        Arc::new(MemoryTools {
+            catalog,
+            bridge,
+            mutations,
+        }),
+    )
 }
 pub(crate) fn configure_context(
     mut start: varin_runtime::supervisor::RunStart,
@@ -84,10 +119,26 @@ struct MemoryTools {
     mutations: bool,
 }
 impl ToolExecutor for MemoryTools {
-    fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken) -> Result<ToolPreparation, ExecutionError> {
-        self.prepare(call, context, cancel).map(ToolPreparation::Ready)
+    fn plan(
+        &self,
+        call: &ToolCall,
+        context: &FrozenToolContext,
+        cancel: &CancellationToken,
+    ) -> Result<ToolPreparation, ExecutionError> {
+        self.prepare(call, context, cancel)
+            .map(ToolPreparation::Ready)
     }
-    fn supports_policy_read(&self, _: &FrozenToolContext, call: &ToolCall, contract: &ToolContract) -> bool { contract.read_only && contract.completion == CompletionKind::Result && args(call, self.mutations).is_ok_and(|a| matches!(a.action.as_str(), "read" | "search")) }
+    fn supports_policy_read(
+        &self,
+        _: &FrozenToolContext,
+        call: &ToolCall,
+        contract: &ToolContract,
+    ) -> bool {
+        contract.read_only
+            && contract.completion == CompletionKind::Result
+            && args(call, self.mutations)
+                .is_ok_and(|a| matches!(a.action.as_str(), "read" | "search"))
+    }
     fn prepare(
         &self,
         call: &ToolCall,
@@ -134,11 +185,12 @@ impl ToolExecutor for MemoryTools {
         cancel: &CancellationToken,
     ) -> ToolCompletion {
         let result = (|| {
-            let basis = basis(&self.catalog, &context.run_id)?.ok_or_else(|| error("memory scope unavailable"))?;
+            let basis = basis(&self.catalog, &context.run_id)?
+                .ok_or_else(|| error("memory scope unavailable"))?;
             let origin = format!("run:{}:{}", context.run_id, context.operation_id);
             let value = self.bridge.query(json!({"action":"tool","runId":context.run_id,"scope":scope(&basis),"origin":origin,"arguments":call.arguments}), cancel)?;
             if value["status"] == "ready" && !value["memoryReceipt"].is_null() {
-                observe_receipt(&self.catalog,&context.run_id,&value["memoryReceipt"])?;
+                observe_receipt(&self.catalog, &context.run_id, &value["memoryReceipt"])?;
             }
             Ok::<_, ExecutionError>(value)
         })();
@@ -206,21 +258,30 @@ impl ContextPreparation for Prepare {
         owner_generation: u64,
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
-        let Some(admitted) = basis(&self.catalog, run_id)? else {return Ok(());};
+        let Some(admitted) = basis(&self.catalog, run_id)? else {
+            return Ok(());
+        };
         loop {
             if cancel.is_cancelled() {
                 return Err(error("context preparation cancelled"));
             }
-            let (checkpoint,memory_basis) = {
+            let (checkpoint, memory_basis) = {
                 let catalog = self.catalog.lock().map_err(error)?;
                 let run = catalog.run(run_id).map_err(error)?;
                 if run.epoch != owner_generation {
                     return Err(error("context owner generation changed"));
                 }
-                (catalog.capture_active_checkpoint(&run.branch_id).map_err(error)?.ok_or_else(|| error("active context missing"))?,
-                    catalog.memory_state_identity(&run.branch_id).map_err(error)?)
+                (
+                    catalog
+                        .capture_active_checkpoint(&run.branch_id)
+                        .map_err(error)?
+                        .ok_or_else(|| error("active context missing"))?,
+                    catalog
+                        .memory_state_identity(&run.branch_id)
+                        .map_err(error)?,
+                )
             };
-            let checkpoint=checkpoint.load().map_err(error)?;
+            let checkpoint = checkpoint.load().map_err(error)?;
             let reply = self.bridge.query(json!({"action":"synchronize","runId":run_id,"scope":scope(&admitted),"checkpoint":checkpoint}), cancel)?;
             if reply["status"] != "ready" {
                 return Err(error(
@@ -238,15 +299,40 @@ impl ContextPreparation for Prepare {
             }
             let refresh = {
                 let catalog = self.catalog.lock().map_err(error)?;
-                let current = catalog.capture_active_checkpoint(&checkpoint.proposal.branch_id).map_err(error)?.ok_or_else(||error("context disappeared"))?;
-                if current.revision != checkpoint.revision {continue;}
-                if catalog.memory_state_identity(&checkpoint.proposal.branch_id).map_err(error)?!=memory_basis {continue;}
-                catalog.prepare_personalization_refresh(&checkpoint.proposal.branch_id,checkpoint.revision,
-                    prepared.effective_system_prompt,prepared.instruction_sources,prepared.memory_checkpoint,prepared.personalization).map_err(error)?
-            }.load().map_err(error)?;
+                let current = catalog
+                    .capture_active_checkpoint(&checkpoint.proposal.branch_id)
+                    .map_err(error)?
+                    .ok_or_else(|| error("context disappeared"))?;
+                if current.revision != checkpoint.revision {
+                    continue;
+                }
+                if catalog
+                    .memory_state_identity(&checkpoint.proposal.branch_id)
+                    .map_err(error)?
+                    != memory_basis
+                {
+                    continue;
+                }
+                catalog
+                    .prepare_personalization_refresh(
+                        &checkpoint.proposal.branch_id,
+                        checkpoint.revision,
+                        prepared.effective_system_prompt,
+                        prepared.instruction_sources,
+                        prepared.memory_checkpoint,
+                        prepared.personalization,
+                    )
+                    .map_err(error)?
+            }
+            .load()
+            .map_err(error)?;
             let mut catalog = self.catalog.lock().map_err(error)?;
             let run = catalog.run(run_id).map_err(error)?;
-            if cancel.is_cancelled() || run.cancel_requested || run.state.terminal() || run.epoch != owner_generation {
+            if cancel.is_cancelled()
+                || run.cancel_requested
+                || run.state.terminal()
+                || run.epoch != owner_generation
+            {
                 return Err(error("context preparation is no longer active"));
             }
             let current = catalog
@@ -256,13 +342,33 @@ impl ContextPreparation for Prepare {
             if current.revision != checkpoint.revision {
                 continue;
             }
-            if catalog.memory_state_identity(&checkpoint.proposal.branch_id).map_err(error)?!=memory_basis {continue;}
-            catalog.publish_personalization_refresh(refresh).map_err(error)?;
-            let memory=catalog.prepare_memory_sync(run_id,owner_generation,state).map_err(error)?;
+            if catalog
+                .memory_state_identity(&checkpoint.proposal.branch_id)
+                .map_err(error)?
+                != memory_basis
+            {
+                continue;
+            }
+            catalog
+                .publish_personalization_refresh(refresh)
+                .map_err(error)?;
+            let memory = catalog
+                .prepare_memory_sync(run_id, owner_generation, state)
+                .map_err(error)?;
             drop(catalog);
-            let memory=memory.load().map_err(error)?;
-            if cancel.is_cancelled(){return Err(error("context preparation cancelled"));}
-            if !self.catalog.lock().map_err(error)?.publish_memory_state(memory).map_err(error)? {continue;}
+            let memory = memory.load().map_err(error)?;
+            if cancel.is_cancelled() {
+                return Err(error("context preparation cancelled"));
+            }
+            if !self
+                .catalog
+                .lock()
+                .map_err(error)?
+                .publish_memory_state(memory)
+                .map_err(error)?
+            {
+                continue;
+            }
             return Ok(());
         }
     }

@@ -56,7 +56,10 @@ impl ModelProvider for PiMessagesProvider {
                     }
                 }
             }
-            let role = if matches!(item.provenance, Provenance::Assistant | Provenance::PolicyOutput { .. }) {
+            let role = if matches!(
+                item.provenance,
+                Provenance::Assistant | Provenance::PolicyOutput { .. }
+            ) {
                 "assistant"
             } else {
                 "user"
@@ -128,7 +131,12 @@ impl ModelProvider for PiMessagesProvider {
                 Content::ProviderOnly => {}
             }
         }
-        let tools:Vec<_>=view.binding.tools.iter().map(|t|json!({"name":t.name,"description":t.schema.get("description").and_then(Value::as_str).unwrap_or(""),"parameters":t.schema})).collect();
+        let tools: Vec<_> = view
+            .binding
+            .tools
+            .iter()
+            .map(|t| json!({"name":t.name,"description":t.description,"parameters":t.schema}))
+            .collect();
         if !tools.is_empty() {
             messages.insert(
                 0,

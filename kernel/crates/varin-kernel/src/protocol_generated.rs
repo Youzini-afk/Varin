@@ -16,6 +16,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.status",
     "runtime.tools.select",
     "runtime.run.inspect",
+    "runtime.run.scope",
     "runtime.run.cancel",
     "runtime.run.resume",
     "runtime.operation.inspect",
@@ -37,6 +38,7 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "authority.grant.revoke",
     "runtime.status",
     "runtime.tools.select",
+    "runtime.run.scope",
     "runtime.run.cancel",
     "runtime.run.resume",
     "runtime.operation.cancel",
@@ -217,6 +219,13 @@ pub(crate) struct McpPrepareParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ExtensionPrepareParams {
+    pub(crate) run_id: String,
+    pub(crate) bindings: Vec<ExtensionToolBinding>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ToolSelectParams {
     pub(crate) run_id: String,
     pub(crate) selection_id: String,
@@ -225,6 +234,7 @@ pub(crate) struct ToolSelectParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ToolReadyParams {
+    pub(crate) extension_bindings: Option<Vec<LiveExtensionToolBinding>>,
     pub(crate) run_id: String,
     pub(crate) selection_id: String,
     pub(crate) binding: Option<LiveMcpBinding>,
@@ -241,6 +251,7 @@ pub(crate) struct PolicyPrepareParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RunStartParams {
+    pub(crate) extension_bindings: Option<Vec<LiveExtensionToolBinding>>,
     pub(crate) policy_binding: Option<AgentPolicyBinding>,
     pub(crate) mcp_binding: Option<LiveMcpBinding>,
     pub(crate) run_id: String,
@@ -300,7 +311,7 @@ pub(crate) struct RunResumeParams {
 pub(crate) struct PermissionOpenParams {
     pub(crate) operation_id: String,
     pub(crate) permission_id: String,
-    pub(crate) call: Value,
+    pub(crate) call: HostToolCall,
     pub(crate) scope: Value,
 }
 
@@ -1413,6 +1424,28 @@ pub(crate) struct McpBinding {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ExtensionToolBinding {
+    pub(crate) provider_key: String,
+    pub(crate) extension_id: String,
+    pub(crate) extension_version: String,
+    pub(crate) service_id: String,
+    pub(crate) service_version: i64,
+    pub(crate) artifact_integrity: String,
+    pub(crate) declaration_hash: String,
+    pub(crate) configuration_identity: RequiredNullable<String>,
+    pub(crate) tool: LaunchTool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LiveExtensionToolBinding {
+    pub(crate) owner_id: String,
+    pub(crate) generation: i64,
+    pub(crate) binding: ExtensionToolBinding,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct LiveMcpBinding {
     pub(crate) owner_id: String,
     pub(crate) binding: McpBinding,
@@ -1439,6 +1472,18 @@ pub(crate) struct SubmitLaunch {
     pub(crate) source: RequiredNullable<LaunchSourceParams>,
     pub(crate) enabled_tools: Vec<String>,
     pub(crate) credential_scope: Option<CredentialScope>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct HostToolCall {
+    pub(crate) run_id: String,
+    pub(crate) operation_id: String,
+    pub(crate) origin: varin_runtime::execution::ToolOrigin,
+    pub(crate) call_id: String,
+    pub(crate) name: String,
+    pub(crate) schema_version: String,
+    pub(crate) arguments: Value,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1627,7 +1672,11 @@ pub(crate) struct LiveRoot {
 pub(crate) struct LaunchTool {
     pub(crate) name: String,
     pub(crate) version: String,
+    pub(crate) description: String,
     pub(crate) schema: Value,
+    #[serde(rename = "output_schema")]
+    pub(crate) output_schema: Value,
+    pub(crate) metadata: RequiredNullable<varin_runtime::execution::ToolMetadata>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1684,6 +1733,7 @@ pub(crate) struct ContextFragment {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelVerificationEnvSummary {
     pub(crate) path: Option<bool>,
+    #[serde(rename = "VIRTUAL_ENV")]
     pub(crate) virtual_env: Option<String>,
 }
 
@@ -1792,6 +1842,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.launch.mcp.prepare" => serde_json::from_value::<McpPrepareParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.launch.extensions.prepare" => {
+            serde_json::from_value::<ExtensionPrepareParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.tools.select" => serde_json::from_value::<ToolSelectParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -1830,6 +1885,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.input.submit" => serde_json::from_value::<InputSubmitParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.run.scope" => serde_json::from_value::<RunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.run.inspect" => serde_json::from_value::<RunParams>(params.clone())

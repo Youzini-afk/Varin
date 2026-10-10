@@ -2,9 +2,7 @@
 //! No second catalog, file writer, process manager, or management-authority fallback exists here.
 use crate::error::{error_code, KernelError};
 use crate::model::Grant;
-use crate::storage::file_mutations::{
-    FileEditArgs, FileWriteArgs, TextMutation,
-};
+use crate::storage::file_mutations::{FileEditArgs, FileWriteArgs, TextMutation};
 use crate::storage::Storage;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -12,22 +10,23 @@ use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::sync::{mpsc, Arc};
 use varin_runtime::execution::{
-    Access, CancellationToken, CompletionKind, ExecutionError, FrozenToolContext, ToolOrigin, ResourceClaim,
-    PreparedToolCall, ResourceIntent, ToolCall, ToolCompletion, ToolContract, ToolExecutionContext, ToolExecutor, ToolPreparation, ToolSchema,
+    Access, CancellationToken, CompletionKind, ExecutionError, FrozenToolContext, PreparedToolCall,
+    ResourceClaim, ResourceIntent, ToolCall, ToolCompletion, ToolContract, ToolExecutionContext,
+    ToolExecutor, ToolOrigin, ToolPreparation, ToolSchema,
 };
 use varin_runtime::{Effect, Lifetime, Outcome};
 
 #[path = "tools_discovery.rs"]
 mod discovery;
-#[path = "tools_reconciliation.rs"]
-mod reconciliation;
 #[path = "tools_language.rs"]
 mod language;
+#[path = "tools_reconciliation.rs"]
+mod reconciliation;
 #[path = "tools_retrieval.rs"]
 mod retrieval;
-use retrieval::RetrievalQueryArgs;
-use language::LanguageQueryArgs;
 use discovery::FileQueryArgs;
+use language::LanguageQueryArgs;
+use retrieval::RetrievalQueryArgs;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -62,6 +61,22 @@ impl ToolKind {
             Self::CodeRetrieval => "code_retrieval",
         }
     }
+    fn description(self) -> &'static str {
+        match self {
+            Self::FileRead=>"Read a bounded UTF-8 range from the admitted source and return its read version.",
+            Self::FileList=>"List paths in the admitted source with bounded pagination.",
+            Self::FileSearch=>"Search text in the admitted source and return bounded matches.",
+            Self::FileWrite=>"Write a file against its exact read version in the admitted writable workspace.",
+            Self::FileEdit=>"Apply exact text edits against a file read version in the admitted writable workspace.",
+            Self::ProcessInspect=>"Inspect a retained process owned by the admitted execution environment.",
+            Self::ProcessRead=>"Read bounded output from a retained process in the admitted execution environment.",
+            Self::ProcessSpawn=>"Start a process in the admitted execution environment and return its durable operation handle.",
+            Self::LanguageDefinition=>"Find symbol definitions using the admitted source's language provider.",
+            Self::LanguageReferences=>"Find symbol references using the admitted source's language provider.",
+            Self::LanguageDiagnostics=>"Read diagnostics from the admitted source's language provider.",
+            Self::CodeRetrieval=>"Retrieve code context from the admitted source using the selected retrieval service.",
+        }
+    }
     fn from_name(name: &str) -> Option<Self> {
         [
             Self::FileRead,
@@ -72,7 +87,9 @@ impl ToolKind {
             Self::ProcessInspect,
             Self::ProcessRead,
             Self::ProcessSpawn,
-            Self::LanguageDefinition, Self::LanguageReferences, Self::LanguageDiagnostics,
+            Self::LanguageDefinition,
+            Self::LanguageReferences,
+            Self::LanguageDiagnostics,
             Self::CodeRetrieval,
         ]
         .into_iter()
@@ -86,7 +103,9 @@ pub(crate) struct FixedFileSource {
     pub revision: i64,
 }
 pub(crate) use varin_runtime::SourceMode;
-fn default_source_mode() -> SourceMode { SourceMode::FixedBranch }
+fn default_source_mode() -> SourceMode {
+    SourceMode::FixedBranch
+}
 /// Supplied by the trusted Host after resolving its environment/source view, never by model args.
 /// A binding is not itself a grant: the Storage owner revalidates the persisted grant on every call.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -110,21 +129,36 @@ pub(crate) struct ToolBinding {
 impl ToolBinding {
     fn physical_source(&self) -> Value {
         let mut source = json!({"mode":self.source_mode,"rootId":self.root_id});
-        if let Some(root) = &self.live_root { source["liveRoot"] = json!(root); }
-        if let Some(base) = &self.materialized_source { source["base"] = json!(base); }
+        if let Some(root) = &self.live_root {
+            source["liveRoot"] = json!(root);
+        }
+        if let Some(base) = &self.materialized_source {
+            source["base"] = json!(base);
+        }
         source
     }
-    pub(crate) fn source_selection(&self) -> Result<varin_runtime::catalog::launches::SourceSelection, KernelError> {
-        let fixed = self.file_source.as_ref().or(self.materialized_source.as_ref());
+    pub(crate) fn source_selection(
+        &self,
+    ) -> Result<varin_runtime::catalog::launches::SourceSelection, KernelError> {
+        let fixed = self
+            .file_source
+            .as_ref()
+            .or(self.materialized_source.as_ref());
         let source = varin_runtime::catalog::launches::SourceSelection {
-            environment_run_id: self.environment_run_id.clone(), mode: self.source_mode,
-            live_root: self.live_root.clone(), workspace_id: self.workspace_id.clone(),
+            environment_run_id: self.environment_run_id.clone(),
+            mode: self.source_mode,
+            live_root: self.live_root.clone(),
+            workspace_id: self.workspace_id.clone(),
             execution_workspace_id: self.execution_workspace_id.clone(),
             branch_id: fixed.map(|source| source.branch_id.clone()),
-            revision: fixed.map(|source| u64::try_from(source.revision)).transpose()
+            revision: fixed
+                .map(|source| u64::try_from(source.revision))
+                .transpose()
                 .map_err(|_| KernelError::Protocol("source revision must be nonnegative".into()))?,
         };
-        source.validate().map_err(|error| KernelError::Protocol(error.to_string()))?;
+        source
+            .validate()
+            .map_err(|error| KernelError::Protocol(error.to_string()))?;
         Ok(source)
     }
 }
@@ -169,12 +203,17 @@ struct ProcessSpawnArgs {
 }
 #[derive(Debug, Clone)]
 enum ResourceOperation {
-    CollaborationPin { release: bool, pin_id: String },
+    CollaborationPin {
+        release: bool,
+        pin_id: String,
+    },
     FileRead(FileReadArgs),
     FileQuery(FileQueryArgs),
     LanguageQuery(LanguageQueryArgs),
     RetrievalQuery(RetrievalQueryArgs),
-    ObserveCompute { reply: mpsc::Sender<crate::compute::ComputeWatch> },
+    ObserveCompute {
+        reply: mpsc::Sender<crate::compute::ComputeWatch>,
+    },
     ComputeControl {
         method: &'static str,
         cursor: u64,
@@ -184,7 +223,10 @@ enum ResourceOperation {
         mutation: TextMutation,
         executor: String,
     },
-    ProcessObservation { process_id: String, read: Option<(u64, Option<u64>)> },
+    ProcessObservation {
+        process_id: String,
+        read: Option<(u64, Option<u64>)>,
+    },
     ProcessInspect(ProcessInspectArgs),
     ProcessRead(ProcessReadArgs),
     ProcessSpawn(ProcessSpawnArgs),
@@ -201,8 +243,12 @@ impl ResourceOperation {
             ));
         }
         let parsed = match kind {
-            ToolKind::CodeRetrieval => return RetrievalQueryArgs::parse(args).map(Self::RetrievalQuery),
-            ToolKind::LanguageDefinition | ToolKind::LanguageReferences | ToolKind::LanguageDiagnostics => {
+            ToolKind::CodeRetrieval => {
+                return RetrievalQueryArgs::parse(args).map(Self::RetrievalQuery)
+            }
+            ToolKind::LanguageDefinition
+            | ToolKind::LanguageReferences
+            | ToolKind::LanguageDiagnostics => {
                 return LanguageQueryArgs::parse(kind, args).map(Self::LanguageQuery);
             }
             ToolKind::FileList | ToolKind::FileSearch => {
@@ -212,27 +258,35 @@ impl ResourceOperation {
                 })
             }
             ToolKind::FileRead => serde_json::from_value(args.clone()).map(Self::FileRead),
-            ToolKind::FileWrite => {
-                serde_json::from_value::<FileWriteArgs>(args.clone())
-                    .map(|args| Self::FileMutation(TextMutation::Write(args)))
-            }
+            ToolKind::FileWrite => serde_json::from_value::<FileWriteArgs>(args.clone())
+                .map(|args| Self::FileMutation(TextMutation::Write(args))),
             ToolKind::FileEdit => serde_json::from_value::<FileEditArgs>(args.clone())
                 .map(|args| Self::FileMutation(TextMutation::Edit(args))),
             ToolKind::ProcessInspect => {
                 serde_json::from_value(args.clone()).map(Self::ProcessInspect)
             }
-            ToolKind::ProcessRead => {
-                serde_json::from_value(args.clone()).map(Self::ProcessRead)
-            }
+            ToolKind::ProcessRead => serde_json::from_value(args.clone()).map(Self::ProcessRead),
             ToolKind::ProcessSpawn => {
                 let mut arguments = args.clone();
                 if arguments.get("env").is_none() {
-                    let environment = std::env::vars_os().map(|(name, value)| {
-                        Ok(EnvironmentEntry {
-                            name: name.into_string().map_err(|_| ExecutionError::new("environment_encoding", "process environment name is not UTF-8"))?,
-                            value: value.into_string().map_err(|_| ExecutionError::new("environment_encoding", "process environment value is not UTF-8"))?,
+                    let environment = std::env::vars_os()
+                        .map(|(name, value)| {
+                            Ok(EnvironmentEntry {
+                                name: name.into_string().map_err(|_| {
+                                    ExecutionError::new(
+                                        "environment_encoding",
+                                        "process environment name is not UTF-8",
+                                    )
+                                })?,
+                                value: value.into_string().map_err(|_| {
+                                    ExecutionError::new(
+                                        "environment_encoding",
+                                        "process environment value is not UTF-8",
+                                    )
+                                })?,
+                            })
                         })
-                    }).collect::<Result<Vec<_>, ExecutionError>>()?;
+                        .collect::<Result<Vec<_>, ExecutionError>>()?;
                     arguments["env"] = json!(environment);
                 }
                 serde_json::from_value(arguments).map(Self::ProcessSpawn)
@@ -290,27 +344,59 @@ impl ResourceOperation {
     ) -> (&'static str, Value) {
         match self {
             Self::ProcessObservation { process_id, read } => {
-                let mut params=json!({"workspaceId":binding.workspace_id,"processId":process_id});
-                if let Some((cursor,limit))=read { params["cursor"]=json!(cursor); if let Some(limit)=limit { params["maxBytes"]=json!(limit); } }
-                (if read.is_some() { "process.read" } else { "process.inspect" },params)
+                let mut params = json!({"workspaceId":binding.workspace_id,"processId":process_id});
+                if let Some((cursor, limit)) = read {
+                    params["cursor"] = json!(cursor);
+                    if let Some(limit) = limit {
+                        params["maxBytes"] = json!(limit);
+                    }
+                }
+                (
+                    if read.is_some() {
+                        "process.read"
+                    } else {
+                        "process.inspect"
+                    },
+                    params,
+                )
             }
             Self::CollaborationPin { release, pin_id } => {
-                let source = binding.file_source.as_ref().expect("fixed collaboration binding");
-                if *release { ("branch.unpin", json!({"operationId":format!("child-unpin:{}",context.operation_id),"branchId":source.branch_id,"pinId":pin_id})) }
-                else { ("branch.pin", json!({"operationId":format!("child-pin:{}",context.operation_id),"branchId":source.branch_id,"revision":source.revision,"pinId":pin_id})) }
+                let source = binding
+                    .file_source
+                    .as_ref()
+                    .expect("fixed collaboration binding");
+                if *release {
+                    (
+                        "branch.unpin",
+                        json!({"operationId":format!("child-unpin:{}",context.operation_id),"branchId":source.branch_id,"pinId":pin_id}),
+                    )
+                } else {
+                    (
+                        "branch.pin",
+                        json!({"operationId":format!("child-pin:{}",context.operation_id),"branchId":source.branch_id,"revision":source.revision,"pinId":pin_id}),
+                    )
+                }
             }
             Self::RetrievalQuery(args) => {
                 // Revalidate the bound read grant and explicit scopes without inventing a root
                 // path or dispatching compute. Body reads receive separate per-file admission.
                 let mut params = json!({"workspaceId":binding.workspace_id});
-                if let Some(paths) = &args.paths { params["paths"] = json!(paths); }
+                if let Some(paths) = &args.paths {
+                    params["paths"] = json!(paths);
+                }
                 ("storage.health", params)
             }
-            Self::LanguageQuery(args) => ("file.read", json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,"path":args.path})),
+            Self::LanguageQuery(args) => (
+                "file.read",
+                json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,"path":args.path}),
+            ),
             Self::FileQuery(args) => ("compute.start", args.params(binding, context)),
-            Self::ObserveCompute { .. } => ("compute.read", json!({
-                "workspaceId": binding.workspace_id, "jobId": context.operation_id, "cursor": 0
-            })),
+            Self::ObserveCompute { .. } => (
+                "compute.read",
+                json!({
+                    "workspaceId": binding.workspace_id, "jobId": context.operation_id, "cursor": 0
+                }),
+            ),
             Self::ComputeControl { method, cursor } => {
                 let mut params =
                     json!({"workspaceId":binding.workspace_id,"jobId":context.operation_id});
@@ -399,16 +485,23 @@ pub(crate) struct ResourceReply {
     wake: Option<mpsc::SyncSender<()>>,
 }
 impl ResourceReply {
-    pub(crate) fn send(mut self, value: Result<Value, ResourceFailure>)
-        -> Result<(), mpsc::SendError<Result<Value, ResourceFailure>>> {
-        self.sender.take().expect("resource reply sender").send(value)
+    pub(crate) fn send(
+        mut self,
+        value: Result<Value, ResourceFailure>,
+    ) -> Result<(), mpsc::SendError<Result<Value, ResourceFailure>>> {
+        self.sender
+            .take()
+            .expect("resource reply sender")
+            .send(value)
     }
 }
 impl Drop for ResourceReply {
     fn drop(&mut self) {
         // Close before notifying, including when the owner exits without a reply.
         self.sender.take();
-        if let Some(wake) = &self.wake { let _ = wake.try_send(()); }
+        if let Some(wake) = &self.wake {
+            let _ = wake.try_send(());
+        }
     }
 }
 pub(crate) struct ResourceCall {
@@ -421,8 +514,12 @@ pub(crate) struct ResourceCall {
     pub cancellation: CancellationToken,
     pub reply: ResourceReply,
 }
-type AdmissionControl = dyn Fn(&ToolBinding, &CancellationToken)
-    -> Result<varin_runtime::execution_capacity::AdmissionControlGuard, ExecutionError> + Send + Sync;
+type AdmissionControl = dyn Fn(
+        &ToolBinding,
+        &CancellationToken,
+    ) -> Result<varin_runtime::execution_capacity::AdmissionControlGuard, ExecutionError>
+    + Send
+    + Sync;
 /// The Kernel actor injects this sender. Sending does not create another resource authority.
 #[derive(Clone)]
 pub(crate) struct KernelResourceClient {
@@ -440,33 +537,83 @@ impl KernelResourceClient {
         Self {
             send: Arc::new(send),
             replay: Arc::new(replay),
-            controls, admission_control: None,
+            controls,
+            admission_control: None,
         }
     }
-    pub(crate) fn with_admission_control(mut self, watch: impl Fn(&ToolBinding, &CancellationToken)
-        -> Result<varin_runtime::execution_capacity::AdmissionControlGuard, ExecutionError> + Send + Sync + 'static) -> Self {
+    pub(crate) fn with_admission_control(
+        mut self,
+        watch: impl Fn(
+                &ToolBinding,
+                &CancellationToken,
+            )
+                -> Result<varin_runtime::execution_capacity::AdmissionControlGuard, ExecutionError>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
         self.admission_control = Some(Arc::new(watch));
         self
     }
     /// Caller has checked the real Catalog process Operation and immutable launch source.
-    pub(crate) fn observe_process(&self, binding: &ToolBinding, context: &ToolExecutionContext,
-        process_id: &str, read: Option<(u64, Option<u64>)>, authorize_only: bool,
-        cancel: &CancellationToken) -> Result<Value, ExecutionError> {
-        self.call(binding, context, ResourceOperation::ProcessObservation { process_id:process_id.into(),read },
-            authorize_only,cancel).map_err(|failure|ExecutionError::new(error_code(&failure.error),failure.error.to_string()))
+    pub(crate) fn observe_process(
+        &self,
+        binding: &ToolBinding,
+        context: &ToolExecutionContext,
+        process_id: &str,
+        read: Option<(u64, Option<u64>)>,
+        authorize_only: bool,
+        cancel: &CancellationToken,
+    ) -> Result<Value, ExecutionError> {
+        self.call(
+            binding,
+            context,
+            ResourceOperation::ProcessObservation {
+                process_id: process_id.into(),
+                read,
+            },
+            authorize_only,
+            cancel,
+        )
+        .map_err(|failure| {
+            ExecutionError::new(error_code(&failure.error), failure.error.to_string())
+        })
     }
-    pub(crate) fn authorize_process_observation(&self, binding: &ToolBinding, context: &ToolExecutionContext,
-        process_id: &str, cancel: &CancellationToken) -> Result<(), ExecutionError> {
-        self.observe_process(binding,context,process_id,None,true,cancel).map(|_|())
+    pub(crate) fn authorize_process_observation(
+        &self,
+        binding: &ToolBinding,
+        context: &ToolExecutionContext,
+        process_id: &str,
+        cancel: &CancellationToken,
+    ) -> Result<(), ExecutionError> {
+        self.observe_process(binding, context, process_id, None, true, cancel)
+            .map(|_| ())
     }
-    pub(crate) fn collaboration_pin(&self, binding: &ToolBinding, context: &ToolExecutionContext,
-        release: bool, authorize_only: bool, cancel: &CancellationToken) -> Result<Value, ExecutionError> {
+    pub(crate) fn collaboration_pin(
+        &self,
+        binding: &ToolBinding,
+        context: &ToolExecutionContext,
+        release: bool,
+        authorize_only: bool,
+        cancel: &CancellationToken,
+    ) -> Result<Value, ExecutionError> {
         if binding.source_mode != SourceMode::FixedBranch || binding.file_source.is_none() {
-            return Err(ExecutionError::new("collaboration_source", "dispatch requires an admitted fixed source"));
+            return Err(ExecutionError::new(
+                "collaboration_source",
+                "dispatch requires an admitted fixed source",
+            ));
         }
-        self.call(binding, context, ResourceOperation::CollaborationPin {
-            release, pin_id: format!("child-pin:{}", context.operation_id),
-        }, authorize_only, cancel).map_err(|failure| ExecutionError::new("collaboration_source", failure.error.to_string()))
+        self.call(
+            binding,
+            context,
+            ResourceOperation::CollaborationPin {
+                release,
+                pin_id: format!("child-pin:{}", context.operation_id),
+            },
+            authorize_only,
+            cancel,
+        )
+        .map_err(|failure| ExecutionError::new("collaboration_source", failure.error.to_string()))
     }
     pub(crate) fn replay_process_terminals(
         &self,
@@ -492,11 +639,22 @@ impl KernelResourceClient {
         authorize_only: bool,
         cancellation: &CancellationToken,
     ) -> Result<Value, ResourceFailure> {
-        self.call_checked(binding, context, operation, authorize_only, None, cancellation)
+        self.call_checked(
+            binding,
+            context,
+            operation,
+            authorize_only,
+            None,
+            cancellation,
+        )
     }
     fn call_checked(
-        &self, binding: &ToolBinding, context: &ToolExecutionContext,
-        operation: ResourceOperation, authorize_only: bool, expected_resource_key: Option<String>,
+        &self,
+        binding: &ToolBinding,
+        context: &ToolExecutionContext,
+        operation: ResourceOperation,
+        authorize_only: bool,
+        expected_resource_key: Option<String>,
         cancellation: &CancellationToken,
     ) -> Result<Value, ResourceFailure> {
         if cancellation.is_cancelled() {
@@ -507,7 +665,9 @@ impl KernelResourceClient {
         }
         let (reply, result) = mpsc::channel();
         let wake = authorize_only.then(|| mpsc::sync_channel(1));
-        let _cancel_wait = wake.as_ref().map(|(sender, _)| cancellation.wake_on_cancel(sender.clone()));
+        let _cancel_wait = wake
+            .as_ref()
+            .map(|(sender, _)| cancellation.wake_on_cancel(sender.clone()));
         (self.send)(ResourceCall {
             admission_key: None,
             binding: binding.clone(),
@@ -516,7 +676,10 @@ impl KernelResourceClient {
             authorize_only,
             expected_resource_key,
             cancellation: cancellation.clone(),
-            reply: ResourceReply { sender: Some(reply), wake: wake.as_ref().map(|(sender, _)| sender.clone()) },
+            reply: ResourceReply {
+                sender: Some(reply),
+                wake: wake.as_ref().map(|(sender, _)| sender.clone()),
+            },
         })
         .map_err(|error| ResourceFailure {
             error,
@@ -525,17 +688,28 @@ impl KernelResourceClient {
         if let Some((_, changed)) = wake {
             loop {
                 if cancellation.is_cancelled() {
-                    return Err(ResourceFailure { error: KernelError::Cancelled, dispatched: false });
+                    return Err(ResourceFailure {
+                        error: KernelError::Cancelled,
+                        dispatched: false,
+                    });
                 }
                 match result.try_recv() {
                     Ok(receipt) => return receipt,
-                    Err(mpsc::TryRecvError::Disconnected) => return Err(ResourceFailure {
-                        error: KernelError::Storage("resource owner disconnected before receipt".into()), dispatched: false,
-                    }),
-                    Err(mpsc::TryRecvError::Empty) => {},
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        return Err(ResourceFailure {
+                            error: KernelError::Storage(
+                                "resource owner disconnected before receipt".into(),
+                            ),
+                            dispatched: false,
+                        })
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {}
                 }
                 if changed.recv().is_err() {
-                    return Err(ResourceFailure { error: KernelError::Storage("resource observation closed".into()), dispatched: false });
+                    return Err(ResourceFailure {
+                        error: KernelError::Storage("resource observation closed".into()),
+                        dispatched: false,
+                    });
                 }
             }
         }
@@ -593,10 +767,12 @@ impl KernelToolExecutor {
             ));
         }
         if binding.source_mode == SourceMode::FixedBranch
-            && binding
-                .enabled_tools
-                .iter()
-                .any(|kind| matches!(kind, ToolKind::FileWrite | ToolKind::FileEdit | ToolKind::ProcessSpawn))
+            && binding.enabled_tools.iter().any(|kind| {
+                matches!(
+                    kind,
+                    ToolKind::FileWrite | ToolKind::FileEdit | ToolKind::ProcessSpawn
+                )
+            })
         {
             return Err(ExecutionError::new(
                 "invalid_tool_binding",
@@ -623,14 +799,19 @@ impl KernelToolExecutor {
             ));
         }
         if (binding.source_mode == SourceMode::LiveRoot) != binding.live_root.is_some()
-            || binding.live_root.as_ref().is_some_and(|root| root.host_id.is_empty()
-                || root.canonical_root.is_empty() || Some(root.root_id.as_str()) != binding.root_id.as_deref())
-            || (binding.source_mode == SourceMode::LiveRoot && binding.environment_run_id.is_some()) {
-            return Err(ExecutionError::new("invalid_tool_binding", "live source requires its exact registered environment identity"));
+            || binding.live_root.as_ref().is_some_and(|root| {
+                root.host_id.is_empty()
+                    || root.canonical_root.is_empty()
+                    || Some(root.root_id.as_str()) != binding.root_id.as_deref()
+            })
+            || (binding.source_mode == SourceMode::LiveRoot && binding.environment_run_id.is_some())
+        {
+            return Err(ExecutionError::new(
+                "invalid_tool_binding",
+                "live source requires its exact registered environment identity",
+            ));
         }
-        if binding
-            .enabled_tools
-            .contains(&ToolKind::ProcessSpawn)
+        if binding.enabled_tools.contains(&ToolKind::ProcessSpawn)
             && binding.root_id.as_deref().is_none_or(str::is_empty)
         {
             return Err(ExecutionError::new(
@@ -638,29 +819,77 @@ impl KernelToolExecutor {
                 "process spawn requires a registered root",
             ));
         }
-        if binding.source_mode != SourceMode::LiveRoot && binding.enabled_tools.iter().any(|kind| matches!(kind, ToolKind::LanguageDefinition | ToolKind::LanguageReferences | ToolKind::LanguageDiagnostics)) {
-            return Err(ExecutionError::new("language_source_unavailable", "Language tools require live_root; fixed dependency closure is not available"));
+        if binding.source_mode != SourceMode::LiveRoot
+            && binding.enabled_tools.iter().any(|kind| {
+                matches!(
+                    kind,
+                    ToolKind::LanguageDefinition
+                        | ToolKind::LanguageReferences
+                        | ToolKind::LanguageDiagnostics
+                )
+            })
+        {
+            return Err(ExecutionError::new(
+                "language_source_unavailable",
+                "Language tools require live_root; fixed dependency closure is not available",
+            ));
         }
-        if binding.source_mode != SourceMode::LiveRoot && binding.enabled_tools.contains(&ToolKind::CodeRetrieval) {
-            return Err(ExecutionError::new("retrieval_source_unavailable", "Code retrieval requires live_root; fixed-source retrieval is not available"));
+        if binding.source_mode != SourceMode::LiveRoot
+            && binding.enabled_tools.contains(&ToolKind::CodeRetrieval)
+        {
+            return Err(ExecutionError::new(
+                "retrieval_source_unavailable",
+                "Code retrieval requires live_root; fixed-source retrieval is not available",
+            ));
         }
         let schemas = Self::selected_schemas(&binding.enabled_tools);
-        Ok(Self { binding, schemas, resources, language: None, retrieval: None, retrieval_project_id: None })
+        Ok(Self {
+            binding,
+            schemas,
+            resources,
+            language: None,
+            retrieval: None,
+            retrieval_project_id: None,
+        })
     }
-    pub(crate) fn with_retrieval(mut self, bridge: crate::retrieval::RetrievalBridge, project_id: Option<String>) -> Self { self.retrieval = Some(bridge); self.retrieval_project_id = project_id; self }
-    pub(crate) fn with_language(mut self, bridge: crate::language::LanguageBridge) -> Self { self.language = Some(bridge); self }
-    pub(crate) fn declarations(self, managed_process_observation: bool) -> Vec<varin_runtime::composition::tools::ToolDeclaration> {
+    pub(crate) fn with_retrieval(
+        mut self,
+        bridge: crate::retrieval::RetrievalBridge,
+        project_id: Option<String>,
+    ) -> Self {
+        self.retrieval = Some(bridge);
+        self.retrieval_project_id = project_id;
+        self
+    }
+    pub(crate) fn with_language(mut self, bridge: crate::language::LanguageBridge) -> Self {
+        self.language = Some(bridge);
+        self
+    }
+    pub(crate) fn declarations(
+        self,
+        managed_process_observation: bool,
+    ) -> Vec<varin_runtime::composition::tools::ToolDeclaration> {
         let endpoint = Arc::new(self);
-        endpoint.schemas.iter()
-            .filter(|schema| !managed_process_observation || !matches!(schema.name.as_str(), "process_inspect" | "process_read"))
+        endpoint
+            .schemas
+            .iter()
+            .filter(|schema| {
+                !managed_process_observation
+                    || !matches!(schema.name.as_str(), "process_inspect" | "process_read")
+            })
             .cloned()
-            .map(|schema| varin_runtime::composition::tools::ToolDeclaration::new(schema, endpoint.clone()))
+            .map(|schema| {
+                varin_runtime::composition::tools::ToolDeclaration::new(schema, endpoint.clone())
+            })
             .collect()
     }
     pub(crate) fn selected_schemas(enabled_tools: &BTreeSet<ToolKind>) -> Vec<ToolSchema> {
         enabled_tools
             .iter()
             .map(|kind| ToolSchema {
+                description: kind.description().into(),
+                output_schema: None,
+                metadata: None,
                 name: kind.name().into(),
                 version: "1".into(),
                 schema: tool_schema(*kind),
@@ -695,104 +924,284 @@ impl KernelToolExecutor {
     }
     fn contract(&self, call: &ToolCall, operation: &ResourceOperation) -> ToolContract {
         let job = matches!(operation, ResourceOperation::ProcessSpawn(_));
-        let read_only = !matches!(operation, ResourceOperation::FileMutation(_) | ResourceOperation::ProcessSpawn(_));
+        let read_only = !matches!(
+            operation,
+            ResourceOperation::FileMutation(_) | ResourceOperation::ProcessSpawn(_)
+        );
         let key = |value: Value| value.to_string();
         let (resource, access) = match operation {
-            ResourceOperation::CollaborationPin { .. } | ResourceOperation::ReconcileMutation { .. } | ResourceOperation::ComputeControl { .. } | ResourceOperation::ObserveCompute { .. } =>
-                unreachable!("private receipt queries have no model contract"),
+            ResourceOperation::CollaborationPin { .. }
+            | ResourceOperation::ReconcileMutation { .. }
+            | ResourceOperation::ComputeControl { .. }
+            | ResourceOperation::ObserveCompute { .. } => {
+                unreachable!("private receipt queries have no model contract")
+            }
             // Discovery snapshots have their own short Storage coordination and consume fixed bytes.
             // Their long search/scan wait must not hold a directory-wide write barrier.
-            ResourceOperation::RetrievalQuery(_) => (key(json!(["retrieval-view", self.binding.execution_workspace_id, self.binding.root_id])), Access::Read),
-            ResourceOperation::LanguageQuery(_) => (key(json!(["language-view", self.binding.execution_workspace_id, self.binding.root_id])), Access::Read),
-            ResourceOperation::FileQuery(_) => (key(json!(["discovery", self.binding.execution_workspace_id, self.binding.root_id, self.binding.file_source])), Access::Read),
-            ResourceOperation::FileMutation(mutation) => (key(json!(["unresolved-file", mutation.path()])), Access::Write),
-            ResourceOperation::FileRead(args) if self.binding.source_mode != SourceMode::FixedBranch =>
-                (key(json!(["unresolved-file", args.path])), Access::Read),
+            ResourceOperation::RetrievalQuery(_) => (
+                key(json!([
+                    "retrieval-view",
+                    self.binding.execution_workspace_id,
+                    self.binding.root_id
+                ])),
+                Access::Read,
+            ),
+            ResourceOperation::LanguageQuery(_) => (
+                key(json!([
+                    "language-view",
+                    self.binding.execution_workspace_id,
+                    self.binding.root_id
+                ])),
+                Access::Read,
+            ),
+            ResourceOperation::FileQuery(_) => (
+                key(json!([
+                    "discovery",
+                    self.binding.execution_workspace_id,
+                    self.binding.root_id,
+                    self.binding.file_source
+                ])),
+                Access::Read,
+            ),
+            ResourceOperation::FileMutation(mutation) => (
+                key(json!(["unresolved-file", mutation.path()])),
+                Access::Write,
+            ),
+            ResourceOperation::FileRead(args)
+                if self.binding.source_mode != SourceMode::FixedBranch =>
+            {
+                (key(json!(["unresolved-file", args.path])), Access::Read)
+            }
             ResourceOperation::FileRead(args) => {
                 let source = self.binding.file_source.as_ref().expect("validated source");
-                (key(json!(["fixed-file", self.binding.workspace_id, source.branch_id, source.revision, args.path])), Access::Read)
+                (
+                    key(json!([
+                        "fixed-file",
+                        self.binding.workspace_id,
+                        source.branch_id,
+                        source.revision,
+                        args.path
+                    ])),
+                    Access::Read,
+                )
             }
-            ResourceOperation::ProcessObservation { .. } => unreachable!("observation is admitted by the Catalog wrapper"),
-            ResourceOperation::ProcessInspect(args) => (key(json!(["process-output", self.binding.execution_workspace_id, args.process_id])), Access::Read),
-            ResourceOperation::ProcessRead(args) => (key(json!(["process-output", self.binding.execution_workspace_id, args.process_id])), Access::Read),
+            ResourceOperation::ProcessObservation { .. } => {
+                unreachable!("observation is admitted by the Catalog wrapper")
+            }
+            ResourceOperation::ProcessInspect(args) => (
+                key(json!([
+                    "process-output",
+                    self.binding.execution_workspace_id,
+                    args.process_id
+                ])),
+                Access::Read,
+            ),
+            ResourceOperation::ProcessRead(args) => (
+                key(json!([
+                    "process-output",
+                    self.binding.execution_workspace_id,
+                    args.process_id
+                ])),
+                Access::Read,
+            ),
             // Arbitrary programs have unknown write sets. Record shared writer activity, never
             // pretend that an environment-wide mutex isolates their filesystem side effects.
-            ResourceOperation::ProcessSpawn(_) => (key(json!(["environment-writer-activity", self.binding.execution_workspace_id, self.binding.root_id])), Access::Read),
+            ResourceOperation::ProcessSpawn(_) => (
+                key(json!([
+                    "environment-writer-activity",
+                    self.binding.execution_workspace_id,
+                    self.binding.root_id
+                ])),
+                Access::Read,
+            ),
         };
         ToolContract {
-            name: call.name.clone(), schema_version: "1".into(), read_only,
-            completion: if job { CompletionKind::Job } else { CompletionKind::Result },
+            name: call.name.clone(),
+            schema_version: "1".into(),
+            read_only,
+            completion: if job {
+                CompletionKind::Job
+            } else {
+                CompletionKind::Result
+            },
             lifetime: if job { Lifetime::Thread } else { Lifetime::Run },
-            resources: vec![ResourceClaim { key: resource, access }],
+            resources: vec![ResourceClaim {
+                key: resource,
+                access,
+            }],
         }
     }
-    pub(crate) fn process_observation_contract(&self, context:&ToolExecutionContext, call:&ToolCall) -> Result<ToolContract,ExecutionError> {
-        let operation=self.operation(Some(context),call)?;
-        if !matches!(operation,ResourceOperation::ProcessInspect(_)|ResourceOperation::ProcessRead(_)) {
-            return Err(ExecutionError::new("process_observation","not a read-only process observation"));
+    pub(crate) fn process_observation_contract(
+        &self,
+        context: &ToolExecutionContext,
+        call: &ToolCall,
+    ) -> Result<ToolContract, ExecutionError> {
+        let operation = self.operation(Some(context), call)?;
+        if !matches!(
+            operation,
+            ResourceOperation::ProcessInspect(_) | ResourceOperation::ProcessRead(_)
+        ) {
+            return Err(ExecutionError::new(
+                "process_observation",
+                "not a read-only process observation",
+            ));
         }
-        Ok(self.contract(call,&operation))
+        Ok(self.contract(call, &operation))
     }
     fn physical_file(&self, operation: &ResourceOperation) -> bool {
         matches!(operation, ResourceOperation::FileMutation(_))
-            || (matches!(operation, ResourceOperation::FileRead(_)) && self.binding.source_mode != SourceMode::FixedBranch)
+            || (matches!(operation, ResourceOperation::FileRead(_))
+                && self.binding.source_mode != SourceMode::FixedBranch)
     }
-    fn planned_contract(&self, context: &ToolExecutionContext, call: &ToolCall, operation: &ResourceOperation, cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
+    fn planned_contract(
+        &self,
+        context: &ToolExecutionContext,
+        call: &ToolCall,
+        operation: &ResourceOperation,
+        cancel: &CancellationToken,
+    ) -> Result<ToolContract, ExecutionError> {
         let mut contract = self.contract(call, operation);
         if self.physical_file(operation) {
-            let plan = self.resources.call(&self.binding, context, operation.clone(), true, cancel)
-                .map_err(|failure| ExecutionError::new(error_code(&failure.error), failure.error.to_string()))?;
-            contract.resources[0].key = plan.get("resourceKey").and_then(Value::as_str)
-                .ok_or_else(|| ExecutionError::new("invalid_resource_plan", "file owner omitted its canonical resource identity"))?.into();
+            let plan = self
+                .resources
+                .call(&self.binding, context, operation.clone(), true, cancel)
+                .map_err(|failure| {
+                    ExecutionError::new(error_code(&failure.error), failure.error.to_string())
+                })?;
+            contract.resources[0].key = plan
+                .get("resourceKey")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    ExecutionError::new(
+                        "invalid_resource_plan",
+                        "file owner omitted its canonical resource identity",
+                    )
+                })?
+                .into();
         }
         Ok(contract)
     }
-    fn frozen_operation(&self, call: &ToolCall, request: &FrozenToolContext) -> Result<ResourceOperation, ExecutionError> {
+    fn frozen_operation(
+        &self,
+        call: &ToolCall,
+        request: &FrozenToolContext,
+    ) -> Result<ResourceOperation, ExecutionError> {
         if request.run_id != self.binding.run_id {
-            return Err(ExecutionError::new("unauthorized", "request Run does not match tool binding"));
+            return Err(ExecutionError::new(
+                "unauthorized",
+                "request Run does not match tool binding",
+            ));
         }
         let operation = self.operation(None, call)?;
-        let expected = self.schemas.iter().find(|schema| schema.name == call.name).expect("selected tool");
+        let expected = self
+            .schemas
+            .iter()
+            .find(|schema| schema.name == call.name)
+            .expect("selected tool");
         if !request.tools.iter().any(|schema| schema == expected) {
-            return Err(ExecutionError::new("stale_tool_schema", "tool does not match the frozen request schema"));
+            return Err(ExecutionError::new(
+                "stale_tool_schema",
+                "tool does not match the frozen request schema",
+            ));
         }
         Ok(operation)
     }
-
 }
 impl ToolExecutor for KernelToolExecutor {
-    fn bind_call(self: Arc<Self>, call: &ToolCall, request: &FrozenToolContext, _: &CancellationToken) -> Result<Box<dyn PreparedToolCall>, ExecutionError> {
+    fn bind_call(
+        self: Arc<Self>,
+        call: &ToolCall,
+        request: &FrozenToolContext,
+        _: &CancellationToken,
+    ) -> Result<Box<dyn PreparedToolCall>, ExecutionError> {
         let operation = self.frozen_operation(call, request)?;
-        Ok(Box::new(KernelCall { executor: self, call: call.clone(), request: request.clone(), operation }))
+        Ok(Box::new(KernelCall {
+            executor: self,
+            call: call.clone(),
+            request: request.clone(),
+            operation,
+        }))
     }
-    fn plan(&self, call: &ToolCall, request: &FrozenToolContext, _: &CancellationToken)
-        -> Result<ToolPreparation, ExecutionError> {
+    fn plan(
+        &self,
+        call: &ToolCall,
+        request: &FrozenToolContext,
+        _: &CancellationToken,
+    ) -> Result<ToolPreparation, ExecutionError> {
         let operation = self.frozen_operation(call, request)?;
         Ok(self.plan_operation(call, &operation))
     }
-    fn watch_admission(&self, _: &ToolExecutionContext, _: &ToolCall, _: &ToolContract, cancel: &CancellationToken)
-        -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError> {
-        self.resources.admission_control.as_ref().map(|watch| watch(&self.binding, cancel)).transpose()
+    fn watch_admission(
+        &self,
+        _: &ToolExecutionContext,
+        _: &ToolCall,
+        _: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError>
+    {
+        self.resources
+            .admission_control
+            .as_ref()
+            .map(|watch| watch(&self.binding, cancel))
+            .transpose()
     }
-    fn execution_class(&self, call: &ToolCall, _: &ToolContract) -> varin_runtime::execution_capacity::ExecutionClass {
+    fn execution_class(
+        &self,
+        call: &ToolCall,
+        _: &ToolContract,
+    ) -> varin_runtime::execution_capacity::ExecutionClass {
         use varin_runtime::execution_capacity::ExecutionClass;
-        if call.name == "file_search" { ExecutionClass::LocalCompute } else { ExecutionClass::Unmetered }
+        if call.name == "file_search" {
+            ExecutionClass::LocalCompute
+        } else {
+            ExecutionClass::Unmetered
+        }
     }
-    fn supports_policy_read(&self, context: &FrozenToolContext, call: &ToolCall, contract: &ToolContract) -> bool {
-        self.operation(None, call).is_ok_and(|operation| self.policy_read(context, &operation, contract))
+    fn supports_policy_read(
+        &self,
+        context: &FrozenToolContext,
+        call: &ToolCall,
+        contract: &ToolContract,
+    ) -> bool {
+        self.operation(None, call)
+            .is_ok_and(|operation| self.policy_read(context, &operation, contract))
     }
-    fn prepare(&self, call: &ToolCall, request: &FrozenToolContext, cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
+    fn prepare(
+        &self,
+        call: &ToolCall,
+        request: &FrozenToolContext,
+        cancel: &CancellationToken,
+    ) -> Result<ToolContract, ExecutionError> {
         let operation = self.frozen_operation(call, request)?;
-        self.planned_contract(&execution_context(&self.binding.run_id, call, &request.origin), call, &operation, cancel)
+        self.planned_contract(
+            &execution_context(&self.binding.run_id, call, &request.origin),
+            call,
+            &operation,
+            cancel,
+        )
     }
-    fn authorize(&self, context: &ToolExecutionContext, call: &ToolCall, contract: &ToolContract, cancel: &CancellationToken) -> Result<(), ExecutionError> {
+    fn authorize(
+        &self,
+        context: &ToolExecutionContext,
+        call: &ToolCall,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> Result<(), ExecutionError> {
         let operation = self.operation(Some(context), call)?;
         self.authorize_operation(context, call, &operation, contract, cancel)
     }
-    fn execute(&self, context: &ToolExecutionContext, call: &ToolCall, contract: &ToolContract, cancel: &CancellationToken) -> ToolCompletion {
+    fn execute(
+        &self,
+        context: &ToolExecutionContext,
+        call: &ToolCall,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> ToolCompletion {
         match self.operation(Some(context), call) {
             Ok(operation) => self.execute_operation(context, call, operation, contract, cancel),
-            Err(error) => ToolCompletion::NotDispatched { reason: error.to_string() },
+            Err(error) => ToolCompletion::NotDispatched {
+                reason: error.to_string(),
+            },
         }
     }
 }
@@ -803,18 +1212,36 @@ impl KernelToolExecutor {
             // target, only the canonical physical-file namespace is known. A workspace/root ID
             // would incorrectly separate two aliases of the same file. Static resource owners
             // (process output, language, discovery, fixed views) can still bypass this intent.
-            let access = if matches!(operation, ResourceOperation::FileMutation(_)) { Access::Write } else { Access::Read };
+            let access = if matches!(operation, ResourceOperation::FileMutation(_)) {
+                Access::Write
+            } else {
+                Access::Read
+            };
             ToolPreparation::Resolve {
-                resources: vec![ResourceIntent::Prefix { key_prefix: "[\"file\",".into(), access }],
+                resources: vec![ResourceIntent::Prefix {
+                    key_prefix: "[\"file\",".into(),
+                    access,
+                }],
                 class: varin_runtime::execution_capacity::ExecutionClass::Unmetered,
             }
-        } else { ToolPreparation::Ready(self.contract(call, operation)) }
+        } else {
+            ToolPreparation::Ready(self.contract(call, operation))
+        }
     }
 
-    fn policy_read(&self, context: &FrozenToolContext, operation: &ResourceOperation, contract: &ToolContract) -> bool {
+    fn policy_read(
+        &self,
+        context: &FrozenToolContext,
+        operation: &ResourceOperation,
+        contract: &ToolContract,
+    ) -> bool {
         // Eligibility is this trusted adapter's promise, never extension/MCP metadata.
-        let Some(source) = &context.source else { return false; };
-        let Some(bound) = &self.binding.file_source else { return false; };
+        let Some(source) = &context.source else {
+            return false;
+        };
+        let Some(bound) = &self.binding.file_source else {
+            return false;
+        };
         context.run_id == self.binding.run_id
             && self.binding.source_mode == SourceMode::FixedBranch
             && source.mode == SourceMode::FixedBranch
@@ -824,8 +1251,12 @@ impl KernelToolExecutor {
             && source.environment_run_id == self.binding.environment_run_id
             && source.branch_id.as_deref() == Some(bound.branch_id.as_str())
             && source.revision == u64::try_from(bound.revision).ok()
-            && matches!(operation, ResourceOperation::FileRead(_) | ResourceOperation::FileQuery(_))
-            && contract.read_only && contract.completion == CompletionKind::Result
+            && matches!(
+                operation,
+                ResourceOperation::FileRead(_) | ResourceOperation::FileQuery(_)
+            )
+            && contract.read_only
+            && contract.completion == CompletionKind::Result
     }
     fn authorize_operation(
         &self,
@@ -836,15 +1267,30 @@ impl KernelToolExecutor {
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
         if context.run_id != self.binding.run_id || context.operation_id.is_empty() {
-            return Err(ExecutionError::new("unauthorized", "tool execution identity does not match bound Run"));
+            return Err(ExecutionError::new(
+                "unauthorized",
+                "tool execution identity does not match bound Run",
+            ));
         }
         if let ResourceOperation::RetrievalQuery(args) = &operation {
-            if &self.contract(call, &operation) != contract { return Err(ExecutionError::new("stale_tool_contract", "retrieval contract changed")); }
+            if &self.contract(call, &operation) != contract {
+                return Err(ExecutionError::new(
+                    "stale_tool_contract",
+                    "retrieval contract changed",
+                ));
+            }
             return self.admit_retrieval(context, args, cancel);
         }
         if let ResourceOperation::LanguageQuery(args) = &operation {
-            if &self.contract(call, &operation) != contract { return Err(ExecutionError::new("stale_tool_contract", "language contract changed")); }
-            return self.admit_language_path(context, &args.path, cancel).map(|_| ());
+            if &self.contract(call, &operation) != contract {
+                return Err(ExecutionError::new(
+                    "stale_tool_contract",
+                    "language contract changed",
+                ));
+            }
+            return self
+                .admit_language_path(context, &args.path, cancel)
+                .map(|_| ());
         }
         if &self.planned_contract(context, call, &operation, cancel)? != contract {
             return Err(ExecutionError::new(
@@ -852,7 +1298,9 @@ impl KernelToolExecutor {
                 "tool contract changed",
             ));
         }
-        if self.physical_file(&operation) { return Ok(()); }
+        if self.physical_file(&operation) {
+            return Ok(());
+        }
         self.resources
             .call(&self.binding, context, operation.clone(), true, cancel)
             .map(|_| ())
@@ -869,14 +1317,20 @@ impl KernelToolExecutor {
         cancel: &CancellationToken,
     ) -> ToolCompletion {
         let mut expected = self.contract(call, &operation);
-        if self.physical_file(&operation) { expected.resources = contract.resources.clone(); }
+        if self.physical_file(&operation) {
+            expected.resources = contract.resources.clone();
+        }
         if &expected != contract {
             return ToolCompletion::NotDispatched {
                 reason: "tool contract changed".into(),
             };
         }
-        if let ResourceOperation::RetrievalQuery(args) = &operation { return self.execute_retrieval(context, call, args, cancel); }
-        if let ResourceOperation::LanguageQuery(args) = &operation { return self.execute_language(context, args, cancel); }
+        if let ResourceOperation::RetrievalQuery(args) = &operation {
+            return self.execute_retrieval(context, call, args, cancel);
+        }
+        if let ResourceOperation::LanguageQuery(args) = &operation {
+            return self.execute_language(context, args, cancel);
+        }
         let spawn = matches!(operation, ResourceOperation::ProcessSpawn(_));
         let mutation = matches!(operation, ResourceOperation::FileMutation(_));
         let result = if let ResourceOperation::FileQuery(args) = &operation {
@@ -884,8 +1338,17 @@ impl KernelToolExecutor {
         } else {
             let expected_key = if self.physical_file(&operation) {
                 contract.resources.first().map(|claim| claim.key.clone())
-            } else { None };
-            self.resources.call_checked(&self.binding, context, operation, false, expected_key, cancel)
+            } else {
+                None
+            };
+            self.resources.call_checked(
+                &self.binding,
+                context,
+                operation,
+                false,
+                expected_key,
+                cancel,
+            )
         };
         match result {
             Ok(result) if spawn => {
@@ -963,10 +1426,13 @@ struct KernelCall {
 }
 fn execution_context(run_id: &str, call: &ToolCall, origin: &ToolOrigin) -> ToolExecutionContext {
     ToolExecutionContext {
-        run_id: run_id.into(), origin: origin.clone(),
+        run_id: run_id.into(),
+        origin: origin.clone(),
         operation_id: match origin {
             ToolOrigin::ModelStep { request_id } => format!("{request_id}:tool:{}", call.call_id),
-            ToolOrigin::PolicyAction { action_id, node_id } => format!("{action_id}:node:{node_id}"),
+            ToolOrigin::PolicyAction { action_id, node_id } => {
+                format!("{action_id}:node:{node_id}")
+            }
         },
     }
 }
@@ -975,30 +1441,67 @@ impl PreparedToolCall for KernelCall {
         Ok(self.executor.plan_operation(&self.call, &self.operation))
     }
     fn prepare(&self, cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
-        self.executor.planned_contract(&execution_context(&self.request.run_id, &self.call, &self.request.origin), &self.call, &self.operation, cancel)
+        self.executor.planned_contract(
+            &execution_context(&self.request.run_id, &self.call, &self.request.origin),
+            &self.call,
+            &self.operation,
+            cancel,
+        )
     }
-    fn execution_class(&self, contract: &ToolContract) -> varin_runtime::execution_capacity::ExecutionClass {
+    fn execution_class(
+        &self,
+        contract: &ToolContract,
+    ) -> varin_runtime::execution_capacity::ExecutionClass {
         self.executor.execution_class(&self.call, contract)
     }
-    fn watch_admission(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken)
-        -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError> {
-        self.executor.watch_admission(context, &self.call, contract, cancel)
+    fn watch_admission(
+        &self,
+        context: &ToolExecutionContext,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> Result<Option<varin_runtime::execution_capacity::AdmissionControlGuard>, ExecutionError>
+    {
+        self.executor
+            .watch_admission(context, &self.call, contract, cancel)
     }
     fn supports_policy_read(&self, contract: &ToolContract) -> bool {
-        self.executor.policy_read(&self.request, &self.operation, contract)
+        self.executor
+            .policy_read(&self.request, &self.operation, contract)
     }
-    fn authorize(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken) -> Result<(), ExecutionError> {
-        self.executor.authorize_operation(context, &self.call, &self.operation, contract, cancel)
+    fn authorize(
+        &self,
+        context: &ToolExecutionContext,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> Result<(), ExecutionError> {
+        self.executor
+            .authorize_operation(context, &self.call, &self.operation, contract, cancel)
     }
-    fn execute(&self, context: &ToolExecutionContext, contract: &ToolContract, cancel: &CancellationToken) -> ToolCompletion {
-        self.executor.execute_operation(context, &self.call, self.operation.clone(), contract, cancel)
+    fn execute(
+        &self,
+        context: &ToolExecutionContext,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> varin_runtime::execution::ToolExecutionReceipt {
+        varin_runtime::execution::ToolExecutionReceipt::local(
+            self.executor.execute_operation(
+                context,
+                &self.call,
+                self.operation.clone(),
+                contract,
+                cancel,
+            ),
+            contract,
+        )
     }
 }
 
 fn tool_schema(kind: ToolKind) -> Value {
     let (properties, required) = match kind {
         ToolKind::CodeRetrieval => return retrieval::schema(),
-        ToolKind::LanguageDefinition | ToolKind::LanguageReferences | ToolKind::LanguageDiagnostics => return language::schema(kind),
+        ToolKind::LanguageDefinition
+        | ToolKind::LanguageReferences
+        | ToolKind::LanguageDiagnostics => return language::schema(kind),
         ToolKind::FileList | ToolKind::FileSearch => {
             return discovery::schema(kind == ToolKind::FileSearch)
         }
@@ -1014,9 +1517,7 @@ fn tool_schema(kind: ToolKind) -> Value {
             json!({"path":{"type":"string"},"offset":{"type":"integer","minimum":0},"length":{"type":"integer","minimum":0}}),
             vec!["path"],
         ),
-        ToolKind::ProcessInspect => {
-            (json!({"processId":{"type":"string"}}), vec!["processId"])
-        }
+        ToolKind::ProcessInspect => (json!({"processId":{"type":"string"}}), vec!["processId"]),
         ToolKind::ProcessRead => (
             json!({"processId":{"type":"string"},"cursor":{"type":"integer","minimum":0},"maxBytes":{"type":"integer","minimum":1}}),
             vec!["processId", "cursor"],
@@ -1076,31 +1577,54 @@ pub(crate) fn serve_resource(
             &params,
         )?;
         validate_binding(&grant, &request.binding, &request.context)?;
-        if matches!(request.operation, ResourceOperation::CollaborationPin { release: false, .. })
-            && (!grant.path_scopes.iter().any(String::is_empty)
-                || !(grant.capabilities.contains("storage.read") || grant.capabilities.contains("storage.admin"))) {
-            return Err(KernelError::Authorization("fixed-root child handoff requires the parent's whole-root read authority".into()));
+        if matches!(
+            request.operation,
+            ResourceOperation::CollaborationPin { release: false, .. }
+        ) && (!grant.path_scopes.iter().any(String::is_empty)
+            || !(grant.capabilities.contains("storage.read")
+                || grant.capabilities.contains("storage.admin")))
+        {
+            return Err(KernelError::Authorization(
+                "fixed-root child handoff requires the parent's whole-root read authority".into(),
+            ));
         }
         if let Some(root) = &request.binding.live_root {
             storage.validate_live_root(root, &grant, host_id)?;
         }
         let file_path = match &request.operation {
             ResourceOperation::FileMutation(mutation) => Some(mutation.path()),
-            ResourceOperation::FileRead(args) if request.binding.source_mode != SourceMode::FixedBranch => Some(args.path.as_str()),
+            ResourceOperation::FileRead(args)
+                if request.binding.source_mode != SourceMode::FixedBranch =>
+            {
+                Some(args.path.as_str())
+            }
             _ => None,
         };
         if let Some(path) = file_path {
-            let key = storage.file_resource_key(request.binding.root_id.as_deref().expect("validated physical root"), path, &grant)?;
-            if request.authorize_only { return Ok(json!({"resourceKey":key})); }
+            let key = storage.file_resource_key(
+                request
+                    .binding
+                    .root_id
+                    .as_deref()
+                    .expect("validated physical root"),
+                path,
+                &grant,
+            )?;
+            if request.authorize_only {
+                return Ok(json!({"resourceKey":key}));
+            }
             if request.expected_resource_key.as_deref() != Some(key.as_str()) {
-                return Err(KernelError::Authorization("canonical file resource changed after admission".into()));
+                return Err(KernelError::Authorization(
+                    "canonical file resource changed after admission".into(),
+                ));
             }
         }
         if let ResourceOperation::ReconcileMutation { mutation, executor } = &request.operation {
-            let root_id =
-                request.binding.root_id.as_deref().ok_or_else(|| {
-                    KernelError::Authorization("physical root missing".into())
-                })?;
+            let root_id = request
+                .binding
+                .root_id
+                .as_deref()
+                .ok_or_else(|| KernelError::Authorization("physical root missing".into()))?;
             storage.set_cancellation(request.cancellation.shared_flag());
             let result = storage.reconcile_text_mutation(
                 &request.binding.workspace_id,
@@ -1137,19 +1661,36 @@ pub(crate) fn serve_resource(
             storage.clear_cancellation();
             dispatched = !request.authorize_only;
             return result.map(|mut result| {
-                if !request.authorize_only { result["source"] = request.binding.physical_source(); }
+                if !request.authorize_only {
+                    result["source"] = request.binding.physical_source();
+                }
                 result
             });
         }
-        if matches!(&request.operation, ResourceOperation::ProcessObservation { .. }) {
-            return storage.observe_run_process(method, &authorized, &grant, request.binding.root_id.as_deref(), request.authorize_only);
+        if matches!(
+            &request.operation,
+            ResourceOperation::ProcessObservation { .. }
+        ) {
+            return storage.observe_run_process(
+                method,
+                &authorized,
+                &grant,
+                request.binding.root_id.as_deref(),
+                request.authorize_only,
+            );
         }
         if request.authorize_only {
             return Ok(Value::Null);
         }
         if let ResourceOperation::ObserveCompute { reply } = &request.operation {
-            let watch = storage.watch_compute(&request.context.operation_id, &request.binding.workspace_id, &grant)?;
-            reply.send(watch).map_err(|_| KernelError::Storage("compute observer disconnected".into()))?;
+            let watch = storage.watch_compute(
+                &request.context.operation_id,
+                &request.binding.workspace_id,
+                &grant,
+            )?;
+            reply
+                .send(watch)
+                .map_err(|_| KernelError::Storage("compute observer disconnected".into()))?;
             return Ok(Value::Null);
         }
         storage.set_cancellation(request.cancellation.shared_flag());

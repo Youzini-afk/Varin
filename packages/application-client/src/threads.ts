@@ -1,6 +1,8 @@
 import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildWait, LiveRoot, ContextPersonalization, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
 
 import type { RunModelSelection, RunModelSelections } from '@varin/protocol';
+import type { ExtensionToolBinding, LaunchTool, McpBinding } from '@varin/protocol';
+import type { VarinExtensionServiceProvision } from '@varin/extension-contract';
 
 /** Explicit authority selection. A thread never opens a Pi session. */
 export interface ThreadIdentity { runtime: 'agent'; threadId: string; branchId: string }
@@ -92,6 +94,25 @@ export interface ThreadPlanAPI {
   read(identity: ThreadIdentity): Promise<ThreadPlanState>;
   update(input: ThreadIdentity & { key: string; expectedHeadId: string | null; expectedRef: string | null; content: string }): Promise<PlanMutationResult>;
 }
+/** Preparation is not admission: only the activated Run directory is callable. */
+export interface ThreadToolPreparation {
+  serviceId: string;
+  version: number;
+  declarations: VarinExtensionServiceProvision[];
+  status: 'preparing' | 'ready' | 'unavailable';
+  prepared?: ExtensionToolBinding;
+  error?: string;
+}
+export interface ThreadToolInspection {
+  runId: string;
+  generation: number | null;
+  /** A listed tool still requires authorization for its exact invocation. */
+  permission: 'checked_on_invocation';
+  callable: LaunchTool[];
+  /** Durable selected identities; these records do not grant invocation authority. */
+  bindings: { mcp: McpBinding | null; extensions: ExtensionToolBinding[] };
+  preparations: ThreadToolPreparation[];
+}
 export interface ThreadsAPI {
   plan?: ThreadPlanAPI;
   collaboration?: ThreadCollaborationAPI;
@@ -112,6 +133,7 @@ export interface ThreadsAPI {
   cancelInput(inputId: string, expectedRevision: number): Promise<QueuedInput>;
   historyPage(identity: ThreadIdentity, cursor: { headId: string; beforeId: string }): Promise<ThreadHistoryPage>;
   snapshot(identity: ThreadIdentity): Promise<ThreadSnapshot>;
+  inspectTools(identity: ThreadIdentity, runId: string): Promise<ThreadToolInspection>;
   run(runId: string): Promise<Run>;
   cancelRun(runId: string): Promise<RunCancellationReceipt>;
   operation(operationId: string): Promise<Operation>;

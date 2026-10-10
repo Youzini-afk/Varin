@@ -1,7 +1,7 @@
 //! Ready tool compositions publish only at a closed request boundary. Configuration remains
 //! with its owner; the activation fact retains the exact credential-free executable selection.
 use super::launch_content::LaunchMetadata;
-use super::launches::HostToolBinding;
+use super::launches::{ExtensionToolBinding, HostToolBinding};
 use super::*;
 use crate::execution::ToolSchema;
 
@@ -11,6 +11,7 @@ pub struct ToolComposition {
     pub generation: u64,
     pub tools: Vec<ToolSchema>,
     pub mcp_binding: Option<HostToolBinding>,
+    pub extension_bindings: Vec<ExtensionToolBinding>,
 }
 pub struct ToolUpdatePreparation {
     run_id: String,
@@ -28,6 +29,7 @@ pub struct PreparedToolUpdate {
     base_ref: Value,
     tools_ref: Value,
     mcp_ref: Option<Value>,
+    extensions_ref: Value,
     composition: ToolComposition,
     reference: Value,
     _publication: crate::content::ContentPublication,
@@ -63,8 +65,12 @@ impl ToolUpdatePreparation {
         self,
         mut tools: Vec<ToolSchema>,
         mcp_binding: Option<HostToolBinding>,
+        extension_bindings: Vec<ExtensionToolBinding>,
     ) -> Result<PreparedToolUpdate> {
         if let Some(binding) = &mcp_binding {
+            binding.validate()?;
+        }
+        for binding in &extension_bindings {
             binding.validate()?;
         }
         tools.sort_by(|a, b| a.name.cmp(&b.name));
@@ -72,13 +78,14 @@ impl ToolUpdatePreparation {
         if let Some(binding) = &mcp_binding {
             expected.extend(binding.tools.iter().cloned());
         }
+        expected.extend(extension_bindings.iter().map(|b| b.tool.clone()));
         expected.sort_by(|a, b| a.name.cmp(&b.name));
         let mut names = std::collections::BTreeSet::new();
         if tools != expected
             || tools.iter().any(|tool| {
                 tool.name.is_empty()
                     || tool.version.is_empty()
-                    || !tool.schema.is_object()
+                    || !(tool.schema.is_object() || tool.schema.is_boolean())
                     || !names.insert(&tool.name)
             })
         {
@@ -93,6 +100,7 @@ impl ToolUpdatePreparation {
                 .ok_or_else(|| RuntimeError::Invalid("tool generation exhausted".into()))?,
             tools,
             mcp_binding,
+            extension_bindings,
         };
         let reference = self.content.save(&serde_json::to_value(&composition)?)?;
         let tools_ref = self
@@ -103,6 +111,9 @@ impl ToolUpdatePreparation {
             .as_ref()
             .map(|binding| self.content.save(&serde_json::to_value(binding)?))
             .transpose()?;
+        let extensions_ref = self
+            .content
+            .save(&serde_json::to_value(&composition.extension_bindings)?)?;
         Ok(PreparedToolUpdate {
             run_id: self.run_id,
             epoch: self.epoch,
@@ -110,6 +121,7 @@ impl ToolUpdatePreparation {
             base_ref: self.base_ref,
             tools_ref,
             mcp_ref,
+            extensions_ref,
             composition,
             reference,
             _publication: self.publication,
@@ -150,7 +162,7 @@ impl Catalog {
         let tx = self.db.transaction()?;
         let mut run: Run = record(&tx, "runs", &prepared.run_id)?;
         fence(&run, prepared.epoch)?;
-        if run.cancel_requested {
+        if run.cancel_requested || run.state.terminal() {
             return Ok(false);
         }
         let mut launch: LaunchMetadata = record(&tx, "run_launches", &run.id)?;
@@ -179,6 +191,7 @@ impl Catalog {
         launch.selection.tool_schema_generation = prepared.composition.generation;
         launch.selection.tools_ref = prepared.tools_ref.clone();
         launch.selection.mcp_binding_ref = prepared.mcp_ref.clone();
+        launch.selection.extension_bindings_ref = prepared.extensions_ref.clone();
         launch.revision += 1;
         run.revision += 1;
         put(&tx, "run_launches", &run.id, &launch)?;

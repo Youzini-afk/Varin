@@ -200,6 +200,7 @@ pub(super) fn hydrate_operation(
         lifetime: operation.lifetime,
         handed_off: operation.handed_off,
         executor: operation.executor,
+        execution_owner: operation.execution_owner,
         waiting_on: operation.waiting_on,
         intent: operation.intent,
         result,

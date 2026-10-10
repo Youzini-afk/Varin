@@ -104,7 +104,10 @@ impl ModelProvider for GoogleProvider {
                 }
                 // Signatures are model-bound even within a protocol family. Keep only semantics.
             }
-            let role = if matches!(item.provenance, Provenance::Assistant | Provenance::PolicyOutput { .. }) {
+            let role = if matches!(
+                item.provenance,
+                Provenance::Assistant | Provenance::PolicyOutput { .. }
+            ) {
                 "model"
             } else {
                 "user"
@@ -173,7 +176,7 @@ impl ModelProvider for GoogleProvider {
             .binding
             .tools
             .iter()
-            .map(|t| json!({"name":t.name,"parametersJsonSchema":t.schema}))
+            .map(|t| json!({"name":t.name,"description":t.description,"parametersJsonSchema":t.schema}))
             .collect();
         let mut body = json!({"contents":contents,"generationConfig":{"candidateCount":1}});
         if !system.is_empty() {

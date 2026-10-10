@@ -21,6 +21,12 @@ durable receipt. Retrying the same command preserves that receipt and cannot res
 command. The UI reads derived `LaunchIntent.startable`/`pause` projections rather than guessing
 eligibility from a waiting Run or a Wait ID prefix.
 
+`ThreadsAPI.inspectTools(identity, runId)` queries the authenticated Host for the Run's activated
+tool directory, selected provider identities, and per-service preparation state. An extension still
+preparing is not callable. Revoked providers are unavailable immediately; a normally retiring provider
+can remain callable through its original Run pin. Listing a callable tool does not grant permission:
+each actual invocation is authorized against its original operation and current permission policy.
+
 The desktop contract defines:
 
 - `VarinDesktopCommandMap` — typed `{ args, result }` for all 58 `desktop_*` commands

@@ -79,6 +79,9 @@ it("persists web material, collection membership and related-thread access throu
     expect((await collections.handle({ action: "add", collectionId, member: { kind: "snapshot", snapshotId: ref.snapshotId } }, context("parent"))).status).toBe("ok");
     expect((await collections.handle({ action: "share", collectionId, targetThreadId: "child" }, context("parent"))).status).toBe("ok");
     expect((await materials.read("workspace", ref.snapshotId, authority("child")))?.body.toString()).toBe("A durable finding.");
+    expect((await materials.read("workspace", ref.snapshotId, {
+      kind: "thread", owningWorkspaceId: "workspace", threadId: "child",
+    }, { byteRange: { offset: 2, length: 7 }, expectedContentHash: ref.contentHash }))?.body.toString()).toBe("durable");
     expect(await materials.read("workspace", ref.snapshotId, authority("unrelated"))).toBeNull();
 
     // Restart the native storage owner, then reread through fresh Host facades.

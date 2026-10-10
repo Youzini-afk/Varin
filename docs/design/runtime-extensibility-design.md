@@ -63,9 +63,9 @@ flowchart TB
 但不应成为原生可信模块之间的唯一调用方式。目标是把跨边界入口和内部类型化调用分开，提前解析稳定绑定。
 这只是可以消除的工作量，尚无测量证明它是当前产品的主要瓶颈。
 
-[BrokeredHostSupervisor](../../packages/extension-host/src/broker-supervisor.ts)目前用同一条 Promise 队列串行处理 reconcile、准备、启用和停用，
-其中会等待扩展启动与释放。原生化保留它的归属和候选合同，但将耗时准备/收尾移出公共队列，仅对相同实例或真实依赖关系排序。
-这个发现属于扩展生命周期范围，不能据此认定它就是此前 dispatch 卡住的原因。
+[BrokeredHostSupervisor](../../packages/extension-host/src/broker-supervisor.ts)在初始核对中曾用公共 Promise 队列等待扩展启动与释放；
+后续实现已经按 owner 协调，并保留原候选发布、实际 callback drain 与撤权合同。完整组合仍须使耗时准备/收尾离开公共关键路径，
+仅对相同实例或真实依赖关系排序。初始队列发现属于扩展生命周期范围，不能据此认定它就是此前 dispatch 卡住的原因。
 
 本次深化补足：原生绑定、Agent 策略接口、明确的扩展参与方式、局部组合更新、契约发现和任务/扩展寿命分离。
 既有实现仍按原文档运行；下文描述原生化后的目标语义。
@@ -178,7 +178,7 @@ Provider 实现合同；Consumer 只依赖合同。包可以同时承担多个�
 
 ## 7. 可替换的 Agent 策略
 
-拟议 `AgentPolicy` 接收运行快照与本次事件，返回下一步行动及其策略状态。行动包括请求模型、提交工具图/子任务、
+`AgentPolicy` 接收运行快照与本次事件，返回下一步行动及其策略状态。行动包括请求模型、提交工具图/子任务、
 等待已登记事件、交付结果、暂停或结束。默认实现保持现有用户习惯，领域扩展可定义其他工作流程。
 
 核心只解释合法行动、推进独立工作、提交结果；它不把“必须先计划”“每步必须反思”等策略写死。
@@ -223,6 +223,10 @@ export default defineExtension({
   },
 });
 ```
+
+当前普通工具的可运行包结构见 [`material-snapshot-tool`](../../examples/extensions/material-snapshot-tool/README.md)：
+manifest 的一份 service/tool 声明交给 `provideTool`，调用级 capability client 访问既有材料 owner。
+该具体入口的实现和验证边界见实施台账；它不代表本节全部能力、UI slots 或自助生成流程已经完成。
 
 SDK 注册自动归属 owner，无需手动保存每个 disposer。`call` 传递本次环境、取消和来源等必要上下文，
 实现不再从全局“当前会话”推断。真实外部资源经 `ctx.effect()` 注册其释放动作。

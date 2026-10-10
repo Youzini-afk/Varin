@@ -13,9 +13,15 @@ pub(super) fn execute(
     let owner = runtime.catalog();
     if method == "runtime.events.read" {
         let p: EventsParams = serde_json::from_value(params)?;
-        let cursor = u64::try_from(p.cursor).map_err(|_| KernelError::Protocol("event cursor must be nonnegative".into()))?;
-        let limit = u32::try_from(p.limit).map_err(|_| KernelError::Protocol("event limit out of range".into()))?;
-        let read = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.capture_events_read(cursor, limit).map_err(domain)?;
+        let cursor = u64::try_from(p.cursor)
+            .map_err(|_| KernelError::Protocol("event cursor must be nonnegative".into()))?;
+        let limit = u32::try_from(p.limit)
+            .map_err(|_| KernelError::Protocol("event limit out of range".into()))?;
+        let read = owner
+            .lock()
+            .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+            .capture_events_read(cursor, limit)
+            .map_err(domain)?;
         return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
     }
     if method == "runtime.thread.operations.active" {
@@ -43,7 +49,7 @@ pub(super) fn execute(
             let preparation = owner
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                .prepare_permission(p.call, p.scope);
+                .prepare_permission(json!({"runId":p.call.run_id,"operationId":p.call.operation_id,"origin":p.call.origin,"callId":p.call.call_id,"name":p.call.name,"schemaVersion":p.call.schema_version,"arguments":p.call.arguments}), p.scope);
             let prepared = preparation.load().map_err(domain)?;
             let mut catalog = owner
                 .lock()

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { KernelClient } from './kernel-client.js';
 import type { Operation } from './protocol.generated.js';
-import type { McpCall } from './mcp-bridge.js';
+import type { HostToolCall } from './protocol.generated.js';
 
 export interface PermissionScope {
   ownerReference: string;
@@ -21,7 +21,7 @@ export class PermissionService {
   private readonly pending = new Map<string, Pending>();
   constructor(private readonly kernel: KernelClient) {}
 
-  async authorize(call: McpCall, scope: PermissionScope, signal: AbortSignal): Promise<void> {
+  async authorize(call: HostToolCall, scope: PermissionScope, signal: AbortSignal): Promise<void> {
     if (signal.aborted || this.pending.has(call.operationId)) throw new Error('permission_not_available');
     const permissionId = randomUUID();
     const exactCall = structuredClone(call);
