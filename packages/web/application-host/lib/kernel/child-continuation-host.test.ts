@@ -99,7 +99,7 @@ it.each(['user_continuation', 'message_request'] as const)('startup %s re-admits
     pinBranchHandoff: vi.fn(async () => ({ pinId: 'child-source-pin:execution:new', root: 'fixed-result-root' })),
   };
   const runtime = {
-    onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {}, reconcileChildren: async () => [], reconcileProcessWaits: async () => [],
+    onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {}, reconcileObservations: async () => [],
     children: async () => [], childExecutions: async () => [structuredClone(child)], unacceptedChildSources: async () => [], status: async () => ({ eventCursor: 7 }), events: async () => [],
     context: vi.fn(async () => checkpoint), childExecution: async () => structuredClone(child),
     readyChildSource: vi.fn(async (input: Parameters<AgentRuntimeClient['readyChildSource']>[0]) => {

@@ -3079,3 +3079,53 @@ fn external_result_outlives_kernel_until_original_stop_receipt() {
         );
     }
 }
+
+#[test]
+fn reply_deadline_short_facts_recheck_clock_and_catch_up_without_replacing_a_winner() {
+    use messages::reply_wait::{resolve, REPLY_EVENT};
+    let fixture = Fixture::new();
+    let mut db = fixture.open();
+    let receipt = submit(&mut db);
+    for (case, accepted_at, deadline) in [
+        ("early-before-registration", Some(999), Some(1000)),
+        ("at-deadline", Some(1000), Some(1000)),
+        ("wall-forward-backward", None, Some(1000)),
+        ("unbounded", None, None),
+    ] {
+        let after = db.event_cursor().unwrap();
+        let tx = db.db.transaction().unwrap();
+        // This is the same short event produced by accepted_reply, before observation
+        // registration. The body remains outside these Wait/Event records.
+        let reply_cursor = accepted_at.map(|accepted_at_ms| {
+            event(&tx, case, 1, REPLY_EVENT,
+                json!({"reply_message_id":format!("reply:{case}"),"accepted_at_ms":accepted_at_ms})).unwrap()
+        });
+        let mut wait = Wait {
+            id: format!("reply-wait:{case}"), run_id:receipt.run_id.clone(),
+            subject:case.into(), kind:REPLY_EVENT.into(), after_cursor:after,
+            deadline_at_ms:deadline, trigger_cursor:None, cancelled:false,
+        };
+        tx.execute("INSERT INTO waits(id,run_id,body) VALUES(?1,?2,?3)",
+            params![wait.id,wait.run_id,encode(&wait).unwrap()]).unwrap();
+        if accepted_at.is_none() {
+            assert!(!resolve(&tx, &mut wait, 900).unwrap());
+            assert!(!resolve(&tx, &mut wait, 800).unwrap(), "backward wall adjustment cannot expire early");
+        }
+        assert_eq!(resolve(&tx, &mut wait, 2000).unwrap(), deadline.is_some());
+        let winner = wait.trigger_cursor;
+        if case == "early-before-registration" {
+            assert_eq!(winner, reply_cursor, "an already accepted on-time reply wins after delayed reconciliation");
+        } else if deadline.is_some() {
+            let kind:String=tx.query_row("SELECT kind FROM events WHERE cursor=?1",[sql_number(winner.unwrap()).unwrap()],|r|r.get(0)).unwrap();
+            assert_eq!(kind, "wait.expired");
+        } else {
+            assert_eq!(winner, None);
+        }
+        assert!(!resolve(&tx, &mut wait, 700).unwrap());
+        assert_eq!(wait.trigger_cursor, winner, "backward clock adjustment cannot replace the persisted winner");
+        let persisted:Wait = record(&tx, "waits", &wait.id).unwrap();
+        assert_eq!(persisted.deadline_at_ms, deadline);
+        assert_eq!(persisted.trigger_cursor, winner);
+        tx.commit().unwrap();
+    }
+}

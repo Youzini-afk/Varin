@@ -619,12 +619,9 @@ export class AgentRuntimeClient {
       signal,
     );
   }
-  reconcileProcessWaits(signal?: AbortSignal): Promise<string[]> {
-    return this.kernel.agentRuntimeRequest(
-      'runtime.process.wait.reconcile',
-      {},
-      signal,
-    );
+  /** The native observation owner retains child/process/reply conditions and deadlines. */
+  reconcileObservations(signal?: AbortSignal): Promise<string[]> {
+    return this.kernel.agentRuntimeRequest('runtime.observations.reconcile', {}, signal);
   }
   registerFollowup(input: FollowupRegisterParams, signal?: AbortSignal): Promise<Followup> {
     return this.kernel.agentRuntimeRequest('runtime.followup.register', input, signal);
@@ -647,13 +644,7 @@ export class AgentRuntimeClient {
   controlFollowup(input: FollowupControlParams, signal?: AbortSignal): Promise<Followup> {
     return this.kernel.agentRuntimeRequest('runtime.followup.control', input, signal);
   }
-  reconcileChildren(signal?: AbortSignal): Promise<string[]> {
-    return this.kernel.agentRuntimeRequest(
-      'runtime.child.reconcile',
-      {},
-      signal,
-    );
-  }
+
   cancelChildWait(waitId: string, signal?: AbortSignal): Promise<ChildWait> {
     return this.kernel.agentRuntimeRequest(
       'runtime.child.wait.cancel',

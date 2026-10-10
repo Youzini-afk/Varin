@@ -10,6 +10,13 @@ use crate::execution::{
 use serde::Deserialize;
 
 pub const SEND_TOOL: &str = "send";
+#[path = "catalog_reply_wait.rs"]
+pub mod reply_wait;
+pub use reply_wait::ReplyWaitView;
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MessageWaitOptions { pub timeout_ms: Option<u64> }
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(
     tag = "kind",
@@ -28,6 +35,8 @@ pub enum MessageActor {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MessageInput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait: Option<MessageWaitOptions>,
     pub target_thread_id: Option<String>,
     pub target_branch_id: Option<String>,
     pub reply_to: Option<String>,
@@ -36,6 +45,7 @@ pub struct MessageInput {
 }
 impl MessageInput {
     pub fn validate(&self) -> Result<()> {
+        if let Some(duration)=self.wait.as_ref().and_then(|w|w.timeout_ms) { super::observations::deadline_after(super::observations::wall_time_ms()?, duration)?; }
         if self.text.trim().is_empty() {
             return Err(RuntimeError::Invalid("message text is required".into()));
         }
@@ -73,6 +83,7 @@ pub struct MessageReceipt {
     #[serde(flatten)]
     pub identity: MessageIdentity,
     pub accepted_cursor: u64,
+    pub accepted_at_ms: u64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -83,6 +94,7 @@ pub struct MessageSummary {
     pub delivered_run_id: Option<String>,
     pub delivered_cursor: Option<u64>,
     pub activation: MessageActivation,
+    pub reply_wait: Option<ReplyWaitView>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -124,6 +136,7 @@ pub struct MessagePreparation {
     publication: crate::content::ContentPublication,
 }
 pub struct PreparedMessage {
+    wait: Option<MessageWaitOptions>,
     key: String,
     identity: MessageIdentity,
     epoch: u64,
@@ -233,6 +246,7 @@ impl Catalog {
         branch: String,
         input: MessageInput,
     ) -> Result<MessagePreparation> {
+        if input.wait.is_some() { return Err(RuntimeError::Invalid("User messages have no execution observation owner".into())); }
         if key.trim().is_empty() {
             return Err(RuntimeError::Invalid(
                 "message idempotency key is required".into(),
@@ -380,6 +394,7 @@ impl Catalog {
         let identity = &prepared.identity;
         // Recheck the actual family and original reverse route after body preparation.
         let routing = MessageInput {
+            wait: None,
             target_thread_id: Some(identity.target_thread_id.clone()),
             target_branch_id: Some(identity.target_branch_id.clone()),
             reply_to: identity.reply_to.clone(),
@@ -410,9 +425,9 @@ impl Catalog {
                 || intent.call().name != SEND_TOOL
                 || intent.contract().name != SEND_TOOL
                 || intent.contract().schema_version != intent.call().schema_version
-                || intent.contract().lifetime != Lifetime::Run
+                || intent.contract().lifetime != if prepared.wait.is_some() { Lifetime::Thread } else { Lifetime::Run }
                 || intent.contract().read_only
-                || intent.contract().completion != crate::execution::CompletionKind::Result
+                || intent.contract().completion != if prepared.wait.is_some() { crate::execution::CompletionKind::Job } else { crate::execution::CompletionKind::Result }
                 || !super::goals::tool_allowed(&tx, &invocation.context)?
             {
                 return Err(RuntimeError::Conflict(
@@ -420,16 +435,22 @@ impl Catalog {
                 ));
             }
         }
+        let accepted_at_ms = super::observations::wall_time_ms()?;
+        let deadline_at_ms = prepared.wait.as_ref().and_then(|w|w.timeout_ms)
+            .map(|timeout|super::observations::deadline_after(accepted_at_ms, timeout)).transpose()?;
+        let mut accepted = serde_json::to_value(identity)?;
+        accepted["acceptedAtMs"] = json!(accepted_at_ms);
         let cursor = event(
             &tx,
             &identity.message_id,
             1,
             "message.accepted",
-            serde_json::to_value(identity)?,
+            accepted,
         )?;
         let receipt = MessageReceipt {
             identity: identity.clone(),
             accepted_cursor: cursor,
+            accepted_at_ms,
         };
         let activation = activation::accept(&tx, identity)?;
         let input = QueuedInputMetadata {
@@ -465,16 +486,18 @@ impl Catalog {
                 .expect("prepared completion")
                 .1
                 .clone();
-            let reference = match &completion {
-                super::result_content::ToolCompletionMetadata::Result { content_ref, .. } => {
-                    content_ref.clone()
-                }
-                _ => unreachable!(),
-            };
-            operation.phase = OperationPhase::Terminal;
-            operation.outcome = Some(Outcome::Succeeded);
+            if prepared.wait.is_some() {
+                reply_wait::register(&tx, &mut operation, identity, cursor, deadline_at_ms, accepted_at_ms)?;
+            } else {
+                let reference = match &completion {
+                    super::result_content::ToolCompletionMetadata::Result { content_ref, .. } => content_ref.clone(),
+                    _ => return Err(RuntimeError::Invalid("send completion kind changed".into())),
+                };
+                operation.phase = OperationPhase::Terminal;
+                operation.outcome = Some(Outcome::Succeeded);
+                operation.result = Some(OperationResultMetadata::Content { reference });
+            }
             operation.effect = Effect::Confirmed;
-            operation.result = Some(OperationResultMetadata::Content { reference });
             operation.call_completion = Some(completion.clone());
             operation.revision += 1;
             put(&tx, "operations", &operation.id, &operation)?;
@@ -498,10 +521,11 @@ impl Catalog {
                 &tx,
                 &operation.id,
                 operation.revision,
-                "operation.settled",
+                if prepared.wait.is_some() { "message.wait_registered" } else { "operation.settled" },
                 serde_json::to_value(&operation)?,
             )?;
         }
+        reply_wait::accepted_reply(&tx, identity, accepted_at_ms)?;
         tx.commit()?;
         Ok(MessageAdmission {
             receipt,
@@ -576,11 +600,15 @@ impl MessagePreparation {
         let completion = if invocation.is_some() {
             // The stable acceptance handle is staged before commit. acceptedCursor belongs to
             // the message view; the tool receipt does not invent a transaction's future cursor.
-            let completion = ToolCompletion::Result {
-                outcome: Outcome::Succeeded,
-                effect: Effect::Confirmed,
+            let completion = if self.input.wait.is_some() {
+                ToolCompletion::JobAccepted {
+                    operation_id: self.operation.as_ref().expect("send Operation").id.clone(),
+                    phase: "awaiting_reply".into(), effect: Effect::Confirmed, lifetime: Lifetime::Thread,
+                }
+            } else { ToolCompletion::Result {
+                outcome: Outcome::Succeeded, effect: Effect::Confirmed,
                 content: json!({"accepted":true,"message":self.identity}),
-            };
+            }};
             let metadata =
                 super::result_content::ToolCompletionMetadata::write(&self.content, &completion)?;
             Some((completion, metadata))
@@ -588,6 +616,7 @@ impl MessagePreparation {
             None
         };
         Ok(PreparedMessage {
+            wait: self.input.wait,
             key: self.key,
             identity: self.identity,
             epoch: self.epoch,
@@ -603,11 +632,13 @@ impl MessagePreparation {
 fn summary(db: &Connection, row: QueuedInputMetadata) -> Result<MessageSummary> {
     let activation = activation::project(db, &row)?;
     let identity = message_identity(&row)?.clone();
+    let InputOrigin::Message { command_key, .. } = &row.origin else { unreachable!() };
+    let receipt: String = db.query_row("SELECT receipt FROM commands WHERE id=?1", [command_key], |r|r.get(0))?;
+    let receipt: MessageReceipt = serde_json::from_str(&receipt)?;
+    if receipt.identity != identity || receipt.accepted_cursor != row.cursor { return Err(RuntimeError::Invalid("message receipt identity changed".into())); }
+    let reply_wait = reply_wait::project(db, &identity)?;
     Ok(MessageSummary {
-        receipt: MessageReceipt {
-            identity,
-            accepted_cursor: row.cursor,
-        },
+        receipt, reply_wait,
         state: row.state,
         delivered_run_id: (row.state == InputState::Delivered).then_some(row.run_id).flatten(),
         activation,

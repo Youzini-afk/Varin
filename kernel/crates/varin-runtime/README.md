@@ -163,13 +163,13 @@ with exact byte offsets and explicit truncation. A byte budget too small for the
 fails explicitly instead of exceeding the requested budget or returning a non-progressing cursor. ProviderOriginal and typed opaque continuation stay in
 the original store and are excluded from these shared reads and search; tool/user JSON remains data.
 
-Reply waits and sharing undelivered policy/auxiliary outputs remain separate implementation work.
+Sharing undelivered policy/auxiliary outputs remains separate implementation work.
 Directed messages and terminal-child continuation are described below. These readers neither synthesize those records nor revive a
 completed child launch. See [the family read evidence](../../../docs/reviews/runtime-family-reads-2026-10-11.md).
 
 ## Task-family messages and request activation
 
-Ordinary `send` version 2 accepts `kind: inform` or `kind: request`, an explicit target Thread/branch or a received
+Ordinary `send` version 3 accepts `kind: inform` or `kind: request`, an explicit target Thread/branch or a received
 `replyTo`, and text. ModelStep and PolicyAction/node use the same frozen declaration, original call
 and ordinary effectful Operation. The original message ID and confirmed tool completion are committed
 with the message, so recovery does not resend. A reply reverses the original peer/branch; a supplied
@@ -193,8 +193,8 @@ actual receiving Run; this does not claim that a model handled the message.
 `runtime.messages.send` is the trusted User ingress; list/get provide original incoming/outgoing
 metadata and one original body. List cursors fix the identity, direction and upper acceptance cursor.
 Body reads and list traversal run on workers with owner-epoch checks. Public reads cannot manufacture
-Agent sender identity or execution authority. `send(wait)` is still rejected before effects by this
-version's strict schema. Original inform behavior has [separate evidence](../../../docs/reviews/runtime-passive-messages-2026-10-11.md).
+Agent sender identity or execution authority. User ingress does not accept tool-only `wait` or create
+an observation Run. Original inform behavior has [separate evidence](../../../docs/reviews/runtime-passive-messages-2026-10-11.md).
 
 A request carries a short tagged activation fact in the same ingress row. Acceptance binds an active
 receiver Run in that transaction; idle work stays pending. The existing event-driven continuation worker
@@ -208,11 +208,58 @@ Message history rather than rewritten User input or implicit skill activation.
 Message views distinguish passive, pending, bound, cancelled and failed activation from history delivery.
 Hold reasons are projections of the real Run/Goal/source owner, not a second execution state machine.
 Manual policy pause, unanswered questions and Goal pause/budget remain effective. A new request may end
-all live child/process observations in its receiver Run; each original cancelled observation is delivered
+all live child/process/reply observations in its receiver Run; each original outcome is delivered
 before that Run becomes runnable, without cancelling the observed child or process. Cancelling a Run
 or tree fences accepted unconsumed requests, including pending work before a Run exists. Original message
 identity/body remain readable; same-key retries cannot launch again. A later genuinely new intent remains
 independent. Preparation failures stay visible rather than retrying on every event.
+
+## Correlated reply observations and absolute deadlines
+
+A tool `send` with `wait: {}` registers an indefinite observation; `wait: {timeoutMs: n}` fixes an
+absolute deadline at original acceptance, with zero meaning immediately elapsed. Without wait it
+keeps its ordinary Result completion. The Job/Thread variant commits the original message, Confirmed
+send effect, original JobAccepted, Operation and Wait in one Catalog transaction. Invocation acceptance
+and observation completion stay distinct. Both ModelStep and PolicyAction use the original identity,
+consumption and recovery contracts. A retry keeps its first acceptance time and deadline.
+
+Only an authenticated reverse-peer/branch message whose replyTo names the original message can
+resolve its observation. The original acceptedAtMs is durable. A matching reply accepted strictly before
+the deadline wins; a reply accepted at or after it remains a late message even if timer processing was
+late. Reconciliation checks retained eligible events before committing expiry. Existing winning triggers
+are immutable. Expiry is an ended observation, not a fabricated reply or message-send failure.
+
+`catalog::observations` selects the original child/process/reply Waits together. Ready observations can
+publish their original results while any live unready observation retains the Run's parking object.
+All original invocations must be consumed and all observations settled before model admission. The
+single dependency policy wrapper replaces competing child/process wrappers; question, manual Pause
+and Goal keep their own controls. New legal input ends observations without withdrawing messages or
+stopping the observed child/process. Run termination closes its remaining observations with the send
+Confirmed effect intact, without pretending their lifecycle fact reached history.
+
+Reply observation history contains original message/Wait/reply IDs and other outstanding message IDs.
+It never copies reply text: that body is delivered once through the original message input queue.
+Public `replyWait` is derived from the original Wait, winning event, Operation and actual history
+presence; terminal Operation alone is not evidence of delivery. Read/GC protection stays with the
+existing input/history/publication references.
+
+Independent report/observation consumers retain their original errors while allowing healthy work
+to commit. Child reports, receipts and Wait bodies are loaded outside Catalog and admitted per item;
+one unavailable report body cannot hold back another child's report or an unrelated process/reply
+observation. Host recovery keeps the reconciliation error visible and still discovers already
+committed saved launches and events. It does not turn failed reads into successful empty results.
+
+The original native continuation worker combines real event notifications with the nearest persisted
+wall-clock deadline. Linux uses eventfd/timerfd with an absolute CLOCK_REALTIME timer and clock-change
+notification; Windows uses an event plus absolute UTC waitable timer; macOS uses a dispatch walltime
+source. No Wait gets a private thread or a Host timer, and no timer requests waking the computer.
+Reopen, wake or clock adjustment rechecks the same absolute deadline, not a new duration. Short Wait
+facts settle before downstream content/Goal/follow-up work; a failed independent owner cannot disarm
+another Wait's future deadline. Already triggered Waits leave the deadline query, and repeated owner
+errors do not create an event-driven retry loop. Errors are visible recovery facts, not an empty
+deadline. Admission rejects only unrepresentable
+integer/time instants; the native signed-nanosecond wall-time representation ends in 2262, not an
+arbitrary HTTP timeout or silent truncation. Platform execution evidence is reported separately.
 
 ## Immutable conversation and model bodies
 
@@ -246,7 +293,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 30, input domain 4 and collaboration domain 5 store input intents/queue bodies and context-job ownership,
+Catalog version 31, input domain 4 and collaboration domain 5 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -815,8 +862,8 @@ Catalog computes the specified subtree from retained Thread/ChildTask lineage wi
 transaction cancels preparing children, descendant Runs, live process Operations and original active
 followup/Goal continuations, including terminal source Runs. Parent and sibling subtrees stay outside
 a child target. A short TreeCancellationReceipt acknowledges cancellation intent, not executor stop.
-A parent-Thread scope fence is checked in that same transaction. Correlated reply
-Wait/deadline, remote environments and the complete collaboration product migration remain separate work.
+A parent-Thread scope fence is checked in that same transaction. Remote environments and the
+complete collaboration product migration remain separate work.
 
 A report, execution outcome and file result are separate facts. Report outcome follows the original
 terminal Run and the presence of a textual report; an earlier failed tool does not permanently turn
@@ -857,7 +904,7 @@ idempotent. Cancelling observation delivers an environment fact, leaves the chil
 does not consume a later child report. Ordinary model dispatch recovery continues to refuse
 replaying a dispatched request whose completion is unknown.
 
-The collaboration policy checks a pending observation before invoking the selected strategy. It
+The shared observation policy checks a pending dependency before invoking the selected strategy. It
 parks with the unchanged strategy checkpoint rather than silently advancing private state for an
 action it did not execute. Report delivery resumes the original graph completion boundary. If the
 observation was cancelled after registration but before parking, the same domain owner permits the
@@ -992,8 +1039,8 @@ fact, and an indeterminate receipt is never presented as proof that its tree sto
 lifecycle projection and an existing `process_read` reference, not command arguments or
 log contents. Delivery identity deduplicates the same process fact on the visible history chain.
 
-The existing Host continuation coordinator consumes process-wait facts alongside child facts;
-there is no timer/model polling loop. It rebinds the same Run through its saved model, source,
+The existing Host continuation coordinator consumes process-wait facts alongside child/reply facts;
+process completion remains event-driven, without model polling. It rebinds the same Run through its saved model, source,
 and context preparation contracts. Cancelling the observation cancels its Wait, not the process.
 Cancelling the actual spawn Operation retains the existing explicit process-stop path.
 

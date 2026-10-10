@@ -1,5 +1,6 @@
 //! Real Engine, collaboration endpoint, Catalog and Storage; no Host transport or paid provider.
 use super::*;
+use crate::observations::{ObservationPolicy,policy_identity};
 use crate::storage::Storage;
 use crate::tools::{serve_resource, FixedFileSource, KernelToolExecutor, ToolKind};
 use std::collections::BTreeSet;
@@ -457,7 +458,7 @@ fn run_sequence(cancel_before_park: bool, pause_before_observation: bool) {
         accepted: accepted_tx,
         release: Arc::new(Mutex::new(release_rx)),
     });
-    let mut policy = Arc::new(CollaborationPolicy {
+    let mut policy = Arc::new(ObservationPolicy {
         inner: sequence.clone(),
         catalog: db.clone(),
     });
@@ -610,7 +611,7 @@ fn run_sequence(cancel_before_park: bool, pause_before_observation: bool) {
             .unwrap()
             .resume_policy_pause(&run, &pause, epoch)
             .unwrap();
-        policy = Arc::new(CollaborationPolicy {
+        policy = Arc::new(ObservationPolicy {
             inner: sequence.clone(),
             catalog: db.clone(),
         });

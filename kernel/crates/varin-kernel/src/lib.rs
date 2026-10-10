@@ -21,6 +21,8 @@ mod plan_bridge;
 mod policy;
 mod process;
 mod process_wait;
+mod observations;
+mod continuation_wake;
 mod protocol;
 mod protocol_generated;
 mod questions;

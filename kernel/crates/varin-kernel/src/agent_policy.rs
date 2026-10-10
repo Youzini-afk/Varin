@@ -145,7 +145,7 @@ pub(super) fn execute(
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                 .prepare_policy_change(
                     &p.run_id,
-                    crate::process_wait::default_policy_identity(),
+                    crate::observations::default_policy_identity(),
                     identity,
                     models,
                     p.target,

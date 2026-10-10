@@ -380,7 +380,7 @@ impl Fixture {
             calls: AtomicUsize::new(0),
         });
         let identity =
-            process_wait::policy_identity(questions::policy_identity(sequence.identity()));
+            crate::observations::policy_identity(questions::policy_identity(sequence.identity()));
         let binding:RequestBinding=serde_json::from_value(json!({"goal":null,"resource_activations":[],"resource_checkpoint_id":null,"connection_identity":"fixture","provider_family":"fixture","model":"unused","credential_ref":null,"configuration_generation":1,"tool_schema_generation":1,"tools":tools,"instruction_sources":[],"memory_checkpoint":null,"attachment_refs":[],"environment_cursor":0,"history_range":{"branch_id":"main","ancestor_id":null,"leaf_id":null}})).unwrap();
         let launch = LaunchSelection::from_binding(&binding, identity, source);
         let mut db = Catalog::open(&root).unwrap();
@@ -417,7 +417,7 @@ impl Fixture {
             context_preparation: Arc::new(NoopContextPreparation),
             progress: ProgressSink::default(),
         };
-        let start = process_wait::configure(questions::configure(start, owner.clone()), owner);
+        let start = crate::observations::configure(questions::configure(start, owner.clone()), owner);
         self.runtime
             .start(&self.run, start)
             .unwrap()
@@ -918,7 +918,7 @@ fn accepted_question_before_graph_receipt_reopen_consumes_original_job_once() {
             &PolicyGraphIntent::PolicyToolGraphV1 {
                 action_id,
                 boundary,
-                identity: process_wait::policy_identity(questions::policy_identity(
+                identity: crate::observations::policy_identity(questions::policy_identity(
                     f.sequence.identity(),
                 )),
                 state: json!({"stage":2}),
@@ -1049,7 +1049,7 @@ fn policy_todo_committed_before_tool_settlement_reconciles_original_epoch_and_he
             &PolicyGraphIntent::PolicyToolGraphV1 {
                 action_id,
                 boundary,
-                identity: process_wait::policy_identity(questions::policy_identity(
+                identity: crate::observations::policy_identity(questions::policy_identity(
                     f.sequence.identity(),
                 )),
                 state: json!({"stage":1}),

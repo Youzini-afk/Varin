@@ -170,6 +170,7 @@ pub struct Wait {
     pub subject: String,
     pub kind: String,
     pub after_cursor: u64,
+    pub deadline_at_ms: Option<u64>,
     pub trigger_cursor: Option<u64>,
     pub cancelled: bool,
 }

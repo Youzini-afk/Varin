@@ -484,6 +484,7 @@ impl Catalog {
         }
         let tx = self.db.transaction()?;
         let run = bodies::validate_delivery(&tx, &captured.id, captured.epoch, head.as_deref())?;
+        if super::observations::next(&tx, &run.id)?.is_some() { return Ok(Some(InputBatch::default())); }
         for input in &queued {
             let current: QueuedInputMetadata = record(&tx, "input_queue", &input.id)?;
             if current != *input

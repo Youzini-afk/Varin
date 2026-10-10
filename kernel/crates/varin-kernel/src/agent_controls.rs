@@ -145,21 +145,8 @@ impl ControlCommands {
                     .run(&p.run_id)
                     .map_err(domain)?
                     .waiting_on;
-                if waiting
-                    .as_deref()
-                    .is_some_and(|id| id.starts_with("child-wait:"))
-                {
-                    runtime
-                        .quiesce_child_waits()
-                        .map_err(|e| KernelError::Operation(e.to_string()))?;
-                }
-                if waiting
-                    .as_deref()
-                    .is_some_and(|id| id.starts_with("process-wait:"))
-                {
-                    runtime
-                        .quiesce_process_waits()
-                        .map_err(|e| KernelError::Operation(e.to_string()))?;
+                if waiting.as_deref().is_some_and(varin_runtime::catalog::observations::is_observation_id) {
+                    runtime.quiesce_observations().map_err(|e|KernelError::Operation(e.to_string()))?;
                 }
                 if let Some(operation) = waiting
                     .as_deref()
@@ -187,16 +174,9 @@ impl ControlCommands {
                     .operation(&p.operation_id)
                     .map_err(domain)?;
                 let native = original.execution_owner == Some(varin_runtime::ExecutorOwner::Kernel);
-                if native && original.executor.as_deref() == Some("wait_process") {
-                    runtime
-                        .quiesce_process_waits()
-                        .map_err(|e| KernelError::Operation(e.to_string()))?;
-                    let operation = runtime
-                        .catalog()
-                        .lock()
-                        .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                        .cancel_process_wait(&p.operation_id)
-                        .map_err(domain)?;
+                if native && original.waiting_on.as_deref().is_some_and(varin_runtime::catalog::observations::is_observation_id) {
+                    runtime.quiesce_observations().map_err(|e|KernelError::Operation(e.to_string()))?;
+                    let operation=runtime.catalog().lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?.cancel_observation(&p.operation_id).map_err(domain)?;
                     return Ok(operation_cancellation_receipt(&operation));
                 }
                 if native && original.executor.as_deref() == Some("ask_user") {
@@ -233,30 +213,14 @@ impl ControlCommands {
                 }
                 Ok(operation_cancellation_receipt(&operation))
             }
-            "runtime.child.reconcile" | "runtime.child.wait.cancel" => {
-                runtime
-                    .quiesce_child_waits()
-                    .map_err(|error| KernelError::Operation(error.to_string()))?;
-                let resumed =
-                    varin_runtime::catalog::child_delivery::deliver_waits(&runtime.catalog())
-                        .map_err(domain)?;
-                if method == "runtime.child.reconcile" {
-                    return Ok(serde_json::to_value(resumed)?);
-                }
-                let p: ChildWaitParams = serde_json::from_value(params)?;
-                let wait = runtime
-                    .catalog()
-                    .lock()
-                    .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                    .inspect_child_wait(&p.wait_id)
-                    .map_err(domain)?;
-                Ok(serde_json::to_value(wait)?)
+            "runtime.observations.reconcile" => {
+                Ok(serde_json::to_value(runtime.reconcile_observations().map_err(|e|KernelError::Operation(e.to_string()))?)?)
             }
-            "runtime.process.wait.reconcile" => {
-                runtime
-                    .quiesce_process_waits()
-                    .map_err(|e| KernelError::Operation(e.to_string()))?;
-                Ok(serde_json::to_value(varin_runtime::catalog::process_delivery::deliver_waits(&runtime.catalog()).map_err(domain)?)?)
+            "runtime.child.wait.cancel" => {
+                runtime.reconcile_observations().map_err(|e|KernelError::Operation(e.to_string()))?;
+                let p:ChildWaitParams=serde_json::from_value(params)?;
+                let wait=runtime.catalog().lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?.inspect_child_wait(&p.wait_id).map_err(domain)?;
+                Ok(serde_json::to_value(wait)?)
             }
             _ => Err(KernelError::Protocol(
                 "unknown worker control command".into(),

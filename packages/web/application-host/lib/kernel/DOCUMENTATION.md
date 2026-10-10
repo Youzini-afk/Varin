@@ -43,7 +43,7 @@ and ContentStore through AgentRuntimeClient. ThreadAdapter validates the selecte
 sets the trusted User sender; the nested send request cannot contain actor or sender overrides. The
 Host neither queues a second copy nor prepares a model/source or calls continueLaunch for an inform.
 Rust validates the actual family and exact reply peers. Generated parameters accept explicit request
-activation but still reject unsupported wait/deadline fields before acceptance. Read responses use the ordinary data path.
+activation but reject tool-only wait/deadline fields: a User message has no original Agent observation owner. Read responses use the ordinary data path.
 
 `ThreadsAPI.messages` and the shared `ThreadMessages` panel separate immutable acceptance from actual
 history delivery and request activation. Received/sent lists contain metadata; opening a message reads its original body.
@@ -62,6 +62,18 @@ while only explicit UserContinuation parses User skill commands. The message pan
 inform/request kind, holds, exact Run/execution linkage and failed/cancelled activation separately from
 delivery. Uncertain retries keep the kind as well as body/peer/key. Tree stop remains available even
 when a Thread has no active Run or displayed children, so pre-Run requests can be fenced.
+
+The message view also projects the original Agent reply observation, if any: exact wait/Operation/Run,
+absolute deadline and replied/expired/cancelled state. The `delivered` flag checks actual lifecycle history,
+not merely a terminal Operation. Ending a displayed own observation calls the original Operation cancel
+path; peer observations are read-only, sent messages remain, and late replies retain their original link.
+User UI sends never create a synthetic Run or Agent tool invocation to obtain a wait.
+
+`runtime.observations.reconcile` is the single native child/process/reply observation consumer. It
+replaces the split child/process reconcile RPCs while retaining the original child reports, source/file
+results and process receipts. Startup discovery and `observation.run_ready` feed the same continueLaunch
+owner. The native worker owns realtime deadline wakeups; the Host has no periodic wait timer, persistent
+inbox copy or authority to resume a policy Pause/question/Goal because an observation ended.
 
 ## Runtime content maintenance
 
@@ -807,7 +819,7 @@ The shared composer uses this path when the child is idle, retains the original 
 response, and uses ordinary boundary/interrupt input when active. Snapshot and exact execution report
 routes expose separate Run/report/file-result identities; old dispatch cards and Waits remain original
 facts. Directed requests use this same continuation owner with a `message_request` trigger and original
-message provenance; correlated reply Wait/deadline remains separate unfinished work.
+message provenance. Correlated reply observations use the same original message facts and native Wait owner.
 
 Child Run termination, report production, process lifetime and file settlement are separate facts.
 Actual worker/root leases, original file receipts, guardian-confirmed process stop and original

@@ -1048,10 +1048,7 @@ impl Catalog {
                         let wait: Wait = super::record(&tx, "waits", key)?;
                         if wait.run_id != run.id
                             || (wait.cancelled
-                                && !super::collaboration::pending_cancelled_observation(
-                                    &tx, &run, &wait,
-                                )?
-                                && !super::process_wait::pending_cancelled_observation(&tx, &run, &wait)?)
+                                && !super::observations::pending_cancelled(&tx, &run, &wait)?)
                         {
                             return Err(RuntimeError::Conflict(
                                 "wait ownership or status changed".into(),
@@ -1723,10 +1720,7 @@ impl Catalog {
                     let wait: Wait = super::record(&tx, "waits", wait_id)?;
                     if wait.run_id != run_id
                         || (wait.cancelled
-                            && !super::collaboration::pending_cancelled_observation(
-                                &tx, &run, &wait,
-                            )?
-                            && !super::process_wait::pending_cancelled_observation(&tx, &run, &wait)?)
+                            && !super::observations::pending_cancelled(&tx, &run, &wait)?)
                     {
                         return Err(RuntimeError::Conflict("policy wait unavailable".into()));
                     }
@@ -2005,6 +1999,7 @@ impl Catalog {
             subject: run_id.into(),
             kind: "execution.reconciled".into(),
             after_cursor,
+            deadline_at_ms: None,
             trigger_cursor: None,
             cancelled: false,
         };

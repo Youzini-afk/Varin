@@ -100,7 +100,12 @@ Read calls accept AbortSignal and all calls keep the existing runtime endpoint-g
 A lost send response must be retried with the same original key and intent. Aborting the transport or
 closing a UI does not retract a message already accepted by the Catalog. A request can enter the
 current Run or admit a new root/child execution through its existing owner. Manual pauses, unanswered
-questions and Goal limits remain effective. This version does not expose reply Waits or deadlines.
+questions and Goal limits remain effective. Receipt `acceptedAtMs` is the original committed time.
+A nullable `replyWait` view reports an Agent's original observation, exact Operation/Run, absolute
+deadline, winning reply/expiry/cancellation and actual lifecycle-history delivery. These are projections,
+not client timers or execution state. User sends have no observation owner and do not accept `wait`.
+The UI can end its own Agent observation through the existing Operation control; this never withdraws
+the original message, changes a won result or hides a late linked reply.
 
 ## Delegated execution continuation
 

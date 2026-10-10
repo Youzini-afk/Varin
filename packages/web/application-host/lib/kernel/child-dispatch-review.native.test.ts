@@ -300,6 +300,67 @@ it('family tools and public views read original and fork-inherited conversations
   expect(reopened.errors).toEqual([]);
 }, 30_000);
 
+it('two real send observations retain their original requests across Host restart and resume only after both linked replies', async () => {
+  const entered = gate(); const release = gate();
+  let parentSteps = 0; let childSteps = 0; let operationId = '';
+  const f = await fixture(({ body, response }) => {
+    assertPairing(body);
+    if (isParent(body)) {
+      if (++parentSteps === 1) complete(response, [tool('dispatch', { ...dispatch, tools: ['threads', 'send'] }, 'reply-observer-child')]);
+      else { operationId = job(body); complete(response, [answer('Parent finished; explicit replies remain available', 'reply-parent-done')]); }
+    } else if (++childSteps === 1) complete(response, [tool('threads', {}, 'reply-discovery')]);
+    else if (childSteps === 2) {
+      const content = result(body, 'threads')?.content as { page: import('./protocol.generated.js').FamilyList };
+      const parent = content.page.members.find(member => member.threadId === content.page.rootThreadId)!;
+      const target = { targetThreadId: parent.threadId, targetBranchId: parent.branches[0]!.branchId };
+      complete(response, [
+        tool('send', { ...target, kind: 'inform', text: 'FIRST_ORIGINAL_REPLY_REQUEST', wait: {} }, 'reply-send-one'),
+        tool('send', { ...target, kind: 'inform', text: 'SECOND_ORIGINAL_REPLY_REQUEST', wait: {} }, 'reply-send-two'),
+      ]);
+    } else {
+      expect(childSteps).toBe(3);
+      const outputs = (body.input as Array<Record<string, unknown>>).filter(item => item.type === 'function_call_output' && ['reply-send-one', 'reply-send-two'].includes(String(item.call_id)));
+      expect(outputs).toHaveLength(2);
+      for (const output of outputs) expect(JSON.parse(String(output.output))).toMatchObject({ kind: 'job_accepted', effect: 'confirmed' });
+      expect(JSON.stringify(body.input)).toContain('FIRST_LINKED_REPLY_BODY');
+      expect(JSON.stringify(body.input)).toContain('SECOND_LINKED_REPLY_BODY');
+      complete(response, [answer('Both original reply observations completed once', 'reply-child-done')]);
+    }
+  });
+  const h = await f.openHost({ context: original => blockChild(original, entered, release) });
+  try {
+    const identity = await h.api.create('two-correlated-replies');
+    const prepared = await h.api.prepareSource({ ...identity, key: 'reply-source', path: f.workspace, mode: 'fixed_branch' });
+    const initial = await h.api.submit({ ...identity, key: 'reply-input', expectedHead: null, text: 'Dispatch a child and finish; the user will reply to its two messages', model, source: prepared.source });
+    await entered.promise;
+    await expect.poll(async () => (await h.runtime.run(initial.run_id)).state).toBe('completed');
+    release.release();
+    await expect.poll(async () => (await h.runtime.child(operationId)).receipt?.run_id).toBeTruthy();
+    const child = await h.runtime.child(operationId);
+    const own = { runtime: 'agent' as const, threadId: child.child_thread_id, branchId: child.child_branch_id };
+    await expect.poll(async () => (await h.api.messages!.list(own, { direction: 'outgoing' })).messages.filter(message => message.replyWait?.state === 'waiting').length).toBe(2);
+    const requests = (await h.api.messages!.list(own, { direction: 'outgoing' })).messages;
+    const firstIntent = { key: 'first-original-reply', kind: 'inform' as const, replyTo: requests[0]!.messageId, text: 'FIRST_LINKED_REPLY_BODY' };
+    const first = await h.api.messages!.send(identity, firstIntent);
+    await expect.poll(async () => (await h.api.messages!.get(own, requests[0]!.messageId)).replyWait).toMatchObject({ state: 'replied', replyMessageId: first.messageId, delivered: true });
+    expect((await h.runtime.run(child.receipt!.run_id)).state).toBe('waiting');
+    expect(childSteps).toBe(2);
+    await h.close();
+    const reopened = await f.openHost();
+    expect(await reopened.api.messages!.send(identity, firstIntent)).toEqual(first);
+    expect((await reopened.api.messages!.get(own, requests[1]!.messageId)).replyWait).toMatchObject({ state: 'waiting', deadlineAtMs: null });
+    expect(childSteps).toBe(2);
+    const second = await reopened.api.messages!.send(identity, { key: 'second-original-reply', kind: 'inform', replyTo: requests[1]!.messageId, text: 'SECOND_LINKED_REPLY_BODY' });
+    await expect.poll(async () => (await reopened.runtime.child(operationId)).report?.outcome, { timeout: 10_000 }).toBe('succeeded');
+    const snapshot = await reopened.api.snapshot(own);
+    expect(snapshot.history.filter(item => item.id === first.messageId)).toHaveLength(1);
+    expect(snapshot.history.filter(item => item.id === second.messageId)).toHaveLength(1);
+    for (const message of requests) expect((await reopened.api.messages!.get(own, message.messageId)).replyWait).toMatchObject({ state: 'replied', delivered: true });
+    expect((await reopened.api.messages!.list(own, { direction: 'outgoing' })).messages.map(message => message.messageId)).toEqual(requests.map(message => message.messageId));
+    expect(parentSteps).toBe(2); expect(childSteps).toBe(3); expect(reopened.errors).toEqual([]);
+  } finally { release.release(); }
+}, 40_000);
+
 it('passive family messages keep Agent and User identities, do not reopen finished work, and arrive once in a natural later Run', async () => {
   const entered = gate(); const release = gate();
   let parentSteps = 0; let childSteps = 0; let operationId = ''; let agentMessageId = '';

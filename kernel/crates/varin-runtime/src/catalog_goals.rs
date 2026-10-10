@@ -828,6 +828,7 @@ impl Catalog {
                 subject: d.id.clone(),
                 kind: "goal.ready".into(),
                 after_cursor,
+                deadline_at_ms: None,
                 trigger_cursor: None,
                 cancelled: false,
             };

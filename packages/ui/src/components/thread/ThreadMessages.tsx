@@ -1,12 +1,12 @@
 import React from 'react';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, ThreadRequestError } from '@varin/application-client';
 import type { ThreadFamilyAPI, ThreadIdentity, ThreadMessagesAPI } from '@varin/application-client';
-import type { FamilyList, MessageActivation, MessageActivationHold, MessageDirection, MessageKind, MessagePage, MessageReceipt, MessageSummary, MessageView } from '@varin/protocol';
+import type { FamilyList, MessageActivation, MessageActivationHold, MessageDirection, MessageKind, MessagePage, MessageReceipt, MessageSummary, MessageView, ReplyWaitView } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 
-type Props = { api: ThreadMessagesAPI; family?: ThreadFamilyAPI; identity: ThreadIdentity; eventCursor?: number };
+type Props = { api: ThreadMessagesAPI; family?: ThreadFamilyAPI; identity: ThreadIdentity; eventCursor?: number; cancelObservation?: (operationId: string) => Promise<void> };
 type Send = Parameters<ThreadMessagesAPI['send']>[1];
 const holdLabels: Record<MessageActivationHold, string> = {
   manual_pause: 'manually paused', question: 'awaiting a user answer', goal_blocked: 'Goal control or budget is blocking work',
@@ -20,6 +20,14 @@ function activationText(activation: MessageActivation): string {
     case 'cancelled': return `Request activation cancelled${activation.runId ? ` · ${activation.runId}` : ''}`;
     case 'failed': return `Request activation failed: ${activation.code}${activation.executionId ? ` · execution ${activation.executionId}` : ''}`;
   }
+}
+function replyWaitText(wait: ReplyWaitView): string {
+  if (wait.state === 'replied') return `Linked reply received: ${wait.replyMessageId}`;
+  if (wait.state === 'expired') return 'Reply wait deadline elapsed · the sent message remains available for a later reply';
+  if (wait.state === 'cancelled') return 'Reply observation cancelled · the sent message was not withdrawn';
+  if (wait.deadlineAtMs === null) return 'Waiting for a linked reply · no deadline';
+  const deadline = new Date(wait.deadlineAtMs);
+  return `Waiting for a linked reply · deadline ${Number.isNaN(deadline.getTime()) ? `Unix time ${wait.deadlineAtMs} ms` : deadline.toISOString()}`;
 }
 /** Rebuildable original-message views and an unsent draft; no UI queue or execution owner. */
 export function ThreadMessages(props: Props) {
@@ -35,7 +43,7 @@ function MessageCard(props: Props & { host: number }) {
     {visited && <div hidden={!open}><Messages {...props} open={open} /></div>}
   </section>;
 }
-function Messages({ api, family, identity, host, eventCursor, open }: Props & { host: number; open: boolean }) {
+function Messages({ api, family, identity, host, eventCursor, open, cancelObservation }: Props & { host: number; open: boolean }) {
   const [direction, setDirection] = React.useState<MessageDirection>('incoming');
   const [cursor, setCursor] = React.useState<string>();
   const [revision, setRevision] = React.useState(0);
@@ -112,6 +120,11 @@ function Messages({ api, family, identity, host, eventCursor, open }: Props & { 
         <p className="break-all">{message.actor.kind === 'user' ? 'User' : 'Agent'} · {message.senderThreadId} / {message.senderBranchId} → {message.targetThreadId} / {message.targetBranchId}</p>
         <p className="text-xs break-all">{message.messageId} · {message.state === 'delivered' ? `Delivered to history in ${message.deliveredRunId}` : message.state === 'cancelled' ? 'Delivery cancelled · original message retained' : message.activation.state === 'failed' ? 'Accepted · not delivered' : message.kind === 'inform' ? 'Accepted · awaiting a normal boundary' : 'Accepted · awaiting history delivery'}{message.replyTo ? ` · reply to ${message.replyTo}` : ''}</p>
         <p className="text-xs break-all">{activationText(message.activation)}</p>
+        {message.replyWait && <div className="space-y-1 text-xs break-all" aria-label="Reply observation">
+          <p>{replyWaitText(message.replyWait)}</p>
+          <p>Run {message.replyWait.runId} · observation {message.replyWait.waitId}{message.replyWait.state !== 'waiting' ? message.replyWait.delivered ? ' · observation result delivered' : ' · observation result not delivered' : ''}</p>
+          {direction === 'outgoing' && message.replyWait.state === 'waiting' && cancelObservation && <Button variant="ghost" size="sm" onClick={() => void cancelObservation(message.replyWait!.operationId)}>End reply observation</Button>}
+        </div>}
         <Button variant="ghost" size="sm" onClick={() => setSelected(message.messageId)}>Read message {message.messageId}</Button>
         {direction === 'incoming' && <Button variant="ghost" size="sm" disabled={pending || uncertain} onClick={() => { setReply(message); setKind('inform'); setAccepted(undefined); }}>Reply to {message.messageId}</Button>}
       </article>)}

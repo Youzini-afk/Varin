@@ -476,6 +476,7 @@ impl Catalog {
                 subject: op.id.clone(),
                 kind: "policy.resumed".into(),
                 after_cursor,
+                deadline_at_ms: None,
                 trigger_cursor: None,
                 cancelled: false,
             };

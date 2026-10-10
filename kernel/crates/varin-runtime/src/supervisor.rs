@@ -608,20 +608,41 @@ impl RunSupervisor {
         }
         Ok(())
     }
+    pub fn reconcile_observations(&self) -> Result<Vec<String>> {
+        self.catalog.lock().map_err(error)?.reconcile_waits().map_err(error)?;
+        // Child reports and fixed file results remain in their original producer/receipt owner.
+        // An unreadable report is retained as an error, not a gate for unrelated observations.
+        let mut failure = crate::catalog::child_delivery::reconcile_reports(&self.catalog).err().map(error);
+        let progress = (|| {
+            self.catalog.lock().map_err(error)?.interrupt_request_observations().map_err(error)?;
+            self.quiesce_observations()?;
+            loop {
+                let before = self.catalog.lock().map_err(error)?.observation_positions().map_err(error)?;
+                self.catalog.lock().map_err(error)?.select_ready_observations().map_err(error)?;
+                // Evaluate every original consumer even when another content owner failed. Each
+                // consumer still validates its own Run/Wait and publication boundary before writing.
+                for result in [
+                    crate::catalog::child_delivery::deliver_waits(&self.catalog),
+                    crate::catalog::process_delivery::deliver_waits(&self.catalog),
+                    crate::catalog::messages::reply_wait::deliver_waits(&self.catalog),
+                ] {
+                    if let Err(cause) = result { failure.get_or_insert_with(|| error(cause)); }
+                }
+                let after = self.catalog.lock().map_err(error)?.observation_positions().map_err(error)?;
+                if before == after || after.is_empty() { break; }
+            }
+            self.catalog.lock().map_err(error)?.pending_observation_continuations().map_err(error)
+        })();
+        if let Some(failure) = failure { return Err(failure); }
+        progress
+    }
     pub fn reconcile_message_requests(&self)->Result<()> {
-        self.catalog.lock().map_err(error)?.interrupt_request_observations().map_err(error)?;
-        // Original observation delivery is also the crash-recovery path after the cancellation
-        // committed. Quiesce the same waiter before its existing writer changes history.
-        loop {
-            let before=self.catalog.lock().map_err(error)?.request_observation_positions().map_err(error)?;
-            self.quiesce_child_waits()?;
-            self.quiesce_process_waits()?;
-            crate::catalog::child_delivery::deliver_waits(&self.catalog).map_err(error)?;
-            crate::catalog::process_delivery::deliver_waits(&self.catalog).map_err(error)?;
-            let after=self.catalog.lock().map_err(error)?.request_observation_positions().map_err(error)?;
-            if before==after || after.is_empty(){break}
-        }
-        crate::catalog::messages::activation::reconcile(&self.catalog).map_err(error)?;
+        let observations = self.reconcile_observations();
+        // Legal request activation is a separate ingress owner. Its original guards decide
+        // eligibility; a failed, unrelated observation cannot suppress this event-driven pass.
+        let activation = crate::catalog::messages::activation::reconcile(&self.catalog).map_err(error);
+        observations?;
+        activation?;
         Ok(())
     }
     pub fn resume_policy_pause(&self, run_id: &str, wait_id: &str) -> Result<crate::catalog::policy_control::PolicyResumeReceipt> {
@@ -704,6 +725,9 @@ impl RunSupervisor {
     }
     /// A persisted child Wait has relinquished the history writer. Join only final teardown,
     /// never a running model/tool, before its durable report makes that same Run runnable.
+    pub fn quiesce_observations(&self) -> Result<()> {
+        self.quiesce_child_waits()?; self.quiesce_process_waits()?; self.quiesce_waits("reply-wait:")
+    }
     pub fn quiesce_child_waits(&self) -> Result<()> {
         self.quiesce_waits("child-wait:")
     }
@@ -711,6 +735,13 @@ impl RunSupervisor {
         self.quiesce_waits("process-wait:")
     }
     pub fn cancel_operation(&self, operation_id: &str) -> Result<crate::OperationMetadata> {
+        {
+            let mut catalog=self.catalog.lock().map_err(error)?;
+            let op=catalog.operation(operation_id).map_err(error)?;
+            if op.waiting_on.as_deref().is_some_and(crate::catalog::observations::is_observation_id) {
+                return catalog.cancel_observation(operation_id).map_err(error);
+            }
+        }
         self.cancel_operation_control(operation_id);
         self.catalog
             .lock()

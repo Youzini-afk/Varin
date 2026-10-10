@@ -233,8 +233,7 @@ impl RunAssembly {
         }
         if !is_context_job {
             start = crate::questions::configure(start, runtime.catalog());
-            start = crate::collaboration::configure(start, runtime.catalog());
-            start = crate::process_wait::configure(start, runtime.catalog());
+            start = crate::observations::configure(start, runtime.catalog());
         }
         if let Some(selected) = selected {
             let kinds: std::collections::BTreeSet<crate::tools::ToolKind> = selected

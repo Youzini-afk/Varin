@@ -994,7 +994,7 @@ fn new_user_execution_leaves_ended_goal_behind_but_preserves_active_pause_and_bu
 
 fn request_child(f:&mut Fixture,child:&ChildTask,key:&str)->varin_runtime::catalog::messages::MessageReceipt {
     use varin_runtime::catalog::messages::*;
-    let prepared=f.db.prepare_user_message(key.into(),child.parent_thread_id.clone(),child.parent_branch_id.clone(),MessageInput{target_thread_id:Some(child.child_thread_id.clone()),target_branch_id:Some(child.child_branch_id.clone()),reply_to:None,kind:MessageKind::Request,text:"/skill:ordinary-text does not acquire an explicit User skill".into()}).unwrap().load().unwrap();
+    let prepared=f.db.prepare_user_message(key.into(),child.parent_thread_id.clone(),child.parent_branch_id.clone(),MessageInput{wait:None,target_thread_id:Some(child.child_thread_id.clone()),target_branch_id:Some(child.child_branch_id.clone()),reply_to:None,kind:MessageKind::Request,text:"/skill:ordinary-text does not acquire an explicit User skill".into()}).unwrap().load().unwrap();
     f.db.admit_message(prepared).unwrap().receipt
 }
 #[test]

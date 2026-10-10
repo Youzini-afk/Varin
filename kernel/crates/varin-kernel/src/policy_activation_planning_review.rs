@@ -214,8 +214,7 @@ fn activated_planning_generation_uses_its_exact_model_and_private_credential_own
         .unwrap();
     start.provider = bridge.wrap_models(&run, start.provider).unwrap();
     start = crate::questions::configure(start, catalog.clone());
-    start = crate::collaboration::configure(start, catalog.clone());
-    start = crate::process_wait::configure(start, catalog.clone());
+    start = crate::observations::configure(start, catalog.clone());
     let input = catalog
         .lock()
         .unwrap()

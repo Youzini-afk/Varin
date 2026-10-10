@@ -35,7 +35,7 @@ impl Fixture {
     }
     fn with_tools(goal: bool, native: Vec<ToolSchema>, selected: Vec<String>) -> Self {
         let mut f = dispatch::Fixture::new_host_child_with_native(true, false, None, selected, native);
-        f.launch.policy = crate::process_wait::default_policy_identity();
+        f.launch.policy = crate::observations::default_policy_identity();
         // The real parent policy graph already committed private {"stage": 1}; the child must
         // nevertheless start with null. No checkpoint is copied or fabricated for the child.
         let persisted = rusqlite::Connection::open_with_flags(
@@ -176,7 +176,7 @@ impl Fixture {
             .unwrap()
             .prepare_policy_change(
                 &self.run.id,
-                crate::process_wait::default_policy_identity(),
+                crate::observations::default_policy_identity(),
                 crate::policy::effective_identity(artifact(generation).identity),
                 vec![model],
                 PolicyTarget::Extension {

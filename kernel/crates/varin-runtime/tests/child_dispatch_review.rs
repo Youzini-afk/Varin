@@ -1092,3 +1092,46 @@ fn original_no_send_receipt_does_not_wait_for_a_nonexistent_native_process() {
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn independent_child_report_body_failure_keeps_healthy_report_and_receipt_admission() {
+    let mut f = Fixture::new();
+    let broken = f.accept();
+    f.settle_exchange();
+    let call = f.admit_policy_call(ToolCall {
+        call_id:"healthy-sibling".into(),name:"dispatch".into(),schema_version:"1".into(),
+        arguments:serde_json::to_value(&f.input).unwrap(),
+    });
+    let healthy=f.db.accept_child(&call,f.input.clone(),f.pin.clone(),f.launch.clone()).unwrap();
+    f.settle_policy_call(&call,"preparing_child");
+    let mut broken_item=None;
+    for child in [&broken,&healthy] {
+        let (source,proposal,basis)=child_context(child);
+        let prepared=f.db.prepare_child(&child.execution_id,source,proposal,basis).unwrap();
+        let run=prepared.receipt.unwrap().run_id;
+        let epoch=f.db.epoch();
+        f.db.commit_execution(&run,epoch,&ExecutionRecord::StateChanged{state:RunState::Runnable,waiting_on:None}).unwrap();
+        let item=f.db.append_history(&run,epoch,f.db.head(&child.child_branch_id).unwrap().as_deref(),HistorySource::Assistant,serde_json::to_value(ConversationItem {
+            id:format!("report:{}",child.execution_id),resource_activation:None,provenance:Provenance::Assistant,
+            content:Content::Text{text:format!("Independent report {}",child.execution_id)},opaque:None,
+        }).unwrap(),None).unwrap();
+        f.db.commit_execution(&run,epoch,&ExecutionRecord::StateChanged{state:RunState::Completed,waiting_on:None}).unwrap();
+        if child.execution_id==broken.execution_id {broken_item=Some(item.id);}
+    }
+    let fault=rusqlite::Connection::open(f.root.join("conversation.sqlite")).unwrap();
+    let raw:String=fault.query_row("SELECT body FROM history WHERE id=?1",[broken_item.unwrap()],|r|r.get(0)).unwrap();
+    let metadata:serde_json::Value=serde_json::from_str(&raw).unwrap();
+    let hash=metadata["content"]["content_object"].as_str().unwrap().strip_prefix("sha256-").unwrap();
+    let path=f.root.join("content/objects").join(&hash[..2]).join(&hash[2..]);
+    let held=path.with_extension("fault-injection");std::fs::rename(&path,&held).unwrap();
+    let runtime=varin_runtime::supervisor::RunSupervisor::new(f.db);
+    assert!(runtime.reconcile_observations().is_err());
+    let owner=runtime.catalog();let db=owner.lock().unwrap();
+    assert!(db.child_task(&broken.operation_id).unwrap().report.is_none());
+    assert!(db.child_task(&healthy.operation_id).unwrap().report.is_some());
+    assert!(db.operation(&healthy.operation_id).unwrap().external_receipt.is_some());
+    drop(db);std::fs::rename(held,path).unwrap();
+    runtime.reconcile_observations().unwrap();
+    assert!(owner.lock().unwrap().child_task(&broken.operation_id).unwrap().report.is_some());
+    drop(owner);drop(runtime);drop(fault);std::fs::remove_dir_all(f.root).unwrap();
+}

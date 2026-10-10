@@ -52,9 +52,7 @@ fn storage(error: impl ToString) -> ExecutionError {
     ExecutionError::new("policy_selection", error.to_string())
 }
 pub(crate) fn effective_identity(identity: PolicyIdentity) -> PolicyIdentity {
-    crate::process_wait::policy_identity(crate::collaboration::policy_identity(
-        crate::questions::policy_identity(identity),
-    ))
+    crate::observations::policy_identity(crate::questions::policy_identity(identity))
 }
 impl PolicyBridge {
     pub(crate) fn new(output: impl Into<crate::transport::Sender>) -> Self {

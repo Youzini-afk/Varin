@@ -771,6 +771,7 @@ impl Catalog {
             subject: run_id.into(),
             kind: "launch.prepared".into(),
             after_cursor,
+            deadline_at_ms: None,
             trigger_cursor: None,
             cancelled: false,
         };

@@ -45,11 +45,15 @@ export interface MessageReceipt {
   kind: MessageKind;
   replyTo: string | null;
   acceptedCursor: number;
+  acceptedAtMs: number;
 }
+
+export interface ReplyWaitView { waitId: string; operationId: string; runId: string; deadlineAtMs: number | null; state: 'waiting' | 'replied' | 'expired' | 'cancelled'; replyMessageId: string | null; delivered: boolean }
 
 export interface MessageSummary extends MessageReceipt {
   state: 'queued' | 'delivered' | 'cancelled';
   activation: MessageActivation;
+  replyWait: ReplyWaitView | null;
   deliveredRunId: string | null;
   deliveredCursor: number | null;
 }
@@ -1525,6 +1529,7 @@ export interface ChildWait {
   after_cursor: number;
   trigger_cursor: number | null;
   cancelled: boolean;
+  deadline_at_ms: number | null;
 }
 
 export interface FamilyListParams {

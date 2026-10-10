@@ -213,8 +213,7 @@ export type KernelMethod =
   | "runtime.tree.cancel"
   | "runtime.child.capabilities"
   | "runtime.child.release"
-  | "runtime.process.wait.reconcile"
-  | "runtime.child.reconcile"
+  | "runtime.observations.reconcile"
   | "runtime.child.wait.cancel"
   | "runtime.family.list"
   | "runtime.family.runs"
@@ -269,11 +268,15 @@ export interface MessageReceipt {
   kind: MessageKind;
   replyTo: string | null;
   acceptedCursor: number;
+  acceptedAtMs: number;
 }
+
+export interface ReplyWaitView { waitId: string; operationId: string; runId: string; deadlineAtMs: number | null; state: 'waiting' | 'replied' | 'expired' | 'cancelled'; replyMessageId: string | null; delivered: boolean }
 
 export interface MessageSummary extends MessageReceipt {
   state: 'queued' | 'delivered' | 'cancelled';
   activation: MessageActivation;
+  replyWait: ReplyWaitView | null;
   deliveredRunId: string | null;
   deliveredCursor: number | null;
 }
@@ -3042,6 +3045,7 @@ export interface ChildWait {
   after_cursor: number;
   trigger_cursor: number | null;
   cancelled: boolean;
+  deadline_at_ms: number | null;
 }
 
 export interface FamilyListParams {
@@ -3353,8 +3357,7 @@ export type KernelMethodParams = {
   "runtime.tree.cancel": TreeCancelParams;
   "runtime.child.capabilities": KernelEmptyParams;
   "runtime.child.release": ChildExecutionParams;
-  "runtime.process.wait.reconcile": KernelEmptyParams;
-  "runtime.child.reconcile": KernelEmptyParams;
+  "runtime.observations.reconcile": KernelEmptyParams;
   "runtime.child.wait.cancel": ChildWaitParams;
   "runtime.family.list": FamilyListParams;
   "runtime.family.runs": FamilyRunsParams;
@@ -5161,16 +5164,7 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
-      method: "runtime.process.wait.reconcile";
-      params: KernelEmptyParams;
-      epoch?: string;
-      grantId?: string;
-    }
-  | {
-      v: typeof KERNEL_PROTOCOL_VERSION;
-      kind: "request";
-      id: string;
-      method: "runtime.child.reconcile";
+      method: "runtime.observations.reconcile";
       params: KernelEmptyParams;
       epoch?: string;
       grantId?: string;

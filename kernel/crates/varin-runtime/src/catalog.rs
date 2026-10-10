@@ -38,7 +38,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 30;
+pub(crate) const FORMAT: i64 = 31;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -1109,6 +1109,7 @@ impl Catalog {
             subject: subject.into(),
             kind: kind.into(),
             after_cursor,
+            deadline_at_ms: None,
             trigger_cursor: None,
             cancelled: false,
         };
@@ -1147,6 +1148,10 @@ impl Catalog {
             }
             let run: Run = record(&tx, "runs", &wait.run_id)?;
             if run.state.terminal() || run.cancel_requested {
+                continue;
+            }
+            if wait.kind == messages::reply_wait::REPLY_EVENT {
+                if messages::reply_wait::resolve(&tx, &mut wait, observations::wall_time_ms()?)? { count += 1; }
                 continue;
             }
             let cursor:Option<u64>=tx.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind=?2 AND cursor>?3 ORDER BY cursor LIMIT 1",params![wait.subject,wait.kind,sql_number(wait.after_cursor)?],|r|read_number(r,0)).optional()?;
@@ -1345,6 +1350,7 @@ impl Catalog {
                         subject: run.id.clone(),
                         kind: "recovery.reconciled".into(),
                         after_cursor,
+                        deadline_at_ms: None,
                         trigger_cursor: None,
                         cancelled: false,
                     };
@@ -1533,6 +1539,7 @@ CREATE TABLE history(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES thre
 CREATE INDEX history_run ON history(run_id);
 CREATE TABLE runs(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),body TEXT NOT NULL,context_checkpoint_id TEXT REFERENCES context_checkpoints(id));
 CREATE INDEX runs_branch ON runs(branch_id);
+CREATE INDEX runs_waiting ON runs(json_extract(body,'$.waiting_on')) WHERE json_extract(body,'$.state')='waiting';
 CREATE TABLE commands(id TEXT PRIMARY KEY,intent TEXT NOT NULL,receipt TEXT NOT NULL);
 CREATE TABLE operations(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),body TEXT NOT NULL);
 CREATE INDEX operations_run ON operations(run_id);
@@ -1610,6 +1617,8 @@ pub mod context;
 pub mod family;
 #[path = "catalog_messages.rs"]
 pub mod messages;
+#[path = "catalog_observations.rs"]
+pub mod observations;
 
 #[path = "catalog_history.rs"]
 pub mod history_views;
@@ -1742,10 +1751,4 @@ pub(super) fn request_cancel_operation_in(tx: &Transaction<'_>, key: &str) -> Re
         Value::Null,
     )?;
     Ok(op)
-}
-
-/// A superseding input ends each original observation. Keep the existing Run parked until
-/// their cancellation or completed-result facts have all reached the legal history boundary.
-pub(super) fn next_ready_dependency_wait(db:&Connection,run:&str)->Result<Option<String>> {
-    Ok(db.query_row("SELECT w.id FROM operations o JOIN waits w ON w.id=json_extract(o.body,'$.waiting_on') WHERE o.run_id=?1 AND json_extract(o.body,'$.phase')!='terminal' AND json_extract(o.body,'$.execution_owner.kind')='kernel' AND json_extract(o.body,'$.executor') IN ('wait_child','wait_process') AND (json_extract(w.body,'$.cancelled')=1 OR json_extract(w.body,'$.trigger_cursor') IS NOT NULL) ORDER BY o.rowid LIMIT 1",[run],|r|r.get(0)).optional()?)
 }
