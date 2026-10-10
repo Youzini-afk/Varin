@@ -262,6 +262,10 @@ impl ContentStore {
             UNION ALL SELECT json_extract(p.value,'$.body') FROM run_launches l,json_each(l.body,'$.selection.policy_models') p");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.result.answer_ref') FROM operations WHERE json_extract(body,'$.executor')='ask_user' AND json_extract(body,'$.result.answer_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT state_ref FROM policy_checkpoints UNION ALL SELECT action_ref FROM policy_checkpoints");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.input_ref') FROM child_tasks
+            UNION ALL SELECT json_extract(body,'$.configuration_ref') FROM child_tasks
+            UNION ALL SELECT json_extract(body,'$.launch.tools_ref') FROM child_tasks
+            UNION ALL SELECT json_extract(body,'$.launch.base_tools_ref') FROM child_tasks");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.body_ref') FROM operations WHERE json_extract(body,'$.intent.kind') IN ('policy_read_graph_v1','policy_model_job_v1')
             UNION ALL SELECT json_object('content_object',json_extract(receipt,'$.output.content_ref')) FROM policy_graph_nodes WHERE json_extract(receipt,'$.output.content_ref') IS NOT NULL");
         let mut references=Vec::new();

@@ -207,9 +207,10 @@ impl ControlCommands {
                     .lock()
                     .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
                 catalog.reconcile_child_reports().map_err(domain)?;
-                Ok(serde_json::to_value(
-                    catalog.child_task(&p.operation_id).map_err(domain)?,
-                )?)
+                let child = catalog.child_task(&p.operation_id).map_err(domain)?;
+                let read = catalog.capture_child_read(child);
+                drop(catalog);
+                Ok(serde_json::to_value(read.load().map_err(domain)?)?)
             }
             "runtime.child.reconcile"
             | "runtime.child.wait.cancel"

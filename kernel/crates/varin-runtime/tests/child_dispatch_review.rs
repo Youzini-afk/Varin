@@ -88,6 +88,31 @@ fn authority_cannot_be_forged_by_another_run_policy_origin_or_expanded_child_too
 }
 
 #[test]
+fn child_body_roots_survive_collection_and_broken_task_text_does_not_block_controls() {
+    let mut f = Fixture::new();
+    let child = f.accept();
+    let (source,proposal,basis) = child_context(&child);
+    let child = f.db.prepare_child(&child.operation_id,source,proposal,basis).unwrap();
+    f.db.collect_content_objects().unwrap();
+    let view = f.db.capture_child_read(child.clone()).load().unwrap();
+    assert_eq!(view.input,f.input);
+    assert_eq!(view.launch.tools,f.launch.tools);
+    assert!(serde_json::to_value(&child).unwrap().get("input").is_none());
+    let hash=child.input_ref["content_object"].as_str().unwrap().strip_prefix("sha256-").unwrap();
+    std::fs::write(f.root.join("content/objects").join(&hash[..2]).join(&hash[2..]),b"damaged task body").unwrap();
+    assert!(f.db.capture_child_read(child.clone()).load().is_err());
+    let receipt=child.receipt.as_ref().unwrap();
+    assert_eq!(f.db.task_family(&receipt.run_id,f.db.epoch()).unwrap(),child.parent_thread_id);
+    assert_eq!(f.db.require_child_parent(&f.context.run_id,&child.operation_id).unwrap().child_thread_id,child.child_thread_id);
+    f.db.cancel_child(&child.operation_id).unwrap();
+    assert!(f.db.run(&receipt.run_id).unwrap().cancel_requested);
+    assert!(f.db.mark_child_resources_released(&child.operation_id).unwrap().resources_released);
+    let root=f.root.clone();
+    drop(f);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn preparation_failure_before_dispatch_exchange_commit_preserves_the_real_receipt_and_report() {
     let mut f = Fixture::new();
     let child = f.accept();

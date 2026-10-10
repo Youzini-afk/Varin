@@ -21,6 +21,8 @@ mod input_commands;
 
 #[path="agent_controls.rs"]
 mod control_commands;
+#[path="agent_children.rs"]
+mod child_commands;
 
 fn run_cancellation_receipt(run: &varin_runtime::Run) -> Value {
     json!({"id":run.id,"thread_id":run.thread_id,"branch_id":run.branch_id,"state":run.state,
@@ -386,6 +388,16 @@ pub(crate) fn spawn(
                                 done(&response_id); let _ = response_sender.send(response);
                             });
                             deferred = true; return Ok(Value::Null);
+                        }
+                        if matches!(method,"runtime.child.list"|"runtime.child.for_thread"|"runtime.child.inspect"|"runtime.child.release"|"runtime.child.fail"|"runtime.child.report.read") {
+                            let runtime=runtime.clone();let method=method.to_owned();
+                            let response_id=id.clone();let response_sender=responses.clone();let done=finished.clone();let cancelled=cancellation.clone();
+                            thread::spawn(move||{
+                                let result=child_commands::execute(runtime,&method,params,&cancelled);
+                                let response=match result{Ok(value)=>response_ok(&response_id,value),Err(error)=>response_error(&response_id,&error)};
+                                done(&response_id);let _=response_sender.send(response);
+                            });
+                            deferred=true;return Ok(Value::Null);
                         }
                         if matches!(method,"runtime.thread.create"|"runtime.input.submit"|"runtime.input.enqueue"|"runtime.input.edit"|"runtime.input.cancel"|"runtime.input.inspect"|"runtime.input.list"|"runtime.child.prepare") {
                             let order=input_order;
@@ -911,24 +923,8 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
     }
 
     match method {
-        "runtime.child.report.read" => {let p:ChildReportReadParams=serde_json::from_value(params)?;
-            let offset=usize::try_from(p.offset.unwrap_or(0)).map_err(|_|KernelError::Protocol("invalid offset".into()))?;
-            let max=usize::try_from(p.max_bytes.unwrap_or(65536)).map_err(|_|KernelError::Protocol("invalid maxBytes".into()))?;
-            Ok(serde_json::to_value(catalog.read_child_report(&p.operation_id,&p.item_id,offset,max).map_err(domain)?)?)},
         "runtime.child.sources.pending" => Ok(serde_json::to_value(catalog.unaccepted_child_sources().map_err(domain)?)?),
         "runtime.child.sources.release" => {let p:OperationParams=serde_json::from_value(params)?;catalog.mark_unaccepted_child_source_released(&p.operation_id).map_err(domain)?;Ok(json!({}))},
-        "runtime.child.list" => Ok(serde_json::to_value(catalog.child_tasks().map_err(domain)?)?),
-        "runtime.child.for_thread" => { let p: ThreadParams = serde_json::from_value(params)?; Ok(serde_json::to_value(catalog.child_task_for_thread(&p.thread_id).map_err(domain)?)?) },
-        "runtime.child.inspect" | "runtime.child.cancel" | "runtime.child.release" => {
-            let p: OperationParams = serde_json::from_value(params)?;
-            let child = match method { "runtime.child.cancel" => catalog.cancel_child(&p.operation_id), "runtime.child.release" => catalog.mark_child_resources_released(&p.operation_id), _ => catalog.child_task(&p.operation_id) }.map_err(domain)?;
-            Ok(serde_json::to_value(child)?)
-        }
-        "runtime.child.fail" => {
-            let p: ChildFailParams = serde_json::from_value(params)?;
-            if !["preparation_failed","source_unavailable","credentials_unavailable","binding_changed"].contains(&p.code.as_str()) {return Err(KernelError::Protocol("unknown child preparation failure".into()));}
-            Ok(serde_json::to_value(catalog.fail_child_preparation(&p.operation_id,&p.code).map_err(domain)?)?)
-        }
         "runtime.process.wait.reconcile" => Ok(serde_json::to_value(catalog.deliver_process_waits().map_err(domain)?)?),
         "runtime.child.reconcile" => Ok(serde_json::to_value(catalog.deliver_child_waits().map_err(domain)?)?),
         "runtime.child.wait.cancel" => {let p:ChildWaitParams=serde_json::from_value(params)?;Ok(serde_json::to_value(catalog.cancel_child_wait(&p.wait_id).map_err(domain)?)?)},
