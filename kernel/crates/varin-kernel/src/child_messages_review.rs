@@ -232,22 +232,85 @@ fn send_rejects_unselected_and_model_supplied_sender_before_any_message_is_accep
 #[path = "message_wait_review.rs"]
 mod wait_review;
 
+fn enable_fixed_file_reader(f: &mut Fixture) {
+    let source = f.original.source.as_ref().unwrap();
+    let root = f.root.join("file-storage");
+    let mut storage = crate::storage::Storage::open(&root, "child-file-host").unwrap();
+    for (id, capabilities) in [
+        ("writer", vec!["storage.admin"]),
+        ("child-source-grant", vec!["storage.read"]),
+    ] {
+        storage.issue_grant(&json!({"grantId":id,"hostGeneration":"child-files","capabilities":capabilities,"pathScopes":[""],"threadId":f.run.thread_id,"runId":f.run.id,"owningWorkspace":source.workspace_id,"executionWorkspace":source.execution_workspace_id}),"child-file-host","child-files",&root.to_string_lossy(),EPOCH).unwrap();
+    }
+    let mut invoke = |method: &str, params: Value| {
+        let (grant, params) = storage
+            .authorize(
+                Some("writer"),
+                EPOCH,
+                "child-file-host",
+                "child-files",
+                method,
+                &params,
+            )
+            .unwrap();
+        storage
+            .dispatch(method, &params, Some("writer"), &grant)
+            .unwrap()
+    };
+    invoke(
+        "branch.create.begin",
+        json!({"operationId":"file-fixture","builderId":"file-fixture","workspaceId":source.workspace_id,"branchId":source.branch_id,"draftBasePaths":[],"captureScopes":[]}),
+    );
+    invoke(
+        "branch.create.append",
+        json!({"builderId":"file-fixture","sequence":0,"entries":[{"path":"result.txt","state":{"kind":"directory","mode":493}}]}),
+    );
+    let branch = invoke(
+        "branch.create.finish",
+        json!({"operationId":"file-fixture","builderId":"file-fixture"}),
+    );
+    assert_eq!(branch["headRevision"], json!(source.revision.unwrap()));
+    let storage = Arc::new(Mutex::new(storage));
+    let (tx, _rx) = mpsc::sync_channel(1);
+    let bridge = crate::host_query::OwnerChannel::new("file-observation", tx);
+    let client = crate::file_observation::Client::new(
+        move |command| {
+            command.serve(
+                Some(&mut storage.lock().unwrap()),
+                EPOCH,
+                "child-file-host",
+                "child-files",
+            );
+            Ok(())
+        },
+        bridge,
+    );
+    f.assembly.resources = f.assembly.resources.clone().with_file_observations(client);
+}
+
 #[test]
 fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait() {
     use varin_runtime::catalog::followups::{
         observation::FollowupObservationState, FollowupActor, NextRunWaitState,
     };
-    for (trigger_kind, model) in ["at", "any", "all"].into_iter()
-        .flat_map(|kind| [true, false].map(|model| (kind, model))) {
+    for (trigger_kind, model) in ["at", "any", "all", "file"]
+        .into_iter()
+        .flat_map(|kind| [true, false].map(|model| (kind, model)))
+    {
         for wait in [false, true] {
-            let f = Fixture::with_tools(
+            let mut f = Fixture::with_tools(
                 false,
                 vec![crate::followup_tools::schema()],
                 vec!["follow_up".into()],
             );
+            if trigger_kind == "file" {
+                enable_fixed_file_reader(&mut f);
+            }
             let deadline = varin_runtime::catalog::observations::wall_time_ms().unwrap() + 60_000;
             let mut args = json!({"action":"register","trigger":{"kind":"at","atMs":deadline},"instruction":"Check this delegated task once at the requested time"});
-            if trigger_kind != "at" {
+            if trigger_kind == "file" {
+                args["trigger"] = json!({"kind":"all","sources":[{"kind":"file","path":"result.txt","condition":"exists"},{"kind":"file","path":"result.txt","condition":"changed"}]});
+            } else if trigger_kind != "at" {
                 args["trigger"] = json!({"kind":trigger_kind,"sources":[{"kind":"at","atMs":deadline},{"kind":"at","atMs":deadline+1}]});
             }
             if wait {
@@ -256,7 +319,7 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
             let calls = vec![ToolCall {
                 call_id: "one-check".into(),
                 name: "follow_up".into(),
-                schema_version: "2".into(),
+                schema_version: crate::followup_tools::schema().version,
                 arguments: args,
             }];
             if wait {
@@ -269,6 +332,11 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
             let followups = db.followups(&f.run.thread_id).unwrap();
             assert_eq!(followups.len(), 1);
             let value = &followups[0];
+            if trigger_kind == "file" {
+                assert!(value.sources[0].observed.is_some());
+                assert!(value.sources[1].observed.is_none());
+                assert!(value.sources[1].file.as_ref().unwrap().immutable);
+            }
             let FollowupActor::Agent {
                 run_id,
                 operation_id,
@@ -322,7 +390,8 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
 
 #[test]
 #[cfg(target_os = "linux")]
-fn native_followup_all_instants_deliver_original_wait_and_one_active_ingress_without_host_polling() {
+fn native_followup_all_instants_deliver_original_wait_and_one_active_ingress_without_host_polling()
+{
     use varin_runtime::catalog::followups::{
         observation::FollowupObservationState, NextRunWaitState,
     };
@@ -338,7 +407,7 @@ fn native_followup_all_instants_deliver_original_wait_and_one_active_ingress_wit
         vec![ToolCall {
             call_id: "wake-once".into(),
             name: "follow_up".into(),
-            schema_version: "2".into(),
+            schema_version: crate::followup_tools::schema().version,
             arguments: json!({"action":"register","trigger":{"kind":"all","sources":[{"kind":"at","atMs":deadline-100},{"kind":"at","atMs":deadline}]},"instruction":"Inspect current work once","wait":{}}),
         }],
     );
@@ -422,7 +491,7 @@ fn followup_get_list_and_control_consume_real_retained_user_instruction_from_bot
             .unwrap()
             .admit_followup_registration(prepared)
             .unwrap();
-        let calls=[json!({"action":"get","followupId":"user-instruction"}),json!({"action":"list"}),json!({"action":"control","followupId":"user-instruction","expectedRevision":1,"control":"cancel"})].into_iter().enumerate().map(|(n,arguments)|ToolCall{call_id:format!("manage-{n}"),name:"follow_up".into(),schema_version:"2".into(),arguments}).collect();
+        let calls=[json!({"action":"get","followupId":"user-instruction"}),json!({"action":"list"}),json!({"action":"control","followupId":"user-instruction","expectedRevision":1,"control":"cancel"})].into_iter().enumerate().map(|(n,arguments)|ToolCall{call_id:format!("manage-{n}"),name:"follow_up".into(),schema_version:crate::followup_tools::schema().version,arguments}).collect();
         execute(&f, model, calls, &mut OwnerReplies::default(), false);
         let read = rusqlite::Connection::open(f.root.join("conversation.sqlite")).unwrap();
         let mut values = Vec::new();

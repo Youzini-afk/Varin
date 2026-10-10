@@ -37,6 +37,7 @@ mod compute_resources;
 mod core;
 mod dispatch;
 pub(crate) mod file_mutations;
+pub(crate) mod file_observations;
 mod file_reconciliation;
 mod file_resource_leases;
 mod file_resources;
@@ -186,11 +187,16 @@ pub(crate) struct Storage {
     branch_write_builders: HashMap<String, BranchWriteBuilder>,
     verified_objects: BTreeSet<String>,
     file_roots: HashMap<String, FileRoot>,
+    observation_reads: HashMap<String, file_observations::ActiveRead>,
+    observation_hints: Option<Arc<dyn Fn(file_observations::Hint) + Send + Sync>>,
     file_leases: HashMap<String, FileLease>,
     retained_file_leases: HashMap<String, file_resource_leases::RetainedFileLease>,
     materializations: HashMap<String, materialization::ActiveMaterialization>,
     result_publications: BTreeSet<String>,
     processes: crate::process::ProcessManager,
+    process_receipt_wake: Option<crate::process::receipt_wake::Watch>,
+    process_receipt_notify: Option<Arc<dyn Fn() + Send + Sync>>,
+    process_receipt_wake_failure: Option<String>,
     computations: crate::compute::ComputeManager,
 }
 
@@ -198,6 +204,8 @@ impl Drop for Storage {
     fn drop(&mut self) {
         // Keep the catalog and storage lock alive through process drainage.
         // Field drop order alone would unlock before native children stop.
+        self.process_receipt_wake.take();
+        self.cancel_file_observation_reads();
         self.computations.shutdown();
         let _ = self.shutdown_processes();
     }

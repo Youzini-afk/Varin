@@ -8,6 +8,14 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-11 增量：原来源文件条件与取消恢复
+
+- 普通 `follow_up` **版本3** 与 User API 接入 file exists/changed/ready，单独或 flat Any/All 共用原 occurrence/input/Goal/root/child 链。Catalog **35** 保存原叶基线、实际 FileState、持久接受的 watch position 和 gap；Storage 原 operations/operation_owners 保存精确只读来源受理，ContentStore 保持正文 owner。live_root、原 materialized run root、fixed_branch 精确 revision 分别核验，不随 child 新结果改读来源。
+- 原 watcher 在基线前 ready，每次 open 独立 handle，同根共享 watcher；真实文件 capture/hash 在锁外 worker。busy/不稳定可保存 null baseline_pending，首次稳定基线不虚构 changed；gap 不证明离线 A→B→A。快照稳定与受管 writer/lease/process 空闲分开，持续 writer 不阻稳定 exists/changed，ready 不靠 quiet timer。原 Documents 目录 entry invalidation 同步接 Registry、semantic、LSP 与 Pi tracker。
+- 正常 grant retire 保 provenance，明确 revoke 拒新读并精确唤醒 fixed receipt。取消先挡原 generation，再等实际 reader drain；取消可选 tool Wait 不撤条件或杀进程。Storage 已受理但 Catalog 未提交的 User 意图可从原 pending projection 看到并明确取消，原 commands fence 防迟到受理、原 observer/pin 幂等释放；未知 key 不创建提前封禁，已交付定义和原 key 重试保留。没有第二清理库或过期推断。
+- 原 guardian 回执晚到且目标不再写的恢复窗口，复用一个临时 receipt 目录通知后按原 process/epoch/treeStopped 核短回执；不扫描 spool、不造第二终态、不以业务 Unknown 代替停止。实际组合还修复原工具登记 mutex 析构重入、同 key watch 误关和 reader 相互阻塞。
+- 最终 runtime **405/0、2 ignored**，kernel **109/0、11 ignored**，准确 fresh binary 原 guardian/Storage **3/3**；Host **83/1 skipped**、UI **75/75**、类型/lint/all-targets/协议与实际 bundle 通过。独审最终 Catalog7、Host5组和 Linux receipt-wake2项全绿，三个确认缺陷原条件复验闭合；构建同源和未验边界见[文件条件验收](../reviews/runtime-file-followups-2026-10-11.md)。其他领域事件、完整 Host/平台验收与两设计余项继续，默认切换和全面迁移仍交用户先验收后负责。
+
 ## 2026-10-11 增量：组合条件与原发生项
 
 - 普通 `follow_up` **版本2** 和 User API 接入 flat Any/All，逐叶授权原 At/ProcessStopped；Catalog **34** 保存每叶游标与实际观察证据，删除重复单一 operation_id，无新调度/正文 owner。All 部分命中跨 reopen/GC 保留，已到期叶退出 deadline；Any 实际 At 不等未命中进程，发生项冻结真实观察快照，后续来源不重触发。
@@ -419,7 +427,7 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 
 ## 能力清单与现有复用入口
 
-### 本轮底层验证与剩余边界
+### 早期底层验证（历史证据）
 
 - 跨 Run 的资源准入复用 Catalog 所属协调器，原子申请完整资源集合；冲突请求按队列推进，无关资源可继续。真实多 Engine 反例验证排队取消不派发、独立工作推进、后台 Job 保留占用及重启恢复。发现并修复了同步执行器已死但锁残留、以及执行端已停止却因业务效果未知而保留锁的问题。9 项新增回归、79 项 runtime 单测、8 项 kernel 单测和 26 项文件资源审计通过；Windows/macOS 路径行为未在本 Linux 环境验证。
 - 原生 file_list/file_search 已移除 10 ms 轮询，复用 compute 作业的输出/终态通知；生产者背压也改为事件等待。取消注册可移除，完成前先确认 cursor 释放 buffer credit。独立核验包括 1,000 个完成/取消交错、10,000 次正常等待无注册积累、真实超过 1 MiB 结果排空、截断清理及背压中撤权；新构建原生消费者 22/22、资源准入 9/9 和额外撤权反例通过。
@@ -429,27 +437,27 @@ MCP 工具共享不可变世代，Host 按具体世代及持有者保留连接�
 
 本轮 Host/Pi-host 类型、协议生成一致性与文档链接检查通过。已安装的 SDK 补丁实际参与上述测试；cloud lock 按官方 staging 的 production manifests 核对后完成 frozen install。该轮尚缺生成的 Web CLI/UI 产物，未验完整发行布局；后续 Linux 正式运行包证据见专节，仍不据此声明所有平台通过。
 
-下表的“现有入口”是迁移来源，不表示其中代码都应保留，亦不把既有实现误记为新原生合同已完成。
+下表按当前已发布增量更新；具体证据以上方各阶段记录为准。“现有入口”是复用来源，不表示其中代码都应保留，亦不把既有实现误记为新原生合同已完成。完整 Host/平台验收与用户负责的最终迁移另列，不混入源码能力状态。
 
 | 能力 | 当前入口/权威 | 目标交付 | 原生实现状态 |
 | --- | --- | --- | --- |
 | 会话、分支、运行中输入 | `packages/pi-host/src/session-host.ts`、`packages/runtime-broker` | ConversationStore + RunCoordinator；队列编辑、steering、停止、重连、历史回读 | 局部实现：持久队列、编辑/取消、边界输入/中断/nextRun；显式原生界面、固定 head 分页与对话分支已接入；默认路由迁移与完整恢复未完成 |
 | 模型、认证、推理用途 | Pi SDK、Host `connections`/`pi-config`/`small-model` | 各实际配置 transport、OAuth/云身份、模型覆盖、reasoning/opaque、多模态、usage；chat与embedding/rerank等各自合同 | 局部实现：native query/index embedding 复用真实配置/凭据 owner、共享纯transport和持久dispatch/usage事实；rerank及完整认证/模型覆盖未完成 |
 | 上下文、记忆checkpoint、压缩 | Pi harness/session history、Host `memory` | 原文保留；来源角色；冻结快照；祖先范围压缩；交付去重；即时记忆写入与稳定system快照 | 原生 checkpoint 与显式摘要 Run 已实现，产品接线验收中；自动预算触发与完整记忆流程未完成 |
-| 文件、草稿、恢复 | Rust `storage`；Host `documents`/`recovery`；UI Document Registry | 复用内容对象/条件写入/恢复；明确草稿owner；分支与磁盘效果区分；组合恢复可核对 | 未完成迁移，底层能力已存在 |
-| 工作分支、基线与dispatch | Host `harness/thread-services.ts`、`thread-runtime.ts`、`kernel/storage-adapter.ts` | 持久受理立即回执；准备独立作业；批量capture；真实一致性标记；无变更报告与代码集成分开 | 未完成 |
-| Shell、PTY、输出、进程树 | Rust `process` guardian；Host `kernel/process-service.ts`/`terminal` | 保留真实进程回执；推送I/O与stdin确认；控制独立；取消观察不同于终止进程 | 未完成迁移，guardian已存在 |
+| 文件、草稿、恢复 | Rust `storage`；Host `documents`/`recovery`；UI Document Registry | 复用内容对象/条件写入/恢复；明确草稿owner；分支与磁盘效果区分；组合恢复可核对 | 原生文件工具、固定/可写来源、结果保留与逐项集成已有闭环；完整草稿与历史/磁盘组合恢复的产品接线仍需完成 |
+| 工作分支、基线与dispatch | Host `harness/thread-services.ts`、`thread-runtime.ts`、`kernel/storage-adapter.ts` | 持久受理立即回执；准备独立作业；批量capture；真实一致性标记；无变更报告与代码集成分开 | 固定与可写 child 持久受理、原来源准备、递归取消、报告/WorkingResult 与逐项集成已接；更广捕获与恢复产品组合仍待 |
+| Shell、PTY、输出、进程树 | Rust `process` guardian；Host `kernel/process-service.ts`/`terminal` | 保留真实进程回执；推送I/O与stdin确认；控制独立；取消观察不同于终止进程 | 原生 spawn/持久观察/停止、PTY input/resize 回执、原进程终端与恢复已接；平台和产品完整验收仍待 |
 | LSP、结构/关键词/语义检索 | Host `lsp`/`search`/`structure`/`knowledge`；Rust `compute` | 按environment/project/config/view共享服务；来源修订明确；独立准备；不等待无关索引 | 局部实现：live_root 定义/引用/诊断及可组合关键词/结构/显式语义已接原 owner 与原生历史；真实reader切代、撤权和推理账本已验收。fixed/materialized 闭包、其余 LSP、rerank 与远端仍未完成 |
-| 任务协作、消息、wait | Host `harness` registry/services | 单一Thread/Run事实；有来源消息；Wait持久化与游标；结果恰当去重；旧世代不污染新执行 | 未完成 |
-| 计划、普通记忆、Bot知识 | Host `memory`/`knowledge`；普通Agent notes为Rust typed record | 保留各领域owner、权限和revision；不把所有知识塞入泛化状态库 | 未完成 |
-| Goal、自动接续、辅助模型 | Host `bots`/`pi-session-automation`/`run` | 显式Goal授权、暂停/预算/用量；等待不覆盖手动暂停；辅助请求独立身份 | 规划模型独立 Operation 已有局部验收；Goal 和自动接续仍未完成 |
-| 问题、follow-up、日历 | Pi extension UI bridge；Host `harness/followups.ts`/`scheduled-tasks` | 问答持久记录；到期非批准；发生项幂等；登记后重查防丢唤醒；时区/遗漏策略 | 未完成 |
+| 任务协作、消息、wait | Host `harness` registry/services | 单一Thread/Run事实；有来源消息；Wait持久化与游标；结果恰当去重；旧世代不污染新执行 | 真实 family 发现/互读、inform/request/reply、关联 Wait/期限、多观察屏障、child 独立新 Run 已接；完整 Host 与平台验收仍待 |
+| 计划、普通记忆、Bot知识 | Host `memory`/`knowledge`；普通Agent notes为Rust typed record | 保留各领域owner、权限和revision；不把所有知识塞入泛化状态库 | 普通 notes、真实自身计划、root/child 两调用来源、CAS 和原回执恢复已接；Bot 知识与完整自动记忆流程仍待 |
+| Goal、自动接续、辅助模型 | Host `bots`/`pi-session-automation`/`run` | 显式Goal授权、暂停/预算/用量；等待不覆盖手动暂停；辅助请求独立身份 | 显式 Goal、原用量/预算、暂停、依赖、root/child 自动接续及独立规划模型已接；其他辅助用途与完整产品验收仍待 |
+| 问题、follow-up、日历 | Pi extension UI bridge；Host `harness/followups.ts`/`scheduled-tasks` | 问答持久记录；到期非批准；发生项幂等；登记后重查防丢唤醒；时区/遗漏策略 | 问题/回答、一次 At/ProcessStopped、Any/All 与带时区日历发生项已接；原来源文件 exists/changed/ready 已接，其他领域来源继续 |
 | Computer Use、人工接管 | Host `computer`、`packages/computer-driver` | 实际桌面控制epoch；观察/动作/效果分开；紧急停止独立；释放按键与资源有证据 | 未完成；平台既有缺口不因原生化自动消失 |
-| MCP、脚本、用户扩展 | Pi MCP/codemode adapters；`extension-contract`/`extension-host`/`extension-sdk` | 原生MCP；单registry；脚本嵌套调用同权限/回执；完整async单元格；不另造插件管理器 | 未完成 |
-| 深层策略、发现与工作台 | 既有扩展service registry、Host/Surface和UI shells | CompositionPlan；Provider/Transform/Decision/Observer；AgentPolicy；按需合同查询；无UI后端 | context/Decision/Observer 与只读策略图已有局部验收；辅助规划模型已有局部验收，完整深层组合及工作台未完成 |
-| Web/材料/科研/Bot领域工具 | 现有Host领域服务与harness工具 | 通过相同Operations接入；保留材料来源、产物及用户配置行为 | 未完成 |
+| MCP、脚本、用户扩展 | Pi MCP/codemode adapters；`extension-contract`/`extension-host`/`extension-sdk` | 原生MCP；单registry；脚本嵌套调用同权限/回执；完整async单元格；不另造插件管理器 | 原生 MCP、普通扩展 tools/SDK、精确服务世代与 child 委派已接；MCP Tasks、持久 async 脚本、长输出与多模态映射仍待 |
+| 深层策略、发现与工作台 | 既有扩展service registry、Host/Surface和UI shells | CompositionPlan；Provider/Transform/Decision/Observer；AgentPolicy；按需合同查询；无UI后端 | 一般 ToolGraph、直接 child、Deliver/Pause、策略换绑、context/Decision/Observer、真实扩展/SDK 发现已有闭环；完整领域 Provider/Transform 覆盖与工作台仍待 |
+| Web/材料/科研/Bot领域工具 | 现有Host领域服务与harness工具 | 通过相同Operations接入；保留材料来源、产物及用户配置行为 | 普通材料入口已接原领域 owner；Web/科研/Bot 其余 native 身份与完整能力继续 |
 | Web/Electron/Mobile、远端、发行 | `application-client`/`protocol`、各surface、Host环境服务、kernel packaging | 同一后端生命周期；snapshot/cursor投影；环境绑定/fencing；平台驱动与安装升级实际验证 | 未完成 |
-| 用户资产与Pi退出 | Pi JSONL/配置/凭据引用/用户扩展源文件 | 一次性导入保留entry ID、分支、工具配对、压缩、opaque及未知项；原文件保留；切换结算在途工作 | 未开始 |
+| 用户资产与Pi退出 | Pi JSONL/配置/凭据引用/用户扩展源文件 | 一次性导入保留entry ID、分支、工具配对、压缩、opaque及未知项；原文件保留；切换结算在途工作 | 交付迁移前验收入口与清单；用户验收后负责默认切换、Pi 删除及资产全面迁移，当前未执行 |
 
 ## 已核验增量：策略主动读取与可恢复结果
 

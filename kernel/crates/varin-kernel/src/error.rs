@@ -2,6 +2,41 @@ use serde_json::Value;
 use std::io;
 use thiserror::Error;
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum FileObservationSourceCode {
+    RootChanged,
+    SourceUnavailable,
+    AuthorityDenied,
+    WatchUnavailable,
+    Cancelled,
+}
+impl FileObservationSourceCode {
+    pub(crate) fn parse(code: &str) -> Option<Self> {
+        match code {
+            "root_changed" => Some(Self::RootChanged),
+            "source_unavailable" => Some(Self::SourceUnavailable),
+            "authority_denied" => Some(Self::AuthorityDenied),
+            "watch_unavailable" => Some(Self::WatchUnavailable),
+            "cancelled" => Some(Self::Cancelled),
+            _ => None,
+        }
+    }
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::RootChanged => "root_changed",
+            Self::SourceUnavailable => "source_unavailable",
+            Self::AuthorityDenied => "authority_denied",
+            Self::WatchUnavailable => "watch_unavailable",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+impl std::fmt::Display for FileObservationSourceCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Error)]
 pub(crate) enum KernelError {
     #[error("protocol error: {0}")]
@@ -12,6 +47,12 @@ pub(crate) enum KernelError {
     Authorization(String),
     #[error("operation error: {0}")]
     Operation(String),
+    #[error("file observation source failed: {0}")]
+    FileObservationSource(FileObservationSourceCode),
+    #[error("file observation is busy under an existing writer or capture lease")]
+    FileObservationBusy,
+    #[error("snapshot changed: {0}")]
+    SnapshotChanged(String),
     #[error("activation held: {0}")]
     ActivationHeld(String),
     #[error("operation cancelled")]
@@ -39,7 +80,10 @@ pub(crate) fn error_code(error: &KernelError) -> &'static str {
         KernelError::Protocol(_) => "protocol-error",
         KernelError::Storage(_) => "storage-error",
         KernelError::Authorization(_) => "unauthorized",
-        KernelError::Operation(_) => "operation-error",
+        KernelError::Operation(_)
+        | KernelError::FileObservationSource(_)
+        | KernelError::FileObservationBusy
+        | KernelError::SnapshotChanged(_) => "operation-error",
         KernelError::Cancelled => "cancelled",
         KernelError::ActivationHeld(_) => "activation-held",
     }

@@ -794,7 +794,14 @@ export const createLanguageSupervisor = ({
     try {
       if (!fileWatches.has(workspaceId)) {
         fileWatches.set(workspaceId, documents.watch(workspaceId, event => {
-          if (event.resource) observeDocumentMutation({ ...event.resource, kind: event.kind === 'deleted' ? 'deleted' : event.kind === 'created' ? 'created' : 'modified' });
+          if (event.kind === 'invalidated' && event.resource) {
+            const resources = new Set<string>();
+            for (const current of sessions.values()) if (current.workspaceId === workspaceId) {
+              for (const resourceId of current.documents.keys()) if (resourceId === event.resource.resourceId
+                || resourceId.startsWith(`${event.resource.resourceId}/`)) resources.add(resourceId);
+            }
+            for (const resourceId of resources) observeDocumentMutation({ workspaceId, resourceId, kind: 'modified' });
+          } else if (event.resource) observeDocumentMutation({ ...event.resource, kind: event.kind === 'deleted' ? 'deleted' : event.kind === 'created' ? 'created' : 'modified' });
           else if (event.kind === 'reset') {
             const resources = new Set<string>();
             for (const current of sessions.values()) {

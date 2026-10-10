@@ -1190,3 +1190,6 @@ fn one_explicit_check_enters_original_dependency_goal_without_clearing_subscript
 
 #[path = "fixtures/followup_conditions.rs"]
 mod conditions;
+
+#[path = "fixtures/followup_files.rs"]
+mod files;

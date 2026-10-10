@@ -1,3 +1,5 @@
+import { FileObservationBridge, type PrivateFileObservationResponse } from './file-observation-bridge.js';
+import type { FileObservationOwner } from './file-observation-owner.js';
 import type { KernelRecoveryOperationConflictsResult, McpBinding, LiveMcpBinding } from './protocol.generated.js';
 import { PlanBridge, type PrivatePlanResponse } from './plan-bridge.js';
 import type { PlanOwner } from './plan-owner.js';
@@ -596,6 +598,7 @@ export class KernelClient {
   private readonly memoryBridge: MemoryBridge;
   private readonly contextBridge: ContextBridge;
   private readonly resourceBridge: ResourceBridge;
+  private readonly fileObservationBridge: FileObservationBridge;
   private readonly planBridge: PlanBridge;
   private readonly retrievalBridge: RetrievalBridge;
   private readonly issuedGrants = new Map<string, KernelGrantHandle>();
@@ -630,6 +633,8 @@ export class KernelClient {
       () => this.failAll(new KernelClientError({ code: "retrieval-channel-failed", message: "Private retrieval channel failed", retryable: false }), true));
     this.memoryBridge = new MemoryBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "memory-channel-failed", message: "Private memory channel failed", retryable: false }), true));
+    this.fileObservationBridge = new FileObservationBridge(() => this.epoch, response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: 'file-observation-channel-failed', message: 'Private file observation channel failed', retryable: false }), true));
     this.resourceBridge = new ResourceBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "resource-channel-failed", message: "Private resource channel failed", retryable: false }), true));
     this.contextBridge = new ContextBridge(() => this.epoch, response => this.write(response),
@@ -701,6 +706,7 @@ export class KernelClient {
   setMemoryOwner(owner: MemoryToolOwner): void { this.memoryBridge.setOwner(owner); }
   setContextOwner(owner: ContextOwner): void { this.contextBridge.setOwner(owner); }
   setResourceOwner(owner: ResourceOwner): void { this.resourceBridge.setOwner(owner); }
+  setFileObservationOwner(owner: FileObservationOwner): void { this.fileObservationBridge.setOwner(owner); }
   setPlanOwner(owner: PlanOwner): void { this.planBridge.setOwner(owner); }
   setLanguageOwner(owner: LanguageToolOwner): void { this.languageBridge.setOwner(owner); }
   toolAvailability(runId:string,name:string,version:string):boolean|undefined{return this.toolBridge.availability(runId,name,version);}
@@ -937,7 +943,7 @@ export class KernelClient {
         pending?.release();
         return;
       }
-      if (this.credentialBridge.consume(response) || this.resourceBridge.consume(response) || this.contextBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.toolBridge.consume(response) || this.policyBridge.consume(response)) return;
+      if (this.credentialBridge.consume(response) || this.fileObservationBridge.consume(response) || this.resourceBridge.consume(response) || this.contextBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.toolBridge.consume(response) || this.policyBridge.consume(response)) return;
       if (response.kind === "runtime-event") {
         if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch
           || !["durable", "progress"].includes(response.stream)
@@ -1010,6 +1016,7 @@ export class KernelClient {
     this.memoryBridge.close();
     this.contextBridge.close();
     this.resourceBridge.close();
+    this.fileObservationBridge.close();
     this.planBridge.close();
     this.retrievalBridge.close();
     this.issuedGrants.clear();
@@ -1034,10 +1041,10 @@ export class KernelClient {
     if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
-  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateToolFrame | PrivatePolicyResponse | PrivateMemoryResponse | PrivateContextResponse | PrivateResourceResponse | PrivatePlanResponse | PrivateLanguageResponse | PrivateRetrievalResponse): Promise<void> {
+  private async write(request: KernelRequest | PrivateCredentialResponse | PrivateToolFrame | PrivatePolicyResponse | PrivateMemoryResponse | PrivateContextResponse | PrivateResourceResponse | PrivateFileObservationResponse | PrivatePlanResponse | PrivateLanguageResponse | PrivateRetrievalResponse): Promise<void> {
     const transport = this.transport;
     if (!transport) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel transport is unavailable", retryable: true });
-    const control = request.kind === "cancel" || request.kind === "credential-response" || request.kind === "host-tool-revoked"
+    const control = request.kind === "cancel" || request.kind === "credential-response" || request.kind === "host-tool-revoked" || request.kind === "file-observation-response"
       || (request.kind === "request" && CONTROL_METHODS.has(request.method));
     await transport.send(request as unknown as Record<string, unknown>, control ? "control" : "data");
   }
@@ -1709,6 +1716,7 @@ export class KernelClient {
     this.memoryBridge.close();
     this.contextBridge.close();
     this.resourceBridge.close();
+    this.fileObservationBridge.close();
     this.planBridge.close();
     this.retrievalBridge.close();
     this.issuedGrants.clear();

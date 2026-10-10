@@ -1307,8 +1307,16 @@ it('excludes the dispatching round admission without ignoring real writer activi
     const quiet = await harness.authority.beginCapture(harness.identity.workspaceId, options);
     expect(await harness.authority.completeCapture(quiet)).toMatchObject({ stable: true });
     const capture = await harness.authority.beginCapture(harness.identity.workspaceId, options);
+    const observations: Promise<unknown>[] = [];
+    const unsubscribe = harness.authority.subscribeMutationState(workspaceId => {
+      observations.push(harness.authority.inspectMutation(workspaceId));
+    });
     const writer = await harness.authority.registerWriter(harness.token(), { purpose: 'documents-write' });
     await writer.close();
+    unsubscribe();
+    const states = await Promise.all(observations);
+    expect(states.at(-1)).toMatchObject({ activeWriters: [{ writerId: round.writerId }] });
+    expect(states.length).toBeGreaterThanOrEqual(2);
     expect(await harness.authority.completeCapture(capture)).toMatchObject({
       stable: false, reasons: expect.arrayContaining(['writer-activity']),
     });

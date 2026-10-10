@@ -197,11 +197,16 @@ impl Storage {
             branch_write_builders: HashMap::new(),
             verified_objects: BTreeSet::new(),
             file_roots: HashMap::new(),
+            observation_reads: HashMap::new(),
+            observation_hints: None,
             file_leases: HashMap::new(),
             retained_file_leases: HashMap::new(),
             materializations: HashMap::new(),
             result_publications: BTreeSet::new(),
             processes: crate::process::ProcessManager::default(),
+            process_receipt_wake: None,
+            process_receipt_notify: None,
+            process_receipt_wake_failure: None,
             computations: crate::compute::ComputeManager::default(),
         };
         // A process may have exited after the SQLite commit and before the

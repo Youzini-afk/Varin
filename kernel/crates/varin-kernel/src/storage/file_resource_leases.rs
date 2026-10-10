@@ -24,9 +24,7 @@ pub(super) fn canonical_lease_path(resolved: PathBuf) -> Result<PathBuf, KernelE
     // Parent components are canonicalized by resolve_file_resource.
     // Preserve a symlink leaf: mutations replace the link, not its target.
     let absolute = match fs::symlink_metadata(&resolved) {
-        Ok(metadata) if !metadata.file_type().is_symlink() => {
-            fs::canonicalize(&resolved)?
-        }
+        Ok(metadata) if !metadata.file_type().is_symlink() => fs::canonicalize(&resolved)?,
         Ok(_) => resolved,
         Err(error) if error.kind() == io::ErrorKind::NotFound => resolved,
         Err(error) => return Err(error.into()),
@@ -35,9 +33,7 @@ pub(super) fn canonical_lease_path(resolved: PathBuf) -> Result<PathBuf, KernelE
     let absolute = PathBuf::from(
         absolute
             .to_str()
-            .ok_or_else(|| {
-                KernelError::Authorization("file lease path is not UTF-8".to_string())
-            })?
+            .ok_or_else(|| KernelError::Authorization("file lease path is not UTF-8".to_string()))?
             .to_lowercase(),
     );
     Ok(absolute)
@@ -54,14 +50,31 @@ impl Storage {
             .remove(lease_id)
             .is_some_and(|lease| lease.release_requested)
         {
-            self.file_leases.remove(lease_id);
+            if let Some(lease) = self.file_leases.remove(lease_id) {
+                self.hint_file_root(&lease.root_id);
+            }
         }
     }
 
     /// Same canonical file identity as actual leases, independent of alias roots and Run IDs.
-    pub(crate) fn file_resource_key(&self, root_id: &str, path: &str, grant: &Grant) -> Result<String, KernelError> {
-        let resolved = self.canonical_lease_resources(root_id, &[FileLeaseResource { path: path.into(), subtree: false }], grant)?;
-        let absolute = resolved[0].absolute.to_str().ok_or_else(|| KernelError::Authorization("file resource path is not UTF-8".into()))?;
+    pub(crate) fn file_resource_key(
+        &self,
+        root_id: &str,
+        path: &str,
+        grant: &Grant,
+    ) -> Result<String, KernelError> {
+        let resolved = self.canonical_lease_resources(
+            root_id,
+            &[FileLeaseResource {
+                path: path.into(),
+                subtree: false,
+            }],
+            grant,
+        )?;
+        let absolute = resolved[0]
+            .absolute
+            .to_str()
+            .ok_or_else(|| KernelError::Authorization("file resource path is not UTF-8".into()))?;
         Ok(serde_json::to_string(&["file", absolute])?)
     }
     pub(super) fn canonical_lease_resources(
@@ -83,6 +96,30 @@ impl Storage {
             .collect()
     }
 
+    /// Observer reads share the original physical lease namespace. Only another
+    /// known read worker is compatible; ordinary mutations still see every lease.
+    pub(super) fn assert_file_observation_lease(
+        &self,
+        grant: &Grant,
+        root_id: &str,
+        paths: &[FileLeaseResource],
+    ) -> Result<(), KernelError> {
+        let requested = self.canonical_lease_resources(root_id, paths, grant)?;
+        for lease in self.file_leases.values() {
+            if self.is_file_observation_read_lease(&lease.lease_id) {
+                continue;
+            }
+            if requested.iter().any(|resource| {
+                lease
+                    .canonical_resources
+                    .iter()
+                    .any(|held| overlaps(held, resource))
+            }) {
+                return Err(KernelError::FileObservationBusy);
+            }
+        }
+        Ok(())
+    }
     pub(super) fn assert_file_lease(
         &self,
         grant: &Grant,
@@ -93,7 +130,9 @@ impl Storage {
         let requested = self.canonical_lease_resources(root_id, paths, grant)?;
         if let Some(lease_id) = lease_id {
             if self.retained_file_leases.contains_key(lease_id) {
-                return Err(KernelError::Operation("file lease is retained by an active file worker".into()));
+                return Err(KernelError::Operation(
+                    "file lease is retained by an active file worker".into(),
+                ));
             }
             let lease = self.file_leases.get(lease_id).ok_or_else(|| {
                 KernelError::Operation("file resource lease is no longer active".to_string())
@@ -251,6 +290,7 @@ impl Storage {
             return Ok(json!({"leaseId": params.lease_id, "released": true, "deferred": true}));
         }
         self.file_leases.remove(&params.lease_id);
+        self.hint_file_root(&params.root_id);
         Ok(json!({"leaseId": params.lease_id, "released": true}))
     }
 }

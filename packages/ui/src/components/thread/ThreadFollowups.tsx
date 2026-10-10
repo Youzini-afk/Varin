@@ -1,7 +1,7 @@
 import React from 'react';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import type { ThreadFollowupsAPI, ThreadIdentity } from '@varin/application-client';
-import type { Followup, FollowupRegisterParams, FollowupRegistrationSource, FollowupSource, FollowupView, Operation, Run } from '@varin/protocol';
+import type { FollowupPendingRegistration, Followup, FollowupRegisterParams, FollowupRegistrationSource, FollowupSource, FollowupView, Operation, Run } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -19,17 +19,19 @@ function atLabel(at: number) {
   return Number.isNaN(date.getTime()) ? `Unix time ${at} ms` : `${date.toLocaleString()} · ${date.toISOString()}`;
 }
 function sourceLabel(source: FollowupSource) {
+  if (source.kind === 'file') return `When ${source.path} ${source.condition === 'exists' ? 'exists' : source.condition === 'changed' ? 'changes' : 'is stable with managed writers stopped'}`;
   return source.kind === 'at' ? `At ${atLabel(source.at_ms)}` : `After process ${source.operation_id} actually stops`;
 }
 function triggerLabel(item: Followup) {
-  if (item.trigger.kind === 'at' || item.trigger.kind === 'process_stopped') return sourceLabel(item.trigger);
+  if (item.trigger.kind === 'at' || item.trigger.kind === 'process_stopped' || item.trigger.kind === 'file') return sourceLabel(item.trigger);
   if (item.trigger.kind === 'any') return 'When any condition is observed';
   if (item.trigger.kind === 'all') return 'When every condition is observed';
   return item.trigger.kind === 'run_completed' ? 'After the original run completes' : 'Continuing goal work';
 }
-type SourceDraft = { kind: FollowupRegistrationSource['kind']; at: string; processId: string };
-const emptySource = (): SourceDraft => ({ kind: 'at', at: '', processId: '' });
+type SourceDraft = { kind: FollowupRegistrationSource['kind']; at: string; processId: string; path: string; condition: 'exists' | 'changed' | 'ready' };
+const emptySource = (): SourceDraft => ({ kind: 'at', at: '', processId: '', path: '', condition: 'exists' });
 function sourceInput(draft: SourceDraft, processes: Operation[]): FollowupRegistrationSource | null {
+  if (draft.kind === 'file') return draft.path.length ? { kind: 'file', path: draft.path, condition: draft.condition } : null;
   if (draft.kind === 'process_stopped') return processes.some(value => value.id === draft.processId)
     ? { kind: 'process_stopped', operationId: draft.processId } : null;
   const atMs = draft.at ? new Date(draft.at).getTime() : NaN;
@@ -39,6 +41,12 @@ function SourceEditor({ value, onChange, processes, disabled, label = 'Follow-up
   value: SourceDraft; onChange(value: SourceDraft): void; processes: Operation[]; disabled: boolean; label?: string;
 }) {
   const atMs = value.at ? new Date(value.at).getTime() : NaN;
+  if (value.kind === 'file') return <><label className="block">Original source path<Input aria-label={`${label} file path`} value={value.path}
+    disabled={disabled} onChange={event => onChange({ ...value, path: event.target.value })} placeholder="results/output.json" /></label>
+    <label>File condition<select aria-label={`${label} file condition`} value={value.condition} disabled={disabled}
+      onChange={event => onChange({ ...value, condition: event.target.value as SourceDraft['condition'] })}>
+      <option value="exists">Exists</option><option value="changed">Changed since registration</option><option value="ready">Stable, managed writers stopped</option>
+    </select></label><p className="text-xs text-muted-foreground">Uses the original run's source. A fixed revision cannot change. Ready describes managed writer and capture evidence, not semantic completion or every external writer.</p></>;
   return value.kind === 'at' ? <><label className="block">Time ({Intl.DateTimeFormat().resolvedOptions().timeZone})<Input aria-label={`${label} time`} type="datetime-local" step="1" value={value.at}
     disabled={disabled} onChange={event => onChange({ ...value, at: event.target.value })} /></label>
     {Number.isFinite(atMs) && <p className="text-xs text-muted-foreground">{atLabel(atMs)}. A past time becomes due once.</p>}</>
@@ -77,8 +85,21 @@ export function ThreadFollowups({ api, identity, run, operations, followups, pen
   const [editing, setEditing] = React.useState(false);
   const [kind, setKind] = React.useState<FollowupRegisterParams['trigger']['kind']>('at');
   const [at, setAt] = React.useState(''); const [processId, setProcessId] = React.useState('');
+  const [filePath, setFilePath] = React.useState(''); const [fileCondition, setFileCondition] = React.useState<SourceDraft['condition']>('exists');
   const [conditions, setConditions] = React.useState<SourceDraft[]>([emptySource(), { ...emptySource(), kind: 'process_stopped' }]);
   const [instruction, setInstruction] = React.useState(''); const [uncertain, setUncertain] = React.useState(false);
+  const [registrations, setRegistrations] = React.useState<FollowupPendingRegistration[]>([]);
+  const [registrationError, setRegistrationError] = React.useState(false);
+  React.useEffect(() => {
+    const controller = new AbortController(); const selectedHost = getRuntimeEndpointGeneration();
+    setRegistrationError(false);
+    void api.pendingRegistrations(identity, controller.signal).then(items => {
+      if (controller.signal.aborted || selectedHost !== getRuntimeEndpointGeneration()) return;
+      if (items.some(item => item.threadId !== identity.threadId || item.branchId !== identity.branchId)) { setRegistrationError(true); return; }
+      setRegistrations(items);
+    }, () => { if (!controller.signal.aborted && selectedHost === getRuntimeEndpointGeneration()) setRegistrationError(true); });
+    return () => controller.abort();
+  }, [api, identity, followups, uncertain]);
   const intent = React.useRef<FollowupRegisterParams | null>(null);
   const live = React.useRef(false); const host = React.useRef(getRuntimeEndpointGeneration());
   React.useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
@@ -88,26 +109,33 @@ export function ThreadFollowups({ api, identity, run, operations, followups, pen
     && ['thread', 'environment'].includes(operation.lifetime) && operation.call_completion?.kind === 'job_accepted');
   const process = processes.find(operation => operation.id === processId);
   const composite = kind === 'any' || kind === 'all';
-  const selected = composite ? conditions.map(value => sourceInput(value, processes)) : [sourceInput({ kind, at, processId }, processes)];
-  const valid = instruction.trim().length > 0 && selected.every(value => value !== null) && (composite || kind === 'at' ? Boolean(run) : Boolean(process));
+  const selected = composite ? conditions.map(value => sourceInput(value, processes)) : [sourceInput({ kind, at, processId, path: filePath, condition: fileCondition }, processes)];
+  const valid = instruction.trim().length > 0 && selected.every(value => value !== null) && (composite || kind !== 'process_stopped' ? Boolean(run) : Boolean(process));
   const register = () => {
     if (!intent.current) {
       if (!valid) return;
-      intent.current = { key: crypto.randomUUID(), runId: composite || kind === 'at' ? run!.id : process!.run_id,
+      intent.current = { key: crypto.randomUUID(), runId: composite || kind !== 'process_stopped' ? run!.id : process!.run_id,
         trigger: composite ? { kind, sources: selected as FollowupRegistrationSource[] } : selected[0]!, instruction };
     }
     const original = intent.current;
     return act(async () => {
       try {
         await api.register({ ...identity, ...original });
-        if (current()) { intent.current = null; setUncertain(false); setInstruction(''); setAt(''); setConditions([emptySource(), { ...emptySource(), kind: 'process_stopped' }]); setEditing(false); }
+        if (current()) { intent.current = null; setUncertain(false); setInstruction(''); setAt(''); setFilePath(''); setConditions([emptySource(), { ...emptySource(), kind: 'process_stopped' }]); setEditing(false); }
       } catch (error) { if (current()) setUncertain(true); throw error; }
     });
   };
   const control = (item: Followup, action: 'pause' | 'resume' | 'cancel') => act(() => api.control({
     ...identity, followupId: item.id, expectedRevision: item.revision, action,
   }));
-  if (!run && independent.length === 0) return null;
+  const discardRegistration = (item: FollowupPendingRegistration) => act(async () => {
+    await api.cancelRegistration({ ...identity, key: item.id, runId: item.sourceRunId });
+    if (current()) {
+      setRegistrations(items => items.filter(value => value.id !== item.id));
+      if (intent.current?.key === item.id) { intent.current = null; setUncertain(false); }
+    }
+  });
+  if (!run && independent.length === 0 && registrations.length === 0 && !registrationError) return null;
   return <section className="mx-auto max-w-3xl space-y-2 rounded border p-3 text-sm" aria-label="One-time follow-ups">
     <div className="flex items-center gap-2"><span>One-time follow-ups</span>{run && <Button variant="ghost" size="sm" aria-expanded={editing}
       onClick={() => setEditing(value => !value)}>{editing ? 'Hide follow-up form' : 'Schedule a follow-up'}</Button>}</div>
@@ -115,7 +143,7 @@ export function ThreadFollowups({ api, identity, run, operations, followups, pen
       <p>Deliver this instruction at the next legal boundary, or start a new run here when idle. Current pauses, questions, permissions and goal limits still apply.</p>
       <label className="block">Trigger<select aria-label="Follow-up trigger" value={kind} disabled={pending || uncertain}
         onChange={event => setKind(event.target.value as typeof kind)} className="ml-2 rounded border bg-background p-1">
-        <option value="at">At a specific time</option><option value="process_stopped">After a process stops</option>
+        <option value="at">At a specific time</option><option value="process_stopped">After a process stops</option><option value="file">When a file condition is met</option>
         <option value="any">Any condition</option><option value="all">Every condition</option>
       </select></label>
       {composite ? <div className="space-y-2">
@@ -124,7 +152,7 @@ export function ThreadFollowups({ api, identity, run, operations, followups, pen
           <legend>Condition {index + 1}</legend>
           <select aria-label={`Condition ${index + 1} kind`} value={value.kind} disabled={pending || uncertain}
             onChange={event => setConditions(values => values.map((item, i) => i === index ? { ...item, kind: event.target.value as SourceDraft['kind'] } : item))}>
-            <option value="at">At a specific time</option><option value="process_stopped">After a process stops</option>
+            <option value="at">At a specific time</option><option value="process_stopped">After a process stops</option><option value="file">When a file condition is met</option>
           </select>
           <SourceEditor value={value} onChange={next => setConditions(values => values.map((item, i) => i === index ? next : item))}
             processes={processes} disabled={pending || uncertain} label={`Condition ${index + 1}`} />
@@ -132,13 +160,19 @@ export function ThreadFollowups({ api, identity, run, operations, followups, pen
             onClick={() => setConditions(values => values.filter((_, i) => i !== index))}>Remove condition {index + 1}</Button>
         </fieldset>)}
         <Button variant="ghost" size="sm" disabled={pending || uncertain} onClick={() => setConditions(values => [...values, emptySource()])}>Add condition</Button>
-      </div> : <SourceEditor value={{ kind, at, processId }} onChange={value => { setAt(value.at); setProcessId(value.processId); }} processes={processes} disabled={pending || uncertain} />}
+      </div> : <SourceEditor value={{ kind, at, processId, path: filePath, condition: fileCondition }} onChange={value => { setAt(value.at); setProcessId(value.processId); setFilePath(value.path); setFileCondition(value.condition); }} processes={processes} disabled={pending || uncertain} />}
       <label className="block">Instruction<Textarea aria-label="Follow-up instruction" value={instruction} disabled={pending || uncertain}
         onChange={event => setInstruction(event.target.value)} rows={3} /></label>
       {uncertain && <p role="status">Acceptance is unconfirmed. Retry keeps the original time, instruction, source and key. Leaving this draft does not cancel an accepted follow-up.</p>}
       <Button variant="outline" size="sm" disabled={pending || (!uncertain && !valid)} onClick={() => void register()}>{uncertain ? 'Retry original follow-up' : 'Register one-time follow-up'}</Button>
       {uncertain && <Button variant="ghost" size="sm" disabled={pending} onClick={() => { intent.current = null; setUncertain(false); }}>Leave uncertain follow-up draft</Button>}
     </div>}
+    {registrationError && <p role="alert">Pending file registrations could not be read. Retained source resources may still need cancellation.</p>}
+    {registrations.map(item => <div key={item.id} className="space-y-1 rounded border p-3" aria-label="Unconfirmed file registration">
+      <p>File resources were accepted, but this follow-up has not been registered.</p>
+      <p className="break-all text-xs text-muted-foreground">{item.id} · original run {item.sourceRunId} · {item.paths.join(', ')}</p>
+      <Button variant="ghost" size="sm" disabled={pending} onClick={() => void discardRegistration(item)}>Cancel unconfirmed registration</Button>
+    </div>)}
     {independent.map(item => {
       const delivery = item.occurrence?.delivery;
       const consumed = delivery?.state === 'delivered';
@@ -156,6 +190,12 @@ export function ThreadFollowups({ api, identity, run, operations, followups, pen
         {delivery && <p className="break-all text-xs text-muted-foreground">Input {delivery.input_id} · {delivery.state} · activation {delivery.activation_state}
           {delivery.run_id && ` · run ${delivery.run_id}`}{delivery.execution_id && ` · execution ${delivery.execution_id}`}
           {delivery.delivered_cursor !== null && ` · delivered at ${delivery.delivered_cursor}`}{delivery.failure_code && ` · ${delivery.failure_code}`}</p>}
+        {item.sources.filter(source => source.file !== null).map(source => {
+          const file = source.file!;
+          return <p key={source.source_index} className="text-xs text-muted-foreground">File condition {source.source_index + 1}: {file.current?.kind ?? 'awaiting original baseline'}
+            {file.immutable && ' · fixed immutable source'}{file.gap && ' · observation gap; unavailable changes are not reconstructed'}
+            {file.failure_code && ` · ${file.failure_code}`}{file.released && ' · observer released'}</p>;
+        })}
         <FollowupInstruction api={api} identity={identity} item={item} />
         {!ended && <>
           {item.state === 'active' && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void control(item, 'pause')}>Pause follow-up</Button>}

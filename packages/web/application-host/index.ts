@@ -1,3 +1,5 @@
+import { DocumentsFileObservationOwner } from './lib/kernel/file-observation-owner.js';
+import { FileObservationService } from './lib/kernel/file-observation-service.js';
 import { createScheduleToolOwner, SCHEDULE_CAPABILITY } from './lib/kernel/schedule-tool-owner.js';
 import { CalendarOwner } from './lib/scheduled-tasks/calendar-owner.js';
 import { createChildProfilePreparer } from './lib/kernel/child-profiles.js';
@@ -2972,6 +2974,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const cwd=workspace?.root??mcpAgentDir;
     return readMcpHostPermissionPolicy(mcpAgentDir,cwd,Boolean(workspace)&&mcpHostProjectTrusted(mcpAgentDir,cwd));
   }}));
+  const fileObservationOwner = new DocumentsFileObservationOwner(documentsAuthority, liveSources.validate,
+    receiptId => fileObservations.changed(receiptId));
+  const fileObservations = new FileObservationService(agentRuntime, fileObservationOwner,
+    () => console.error('[Followup] Original file observation requires attention'));
+  kernelClient.setFileObservationOwner(fileObservationOwner);
+  void fileObservations.recover();
   const runObservers = new RunObservers(agentRuntime, extensionRuntime, (threadId, _error) => {
     console.error('[RunObserver] Activity projection requires attention:', threadId ?? 'selection');
   });
@@ -4673,6 +4681,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // dependencies begin shutting down.
       runObservers.stop();
       collaboration.stop();
+      await fileObservations.stop();
       scheduledTasksRuntime.stop();
       await botService.dispose();
       followUpService.dispose();

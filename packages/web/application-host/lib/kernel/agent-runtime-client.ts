@@ -21,6 +21,7 @@ import type {
 } from './extension-tool-owner.js';
 import type { LiveExtensionToolBinding } from './protocol.generated.js';
 import { permissionService } from './permission-service.js';
+import { registerUserFollowup } from './followup-source.js';
 import type {
   ContextJob,
   ContextCheckpoint,
@@ -617,6 +618,23 @@ export class AgentRuntimeClient {
     );
   }
   /** The native observation owner retains child/process/reply conditions and deadlines. */
+  async pendingFollowupRegistrations(threadId: string, branchId: string, signal?: AbortSignal): Promise<CalendarProtocol.FollowupPendingRegistration[]> {
+    const registrations = new Map<string, CalendarProtocol.FollowupPendingRegistration>();
+    let after: string | undefined;
+    do {
+      const page = await this.kernel.agentRuntimeRequest<CalendarProtocol.FollowupPendingResult, 'runtime.followup.registrations.pending'>(
+        'runtime.followup.registrations.pending', { threadId, branchId, ...(after ? { after } : {}) }, signal);
+      for (const item of page.registrations) {
+        const prior = registrations.get(item.id);
+        registrations.set(item.id, prior ? { ...item, paths: [...new Set([...prior.paths, ...item.paths])] } : item);
+      }
+      after = page.nextCursor ?? undefined;
+    } while (after !== undefined);
+    return [...registrations.values()];
+  }
+  cancelFollowupRegistration(input: CalendarProtocol.FollowupRegistrationCancelParams, signal?: AbortSignal): Promise<CalendarProtocol.FollowupRegistrationCancelResult> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.registration.cancel', input, signal);
+  }
   reconcileObservations(signal?: AbortSignal): Promise<string[]> {
     return this.kernel.agentRuntimeRequest('runtime.observations.reconcile', {}, signal);
   }
@@ -653,8 +671,17 @@ export class AgentRuntimeClient {
   calendarProjects(signal?: AbortSignal): Promise<string[]> { return this.kernel.agentRuntimeRequest('runtime.calendar.projects', {}, signal); }
   calendarPending(signal?: AbortSignal): Promise<CalendarProtocol.CalendarPending> { return this.kernel.agentRuntimeRequest('runtime.calendar.pending', {}, signal); }
 
+  fileFollowups(after?: string, signal?: AbortSignal): Promise<CalendarProtocol.FollowupFilesResult> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.files', after === undefined ? {} : { after }, signal);
+  }
+  observeFileFollowup(input: CalendarProtocol.FollowupFileObserveParams, signal?: AbortSignal): Promise<CalendarProtocol.FollowupFileObserveResult> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.file.observe', input, signal);
+  }
+  releaseFileFollowup(input: CalendarProtocol.FollowupFileReleaseParams, signal?: AbortSignal): Promise<CalendarProtocol.FollowupFileReleaseResult> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.file.release', input, signal);
+  }
   registerFollowup(input: FollowupRegisterParams, signal?: AbortSignal): Promise<Followup> {
-    return this.kernel.agentRuntimeRequest('runtime.followup.register', input, signal);
+    return registerUserFollowup(this.kernel, this, input, this.resolveLiveSource, signal);
   }
   startGoal(input: GoalStartParams, signal?: AbortSignal): Promise<GoalControlReceipt> {
     return this.kernel.agentRuntimeRequest('runtime.goal.start', input, signal);

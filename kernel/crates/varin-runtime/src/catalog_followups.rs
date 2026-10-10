@@ -13,9 +13,14 @@ mod registration;
 pub use registration::*;
 #[path = "catalog_followup_wait.rs"]
 pub mod observation;
+#[path = "catalog_followup_registration_cancel.rs"]
+mod registration_cancel;
 #[path = "catalog_followup_sources.rs"]
 mod sources;
 pub use sources::*;
+#[path = "catalog_followup_files.rs"]
+mod files;
+pub use files::*;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -76,16 +81,42 @@ pub enum FollowupActor {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FollowupTrigger {
-    At { at_ms: u64 },
-    ProcessStopped { operation_id: String },
-    Any { sources: Vec<FollowupSource> },
-    All { sources: Vec<FollowupSource> },
-    RunCompleted { cursor: u64 },
-    GoalRequested { cursor: u64 },
+    At {
+        at_ms: u64,
+    },
+    ProcessStopped {
+        operation_id: String,
+    },
+    File {
+        path: String,
+        condition: FileCondition,
+    },
+    Any {
+        sources: Vec<FollowupSource>,
+    },
+    All {
+        sources: Vec<FollowupSource>,
+    },
+    RunCompleted {
+        cursor: u64,
+    },
+    GoalRequested {
+        cursor: u64,
+    },
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TriggerEvidence {
+    File {
+        receipt_id: String,
+        condition: FileCondition,
+        path: String,
+        state: FileState,
+        proof: FileProof,
+        position: Option<FileWatchPosition>,
+        gap: bool,
+        observed_at_ms: u64,
+    },
     At {
         at_ms: u64,
         observed_at_ms: u64,
@@ -394,6 +425,7 @@ fn observe(tx: &Transaction<'_>, d: &mut Definition, now: u64) -> Result<bool> {
     let (cursor, evidence) = match &d.trigger {
         FollowupTrigger::At { .. }
         | FollowupTrigger::ProcessStopped { .. }
+        | FollowupTrigger::File { .. }
         | FollowupTrigger::Any { .. }
         | FollowupTrigger::All { .. } => {
             let Some(observed) = sources::observe_sources(tx, d, now)? else {
@@ -670,10 +702,12 @@ fn definition_for_run(
             source_index,
             after_cursor: cursor,
             observed: None,
+            file: None,
         })
         .collect();
     let kind = match trigger {
         FollowupTrigger::At { .. } => "at",
+        FollowupTrigger::File { .. } => "file",
         FollowupTrigger::Any { .. } => "any",
         FollowupTrigger::All { .. } => "all",
         FollowupTrigger::ProcessStopped { .. } => "process_stopped",

@@ -476,14 +476,14 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
     let follow = ToolCall {
         call_id: "on-stop".into(),
         name: "follow_up".into(),
-        schema_version: "2".into(),
+        schema_version: crate::followup_tools::schema().version,
         arguments: json!({"action":"register","trigger":{"kind":"process_stopped","operationId":processes[0]},"instruction":"Read the final original output after stop"}),
     };
     let (follow_context, follow_frozen) =
         model_call(&owner, &check_run, "time-check-register", &follow, &tools);
     let follow_directory = Arc::new(
         varin_runtime::composition::tools::ToolDirectory::assemble(vec![
-            crate::followup_tools::declaration(owner.clone()),
+            crate::followup_tools::declaration(owner.clone(), None, None),
         ])
         .unwrap(),
     );

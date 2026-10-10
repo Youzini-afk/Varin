@@ -1671,6 +1671,7 @@ type VarinWorkspaceFileEventPosition = {
 
 export type VarinWorkspaceFileEvent = VarinWorkspaceFileEventPosition & (
   | { kind: 'created' | 'changed' | 'deleted'; resource: VarinResourceReference; revision?: string }
+  | { kind: 'invalidated'; resource: VarinResourceReference; reason: 'entry-changed' }
   | { kind: 'moved'; from: VarinResourceReference; resource: VarinResourceReference; revision?: string }
   | { kind: 'reset'; reason: 'overflow' | 'reconnected' | 'authority-changed' | 'gap' }
 );

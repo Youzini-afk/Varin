@@ -9,12 +9,16 @@ pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 1;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
+    "runtime.followup.registrations.pending",
+    "runtime.followup.registration.cancel",
     "runtime.operation.status",
     "runtime.child.cancel",
     "runtime.child.capabilities",
     "runtime.tree.cancel",
     "runtime.goal.control",
     "runtime.followup.control",
+    "runtime.followup.files",
+    "runtime.followup.file.release",
     "runtime.policy.select",
     "runtime.policy.cancel",
     "runtime.policy.fail",
@@ -47,12 +51,16 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.calendar.calculation.retry",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "runtime.followup.registrations.pending",
+    "runtime.followup.registration.cancel",
     "runtime.operation.status",
     "runtime.child.cancel",
     "runtime.child.capabilities",
     "runtime.tree.cancel",
     "runtime.goal.control",
     "runtime.followup.control",
+    "runtime.followup.files",
+    "runtime.followup.file.release",
     "runtime.policy.select",
     "runtime.policy.cancel",
     "runtime.policy.fail",
@@ -233,11 +241,54 @@ pub(crate) struct ResourceSnapshotParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct FollowupRegisterParams {
+pub(crate) struct FollowupPendingParams {
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) after: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupRegistrationCancelParams {
+    pub(crate) key: String,
+    pub(crate) run_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupRegisterAdmissionParams {
     pub(crate) key: String,
     pub(crate) run_id: String,
     pub(crate) trigger: varin_runtime::catalog::followups::FollowupRegistrationTrigger,
     pub(crate) instruction: String,
+    pub(crate) file_authority: Option<FollowupFileAuthority>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupFilesParams {
+    pub(crate) after: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupFileObserveParams {
+    pub(crate) followup_id: String,
+    pub(crate) generation: i64,
+    pub(crate) source_index: i64,
+    pub(crate) receipt_id: String,
+    pub(crate) observation_revision: i64,
+    pub(crate) reopen: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupFileReleaseParams {
+    pub(crate) followup_id: String,
+    pub(crate) generation: i64,
+    pub(crate) source_index: i64,
+    pub(crate) receipt_id: String,
+    pub(crate) observation_revision: i64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1839,6 +1890,12 @@ pub(crate) struct InitialContext {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupFileAuthority {
+    pub(crate) grant_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct PlanForkCaptureParams {
     pub(crate) source_thread_id: String,
     pub(crate) source_branch_id: String,
@@ -2330,8 +2387,31 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "runtime.followup.registrations.pending" => {
+            serde_json::from_value::<FollowupPendingParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.registration.cancel" => {
+            serde_json::from_value::<FollowupRegistrationCancelParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.followup.register" => {
-            serde_json::from_value::<FollowupRegisterParams>(params.clone())
+            serde_json::from_value::<FollowupRegisterAdmissionParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.files" => serde_json::from_value::<FollowupFilesParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.followup.file.observe" => {
+            serde_json::from_value::<FollowupFileObserveParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.file.release" => {
+            serde_json::from_value::<FollowupFileReleaseParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

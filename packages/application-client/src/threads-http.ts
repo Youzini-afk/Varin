@@ -52,6 +52,8 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     resources: { refresh: input => post('resources/refresh', input) },
     followups: {
       register: input => post('followup/register', input),
+      pendingRegistrations: (identity, signal) => post('followup/registrations/pending', identity, signal),
+      cancelRegistration: input => post('followup/registration/cancel', input),
       list: (identity, signal) => post('followup/list', identity, signal),
       get: (identity, followupId, signal) => post('followup/get', { ...identity, followupId }, signal),
       control: input => post('followup/control', input),

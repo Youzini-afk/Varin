@@ -6,37 +6,14 @@
 //! Documents-authorized canonical root after every kernel restart.
 use super::*;
 use crate::protocol_generated::{
-    KernelFileApplyParams, KernelFileCaptureParams,
-    KernelFileMeasureParams, KernelFileMkdirParams, KernelFileOperationListParams,
-    KernelFileOperationReconcileParams, KernelFileRemoveParams, KernelFileRenameParams,
-    KernelFileRootRegisterParams, KernelFileScanParams,
+    KernelFileApplyParams, KernelFileCaptureParams, KernelFileMeasureParams, KernelFileMkdirParams,
+    KernelFileOperationListParams, KernelFileOperationReconcileParams, KernelFileRemoveParams,
+    KernelFileRenameParams, KernelFileRootRegisterParams, KernelFileScanParams,
 };
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 use std::path::{Component, Path};
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-pub(super) enum FileState {
-    #[serde(rename = "regular-file")]
-    RegularFile {
-        #[serde(rename = "objectHash")]
-        object_hash: String,
-        #[serde(rename = "byteLength")]
-        byte_length: u64,
-        mode: Option<u32>,
-    },
-    Directory {
-        mode: Option<u32>,
-    },
-    Symlink {
-        #[serde(rename = "symlinkTarget")]
-        symlink_target: String,
-        mode: Option<u32>,
-    },
-    Missing,
-    Unsupported,
-}
+pub(super) use varin_runtime::catalog::followups::FileState;
 
 #[derive(Clone, Debug)]
 pub(super) struct ResolvedFileResource {
@@ -301,18 +278,31 @@ fn clone_file(_source: &Path, _destination: &Path) -> Result<bool, KernelError> 
     Ok(false)
 }
 
-pub(super) fn copy_object_to(source: &Path, destination: &Path, cancellation: &AtomicBool) -> Result<&'static str, KernelError> {
-    if cancellation.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+pub(super) fn copy_object_to(
+    source: &Path,
+    destination: &Path,
+    cancellation: &AtomicBool,
+) -> Result<&'static str, KernelError> {
+    if cancellation.load(Ordering::Acquire) {
+        return Err(KernelError::Cancelled);
+    }
     if clone_file(source, destination)? {
         return Ok("reflink");
     }
     let mut reader = File::open(source)?;
-    let mut target = OpenOptions::new().create_new(true).write(true).open(destination)?;
+    let mut target = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(destination)?;
     let mut buffer = [0u8; 128 * 1024];
     loop {
-        if cancellation.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+        if cancellation.load(Ordering::Acquire) {
+            return Err(KernelError::Cancelled);
+        }
         let count = reader.read(&mut buffer)?;
-        if count == 0 { break; }
+        if count == 0 {
+            break;
+        }
         target.write_all(&buffer[..count])?;
     }
     target.sync_all()?;
@@ -366,11 +356,18 @@ pub(super) fn create_symlink(target: &str, path: &Path) -> Result<(), KernelErro
 }
 
 impl Storage {
-    pub(crate) fn validate_live_root(&self, identity: &varin_runtime::catalog::launches::LiveRoot,
-        grant: &Grant, host_id: &str) -> Result<(), KernelError> {
+    pub(crate) fn validate_live_root(
+        &self,
+        identity: &varin_runtime::catalog::launches::LiveRoot,
+        grant: &Grant,
+        host_id: &str,
+    ) -> Result<(), KernelError> {
         let root = self.registered_file_root(&identity.root_id, grant)?;
-        if identity.host_id != host_id || root.canonical_root != Path::new(&identity.canonical_root) {
-            return Err(KernelError::Authorization("live source environment identity changed".into()));
+        if identity.host_id != host_id || root.canonical_root != Path::new(&identity.canonical_root)
+        {
+            return Err(KernelError::Authorization(
+                "live source environment identity changed".into(),
+            ));
         }
         Ok(())
     }
@@ -892,17 +889,23 @@ impl Storage {
         workspace_id: &str,
     ) -> Result<Option<Value>, KernelError> {
         let (_, params_hash) = file_operation_identity(params_value)?;
-        let Some((state, result)) = self.file_operation_record(operation_id, kind, &params_hash)? else {
+        let Some((state, result)) = self.file_operation_record(operation_id, kind, &params_hash)?
+        else {
             return Ok(None);
         };
-        if state != "committed" { return Ok(None); }
+        if state != "committed" {
+            return Ok(None);
+        }
         let owned: bool = self.conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM operation_owners WHERE operation_id=?1 AND workspace_id=?2)",
             params![operation_id, workspace_id], |row| row.get(0))?;
         if !owned {
-            return Err(KernelError::Authorization("file operation is not owned by the workspace".into()));
+            return Err(KernelError::Authorization(
+                "file operation is not owned by the workspace".into(),
+            ));
         }
-        let result = result.ok_or_else(|| KernelError::Storage("committed file operation has no result".into()))?;
+        let result = result
+            .ok_or_else(|| KernelError::Storage("committed file operation has no result".into()))?;
         Ok(Some(serde_json::from_str(&result)?))
     }
 
@@ -913,7 +916,9 @@ impl Storage {
         params_value: &Value,
     ) -> Result<(String, Option<Value>, bool), KernelError> {
         let (identity_params, params_hash) = file_operation_identity(params_value)?;
-        if let Some((state, result)) = self.file_operation_record(operation_id, kind, &params_hash)? {
+        if let Some((state, result)) =
+            self.file_operation_record(operation_id, kind, &params_hash)?
+        {
             if state == "committed" {
                 let result = result.ok_or_else(|| {
                     KernelError::Storage("committed file operation has no result".to_string())
@@ -1143,7 +1148,10 @@ impl Storage {
                         None
                     }
                 }
-                "file.materialize" => { unresolved += 1; continue; }
+                "file.materialize" => {
+                    unresolved += 1;
+                    continue;
+                }
                 _ => None,
             };
             if let Some((result, owner_id, owner_workspace)) = result {
@@ -1932,8 +1940,6 @@ impl Storage {
         self.finish_file_operation(&params.operation_id, &result)?;
         Ok(result)
     }
-
-
 }
 
 // Shared path resolution for Storage-admitted background captures.
@@ -1943,7 +1949,9 @@ pub(super) fn resolve_admitted_resource(
     grant: &Grant,
     allow_root: bool,
 ) -> Result<ResolvedFileResource, KernelError> {
-    resolve_scoped_resource(&root.canonical_root, relative, allow_root, false, |path| path_allowed(grant, path))
+    resolve_scoped_resource(&root.canonical_root, relative, allow_root, false, |path| {
+        path_allowed(grant, path)
+    })
 }
 
 /// Shared canonical identity resolution. Reservation inspection reads only existing journal
@@ -1956,8 +1964,16 @@ pub(super) fn resolve_scoped_resource(
     scope_allows: impl Fn(&str) -> bool,
 ) -> Result<ResolvedFileResource, KernelError> {
     match fs::canonicalize(canonical_root) {
-        Ok(current_root) if current_root == canonical_root && fs::metadata(&current_root)?.is_dir() => (),
-        Ok(_) => return Err(KernelError::Authorization("registered file root identity changed".into())),
+        Ok(current_root)
+            if current_root == canonical_root && fs::metadata(&current_root)?.is_dir() =>
+        {
+            ()
+        }
+        Ok(_) => {
+            return Err(KernelError::Authorization(
+                "registered file root identity changed".into(),
+            ))
+        }
         Err(error) if recorded_root_may_be_missing && error.kind() == io::ErrorKind::NotFound => (),
         Err(error) => return Err(error.into()),
     }
@@ -2020,18 +2036,26 @@ pub(super) fn resolve_scoped_resource(
 impl Storage {
     /// Private read-only Host admission before Documents accesses a retrieval candidate.
     /// The persisted Run grant and physical lease owner remain authoritative; no body is read.
-    pub(crate) fn file_read_check(&mut self, params: &Value, grant: &Grant) -> Result<Value, KernelError> {
+    pub(crate) fn file_read_check(
+        &mut self,
+        params: &Value,
+        grant: &Grant,
+    ) -> Result<Value, KernelError> {
         let args: crate::protocol_generated::KernelFileReadCheckParams = parse_file_params(params)?;
         let key = self.file_resource_key(&args.root_id, &args.path, grant)?;
         self.file_read(params, grant, false)?;
         let resource = self.resolve_file_resource(&args.root_id, &args.path, grant, false)?;
         let metadata = fs::symlink_metadata(&resource.absolute)?;
         if !metadata.is_file() || metadata.file_type().is_symlink() {
-            return Err(KernelError::Authorization("retrieval read admission requires a regular file, not a symlink".into()));
+            return Err(KernelError::Authorization(
+                "retrieval read admission requires a regular file, not a symlink".into(),
+            ));
         }
         // Parent symlinks may have changed while the permission/lease checks ran.
         if self.file_resource_key(&args.root_id, &args.path, grant)? != key {
-            return Err(KernelError::Authorization("canonical file resource changed during admission".into()));
+            return Err(KernelError::Authorization(
+                "canonical file resource changed during admission".into(),
+            ));
         }
         Ok(json!({"resourceKey":key}))
     }
@@ -2045,9 +2069,9 @@ impl Storage {
         grant: &Grant,
         read_body: bool,
     ) -> Result<Value, KernelError> {
-        let root_id = params["rootId"].as_str().ok_or_else(|| {
-            KernelError::Authorization("physical source root is missing".into())
-        })?;
+        let root_id = params["rootId"]
+            .as_str()
+            .ok_or_else(|| KernelError::Authorization("physical source root is missing".into()))?;
         let path = params["path"]
             .as_str()
             .ok_or_else(|| KernelError::Operation("file path is missing".into()))?;

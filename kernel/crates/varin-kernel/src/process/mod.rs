@@ -3,6 +3,7 @@
 //! The kernel owns grants, durable identities, admission and raw byte cursors.
 pub(crate) mod interaction;
 pub(crate) mod platform;
+pub(crate) mod receipt_wake;
 pub(crate) mod subscriptions;
 pub(crate) mod worker;
 use crate::{
@@ -311,6 +312,9 @@ pub(crate) fn read_receipt(
     Ok(Some(value))
 }
 impl ProcessManager {
+    pub(crate) fn is_live(&self, id: &str) -> bool {
+        self.live.contains_key(id)
+    }
     #[cfg(test)]
     pub(crate) fn set_test_worker_executable(&mut self, executable: PathBuf) {
         self.worker_executable = Some(executable);

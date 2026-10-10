@@ -132,7 +132,8 @@ subsequent convergence step and retain their existing native session authority.
 
 The authenticated `/api/threads/followup/{register,list,get,control}` POST routes implement
 `ThreadsAPI.followups`. Registration carries a stable key, selected Thread/branch, original source Run,
-one `at` instant, `process_stopped` operation, or flat `any`/`all` sources, and the retained instruction.
+one `at` instant, `process_stopped` operation, exact-source `file` condition, or flat `any`/`all` sources,
+and the retained instruction.
 Host validates each leaf shape and Run ownership;
 Catalog validates the actual trigger and accepted process. Agent tools use their own original invocation,
 not this User route. Caller-supplied actor, wait and extra trigger fields are rejected by the User API.
@@ -146,7 +147,7 @@ credential/tool/policy preparation remains with its existing owner; generic `run
 automatic launch instruction. Follow-up control cannot resolve an independent policy Pause or question.
 
 The Thread UI supports one-shot local date/time (showing its exact instant), accepted process
-selection and `any`/`all` combinations. Each condition displays its original observed cursor or pending
+selection, source-relative file `exists`/`changed`/`ready`, and `any`/`all` combinations. Each condition displays its original observed cursor or pending
 state. Partial `all` progress comes from durable Catalog events; there is no client condition evaluator. It retains source Run, trigger, instruction and key across an uncertain response, including
 when a newer Run appears. Reading an accepted instruction is on demand and abortable. Cards distinguish
 triggering, input binding, actual delivery, preparation failure and continuation Run/execution. Bound
@@ -158,6 +159,37 @@ Host restart. Retirement closes the old caller but retains stopped-process creat
 proven delegated successor. Failed preparation and explicit authority revocation still revoke. This
 path uses the original grant owner, not a Host ACL/map of permitted old processes. No Pi calendar or
 follow-up ledger is written by these native controls.
+
+`followup-source.ts` admits User file leaves with a private exact-path `storage.read` grant after
+validating the original launch/source and live Documents owner. It retires that temporary grant in
+`finally`; it does not renew a previously accepted receipt or issue process/write authority. Public
+HTTP/tool arguments cannot carry `fileAuthority`, a physical root or a caller-chosen grant.
+
+The authenticated `followup/registrations/pending` route projects original unconfirmed User file
+acceptances for this Thread/branch, including after reconnect. `followup/registration/cancel` uses
+the same original key and source Run; it acquires no new grant. The UI exposes these retained resources
+with an explicit cancel action and preserves identity when cancellation acknowledgement is lost.
+Native commands fence late Catalog admission before the original resource owner drains/releases.
+Neither a missing definition nor elapsed time alone authorizes discarding an unknown User intent.
+
+`file-observation-owner.ts` adapts the original Documents watcher, capture token and mutation state.
+It shares root watchers but gives each open a separate handle. `file-observation-bridge.ts` carries
+only epoch-bound private owner queries and disposes cancelled allocations after the owner drains.
+`file-observation-service.ts` discovers Catalog's paged observe/paused/release bindings and coalesces
+real watcher/managed-writer/Storage-release hints. It preserves dirty hints during a read or pause,
+uses the last durably accepted position, and has no timer or persisted condition state. Root hints
+and exact receipt hints remain distinct, so fixed observers receive grant revocation without a fake
+physical watcher. A managed writer being present gates readiness; it does not erase a stable file
+snapshot needed by exists/changed. Broken source
+receipts remain explicit per-entry failures without blocking unrelated healthy bindings.
+
+File hashing and authority live in Rust Storage. Live-root identity, materialized original run roots
+and immutable fixed revisions remain distinct. Catalog alone commits evidence and occurrence/input;
+source gaps and a pending baseline remain visible in the Thread UI. Root unavailable is not leaf
+missing. `ready` means a stable regular file with no original managed writer, not universal external
+quiescence or semantic completion. Directory-entry invalidations are also consumed by Document
+Registry, semantic inventory, LSP open documents and the original Pi write tracker; none treats a
+directory notification as proven descendant file content.
 
 ## Responsibility table
 

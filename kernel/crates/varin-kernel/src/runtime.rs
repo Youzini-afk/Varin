@@ -30,6 +30,9 @@ struct PendingRootRegistration {
 enum WorkerRequest {
     Wire(Value, Arc<AtomicBool>),
     Resource(crate::tools::ResourceCall),
+    FileObservation(crate::file_observation::Command),
+    FileWriterStopped(String),
+    RecheckRecoveredProcessReceipts,
     Interaction(crate::storage::process_interactions::Command),
     ReplayProcessTerminals(Vec<String>),
     IntegrationReceipt(crate::tools::IntegrationReceiptRead),
@@ -697,6 +700,8 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let memory_bridge = crate::host_query::OwnerChannel::new("memory", response_tx.clone());
     let context_bridge = crate::host_query::OwnerChannel::new("context", response_tx.clone());
     let resource_bridge = crate::host_query::OwnerChannel::new("resource", response_tx.clone());
+    let file_observation_bridge =
+        crate::host_query::OwnerChannel::new("file-observation", response_tx.clone());
     let plan_bridge = crate::plan_bridge::PlanBridge::new(response_tx.clone());
     let language_bridge = crate::language::LanguageBridge::new(response_tx.clone());
     let retrieval_bridge = crate::retrieval::RetrievalBridge::new(response_tx.clone());
@@ -721,8 +726,12 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (agent_tx, agent_rx) = mpsc::channel();
     let (process_terminals, terminal_rx) = mpsc::channel::<crate::process::ProcessTerminal>();
     let terminal_commands = agent_tx.clone();
+    let file_terminal_commands = request_tx.clone();
     thread::spawn(move || {
         for terminal in terminal_rx {
+            let _ = file_terminal_commands.send(WorkerRequest::FileWriterStopped(
+                terminal.process_id.clone(),
+            ));
             if terminal_commands
                 .send(crate::agent_runtime::Command::ProcessTerminal(terminal))
                 .is_err()
@@ -796,6 +805,15 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             }),
         )
     });
+    let file_observation_requests = request_tx.clone();
+    let file_observations = crate::file_observation::Client::new(
+        move |command| {
+            file_observation_requests
+                .send(WorkerRequest::FileObservation(command))
+                .map_err(|_| KernelError::Storage("file observation owner stopped".into()))
+        },
+        file_observation_bridge.clone(),
+    );
     let resources = crate::tools::KernelResourceClient::new(
         move |call| {
             let epoch = resource_epoch
@@ -856,6 +874,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         },
         process_controls.clone(),
     )
+    .with_file_observations(file_observations)
     .with_process_interactions(interaction_client.clone())
     .with_integration_receipts(move |read| {
         integration_requests
@@ -936,6 +955,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let worker_memory = memory_bridge.clone();
     let worker_context = context_bridge.clone();
     let worker_resource = resource_bridge.clone();
+    let worker_file_observation = file_observation_bridge.clone();
     let worker_plan = plan_bridge.clone();
     let worker_retrieval = retrieval_bridge.clone();
     let worker_policy = policy_bridge.clone();
@@ -947,7 +967,13 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         kernel.agent_control = worker_agent_control;
         let mut stopping = false;
         for message in request_rx {
-            if stopping && kernel.active_materializations == 0 {
+            if stopping
+                && kernel.active_materializations == 0
+                && !kernel
+                    .storage
+                    .as_ref()
+                    .is_some_and(Storage::file_observation_reads_active)
+            {
                 break;
             }
             let (request, cancellation) = match message {
@@ -957,7 +983,15 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     for (cancel, _) in &kernel.file_workers {
                         cancel.store(true, Ordering::Release);
                     }
-                    if kernel.active_materializations == 0 {
+                    if let Some(storage) = kernel.storage.as_ref() {
+                        storage.cancel_file_observation_reads();
+                    }
+                    if kernel.active_materializations == 0
+                        && !kernel
+                            .storage
+                            .as_ref()
+                            .is_some_and(Storage::file_observation_reads_active)
+                    {
                         break;
                     }
                     continue;
@@ -1185,6 +1219,27 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     continue;
                 }
+                WorkerRequest::FileObservation(command) => {
+                    command.serve(
+                        kernel.storage.as_mut(),
+                        &kernel.epoch,
+                        kernel.host_id.as_deref().unwrap_or(""),
+                        kernel.host_generation.as_deref().unwrap_or(""),
+                    );
+                    continue;
+                }
+                WorkerRequest::RecheckRecoveredProcessReceipts => {
+                    if let Some(storage) = kernel.storage.as_mut() {
+                        storage.recheck_recovered_process_receipts();
+                    }
+                    continue;
+                }
+                WorkerRequest::FileWriterStopped(id) => {
+                    if let Some(storage) = kernel.storage.as_mut() {
+                        let _ = storage.observe_file_writer_stopped(&id);
+                    }
+                    continue;
+                }
                 WorkerRequest::Resource(call) => {
                     let denied = worker_revoked_grants
                         .lock()
@@ -1291,11 +1346,26 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     worker_memory.initialize(epoch);
                     worker_context.initialize(epoch);
                     worker_resource.initialize(epoch);
+                    worker_file_observation.initialize(epoch);
                     worker_plan.initialize(epoch);
                     worker_retrieval.initialize(epoch);
                     worker_policy.initialize(epoch);
                     if let Some(storage) = kernel.storage.as_mut() {
+                        let output = worker_response_tx.clone();
+                        let epoch = epoch.to_owned();
+                        storage.set_file_observation_hints(move |hint| {
+                            if let Ok(mut value) = serde_json::to_value(hint) {
+                                value["v"] = json!(1);
+                                value["kind"] = json!("file-observation-invalidated");
+                                value["kernelEpoch"] = json!(epoch);
+                                let _ = output.send(value);
+                            }
+                        });
                         storage.set_process_terminal_sender(process_terminals.clone());
+                        let commands = capture_completions.clone();
+                        storage.set_recovered_process_receipt_wake(move || {
+                            let _ = commands.send(WorkerRequest::RecheckRecoveredProcessReceipts);
+                        });
                         storage.set_process_controls(process_controls.clone());
                         storage.set_process_subscriptions(storage_subscriptions.clone());
                     }
@@ -1463,6 +1533,10 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         if request.get("kind").and_then(Value::as_str) == Some("plan-response") {
             plan_bridge.receive(request);
+            continue;
+        }
+        if request.get("kind").and_then(Value::as_str) == Some("file-observation-response") {
+            file_observation_bridge.receive(request);
             continue;
         }
         if request.get("kind").and_then(Value::as_str) == Some("resource-response") {
@@ -1700,12 +1774,38 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     matches!(*method, "runtime.run.cancel" | "runtime.operation.cancel")
                 })
                 .map(|_| request.clone());
+            let (token, wake_cancel) = if matches!(
+                request["method"].as_str(),
+                Some(
+                    "runtime.followup.register"
+                        | "runtime.followup.file.observe"
+                        | "runtime.followup.file.release"
+                )
+            ) {
+                let request_id = request["id"].as_str().unwrap_or_default();
+                let mut active = cancellations
+                    .lock()
+                    .map_err(|_| "cancellation owner poisoned")?;
+                let active = active
+                    .get_mut(request_id)
+                    .ok_or("file observation lost admission")?;
+                let cancel = active.runtime_cancel.clone().unwrap_or_default();
+                if active.token.load(Ordering::Acquire) {
+                    cancel.cancel();
+                }
+                active.token = cancel.shared_flag();
+                active.runtime_cancel = Some(cancel.clone());
+                (cancel.shared_flag(), Some(cancel))
+            } else {
+                (token, None)
+            };
             // Enqueue the intent before fast OS control. A resulting terminal fact can then
             // never overtake its cancel command in the owner's FIFO and lose causality.
             if agent_tx
                 .send(crate::agent_runtime::Command::Request {
                     value: request,
                     cancellation: token,
+                    wake_cancel,
                     input_order,
                 })
                 .is_err()
@@ -1740,6 +1840,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     memory_bridge.close();
     context_bridge.close();
     resource_bridge.close();
+    file_observation_bridge.close();
     plan_bridge.close();
     retrieval_bridge.close();
     policy_bridge.close();

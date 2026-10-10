@@ -423,3 +423,51 @@ it.each(['process_stopped', 'at', 'any', 'all'] as const)('admits one %s follow-
     replacement?.stop();
   }
 }, 60_000);
+
+it('resumes one original materialized file condition through real watcher recovery and original ingress', async () => {
+  const inputs: string[] = [];
+  const f = await fixture((body, response) => { inputs.push(JSON.stringify(body.input)); done(response); });
+  await fs.writeFile(path.join(f.workspace, 'result.txt'), 'original baseline');
+  const identity = await f.api.create('file-followup-original-source');
+  const prepared = await f.api.prepareSource({ ...identity, key: 'capture', path: f.workspace, mode: 'materialized' });
+  const source = await f.api.submit({ ...identity, key: 'original-work', expectedHead: null,
+    text: 'Finish this first round.', model, source: prepared.source });
+  await expect.poll(async () => (await f.runtime.run(source.run_id)).state, { timeout: 15_000 }).toBe('completed');
+  f.collaboration.stop();
+  const { DocumentsFileObservationOwner } = await import('./file-observation-owner.js');
+  const { FileObservationService } = await import('./file-observation-service.js');
+  const errors: unknown[] = [];
+  const owner = new DocumentsFileObservationOwner(f.documents, async () => { throw new Error('No live root expected'); },
+    receiptId => observation.changed(receiptId));
+  const observation = new FileObservationService(f.runtime, owner, error => errors.push(error));
+  f.kernel.setFileObservationOwner(owner);
+  try {
+    const command = { ...identity, key: 'original-file-condition', runId: source.run_id,
+      trigger: { kind: 'file' as const, path: 'result.txt', condition: 'changed' as const },
+      instruction: 'Inspect the changed original result exactly once.' };
+    const registered = await f.api.followups.register(command);
+    expect(registered.sources[0]?.file?.baseline?.kind).toBe('regular-file');
+    expect(registered.occurrence).toBeNull();
+    const binding = (await f.runtime.fileFollowups()).bindings.find(item => item.followupId === registered.id)!;
+    const originalRoot = binding.target!.physicalRoot!.canonicalRoot;
+    expect(originalRoot).not.toBe(f.workspace);
+    // Lose transient handles without replacing Catalog, Storage acceptance or the original source.
+    owner.reset(); observation.changed(binding.receiptId); await observation.recover();
+    await expect.poll(async () => (await f.api.followups.list(identity))[0]?.sources[0]?.file?.gap).toBe(true);
+    await fs.writeFile(path.join(f.workspace, 'result.txt'), 'unrelated workspace version');
+    expect((await f.api.followups.list(identity))[0]?.occurrence).toBeNull();
+    await fs.writeFile(path.join(originalRoot, 'result.txt'), 'changed original result');
+    await expect.poll(async () => Boolean((await f.api.followups.list(identity))[0]?.occurrence?.delivery?.run_id), { timeout: 15_000 }).toBe(true);
+    const current = (await f.api.followups.list(identity))[0]!;
+    const delivery = current.occurrence!.delivery!;
+    expect(current.occurrence!.evidence).toMatchObject({ kind: 'file', path: 'result.txt', condition: 'changed' });
+    expect(delivery.run_id).not.toBe(source.run_id);
+    expect(await f.runtime.run(delivery.run_id!)).toMatchObject({ state: 'accepted' });
+    await f.adapter.recover();
+    await expect.poll(async () => (await f.runtime.run(delivery.run_id!)).state, { timeout: 15_000 }).toBe('completed');
+    expect(inputs).toHaveLength(2); expect(inputs[1]).toContain(command.instruction);
+    expect((await f.runtime.history(identity.branchId)).filter(item => item.id === delivery.input_id)).toHaveLength(1);
+    expect((await f.api.followups.register(command)).occurrence?.delivery?.input_id).toBe(delivery.input_id);
+    expect(errors).toEqual([]); expect(f.launchErrors).toEqual([]);
+  } finally { await observation.stop(); }
+}, 60_000);

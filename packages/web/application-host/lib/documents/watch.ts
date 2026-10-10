@@ -146,6 +146,11 @@ export const createWorkspaceWatcher = ({
           sequence: nextSequence(),
           resource,
         });
+      } else {
+        // A directory can arrive atomically with descendants. Preserve the entry
+        // invalidation so exact-path observers can recheck descendants through
+        // their resource owner; this is not a claim about any file's content.
+        emit({ kind: 'invalidated', sequence: nextSequence(), resource, reason: 'entry-changed' });
       }
     }
   };

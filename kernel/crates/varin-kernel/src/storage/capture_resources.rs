@@ -46,7 +46,7 @@ fn open_regular(path: &Path) -> Result<File, KernelError> {
     }
     let file = options.open(path)?;
     if !file.metadata()?.is_file() {
-        return Err(KernelError::Operation(
+        return Err(KernelError::SnapshotChanged(
             "capture source is no longer a regular file".into(),
         ));
     }
@@ -136,7 +136,7 @@ impl CaptureTask {
                         resolve_admitted_resource(&self.root, path, &self.grant, true)?;
                     let after = fs::symlink_metadata(&after_resource.absolute)?;
                     if !after.is_file() || after.file_type().is_symlink() {
-                        return Err(KernelError::Operation(format!(
+                        return Err(KernelError::SnapshotChanged(format!(
                             "file changed while being captured: {path}"
                         )));
                     }
@@ -149,7 +149,7 @@ impl CaptureTask {
                         || after_hash != hash
                         || after_length != length
                     {
-                        return Err(KernelError::Operation(format!(
+                        return Err(KernelError::SnapshotChanged(format!(
                             "file changed while being captured: {path}"
                         )));
                     }
@@ -344,5 +344,40 @@ impl Storage {
             self.verified_objects.insert(hash);
         }
         Ok(response)
+    }
+}
+
+impl CaptureTask {
+    pub(super) fn observation(
+        root: FileRoot,
+        grant: Grant,
+        path: String,
+        storage_root: PathBuf,
+        cancellation: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            params: KernelFileCaptureBatchParams {
+                operation_id: String::new(),
+                workspace_id: root.owning_workspace_id.clone(),
+                root_id: root.root_id.clone(),
+                paths: vec![path],
+                store: false,
+                lease_id: String::new(),
+            },
+            root,
+            grant,
+            storage_root,
+            cancellation,
+        }
+    }
+}
+impl CapturedBatch {
+    pub(super) fn single_state(mut self) -> Result<FileState, KernelError> {
+        if self.entries.len() != 1 {
+            return Err(KernelError::Storage(
+                "single file observation changed cardinality".into(),
+            ));
+        }
+        Ok(self.entries.remove(0).state)
     }
 }

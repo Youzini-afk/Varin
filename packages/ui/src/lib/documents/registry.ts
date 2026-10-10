@@ -1303,6 +1303,18 @@ export class DocumentRegistry {
   }
 
   handleWatchEvent(event: VarinWorkspaceFileEvent, resetWorkspaceId?: string): void {
+    if (event.kind === 'invalidated') {
+      // An entry (including an atomically replaced directory) invalidates open
+      // descendants; only the Documents read can establish their actual state.
+      for (const record of this.records.values()) {
+        if (record.status === 'loading' || record.saving) continue;
+        if (this.aliasesFor(record.identity).some(alias => alias.workspaceId === event.resource.workspaceId
+          && (alias.resourceId === event.resource.resourceId || alias.resourceId.startsWith(`${event.resource.resourceId}/`)))) {
+          void this.open(record.identity, { reload: true });
+        }
+      }
+      return;
+    }
     if (event.kind === 'reset') {
       const records = [...this.records.values()].filter((record) => (
         !resetWorkspaceId || this.aliasesFor(record.identity).some((alias) => alias.workspaceId === resetWorkspaceId)

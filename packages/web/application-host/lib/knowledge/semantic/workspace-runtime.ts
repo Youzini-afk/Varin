@@ -318,7 +318,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     const wasReady = state.documentWatchReady;
     try {
       const documentWatch = options.documents.watch(state.workspaceId, (event) => {
-        if (event.kind === 'reset') {
+        if (event.kind === 'reset' || event.kind === 'invalidated') {
           // A lost notification requires a new inventory, not a read of every
           // unchanged body. Persisted hints select changed files; query hits
           // still verify their content revision through Documents.
