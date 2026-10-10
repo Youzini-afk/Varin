@@ -203,11 +203,11 @@ describe("nested thread production chain", () => {
       resolveRuntimeWorkspaceId: async (directory) => directory === materializedParentRoot ? "execution-ws" : "ws",
       beginDirtyStateBarrier: async (workspaceId) => {
         barrierWorkspaces.push(workspaceId);
-        return { release: async () => undefined, settle: async () => undefined };
+        return { barrierId: `barrier:${workspaceId}`, release: async () => undefined, settle: async () => undefined };
       },
       beginBaselineCapture: async (workspaceId) => {
         captureWorkspaces.push(workspaceId);
-        return { workspaceId };
+        return { captureId: `capture:${workspaceId}`, workspaceId, epoch: 1, mutationRevision: 1, writerRevision: 1, activeWriterIds: [], allowMaintenance: false, maintenance: false, watchRevision: 1, watch: null };
       },
       completeBaselineCapture: async () => ({ stable: true, reasons: [] }),
       inspectBaselineWriters: async (workspaceId) => {

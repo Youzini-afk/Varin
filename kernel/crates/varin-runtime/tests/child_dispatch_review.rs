@@ -88,8 +88,12 @@ fn authority_cannot_be_forged_by_another_run_policy_origin_or_expanded_child_too
 
 #[test]
 fn child_body_roots_survive_collection_and_broken_task_text_does_not_block_controls() {
-    let mut f = Fixture::new();
+    let mut f = Fixture::new_parent_extension();
     let child = f.accept();
+    assert!(child.receipt.is_none());
+    assert_ne!(child.launch.extension_bindings_ref,f.db.launch_metadata(&f.context.run_id).unwrap().unwrap().selection.extension_bindings_ref);
+    f.db.collect_content_objects().unwrap();
+    assert!(f.db.capture_child_read(child.clone()).load().unwrap().launch.extension_bindings.is_empty());
     let (source, proposal, basis) = child_context(&child);
     let child =
         f.db.prepare_child(&child.operation_id, source, proposal, basis)
@@ -144,7 +148,7 @@ fn preparation_failure_before_dispatch_exchange_commit_preserves_the_real_receip
         f.db.fail_child_preparation(&child.operation_id, "fixture preparation failure")
             .unwrap();
     assert_eq!(failed.report.as_ref().unwrap().outcome, Outcome::Failed);
-    assert_eq!(failed.report.as_ref().unwrap().code_result, "no_changes");
+    assert_eq!(failed.code_result, varin_runtime::catalog::collaboration::ChildCodeResult::NoChanges);
     assert_ne!(
         f.db.operation(&child.operation_id).unwrap().phase,
         OperationPhase::Terminal
@@ -393,7 +397,7 @@ fn child_context(
     varin_runtime::catalog::context::ContextProposal,
     varin_runtime::catalog::personalization::PersonalizationBasis,
 ) {
-    let mut source = child.source_pin.source.clone();
+    let mut source = child.source.pin().unwrap().source.clone();
     source.branch_id = Some(format!("child-source:{}", child.operation_id));
     source.revision = Some(0);
     let proposal = varin_runtime::catalog::context::ContextProposal {
@@ -635,4 +639,45 @@ fn incompatible_collaboration_domain_is_rejected_without_rewriting_existing_asse
         );
         std::fs::remove_dir_all(root).unwrap();
     }
+}
+
+#[test]
+fn fixed_parent_can_admit_private_writable_child_and_cancelled_empty_report_keeps_partial_result() {
+    use varin_runtime::catalog::collaboration::{ChildCodeResult,ChildSource,ChildWorkingResultRef};
+    let mut f=Fixture::new_isolated();
+    let child=f.accept();
+    assert!(matches!(child.source,ChildSource::Pending{..}));
+    assert_eq!(child.code_result,ChildCodeResult::Pending);
+    f.settle_exchange();
+    let (mut source,proposal,basis)=child_context(&child);source.mode=SourceMode::Materialized;
+    let child=f.db.prepare_child(&child.operation_id,source,proposal,basis).unwrap();
+    let run=child.receipt.as_ref().unwrap().run_id.clone();let epoch=f.db.epoch();
+    f.db.admit_operation("child-file-effect",&run,epoch,Lifetime::Run,json!({"fixture":"confirmed file mutation"})).unwrap();
+    f.db.dispatch_operation("child-file-effect",epoch,"file_write",true).unwrap();
+    f.db.settle_operation("child-file-effect",epoch,Outcome::Succeeded,Effect::Confirmed,json!({"written":true})).unwrap();
+    f.db.request_cancel_run(&run).unwrap();
+    f.db.commit_execution(&run,epoch,&ExecutionRecord::StateChanged{state:RunState::Cancelled,waiting_on:None}).unwrap();
+    f.db.reconcile_child_reports().unwrap();
+    let reported=f.db.child_task(&child.operation_id).unwrap();
+    assert_eq!(reported.report.as_ref().unwrap().outcome,Outcome::Cancelled);
+    assert!(reported.report.as_ref().unwrap().history_ids.is_empty());
+    assert_eq!(reported.code_result,ChildCodeResult::Pending);
+    assert_eq!(f.db.child_file_effect(&child.operation_id).unwrap(),Effect::Partial);
+    let publication_id=format!("child-result:{}",child.operation_id);
+    f.db.begin_child_settlement(&child.operation_id).unwrap();
+    let candidate=KernelWorkingResultCandidate {publication_id:publication_id.clone(),candidate_operation_id:format!("result-prepare:{publication_id}"),
+        workspace_id:"workspace-A".into(),branch_id:format!("child-source:{}",child.operation_id),root:"fixed-result-root".into(),base_root:child.source.pin().unwrap().root.clone(),
+        write_revision:1,pin_id:"result-pin".into(),base_pin_id:"result-base-pin".into()};
+    f.db.attach_child_candidate(&child.operation_id,candidate.clone()).unwrap();
+    let result=ChildWorkingResultRef{publication_id:publication_id.clone(),workspace_id:candidate.workspace_id,branch_id:candidate.branch_id,root:candidate.root,base_root:candidate.base_root,
+        result_revision:1,record_id:"working-result:fixed".into()};
+    f.db.attach_child_result(&child.operation_id,result.clone(),Effect::Partial).unwrap();
+    f.db.settle_child_receipts().unwrap();
+    let operation=f.db.operation(&child.operation_id).unwrap();
+    assert_eq!(operation.outcome,Some(Outcome::Cancelled));assert_eq!(operation.effect,Effect::Partial);
+    let original_revision=operation.revision;
+    f.db.settle_child_receipts().unwrap();assert_eq!(f.db.operation(&child.operation_id).unwrap().revision,original_revision);
+    let root=f.root.clone();drop(f.db);let db=Catalog::open(&root).unwrap();
+    assert_eq!(db.child_task(&child.operation_id).unwrap().code_result,ChildCodeResult::Published{result,effect:Effect::Partial});
+    drop(db);std::fs::remove_dir_all(root).unwrap();
 }

@@ -170,10 +170,19 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       </article>)}
       {!historyView && progress && <article className="mx-auto max-w-3xl" aria-label="Streaming assistant response"><MarkdownRenderer messageId={`${identity.threadId}:progress`} isStreaming content={progress} /></article>}
       {snapshot?.children?.map(child => <div key={child.operation_id} className="mx-auto max-w-3xl rounded border p-3 text-sm" aria-label="Child task">
-        <div>Read-only child · {child.state}</div>
+        <div>{child.input.profile === 'read_only' ? 'Read-only child' : child.input.profile === 'isolated_write' ? 'Isolated writable child' : child.input.profile} · {child.state}</div>
+        <div className="text-xs text-muted-foreground">{child.source.kind === 'pending' ? 'Preparing a stable source' : `Source ready · ${child.source.provenance.consistency}`}</div>
+        {child.source.kind === 'ready' && child.source.provenance.consistency !== 'fixed-root' && <div className="text-xs text-muted-foreground">{child.source.provenance.contentMode === 'saved-files' ? 'Saved files' : 'Fixed draft baseline'}{child.source.provenance.omittedDraftPaths.length > 0 ? ` · ${child.source.provenance.omittedDraftPaths.length} unsaved overlays omitted` : ''}</div>}
+        <div className="text-xs text-muted-foreground">{child.code_result.kind === 'published'
+          ? `File result fixed · revision ${child.code_result.result.result_revision} · effect: ${child.code_result.effect} · parent integration requires a separate action`
+          : child.code_result.kind === 'no_changes' ? 'No file changes'
+          : child.code_result.kind === 'unavailable' ? `File result unavailable · ${child.code_result.code} · effect: ${child.code_result.effect}`
+          : child.code_result.kind === 'candidate' ? 'File result fixed; publication pending'
+          : child.code_result.kind === 'settling' ? 'Waiting for child writers and original receipts before fixing the file result'
+          : 'File result pending'}</div>
         <div className="text-xs text-muted-foreground">{child.child_thread_id}</div>
         <p>{child.input.task}</p>
-        {child.report && <><div className="text-xs text-muted-foreground">Report · {child.report.outcome} · no file changes</div><MarkdownRenderer messageId={`child:${child.operation_id}`} content={child.report.detail ?? "Report stored in child history."} /></>}
+        {child.report && <><div className="text-xs text-muted-foreground">Report · {child.report.outcome}</div><MarkdownRenderer messageId={`child:${child.operation_id}`} content={child.report.detail ?? "Report stored in child history."} /></>}
         {child.report?.history_ids.map(itemId => <ChildReportPage key={itemId} api={api} identity={identity} operationId={child.operation_id} itemId={itemId} />)}
         {!child.report && api.collaboration && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelChild(identity, child.operation_id))}>Cancel child task</Button>}
       </div>)}

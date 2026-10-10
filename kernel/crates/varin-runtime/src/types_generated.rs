@@ -133,3 +133,17 @@ pub struct ModelSessionConfiguration {
     pub thinking_level: Option<String>,
     pub model_options: Option<serde_json::Value>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct KernelWorkingResultCandidate {
+    pub publication_id: String,
+    pub candidate_operation_id: String,
+    pub workspace_id: String,
+    pub branch_id: String,
+    pub root: String,
+    pub base_root: String,
+    pub write_revision: u64,
+    pub pin_id: String,
+    pub base_pin_id: String,
+}

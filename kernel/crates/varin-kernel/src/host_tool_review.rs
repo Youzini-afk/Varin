@@ -368,6 +368,23 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
             "kernel restart cannot stop an external callback"
         );
         let before = db.lock().unwrap().run(run).unwrap();
+        // An unchanged unknown receipt can independently confirm that its original executor
+        // stopped. It must free occupancy without inventing a confirmed business effect.
+        let stopped_unknown = json!({"v":1,"kind":"host-tool-receipt","id":"original-unknown-stop","kernelEpoch":"replacement-transport",
+            "executionOwner":{"kind":"external","identity":"installed:host:read@1","epoch":"original-host-owner"},"call":host_call,
+            "receipt":{"completion":original.completion,"executor_stopped":true}});
+        for _ in 0..2 {
+            serde_json::from_value::<LateReceipt>(stopped_unknown.clone()).unwrap().apply(&db).unwrap();
+        }
+        {
+            let catalog=db.lock().unwrap();
+            let op=catalog.operation(&context.operation_id).unwrap();
+            let op=catalog.capture_operation_read(op).load().unwrap();
+            assert_eq!(op.effect,Effect::Unknown);
+            assert_eq!(op.result,Some(json!({"error":"observer_cancelled"})));
+            assert!(catalog.resource_admission().inspect(&context.operation_id).is_none());
+            assert_eq!(catalog.run(run).unwrap(),before);
+        }
         let original_text = if policy {
             "large-original-".repeat(1_400_000)
         } else {

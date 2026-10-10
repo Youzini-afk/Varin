@@ -67,7 +67,7 @@ fn boundary(revoke_before: bool, policy: bool) {
                 let is_pin = !request.authorize_only
                     && matches!(
                         &request.operation,
-                        ResourceOperation::CollaborationPin { release: false, .. }
+                        ResourceOperation::ChildSourceHandoff { .. }
                     );
                 let mut owner = storage.lock().unwrap();
                 if is_pin && revoke_before {
@@ -84,10 +84,10 @@ fn boundary(revoke_before: bool, policy: bool) {
                         )
                     });
                     assert_eq!(
-                        pin["pinId"],
+                        pin["root"]["pin"]["pin_id"],
                         format!("child-pin:{}", request.context.operation_id)
                     );
-                    assert!(pin["root"].is_string());
+                    assert!(pin["root"]["pin"]["root"].is_string());
                     assert!(
                         db.lock().unwrap().child_tasks().unwrap().is_empty(),
                         "source transfer is distinct from Catalog acceptance"
@@ -166,7 +166,7 @@ fn boundary(revoke_before: bool, policy: bool) {
         assert_eq!(children[0].parent_run_id, f.context.run_id);
         let read = db.lock().unwrap().capture_child_read(children[0].clone());
         assert_eq!(read.load().unwrap().launch.tools.len(), 1);
-        assert_eq!(children[0].source_pin.source.revision, Some(0));
+        assert_eq!(children[0].source.pin().unwrap().source.revision, Some(0));
     }
     drop(executor);
     drop(db);

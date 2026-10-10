@@ -3,6 +3,7 @@ use super::*;
 
 pub(super) fn execute(
     runtime: Arc<RunSupervisor>,
+    resources: crate::tools::KernelResourceClient,
     method: &str,
     params: Value,
     cancelled: &AtomicBool,
@@ -11,6 +12,216 @@ pub(super) fn execute(
         return Err(KernelError::Cancelled);
     }
     let owner = runtime.catalog();
+    if method == "runtime.host_tool.reconcile" {
+        let p: HostToolReconcileParams = serde_json::from_value(params)?;
+        let confirmed = crate::integration_reconciliation::reconcile(
+            &runtime,
+            &resources,
+            None,
+            &p.operation_id,
+            Some(&p.execution_owner),
+        )?;
+        return Ok(
+            json!({"reconciled":if confirmed{vec![p.operation_id.clone()]}else{vec![]},"unresolved":if confirmed{vec![]}else{vec![p.operation_id]}}),
+        );
+    }
+
+    if method == "runtime.child.source.ready" {
+        let p: ChildSourceReadyParams = serde_json::from_value(params)?;
+        let source = varin_runtime::catalog::launches::SourceSelection {
+            environment_run_id: p.source.environment_run_id,
+            mode: p.source.mode,
+            live_root: p.source.live_root.and_then(|root| root.0).map(|root| {
+                varin_runtime::catalog::launches::LiveRoot {
+                    host_id: root.host_id,
+                    root_id: root.root_id,
+                    canonical_root: root.canonical_root,
+                }
+            }),
+            workspace_id: p.source.workspace_id,
+            execution_workspace_id: p.source.execution_workspace_id,
+            branch_id: p.source.branch_id.0,
+            revision: p
+                .source
+                .revision
+                .0
+                .map(u64::try_from)
+                .transpose()
+                .map_err(|_| KernelError::Protocol("source revision must be nonnegative".into()))?,
+        };
+        let preparation = owner
+            .lock()
+            .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+            .prepare_child_source(&p.operation_id, p.pin, source, p.provenance)
+            .map_err(domain)?;
+        let prepared = preparation.load().map_err(domain)?;
+        if cancelled.load(Ordering::Acquire) {
+            return Err(KernelError::Cancelled);
+        }
+        let read = {
+            let mut catalog = owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            let child = catalog.attach_child_source(prepared).map_err(domain)?;
+            catalog.capture_child_read(child)
+        };
+        return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
+    }
+    if matches!(
+        method,
+        "runtime.child.settle"
+            | "runtime.child.result.candidate"
+            | "runtime.child.result.published"
+    ) {
+        let (operation_id, binding, receipt_id) = match method {
+            "runtime.child.settle" => {
+                let p: ChildSettleParams = serde_json::from_value(params)?;
+                (p.operation_id, p.tool_binding, None)
+            }
+            "runtime.child.result.candidate" => {
+                let p: ChildResultCandidateParams = serde_json::from_value(params)?;
+                (
+                    p.operation_id,
+                    p.tool_binding,
+                    Some(p.candidate_operation_id),
+                )
+            }
+            _ => {
+                let p: ChildResultPublishedParams = serde_json::from_value(params)?;
+                (p.operation_id, p.tool_binding, Some(p.publication_id))
+            }
+        };
+        let binding: crate::tools::ToolBinding = serde_json::from_value(binding)?;
+        let child = {
+            let catalog = owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            let child = catalog.child_task(&operation_id).map_err(domain)?;
+            let receipt = child
+                .receipt
+                .as_ref()
+                .ok_or_else(|| KernelError::Authorization("child has no Run".into()))?;
+            let run = catalog.run(&receipt.run_id).map_err(domain)?;
+            if binding.run_id != run.id
+                || binding.thread_id != run.thread_id
+                || !run.state.terminal()
+                || child.source.selection() != Some(&binding.source_selection()?)
+            {
+                return Err(KernelError::Authorization(
+                    "child settlement requires the original terminal Run source".into(),
+                ));
+            }
+            child
+        };
+        runtime
+            .quiesce_terminal(&binding.run_id)
+            .map_err(|error| KernelError::Operation(error.to_string()))?;
+        let context = varin_runtime::execution::ToolExecutionContext {
+            run_id: binding.run_id.clone(),
+            origin: child.origin.clone(),
+            operation_id: child.operation_id.clone(),
+        };
+        let cancel = varin_runtime::execution::CancellationToken::default();
+        if method == "runtime.child.settle" {
+            resources
+                .require_child_root_idle(&binding, &context, &cancel)
+                .map_err(|error| KernelError::Operation(error.to_string()))?;
+        }
+        if method == "runtime.child.settle" {
+            owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .confirm_child_file_writers_stopped(&operation_id)
+                .map_err(domain)?;
+            let reads = {
+                let catalog = owner
+                    .lock()
+                    .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+                catalog
+                    .pending_run_operations(&binding.run_id)
+                    .map_err(domain)?
+                    .into_iter()
+                    .filter(|operation| {
+                        matches!(
+                            operation.executor.as_deref(),
+                            Some("file_write" | "file_edit")
+                        )
+                    })
+                    .map(|operation| catalog.capture_operation_read(operation))
+                    .collect::<Vec<_>>()
+            };
+            let operations = reads
+                .into_iter()
+                .map(|read| read.load().map_err(domain))
+                .collect::<Result<Vec<_>, _>>()?;
+            for (id, receipt) in resources.reconcile_mutations(binding.clone(), operations)? {
+                // The Run worker has joined and the original physical root has no file lease.
+                // An uncertain journal can therefore release occupancy without claiming no effect.
+                varin_runtime::catalog::result_content::record_external_receipt(
+                    &owner, &id, receipt, true,
+                )
+                .map_err(domain)?;
+            }
+        }
+        let stored = if let Some(id) = receipt_id {
+            let kind = if method == "runtime.child.result.candidate" {
+                "working.result.prepare"
+            } else {
+                "working.result.publish"
+            };
+            Some(
+                resources
+                    .child_storage_receipt(&binding, &context, &id, kind, &cancel)
+                    .map_err(|error| KernelError::Operation(error.to_string()))?,
+            )
+        } else {
+            None
+        };
+        if cancelled.load(Ordering::Acquire) {
+            return Err(KernelError::Cancelled);
+        }
+        let read = {
+            let mut catalog = owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            let child = if method == "runtime.child.settle" {
+                catalog
+                    .begin_child_settlement(&operation_id)
+                    .map_err(domain)?
+            } else if method == "runtime.child.result.candidate" {
+                let candidate =
+                    crate::storage::result_publication::candidate_view(stored.as_ref().unwrap())?;
+                catalog
+                    .attach_child_candidate(&operation_id, candidate)
+                    .map_err(domain)?
+            } else {
+                let value = stored.as_ref().unwrap();
+                let text = |field: &str| {
+                    value[field].as_str().map(str::to_string).ok_or_else(|| {
+                        KernelError::Protocol(format!("missing publication {field}"))
+                    })
+                };
+                let result = varin_runtime::catalog::collaboration::ChildWorkingResultRef {
+                    publication_id: text("publicationId")?,
+                    workspace_id: text("workspaceId")?,
+                    branch_id: text("branchId")?,
+                    result_revision: value["resultRevision"].as_u64().ok_or_else(|| {
+                        KernelError::Protocol("invalid published revision".into())
+                    })?,
+                    root: text("root")?,
+                    base_root: text("baseRoot")?,
+                    record_id: text("recordId")?,
+                };
+                let effect = catalog.child_file_effect(&operation_id).map_err(domain)?;
+                catalog
+                    .attach_child_result(&operation_id, result, effect)
+                    .map_err(domain)?
+            };
+            catalog.capture_child_read(child)
+        };
+        varin_runtime::catalog::child_delivery::reconcile_reports(&owner).map_err(domain)?;
+        return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
+    }
     if method == "runtime.child.report.read" {
         let p: ChildReportReadParams = serde_json::from_value(params)?;
         let offset = usize::try_from(p.offset.unwrap_or(0))

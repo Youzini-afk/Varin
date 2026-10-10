@@ -2167,6 +2167,22 @@ impl Catalog {
         Ok(op)
     }
 
+    /// Called only after the child supervisor joined and Storage proved the exact private
+    /// root has no live writer leases. Unknown business effects remain unknown.
+    pub fn confirm_child_file_writers_stopped(&mut self, child_operation_id:&str)->Result<()> {
+        let child=self.child_task(child_operation_id)?;
+        let run=child.receipt.as_ref().ok_or_else(||RuntimeError::Conflict("child Run missing".into()))?;
+        if !self.run(&run.run_id)?.state.terminal(){return Err(RuntimeError::Conflict("child Run is not terminal".into()));}
+        let operations=self.pending_run_operations(&run.run_id)?.into_iter()
+            .filter(|operation|matches!(operation.executor.as_deref(),Some("file_write"|"file_edit"))).collect::<Vec<_>>();
+        let tx=self.db.transaction()?;
+        let mut released=0;
+        for operation in &operations {released+=tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1",[&operation.id])?;}
+        if released>0{event(&tx,child_operation_id,child.revision,"child.writers_stopped",Value::Null)?;}
+        tx.commit()?;
+        for operation in &operations {self.release_stopped_resource_owner(&operation.id)?;}
+        Ok(())
+    }
     fn release_stopped_resource_owner(&self, owner: &str) -> Result<()> {
         let occupied: bool = self.db.query_row(
             "SELECT EXISTS(SELECT 1 FROM resource_occupancy WHERE operation_id=?1)",

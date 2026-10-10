@@ -1,4 +1,4 @@
-import type { RecoveryState, RegularFileState, WorkingBranchRoot, WorkingStateRootStore } from "./types.js";
+import type { RecoveryState, RegularFileState, WorkingBranchRoot, WorkingStateRootStore, WorkingBranchCreateOptions } from "./types.js";
 import { defaultNewFileMode } from "./workspace-baseline.js";
 
 export interface EditorDraft {
@@ -174,6 +174,7 @@ export async function createBranchWithDraftBaseline(
   drafts: EditorDraft[] | Record<string, EditorDraft | string | Buffer | null>,
   baseRef?: string,
   captureScopes: string[] = [],
+  options?: WorkingBranchCreateOptions,
 ): Promise<WorkingBranchRoot> {
   const { effectiveState, changedPaths } = await overlayDraftsOnBaseline({
     baseState,
@@ -181,5 +182,5 @@ export async function createBranchWithDraftBaseline(
     putObject: (bytes) => store.putObject(bytes),
   });
 
-  return store.createBranch(workspaceId, branchId, effectiveState, baseRef, changedPaths, captureScopes);
+  return store.createBranch(workspaceId, branchId, effectiveState, baseRef, changedPaths, captureScopes, options);
 }

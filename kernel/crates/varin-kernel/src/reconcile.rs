@@ -22,11 +22,16 @@ pub(crate) fn reconcile(
         .spawn(move || {
             let result = (|| -> Result<Value, KernelError> {
                 let requested: Vec<String> = operations.iter().map(|op| op.id.clone()).collect();
+                let mut reconciled=Vec::new();
+                for operation in &operations {
+                    if operation.executor.as_deref()==Some("integrate_child") && crate::integration_reconciliation::reconcile(&runtime,&resources,Some(&binding),&operation.id,operation.execution_owner.as_ref())? {
+                        reconciled.push(operation.id.clone());
+                    }
+                }
                 let reads={let owner=runtime.catalog();let catalog=owner.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?;
-                    operations.into_iter().map(|operation|catalog.capture_operation_read(operation)).collect::<Vec<_>>()};
+                    operations.into_iter().filter(|operation|matches!(operation.executor.as_deref(),Some("file_write"|"file_edit"))).map(|operation|catalog.capture_operation_read(operation)).collect::<Vec<_>>()};
                 let operations=reads.into_iter().map(|read|read.load().map_err(|error|KernelError::Operation(error.to_string()))).collect::<Result<Vec<_>,_>>()?;
-                let receipts = resources.reconcile_mutations(binding, operations)?;
-                let mut reconciled = Vec::new();
+                let receipts = if operations.is_empty(){Vec::new()}else{resources.reconcile_mutations(binding, operations)?};
                 let catalog = runtime.catalog();
                 for (operation_id, receipt) in receipts {
                     let stopped = receipt.outcome != varin_runtime::Outcome::Indeterminate;

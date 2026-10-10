@@ -377,6 +377,8 @@ export class LegacyWorkingStateRootAdapter implements WorkingStateRootStore {
     return rootFromBranch(branch);
   }
 
+  async releaseCapturedStates(_states: Record<string, RecoveryState>): Promise<void> { /* The test object store has no transient owner leases. */ }
+
   captureDirectory(...args: Parameters<WorkingStateStore["captureDirectory"]>): ReturnType<WorkingStateStore["captureDirectory"]> { return this.store.captureDirectory(...args); }
   async listCaptureScopePaths(directory: string, scopes: readonly string[]): Promise<string[]> {
     if (typeof this.store.listCaptureScopePaths === "function") return this.store.listCaptureScopePaths(directory, scopes);
@@ -402,6 +404,18 @@ export class LegacyWorkingStateRootAdapter implements WorkingStateRootStore {
   directoryMatchesResult(...args: Parameters<WorkingStateStore["directoryMatchesResult"]>): ReturnType<WorkingStateStore["directoryMatchesResult"]> { return this.store.directoryMatchesResult(...args); }
   captureBranchCandidateIdentity(...args: Parameters<WorkingStateStore["captureBranchCandidateIdentity"]>): ReturnType<WorkingStateStore["captureBranchCandidateIdentity"]> { return this.store.captureBranchCandidateIdentity(...args); }
   captureSeededPathIdentity(...args: Parameters<WorkingStateStore["captureSeededPathIdentity"]>): ReturnType<WorkingStateStore["captureSeededPathIdentity"]> { return this.store.captureSeededPathIdentity(...args); }
+  async readSourcePreparation(_branchId: string): Promise<import("./types.js").WorkingSourcePreparation | null> { return null; }
+  async readResultCandidate(_branchId: string, _publicationId: string): Promise<import("./types.js").WorkingResultCandidate | null> { return null; }
+  async prepareResultCandidate(_input: import("./types.js").PrepareWorkingResultCandidate): Promise<import("./types.js").WorkingResultCandidate> {
+    throw new Error("Durable publication candidates require the Rust WorkingState owner");
+  }
+  async publishPreparedResult(_publicationId: string, _candidate: import("./types.js").WorkingResultCandidate): Promise<import("./types.js").WorkingResult> {
+    throw new Error("Durable publication candidates require the Rust WorkingState owner");
+  }
+  async resumeResultPublication(_branchId: string, _publicationId: string): Promise<import("./types.js").WorkingResult | null> {
+    // This legacy isolated fixture never writes the Rust operation log.
+    return null;
+  }
   publishHeadResult(...args: Parameters<WorkingStateStore["publishHeadResult"]>): ReturnType<WorkingStateStore["publishHeadResult"]> { return this.store.publishHeadResult(...args); }
   publishDirectoryResult(...args: Parameters<WorkingStateStore["publishDirectoryResult"]>): ReturnType<WorkingStateStore["publishDirectoryResult"]> { return this.store.publishDirectoryResult(...args); }
   async resultTreeIdentity(branchId: string, revision: number): Promise<string | null> { return this.store.resultTreeIdentity(branchId, revision); }

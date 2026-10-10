@@ -6,6 +6,19 @@
 
 目标是完整实现[完整运行时设计](../design/agent-runtime-design.md)和[能力组合设计](../design/runtime-extensibility-design.md)共同定义的长期运行底座：及时交互、低开销执行、按真实资源调度、深层能力组合和可替换策略。完成聊天循环、迁移已有工具或删除 Pi 都不是单独的完成标准；Pi 退出是这套设计落地后的一个结果。当前生产仍使用 Pi session worker、TypeScript Host 协调和 Rust 资源内核；现有权威见[架构](../architecture.md)。
 
+## 2026-10-10 增量：隔离可写子任务与原结果集成
+
+- 显式 `isolated_write` 与既有 `read_only` 共用原 dispatch/ChildTask/JobAccepted。父来源 whole-root 读取授权形成有界 handoff 后，Catalog 先持久受理独立 Thread/branch，再进行来源捕获、上下文准备和物化。私有子目录的受控文本写入不要求父原来源已有写工具；父方集成是另一个显式授权动作。仍只接受已实现的 `model: parent`，不默开进程、递归派发或任意扩展工具。
+- 固定来源复用原 pin；物理来源复用共享 Documents 稳定捕获，读取实际 materialized 目录而非旧分支基线。已保存文件、Git/非 Git inventory、mode/symlink 和未纳入的未保存 overlays 沿原合同处理。来源 provenance 正文由既有 Storage blob/ref 保留，与原 branch-create 回执一起提交；重启先读原回执，不重扫已固定的来源。实际 Documents workspace 身份与 Storage execution workspace 分开，避免受管目录错误命中父原根。
+- 子 Run 终态、文本报告、物理写停止和代码结果各自记录。受控写入沿既有 Rust 文件/readVersion/CAS authority；实际 Run worker 与原 root lease 排空后才固定候选。候选与 base pins 原子保存，readonly worker 生成原 WorkingResult，再短事务提交 branch revision、结果 record/ref 与原发布回执。已固定候选在目录消失后仍可发布，重投不新增结果版本；取消和空报告不抹掉已确认修改，未知效果保留未知。
+- 普通安装示例 `examples/extensions/child-integration-tool` 通过原 ToolDirectory/权限/Host invocation 调用既有 IntegrationCoordinator。选定 child/publication、实际父 Run/Thread/branch/source 和真实 model/policy origin 组成原 journal 因果绑定；同 Thread/branch 的后续 Run 可以显式集成。没有 Pi 会话伪装、第二结果库、第二效果日志或自动写回。现有三方合并、Documents 脏缓冲区 CAS、条件文件写入和补偿仍是效果 owner；`files-only` 包含文件/Document 内容恢复，不包含 Pi 对话历史回滚。
+- 冲突检查沿原物理路径 lease 和原 unresolved journal，识别不同 workspace ID、嵌套根或别名下的相同资源。等待路径 lease 在工作区短元数据队列外，外部 Surface 等待不占该队列。普通扩展 callback 提前返回不能释放已受理的实际 domain promise；真实原回执独立提供效果与停止证据。已派发 native Surface 请求保留精确原 ACK，取消不伪称执行端已停；失去 owner 而无证据的路径仍保持未知及未决资源保护。
+- 原 Host Tool 对账只接受 Operation/execution-owner 身份，由 Catalog 派生唯一 Integration journal，worker 核对原因果关系与路径事实。读取原收据不需要仍可访问的物理目录或新的 source grant，也不重执行、扫描补偿或杜撰停止。已真实停止但效果仍未知的回执可释放执行占用，业务不确定性和 journal 冲突保护仍独立保留。公开 child_status、Thread snapshot/UI 同步展示真实 source/provenance、profile、报告与固定结果。Catalog 总格式仍为 **19**，collaboration 域升为 **3**；旧内部域格式拒绝，不提供双读或迁移。
+- 整合检查闭合了两个真实事件窗口：child 在旧推进任务排空期间产生新 revision，完成后按原新事实再检查一次；旧 epoch 的 domain discovery 排空时保留新 epoch 唤醒。没有新事实的失败不自旋。来源 grant 从受理就归原 Run 生命周期，撤权失败保留追踪；清理失败只报告，不覆盖已经取得的原效果回执。GC 同步补齐 child Launch 的必需扩展绑定引用，避免受理后尚无子 Run 时误删内容。
+- 独立原反例闭合了真实逐路径取消与停止证据：第一条文件 ACK 后取消不再派发下一条；完整冲突与补偿 ACK 能确认执行停止；补偿不触碰从未由本次派发、后来被外部编辑成相同目标的文件；多 Surface owner 只撤销已派发组，不派发后续组。原 journal 保留实际 apply/undo 事实，未派发槽不伪称观察过 safety。Rust 对账接受已有停止证据且无 applied/compensated 声明的原 `external-intent`，仍拒未确认的 `external-dispatched`；终回执丢失后恢复原公开正文且重投幂等。缺失旧目录只保留其原资源身份，不阻碍无关目标；WorkingResult 的 root/baseRoot 沿原记录寿命保留，旧基线经 rebase、源分支删除与 pin 释放后仍可 GC/health。
+- 最终完整 runtime **251 passed、0 failed、2 个既有 ignored**，kernel lib **39/39**。Host 组合 **16 文件 263/263** 后，最后取消修复单独复跑 owning Integration **69/69**；该 69 包含此前组合中的 Integration 用例，不作相加。已安装 broker/SDK 的 Integration 用例 **5/5**，原 invocation 生命周期 **3/3**，UI **35/35**。这些证据分别覆盖真实原生 Catalog/Storage、协调器、安装入口和 UI，不冒充同一条 Host 端到端链。完整 Host 声明/测试类型、UI 类型、定点 lint、协议一致性、文档链接与实际 Host bundle 通过。Linux 开发内核 identity `0.9.25` 构建并 stage，SHA-256 `e55537a0e4572d6ca4eb99a4da1b71743c8beaefc76e33e04068b67bfb6e0fef`。
+- 独立审查按设计核对来源、写入、结果、集成、取消和恢复，保留四项原反例的修前/修后执行证据，并复核真实 Catalog/Storage 的最后回执恢复及 GC 根；本阶段无剩余已知源码行为阻断。**实际 Host/kernel 端到端缺口仍保留**：Unix socket `EPERM` 与官方提升初始化失败未解除，新增私有 child 写入 → 原 WorkingResult → Wait → 重开 native 场景仅通过类型检查，未执行。其余领域、GC 控制隔离、跨平台和默认 Pi 产品迁移仍未完成，两份设计尚未整体交付。
+
 ## 2026-10-10 增量：运行中策略安全换绑
 
 - 原 Catalog 保存策略选择命令、候选与激活回执，原 Launch 保存实际 generation 和完整 target。选择同时核对当前活动代与用户看到的 desired selection ID；原命令重投返回原回执。候选描述/依赖/规划模型准备独立执行，ready 不等于 active，失败或被取代候选不撤掉仍有效的活动代。首次准备使用原 launch-bound/checkpoint 事实派生 `policy_preparable`，已经使用的默认策略不会在恢复时被当成未选择策略。

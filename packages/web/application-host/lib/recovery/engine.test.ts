@@ -191,6 +191,38 @@ afterEach(async () => {
 });
 
 describe('affected-file workspace recovery journal', () => {
+  it('keeps shared resource work out of compound metadata serialization and drains it on dispose', async () => {
+    const { engine, harness } = await createHarness();
+    const workspaceId = recoveryIdentity(harness).workspaceId;
+    let releaseExclusive!: () => void;
+    let startedExclusive!: () => void;
+    const exclusiveStarted = new Promise<void>(resolve => { startedExclusive = resolve; });
+    const exclusiveWait = new Promise<void>(resolve => { releaseExclusive = resolve; });
+    const first = engine.withWorkspaceStorage(workspaceId, { mode: 'exclusive', purpose: 'first-metadata' }, async () => {
+      startedExclusive(); await exclusiveWait;
+    });
+    await exclusiveStarted;
+    let secondStarted = false;
+    const second = engine.withWorkspaceStorage(workspaceId, { mode: 'exclusive', purpose: 'second-metadata' }, () => { secondStarted = true; });
+    let releaseShared!: () => void;
+    let startedShared!: () => void;
+    const sharedStarted = new Promise<void>(resolve => { startedShared = resolve; });
+    const sharedWait = new Promise<void>(resolve => { releaseShared = resolve; });
+    const shared = engine.withWorkspaceStorage(workspaceId, { mode: 'shared', purpose: 'independent-resource' }, async () => {
+      startedShared(); await sharedWait;
+    });
+    await sharedStarted;
+    expect(secondStarted).toBe(false);
+    releaseExclusive(); await first; await second;
+    expect(secondStarted).toBe(true);
+    let disposed = false;
+    const disposing = engine.dispose().then(() => { disposed = true; });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(disposed).toBe(false);
+    releaseShared(); await shared; await disposing;
+    await expect(engine.withWorkspaceStorage(workspaceId, { mode: 'shared', purpose: 'after-dispose' }, () => undefined)).rejects.toThrow('disposed');
+  });
+
   it('creates a turn checkpoint without scanning unrelated workspace files', async () => {
     const createReadStream = vi.fn(fs.createReadStream.bind(fs));
     const { engine, harness } = await createHarness({

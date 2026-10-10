@@ -58,6 +58,9 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "file.materialize"
         | "storage.record.put"
         | "storage.record.release"
+        | "working.result.prepare"
+        | "working.result.publish"
+        | "working.result.candidate.release"
         | "working.result.put"
         | "working.result.release"
         | "working.draft.put"
@@ -70,6 +73,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "branch.objects" => "storage.maintenance",
         "storage.gc" => "storage.gc",
         "storage.object.rebindOwner"
+        | "recovery.operation.conflicts"
         | "recovery.operation.get"
         | "recovery.turn.start"
         | "recovery.turn.get"

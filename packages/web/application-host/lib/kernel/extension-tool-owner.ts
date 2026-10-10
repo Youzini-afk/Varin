@@ -197,6 +197,9 @@ export async function retainExtensionTool(
         threadId: run.thread_id,
         operationId: call.operationId,
         origin: call.origin,
+        toolName: call.name,
+        operation: descriptor.tool!.operation,
+        arguments: structuredClone(call.arguments),
         source: launch.selection.source,
       };
     };
@@ -271,10 +274,11 @@ export async function retainExtensionTool(
         } catch {
           return undispatchedToolReceipt('extension_tool_dispatch_rejected');
         }
+        let domainReceipt: ToolExecutionReceipt | undefined;
         // Scope lifetime follows the actual pin callback, including cancellation/worker exit.
         try {
           const output = await withToolInvocation(
-            { authority: context, owner: provider, signal: combined },
+            { authority: context, owner: provider, signal: combined, onEffectReceipt: receipt => { domainReceipt = receipt; } },
             (scope) =>
               pin.invoke(
                 'execute',
@@ -283,6 +287,7 @@ export async function retainExtensionTool(
                 scope,
               ),
           );
+          if (domainReceipt) return domainReceipt;
           if (!validateOutput(output))
             return {
               completion: {
@@ -306,6 +311,7 @@ export async function retainExtensionTool(
             executor_stopped: true,
           };
         } catch {
+          if (domainReceipt) return domainReceipt;
           // Broker transport keeps dispatched promises pending until actual response or process exit.
           return {
             completion: {

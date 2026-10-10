@@ -1673,6 +1673,8 @@ describe("thread runtime", () => {
       createdAt: new Date().toISOString(),
     }));
     const store = {
+      resumeResultPublication: async () => null,
+      readResultCandidate: async () => null,
       getBranchRoot: async (branchId: string) => branchId === "baseline-stage-committed" ? null : { captureScopes: [] },
       publishDirectoryResult,
     } as unknown as WorkingStateRootStore;

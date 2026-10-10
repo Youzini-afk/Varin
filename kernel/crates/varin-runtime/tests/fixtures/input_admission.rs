@@ -197,6 +197,15 @@ impl InputAdmission for Catalog {
         proposal: ContextProposal,
         basis: PersonalizationBasis,
     ) -> Result<ChildTask> {
+        let child=self.child_task(operation)?;
+        if matches!(child.source,varin_runtime::catalog::collaboration::ChildSource::Pending{..}) {
+            let root=child.source.pin().unwrap().root.clone();
+            let mut pin_source=source.clone();pin_source.mode=varin_runtime::SourceMode::FixedBranch;
+            let prepared=self.prepare_child_source(operation,varin_runtime::catalog::collaboration::ChildSourcePin {
+                pin_id:format!("child-source-pin:{operation}"),root:root.clone(),source:pin_source},source.clone(),
+                varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot{root})?.load()?;
+            self.attach_child_source(prepared)?;
+        }
         let prepared = self
             .capture_child_preparation(operation, source, proposal, basis)?
             .load()?;

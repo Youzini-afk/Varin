@@ -1,12 +1,12 @@
 //! Child state is metadata; task/configuration and executable descriptions are immutable bodies.
 use super::*;
 use crate::execution::ToolExecutionContext;
-use collaboration::{ChildSourcePin, ChildTask, DispatchInput};
+use collaboration::{ChildSourceHandoff, ChildSourceRoot, ChildSource, ChildCodeResult, ChildTask, DispatchInput};
 
 pub struct ChildAdmissionPreparation {
     context: ToolExecutionContext,
     input: DispatchInput,
-    pin: ChildSourcePin,
+    handoff: ChildSourceHandoff,
     launch: launch_content::PreparedChildLaunch,
     configuration: Value,
     database: std::path::PathBuf,
@@ -18,7 +18,8 @@ pub struct PreparedChildAdmission {
     pub(super) input_ref: Value,
     pub(super) configuration_ref: Value,
     pub(super) launch: launch_content::LaunchSelectionMetadata,
-    pub(super) pin: ChildSourcePin,
+    pub(super) handoff: ChildSourceHandoff,
+    pub(super) profile: String,
     pub(super) parent_tools_ref: Value,
     pub(super) operation_revision: u64,
     pub(super) call_id: String,
@@ -42,17 +43,17 @@ impl ChildAdmissionPreparation {
                 "dispatch differs from its admitted call".into(),
             ));
         }
-        self.pin.source.validate()?;
-        if self.pin.source.mode != SourceMode::FixedBranch
-            || self.pin.pin_id.is_empty()
-            || self.pin.root.is_empty()
-        {
-            return Err(RuntimeError::Invalid(
-                "child requires a retained fixed source".into(),
-            ));
+        self.handoff.source.validate()?;
+        if self.handoff.operation_id != format!("child-source-handoff:{}",self.context.operation_id) {
+            return Err(RuntimeError::Invalid("child source handoff identity changed".into()));
+        }
+        match &self.handoff.root {
+            ChildSourceRoot::Fixed{pin} if self.handoff.source.mode==SourceMode::FixedBranch && pin.source==self.handoff.source && !pin.pin_id.is_empty() && !pin.root.is_empty()=>(),
+            ChildSourceRoot::Physical{root} if self.handoff.source.mode!=SourceMode::FixedBranch && !root.root_id.is_empty() && !root.canonical_root.is_empty()=>(),
+            _=>return Err(RuntimeError::Invalid("child source handoff is inconsistent".into()))
         }
         let mut launch = self.launch.selection;
-        launch.source = Some(self.pin.source.clone());
+        launch.source = Some(self.handoff.source.clone());
         launch.mcp_binding = None;
         launch.policy_models.clear();
         if launch.policy
@@ -64,11 +65,11 @@ impl ChildAdmissionPreparation {
                 !matches!(
                     tool.name.as_str(),
                     "file_read" | "file_list" | "file_search"
-                )
+                ) && !(self.input.profile=="isolated_write" && matches!(tool.name.as_str(),"file_write"|"file_edit"))
             })
         {
             return Err(RuntimeError::Conflict(
-                "child exceeds its read-only profile".into(),
+                "child exceeds its admitted file profile".into(),
             ));
         }
         let input_ref = self.content.save(&serde_json::to_value(&self.input)?)?;
@@ -79,7 +80,8 @@ impl ChildAdmissionPreparation {
             call_id: admitted.call.call_id,
             configuration_ref: self.content.save(&self.configuration)?,
             launch: launch_content::LaunchSelectionMetadata::stage(&self.content, launch)?,
-            pin: self.pin,
+            handoff: self.handoff,
+            profile: self.input.profile,
             parent_tools_ref: self.launch.parent_tools_ref,
             _publication: self.publication,
         })
@@ -100,7 +102,8 @@ pub struct ChildTaskView {
     pub input: DispatchInput,
     pub configuration: Value,
     pub launch: launches::LaunchSelection,
-    pub source_pin: ChildSourcePin,
+    pub source: Value,
+    pub code_result: ChildCodeResult,
     pub state: String,
     pub revision: u64,
     pub cursor: u64,
@@ -132,7 +135,15 @@ impl ChildRead {
             input,
             configuration,
             launch,
-            source_pin: child.source_pin,
+            source: {
+                let mut source=serde_json::to_value(&child.source)?;
+                if let ChildSource::Ready{provenance_ref,..}=&child.source {
+                    source.as_object_mut().expect("source object").remove("provenance_ref");
+                    source["provenance"]=self.content.load(provenance_ref)?;
+                }
+                source
+            },
+            code_result: child.code_result,
             state: child.state,
             revision: child.revision,
             cursor: child.cursor,
@@ -154,14 +165,14 @@ impl Catalog {
         &self,
         context: &ToolExecutionContext,
         input: DispatchInput,
-        pin: ChildSourcePin,
+        handoff: ChildSourceHandoff,
         launch: launch_content::PreparedChildLaunch,
     ) -> Result<ChildAdmissionPreparation> {
         let run = self.run(&context.run_id)?;
         Ok(ChildAdmissionPreparation {
             context: context.clone(),
             input,
-            pin,
+            handoff,
             launch,
             configuration: run.configuration,
             database: self

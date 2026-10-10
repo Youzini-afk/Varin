@@ -534,33 +534,53 @@ records the initial provider-ID collision and corrected candidate-publication fi
 neither initial failure is counted as a passing run. No paid models or huge-frame/kill experiments
 were used. The model reranking and fixed-source limits above remain in force; semantic lease acceptance is recorded separately.
 
-## Native fixed-source child owner
+## Native child source and result owners
 
-`ThreadCollaboration` consumes the native Catalog's committed collaboration facts. Its maps
-only coalesce cancellable in-flight preparation and launch; they are not task storage. It registers
-for durable notifications before startup discovery, reopens exact pending source pins, prepares the
-child through the shared context owner, and uses `AgentRuntimeClient.rebindLaunch` plus the normal
-RunSupervisor. It neither launches a Pi session nor registers native children in ThreadRegistry.
+`ThreadCollaboration` consumes committed Catalog collaboration facts. Its maps only coalesce live
+preparation, launch and receipt reconciliation. It never starts a Pi session or adds a native child to
+ThreadRegistry. `read_only` and `isolated_write` both require explicit parent-model selection. Neither
+profile acquires process, recursive-dispatch or arbitrary extension capabilities. The writable profile
+permits the admitted text tools only inside its separate materialized environment.
 
-Source preparation has an independent child lifetime. Parent final or a stalled child context
-preparer does not hold the parent's file reads/control channel. Cancelling preparation detaches the
-context wait and checks the owner signal again before every publication. Cleanup is independent of
-that cancelled wait; source pins and failed source branches are released through WorkingState, and
-child source grants are revoked when their actual terminal outcome is known. Kernel loss leaves
-unfinished durable cleanup for recovery instead of pretending the resources were released.
+A durable accepted child precedes slow source capture and context preparation. A fixed source reuses
+its original pin. A physical source uses the shared Documents capture window, complete inventory and
+state verification, and a bounded original Storage handoff grant. Saved-files capture retains saved
+files while explicitly recording omitted unsaved overlays. The actual materialized directory is
+registered with Documents; a historical workspace ID never substitutes its unrelated original root.
+The branch-create transaction retains provenance through the existing blob/record references. Recovery
+reads the original fixed source receipt before attempting any current directory or Git observation.
 
-The authenticated `child/list`, `child/cancel`, `child/wait/cancel` and `tree/cancel` HTTP routes verify
-native Thread ownership. The optional `ThreadsAPI.collaboration` capability and child task
-projection distinguish stopping the current Run, stopping a child, cancelling an observation and
-stopping the task with its children. The UI shows the child's actual state/report and no-file-change
-result; source/profile/model facts remain the Catalog's authority.
+Child Run termination, report production and file settlement are separate facts. Actual worker/root
+lease drainage and original file receipts determine when a fixed file candidate may be published.
+Storage atomically fixes a candidate and base pins, then prepares its result document on a readonly
+worker before the short original branch revision/WorkingResult/receipt commit. An existing candidate
+can be published after its physical directory disappears. Cancellation cannot invent no-effect, and
+an empty/cancelled report does not discard real file changes. Late original evidence can refine effect
+without repeating an already-delivered Wait or creating another result revision.
 
-The first profile is fixed-source, read-only and nonrecursive, with explicit parent-model selection.
-No arbitrary model, MCP, process or write capability is inferred from its worker role. Global/project
-notes in its initial context remain owned by personalization; parent's session notes are not copied.
-Role and admitted project are required inputs to the common context preparer, never inferred from
-current navigation during child preparation. Broader collaboration, live isolation capture and code
-merge remain outside this slice. Acceptance evidence is recorded separately after production freeze.
+The authenticated child routes verify native Thread ownership. Snapshot/UI distinguish source
+preparation, profile, report outcome, file settlement, fixed publication and uncertain effect. Resource
+release follows actual evidence; a parent completing does not terminate its independently admitted
+child. The original common context preparer still owns role/project and personalization selection.
+
+Parent integration is explicit through the ordinary installed
+[child integration tool](../../../../../examples/extensions/child-integration-tool/README.md).
+The invocation fixes a publication identity and supplies real parent Run/Thread/source authority.
+The existing IntegrationCoordinator, three-way merge, Documents CAS and typed recovery journal own
+its effects. The journal records causal binding and actual path/Surface phases. Physical path leases
+protect the short reservation even across overlapping workspace roots; unrelated external Surface
+waits do not occupy the workspace metadata queue. `files-only` recovery includes file and Document
+content, but not Pi conversation-history rollback. Fixed read-only parents have no implicit disk
+writeback target.
+
+A trusted domain effect remains attached to the original service invocation through its actual
+promise, even if the extension callback returns early. Its original journal determines effect and
+executor-stop evidence, not extension-returned JSON. The same Catalog Host Tool receipt path reads
+that journal during recovery by original Operation/execution-owner identity, even when the target
+directory no longer exists. It never re-executes the tool. A dispatched native Surface promise drains
+through its exact original acknowledgement; cancellation is not stop evidence. A lost owner without
+that evidence remains unknown and retains unresolved resource protection.
+Native Host IPC acceptance is tracked separately in the implementation plan.
 
 The authenticated `child/report` route verifies parent Thread ownership and reads only a history
 item referenced by that child's durable report. `collaboration.readReport` returns a bounded UTF-8

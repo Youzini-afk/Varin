@@ -651,6 +651,8 @@ describe("durable agent mutation ordering", () => {
         return { operationId: data.operationId, state: operationState, revision: 1, data, files };
       },
       async getOperation() { return data ? { operationId: data.operationId, state: operationState, revision: 1, data, files } : null; },
+      // These isolated agent-mutation fixtures contain no Integration reservations.
+      async listOperationConflicts() { return []; },
       async listOperations() { return data ? [{ operationId: data.operationId, state: operationState, sessionId: data.sessionId }] : []; },
       async updateOperationFile(input: { path: string; phase: string; safety?: RecoveryState }) {
         if (input.path === "second.ts" && input.phase === "apply-intent" && failSecondIntent) throw new Error("injected second intent CAS failure");
@@ -705,6 +707,8 @@ describe("durable agent mutation ordering", () => {
     };
     const durable = {
       async createOperation() { return {}; },
+      // These isolated agent-mutation fixtures contain no Integration reservations.
+      async listOperationConflicts() { return []; },
       async listOperations() { return []; },
       async getOperation() { return { operationId: data.operationId, workspaceId: "ws", state: operationState, revision: 1, data, files: [file] }; },
       async updateOperationFile(input: { phase: string }) {
@@ -798,6 +802,8 @@ describe("durable agent mutation ordering", () => {
         revision += 1;
         return { operationId, revision, state };
       },
+      // These isolated agent-mutation fixtures contain no Integration reservations.
+      async listOperationConflicts() { return []; },
       async listOperations() { return []; },
       async releaseOperation() { return { released: true }; },
     };
@@ -875,6 +881,8 @@ describe("durable agent mutation ordering", () => {
     };
     const durable = {
       async createOperation() { return {}; },
+      // These isolated agent-mutation fixtures contain no Integration reservations.
+      async listOperationConflicts() { return []; },
       async listOperations() { return [{ operationId: "agent-restart-op", state: "applying", sessionId: "s1" }]; },
       async getOperation() { return operation; },
       async updateOperationFile(input: { phase: string }) {

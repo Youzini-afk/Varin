@@ -203,6 +203,9 @@ struct ProcessSpawnArgs {
 }
 #[derive(Debug, Clone)]
 enum ResourceOperation {
+    ChildSourceHandoff {profile:String},
+    ChildStorageReceipt {operation_id:String,kind:String},
+    ChildRootIdle,
     CollaborationPin {
         release: bool,
         pin_id: String,
@@ -343,6 +346,7 @@ impl ResourceOperation {
         context: &ToolExecutionContext,
     ) -> (&'static str, Value) {
         match self {
+            Self::ChildSourceHandoff{..}|Self::ChildStorageReceipt{..}|Self::ChildRootIdle => ("storage.health",json!({"workspaceId":binding.workspace_id})),
             Self::ProcessObservation { process_id, read } => {
                 let mut params = json!({"workspaceId":binding.workspace_id,"processId":process_id});
                 if let Some((cursor, limit)) = read {
@@ -520,9 +524,16 @@ type AdmissionControl = dyn Fn(
     ) -> Result<varin_runtime::execution_capacity::AdmissionControlGuard, ExecutionError>
     + Send
     + Sync;
+/// Constructed only after Catalog validated the original native Integration Tool invocation.
+pub(crate) struct IntegrationReceiptRead {
+    pub source:varin_runtime::catalog::launches::SourceSelection,
+    pub run_id:String,pub thread_id:String,pub operation_id:String,
+    pub reply:mpsc::Sender<Result<Value,KernelError>>,
+}
 /// The Kernel actor injects this sender. Sending does not create another resource authority.
 #[derive(Clone)]
 pub(crate) struct KernelResourceClient {
+    integration_receipts:Option<Arc<dyn Fn(IntegrationReceiptRead)->Result<(),KernelError>+Send+Sync>>,
     send: Arc<dyn Fn(ResourceCall) -> Result<(), KernelError> + Send + Sync>,
     replay: Arc<dyn Fn(Vec<String>) -> Result<(), KernelError> + Send + Sync>,
     controls: crate::process::ProcessControlRegistry,
@@ -536,6 +547,7 @@ impl KernelResourceClient {
     ) -> Self {
         Self {
             send: Arc::new(send),
+            integration_receipts:None,
             replay: Arc::new(replay),
             controls,
             admission_control: None,
@@ -588,6 +600,26 @@ impl KernelResourceClient {
     ) -> Result<(), ExecutionError> {
         self.observe_process(binding, context, process_id, None, true, cancel)
             .map(|_| ())
+    }
+    pub(crate) fn with_integration_receipts(mut self,send:impl Fn(IntegrationReceiptRead)->Result<(),KernelError>+Send+Sync+'static)->Self {
+        self.integration_receipts=Some(Arc::new(send));self
+    }
+    pub(crate) fn integration_receipt(&self,source:varin_runtime::catalog::launches::SourceSelection,run_id:String,thread_id:String,operation_id:String)->Result<Value,KernelError>{
+        let (reply,receive)=mpsc::channel();
+        self.integration_receipts.as_ref().ok_or_else(||KernelError::Storage("Integration journal reader is unavailable".into()))?(IntegrationReceiptRead{source,run_id,thread_id,operation_id,reply})?;
+        receive.recv().map_err(|_|KernelError::Storage("Integration journal owner stopped".into()))?
+    }
+    pub(crate) fn child_source_handoff(&self,binding:&ToolBinding,context:&ToolExecutionContext,profile:&str,authorize_only:bool,cancel:&CancellationToken)->Result<Value,ExecutionError> {
+        self.call(binding,context,ResourceOperation::ChildSourceHandoff{profile:profile.into()},authorize_only,cancel)
+            .map_err(|failure|ExecutionError::new("collaboration_source",failure.error.to_string()))
+    }
+    pub(crate) fn child_storage_receipt(&self,binding:&ToolBinding,context:&ToolExecutionContext,operation_id:&str,kind:&str,cancel:&CancellationToken)->Result<Value,ExecutionError> {
+        self.call(binding,context,ResourceOperation::ChildStorageReceipt{operation_id:operation_id.into(),kind:kind.into()},false,cancel)
+            .map_err(|failure|ExecutionError::new("collaboration_result",failure.error.to_string()))
+    }
+    pub(crate) fn require_child_root_idle(&self,binding:&ToolBinding,context:&ToolExecutionContext,cancel:&CancellationToken)->Result<Value,ExecutionError> {
+        self.call(binding,context,ResourceOperation::ChildRootIdle,false,cancel)
+            .map_err(|failure|ExecutionError::new("collaboration_writer",failure.error.to_string()))
     }
     pub(crate) fn collaboration_pin(
         &self,
@@ -931,6 +963,9 @@ impl KernelToolExecutor {
         let key = |value: Value| value.to_string();
         let (resource, access) = match operation {
             ResourceOperation::CollaborationPin { .. }
+            | ResourceOperation::ChildSourceHandoff { .. }
+            | ResourceOperation::ChildStorageReceipt { .. }
+            | ResourceOperation::ChildRootIdle
             | ResourceOperation::ReconcileMutation { .. }
             | ResourceOperation::ComputeControl { .. }
             | ResourceOperation::ObserveCompute { .. } => {
@@ -1587,6 +1622,15 @@ pub(crate) fn serve_resource(
             return Err(KernelError::Authorization(
                 "fixed-root child handoff requires the parent's whole-root read authority".into(),
             ));
+        }
+        if let Some(root) = &request.binding.live_root {
+            storage.validate_live_root(root, &grant, host_id)?;
+        }
+        match &request.operation {
+            ResourceOperation::ChildSourceHandoff{profile}=>return storage.child_source_handoff(&request.binding,&request.context,profile,&grant,host_id,request.authorize_only),
+            ResourceOperation::ChildStorageReceipt{operation_id,kind}=>return storage.child_storage_receipt(&request.binding,operation_id,kind,&grant),
+            ResourceOperation::ChildRootIdle=>return storage.require_child_root_idle(&request.binding,&grant),
+            _=>()
         }
         if let Some(root) = &request.binding.live_root {
             storage.validate_live_root(root, &grant, host_id)?;

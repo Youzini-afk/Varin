@@ -130,7 +130,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 19, input domain 2 and collaboration domain 2 store input intents/queue bodies and context-job ownership,
+Catalog version 19, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. `Catalog::collect_content_objects` marks requests, provider originals,
@@ -436,47 +436,59 @@ A successful explicit compaction atomically publishes its fixed candidate person
 with the summary and system text. New notes do not advance the checkpoint CAS; explicit profile
 changes do. Context domain 3 is verified read-only before writable SQLite open, including table,
 key and revision uniqueness contracts. Older or malformed formats are preserved and rejected.
-## Fixed-source child tasks
+## Isolated child tasks and fixed results
 
 `catalog_collaboration` is the Catalog's parent/child domain. A dispatch binds the committed
-ModelStep/tool or PolicyAction/node origin, parent Run/Thread/branch, exact model configuration and credential scope,
-admission project, explicit `read_only` profile and fixed source. Model arguments cannot select
-parent identity, project, workspace, source or grants. The initial implementation accepts explicit
-`model: parent` and inherits only the parent's selected file read/list/search subset. Child Runs do
-not acquire MCP, questions, recursive dispatch, process, file mutation or memory mutation tools.
+ModelStep/tool or PolicyAction/node origin, parent Run/Thread/branch, exact model configuration and
+credential scope, admission project, explicit profile and original source. Model arguments cannot
+select parent identity, project, workspace, source or grants. Both `read_only` and `isolated_write`
+require explicit `model: parent`. The read-only profile retains the selected file read/list/search
+subset; the writable profile adds controlled text write/edit only inside its private materialized
+source. Neither profile gains process, recursive dispatch, arbitrary extension or memory mutation
+tools. Private child writes do not require write authority over the parent's source; explicit parent
+Integration is a separate authorized action.
 
-The source owner first validates the actual parent grant and records an immutable revision pin
-under the already persisted tool Operation identity. Whole-root read authority is necessary for
-this whole-root handoff; a narrow path grant cannot be silently widened by cloning its root. That
-source-authorization receipt and the Catalog child acceptance are separate facts. The Catalog's
-short transaction creates the independent child Thread/branch, immutable task/model/source/scope
-and operation handoff, and persists the original JobAccepted receipt. Its operation ID is the
-usable handle for `child_status` and `wait_child`, not a claim that preparation or
-execution has finished. A stopped dispatch with a source receipt but no child is rediscovered from
-its original Operation and exact pin identity. Host cleanup records `child.source_released` only
-after the existing WorkingState owner releases the pin; failed cleanup remains discoverable.
+The source owner validates whole-root read authority and records a bounded handoff under the
+persisted tool Operation. Fixed sources retain their original revision pin. Physical sources retain
+an exact root identity, not a claim that dispatch captured their bytes. Catalog then atomically
+creates the independent child Thread/branch, immutable task/model/scope and original JobAccepted.
+Slow capture and context preparation happen after durable acceptance. A narrow path grant cannot
+silently become whole-root cloning authority. Unaccepted fixed-source handoffs remain discoverable
+until their original pins are actually released.
 
-Host preparation clones the fixed root through `createBranchFromPin`, without recapturing the
-workspace, and invokes the same context owner with explicit agent/worker/admitted-project scope.
-Session notes are keyed by the child's Thread. The existing input writer atomically commits
-the prepared context, child Run, source launch and child receipt after rechecking cancellation.
-Source and credential owners are revalidated before launch. A late cancelled context callback
-cannot publish or launch; closing a Host leaves durable preparation for the next owner.
+Host preparation reuses an immutable pin or performs the shared stable saved-files capture against
+the actual Documents root. Branch creation retains provenance through the existing Storage blob and
+record references, including explicitly omitted unsaved overlays. Recovery reads that original
+receipt before consulting the current directory or Git state. Public source views hydrate provenance
+outside Catalog. The existing input writer commits prepared context, child Run, source launch and
+receipt together after rechecking cancellation and source/credential authority. Late cancelled
+preparation cannot launch a child.
 
-The child has an independent Run and grant. Parent final, cancelling the parent's current Run,
-normal extension retirement, or revoking only the old parent grant after a successful source
-handoff do not implicitly kill the delegated child. Cancelling the child or the task tree is a
-separate action; higher-level workspace or credential disablement still applies at its actual
-owner boundary. The first slice does not implement arbitrary siblings, remote/live first capture,
-write-capable children, code integration or a complete collaboration product migration.
+The child has an independent Run and grant. Parent final, cancelling only the parent's current Run,
+normal extension retirement, or revoking the old parent grant after handoff does not kill the child.
+Child/tree cancellation remains explicit; actual higher-level workspace or credential revocation
+still applies. Arbitrary sibling exchange, remote environments and the complete collaboration
+product migration remain outside this increment.
 
-Completion retains actual child history references and a separate `no_changes` code result. A
-read-only textual report is a successful result, not an empty code merge. Failed/cancelled tools
-and empty textual completion are not converted to empty success. A very fast child may publish
-its report before the parent's accepted call is consumed by its model exchange or policy graph.
-The canonical `call_completion` retains the original acceptance while the existing external receipt
-owner independently settles the child outcome. Recovery fills an unconsumed graph receipt from that
-acceptance without another source pin, dispatch, preparation or model request.
+A report, execution outcome and file result are separate facts. A read-only textual report is valid
+with `no_changes`. Writable children wait for actual file-worker/root-lease drainage before fixing a
+candidate through the original Storage owner. Candidate/base pins and original operation receipts
+bridge crashes; an existing candidate can publish without its former physical directory. A readonly
+worker prepares the WorkingResult, then Storage atomically publishes its original branch revision,
+record references and receipt. Catalog retains only the verified fixed result identity and effect.
+Cancellation or an empty report does not erase confirmed changes or convert unknown effects to none.
+
+Parent integration explicitly selects that fixed publication through an ordinary installed tool.
+The existing Integration journal owns three-way merge, conditional file/Document changes and
+recovery. Its original causal binding and path phases supply the Host Tool receipt; recovery reads
+the original journal without re-executing effects or requiring a surviving target directory.
+Unresolved external effects remain unknown. Executor stop is separate from effect confirmation,
+and cancelling a Run does not turn a pending Surface request into a completed executor.
+
+A fast child may report before the parent's accepted call is consumed. Canonical `call_completion`
+retains the original acceptance while the existing external receipt independently settles outcome.
+Recovery fills an unconsumed graph receipt from that acceptance without another source handoff,
+dispatch, preparation or model request.
 
 `wait_child` registers the original durable Wait and its Job receipt together, including a
 retrospective terminal-event check. A parked parent's worker is quiesced before the report is

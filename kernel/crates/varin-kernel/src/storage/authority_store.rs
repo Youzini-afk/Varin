@@ -120,6 +120,7 @@ impl Storage {
             path_scopes,
             kernel_epoch: epoch.to_string(),
             revoked: false,
+            handoff_operation_id: None,
         };
         let params_hash = hash_json(params)?;
         if let Some((stored_hash, stored_json)) = self
@@ -281,6 +282,7 @@ impl Storage {
             ));
         }
         require_capability(&grant, method)?;
+        self.authorize_child_handoff(&grant,method,params)?;
         let mut authorized = params.clone();
         let workspace = if let Some(workspace) = params.get("workspaceId").and_then(Value::as_str) {
             Some(workspace.to_string())

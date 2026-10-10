@@ -1943,26 +1943,38 @@ pub(super) fn resolve_admitted_resource(
     grant: &Grant,
     allow_root: bool,
 ) -> Result<ResolvedFileResource, KernelError> {
-    let current_root = fs::canonicalize(&root.canonical_root)?;
-    if current_root != root.canonical_root || !fs::metadata(&current_root)?.is_dir() {
-        return Err(KernelError::Authorization(
-            "registered file root identity changed".into(),
-        ));
+    resolve_scoped_resource(&root.canonical_root, relative, allow_root, false, |path| path_allowed(grant, path))
+}
+
+/// Shared canonical identity resolution. Reservation inspection reads only existing journal
+/// metadata; it passes no grant and cannot authorize an effect through this helper.
+pub(super) fn resolve_scoped_resource(
+    canonical_root: &Path,
+    relative: &str,
+    allow_root: bool,
+    recorded_root_may_be_missing: bool,
+    scope_allows: impl Fn(&str) -> bool,
+) -> Result<ResolvedFileResource, KernelError> {
+    match fs::canonicalize(canonical_root) {
+        Ok(current_root) if current_root == canonical_root && fs::metadata(&current_root)?.is_dir() => (),
+        Ok(_) => return Err(KernelError::Authorization("registered file root identity changed".into())),
+        Err(error) if recorded_root_may_be_missing && error.kind() == io::ErrorKind::NotFound => (),
+        Err(error) => return Err(error.into()),
     }
     let (path, relative_path) = normalized_relative_path(relative, allow_root)?;
-    if !path_allowed(grant, &path) {
+    if !scope_allows(&path) {
         return Err(KernelError::Authorization(format!(
             "path is outside grant scope: {path}"
         )));
     }
-    let mut current = root.canonical_root.clone();
+    let mut current = canonical_root.to_path_buf();
     let components = relative_path.components().collect::<Vec<_>>();
     for (index, component) in components.iter().enumerate() {
         let next = current.join(component.as_os_str());
         if index + 1 < components.len() {
             match fs::canonicalize(&next) {
                 Ok(canonical) => {
-                    if !path_inside(&root.canonical_root, &canonical) {
+                    if !path_inside(canonical_root, &canonical) {
                         return Err(KernelError::Authorization(
                             "file path escaped the registered workspace root".to_string(),
                         ));
@@ -1982,19 +1994,19 @@ pub(super) fn resolve_admitted_resource(
             current = next;
         }
     }
-    if !path_inside(&root.canonical_root, &current) {
+    if !path_inside(canonical_root, &current) {
         return Err(KernelError::Authorization(
             "file path escaped the registered workspace root".to_string(),
         ));
     }
-    let canonical_relative = current.strip_prefix(&root.canonical_root).map_err(|_| {
+    let canonical_relative = current.strip_prefix(canonical_root).map_err(|_| {
         KernelError::Authorization("resolved resource is outside registered root".to_string())
     })?;
     let canonical_scope = canonical_relative
         .to_str()
         .ok_or_else(|| KernelError::Authorization("resolved resource is not UTF-8".to_string()))?
         .replace('\\', "/");
-    if !path_allowed(grant, &canonical_scope) {
+    if !scope_allows(&canonical_scope) {
         return Err(KernelError::Authorization(
             "resolved file path is outside grant scope".to_string(),
         ));

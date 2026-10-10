@@ -13,6 +13,9 @@ export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.history.body"] as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
 
 export type KernelMethod =
+  | "recovery.operation.conflicts"
+  | "runtime.host_tool.reconcile"
+  | "source.handoff.claim"
   | "runtime.branch.fork"
   | "runtime.plan.view"
   | "runtime.plan.contains"
@@ -116,6 +119,9 @@ export type KernelMethod =
   | "storage.record.list"
   | "storage.record.workspaces"
   | "storage.record.release"
+  | "working.result.prepare"
+  | "working.result.publish"
+  | "working.result.candidate.release"
   | "working.result.put"
   | "working.result.get"
   | "working.result.list"
@@ -176,6 +182,10 @@ export type KernelMethod =
   | "runtime.child.inspect"
   | "runtime.child.report.read"
   | "runtime.child.for_thread"
+  | "runtime.child.source.ready"
+  | "runtime.child.settle"
+  | "runtime.child.result.candidate"
+  | "runtime.child.result.published"
   | "runtime.child.prepare"
   | "runtime.child.fail"
   | "runtime.child.cancel"
@@ -183,6 +193,26 @@ export type KernelMethod =
   | "runtime.process.wait.reconcile"
   | "runtime.child.reconcile"
   | "runtime.child.wait.cancel";
+
+export interface KernelRecoveryOperationConflictsParams {
+  workspaceId: string;
+  rootId: string;
+  paths: string[];
+  exceptOperationId?: string;
+}
+
+export interface KernelRecoveryOperationConflict {
+  operationId: string;
+  workspaceId: string;
+  state: string;
+  revision: number;
+  canonicalRoot: string;
+  paths: string[];
+}
+
+export interface KernelRecoveryOperationConflictsResult {
+  operations: KernelRecoveryOperationConflict[];
+}
 
 export type RetrievalInvocation = { kind: 'model_step'; requestId: string; toolCallId: string } | { kind: 'policy_action'; actionId: string; nodeId: string; toolCallId: string };
 
@@ -255,6 +285,11 @@ export interface HistoryBodyChunk {
   chunkCount: number;
   totalBytes: number;
   bytesBase64: string;
+}
+
+export interface HostToolReconcileParams {
+  operationId: string;
+  executionOwner: ExecutorOwner;
 }
 
 export interface RunReconcileParams {
@@ -1143,6 +1178,13 @@ export interface KernelHealthParams {
   deep?: boolean;
 }
 
+export interface KernelSourceHandoffClaimParams {
+  handoffOperationId: string;
+  grantId: string;
+  childThreadId: string;
+  childBranchId: string;
+}
+
 export interface KernelGrantIssueParams {
   grantId: string;
   hostGeneration: string;
@@ -1503,6 +1545,54 @@ export interface KernelWorkingReviewDocument {
   error?: string;
 }
 
+export interface KernelWorkingResultPrepareParams {
+  operationId: string;
+  publicationId: string;
+  builderId: string;
+  expectedRoot: string;
+}
+
+export interface KernelWorkingResultPublishParams {
+  operationId: string;
+  workspaceId: string;
+  branchId: string;
+  candidateOperationId: string;
+}
+
+export interface KernelWorkingResultCandidateReleaseParams {
+  operationId: string;
+  workspaceId: string;
+  branchId: string;
+  candidateOperationId: string;
+}
+
+export interface KernelWorkingResultCandidate {
+  publicationId: string;
+  candidateOperationId: string;
+  workspaceId: string;
+  branchId: string;
+  root: string;
+  baseRoot: string;
+  writeRevision: number;
+  pinId: string;
+  basePinId: string;
+}
+
+export interface KernelWorkingResultPublication {
+  publicationId: string;
+  workspaceId: string;
+  branchId: string;
+  resultRevision: number;
+  root: string;
+  baseRoot: string;
+  recordId: string;
+  createdAt: string;
+}
+
+export interface KernelWorkingResultCandidateReleased {
+  released: boolean;
+}
+
 export interface KernelWorkingResultPutParams {
   operationId: string;
   recordId: string;
@@ -1626,6 +1716,11 @@ export interface KernelWorkingReviewReleaseParams {
   recordId: string;
 }
 
+export interface KernelSourceProvenanceReference {
+  objectHash: string;
+  ownerId: string;
+}
+
 export interface KernelCreateBranchBeginParams {
   operationId: string;
   builderId: string;
@@ -1635,6 +1730,7 @@ export interface KernelCreateBranchBeginParams {
   parentRef?: string;
   draftBasePaths: string[];
   captureScopes: string[];
+  sourceProvenance?: KernelSourceProvenanceReference;
 }
 
 export interface KernelCreateBranchAppendParams {
@@ -2156,6 +2252,54 @@ export interface UnacceptedChildSource {
   pin_id: string;
 }
 
+export interface ChildSourceHandoff {
+  operation_id: string;
+  source: LaunchSource;
+  root: ChildSourceRoot;
+}
+
+export type ChildSourceRoot = { kind: 'fixed'; pin: ChildSourcePin } | { kind: 'physical'; root: LiveRoot };
+
+export type ChildSourceProvenance = { consistency: 'fixed-root'; root: string } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[] };
+
+export type ChildSource = { kind: 'pending'; handoff: ChildSourceHandoff } | { kind: 'ready'; handoff: ChildSourceHandoff; pin: ChildSourcePin; selection: LaunchSource; provenance: ChildSourceProvenance };
+
+export interface ChildWorkingResultRef {
+  publication_id: string;
+  workspace_id: string;
+  branch_id: string;
+  result_revision: number;
+  root: string;
+  base_root: string;
+  record_id: string;
+}
+
+export type ChildCodeResult = { kind: 'pending' } | { kind: 'settling'; publication_id: string } | { kind: 'candidate'; candidate: KernelWorkingResultCandidate } | { kind: 'published'; result: ChildWorkingResultRef; effect: Effect } | { kind: 'no_changes' } | { kind: 'unavailable'; code: string; effect: Effect };
+
+export interface ChildSourceReadyParams {
+  operationId: string;
+  pin: ChildSourcePin;
+  source: LaunchSourceParams;
+  provenance: ChildSourceProvenance;
+}
+
+export interface ChildSettleParams {
+  operationId: string;
+  toolBinding: unknown;
+}
+
+export interface ChildResultCandidateParams {
+  operationId: string;
+  toolBinding: unknown;
+  candidateOperationId: string;
+}
+
+export interface ChildResultPublishedParams {
+  operationId: string;
+  toolBinding: unknown;
+  publicationId: string;
+}
+
 export interface ChildPrepareParams {
   operationId: string;
   source: LaunchSourceParams;
@@ -2205,7 +2349,6 @@ export interface ChildReport {
   run_id: string | null;
   history_ids: string[];
   detail: string | null;
-  code_result: string;
 }
 
 export interface ChildTask {
@@ -2221,13 +2364,14 @@ export interface ChildTask {
   input: ChildInput;
   configuration: unknown;
   launch: LaunchSelection;
-  source_pin: ChildSourcePin;
   state: string;
   revision: number;
   cursor: number;
   receipt: InputSubmitReceipt | null;
   report: ChildReport | null;
   resources_released: boolean;
+  source: ChildSource;
+  code_result: ChildCodeResult;
 }
 
 export interface ChildWait {
@@ -2256,6 +2400,7 @@ export type KernelMethodParams = {
   "runtime.history.page": HistoryPageParams;
   "runtime.history.body": HistoryBodyParams;
   "runtime.thread.operations.active": ThreadOperationsParams;
+  "runtime.host_tool.reconcile": HostToolReconcileParams;
   "runtime.run.reconcile": RunReconcileParams;
   "runtime.launch.fail": LaunchFailedParams;
   "runtime.thread.inspect": ThreadParams;
@@ -2313,6 +2458,7 @@ export type KernelMethodParams = {
   "kernel.ping": KernelEmptyParams;
   "kernel.shutdown": KernelEmptyParams;
   "storage.health": KernelHealthParams;
+  "source.handoff.claim": KernelSourceHandoffClaimParams;
   "authority.grant.issue": KernelGrantIssueParams;
   "authority.grant.revoke": KernelGrantRevokeParams;
   "storage.snapshot": KernelSnapshotParams;
@@ -2344,6 +2490,9 @@ export type KernelMethodParams = {
   "storage.record.list": KernelRecordListParams;
   "storage.record.workspaces": KernelRecordWorkspacesParams;
   "storage.record.release": KernelRecordReleaseParams;
+  "working.result.prepare": KernelWorkingResultPrepareParams;
+  "working.result.publish": KernelWorkingResultPublishParams;
+  "working.result.candidate.release": KernelWorkingResultCandidateReleaseParams;
   "working.result.put": KernelWorkingResultPutParams;
   "working.result.get": KernelWorkingResultGetParams;
   "working.result.list": KernelWorkingResultListParams;
@@ -2388,6 +2537,7 @@ export type KernelMethodParams = {
   "recovery.operation.create": KernelRecoveryOperationCreateParams;
   "recovery.operation.file.cas": KernelRecoveryOperationFileCasParams;
   "recovery.operation.complete": KernelRecoveryOperationCompleteParams;
+  "recovery.operation.conflicts": KernelRecoveryOperationConflictsParams;
   "recovery.operation.list": KernelRecoveryOperationListParams;
   "recovery.operation.release": KernelRecoveryOperationReleaseParams;
   "operation.get": KernelOperationGetParams;
@@ -2404,6 +2554,10 @@ export type KernelMethodParams = {
   "runtime.child.inspect": OperationParams;
   "runtime.child.report.read": ChildReportReadParams;
   "runtime.child.for_thread": ThreadParams;
+  "runtime.child.source.ready": ChildSourceReadyParams;
+  "runtime.child.settle": ChildSettleParams;
+  "runtime.child.result.candidate": ChildResultCandidateParams;
+  "runtime.child.result.published": ChildResultPublishedParams;
   "runtime.child.prepare": ChildPrepareParams;
   "runtime.child.fail": ChildFailParams;
   "runtime.child.cancel": OperationParams;
@@ -2546,6 +2700,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.thread.operations.active";
       params: ThreadOperationsParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_tool.reconcile";
+      params: HostToolReconcileParams;
       epoch?: string;
       grantId?: string;
     }
@@ -3066,6 +3229,15 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "source.handoff.claim";
+      params: KernelSourceHandoffClaimParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "authority.grant.issue";
       params: KernelGrantIssueParams;
       epoch?: string;
@@ -3338,6 +3510,33 @@ export type KernelRequest =
       id: string;
       method: "storage.record.release";
       params: KernelRecordReleaseParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "working.result.prepare";
+      params: KernelWorkingResultPrepareParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "working.result.publish";
+      params: KernelWorkingResultPublishParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "working.result.candidate.release";
+      params: KernelWorkingResultCandidateReleaseParams;
       epoch?: string;
       grantId?: string;
     }
@@ -3741,6 +3940,15 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "recovery.operation.conflicts";
+      params: KernelRecoveryOperationConflictsParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "recovery.operation.list";
       params: KernelRecoveryOperationListParams;
       epoch?: string;
@@ -3878,6 +4086,42 @@ export type KernelRequest =
       id: string;
       method: "runtime.child.for_thread";
       params: ThreadParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.child.source.ready";
+      params: ChildSourceReadyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.child.settle";
+      params: ChildSettleParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.child.result.candidate";
+      params: ChildResultCandidateParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.child.result.published";
+      params: ChildResultPublishedParams;
       epoch?: string;
       grantId?: string;
     }

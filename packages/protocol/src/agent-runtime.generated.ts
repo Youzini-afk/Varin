@@ -795,11 +795,71 @@ export interface RuntimeEvent {
   data: unknown;
 }
 
+export interface KernelWorkingResultCandidate {
+  publicationId: string;
+  candidateOperationId: string;
+  workspaceId: string;
+  branchId: string;
+  root: string;
+  baseRoot: string;
+  writeRevision: number;
+  pinId: string;
+  basePinId: string;
+}
+
 export interface UnacceptedChildSource {
   operation_id: string;
   parent_thread_id: string;
   source: LaunchSource;
   pin_id: string;
+}
+
+export interface ChildSourceHandoff {
+  operation_id: string;
+  source: LaunchSource;
+  root: ChildSourceRoot;
+}
+
+export type ChildSourceRoot = { kind: 'fixed'; pin: ChildSourcePin } | { kind: 'physical'; root: LiveRoot };
+
+export type ChildSourceProvenance = { consistency: 'fixed-root'; root: string } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[] };
+
+export type ChildSource = { kind: 'pending'; handoff: ChildSourceHandoff } | { kind: 'ready'; handoff: ChildSourceHandoff; pin: ChildSourcePin; selection: LaunchSource; provenance: ChildSourceProvenance };
+
+export interface ChildWorkingResultRef {
+  publication_id: string;
+  workspace_id: string;
+  branch_id: string;
+  result_revision: number;
+  root: string;
+  base_root: string;
+  record_id: string;
+}
+
+export type ChildCodeResult = { kind: 'pending' } | { kind: 'settling'; publication_id: string } | { kind: 'candidate'; candidate: KernelWorkingResultCandidate } | { kind: 'published'; result: ChildWorkingResultRef; effect: Effect } | { kind: 'no_changes' } | { kind: 'unavailable'; code: string; effect: Effect };
+
+export interface ChildSourceReadyParams {
+  operationId: string;
+  pin: ChildSourcePin;
+  source: LaunchSourceParams;
+  provenance: ChildSourceProvenance;
+}
+
+export interface ChildSettleParams {
+  operationId: string;
+  toolBinding: unknown;
+}
+
+export interface ChildResultCandidateParams {
+  operationId: string;
+  toolBinding: unknown;
+  candidateOperationId: string;
+}
+
+export interface ChildResultPublishedParams {
+  operationId: string;
+  toolBinding: unknown;
+  publicationId: string;
 }
 
 export interface ChildPrepareParams {
@@ -851,7 +911,6 @@ export interface ChildReport {
   run_id: string | null;
   history_ids: string[];
   detail: string | null;
-  code_result: string;
 }
 
 export interface ChildTask {
@@ -867,13 +926,14 @@ export interface ChildTask {
   input: ChildInput;
   configuration: unknown;
   launch: LaunchSelection;
-  source_pin: ChildSourcePin;
   state: string;
   revision: number;
   cursor: number;
   receipt: InputSubmitReceipt | null;
   report: ChildReport | null;
   resources_released: boolean;
+  source: ChildSource;
+  code_result: ChildCodeResult;
 }
 
 export interface ChildWait {

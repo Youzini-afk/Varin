@@ -28,6 +28,7 @@ use crate::storage_schema::{
 };
 
 mod authority_store;
+mod child_sources;
 mod branches;
 mod core;
 mod compute_resources;
@@ -44,6 +45,7 @@ mod file_reconciliation;
 mod operations;
 mod process_resources;
 mod records;
+pub(crate) mod result_publication;
 mod recovery;
 mod state_tree;
 
@@ -184,6 +186,7 @@ pub(crate) struct Storage {
     file_leases: HashMap<String, FileLease>,
     retained_file_leases: HashMap<String, file_resource_leases::RetainedFileLease>,
     materializations: HashMap<String, materialization::ActiveMaterialization>,
+    result_publications: BTreeSet<String>,
     processes: crate::process::ProcessManager,
     computations: crate::compute::ComputeManager,
 }

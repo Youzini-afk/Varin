@@ -237,6 +237,7 @@ impl Storage {
             file_leases: HashMap::new(),
             retained_file_leases: HashMap::new(),
             materializations: HashMap::new(),
+            result_publications: BTreeSet::new(),
             processes: crate::process::ProcessManager::default(),
             computations: crate::compute::ComputeManager::default(),
         };

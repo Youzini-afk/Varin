@@ -37,6 +37,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 mod reconcile;
+mod integration_reconciliation;
 
 #[cfg(test)]
 mod host_tool_review;
