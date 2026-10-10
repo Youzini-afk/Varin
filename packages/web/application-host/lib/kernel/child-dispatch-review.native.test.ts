@@ -8,6 +8,10 @@ import { createServer, type Server, type ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import type { VarinAgentPolicyInput } from '@varin/extension-contract';
+import { ApplicationExtensionRuntime } from '@varin/extension-host';
+import { createAgentPolicy } from './agent-policy.js';
 import { afterEach, expect, it } from 'vitest';
 import { configureRuntimeUrlResolver, createThreadsHttpAPI, setRuntimeExtraHeaders } from '@varin/application-client';
 import { createDocumentAuthority } from '../documents/authority.js';
@@ -24,6 +28,7 @@ import { createThreadSourcePreparer } from './thread-sources.js';
 import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from './storage-adapter.js';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
+const { build } = createRequire(path.join(repository, 'packages/extension-builtins/package.json'))('esbuild');
 const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? '';
 const buildVersion = (JSON.parse(await fs.readFile(path.join(repository, 'package.json'), 'utf8')) as { version: string }).version;
 const cleanup: Array<() => Promise<void>> = [];
@@ -101,7 +106,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
   const configuration = { providerFamily, model: model.modelId, endpoint,
     credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 128 };
   let projectId = 'child-review-project'; let trusted = true;
-  async function openHost(options: { context?: (original: ContextPreparer) => ContextPreparer; collaboration?: boolean; sourceGrantScopes?: string[] } = {}) {
+  async function openHost(options: { context?: (original: ContextPreparer) => ContextPreparer; collaboration?: boolean; sourceGrantScopes?: string[]; policyExample?: boolean } = {}) {
     let kernelProcess: ChildProcess | undefined;
     const kernel = createKernelClient({ hostId: 'child-review-host', storageRoot: root, buildVersion,
       kernelPath, allowCargoDevRunner: false, spawnProcess: ((command, args, options) => { kernelProcess = spawn(command, args ?? [], options ?? {}); return kernelProcess; }) as typeof spawn });
@@ -140,7 +145,31 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
       currentScope: async () => ({ reference: 'child-review-reference', authority: 'child-review-authority',
         account: 'child-review-account', generation: 1 }),
       runtime: { getAuth: async () => ({ auth: { apiKey: 'fake-child-review-key-not-a-real-secret' } }) } });
-    const runtime = new AgentRuntimeClient(kernel);
+    const extensions = options.policyExample ? await ApplicationExtensionRuntime.create({ dataDir: path.join(root, 'extensions'), varinVersion: buildVersion,
+      brokerScript: path.join(repository, 'packages/extension-host/broker/broker-child.mjs') }) : undefined;
+    if (extensions) {
+      await extensions.start();
+      cleanup.push(() => extensions.stop());
+      if (!(await extensions.state()).catalog.extensions.some(entry => entry.manifest.id === 'example.collaboration-policy')) {
+        const folder = path.join(root, 'collaboration-policy'); await fs.mkdir(folder);
+        for (const file of ['package.json', 'varin.extension.json']) await fs.copyFile(path.join(repository, 'examples/extensions/collaboration-policy', file), path.join(folder, file));
+        await build({ entryPoints: [path.join(repository, 'examples/extensions/collaboration-policy/host.ts')], bundle: true, platform: 'node', format: 'cjs',
+          outfile: path.join(folder, 'host.cjs'), alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
+        await extensions.installOrStage({ expectedRevision: (await extensions.state()).catalog.revision,
+          source: { kind: 'local', display: 'Collaboration policy example', specifier: folder } });
+        await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
+          rule: { serviceId: 'varin.agent.policy', version: 2, providerKey: 'example.collaboration-policy:host:varin.agent.policy@2',
+            scope: { projectId }, allowFallback: false } });
+      }
+    }
+    const policyDecisions: VarinAgentPolicyInput[] = [];
+    const runtime = new AgentRuntimeClient(kernel, undefined, extensions ? async ({ threadId }, signal) => {
+      const lease = await createAgentPolicy(extensions)({ sessionId: threadId, projectId }, signal);
+      return lease && { ...lease, decide: async (input, signal) => {
+        policyDecisions.push(structuredClone(input));
+        return lease.decide(input, signal);
+      } };
+    } : undefined);
     const errors: unknown[] = [];
     const models = { resolveModel: async (selection: typeof model) => {
       if (selection.providerId !== model.providerId || selection.modelId !== model.modelId) throw new Error('Unknown fixture model');
@@ -162,7 +191,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
     let closed = false; let crashed = false;
     const close = async () => {
       if (closed) return; closed = true;
-      collaboration?.stop(); await host.close();
+      collaboration?.stop(); await host.close(); await extensions?.stop();
       try { await storage.dispose(); } catch (error) { if (!crashed || !String(error).includes('Kernel client is closed')) throw error; }
       finally { await documents.dispose(); await kernel.close(); }
     };
@@ -175,7 +204,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
       if (!kernelProcess.kill('SIGKILL')) throw new Error('Could not kill this fixture kernel');
       await exited; await kernel.close();
     };
-    return { kernel, grants, crash, runtime, adapter, collaboration, models, prepareContext, workingStates, personalization, documents, memoryQueries, memoryControl,
+    return { kernel, grants, crash, runtime, adapter, collaboration, models, prepareContext, workingStates, personalization, documents, memoryQueries, memoryControl, policyDecisions,
       errors, close, api: createThreadsHttpAPI(), hostUrl: host.url };
   }
   return { root, workspace, requests, openHost, setProject(value: string) { projectId = value; }, setTrusted(value: boolean) { trusted = value; } };
@@ -1020,3 +1049,164 @@ for (const [defect, mutation] of Object.entries(combinedFormatDefects)) {
     expect(f.requests).toHaveLength(4);
   }, 30_000);
 }
+
+// These are the same installed SDK package and real child/source owners as the direct-model
+// cases above. A policy receipt is not converted into a fabricated parent model exchange.
+function policyReceipts(h: Awaited<ReturnType<Awaited<ReturnType<typeof fixture>>['openHost']>>) {
+  return h.policyDecisions.flatMap(input => input.event.kind === 'tool_graph_completed' ? input.event.receipts : []);
+}
+function childSourcePins(root: string) {
+  const database = new DatabaseSync(path.join(root, 'catalog.sqlite'), { readOnly: true });
+  try { return (database.prepare("SELECT pin_id FROM pins WHERE pin_id LIKE 'child-pin:%' ORDER BY pin_id").all() as Array<{ pin_id: string }>).map(row => row.pin_id); }
+  finally { database.close(); }
+}
+
+it('installed collaboration policy accepts a child and reads before any parent ModelStep, then waits for one genuine report', async () => {
+  const entered = gate(); const release = gate();
+  let parentSteps = 0; let childSteps = 0;
+  const f = await fixture(({ body, response }) => {
+    assertPairing(body);
+    if (isParent(body)) {
+      parentSteps++;
+      expect(JSON.stringify(body)).toContain('POLICY_CHILD_FIXED_REPORT');
+      expect(JSON.stringify(body)).toContain('fixed child source before parent changes');
+      expect(JSON.stringify(body)).not.toContain('live source changed after policy admission');
+      expect((body.input as Array<{ type?: string }>).filter(item => ['function_call', 'function_call_output'].includes(item.type ?? ''))).toEqual([]);
+      complete(response, [answer('Parent used its read and actual child report', 'policy-parent-final')]);
+    } else if (++childSteps === 1) complete(response, [tool('file_read', { path: 'source.txt' }, 'policy-child-read')]);
+    else {
+      expect(JSON.stringify(result(body, 'file_read'))).toContain('fixed child source before parent changes');
+      complete(response, [answer('POLICY_CHILD_FIXED_REPORT', 'policy-child-final')]);
+    }
+  });
+  const h = await f.openHost({ policyExample: true, context: original => blockChild(original, entered, release) });
+  try {
+    const identity = await h.api.create('policy-child-fixed');
+    const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+    prepared.source.tools = ['file_read'];
+    const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Delegate, independently inspect, then answer from the report', model, source: prepared.source });
+    await entered.promise;
+    await expect.poll(async () => (await h.runtime.run(receipt.run_id)).waiting_on, { timeout: 10_000 }).toMatch(/^child-wait:/);
+    expect(parentSteps).toBe(0); expect(childSteps).toBe(0);
+    expect(await durableRequests(f.root, receipt.run_id)).toEqual([]);
+    const children = await h.runtime.children(); expect(children).toHaveLength(1);
+    const child = children[0]!;
+    const dispatchEvent = h.policyDecisions.find(input => input.event.kind === 'tool_graph_completed' && input.event.receipts.some(item => item.node_id === 'dispatch'))!.event;
+    if (dispatchEvent.kind !== 'tool_graph_completed') throw new Error('Missing actual dispatch graph completion');
+    expect(child.origin).toEqual({ kind: 'policy_action', action_id: dispatchEvent.action_id, node_id: 'dispatch' });
+    expect(child.configuration).toEqual((await h.runtime.run(receipt.run_id)).configuration);
+    expect(child).toMatchObject({ parent_run_id: receipt.run_id, parent_thread_id: identity.threadId, parent_branch_id: identity.branchId, state: 'preparing', receipt: null });
+    expect(policyReceipts(h)).toEqual([
+      { node_id: 'dispatch', completion: { kind: 'job_accepted', operation_id: child.operation_id, phase: 'preparing_child', effect: 'none', lifetime: 'thread' } },
+      { node_id: 'parent-read', completion: { kind: 'result', outcome: 'succeeded', effect: 'none', output: expect.any(Object) } },
+    ]);
+    expect(childSourcePins(f.root)).toEqual([child.source_pin.pin_id]);
+    const acceptedCall = (await h.runtime.operation(child.operation_id)).call_completion;
+    expect(acceptedCall).toMatchObject({ kind: 'job_accepted', operation_id: child.operation_id, phase: 'preparing_child' });
+    await fs.writeFile(path.join(f.workspace, 'source.txt'), 'live source changed after policy admission');
+    release.release();
+    await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
+    const finished = await h.runtime.child(child.operation_id);
+    expect(finished.launch.tools.map(item => item.name)).toEqual(['file_read']);
+    expect(finished.report).toMatchObject({ outcome: 'succeeded', sender_thread_id: child.child_thread_id, code_result: 'no_changes' });
+    expect((await h.runtime.operation(child.operation_id)).call_completion).toEqual(acceptedCall);
+    expect(policyReceipts(h).filter(item => item.node_id === 'wait-child')).toHaveLength(1);
+    const reports = (await h.api.snapshot(identity)).history.filter(item => item.source === 'agent');
+    expect(reports).toHaveLength(1); expect(JSON.stringify(reports[0])).toContain(child.child_thread_id);
+    expect((await durableRequests(f.root, receipt.run_id))).toHaveLength(1);
+    expect(parentSteps).toBe(1); expect(childSteps).toBe(2); expect(h.errors.map(String)).toEqual([]);
+  } finally { release.release(); }
+}, 30_000);
+
+it('installed collaboration policy reopens its pending Wait without duplicating child, fixed-source pin or parent model', async () => {
+  let parentSteps = 0; let childSteps = 0;
+  const f = await fixture(({ body, response }) => {
+    assertPairing(body);
+    if (isParent(body)) {
+      parentSteps++;
+      expect(JSON.stringify(body)).toContain('POLICY_REPORT_AFTER_REOPEN');
+      complete(response, [answer('Original report received after restart', 'policy-reopened-parent')]);
+    } else if (++childSteps === 1) complete(response, [tool('file_read', { path: 'source.txt' }, 'policy-reopened-read')]);
+    else {
+      expect(JSON.stringify(result(body, 'file_read'))).toContain('fixed child source before parent changes');
+      complete(response, [answer('POLICY_REPORT_AFTER_REOPEN', 'policy-reopened-child')]);
+    }
+  });
+  const h = await f.openHost({ policyExample: true, collaboration: false });
+  const identity = await h.api.create('policy-child-reopen');
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+  prepared.source.tools = ['file_read'];
+  const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Await the delegated report', model, source: prepared.source });
+  await expect.poll(async () => (await h.runtime.run(receipt.run_id)).waiting_on, { timeout: 10_000 }).toMatch(/^child-wait:/);
+  const originalWait = (await h.runtime.run(receipt.run_id)).waiting_on;
+  const children = await h.runtime.children(); expect(children).toHaveLength(1);
+  const child = children[0]!;
+  expect(childSourcePins(f.root)).toEqual([child.source_pin.pin_id]);
+  const acceptedCall = (await h.runtime.operation(child.operation_id)).call_completion;
+  const launch = await h.runtime.launch(receipt.run_id);
+  expect(await durableRequests(f.root, receipt.run_id)).toEqual([]);
+  expect(parentSteps).toBe(0); expect(childSteps).toBe(0);
+  await h.crash(); await h.close();
+  await fs.writeFile(path.join(f.workspace, 'source.txt'), 'new live contents must not replace accepted source');
+  const entered = gate(); const release = gate();
+  const reopened = await f.openHost({ policyExample: true, context: original => blockChild(original, entered, release) });
+  try {
+    await reopened.collaboration!.recover(); await reopened.adapter.recover();
+    await entered.promise;
+    expect((await reopened.runtime.child(child.operation_id)).source_pin).toEqual(child.source_pin);
+    expect(childSourcePins(f.root)).toEqual([child.source_pin.pin_id]);
+    expect((await reopened.runtime.run(receipt.run_id)).waiting_on).toBe(originalWait);
+    expect((await reopened.runtime.launch(receipt.run_id))?.selection.policy).toEqual(launch?.selection.policy);
+    expect(parentSteps).toBe(0); expect(childSteps).toBe(0);
+    release.release();
+    await expect.poll(async () => (await reopened.runtime.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
+    expect(await reopened.runtime.children()).toHaveLength(1);
+    expect((await reopened.runtime.child(child.operation_id)).child_thread_id).toBe(child.child_thread_id);
+    expect((await reopened.runtime.operation(child.operation_id)).call_completion).toEqual(acceptedCall);
+    const history = (await reopened.api.snapshot(identity)).history;
+    expect(history.filter(item => item.source === 'agent')).toHaveLength(1);
+    expect(await durableRequests(f.root, receipt.run_id)).toHaveLength(1);
+    await reopened.collaboration!.recover(); await reopened.adapter.recover();
+    expect((await reopened.api.snapshot(identity)).history).toEqual(history);
+    expect(parentSteps).toBe(1); expect(childSteps).toBe(2); expect(reopened.errors.map(String)).toEqual([]);
+  } finally { release.release(); }
+}, 30_000);
+
+it('cancelling a policy child observation resumes from the real cancellation fact while the child remains independent', async () => {
+  const entered = gate(); const release = gate();
+  let parentSteps = 0; let childSteps = 0;
+  const f = await fixture(({ body, response }) => {
+    assertPairing(body);
+    if (isParent(body)) {
+      parentSteps++;
+      expect(JSON.stringify(body)).toContain('The observation wait was cancelled. The child task was not cancelled.');
+      expect(JSON.stringify(body)).not.toContain('POLICY_CHILD_FINISHED_LATER');
+      complete(response, [answer('Observation cancelled; the child is still running', 'policy-cancelled-observation')]);
+    } else { childSteps++; complete(response, [answer('POLICY_CHILD_FINISHED_LATER', 'policy-independent-child')]); }
+  });
+  const h = await f.openHost({ policyExample: true, context: original => blockChild(original, entered, release) });
+  try {
+    const identity = await h.api.create('policy-child-cancel-observation');
+    const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
+    prepared.source.tools = ['file_read'];
+    const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Delegate and observe', model, source: prepared.source });
+    await entered.promise;
+    await expect.poll(async () => (await h.runtime.run(receipt.run_id)).waiting_on, { timeout: 10_000 }).toMatch(/^child-wait:/);
+    const waitId = (await h.runtime.run(receipt.run_id)).waiting_on!;
+    const children = await h.runtime.children(); expect(children).toHaveLength(1);
+    const child = children[0]!;
+    expect((await h.runtime.cancelChildWait(waitId)).cancelled).toBe(true);
+    await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
+    expect((await h.runtime.child(child.operation_id))).toMatchObject({ state: 'preparing', report: null });
+    expect(childSteps).toBe(0); expect(parentSteps).toBe(1);
+    const history = (await h.api.snapshot(identity)).history;
+    expect(history.filter(item => item.source === 'agent')).toHaveLength(0);
+    expect(history.filter(item => JSON.stringify(item.content).includes('The observation wait was cancelled.'))).toHaveLength(1);
+    release.release();
+    await expect.poll(async () => (await h.runtime.child(child.operation_id)).report?.outcome, { timeout: 10_000 }).toBe('succeeded');
+    expect((await h.runtime.readChildReport(child.operation_id, (await h.runtime.child(child.operation_id)).report!.history_ids.at(-1)!)).text).toBe('POLICY_CHILD_FINISHED_LATER');
+    expect((await h.api.snapshot(identity)).history).toEqual(history);
+    expect(await durableRequests(f.root, receipt.run_id)).toHaveLength(1);
+    expect(parentSteps).toBe(1); expect(childSteps).toBe(1); expect(h.errors.map(String)).toEqual([]);
+  } finally { release.release(); }
+}, 30_000);

@@ -18,14 +18,23 @@ fn dispatch(storage: &mut Storage, method: &str, params: Value) -> Value {
         .dispatch(method, &params, Some("setup"), &grant)
         .unwrap()
 }
-fn boundary(revoke_before: bool) {
+fn boundary(revoke_before: bool, policy: bool) {
     let kinds = BTreeSet::from([ToolKind::FileRead]);
     let read = KernelToolExecutor::selected_schemas(&kinds).remove(0);
     let schema = crate::collaboration::schemas(vec![], true)
         .into_iter()
         .find(|s| s.name == "dispatch")
         .unwrap();
-    let f = fixture::Fixture::new_with_schemas(0, read, schema.clone());
+    let f = if policy {
+        let mut fixture = fixture::Fixture::new_policy_parent_with_schemas(0, read, schema.clone());
+        fixture.context = fixture.admit_policy_call(ToolCall {
+            call_id: "dispatch-call".into(), name: "dispatch".into(), schema_version: "1".into(),
+            arguments: serde_json::to_value(&fixture.input).unwrap(),
+        });
+        fixture
+    } else {
+        fixture::Fixture::new_with_schemas(0, read, schema.clone())
+    };
     let storage_root = f.root.join("storage");
     let mut storage = Storage::open(&storage_root, HOST).unwrap();
     for id in ["setup", "parent"] {
@@ -150,9 +159,15 @@ fn boundary(revoke_before: bool) {
 }
 #[test]
 fn old_parent_grant_revoked_exactly_after_source_transfer_before_child_acceptance() {
-    boundary(false);
+    boundary(false, false);
 }
 #[test]
 fn old_parent_grant_revoked_after_authorize_before_source_transfer_denies() {
-    boundary(true);
+    boundary(true, false);
+}
+
+#[test]
+fn policy_origin_uses_the_same_fixed_source_pin_and_revocation_boundary() {
+    boundary(false, true);
+    boundary(true, true);
 }

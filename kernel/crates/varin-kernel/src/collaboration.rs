@@ -264,7 +264,7 @@ impl ToolExecutor for CollaborationTools {
             }
             let handle: ChildHandle =
                 serde_json::from_value(call.arguments.clone()).map_err(error)?;
-            let mut db = self.catalog.lock().map_err(error)?;
+            let db = self.catalog.lock().map_err(error)?;
             let child = db
                 .require_child_parent(&c.run_id, &handle.operation_id)
                 .map_err(error)?;
@@ -289,7 +289,10 @@ impl ToolExecutor for CollaborationTools {
                 });
             }
             if call.name == collaboration::WAIT_TOOL {
-                db.wait_for_child(c, &handle.operation_id).map_err(error)?;
+                let preparation = db.prepare_child_wait_registration(c, &handle.operation_id).map_err(error)?;
+                drop(db);
+                let prepared = preparation.load().map_err(error)?;
+                self.catalog.lock().map_err(error)?.register_child_wait(prepared).map_err(error)?;
                 Ok(accepted(c, "awaiting_child"))
             } else {
                 Ok(ToolCompletion::Result {
@@ -329,25 +332,23 @@ impl AgentPolicy for CollaborationPolicy {
         state: &Value,
         cancel: &CancellationToken,
     ) -> Result<PolicyDecision, ExecutionError> {
-        let decision = self.inner.decide(view, event, state, cancel)?;
-        if !matches!(
-            decision.action,
-            PolicyAction::Fail { .. } | PolicyAction::Wait { .. }
-        ) && view.pending_tool_calls == 0
-        {
-            if let Some(wait_id) = self
-                .catalog
-                .lock()
-                .map_err(error)?
-                .pending_child_wait(view.run_id)
-                .map_err(error)?
+        // A domain wait is an actual outstanding action. Do not ask the strategy for its
+        // next decision and then checkpoint that decision's state without executing it.
+        if view.pending_tool_calls == 0 {
+            if let Some(wait_id) = self.catalog.lock().map_err(error)?
+                .pending_child_wait(view.run_id).map_err(error)?
             {
                 return Ok(PolicyDecision {
                     action: PolicyAction::Wait { wait_id },
-                    state: decision.state,
+                    state: state.clone(),
                 });
             }
         }
+        let decision = self.inner.decide(view, event, state, cancel)?;
         Ok(decision)
     }
 }
+
+#[cfg(test)]
+#[path = "collaboration_policy_review.rs"]
+mod policy_review;

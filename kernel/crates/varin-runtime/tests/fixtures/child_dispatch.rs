@@ -26,6 +26,7 @@ fn read_schema() -> ToolSchema {
         schema: json!({"type":"object"}),
     }
 }
+#[allow(dead_code)]
 impl Fixture {
     pub(crate) fn new() -> Self {
         Self::new_with_schemas(
@@ -39,6 +40,22 @@ impl Fixture {
         )
     }
     pub(crate) fn new_with_schemas(revision: i64, read: ToolSchema, dispatch: ToolSchema) -> Self {
+        Self::new_parent(revision, read, dispatch, false)
+    }
+    pub(crate) fn new_policy_parent_with_schemas(revision: i64, read: ToolSchema, dispatch: ToolSchema) -> Self {
+        Self::new_parent(revision, read, dispatch, true)
+    }
+    pub(crate) fn new_policy() -> Self {
+        let mut fixture = Self::new_parent(7, read_schema(), ToolSchema {
+            name: DISPATCH_TOOL.into(), version: "1".into(), schema: json!({"type":"object"}),
+        }, true);
+        fixture.context = fixture.admit_policy_call(ToolCall {
+            call_id: "dispatch-call".into(), name: DISPATCH_TOOL.into(), schema_version: "1".into(),
+            arguments: serde_json::to_value(&fixture.input).unwrap(),
+        });
+        fixture
+    }
+    fn new_parent(revision: i64, read: ToolSchema, dispatch: ToolSchema, policy: bool) -> Self {
         let root = std::env::temp_dir().join(format!(
             "varin-child-catalog-review-{}",
             uuid::Uuid::new_v4()
@@ -60,6 +77,21 @@ impl Fixture {
         let receipt = db.submit_with_launch(&SubmitInput { key: "parent-input".into(), thread_id: "thread:parent".into(),
             branch_id: "branch:parent".into(), expected_head: None, input: json!("Delegate a read"),
             configuration: json!({"providerFamily":"fixture","model":"fixture-model","configurationGeneration":2}) }, Some(launch.clone())).unwrap();
+        if policy {
+            let boundary = db.policy_boundary(&receipt.run_id, db.epoch()).unwrap();
+            let origin = ToolOrigin::PolicyAction {
+                action_id: format!("{}:policy:{}", receipt.run_id, boundary.id),
+                node_id: "dispatch-call".into(),
+            };
+            let context = ToolExecutionContext {
+                operation_id: origin.operation_id("dispatch-call"), origin, run_id: receipt.run_id,
+            };
+            let pin = ChildSourcePin { pin_id: "retained-pin".into(), root: "fixed-root".into(), source };
+            let mut child_launch = launch;
+            child_launch.tools = vec![read];
+            child_launch.policy = PolicyIdentity { name: "default".into(), version: "1".into() };
+            return Self { root, db, context, input, pin, launch: child_launch };
+        }
         let range = HistoryRange {
             branch_id: receipt.branch_id.clone(),
             ancestor_id: None,
@@ -304,10 +336,9 @@ impl Fixture {
             },
             operation_id: format!("{request_id}:tool:{call_id}"),
         };
-        let wait = self
-            .db
-            .wait_for_child(&context, &self.context.operation_id)
-            .unwrap();
+        let prepared = self.db.prepare_child_wait_registration(&context, &self.context.operation_id)
+            .unwrap().load().unwrap();
+        let wait = self.db.register_child_wait(prepared).unwrap();
         let result = ToolResult {
             request_id: request_id.clone(),
             call_id,
@@ -346,6 +377,42 @@ impl Fixture {
             )
             .unwrap();
         wait
+    }
+    pub(crate) fn admit_policy_call(&mut self, call: ToolCall) -> ToolExecutionContext {
+        let run_id = self.context.run_id.clone();
+        let epoch = self.db.epoch();
+        self.db.commit_execution(&run_id, epoch, &ExecutionRecord::StateChanged { state: RunState::Runnable, waiting_on: None }).unwrap();
+        let launch = self.db.launch_intent(&run_id).unwrap().unwrap().selection;
+        let boundary = self.db.policy_boundary(&run_id, epoch).unwrap();
+        let action_id = format!("{run_id}:policy:{}", boundary.id);
+        let origin = ToolOrigin::PolicyAction { action_id: action_id.clone(), node_id: call.call_id.clone() };
+        let context = ToolExecutionContext { operation_id: origin.operation_id(&call.call_id), origin: origin.clone(), run_id: run_id.clone() };
+        let intent = PolicyGraphIntent::PolicyToolGraphV1 {
+            action_id, boundary, identity: launch.policy, state: json!({"stage": 1}),
+            nodes: vec![PolicyAdmittedNode {
+                context: FrozenToolContext { run_id: run_id.clone(), origin, tool_schema_generation: launch.tool_schema_generation,
+                    tools: std::sync::Arc::new(launch.tools), source: launch.source },
+                node: PolicyToolNode { id: call.call_id.clone(), depends_on: vec![], call: call.clone() },
+            }],
+        };
+        self.db.admit_policy_graph(&run_id, epoch, &intent).unwrap();
+        self.db.commit_execution(&run_id, epoch, &ExecutionRecord::ToolAdmitted {
+            context: context.clone(), tool: AdmittedTool {
+                contract: ToolContract { name: call.name.clone(), schema_version: "1".into(), read_only: true,
+                    completion: CompletionKind::Job, lifetime: Lifetime::Thread, resources: vec![] }, call,
+            },
+        }).unwrap();
+        self.db.commit_execution(&run_id, epoch, &ExecutionRecord::ToolDispatched { context: context.clone() }).unwrap();
+        context
+    }
+    pub(crate) fn settle_policy_call(&mut self, context: &ToolExecutionContext, phase: &str) {
+        let ToolOrigin::PolicyAction { action_id, node_id } = &context.origin else { panic!("policy call required") };
+        let completion = ToolCompletion::JobAccepted { operation_id: context.operation_id.clone(), phase: phase.into(),
+            effect: Effect::None, lifetime: Lifetime::Thread };
+        self.db.commit_execution(&context.run_id, self.db.epoch(), &ExecutionRecord::ToolSettled {
+            context: context.clone(), completion: completion.clone(),
+        }).unwrap();
+        self.db.settle_policy_node(&context.run_id, self.db.epoch(), action_id, node_id, &completion).unwrap();
     }
     pub(crate) fn settle_exchange(&mut self) {
         let result = ToolResult {

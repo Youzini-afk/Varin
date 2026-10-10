@@ -383,6 +383,7 @@ impl Catalog {
          });
         op.revision += 1;
         put(&tx, "operations", &op.id, &op)?;
+        tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1", [operation_id])?;
         let cursor = event(
             &tx,
             &op.id,
@@ -415,6 +416,7 @@ impl Catalog {
             json!({"child_operation_id":child.operation_id,"history_id":item_id}),
         )?;
         tx.commit()?;
+        self.resource_admission.release(operation_id);
         Ok(Some(run.id))
     }
     pub fn pending_child_continuations(&self) -> Result<Vec<String>> {
@@ -447,8 +449,8 @@ pub fn deliver_waits(catalog: &std::sync::Mutex<Catalog>) -> Result<Vec<String>>
         .pending_child_continuations()
 }
 
-/// Reports are immutable after publication. Capture only reports whose original model exchange
-/// is committed; content staging cannot prematurely terminalize a fast child Job.
+/// Reports are immutable after publication. The original invocation acceptance is already
+/// durable; job completion must not wait for model pairing or policy graph consumption.
 pub struct ChildReceiptPreparation {
     child: ChildTask,
     content: super::result_content::ResultContentPreparation,
@@ -466,7 +468,7 @@ impl ChildReceiptPreparation {
 }
 impl Catalog {
     pub fn capture_child_receipts(&self) -> Result<Vec<ChildReceiptPreparation>> {
-        let mut statement=self.db.prepare("SELECT c.body FROM child_tasks c JOIN operations o ON o.id=c.id JOIN tool_calls t ON t.request_id=json_extract(c.body,'$.origin.request_id') AND t.call_id=json_extract(c.body,'$.call_id') WHERE json_extract(c.body,'$.report') IS NOT NULL AND json_extract(o.body,'$.external_receipt') IS NULL AND t.committed=1")?;
+        let mut statement=self.db.prepare("SELECT c.body FROM child_tasks c JOIN operations o ON o.id=c.id WHERE json_extract(c.body,'$.report') IS NOT NULL AND json_extract(o.body,'$.external_receipt') IS NULL AND json_extract(o.body,'$.call_completion.kind')='job_accepted'")?;
         let rows=statement.query_map([],|row|row.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
         rows.into_iter().map(|row| Ok(ChildReceiptPreparation { child: serde_json::from_str(&row)?, content: self.prepare_result_content() })).collect()
     }
