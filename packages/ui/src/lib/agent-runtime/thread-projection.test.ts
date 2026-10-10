@@ -33,7 +33,7 @@ it('reconnects from the last durable cursor and replaces lossy progress with aut
     expect(progress).toHaveBeenLastCalledWith('');
     await vi.advanceTimersByTimeAsync(1_000);
     expect(observe.mock.calls[1]![0]).toBe(7);
-    view.history.push({ id: 'committed-message', thread_id: identity.threadId, parent: null, source: 'assistant', content: { text: 'durable answer' }, provider: null });
+    view.history.push({ id: 'committed-message', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'assistant', content: { text: 'durable answer' }, provider: null });
     connections[1]!.listener({ cursor: 8, subject: run.id, revision: 2, kind: 'history.appended', data: {} });
     await vi.advanceTimersByTimeAsync(0);
     expect(publish.mock.calls.at(-1)![0].history[0].content.text).toBe('durable answer');

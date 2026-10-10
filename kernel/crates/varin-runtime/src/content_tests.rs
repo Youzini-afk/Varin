@@ -261,7 +261,7 @@ fn current_format_gc_preserves_request_original_history_output_and_input_referen
     let queued_ref = store.save(&queued).unwrap();
     db.execute("INSERT INTO model_steps(id,run_id,state,body) SELECT 'step',id,'prepared',?1 FROM runs LIMIT 1",[json!({"request":request_ref,"original":[{"item":original_ref}]}).to_string()]).unwrap();
     db.execute(
-        "INSERT INTO history(id,thread_id,parent,body) VALUES('entry','thread',NULL,?1)",
+        "INSERT INTO history(id,thread_id,parent,body,run_id) SELECT 'entry','thread',NULL,?1,id FROM runs LIMIT 1",
         [json!({"content":history_ref}).to_string()],
     )
     .unwrap();

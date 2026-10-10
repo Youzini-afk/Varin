@@ -1,3 +1,4 @@
+import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
 import { PlanConflict } from './plan-service.js';
 import { parseThreadImages } from './thread-images.js';
 import type { Express, RequestHandler } from 'express';
@@ -22,6 +23,12 @@ const revision = (value: unknown): number => {
 const identity = (body: Record<string, unknown>): ThreadIdentity => {
   if (body.runtime !== 'agent') throw new Error('Explicit thread runtime selection is required');
   return { runtime: 'agent', threadId: text(body.threadId), branchId: text(body.branchId) };
+};
+/** Rust owns the nested query decoder and family authorization; Host owns caller identity. */
+const familyRequest = <T>(value: unknown): Omit<T, 'callerThreadId'> => {
+  const request = object(value);
+  if ('callerThreadId' in request) throw new Error('Family caller is the authenticated Thread identity');
+  return request as Omit<T, 'callerThreadId'>;
 };
 const goalBudget = (value: unknown): { maxOutputTokens: number } | null => {
   if (value === null) return null;
@@ -52,6 +59,10 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'source/prepare': ['runtime', 'threadId', 'branchId', 'key', 'path', 'mode'],
     'context/compact': ['runtime', 'threadId', 'branchId', 'key', 'throughId', 'expectedRevision', 'model'],
     'context/publish': ['runtime', 'threadId', 'branchId', 'runId'], 'context/cancel': ['runtime', 'threadId', 'branchId', 'runId'], 'context/resume': ['runtime', 'threadId', 'branchId', 'runId'],
+    'family/list': ['runtime', 'threadId', 'branchId', 'includeSelf'],
+    'family/runs': ['runtime', 'threadId', 'branchId', 'request'],
+    'family/read': ['runtime', 'threadId', 'branchId', 'request'],
+    'family/item': ['runtime', 'threadId', 'branchId', 'request'],
     'child/report': ['runtime', 'threadId', 'branchId', 'operationId', 'itemId', 'offset', 'maxBytes'],
     'child/list': ['runtime', 'threadId', 'branchId'], 'child/cancel': ['runtime', 'threadId', 'branchId', 'operationId'],
     'child/wait/cancel': ['runtime', 'threadId', 'branchId', 'waitId'], 'tree/cancel': ['runtime', 'threadId', 'branchId'],
@@ -106,6 +117,13 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     return adapter.decidePermission({ ...identity(body), operationId: text(body.operationId), permissionId: text(body.permissionId), decision: body.decision });
   });
   post('question/answer', body => adapter.answerQuestion({ ...identity(body), operationId: text(body.operationId), answer: text(body.answer) }));
+  post('family/list', (body, signal) => {
+    if (body.includeSelf !== undefined && typeof body.includeSelf !== 'boolean') throw new Error('includeSelf must be boolean');
+    return adapter.familyList(identity(body), body.includeSelf, signal);
+  });
+  post('family/runs', (body, signal) => adapter.familyRuns(identity(body), familyRequest<FamilyRunsParams>(body.request), signal));
+  post('family/read', (body, signal) => adapter.familyRead(identity(body), familyRequest<FamilyReadParams>(body.request), signal));
+  post('family/item', (body, signal) => adapter.familyItem(identity(body), familyRequest<FamilyItemParams>(body.request), signal));
   post('child/report', body => adapter.readChildReport(identity(body), text(body.operationId), text(body.itemId), body.offset === undefined ? 0 : revision(body.offset), body.maxBytes === undefined ? 65536 : revision(body.maxBytes)));
   post('child/list', body => adapter.children(identity(body)));
   post('child/cancel', body => adapter.cancelChild(identity(body), text(body.operationId)));

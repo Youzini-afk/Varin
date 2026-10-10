@@ -4,6 +4,7 @@ mod agent_resources;
 mod agent_runtime;
 mod authority;
 mod collaboration;
+mod family_tools;
 mod child_capabilities;
 mod compute;
 mod context;

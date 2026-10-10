@@ -298,6 +298,10 @@ impl ContentStore {
         })?)
     }
     pub(crate) fn load(&self, reference: &Value) -> Result<Value> {
+        self.load_cancellable(reference, &||false)
+    }
+    pub(crate) fn load_cancellable(&self, reference: &Value, cancelled: &dyn Fn()->bool) -> Result<Value> {
+        if cancelled() { return Err(RuntimeError::DispatchCancelled); }
         let _publication = self.begin_publication();
         let _io = self
             .coordination
@@ -312,6 +316,7 @@ impl ContentStore {
         }
         let mut bytes = Vec::new();
         for hash in manifest.chunks {
+            if cancelled() { return Err(RuntimeError::DispatchCancelled); }
             bytes.extend(self.read_bytes(&hash)?);
         }
         if bytes.len() as u64 != manifest.bytes {
@@ -319,7 +324,10 @@ impl ContentStore {
                 "content manifest length mismatch".into(),
             ));
         }
-        Ok(serde_json::from_slice(&bytes)?)
+        if cancelled() { return Err(RuntimeError::DispatchCancelled); }
+        let value = serde_json::from_slice(&bytes)?;
+        if cancelled() { return Err(RuntimeError::DispatchCancelled); }
+        Ok(value)
     }
     pub(crate) fn save_history(
         &self,
@@ -332,16 +340,20 @@ impl ContentStore {
         &self,
         mut item: crate::types::HistoryItem,
     ) -> Result<crate::types::HistoryItem> {
+        let (content, provider) = self.load_history_payload(&item.content)?;
+        item.content = content;
+        item.provider = provider;
+        Ok(item)
+    }
+    pub(crate) fn load_history_payload(&self, reference: &Value) -> Result<(Value, Option<crate::types::ProviderOriginal>)> {
+        self.load_history_payload_cancellable(reference, &||false)
+    }
+    pub(crate) fn load_history_payload_cancellable(&self, reference: &Value, cancelled: &dyn Fn()->bool) -> Result<(Value, Option<crate::types::ProviderOriginal>)> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
-        struct Payload {
-            content: Value,
-            provider: Option<crate::types::ProviderOriginal>,
-        }
-        let payload: Payload = serde_json::from_value(self.load(&item.content)?)?;
-        item.content = payload.content;
-        item.provider = payload.provider;
-        Ok(item)
+        struct Payload { content: Value, provider: Option<crate::types::ProviderOriginal> }
+        let payload: Payload = serde_json::from_value(self.load_cancellable(reference, cancelled)?)?;
+        Ok((payload.content, payload.provider))
     }
     pub(crate) fn save_originals(
         &self,

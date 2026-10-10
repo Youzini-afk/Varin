@@ -123,20 +123,13 @@ pub struct QueuedInputRead {
 }
 impl QueuedInputRead {
     pub fn load(self) -> Result<QueuedInput> {
-        let payload = self.content.hydrate_history(HistoryItem {
-            id: self.metadata.id.clone(),
-            thread_id: self.metadata.thread_id.clone(),
-            parent: None,
-            source: HistorySource::User,
-            content: self.reference,
-            provider: None,
-        })?;
-        if payload.provider.is_some() {
+        let (content, provider) = self.content.load_history_payload(&self.reference)?;
+        if provider.is_some() {
             return Err(RuntimeError::Invalid(
                 "queued input contains a provider original".into(),
             ));
         }
-        Ok(self.metadata.with_content(payload.content))
+        Ok(self.metadata.with_content(content))
     }
 }
 pub struct InputEditPreparation {

@@ -1,3 +1,4 @@
+import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
 import type { ChildProfilePreparer } from './child-profiles.js';
 import type { ThreadToolInspection } from '@varin/application-client';
 import type { PlanService } from './plan-service.js';
@@ -161,6 +162,22 @@ export class ThreadAdapter {
     const result = await this.runtime.cancelOperation(operationId);
     if (result.executor === 'ask_user') await this.continueLaunch(result.run_id);
     return result;
+  }
+  async familyList(identity: ThreadIdentity, includeSelf?: boolean, signal?: AbortSignal) {
+    await this.requireIdentity(identity, signal);
+    return this.runtime.familyList({ callerThreadId: identity.threadId, ...(includeSelf === undefined ? {} : { includeSelf }) }, signal);
+  }
+  async familyRuns(identity: ThreadIdentity, request: Omit<FamilyRunsParams, 'callerThreadId'>, signal?: AbortSignal) {
+    await this.requireIdentity(identity, signal);
+    return this.runtime.familyRuns({ ...request, callerThreadId: identity.threadId }, signal);
+  }
+  async familyRead(identity: ThreadIdentity, request: Omit<FamilyReadParams, 'callerThreadId'>, signal?: AbortSignal) {
+    await this.requireIdentity(identity, signal);
+    return this.runtime.familyRead({ ...request, callerThreadId: identity.threadId }, signal);
+  }
+  async familyItem(identity: ThreadIdentity, request: Omit<FamilyItemParams, 'callerThreadId'>, signal?: AbortSignal) {
+    await this.requireIdentity(identity, signal);
+    return this.runtime.familyItem({ ...request, callerThreadId: identity.threadId }, signal);
   }
   async readChildReport(identity: ThreadIdentity, operationId: string, itemId: string, offset = 0, maxBytes = 65536) {
     await this.requireIdentity(identity);
@@ -456,9 +473,9 @@ export class ThreadAdapter {
     }
   }
 
-  async requireIdentity(identity: ThreadIdentity) {
+  async requireIdentity(identity: ThreadIdentity, signal?: AbortSignal) {
     this.assertIdentity(identity);
-    const thread = await this.runtime.thread(identity.threadId);
+    const thread = await this.runtime.thread(identity.threadId, signal);
     if (!thread.branches.some(branch => branch.branch_id === identity.branchId)) throw new Error('Branch does not belong to the selected thread');
     return thread;
   }

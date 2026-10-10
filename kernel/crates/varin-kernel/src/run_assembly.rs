@@ -246,6 +246,7 @@ impl RunAssembly {
             start.binding.tools.push(crate::agent_resources::schema());
             if !is_child {
                 start.binding.tools = crate::questions::schemas(start.binding.tools);
+                start.binding.tools.extend(crate::family_tools::schemas());
                 start.binding.tools.push(crate::agent_goals::schema());
                 start.binding.tools = crate::collaboration::schemas(
                     start.binding.tools,
@@ -343,6 +344,7 @@ impl RunAssembly {
         }
         if !is_context_job {
             declarations.push(crate::questions::declaration(runtime.catalog()));
+            declarations.extend(crate::family_tools::declarations(runtime.catalog()));
             declarations.push(crate::questions::status_declaration(runtime.catalog()));
             if !is_child { declarations.push(crate::agent_goals::declaration(runtime.catalog())); }
             declarations.extend(crate::collaboration::declarations(

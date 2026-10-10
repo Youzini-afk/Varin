@@ -139,6 +139,34 @@ The read and delivery authorities enforce the same scope, reuse original event
 cursors and delivery records, and apply the Host's processed `throughCursor` fence. A new branch
 or context cannot revoke or relabel another Run's historical activity.
 
+## Same-task conversation reads
+
+`catalog::family` derives root/parent/sibling/descendant membership from the original ChildTask/Thread
+relations, shared with task-family scheduling. Ordinary `threads` and `read_thread` calls bind the actual
+frozen ModelStep or PolicyAction/node. Listing and reading grant no target execution, source, private
+policy-state or cancellation authority, and never prepare the target's model or working directory.
+Only capabilities selected in the original child directory are callable after recovery.
+
+History rows now carry the actual producing/receiving `run_id`, committed with the original item and
+Run. A fork retains that owner. No item-ID parsing, latest-Run inference or separate history ledger is
+used. Fixed branch views include inherited same-Thread Run records and directly admitted Runs;
+directory entries retain each original Run's branch. Reader capture holds only metadata and the
+existing ContentStore publication protection. Relationship traversal, ancestry, body IO, decoding,
+search, serialization and the ordinary `runtime.history.page` traversal run on read workers.
+
+Recent/range/search pages retain original IDs, provenance and actual tool call/result association.
+Ranges are exclusive, output chronological, and literal search matches decoded text and paths.
+Search scan budgets return a cursor even when the current page has no matches. Signed anchors/cursors
+bind caller, target, branch, Run, query and owner epoch: append/fork/rollback cannot retarget an
+existing view; reopening requires a new anchor. Original-item reads page semantic conversation JSON,
+with exact byte offsets and explicit truncation. A byte budget too small for the next UTF-8 code point
+fails explicitly instead of exceeding the requested budget or returning a non-progressing cursor. ProviderOriginal and typed opaque continuation stay in
+the original store and are excluded from these shared reads and search; tool/user JSON remains data.
+
+Messages, reply waits, terminal-child continuation and sharing undelivered policy/auxiliary outputs
+remain separate implementation work. These readers neither synthesize those records nor revive a
+completed child launch. See [the family read evidence](../../../docs/reviews/runtime-family-reads-2026-10-11.md).
+
 ## Immutable conversation and model bodies
 
 Model-step metadata holds content references for frozen requests and provider originals. History
@@ -171,7 +199,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 26, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
+Catalog version 27, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,

@@ -578,6 +578,7 @@ fn append_item(
         ));
     }
     let stored = HistoryItem {
+                run_id: run.id.clone(),
         id: id.into(),
         thread_id: run.thread_id.clone(),
         parent: head,
@@ -586,8 +587,8 @@ fn append_item(
         provider: None,
     };
     tx.execute(
-        "INSERT INTO history(id,thread_id,parent,body) VALUES(?1,?2,?3,?4)",
-        params![stored.id, stored.thread_id, stored.parent, encode(&stored)?],
+        "INSERT INTO history(id,thread_id,parent,body,run_id) VALUES(?1,?2,?3,?4,?5)",
+        params![stored.id, stored.thread_id, stored.parent, encode(&stored)?, run.id],
     )?;
     tx.execute(
         "UPDATE branches SET head=?2 WHERE id=?1",

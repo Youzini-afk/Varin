@@ -191,6 +191,7 @@ pub(crate) enum Command {
 }
 pub(crate) fn domain(error: varin_runtime::RuntimeError) -> KernelError {
     match error {
+        varin_runtime::RuntimeError::DispatchCancelled => KernelError::Cancelled,
         varin_runtime::RuntimeError::Conflict(message) => {
             KernelError::Operation(format!("conflict: {message}"))
         }
@@ -1670,6 +1671,42 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
+                        if matches!(method, "runtime.family.list" | "runtime.family.runs" | "runtime.family.read" | "runtime.family.item") {
+                            let command = {
+                                let owner = runtime.catalog();
+                                let catalog = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+                                FamilyCommand::capture(&catalog, method, params)?
+                            };
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            content_tasks.send(Box::new(move || {
+                                let result = command.load(&|| cancelled.load(Ordering::Acquire));
+                                let response = match result { Ok(value) => response_ok(&response_id, value), Err(error) => response_error(&response_id, &error) };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
+                            })).map_err(|_| KernelError::Storage("content reader unavailable".into()))?;
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
+                        if method == "runtime.history.page" {
+                            let p: HistoryPageParams = serde_json::from_value(params)?;
+                            let limit = u32::try_from(p.limit).map_err(|_| KernelError::Protocol("history page limit out of range".into()))?;
+                            let read = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.capture_history_page(&p.branch_id).map_err(domain)?;
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            content_tasks.send(Box::new(move || {
+                                let result = read.load(p.head_id.as_deref(), p.before_id.as_deref(), limit, &|| cancelled.load(Ordering::Acquire)).map_err(domain).and_then(|page|serde_json::to_value(page).map_err(Into::into));
+                                let response = match result { Ok(value) => response_ok(&response_id, value), Err(error) => response_error(&response_id, &error) };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
+                            })).map_err(|_| KernelError::Storage("content reader unavailable".into()))?;
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
                         if method == "runtime.history.body" {
                             let p: HistoryBodyParams = serde_json::from_value(params)?;
                             let chunk_index = usize::try_from(p.chunk_index).map_err(|_| {
@@ -1691,6 +1728,7 @@ pub(crate) fn spawn(
                                 let result=(||->Result<Value,KernelError>{
                                     if cancelled.load(Ordering::Acquire){return Err(KernelError::Cancelled);}
                                     let chunk=read.chunk(chunk_index).map_err(domain)?;
+                                    if cancelled.load(Ordering::Acquire){return Err(KernelError::Cancelled);}
                                     Ok(json!({"itemId":p.item_id,"contentRef":chunk.content_ref,"chunkIndex":chunk.chunk_index,"chunkCount":chunk.chunk_count,"totalBytes":chunk.total_bytes,"bytesBase64":base64::engine::general_purpose::STANDARD.encode(chunk.bytes)}))
                                 })();
                                 let response=match result {Ok(value)=>response_ok(&response_id,value),Err(error)=>response_error(&response_id,&error)};
@@ -1951,21 +1989,6 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         return Ok(serde_json::to_value(
             catalog
                 .plan_view(&p.branch_id, head.as_deref())
-                .map_err(domain)?,
-        )?);
-    }
-    if method == "runtime.history.page" {
-        let p: HistoryPageParams = serde_json::from_value(params)?;
-        let limit = u32::try_from(p.limit)
-            .map_err(|_| KernelError::Protocol("history page limit out of range".into()))?;
-        return Ok(serde_json::to_value(
-            catalog
-                .history_page(
-                    &p.branch_id,
-                    p.head_id.as_deref(),
-                    p.before_id.as_deref(),
-                    limit,
-                )
                 .map_err(domain)?,
         )?);
     }
@@ -2495,3 +2518,52 @@ mod child_process_review;
 #[cfg(test)]
 #[path = "policy_domains_review.rs"]
 mod policy_domains_review;
+
+/// The public API and ordinary tools consume the same captured domain reader.
+enum FamilyCommand {
+    List(varin_runtime::catalog::family::FamilyRead, bool),
+    Runs(varin_runtime::catalog::family::FamilyRead, Option<String>, Option<usize>),
+    Read(varin_runtime::catalog::family::FamilyRead, varin_runtime::catalog::family::ReadRequest),
+    Item(varin_runtime::catalog::family::FamilyRead, varin_runtime::catalog::family::ItemRequest),
+}
+impl FamilyCommand {
+    fn capture(catalog: &Catalog, method: &str, params: Value) -> Result<Self, KernelError> {
+        fn size(value: Option<i64>) -> Result<Option<usize>, KernelError> {
+            value.map(|value| usize::try_from(value).map_err(|_| KernelError::Protocol("family byte/page position must be nonnegative".into()))).transpose()
+        }
+        Ok(match method {
+            "runtime.family.list" => {
+                let p: FamilyListParams = serde_json::from_value(params)?;
+                Self::List(catalog.capture_family_read(&p.caller_thread_id, None, None).map_err(domain)?, p.include_self.unwrap_or(false))
+            }
+            "runtime.family.runs" => {
+                let p: FamilyRunsParams = serde_json::from_value(params)?;
+                Self::Runs(catalog.capture_family_read(&p.caller_thread_id, Some(&p.thread_id), Some(&p.branch_id)).map_err(domain)?, p.cursor, size(p.limit)?)
+            }
+            "runtime.family.read" => {
+                let p: FamilyReadParams = serde_json::from_value(params)?;
+                Self::Read(catalog.capture_family_read(&p.caller_thread_id, Some(&p.thread_id), Some(&p.branch_id)).map_err(domain)?, varin_runtime::catalog::family::ReadRequest { run_id: p.run_id, anchor: p.anchor, cursor: p.cursor, query: p.query })
+            }
+            "runtime.family.item" => {
+                let p: FamilyItemParams = serde_json::from_value(params)?;
+                Self::Item(catalog.capture_family_read(&p.caller_thread_id, Some(&p.thread_id), Some(&p.branch_id)).map_err(domain)?, varin_runtime::catalog::family::ItemRequest { run_id: p.run_id, anchor: p.anchor, item_id: p.item_id, offset: size(p.offset)?, max_bytes: size(p.max_bytes)? })
+            }
+            _ => return Err(KernelError::Protocol("unknown family read method".into())),
+        })
+    }
+    fn load(self, cancelled: &dyn Fn() -> bool) -> Result<Value, KernelError> {
+        if cancelled() { return Err(KernelError::Cancelled); }
+        let value = match self {
+            Self::List(read, include_self) => serde_json::to_value(read.list(include_self, cancelled).map_err(domain)?),
+            Self::Runs(read, cursor, limit) => serde_json::to_value(read.runs(cursor.as_deref(), limit, cancelled).map_err(domain)?),
+            Self::Read(read, request) => serde_json::to_value(read.read(request, cancelled).map_err(domain)?),
+            Self::Item(read, request) => serde_json::to_value(read.item(request, cancelled).map_err(domain)?),
+        }?;
+        if cancelled() { return Err(KernelError::Cancelled); }
+        Ok(value)
+    }
+}
+
+#[cfg(test)]
+#[path = "family_public_review.rs"]
+mod family_public_review;

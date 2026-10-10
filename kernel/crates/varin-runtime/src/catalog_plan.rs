@@ -90,7 +90,7 @@ struct Cursor {
 }
 // HMAC-SHA256 with a per-open random key. Tokens are transient authenticated read
 // positions, never durable authorization or an additional history owner.
-fn mac(key: &[u8; 32], data: &[u8]) -> [u8; 32] {
+pub(super) fn mac(key: &[u8; 32], data: &[u8]) -> [u8; 32] {
     use sha2::{Digest, Sha256};
     let mut inner = [0x36; 64];
     let mut outer = [0x5c; 64];

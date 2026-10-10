@@ -1,3 +1,4 @@
+import { ThreadFamily } from './ThreadFamily';
 import { attachProcessTerminal } from '@/lib/attachProcessTerminal';
 import { ThreadChildProfiles } from './ThreadChildProfiles';
 import { ThreadPlan } from './ThreadPlan';
@@ -184,6 +185,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       </div>
       {snapshot && <ThreadGoal api={api.goals} identity={identity} goals={snapshot.goals} sourceRunId={run?.id} refresh={async () => { await projection.current?.refresh(); }} />}
       {launch && <ThreadChildProfiles launch={launch.selection} />}
+      {api.family && <ThreadFamily api={api.family} identity={identity} />}
       {api.plan && <ThreadPlan api={api.plan} identity={identity} contextRevision={snapshot?.context.checkpoint?.revision} />}
       {visibleHistory.map(item => <article key={item.id} className="mx-auto max-w-3xl">
         <div className="mb-1 text-xs text-muted-foreground">{item.source}</div>

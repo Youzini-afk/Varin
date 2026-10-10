@@ -11,9 +11,9 @@ export class ThreadRequestError extends Error {
 
 /** Uses the same Application Host transport/auth selection as the other RuntimeAPIs. */
 export function createThreadsHttpAPI(): ThreadsAPI {
-  const post = async <T>(method: string, body: unknown): Promise<T> => {
+  const post = async <T>(method: string, body: unknown, signal?: AbortSignal): Promise<T> => {
     const generation = getRuntimeEndpointGeneration();
-    const response = await runtimeFetch(`/api/threads/${method}`, { method: 'POST',
+    const response = await runtimeFetch(`/api/threads/${method}`, { method: 'POST', ...(signal ? { signal } : {}),
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) });
     if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during thread request');
     if (!response.ok) {
@@ -26,6 +26,12 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     return result;
   };
   return {
+    family: {
+      list: (identity, includeSelf, signal) => post('family/list', { ...identity, includeSelf }, signal),
+      runs: (identity, request, signal) => post('family/runs', { ...identity, request }, signal),
+      read: (identity, request, signal) => post('family/read', { ...identity, request }, signal),
+      item: (identity, request, signal) => post('family/item', { ...identity, request }, signal),
+    },
     processes: { openTerminal: input => post('process/terminal', input) },
     plan: { read: identity => post('plan/read', identity), update: input => post('plan/update', input) },
     collaboration: {

@@ -17,23 +17,7 @@ impl Catalog {
                 "Run cancellation forbids new execution".into(),
             ));
         }
-        let mut thread = run.thread_id;
-        let mut visited = BTreeSet::new();
-        loop {
-            if !visited.insert(thread.clone()) {
-                return Err(RuntimeError::Invalid("cyclic task lineage".into()));
-            }
-            let Some(child) = self.child_task_for_thread(&thread)? else {
-                return Ok(thread);
-            };
-            let parent = self.run(&child.parent_run_id)?;
-            if child.child_thread_id != thread || parent.thread_id != child.parent_thread_id {
-                return Err(RuntimeError::Invalid(
-                    "task lineage does not match parent Run".into(),
-                ));
-            }
-            thread = parent.thread_id;
-        }
+        thread_family(&self.db, &run.thread_id)
     }
 }
 
@@ -117,5 +101,24 @@ impl Catalog {
             .map(|status| status.state)
             .unwrap_or(if settled { "settled" } else { "not_active" });
         Ok(json!({"admissionId":identity,"state":state,"queue":queue}))
+    }
+}
+
+/// The one lineage authority shared by scheduling and conversation readers.
+pub(super) fn thread_family(db: &Connection, thread_id: &str) -> Result<String> {
+    let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM threads WHERE id=?1)", [thread_id], |row| row.get(0))?;
+    if !exists { return Err(RuntimeError::NotFound(thread_id.into())); }
+    let mut thread = thread_id.to_owned();
+    let mut visited = BTreeSet::new();
+    loop {
+        if !visited.insert(thread.clone()) { return Err(RuntimeError::Invalid("cyclic task lineage".into())); }
+        let raw: Option<String> = db.query_row("SELECT body FROM child_tasks WHERE child_thread_id=?1", [&thread], |row| row.get(0)).optional()?;
+        let Some(raw) = raw else { return Ok(thread); };
+        let child: collaboration::ChildTask = serde_json::from_str(&raw)?;
+        let parent: Run = record(db, "runs", &child.parent_run_id)?;
+        if child.child_thread_id != thread || parent.thread_id != child.parent_thread_id {
+            return Err(RuntimeError::Invalid("task lineage does not match parent Run".into()));
+        }
+        thread = parent.thread_id;
     }
 }

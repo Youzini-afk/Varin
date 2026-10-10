@@ -1,3 +1,4 @@
+import type { FamilyListParams, FamilyRunsParams, FamilyReadParams, FamilyItemParams, FamilyList, FamilyRuns, FamilyRead, FamilyItem } from './protocol.generated.js';
 import type { ChildCapabilityDescriptor, ChildDispatchCatalog, TreeCancelTarget, TreeCancellationReceipt, McpBinding, LiveMcpBinding } from './protocol.generated.js';
 import { savedSourceLaunch } from './source-launch.js';
 import type { PlanView, PlanForkCapture } from '@varin/protocol';
@@ -486,6 +487,18 @@ export class AgentRuntimeClient {
       { operationId },
       signal,
     );
+  }
+  familyList(input: FamilyListParams, signal?: AbortSignal): Promise<FamilyList> {
+    return this.kernel.agentRuntimeRequest('runtime.family.list', input, signal);
+  }
+  familyRuns(input: FamilyRunsParams, signal?: AbortSignal): Promise<FamilyRuns> {
+    return this.kernel.agentRuntimeRequest('runtime.family.runs', input, signal);
+  }
+  familyRead(input: FamilyReadParams, signal?: AbortSignal): Promise<FamilyRead> {
+    return this.kernel.agentRuntimeRequest('runtime.family.read', input, signal);
+  }
+  familyItem(input: FamilyItemParams, signal?: AbortSignal): Promise<FamilyItem> {
+    return this.kernel.agentRuntimeRequest('runtime.family.item', input, signal);
   }
   readChildReport(
     operationId: string,
@@ -1703,6 +1716,7 @@ export class AgentRuntimeClient {
     return {
       id: reference.id,
       thread_id: reference.thread_id,
+      run_id: reference.run_id,
       parent: reference.parent,
       source: reference.source,
       content: body.content,

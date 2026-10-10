@@ -701,6 +701,7 @@ impl Fixture {
             .unwrap();
         let launch = self.db.launch_intent(&run_id).unwrap().unwrap().selection;
         let boundary = self.db.policy_boundary(&run_id, epoch).unwrap();
+        let checkpoint = boundary.resource_checkpoint_id.clone();
         let action_id = format!("{run_id}:policy:{}", boundary.id);
         let origin = ToolOrigin::PolicyAction {
             action_id: action_id.clone(),
@@ -720,7 +721,7 @@ impl Fixture {
                 context: FrozenToolContext {
                     child_dispatch: self.db.launch_metadata(&run_id).unwrap().unwrap().dispatch_context_ref,
                     resource_activations: Vec::new(),
-                    resource_checkpoint_id: None,
+                    resource_checkpoint_id: checkpoint,
                     run_id: run_id.clone(),
                     origin,
                     tool_schema_generation: launch.tool_schema_generation,

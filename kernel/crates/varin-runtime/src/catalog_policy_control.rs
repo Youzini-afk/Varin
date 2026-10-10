@@ -432,6 +432,7 @@ impl Catalog {
         };
         let control = if let Some((item, reference)) = &item {
             let history = HistoryItem {
+                run_id: run.id.clone(),
                 id: item.id.clone(),
                 thread_id: run.thread_id.clone(),
                 parent: expected_head,
@@ -440,12 +441,13 @@ impl Catalog {
                 provider: None,
             };
             tx.execute(
-                "INSERT INTO history(id,thread_id,parent,body) VALUES(?1,?2,?3,?4)",
+                "INSERT INTO history(id,thread_id,parent,body,run_id) VALUES(?1,?2,?3,?4,?5)",
                 params![
                     history.id,
                     history.thread_id,
                     history.parent,
-                    encode(&history)?
+                    encode(&history)?,
+                    run.id
                 ],
             )?;
             tx.execute(

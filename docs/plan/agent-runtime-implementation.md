@@ -1,12 +1,19 @@
 # 原生 Agent 运行时实施
 
-状态：实施中，尚未切换生产运行时。更新：2026-10-10（Asia/Singapore）。
+状态：实施中，尚未切换生产运行时。更新：2026-10-11（Asia/Singapore）。
 
 综合结构审阅见[2026-10-09 实现审阅](../reviews/runtime-2026-10-09.md)，后续实现及独立行为验证见[控制路径隔离增量](../reviews/runtime-control-isolation-2026-10-09.md)。前次源码与编译审阅、各阶段行为验证分别记录；历史通过记录不代替当前代码的证据。两份设计的整体交付仍未完成。
 
 目标是完整实现[完整运行时设计](../design/agent-runtime-design.md)和[能力组合设计](../design/runtime-extensibility-design.md)共同定义的长期运行底座：及时交互、低开销执行、按真实资源调度、深层能力组合和可替换策略。完成聊天循环、迁移已有工具或删除 Pi 都不是单独的完成标准；Pi 退出是这套设计落地后的一个结果。当前生产仍使用 Pi session worker、TypeScript Host 协调和 Rust 资源内核；现有权威见[架构](../architecture.md)。
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
+
+## 2026-10-11 增量：同任务发现与按需会话互读
+
+- 普通 `threads`/`read_thread` 与四个公开 family reader 共用 Catalog 的真实任务血缘，支持根/父/兄弟/后代、历史 Run、固定最近/范围/搜索页和原 JSON 分块。当前 Thread 可以按需读其他已完成/取消会话，不启动目标模型或 cwd，不获得其控制、文件或私有策略状态权限；ModelStep 和 PolicyAction 都核实际冻结声明与 origin，未选工具重开不补入。
+- 所有原 history writer 在同事务保存实际生产/接收 Run，Catalog 格式 **27**。Fork 不重记旧记录 owner，继承 Run 可发现/筛读且保留原 branch。原 ContentStore 继续唯一拥有正文，Catalog 只捕获短事实和在途保护；普通旧 history.page 也迁出锁内遍历。原文读取/搜索排除 ProviderOriginal 和 typed opaque continuation，不改变普通 user/tool JSON。Signed view 在同 epoch 的追加/fork/回滚间固定，重开后明确失效；已进旧 SQLite 快照的 reader 在返回前用当前连接重核 epoch/caller。
+- 认证 Host→application-client→共享 ThreadConversation 按需只读面板保留真实 caller/target、原文 ID/Run/tool 关联、部分结果和续读位置。切 Host/target/branch/Run 取消原读且丢弃迟到结果。独审两条真实错位已红绿修复：Run 过滤后的前后导航，以及后建已完成 fork 遮蔽仍活动根任务；状态和导航由原事实推导，不建第二状态表。
+- 最终 runtime **336/0、2 ignored**，kernel lib **74/0、11 ignored**；原生 family12与双来源/public4计在完整套件内。Host **27/27**、UI **35/35**、原 fresh binary guardian组合 **1/1** 通过。all-targets、同源准确身份 Linux x64 `0.9.25` 构建及 staging、类型/lint/实际 Host bundle/协议/文档检查通过。独审接受本切片。完整 Host IPC 用例保留可复跑入口但未执行；定向消息、关联 Wait/期限、新 Run 续接及未交付策略/辅助结果共享仍继续，不能把本切片称完整协作。详见[验收记录](../reviews/runtime-family-reads-2026-10-11.md)。
 
 ## 2026-10-10 增量：子任务普通记忆、自身计划与报告事实
 
