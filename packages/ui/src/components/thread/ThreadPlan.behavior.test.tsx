@@ -135,7 +135,7 @@ it('clears the draft on a Host switch and rejects an old Host save result', asyn
 
 it.each([
   ['plan-not-ready', 'The plan is not ready yet.'],
-  ['plan-unsupported', 'Conversation plans are unavailable for Bot or child conversations.'],
+  ['plan-unsupported', 'Conversation plans are unavailable for this conversation scope.'],
 ])('distinguishes %s from a missing plan or failed read and refreshes after scope setup', async (code, message) => {
   const f = fixture(); f.api.read.mockRejectedValueOnce(new ThreadRequestError(400, code));
   await render(f.api);

@@ -106,7 +106,7 @@ function PlanCard({ api, identity, contextRevision, host }: Props & { host: numb
     {loading && <p role="status">Loading plan…</p>}
     {readError === 'failed' && <p role="alert">Could not read the current plan. <Button variant="ghost" size="sm" onClick={() => void refresh()}>Retry reading plan</Button></p>}
     {readError === 'not-ready' && <p role="status">The plan is not ready yet. Send the first message and wait for conversation setup; plan availability will refresh automatically.</p>}
-    {readError === 'unsupported' && <p role="status">Conversation plans are unavailable for Bot or child conversations.</p>}
+    {readError === 'unsupported' && <p role="status">Conversation plans are unavailable for this conversation scope.</p>}
     {state && <div aria-label="Current plan">
       {state.plan === null ? <p>No plan yet.</p> : state.plan.content === '' ? <p>The plan is empty.</p>
         : <MarkdownRenderer messageId={`plan:${state.plan.ref}`} content={state.plan.content} />}

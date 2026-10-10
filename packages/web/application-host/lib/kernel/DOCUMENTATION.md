@@ -685,9 +685,16 @@ file, resource, question, recursive collaboration and managed process capabiliti
 source projection and private text-write projection remain explicit; process capability additionally
 requires real configured/delegated authority and existing permission gates. A private cwd is not an
 OS sandbox. Ordinary extensions and MCP use the exact original frozen Host declarations. LSP,
-memory/plan/Goal, Computer and remote child bindings remain unavailable until
+Goal, Computer and remote child bindings remain unavailable until
 their complete owner contracts are connected; no unsupported list is silently trimmed. The UI displays
 the frozen native descriptors together with actual Launch Host bindings and selected profile facts.
+
+Explicitly selected native memory and todo tools use the original ordinary owners. `currentThread`
+notes resolve to the actual child Thread; admitted project/global scopes remain shared under the same
+permissions, while parent/sibling private notes do not transfer. Initial child plans are absent and
+belong to the actual child Thread/branch/history. Public plan editing and branch capture use the same
+KnowledgeStore CAS and original receipt as tools, independently of tool selection. Source `read_only`
+is not a prohibition on explicitly selected note/plan mutations. Bot/context-job scope remains separate.
 
 A child uses the ordinary AgentPolicy lifecycle after durable task admission. `preparePolicy` resolves
 its actual Thread/project routing scope, then commits the original artifact and generation through the

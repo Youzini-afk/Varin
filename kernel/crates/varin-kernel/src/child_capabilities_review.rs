@@ -37,7 +37,7 @@ fn available_metadata_is_the_actual_native_directory_and_classifies_real_source_
             .source_requirement,
         ChildSourceRequirement::None
     );
-    for name in ["memory", "todo", "goal_report", "computer", "pi-only"] {
+    for name in ["goal_report", "computer", "pi-only"] {
         assert!(select(&[name.into()]).is_err());
     }
 }
@@ -152,5 +152,53 @@ fn binding_hook_freezes_model_visible_configuration_without_changing_tool_schema
     );
     drop(hook);
     drop(catalog);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn normal_child_inherits_actual_parent_note_and_plan_declarations() {
+    let native = schemas();
+    let get = |name: &str| {
+        native
+            .iter()
+            .find(|tool| tool.name == name)
+            .unwrap()
+            .clone()
+    };
+    let mut f = fixture::Fixture::new_parent_custom(
+        0,
+        get("file_read"),
+        get("dispatch"),
+        false,
+        false,
+        false,
+        |input, launch| {
+            input.tools = None;
+            launch.tools.retain(|tool| tool.name != "wait_child");
+            launch
+                .tools
+                .extend([get("wait_child"), get("memory"), get("todo")]);
+        },
+    );
+    let selected =
+        f.db.capture_child_dispatch_invocation(&f.context)
+            .unwrap()
+            .load()
+            .unwrap();
+    let (_, tools) = crate::collaboration::resolve_selection(&selected, &f.input).unwrap();
+    assert_eq!(delegated(&tools), tools);
+    assert!(tools.contains(&crate::memory::schema(true)));
+    assert!(tools.contains(&crate::plan::schema()));
+    f.launch.tools = tools.clone();
+    let child = f.accept();
+    let child = f.db.capture_child_read(child).load().unwrap();
+    assert_eq!(child.launch.tools, tools);
+    assert_eq!(
+        child.selected_profile.work_mode,
+        varin_runtime::catalog::dispatch::ChildWorkMode::ReadOnly
+    );
+    let root = f.root.clone();
+    drop(selected);
+    drop(f);
     std::fs::remove_dir_all(root).unwrap();
 }

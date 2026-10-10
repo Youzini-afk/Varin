@@ -18,6 +18,9 @@ import { afterEach, expect, it } from 'vitest';
 import { configureRuntimeUrlResolver, createThreadsHttpAPI, setRuntimeExtraHeaders } from '@varin/application-client';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
+import { openUserKnowledgeStore } from '../harness/recall-tool.js';
+import { createPlanOwner } from './plan-owner.js';
+import { PlanService } from './plan-service.js';
 import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
 import { createKernelClient } from './kernel-client.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
@@ -113,7 +116,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
   const configuration = { providerId: model.providerId, providerFamily, model: model.modelId, endpoint,
     credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 128 };
   let projectId = 'child-review-project'; let trusted = true;
-  async function openHost(options: { context?: (original: ContextPreparer) => ContextPreparer; collaboration?: boolean; sourceGrantScopes?: string[]; policyExample?: boolean } = {}) {
+  async function openHost(options: { context?: (original: ContextPreparer) => ContextPreparer; collaboration?: boolean; sourceGrantScopes?: string[]; policyExample?: boolean; plans?: boolean } = {}) {
     let kernelProcess: ChildProcess | undefined;
     const kernel = createKernelClient({ hostId: 'child-review-host', storageRoot: root, buildVersion,
       kernelPath, allowCargoDevRunner: false, spawnProcess: ((command, args, options) => { kernelProcess = spawn(command, args ?? [], options ?? {}); return kernelProcess; }) as typeof spawn });
@@ -178,12 +181,15 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
         return lease.decide(input, signal);
       } };
     }, observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({sessionId:threadId,projectId}, changed, signal) } : undefined);
+    const knowledge = options.plans ? await openUserKnowledgeStore({ dataDir: root, hostId: 'child-review-host', embedding: null }) : undefined;
+    const plans = knowledge ? new PlanService(runtime, async () => knowledge) : undefined;
+    if (knowledge) kernel.setPlanOwner(createPlanOwner(async () => knowledge, runtime));
     const errors: unknown[] = [];
     const models = { resolveModel: async (selection: typeof model) => {
       if (selection.providerId !== model.providerId || selection.modelId !== model.modelId) throw new Error('Unknown fixture model');
       return { configuration, credentialOwner };
     }, rebindModel: async () => credentialOwner };
-    const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, workingStates, runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ documents, workingStates, prepareResources: resources.prepareSourceCapture }), prepareContext, undefined, undefined, undefined,
+    const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, workingStates, runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ documents, workingStates, prepareResources: resources.prepareSourceCapture }), prepareContext, plans, undefined, undefined,
       createChildProfilePreparer({ settings: async () => ({}), capabilities: signal => runtime.childCapabilities(signal), models }));
     const collaboration = options.collaboration === false ? undefined : new ThreadCollaboration({ kernel, storageAdapter: storage, resolveLiveSource: async () => { throw new Error("Fixed source fixture"); }, sourceCaptureOwners: { documents, prepareResources: resources.prepareSourceCapture, inspectInventory: async () => { throw new Error("Fixed source fixture"); } }, runtime, workingStates, prepareContext, continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal), onError: (_operation, error) => { errors.push(error); } });
     const app = express();
@@ -198,7 +204,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
     let closed = false; let crashed = false;
     const close = async () => {
       if (closed) return; closed = true;
-      collaboration?.stop(); await host.close(); await extensions?.stop();
+      collaboration?.stop(); await host.close(); await extensions?.stop(); await knowledge?.close();
       try { await storage.dispose(); } catch (error) { if (!crashed || !String(error).includes('Kernel client is closed')) throw error; }
       finally { await documents.dispose(); await kernel.close(); }
     };
@@ -218,7 +224,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
 }
 
 
-const dispatch = { task: 'CHILD_TASK: inspect source.txt and send a report', workMode: 'read_only' };
+const dispatch = { task: 'CHILD_TASK: inspect source.txt and send a report', workMode: 'read_only', tools: ['file_read'] };
 // Normal children may themselves delegate; identify the admitted role from the actual context.
 const isParent = (body: Record<string, unknown>) => !JSON.stringify(body.input ?? body.system).includes('Your admitted role is worker');
 const job = (body: Record<string, unknown>) => {
@@ -234,6 +240,65 @@ function blockChild(original: ContextPreparer, entered: ReturnType<typeof gate>,
   }, { main: original.main, ...(original.refresh ? { refresh: original.refresh } : {}) });
   return prepare;
 }
+
+it('selected read-only child owns its ordinary notes and plan through real Host owners and public plan consumers', async () => {
+  const entered = gate(); const release = gate();
+  let parentSteps = 0; let childSteps = 0; let operationId = '';
+  const f = await fixture(({ body, response }) => {
+    assertPairing(body);
+    if (isParent(body)) {
+      if (++parentSteps === 1) complete(response, [tool('dispatch', { ...dispatch, tools: ['memory', 'todo'] }, 'delegate-notes-plan')]);
+      else if (parentSteps === 2) { operationId = job(body); complete(response, [tool('wait_child', { operationId }, 'observe-notes-plan')]); }
+      else complete(response, [answer('Parent received the child report', 'parent-notes-plan-done')]);
+    } else {
+      childSteps++;
+      if (childSteps === 1) complete(response, [tool('memory', { action: 'read' }, 'read-child-notes')]);
+      else if (childSteps === 2) {
+        const notes = result(body, 'memory')?.content as { revision: number; notes: Array<{ content: string }> };
+        expect(notes.notes.map(note => note.content)).toEqual(['SHARED_CHILD_PROJECT']);
+        complete(response, [tool('memory', { action: 'save', scope: 'currentThread', content: 'CHILD_OWN_NOTE', revision: notes.revision }, 'save-child-note')]);
+      } else if (childSteps === 3) {
+        expect(result(body, 'memory')).toMatchObject({ outcome: 'succeeded', effect: 'confirmed' });
+        complete(response, [tool('todo', { action: 'update', expectedRef: null, items: [{ text: 'Child owned plan', status: 'pending' }] }, 'save-child-plan')]);
+      } else {
+        expect(result(body, 'todo')).toMatchObject({ outcome: 'succeeded', effect: 'confirmed' });
+        complete(response, [answer('CHILD_NOTES_PLAN_REPORT', 'child-notes-plan-done')]);
+      }
+    }
+  });
+  const h = await f.openHost({ plans: true, context: original => blockChild(original, entered, release) });
+  const identity = await h.api.create('child-notes-plan');
+  await h.personalization.saveNote({ scope: { kind: 'session', id: identity.threadId }, content: 'PARENT_PRIVATE_NOTE' });
+  await h.personalization.saveNote({ scope: { kind: 'project', id: 'child-review-project' }, content: 'SHARED_CHILD_PROJECT' });
+  const prepared = await h.api.prepareSource({ ...identity, key: 'notes-plan-source', path: f.workspace, mode: 'fixed_branch' });
+  prepared.source.tools = ['file_read'];
+  const run = await h.api.submit({ ...identity, key: 'notes-plan-input', expectedHead: null, text: 'Delegate notes and plan', model, source: prepared.source });
+  try {
+    await entered.promise;
+    await expect.poll(() => operationId).not.toBe('');
+    const parentState = await h.api.plan!.read(identity);
+    const parentPlan = await h.api.plan!.update({ ...identity, key: 'parent-plan', expectedHeadId: parentState.headId, expectedRef: null, content: 'PARENT_PRIVATE_PLAN' });
+    release.release();
+    await expect.poll(async () => (await h.runtime.run(run.run_id)).state, { timeout: 10_000 }).toBe('completed');
+    const child = await h.runtime.child(operationId);
+    expect(child.launch.tools.map(item => item.name).sort()).toEqual(['memory', 'todo']);
+    expect(child.report?.outcome).toBe('succeeded'); expect(child.code_result).toEqual({ kind: 'no_changes' });
+    const childIdentity = { runtime: 'agent' as const, threadId: child.child_thread_id, branchId: child.child_branch_id };
+    const ownPlan = await h.api.plan!.read(childIdentity);
+    expect(ownPlan.plan).toMatchObject({ threadId: child.child_thread_id, content: '- [ ] Child owned plan' });
+    expect((await h.api.plan!.read(identity)).plan).toEqual(parentPlan.plan);
+    const ownNotes = await h.personalization.context(child.child_thread_id);
+    expect(ownNotes.memories.map(note => note.content)).toEqual(['SHARED_CHILD_PROJECT', 'CHILD_OWN_NOTE']);
+    expect((await h.personalization.context(identity.threadId)).memories.map(note => note.content)).not.toContain('CHILD_OWN_NOTE');
+    const edit = await h.api.plan!.update({ ...childIdentity, key: 'child-user-edit', expectedHeadId: ownPlan.headId, expectedRef: ownPlan.plan!.ref, content: 'User child plan' });
+    await h.close();
+    const reopened = await f.openHost({ plans: true });
+    expect((await reopened.api.plan!.read(childIdentity)).plan).toEqual(edit.plan);
+    expect((await reopened.personalization.context(child.child_thread_id)).memories).toEqual(ownNotes.memories);
+    expect((await reopened.runtime.child(operationId)).report).toEqual(child.report);
+    expect(h.errors.map(String)).toEqual([]); expect(reopened.errors.map(String)).toEqual([]);
+  } finally { release.release(); }
+});
 
 it('real dispatch returns before child preparation; parent reads, waits, and receives fixed-source scoped report exactly once', async () => {
   const entered = gate(); const release = gate();
@@ -692,7 +757,10 @@ it('a revoked child grant blocks its own reads even though the parent handoff wa
   const grant = h.grants.find(entry => entry.runId === child.receipt!.run_id)!;
   expect(grant).toBeDefined(); await h.kernel.revokeGrant(grant.grantId);
   complete(childResponse!, [tool('file_read', { path: 'source.txt' }, 'child-read')]);
-  await expect.poll(async () => (await h.runtime.child(operationId)).report?.outcome).toBe('failed');
+  // The Run completed by reporting the denied read. Report delivery is not proof the read succeeded.
+  await expect.poll(async () => (await h.runtime.child(operationId)).report?.outcome).toBe('succeeded');
+  const reported = await h.runtime.child(operationId);
+  expect((await h.runtime.readChildReport(operationId, reported.report!.history_ids.at(-1)!)).text).toContain('reading failed');
   expect(childSteps).toBe(2); expect(parentSteps).toBe(2);
 }, 20_000);
 

@@ -8,6 +8,7 @@ import { parseTodoPlan, renderTodoPlan } from '@varin/protocol';
 import { openKnowledgeStoreEngine } from './store-engine.js';
 import { openWorkspaceKnowledge, type KnowledgeStore } from './store.js';
 import { createPlanOwner, type PlanQuery } from '../kernel/plan-owner.js';
+import { PlanService } from '../kernel/plan-service.js';
 import { PlanBridge, type PrivatePlanResponse } from '../kernel/plan-bridge.js';
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 
@@ -214,14 +215,27 @@ describe('plan independent owner review, real TriviumDB', () => {
     expect(changes).toEqual([{ threadId: v.threadId, branchId: v.branchId, ref: first.plan!.ref }]);
     await expect(mutatePlan(store, input(v, 'pipe-conflict', null, 'altered'))).rejects.toThrow(/intent/);
   });
-  it('carries a policy invocation through the private Host bridge and reads its old receipt after owner reopen', async () => {
-    const f = await fixture(true); const v = view();
-    // Only Catalog ancestry is a fixture. Bridge dispatch, plan owner, worker pipe and database are real.
-    const runtime = { planContains: async (_branch: string, head: string | null, candidate: string | null) => ({
-      status: 'ready', visible: candidate === null || fixtureHistory.get(historyKey({ threadId: v.threadId, headId: head }))?.includes(candidate),
-    }) } as unknown as AgentRuntimeClient;
-    const query: PlanQuery = { action: 'mutate', view: v, origin: tool('policy_action'),
-      arguments: { action: 'update', expectedRef: null, items: [{ text: 'Policy plan', status: 'pending' }] } };
+  it.each(['model_step', 'policy_action'] as const)('carries a child %s plan through its public service, private bridge and original worker receipt', async kind => {
+    const f = await fixture(true); const v = view('child-branch', ['child-h1'], null, 'child');
+    const parent = view('parent-branch', ['parent-h1'], null, 'parent');
+    const sibling = view('sibling-branch', ['sibling-h1'], null, 'sibling');
+    const views = new Map([v, parent, sibling].map(value => [value.branchId, value]));
+    const identity = (value: PlanView) => ({ runtime: 'agent' as const, threadId: value.threadId, branchId: value.branchId });
+    // Catalog admission/history are fixtures. Public service, private bridge, owner, worker pipe and DB are real.
+    const runtime = {
+      context: async (branch: string) => ({ personalization: { mode: 'agent', threadRole: branch === parent.branchId ? 'main' : 'worker', sessionId: views.get(branch)!.threadId } }),
+      childForThread: async (thread: string) => thread === v.threadId || thread === sibling.threadId ? { child_thread_id: thread } : null,
+      planView: async (branch: string) => views.get(branch)!,
+      planContains: async (branch: string, head: string | null, candidate: string | null) => ({
+        status: 'ready', visible: candidate === null || fixtureHistory.get(historyKey({ threadId: views.get(branch)!.threadId, headId: head }))?.includes(candidate),
+      }),
+    } as unknown as AgentRuntimeClient;
+    const plans = new PlanService(runtime, async () => f.store);
+    const parentPlan = await plans.update({ ...identity(parent), key: 'parent-only', expectedHeadId: parent.headId, expectedRef: null, content: 'Parent private plan' });
+    expect((await plans.read(identity(v))).plan).toBeNull();
+    expect((await plans.read(identity(sibling))).plan).toBeNull();
+    const query: PlanQuery = { action: 'mutate', view: v, origin: { ...tool(kind), runId: 'child-run' },
+      arguments: { action: 'update', expectedRef: null, items: [{ text: 'Child own plan', status: 'pending' }] } };
     const channel = (store: KnowledgeStore, authority: AgentRuntimeClient) => {
       const responses = new Map<string, (response: PrivatePlanResponse) => void>();
       const bridge = new PlanBridge(() => 'kernel-epoch', async response => { responses.get(response.id)!(response); },
@@ -234,19 +248,39 @@ describe('plan independent owner review, real TriviumDB', () => {
     };
     const firstChannel = channel(f.store, runtime);
     const response = await firstChannel.request('write', query);
-    expect(response.result.status).toBe('ready');
     if (response.result.status !== 'ready' || !response.result.mutation) throw new Error('Plan mutation receipt missing');
     const committed = response.result.mutation;
     expect(committed.receipt.origin).toEqual(query.origin);
-    expect(committed.plan?.content).toBe('- [ ] Policy plan');
-    await write(f.store, v, 'later-user-edit', committed.receipt.ref, 'Newer user plan');
+    expect((await plans.read(identity(v))).plan).toMatchObject({ threadId: 'child', content: '- [ ] Child own plan' });
+    const capture = await plans.capture(identity(v), v.headId, 'child-fork');
+    views.set('child-fork', forkView(capture, ['child-h1']));
+    await plans.update({ ...identity(v), key: 'later-user-edit', expectedHeadId: v.headId, expectedRef: committed.receipt.ref, content: 'Newer child user plan' });
+    await expect(plans.update({ ...identity(v), key: 'stale-user-edit', expectedHeadId: v.headId, expectedRef: committed.receipt.ref, content: 'Stale overwrite' })).rejects.toMatchObject({ code: 'plan-conflict' });
+    expect((await plans.read(identity(parent))).plan).toEqual(parentPlan.plan);
+    expect((await plans.read(identity(sibling))).plan).toBeNull();
     firstChannel.bridge.close(); await f.store.close();
     const reopened = await f.open();
     const receiptChannel = channel(reopened, { planContains: async () => { throw new Error('An original receipt must not resolve a new history view'); } } as unknown as AgentRuntimeClient);
     const recovered = await receiptChannel.request('original-receipt', { ...query, action: 'receipt' });
     expect(recovered.result).toEqual({ status: 'ready', plan: committed.plan, mutation: committed });
-    expect((await readPlan(reopened, v))?.content).toBe('Newer user plan');
+    const restoredPlans = new PlanService(runtime, async () => reopened);
+    expect((await restoredPlans.read(identity(v))).plan?.content).toBe('Newer child user plan');
+    expect((await restoredPlans.read(identity(views.get('child-fork')!))).plan).toEqual(committed.plan);
+    expect((await restoredPlans.read(identity(parent))).plan).toEqual(parentPlan.plan);
     receiptChannel.bridge.close();
+  });
+  it('requires an admitted ordinary scope rather than trusting a child-like role label', async () => {
+    const identity = { runtime: 'agent' as const, threadId: 'claimed-child', branchId: 'branch' };
+    let basis: { mode: string; threadRole: string; sessionId: string } | undefined = { mode: 'agent', threadRole: 'worker', sessionId: identity.threadId };
+    const runtime = { context: async () => basis && ({ personalization: basis }), childForThread: async () => null } as unknown as AgentRuntimeClient;
+    const service = new PlanService(runtime, async () => { throw new Error('An unsupported scope must not open the plan owner'); });
+    await expect(service.read(identity)).rejects.toMatchObject({ code: 'plan-unsupported' });
+    basis = { mode: 'bot', threadRole: 'main', sessionId: identity.threadId };
+    await expect(service.read(identity)).rejects.toMatchObject({ code: 'plan-unsupported' });
+    basis = { mode: 'agent', threadRole: 'main', sessionId: 'foreign-thread' };
+    await expect(service.read(identity)).rejects.toThrow('Context belongs to another Thread');
+    basis = undefined;
+    await expect(service.read(identity)).rejects.toMatchObject({ code: 'plan-not-ready' });
   });
   it('keeps plans out of legacy blocks and global knowledge views', async () => {
     const { store } = await fixture();

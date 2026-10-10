@@ -638,8 +638,8 @@ actual parent model/tool declarations and adds credential-free discovery to the 
 A later configuration, model or tool selection cannot rewrite an old invocation. GC follows original
 nested references and in-flight publication; descendants share the catalog rather than nesting copies.
 
-Normal dispatch inherits its actual model and delegated tool declarations, excluding automatically
-injected main-only memory/plan/Goal helpers. Explicit `tools` may narrow that set; same-name but different
+Normal dispatch inherits its actual model and delegated tool declarations, including ordinary memory
+and plan when present; primary Goal authority remains separate. Explicit `tools` may narrow that set; same-name but different
 declarations are not reinterpreted as core tools. The default set fails visibly if capabilities are
 unsupported. An explicit preset validates its whole declared definition before narrowing or overriding
 its work mode; missing, disabled or unsupported choices never fall back. Explicitly selected models
@@ -706,7 +706,10 @@ a child target. A short TreeCancellationReceipt acknowledges cancellation intent
 A parent-Thread scope fence is checked in that same transaction. Arbitrary sibling exchange, remote
 environments and the complete collaboration product migration remain separate work.
 
-A report, execution outcome and file result are separate facts. A read-only textual report is valid
+A report, execution outcome and file result are separate facts. Report outcome follows the original
+terminal Run and the presence of a textual report; an earlier failed tool does not permanently turn
+a later completed Run into failure. Its failed/unknown Operation and receipt remain unchanged.
+A completed report is not proof that every tool succeeded. A read-only textual report is valid
 with `no_changes`. A final child report can coexist with independent live processes. Writable children
 wait for actual file-worker/root-lease drainage and original process/guardian executor-stop evidence,
 along with dispatched workspace MCP and source-scoped extension callback stop facts, before fixing a
@@ -937,8 +940,10 @@ bridge derives the fixed invocation head and original Operation identity from Ca
 arguments contain no owner/scope fields. Model and policy-node mutations retain their actual tagged
 `ToolOrigin`, call, Run and original effect epoch in the existing KnowledgeStore receipt intent.
 Recovery preserves that effect epoch while new execution remains fenced by the current Run/graph owner.
-Only admitted ordinary main Threads receive the schema,
-and dispatch rechecks their persisted role and child relationship. Source-inheritance filters
+Admitted ordinary main Threads and explicitly selected ordinary children can use the same schema;
+dispatch rechecks their persisted scope and real child relationship. A worker role label alone grants
+nothing. Each child uses its own Thread/branch/history plan, never a copy of its parent plan.
+User plan read/edit/fork remains independent of whether the Agent selected the todo tool. Source-inheritance filters
 recognize this built-in without granting source capabilities. An authoritative CAS-conflict
 receipt settles `Failed/None`; an unknown dispatch is not relabeled as no effect. Recovery queries
 the original Knowledge receipt and never repeats a plan mutation.

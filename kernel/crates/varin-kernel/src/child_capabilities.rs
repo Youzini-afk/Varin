@@ -22,6 +22,8 @@ pub(crate) fn schemas() -> Vec<ToolSchema> {
         crate::agent_resources::schema(),
         crate::questions::schema(),
         crate::questions::status_schema(),
+        crate::memory::schema(true),
+        crate::plan::schema(),
     ]);
     tools = crate::collaboration::schemas(tools, true);
     tools.sort_by(|a, b| a.name.cmp(&b.name));
@@ -91,12 +93,12 @@ pub(crate) fn select_frozen(
         })
         .collect()
 }
-/// Automatic main-only helpers are not delegation selections. Every returned tool is
+/// Main-only Goal authority is not a delegation selection. Every returned tool is
 /// present in the actual parent directory with the identical owning declaration.
 pub(crate) fn delegated(parent: &[ToolSchema]) -> Vec<ToolSchema> {
     parent
         .iter()
-        .filter(|tool| !matches!(tool.name.as_str(), "memory" | "todo" | "goal_report"))
+        .filter(|tool| tool.name != "goal_report")
         .cloned()
         .collect()
 }

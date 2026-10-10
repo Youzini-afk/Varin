@@ -164,6 +164,15 @@ impl Fixture {
         mcp: Option<varin_runtime::catalog::launches::HostToolBinding>,
         tools: Vec<String>,
     ) -> Self {
+        Self::new_host_child_with_native(policy, isolated, mcp, tools, Vec::new())
+    }
+    pub(crate) fn new_host_child_with_native(
+        policy: bool,
+        isolated: bool,
+        mcp: Option<varin_runtime::catalog::launches::HostToolBinding>,
+        tools: Vec<String>,
+        native: Vec<ToolSchema>,
+    ) -> Self {
         let mut fixture = Self::new_parent_custom(
             7,
             read_schema(),
@@ -180,6 +189,7 @@ impl Fixture {
             true,
             move |input, launch| {
                 input.tools = Some(tools);
+                launch.tools.extend(native);
                 if let Some(binding) = mcp {
                     launch.tools.extend(binding.tools.iter().cloned());
                     launch.mcp_binding = Some(binding);
@@ -212,7 +222,7 @@ impl Fixture {
         fixture.launch.mcp_binding = resolved.mcp_binding;
         fixture
     }
-    fn new_parent_custom(
+    pub(crate) fn new_parent_custom(
         revision: i64,
         read: ToolSchema,
         dispatch: ToolSchema,
