@@ -207,6 +207,11 @@ recall and semantic knowledge indexing exclude them through their existing type 
 A native update uses exact `expectedRef` CAS. One `commitTransaction` writes the immutable
 version, branch pointer and original receipt together; notifications follow commit. Tool receipt
 lookup uses the real persistent Operation ID, then checks its complete frozen origin and intent.
+Tool origins carry the existing tagged `ToolOrigin`: either the actual model request/call or policy
+action/node, plus its Run and original effect epoch. There is no fabricated request ID or legacy
+flat-origin fallback. The Kernel captures the original invocation's history range and schemas before
+the private bridge query. A reopened receipt lookup does not resolve today's plan ancestry or reapply
+the update; a later user edit stays current.
 User command keys are scoped to the authenticated Thread and branch. Replaying a lost response
 returns the original version, even after a later user edit, without another mutation. Storage
 failure remains unknown until the original receipt can be queried. Pi `expectedUpdatedAt` APIs
@@ -236,8 +241,14 @@ plans. Existing conversation forks for unsupported scopes retain their previous 
 a storage or Catalog failure cannot silently downgrade a supported plan-aware fork. The card
 separates these states, disables unsupported edits and refreshes after context admission.
 
-The native slice's independent acceptance currently includes 22 real-owner/IPC cases and 22
+The initial 2026-10-09 native slice's independent acceptance included 22 real-owner/IPC cases and 22
 real-kernel Host cases; UI/client focused acceptance covers 18 cases. Production Host bundling
 and Host/UI typechecks passed. Receipt replay, fork identity, temporary selection staleness and
 generic recall isolation have direct counterexamples. The exact durable no-effect receipt test
-and 12 execution regressions passed; newer-mainline integration remains a separate gate; no power-loss or packaged cross-platform claim is made.
+and 12 execution regressions passed at that snapshot. The 2026-10-10 tagged-origin extension passed
+25 owning tests, including the actual PrivatePlanBridge, KnowledgeStore worker and database with an
+explicit Catalog-ancestry fixture. It covers both model and policy origins, owner reopen, conflicting
+intent and original receipt lookup after a later edit. Current combined native/Host evidence and
+remaining validation boundaries are recorded in the
+[implementation plan](../../../../../docs/plan/agent-runtime-implementation.md); no power-loss or
+packaged cross-platform claim is made.

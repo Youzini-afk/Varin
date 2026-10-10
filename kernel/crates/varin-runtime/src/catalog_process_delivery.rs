@@ -112,7 +112,7 @@ impl Catalog {
             }
             let unresolved: i64 = self.db.query_row("SELECT count(*) FROM tool_calls t JOIN model_steps m ON m.id=t.request_id WHERE m.run_id=?1 AND t.committed=0",
                 [&run.id], |row| row.get(0))?;
-            if unresolved != 0 {
+            if unresolved != 0 || !super::result_content::job_acceptance_consumed(&self.db, &operation)? {
                 continue;
             }
             let fact_cursor: Option<u64> = if wait.cancelled {
@@ -203,7 +203,7 @@ impl Catalog {
             return Ok(false);
         }
         let unresolved: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM tool_calls t JOIN model_steps m ON m.id=t.request_id WHERE m.run_id=?1 AND t.committed=0)", [&run.id], |row|row.get(0))?;
-        if unresolved {
+        if unresolved || !super::result_content::job_acceptance_consumed(&tx, &operation)? {
             return Ok(false);
         }
         let mut run: Run = record(&tx, "runs", &wait.run_id)?;

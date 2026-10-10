@@ -610,9 +610,10 @@ it('does not silently discard a prepared workspace when a live run appears befor
   expect(f.enqueue).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ text: 'run on prepared workspace' }));
 });
 
-it('requires an explicit answer send, keeps the draft on failure and disables a stale question', async () => {
+it('answers a policy-node question explicitly, keeps the draft on failure and disables a stale question', async () => {
   const f = fixture(true);
-  const operation: ThreadSnapshot['operations'][number] = { id: 'question-op', run_id: 'ui-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'ask_user', waiting_on: 'question:question-op', intent: { call: { arguments: { question: 'Which approach?', options: ['Option A', 'Option B'] } } }, result: null, external_receipt: null, call_completion: null, execution_owner: null };
+  const operationId = 'ui-run:policy:question-action:node:ask';
+  const operation: ThreadSnapshot['operations'][number] = { id: operationId, run_id: 'ui-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'ask_user', waiting_on: `question:${operationId}`, intent: { kind: 'tool', origin: { kind: 'policy_action', action_id: 'ui-run:policy:question-action', node_id: 'ask' }, call: { call_id: 'ask', name: 'ask_user', schema_version: '1', arguments: { question: 'Which approach?', options: ['Option A', 'Option B'] } } }, result: null, external_receipt: null, call_completion: { kind: 'job_accepted', operation_id: operationId, phase: 'awaiting_user', effect: 'none', lifetime: 'thread' }, execution_owner: null };
   f.view.activeRun!.state = 'waiting'; f.view.activeRun!.waiting_on = operation.waiting_on;
   f.view.operations = [operation];
   const answer = vi.fn<ThreadsAPI['answerQuestion']>().mockRejectedValueOnce(new Error('uncertain answer acceptance')).mockImplementation(async () => {

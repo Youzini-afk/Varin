@@ -277,7 +277,7 @@ impl Catalog {
         let source = self
             .launch_metadata(run_id)?
             .and_then(|launch| launch.selection.source);
-        Ok(PolicyBoundary { goal, id, source, resource_checkpoint_id })
+        Ok(PolicyBoundary { history_range: HistoryRange { branch_id: run.branch_id.clone(), ancestor_id: None, leaf_id: self.head(&run.branch_id)? }, goal, id, source, resource_checkpoint_id })
     }
     /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn policy_graph(&self, run_id: &str, epoch: u64) -> Result<Option<PolicyGraphState>> {

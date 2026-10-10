@@ -104,9 +104,6 @@ fn query(
     contract: &ToolContract,
     receipt: bool,
 ) -> Result<Value, ExecutionError> {
-    let ToolOrigin::ModelStep { request_id } = &context.origin else {
-        return Err(error("plan requires a conversation model call"));
-    };
     let read_only = matches!(args(call)?, Arguments::Read);
     if call.name != TOOL
         || call.schema_version != "1"
@@ -117,7 +114,7 @@ fn query(
         || contract.lifetime != Lifetime::Run
         || !contract.resources.is_empty()
         || (receipt && read_only)
-        || context.operation_id != format!("{request_id}:tool:{}", call.call_id)
+        || context.operation_id != context.origin.operation_id(&call.call_id)
     {
         return Err(error("plan call does not match its admitted contract"));
     }
@@ -135,48 +132,27 @@ fn query(
         (
             catalog.epoch(),
             catalog.run(&context.run_id).map_err(error)?,
-            catalog.capture_model_step_read(request_id).map_err(error)?,
+            catalog
+                .capture_tool_invocation(context, &call.call_id)
+                .map_err(error)?,
         )
     };
-    let step = read.metadata.clone();
-    let snapshot: RequestSnapshot =
-        serde_json::from_value(read.load_request().map_err(error)?).map_err(error)?;
-    if step.run_id != run.id
-        || snapshot.view.run_id != run.id
-        || snapshot.view.request_id != *request_id
-        || snapshot.view.binding.history_range.branch_id != run.branch_id
-        || !matches!(&snapshot.view.origin, RequestOrigin::Conversation { history_range, .. } if history_range == &snapshot.view.binding.history_range)
-        || !snapshot.view.binding.tools.contains(&schema())
-    {
+    let snapshot = read.load().map_err(error)?;
+    if snapshot.call != *call || !snapshot.tools.contains(&schema()) {
         return Err(error(
-            "plan request is not the admitted conversation snapshot",
+            "plan call is not bound to its original schema and arguments",
         ));
     }
     let (operation_epoch, view) = {
         let catalog = owner.lock().map_err(error)?;
-        let current = catalog.run(&context.run_id).map_err(error)?;
-        let current_step = catalog.model_step_metadata(request_id).map_err(error)?;
-        if catalog.epoch() != epoch
-            || current_step.request != step.request
-            || current_step.run_id != run.id
-        {
-            return Err(error("plan request owner changed during preparation"));
+        if catalog.epoch() != epoch {
+            return Err(error("plan owner changed during preparation"));
         }
-        if !receipt
-            && (current.epoch != epoch
-                || current.cancel_requested
-                || current.state.terminal()
-                || current_step.superseded_by_input.is_some())
-        {
-            return Err(error("plan execution generation is no longer active"));
-        }
-        if !receipt {
-            catalog
-                .inspect_admission(&run.id, epoch, &context.origin, &call.call_id)
-                .map_err(error)?;
-        }
+        catalog
+            .validate_tool_invocation(&snapshot, !receipt)
+            .map_err(error)?;
         let operation_epoch = if read_only {
-            step.epoch
+            snapshot.owner_epoch
         } else {
             let operation = catalog.operation(&context.operation_id).map_err(error)?;
             if operation.run_id != run.id
@@ -194,17 +170,14 @@ fn query(
         (
             operation_epoch,
             catalog
-                .plan_view(
-                    &run.branch_id,
-                    snapshot.view.binding.history_range.leaf_id.as_deref(),
-                )
+                .plan_view(&run.branch_id, snapshot.history_range.leaf_id.as_deref())
                 .map_err(error)?,
         )
     };
     Ok(
         json!({"action":if receipt { "receipt" } else if read_only { "read" } else { "mutate" },
         "view":view,
-        "origin":{"kind":"tool","operationId":context.operation_id,"runId":run.id,"requestId":request_id,"callId":call.call_id,"epoch":operation_epoch},
+        "origin":{"kind":"tool","operationId":context.operation_id,"runId":run.id,"toolOrigin":context.origin,"callId":call.call_id,"epoch":operation_epoch},
         "arguments":call.arguments}),
     )
 }
@@ -233,6 +206,23 @@ fn mutation_result(query: &Value, value: &Value) -> Option<(Outcome, Effect)> {
     }
 }
 impl ToolExecutor for PlanTools {
+    fn supports_policy_read(
+        &self,
+        frozen: &FrozenToolContext,
+        call: &ToolCall,
+        contract: &ToolContract,
+    ) -> bool {
+        call.name == TOOL
+            && call.schema_version == "1"
+            && frozen.tools.contains(&schema())
+            && matches!(args(call), Ok(Arguments::Read))
+            && contract.name == TOOL
+            && contract.schema_version == "1"
+            && contract.read_only
+            && contract.completion == CompletionKind::Result
+            && contract.lifetime == Lifetime::Run
+            && contract.resources.is_empty()
+    }
     fn plan(
         &self,
         call: &ToolCall,
@@ -248,11 +238,8 @@ impl ToolExecutor for PlanTools {
         context: &FrozenToolContext,
         _cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
-        if call.schema_version != "1"
-            || !context.tools.contains(&schema())
-            || !matches!(context.origin, ToolOrigin::ModelStep { .. })
-        {
-            return Err(error("plan schema is not bound to a model step"));
+        if call.schema_version != "1" || !context.tools.contains(&schema()) {
+            return Err(error("plan schema is not bound to its invocation"));
         }
         Ok(ToolContract {
             name: TOOL.into(),
@@ -414,12 +401,8 @@ pub(crate) fn reconcile(
                     let operation = read.load().map_err(error)?;
                     let admitted: ToolInvocation =
                         serde_json::from_value(operation.intent.clone()).map_err(error)?;
-                    if !matches!(admitted.origin, ToolOrigin::ModelStep { .. })
-                        || operation.id != admitted.origin.operation_id(&admitted.call.call_id)
-                    {
-                        return Err(error(
-                            "plan recovery currently requires its original model invocation",
-                        ));
+                    if operation.id != admitted.origin.operation_id(&admitted.call.call_id) {
+                        return Err(error("plan recovery requires its original invocation"));
                     }
                     let context = ToolExecutionContext {
                         run_id: run_id.clone(),

@@ -31,7 +31,9 @@ release is explicitly approved.
 - [Planning policy](planning-policy/README.md): explicitly configure a tool-free planning model,
   inspect its committed bounded plan, then choose an evidence graph and main-model answer.
 
-Both use the ordinary installed brokered Host extension and project service-routing paths.
+- [Plan, question and process policy](domain-policy/README.md): use original plan receipts, authenticated answers and process observations without provider inference.
+
+These use the ordinary installed brokered Host extension and project service-routing paths.
 
 
 ## Ordinary Agent tool examples

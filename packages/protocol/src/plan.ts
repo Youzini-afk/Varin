@@ -1,4 +1,6 @@
 /** Conversation plans reuse the KnowledgeStore owner, not Pi session identity. */
+import type { ToolOrigin } from './agent-runtime.generated.js';
+
 export type PlanRef = string;
 export interface PlanSnapshot {
   ref: PlanRef;
@@ -25,7 +27,7 @@ export interface PlanView {
 }
 export type PlanOrigin =
   | { kind: 'user'; key: string }
-  | { kind: 'tool'; operationId: string; runId: string; requestId: string; callId: string; epoch: number };
+  | { kind: 'tool'; operationId: string; runId: string; toolOrigin: ToolOrigin; callId: string; epoch: number };
 export interface PlanSelection { latestRef: PlanRef | null; selectedRef: PlanRef | null }
 export interface PlanCandidate {
   latestRef: PlanRef | null;

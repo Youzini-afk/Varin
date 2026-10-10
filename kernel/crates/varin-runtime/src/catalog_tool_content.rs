@@ -1,6 +1,8 @@
 //! Frozen tool arguments are immutable content; control transitions use their identities.
 use super::*;
-use crate::execution::{AdmittedTool, ToolCall, ToolContract, ToolInvocation, ToolOrigin};
+use crate::execution::{
+    AdmittedTool, ToolCall, ToolContract, ToolExecutionContext, ToolInvocation, ToolOrigin,
+};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -267,5 +269,274 @@ impl Catalog {
             prepared.intent.contract().lifetime,
             serde_json::to_value(&prepared.intent)?,
         )
+    }
+}
+
+/// Validate one admitted Job against its actual model or graph caller. Metadata only.
+pub(super) fn require_job_invocation(
+    db: &Connection,
+    run: &Run,
+    op: &Operation,
+    context: &ToolExecutionContext,
+    tool: &str,
+) -> Result<super::tool_content::ToolIntent> {
+    let admitted = super::tool_content::ToolIntent::from_operation(op)?;
+    if op.id != context.operation_id
+        || context.operation_id != context.origin.operation_id(&admitted.call().call_id)
+        || op.run_id != run.id
+        || op.epoch != run.epoch
+        || context.run_id != run.id
+        || admitted.origin() != &context.origin
+        || admitted.call().name != tool
+        || op.executor.as_deref() != Some(tool)
+        || admitted.contract().completion != crate::execution::CompletionKind::Job
+        || admitted.contract().lifetime != Lifetime::Thread
+        || !admitted.contract().read_only
+    {
+        return Err(RuntimeError::Conflict(
+            "job invocation owner or contract changed".into(),
+        ));
+    }
+    let expected: String = match &context.origin {
+        ToolOrigin::ModelStep { request_id } => {
+            let step: ModelStep = record(db, "model_steps", request_id)?;
+            if step.run_id != run.id || step.state != ModelStepState::Completed {
+                return Err(RuntimeError::Conflict(
+                    "job call has no completed model owner".into(),
+                ));
+            }
+            db.query_row(
+                "SELECT body FROM tool_calls WHERE request_id=?1 AND call_id=?2",
+                params![request_id, admitted.call().call_id],
+                |row| row.get(0),
+            )?
+        }
+        ToolOrigin::PolicyAction { action_id, node_id } => {
+            let graph: Operation = record(db, "operations", action_id)?;
+            if graph.run_id != run.id
+                || graph.epoch != run.epoch
+                || graph.cancel_requested
+                || graph.phase == OperationPhase::Terminal
+                || super::policy::graph_metadata(&graph)?.is_none()
+            {
+                return Err(RuntimeError::Conflict(
+                    "job call has no active policy graph owner".into(),
+                ));
+            }
+            db.query_row("SELECT call FROM policy_graph_nodes WHERE action_id=?1 AND node_id=?2 AND receipt IS NULL",
+                params![action_id, node_id], |row| row.get(0))?
+        }
+    };
+    if serde_json::from_str::<super::tool_content::ToolCallMetadata>(&expected)? != *admitted.call()
+    {
+        return Err(RuntimeError::Conflict(
+            "job call differs from its caller's frozen invocation".into(),
+        ));
+    }
+    Ok(admitted)
+}
+
+/// A captured invocation's immutable caller binding. Loading never holds Catalog.
+enum InvocationOwner {
+    Model {
+        step: ModelStep,
+    },
+    Policy {
+        operation: Operation,
+        metadata: super::policy_body::PolicyActionMetadata,
+    },
+}
+pub struct ToolInvocationRead {
+    context: ToolExecutionContext,
+    branch_id: String,
+    call: ToolCallMetadata,
+    owner: InvocationOwner,
+    content: crate::content::ContentStore,
+    _publication: crate::content::ContentPublication,
+}
+pub struct ToolInvocationSnapshot {
+    pub context: ToolExecutionContext,
+    pub call: ToolCall,
+    pub history_range: crate::execution::HistoryRange,
+    pub tools: std::sync::Arc<Vec<crate::execution::ToolSchema>>,
+    pub owner_epoch: u64,
+    owner: InvocationOwner,
+    _publication: crate::content::ContentPublication,
+}
+impl ToolInvocationRead {
+    pub fn load(self) -> Result<ToolInvocationSnapshot> {
+        use crate::execution::{RequestOrigin, RequestSnapshot};
+        let call = self.call.load(&self.content)?;
+        let (history_range, tools, owner_epoch) = match &self.owner {
+            InvocationOwner::Model { step } => {
+                let snapshot: RequestSnapshot =
+                    serde_json::from_value(self.content.load(&step.request)?)?;
+                if snapshot.view.run_id != self.context.run_id
+                    || snapshot.view.request_id != step.id
+                    || snapshot.view.binding.history_range.branch_id != self.branch_id
+                    || !matches!(&snapshot.view.origin, RequestOrigin::Conversation { history_range, .. } if history_range == &snapshot.view.binding.history_range)
+                {
+                    return Err(RuntimeError::Conflict(
+                        "invocation is not its admitted conversation snapshot".into(),
+                    ));
+                }
+                (
+                    snapshot.view.binding.history_range,
+                    std::sync::Arc::new(snapshot.view.binding.tools),
+                    step.epoch,
+                )
+            }
+            InvocationOwner::Policy {
+                operation,
+                metadata,
+            } => {
+                let graph = metadata.load_graph(&self.content, &self.context.run_id)?;
+                let ToolOrigin::PolicyAction { node_id, .. } = &self.context.origin else {
+                    unreachable!("captured policy owner")
+                };
+                let node = graph
+                    .nodes()
+                    .iter()
+                    .find(|node| &node.node.id == node_id)
+                    .ok_or_else(|| RuntimeError::NotFound(node_id.clone()))?;
+                if node.node.call != call
+                    || node.context.origin != self.context.origin
+                    || metadata.boundary().history_range.branch_id != self.branch_id
+                {
+                    return Err(RuntimeError::Conflict(
+                        "invocation differs from its admitted policy node".into(),
+                    ));
+                }
+                (
+                    metadata.boundary().history_range.clone(),
+                    node.context.tools.clone(),
+                    operation.epoch,
+                )
+            }
+        };
+        Ok(ToolInvocationSnapshot {
+            context: self.context,
+            call,
+            history_range,
+            tools,
+            owner_epoch,
+            owner: self.owner,
+            _publication: self._publication,
+        })
+    }
+}
+impl Catalog {
+    /// Capture the actual model call or graph node without decoding its arguments or binding body.
+    pub fn capture_tool_invocation(
+        &self,
+        context: &ToolExecutionContext,
+        call_id: &str,
+    ) -> Result<ToolInvocationRead> {
+        let run = self.run(&context.run_id)?;
+        if context.operation_id != context.origin.operation_id(call_id) {
+            return Err(RuntimeError::Conflict(
+                "invocation operation identity changed".into(),
+            ));
+        }
+        let (owner, call) = match &context.origin {
+            ToolOrigin::ModelStep { request_id } => {
+                let step = self.model_step_metadata(request_id)?;
+                if step.run_id != run.id {
+                    return Err(RuntimeError::Conflict(
+                        "invocation model owner changed".into(),
+                    ));
+                }
+                let raw: String = self.db.query_row(
+                    "SELECT body FROM tool_calls WHERE request_id=?1 AND call_id=?2",
+                    params![request_id, call_id],
+                    |row| row.get(0),
+                )?;
+                (
+                    InvocationOwner::Model { step },
+                    serde_json::from_str::<ToolCallMetadata>(&raw)?,
+                )
+            }
+            ToolOrigin::PolicyAction { action_id, node_id } => {
+                let operation = self.operation(action_id)?;
+                let metadata = super::policy::graph_metadata(&operation)?.ok_or_else(|| {
+                    RuntimeError::Invalid("invocation owner is not a policy graph".into())
+                })?;
+                if operation.run_id != run.id || node_id != call_id {
+                    return Err(RuntimeError::Conflict(
+                        "invocation graph owner changed".into(),
+                    ));
+                }
+                let raw: String = self.db.query_row("SELECT call FROM policy_graph_nodes WHERE action_id=?1 AND node_id=?2 AND call_id=?3",
+                    params![action_id, node_id, call_id], |row| row.get(0))?;
+                (
+                    InvocationOwner::Policy {
+                        operation,
+                        metadata,
+                    },
+                    serde_json::from_str::<ToolCallMetadata>(&raw)?,
+                )
+            }
+        };
+        Ok(ToolInvocationRead {
+            context: context.clone(),
+            branch_id: run.branch_id,
+            call,
+            owner,
+            content: self.content.clone(),
+            _publication: self.content.begin_publication(),
+        })
+    }
+    /// Recheck the exact immutable caller after body preparation; receipt reconciliation may read a retired owner.
+    pub fn validate_tool_invocation(
+        &self,
+        snapshot: &ToolInvocationSnapshot,
+        live: bool,
+    ) -> Result<()> {
+        let run = self.run(&snapshot.context.run_id)?;
+        if run.branch_id != snapshot.history_range.branch_id {
+            return Err(RuntimeError::Conflict("invocation branch changed".into()));
+        }
+        match &snapshot.owner {
+            InvocationOwner::Model { step } => {
+                let current = self.model_step_metadata(&step.id)?;
+                if current.run_id != run.id
+                    || current.request != step.request
+                    || (live && current.superseded_by_input.is_some())
+                {
+                    return Err(RuntimeError::Conflict(
+                        "invocation model binding changed".into(),
+                    ));
+                }
+            }
+            InvocationOwner::Policy {
+                operation,
+                metadata,
+            } => {
+                let current = self.operation(&operation.id)?;
+                if current.run_id != run.id
+                    || super::policy::graph_metadata(&current)?.as_ref() != Some(metadata)
+                    || (live
+                        && (current.cancel_requested || current.phase == OperationPhase::Terminal))
+                {
+                    return Err(RuntimeError::Conflict(
+                        "invocation graph binding changed".into(),
+                    ));
+                }
+            }
+        }
+        if live {
+            if run.epoch != self.epoch || run.cancel_requested || run.state.terminal() {
+                return Err(RuntimeError::Conflict(
+                    "invocation generation is no longer active".into(),
+                ));
+            }
+            self.inspect_admission(
+                &run.id,
+                self.epoch,
+                &snapshot.context.origin,
+                &snapshot.call.call_id,
+            )?;
+        }
+        Ok(())
     }
 }

@@ -536,6 +536,8 @@ it('source start, saved rebind and successor continuation preserve ordinary and 
     f.launch.selection.tools = [
       { ...f.launch.selection.tools[0]!, name: 'file_read' },
       { ...f.launch.selection.tools[0]!, name: 'ask_user' },
+      { ...f.launch.selection.tools[0]!, name: 'question_status' },
+      { ...f.launch.selection.tools[0]!, name: 'goal_report' },
       mcp.binding.tools[0]!,
       extension.binding.tool,
     ];

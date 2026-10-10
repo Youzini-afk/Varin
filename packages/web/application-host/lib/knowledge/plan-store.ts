@@ -37,10 +37,19 @@ function viewOf(value: PlanView): PlanView {
 function originOf(value: PlanOrigin): PlanOrigin {
   if (value?.kind === 'user') return { kind: 'user', key: text(value.key, 'user command key') };
   if (value?.kind !== 'tool') return fail('Plan mutation origin is required');
-  const origin: PlanOrigin = { kind: 'tool', operationId: text(value.operationId, 'Operation'),
-    runId: text(value.runId, 'Run'), requestId: text(value.requestId, 'request'), callId: text(value.callId, 'call'), epoch: value.epoch };
+  const admitted = value.toolOrigin;
+  const toolOrigin: typeof admitted = admitted?.kind === 'model_step'
+    ? { kind: 'model_step', request_id: text(admitted.request_id, 'request') }
+    : admitted?.kind === 'policy_action'
+      ? { kind: 'policy_action', action_id: text(admitted.action_id, 'policy action'), node_id: text(admitted.node_id, 'policy node') }
+      : fail('Plan tool origin is required');
+  const origin: Extract<PlanOrigin, { kind: 'tool' }> = { kind: 'tool', operationId: text(value.operationId, 'Operation'),
+    runId: text(value.runId, 'Run'), toolOrigin, callId: text(value.callId, 'call'), epoch: value.epoch };
+  const operationId = toolOrigin.kind === 'model_step'
+    ? `${toolOrigin.request_id}:tool:${origin.callId}` : `${toolOrigin.action_id}:node:${toolOrigin.node_id}`;
   if (!Number.isSafeInteger(origin.epoch) || origin.epoch < 1
-    || origin.operationId !== `${origin.requestId}:tool:${origin.callId}`) fail('Plan tool origin is not a real model call');
+    || origin.operationId !== operationId
+    || toolOrigin.kind === 'policy_action' && toolOrigin.node_id !== origin.callId) fail('Plan tool origin differs from its invocation');
   return origin;
 }
 function selectionOf(value: PlanSelection | undefined): PlanSelection {

@@ -34,7 +34,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 23;
+pub(crate) const FORMAT: i64 = 24;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -1464,6 +1464,10 @@ impl Catalog {
                 }
             }
             if op.phase != OperationPhase::Terminal {
+                // A dispatched effect is reconciled under its original intent generation.
+                // Only work that may actually be readmitted acquires this owner's epoch.
+                // Run/graph fencing still governs every new execution and receipt consumer.
+                let preserve_dispatch_epoch = matches!(op.effect, Effect::Dispatched | Effect::Partial | Effect::Unknown);
                 // A live user's one-action decision cannot survive its authorizing owner.
                 if op.effect == Effect::None && op.result.as_ref().is_some_and(|v| matches!(v, OperationResultMetadata::Control { value } if value.get("permission").is_some())) {
                     if let Some(wait_id) = &op.waiting_on {
@@ -1508,7 +1512,7 @@ impl Catalog {
                         });
                     }
                 }
-                op.epoch = self.epoch;
+                if !preserve_dispatch_epoch { op.epoch = self.epoch; }
                 op.revision += 1;
                 put(&tx, "operations", &op.id, &op)?;
                 event(

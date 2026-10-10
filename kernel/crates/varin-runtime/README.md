@@ -171,7 +171,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 23, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
+Catalog version 24, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -194,8 +194,8 @@ Ordinary tool calls and Operations retain frozen argument references. Admission 
 prepared identities; dispatch, settlement and cancellation use metadata. Recovery and public Operation
 views load arguments on workers. Permission preparation also stages the exact call and scope outside
 Catalog; approval and consumption compare those identities against the admitted action. Public views
-restore the original call/scope shape. Plan authorization reads its frozen model request outside Catalog,
-then rechecks the current owner and request reference. Ordinary tool results and original external
+restore the original call/scope shape. Plan authorization reads its frozen ModelStep or policy-node
+invocation outside Catalog, then rechecks the actual caller and binding. Ordinary tool results and original external
 receipt bodies use the same ContentStore. Workers persist bodies before Catalog commits their
 identities, outcome/effect facts and events. Internal tagged control state cannot be confused with
 arbitrary result JSON; public Operation/event views restore the original shape on read workers.
@@ -345,11 +345,28 @@ restore the exact definition and receipts; cancellation and admission queries re
 Private policy state and actions are immutable references, loaded outside Catalog when continuing.
 Memory mutations and fixed-source child dispatch/observation use their existing domain writers and
 receipt recovery. A policy can dispatch a child, continue independent work and later observe it through
-`wait_child`, using ordinary graph nodes rather than a second child-action API. Plan
-tools, process observation and questions retain their explicit origin restrictions until their own
-policy-origin consumers are connected. Independent delivery and explicit pause use the control actions
-below. Ordinary extension tools and MCP permissions now carry actual policy origins. Other remaining
-design domains are tracked in the implementation plan.
+`wait_child`, using ordinary graph nodes rather than a second child-action API. `todo`, `ask_user` and
+`wait_process` likewise accept the real policy origin. A shared invocation capture restores the
+original call, schema directory and history range outside Catalog; the commit rechecks their owner.
+The frozen policy boundary records its actual branch/head, rather than deriving a plan view from
+today's history. Ordinary extension tools and MCP permissions also carry actual policy origins.
+Independent delivery and explicit pause use the control actions below. Other remaining design
+domains are tracked in the implementation plan.
+
+Question and process observers reuse the original Job acceptance and Wait owners. A pending observation
+parks before an ordinary policy callback, retaining the committed private state and original event.
+A failed or indeterminate sibling remains visible to the policy; an unexecuted continuation proposal
+cannot advance its private state. Answer/process delivery waits for canonical acceptance to be consumed
+by its real model exchange or graph node. Cancelling an observer between registration and parking is
+authenticated against that original observer, and does not terminate the observed process.
+
+`question_status` is an ordinary read-only Result tool for an accepted question in the same Run.
+It distinguishes `awaiting_user`, `answered` and `cancelled`; only `answered` contains the authentic
+answer and its user-history identity. Its worker reads referenced content outside Catalog and rechecks
+the caller, question and Wait before returning. It neither changes JobAccepted into a terminal result
+nor treats an answer as permission. The ordinary installed
+[`domain-policy`](../../../examples/extensions/domain-policy/README.md) example consumes these tools,
+owned result chunks and explicit Deliver/Pause/Resume without model inference.
 
 ## Safe policy activation
 
@@ -856,8 +873,11 @@ bounded pages; reopening restarts only pure reads. Existing conversation fork re
 validation is unchanged and is not claimed to be a new bounded plan-page operation.
 
 `todo` exposes `read` and whole-plan `update` with exact `expectedRef` CAS. The private
-bridge derives the fixed request head and original Operation identity from Catalog; model
-arguments contain no owner/scope fields. Only admitted ordinary main Threads receive the schema,
+bridge derives the fixed invocation head and original Operation identity from Catalog; tool
+arguments contain no owner/scope fields. Model and policy-node mutations retain their actual tagged
+`ToolOrigin`, call, Run and original effect epoch in the existing KnowledgeStore receipt intent.
+Recovery preserves that effect epoch while new execution remains fenced by the current Run/graph owner.
+Only admitted ordinary main Threads receive the schema,
 and dispatch rechecks their persisted role and child relationship. Source-inheritance filters
 recognize this built-in without granting source capabilities. An authoritative CAS-conflict
 receipt settles `Failed/None`; an unknown dispatch is not relabeled as no effect. Recovery queries

@@ -1328,6 +1328,22 @@ pub enum PolicyEvent {
     },
 }
 
+impl PolicyEvent {
+    /// A domain Wait must not hide a strategy's failure response to a real execution receipt.
+    pub fn has_execution_failure(&self) -> bool {
+        match self {
+            Self::ToolsCompleted { results } => results.iter().any(|result| match &result.completion {
+                ToolCompletion::NotDispatched { .. } => true,
+                ToolCompletion::Result { outcome, .. } => *outcome != Outcome::Succeeded,
+                ToolCompletion::JobAccepted { .. } => false,
+            }),
+            Self::ToolGraphCompleted { receipts, .. } => receipts.iter().any(|receipt| receipt.outcome() != Outcome::Succeeded),
+            Self::ModelJobCompleted { receipt, .. } => receipt.outcome != Outcome::Succeeded,
+            _ => false,
+        }
+    }
+}
+
 pub struct PolicyView<'a> {
     pub run_id: &'a str,
     pub state: RunState,

@@ -63,6 +63,7 @@ impl PolicyNodeReceipt {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PolicyBoundary {
+    pub history_range: HistoryRange,
     pub goal: Option<crate::catalog::goals::FrozenGoal>,
     pub resource_checkpoint_id: Option<String>,
     pub id: String,

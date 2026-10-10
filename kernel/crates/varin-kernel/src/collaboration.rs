@@ -408,23 +408,23 @@ impl AgentPolicy for CollaborationPolicy {
         state: &Value,
         cancel: &CancellationToken,
     ) -> Result<PolicyDecision, ExecutionError> {
-        // A domain wait is an actual outstanding action. Do not ask the strategy for its
-        // next decision and then checkpoint that decision's state without executing it.
-        if view.pending_tool_calls == 0 {
-            if let Some(wait_id) = self
-                .catalog
-                .lock()
-                .map_err(error)?
-                .pending_child_wait(view.run_id)
-                .map_err(error)?
-            {
-                return Ok(PolicyDecision {
-                    action: PolicyAction::Wait { wait_id },
-                    state: state.clone(),
-                });
+        let wait = if view.pending_tool_calls == 0 {
+            self.catalog.lock().map_err(error)?.pending_child_wait(view.run_id).map_err(error)?
+        } else { None };
+        if let Some(wait_id) = &wait {
+            if !event.has_execution_failure() {
+                return Ok(PolicyDecision { action: PolicyAction::Wait { wait_id: wait_id.clone() }, state: state.clone() });
             }
         }
         let decision = self.inner.decide(view, event, state, cancel)?;
+        if matches!(decision.action, PolicyAction::Fail { .. } | PolicyAction::Wait { .. }) {
+            return Ok(decision);
+        }
+        if let Some(wait_id) = wait {
+            // This proposal did not execute. Keep the committed private baseline and let the
+            // core checkpoint retain the original event for the resumed, newly informed decision.
+            return Ok(PolicyDecision { action: PolicyAction::Wait { wait_id }, state: state.clone() });
+        }
         Ok(decision)
     }
 }

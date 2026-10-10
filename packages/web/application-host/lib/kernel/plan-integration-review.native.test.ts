@@ -291,8 +291,10 @@ it('actual todo uses the admitted Operation and returns the same immutable revis
   expect(mutation.origin).toMatchObject({ kind: 'tool', runId: run.run_id, callId: 'plan-update', epoch: (await f.runtime.run(run.run_id)).epoch });
   const operation = await f.runtime.operation(mutation.origin.operationId);
   expect(operation).toMatchObject({ run_id: run.run_id, outcome: 'succeeded', effect: 'confirmed' });
+  const origin = mutation.origin.toolOrigin;
   const admission = { runId: run.run_id, ownerGeneration: mutation.origin.epoch,
-    requestId: mutation.origin.requestId, callId: mutation.origin.callId };
+    ...(origin.kind === 'model_step' ? { requestId: origin.request_id } : { actionId: origin.action_id, nodeId: origin.node_id }),
+    callId: mutation.origin.callId };
   expect((await f.runtime.admission(admission)).state).toBe('settled');
   await expect(f.runtime.admission({ ...admission, ownerGeneration: admission.ownerGeneration + 1 })).rejects.toThrow();
   await expect(f.runtime.admission({ ...admission, callId: 'forged-call' })).rejects.toThrow();

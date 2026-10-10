@@ -8,6 +8,17 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-10 增量：一般策略的计划、提问与进程观察
+
+- `todo`、`ask_user` 和 `wait_process` 现在接受真实 `PolicyAction`/node，与模型调用共用原 Operation、权限、资源准入、领域 owner 和 canonical 调用回执。只有 ModelStep 写 provider 工具配对；JobAccepted 始终只是受理，图节点消费与领域终态分别保留。共享短 Job 校验替代子任务、问题和进程各自的模型专用分支，没有第二份执行、计划、问题或进程账本。
+- 原策略边界保存真实 `history_range`；计划桥接从冻结调用、schema 和原 head 形成视图，正文在 Catalog 外加载后核对原身份。KnowledgeStore 的工具来源直接使用既有 tagged `ToolOrigin`，保留原 Operation/Run/call/effect epoch，旧 flat requestId 不作兼容兜底。实测修复了已写计划、ToolSettled 前重开把 epoch 改成新 owner 而无法读取原回执的问题：已派发效果保留原 epoch，新执行仍受当前 Run/graph 栅栏约束；原图恢复只查询已有回执，不重做 mutation，也不覆盖后来的用户计划编辑。
+- 问题/进程 Wait 在普通策略回调前停靠，保存已提交私有状态和原 continuation；真实失败/indeterminate 同图节点仍可交策略决定 Fail。被 Wait 替换、尚未执行的提案不推进私有状态。回答/进程交付先核对原 model exchange 或 graph node 已消费 JobAccepted；注册与停靠之间取消观察只解除原观察，不停止独立进程。真实回答和取消继续走原 Thread/branch/Operation/Wait，Goal 手动暂停不被回答清除。
+- 新增普通纯读 `question_status`，只读取同 Run 已受理问题，明确区分 awaiting_user、answered、cancelled；只有 answered 返回原用户答案和 history identity。读取引用正文和重核 caller/question/Wait 分离，策略通过既有 ToolGraph→ReadResult 消费，没有任意历史/对象读取接口，也不把答案作为权限。普通已安装示例 [domain-policy](../../examples/extensions/domain-policy/README.md) 完成计划 CAS→提问→答案读取→可选固定进程→观察→Deliver/Pause/Resume，不调用模型或把答案拼成命令。
+- 实际 Host source-start/rebind 组合发现旧负向内置工具列表把 `goal_report` 和新增 `question_status` 当作 source 工具，导致 durable tools 冲突；已改用 source 准入和投影共用的明确 source 能力集合。公开问题卡和回答路由仍消费原 Operation，无需 ModelStep 身份。Catalog 内部格式为 **24**，旧格式在 owner/recovery 写入前拒绝。
+- 独立审查还复现并阻断了模型混合链：有状态策略 RequestModel→真实 provider 工具输出 ask_user→ExecuteTools→Wait→用户回答后，正常续跑与重开均错误退为 Started。最小修复只把最新、已消费、同 Run 的实际 Wait checkpoint 识别为恢复边界，保留原 ToolsCompleted；真实 input 交付后、下一决策前崩溃则交 InputDelivered，保留已提交私有基线。两条原独立失败探针均修后 Completed，原模型/Job 配对不变；新输入窗口也先红后绿，没有用任意旧 checkpoint 兜底。
+- 修后完整 runtime **311 passed / 0 failed / 2 既有 ignored**，kernel lib **55 passed / 0 failed / 2 ignored**。领域 focused **11/11** 覆盖上述混合恢复与原图/Goal/回执；process Wait **10/10**，计数与完整套件重叠。真实 guardian 纵切单独通过 **1/1**：原生 Engine/Catalog/Storage 中计划→提问→重开→真实答复→进程 spawn/wait/inspect→交付/暂停/恢复，零 ModelStep；其中计划 owner reply 明确为 fixture。Portable Host **4 文件 52/52** 包括实际 PrivatePlanBridge→KnowledgeStore worker/数据库的原回执重开，以及真实安装 artifact/broker 的策略消费者；后者提供已提交领域事件夹具。现有 UI 两个 owning suites **40/40**，涵盖 policy-node 问题的回答重试与过期禁用及计划编辑。上述各层不合称完整 Host IPC 验收。
+- 生成协议一致性、Host 生产/完整测试类型、UI 类型、示例窄类型、变更 lint、实际 Host bundle 与文档链接检查通过。最终 Linux x64 开发内核按 build identity `0.9.25`、target `x86_64-unknown-linux-gnu`、arch `x64` 编译并 stage，SHA-256 `befd0b599059ffdc9d65eda18cdb307583602b59a985021ad68da5f94e420377`；该二进制的真实 guardian 纵切再次 **1/1**。独立审查接受本切片，没有剩余已证实的行为阻断。实际 Host IPC、真实模型和跨平台证据仍按原范围待补；用户验收后的默认切换与全面迁移分工不变，其余设计能力继续推进。
+
 ## 2026-10-10 增量：已持久但未派发模型候选的原生恢复
 
 - 闭合前一 Goal 阶段独立探针确认的原生恢复缺口：真实 Engine 提交 `RequestPrepared` 后、`ModelDispatched` 前崩溃，现经原 Catalog→RunSupervisor 路径恢复同一 Run 和真实输入。原候选明确终结为 `NotDispatched`，完整冻结请求继续保留；没有合成 `ModelFinished`、provider 正文、零用量或输入 supersession，也不直接重发旧序列化 transport。
