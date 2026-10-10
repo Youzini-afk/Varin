@@ -247,7 +247,7 @@ impl Persistence for LoseDeliveryReply {
         run: &str,
         epoch: u64,
         head: Option<&str>,
-    ) -> Result<Vec<ConversationItem>, ExecutionError> {
+    ) -> Result<InputBatch, ExecutionError> {
         self.0.consume_inputs(run, epoch, head)
     }
     fn commit(
@@ -611,9 +611,9 @@ impl Persistence for InputRace {
         r: &str,
         e: u64,
         h: Option<&str>,
-    ) -> Result<Vec<ConversationItem>, ExecutionError> {
+    ) -> Result<InputBatch, ExecutionError> {
         let items = self.db.consume_inputs(r, e, h)?;
-        if !items.is_empty() {
+        if !items.items.is_empty() {
             return Err(ExecutionError::new(
                 "lost_input_delivery",
                 "input delivery committed before worker loss",

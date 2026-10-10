@@ -1,3 +1,4 @@
+import type { MessageSendParams, MessageListParams } from '@varin/protocol';
 import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
 import type { ChildProfilePreparer } from './child-profiles.js';
 import type { ThreadToolInspection } from '@varin/application-client';
@@ -162,6 +163,18 @@ export class ThreadAdapter {
     const result = await this.runtime.cancelOperation(operationId);
     if (result.executor === 'ask_user') await this.continueLaunch(result.run_id);
     return result;
+  }
+  async sendMessage(identity: ThreadIdentity, request: Omit<MessageSendParams, 'senderThreadId' | 'senderBranchId'>, signal?: AbortSignal) {
+    await this.requireIdentity(identity, signal);
+    return this.runtime.sendMessage({ ...request, senderThreadId: identity.threadId, senderBranchId: identity.branchId }, signal);
+  }
+  async listMessages(identity: ThreadIdentity, request: Omit<MessageListParams, 'threadId' | 'branchId'>, signal?: AbortSignal) {
+    await this.requireIdentity(identity, signal);
+    return this.runtime.listMessages({ ...request, threadId: identity.threadId, branchId: identity.branchId }, signal);
+  }
+  async getMessage(identity: ThreadIdentity, messageId: string, signal?: AbortSignal) {
+    await this.requireIdentity(identity, signal);
+    return this.runtime.getMessage({ threadId: identity.threadId, branchId: identity.branchId, messageId }, signal);
   }
   async familyList(identity: ThreadIdentity, includeSelf?: boolean, signal?: AbortSignal) {
     await this.requireIdentity(identity, signal);

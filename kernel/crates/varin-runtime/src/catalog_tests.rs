@@ -1139,7 +1139,7 @@ fn prepared_inputs_preserve_original_intents_and_only_retry_changed_queue_materi
         .unwrap();
     let delivered = db.admit_input_delivery(corrected).unwrap().unwrap();
     assert!(
-        matches!(&delivered[0].content,crate::execution::Content::Text {text} if text=="corrected")
+        matches!(&delivered.items[0].content,crate::execution::Content::Text {text} if text=="corrected")
     );
     assert_eq!(
         db.queued_input_metadata(&later.input_id).unwrap().state,

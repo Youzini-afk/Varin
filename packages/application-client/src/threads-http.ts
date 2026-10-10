@@ -26,6 +26,11 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     return result;
   };
   return {
+    messages: {
+      send: (identity, request, signal) => post('messages/send', { ...identity, request }, signal),
+      list: (identity, request, signal) => post('messages/list', { ...identity, request }, signal),
+      get: (identity, messageId, signal) => post('messages/get', { ...identity, messageId }, signal),
+    },
     family: {
       list: (identity, includeSelf, signal) => post('family/list', { ...identity, includeSelf }, signal),
       runs: (identity, request, signal) => post('family/runs', { ...identity, request }, signal),

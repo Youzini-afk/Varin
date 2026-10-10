@@ -222,6 +222,29 @@ pub(super) fn execute(
     }
     let catalog = runtime.catalog();
     match method {
+        "runtime.messages.send" => {
+            let p: MessageSendParams = serde_json::from_value(params)?;
+            let input = varin_runtime::catalog::messages::MessageInput { target_thread_id:p.target_thread_id,target_branch_id:p.target_branch_id,reply_to:p.reply_to,kind:p.kind,text:p.text };
+            input.validate().map_err(domain)?;
+            let preparation = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.prepare_user_message(p.key,p.sender_thread_id,p.sender_branch_id,input).map_err(domain)?;
+            let prepared = preparation.load().map_err(domain)?;
+            let mut owner = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+            Ok(serde_json::to_value(owner.admit_message(prepared).map_err(domain)?.receipt)?)
+        }
+        "runtime.messages.list" => {
+            let p: MessageListParams = serde_json::from_value(params)?;
+            let limit = p.limit.map(usize::try_from).transpose().map_err(|_| KernelError::Protocol("message page size must be positive".into()))?;
+            let read = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.capture_message_list(p.thread_id,p.branch_id,p.direction,p.cursor,limit).map_err(domain)?;
+            Ok(serde_json::to_value(read.load(&|| cancelled.load(Ordering::Acquire)).map_err(domain)?)?)
+        }
+        "runtime.messages.get" => {
+            let p: MessageGetParams = serde_json::from_value(params)?;
+            let read = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.capture_message(&p.thread_id,&p.branch_id,&p.message_id).map_err(domain)?;
+            let message = read.load().map_err(domain)?;
+            if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+            Ok(serde_json::to_value(message)?)
+        }
         "runtime.thread.create" => {
             let p: ThreadCreateParams = serde_json::from_value(params)?;
             if p.thread_id.trim().is_empty() || p.branch_id.trim().is_empty() {
@@ -464,3 +487,7 @@ mod resource_receipt_tests {
         drop(sql);drop(catalog);std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "message_public_review.rs"]
+mod message_public_review;

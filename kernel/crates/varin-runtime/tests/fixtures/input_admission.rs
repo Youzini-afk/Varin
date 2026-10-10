@@ -227,7 +227,7 @@ impl InputAdmission for Catalog {
         loop {
             let prepared = self.prepare_input_delivery(run, epoch, head)?.load()?;
             if let Some(items) = self.admit_input_delivery(prepared)? {
-                return Ok(items);
+                return Ok(items.items);
             }
         }
     }

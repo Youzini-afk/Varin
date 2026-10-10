@@ -1,3 +1,4 @@
+import type { MessageSendParams, MessageListParams, MessageGetParams, MessageReceipt, MessagePage, MessageView } from './protocol.generated.js';
 import type { FamilyListParams, FamilyRunsParams, FamilyReadParams, FamilyItemParams, FamilyList, FamilyRuns, FamilyRead, FamilyItem } from './protocol.generated.js';
 import type { ChildCapabilityDescriptor, ChildDispatchCatalog, TreeCancelTarget, TreeCancellationReceipt, McpBinding, LiveMcpBinding } from './protocol.generated.js';
 import { savedSourceLaunch } from './source-launch.js';
@@ -487,6 +488,15 @@ export class AgentRuntimeClient {
       { operationId },
       signal,
     );
+  }
+  sendMessage(input: MessageSendParams, signal?: AbortSignal): Promise<MessageReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.messages.send', input, signal);
+  }
+  listMessages(input: MessageListParams, signal?: AbortSignal): Promise<MessagePage> {
+    return this.kernel.agentRuntimeRequest('runtime.messages.list', input, signal);
+  }
+  getMessage(input: MessageGetParams, signal?: AbortSignal): Promise<MessageView> {
+    return this.kernel.agentRuntimeRequest('runtime.messages.get', input, signal);
   }
   familyList(input: FamilyListParams, signal?: AbortSignal): Promise<FamilyList> {
     return this.kernel.agentRuntimeRequest('runtime.family.list', input, signal);

@@ -86,6 +86,19 @@ attempt. A startup timeout means no agent input was dispatched by that candidate
 prompt was sent has different, ambiguous execution semantics. `test/runtime-auth-timeout.test.ts`
 exercises a stalled response body, concurrent mint sharing, retry and late-publication rejection.
 
+## Task-family message contract
+
+`ThreadsAPI.messages` exposes immutable `inform` acceptance and original incoming/outgoing message
+views. The caller supplies its `ThreadIdentity` separately from the peer request. The trusted Host
+sets User identity; clients cannot choose Agent actor/sender fields. `replyTo` addresses the exact
+original peer without guessing its current branch. A send receipt confirms acceptance, while message
+views separately report the actual history delivery Run and cursor; neither promises execution.
+
+Read calls accept AbortSignal and all calls keep the existing runtime endpoint-generation checks.
+A lost send response must be retried with the same original key and intent. Aborting the transport or
+closing a UI does not retract a message already accepted by the Catalog. This version does not expose
+active requests, reply Waits or terminal-child continuation.
+
 ## History
 
 This package was extracted from the former UI-owned API and transport modules to clarify the boundary

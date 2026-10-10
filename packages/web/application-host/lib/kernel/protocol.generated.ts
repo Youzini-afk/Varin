@@ -214,7 +214,68 @@ export type KernelMethod =
   | "runtime.family.list"
   | "runtime.family.runs"
   | "runtime.family.read"
-  | "runtime.family.item";
+  | "runtime.family.item"
+  | "runtime.messages.send"
+  | "runtime.messages.list"
+  | "runtime.messages.get";
+
+export type MessageKind = 'inform';
+
+export interface MessageSendParams {
+  key: string;
+  senderThreadId: string;
+  senderBranchId: string;
+  targetThreadId?: string;
+  targetBranchId?: string;
+  replyTo?: string;
+  kind: MessageKind;
+  text: string;
+}
+
+export interface MessageListParams {
+  threadId: string;
+  branchId: string;
+  direction: MessageDirection;
+  cursor?: string;
+  limit?: number;
+}
+
+export type MessageDirection = 'incoming' | 'outgoing';
+
+export interface MessageGetParams {
+  threadId: string;
+  branchId: string;
+  messageId: string;
+}
+
+export type MessageActor = {kind: 'user'} | {kind: 'agent'; runId: string; operationId: string; origin: ToolOrigin};
+
+export interface MessageReceipt {
+  messageId: string;
+  senderThreadId: string;
+  senderBranchId: string;
+  targetThreadId: string;
+  targetBranchId: string;
+  actor: MessageActor;
+  kind: MessageKind;
+  replyTo: string | null;
+  acceptedCursor: number;
+}
+
+export interface MessageSummary extends MessageReceipt {
+  state: 'queued' | 'delivered';
+  deliveredRunId: string | null;
+  deliveredCursor: number | null;
+}
+
+export interface MessageView extends MessageSummary {
+  text: string;
+}
+
+export interface MessagePage {
+  messages: MessageSummary[];
+  nextCursor: string | null;
+}
 
 export type FollowupTrigger = { kind: 'process_stopped'; operation_id: string } | { kind: 'run_completed'; cursor: number } | { kind: 'goal_requested'; cursor: number };
 
@@ -3224,6 +3285,9 @@ export type KernelMethodParams = {
   "runtime.family.runs": FamilyRunsParams;
   "runtime.family.read": FamilyReadParams;
   "runtime.family.item": FamilyItemParams;
+  "runtime.messages.send": MessageSendParams;
+  "runtime.messages.list": MessageListParams;
+  "runtime.messages.get": MessageGetParams;
 };
 
 export type KernelRequest =
@@ -5033,6 +5097,33 @@ export type KernelRequest =
       id: string;
       method: "runtime.family.item";
       params: FamilyItemParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.messages.send";
+      params: MessageSendParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.messages.list";
+      params: MessageListParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.messages.get";
+      params: MessageGetParams;
       epoch?: string;
       grantId?: string;
     }

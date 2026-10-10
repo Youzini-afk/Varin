@@ -577,3 +577,6 @@ fn plan_scope_rejects_role_only_bot_foreign_and_missing_admissions() {
 
 #[path = "child_family_review.rs"]
 mod family_review;
+
+#[path = "child_messages_review.rs"]
+mod message_review;

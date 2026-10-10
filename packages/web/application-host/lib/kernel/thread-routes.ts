@@ -59,6 +59,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'source/prepare': ['runtime', 'threadId', 'branchId', 'key', 'path', 'mode'],
     'context/compact': ['runtime', 'threadId', 'branchId', 'key', 'throughId', 'expectedRevision', 'model'],
     'context/publish': ['runtime', 'threadId', 'branchId', 'runId'], 'context/cancel': ['runtime', 'threadId', 'branchId', 'runId'], 'context/resume': ['runtime', 'threadId', 'branchId', 'runId'],
+    'messages/send': ['runtime', 'threadId', 'branchId', 'request'],
+    'messages/list': ['runtime', 'threadId', 'branchId', 'request'],
+    'messages/get': ['runtime', 'threadId', 'branchId', 'messageId'],
     'family/list': ['runtime', 'threadId', 'branchId', 'includeSelf'],
     'family/runs': ['runtime', 'threadId', 'branchId', 'request'],
     'family/read': ['runtime', 'threadId', 'branchId', 'request'],
@@ -117,6 +120,24 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     return adapter.decidePermission({ ...identity(body), operationId: text(body.operationId), permissionId: text(body.permissionId), decision: body.decision });
   });
   post('question/answer', body => adapter.answerQuestion({ ...identity(body), operationId: text(body.operationId), answer: text(body.answer) }));
+  post('messages/send', (body, signal) => {
+    const request = object(body.request);
+    if (Object.keys(request).some(key => !['key', 'targetThreadId', 'targetBranchId', 'replyTo', 'kind', 'text'].includes(key))) throw new Error('Invalid message field');
+    if (request.kind !== 'inform' || typeof request.text !== 'string') throw new Error('Invalid message content');
+    return adapter.sendMessage(identity(body), { key: text(request.key), kind: request.kind, text: request.text,
+      ...(request.targetThreadId === undefined ? {} : { targetThreadId: text(request.targetThreadId) }),
+      ...(request.targetBranchId === undefined ? {} : { targetBranchId: text(request.targetBranchId) }),
+      ...(request.replyTo === undefined ? {} : { replyTo: text(request.replyTo) }) }, signal);
+  });
+  post('messages/list', (body, signal) => {
+    const request = object(body.request);
+    if (Object.keys(request).some(key => !['direction', 'cursor', 'limit'].includes(key))) throw new Error('Invalid message listing field');
+    if (request.direction !== 'incoming' && request.direction !== 'outgoing') throw new Error('Invalid message direction');
+    return adapter.listMessages(identity(body), { direction: request.direction,
+      ...(request.cursor === undefined ? {} : { cursor: text(request.cursor) }),
+      ...(request.limit === undefined ? {} : { limit: revision(request.limit) }) }, signal);
+  });
+  post('messages/get', (body, signal) => adapter.getMessage(identity(body), text(body.messageId), signal));
   post('family/list', (body, signal) => {
     if (body.includeSelf !== undefined && typeof body.includeSelf !== 'boolean') throw new Error('includeSelf must be boolean');
     return adapter.familyList(identity(body), body.includeSelf, signal);

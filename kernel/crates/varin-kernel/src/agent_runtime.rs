@@ -592,6 +592,7 @@ pub(crate) fn spawn(
                                 | "runtime.input.enqueueReceipt"
                                 | "runtime.input.enqueue"
                                 | "runtime.input.edit"
+                                | "runtime.messages.send"
                                 | "runtime.child.prepare"
                                 | "runtime.child.source.ready"
                                 | "runtime.tools.ready"
@@ -849,6 +850,9 @@ pub(crate) fn spawn(
                                 | "runtime.input.cancel"
                                 | "runtime.input.inspect"
                                 | "runtime.input.list"
+                                | "runtime.messages.send"
+                                | "runtime.messages.list"
+                                | "runtime.messages.get"
                                 | "runtime.child.prepare"
                         ) {
                             let order = input_order;

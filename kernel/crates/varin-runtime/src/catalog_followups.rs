@@ -320,7 +320,7 @@ fn eligibility(db: &Connection, definition: &Definition) -> Result<Option<HoldRe
         |r| r.get(0),
     )?;
     let queued: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM input_queue WHERE branch_id=?1 AND state='queued')",
+        "SELECT EXISTS(SELECT 1 FROM input_queue WHERE branch_id=?1 AND state='queued' AND activation='activating')",
         [&definition.branch_id],
         |r| r.get(0),
     )?;

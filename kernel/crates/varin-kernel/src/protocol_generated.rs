@@ -1656,6 +1656,37 @@ pub(crate) struct FamilyItemParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct MessageSendParams {
+    pub(crate) key: String,
+    pub(crate) sender_thread_id: String,
+    pub(crate) sender_branch_id: String,
+    pub(crate) target_thread_id: Option<String>,
+    pub(crate) target_branch_id: Option<String>,
+    pub(crate) reply_to: Option<String>,
+    pub(crate) kind: varin_runtime::MessageKind,
+    pub(crate) text: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct MessageListParams {
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) direction: varin_runtime::catalog::messages::MessageDirection,
+    pub(crate) cursor: Option<String>,
+    pub(crate) limit: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct MessageGetParams {
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) message_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct InitialContext {
     pub(crate) resources: Option<varin_runtime::catalog::resources::ContextResources>,
     pub(crate) personalization: Option<ContextPersonalization>,
@@ -2870,6 +2901,15 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.family.item" => serde_json::from_value::<FamilyItemParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.messages.send" => serde_json::from_value::<MessageSendParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.messages.list" => serde_json::from_value::<MessageListParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.messages.get" => serde_json::from_value::<MessageGetParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         _ => Ok(()),

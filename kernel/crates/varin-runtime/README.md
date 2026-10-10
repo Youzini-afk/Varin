@@ -163,9 +163,39 @@ with exact byte offsets and explicit truncation. A byte budget too small for the
 fails explicitly instead of exceeding the requested budget or returning a non-progressing cursor. ProviderOriginal and typed opaque continuation stay in
 the original store and are excluded from these shared reads and search; tool/user JSON remains data.
 
-Messages, reply waits, terminal-child continuation and sharing undelivered policy/auxiliary outputs
-remain separate implementation work. These readers neither synthesize those records nor revive a
+Active requests, reply waits, terminal-child continuation and sharing undelivered policy/auxiliary outputs
+remain separate implementation work. Passive messages are described below. These readers neither synthesize those records nor revive a
 completed child launch. See [the family read evidence](../../../docs/reviews/runtime-family-reads-2026-10-11.md).
+
+## Passive task-family messages
+
+Ordinary `send` version 1 accepts `kind: inform`, an explicit target Thread/branch or a received
+`replyTo`, and text. ModelStep and PolicyAction/node use the same frozen declaration, original call
+and ordinary effectful Operation. The original message ID and confirmed tool completion are committed
+with the message, so recovery does not resend. A reply reverses the original peer/branch; a supplied
+target must match. Membership comes from the original task lineage, never a shared directory.
+
+The existing input queue holds typed origin and activation plus one delivery state. A pending inform
+has no receiving Run. Its original text and command intent live in ContentStore, staged outside the
+Catalog mutex and protected through commit and GC. No inbox mirror or second scheduler is introduced.
+Messages remain immutable: ordinary user-input list/inspect/edit/cancel project only UserIngress.
+User messages retain User provenance even when sent from a child UI; tool messages retain AgentMessage
+provenance and the real sending Run/Operation. The canonical envelope preserves message/peer/reply
+identity in both live and recovered history.
+
+Passive delivery at a legal existing boundary adds history without producing an activating InputDelivered
+policy event, discarding a decision, superseding a failed ModelStep, changing Goal authorization or
+blocking a normal final completion. Waiting and idle work is not woken. Cancellation rejects stale
+prepared delivery but keeps accepted information for a later independently admitted Run on that branch.
+An existing authorized followup is not blocked merely by an inform. Delivered history records its
+actual receiving Run; this does not claim that a model handled the message.
+
+`runtime.messages.send` is the trusted User ingress; list/get provide original incoming/outgoing
+metadata and one original body. List cursors fix the identity, direction and upper acceptance cursor.
+Body reads and list traversal run on workers with owner-epoch checks. Public reads cannot manufacture
+Agent sender identity or execution authority. Active `request`, `send(wait)` and completed-child new-Run
+admission are subsequent work and are rejected before effects by this version's strict schema.
+See [the passive-message evidence](../../../docs/reviews/runtime-passive-messages-2026-10-11.md).
 
 ## Immutable conversation and model bodies
 
@@ -199,7 +229,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 27, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
+Catalog version 28, input domain 3 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,

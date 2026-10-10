@@ -1,6 +1,6 @@
 //! Durable ingress held outside the active history until a legal model boundary.
 use super::*;
-use crate::execution::ConversationItem;
+use crate::execution::{ConversationItem, InputBatch};
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 pub struct EnqueueInput {
@@ -23,31 +23,50 @@ pub struct QueuedInput {
     pub content: Value,
     pub cursor: u64,
 }
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InputActivation { Activating, Passive }
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum InputOrigin {
+    UserIngress,
+    Message { identity: super::messages::MessageIdentity, command_key: String },
+}
+impl InputOrigin {
+    pub fn is_user_ingress(&self) -> bool { matches!(self, Self::UserIngress) }
+    pub(super) fn history_source(&self) -> HistorySource {
+        match self { Self::Message { identity, .. } if matches!(identity.actor, super::messages::MessageActor::Agent { .. }) => HistorySource::Agent, _ => HistorySource::User }
+    }
+}
 /// Queue ownership is independent of its immutable user-content body.
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 pub struct QueuedInputMetadata {
     pub id: String,
     pub thread_id: String,
     pub branch_id: String,
-    pub run_id: String,
+    pub run_id: Option<String>,
     pub mode: InputMode,
     pub state: InputState,
     pub revision: u64,
     pub cursor: u64,
+    pub origin: InputOrigin,
+    pub activation: InputActivation,
+    pub delivered_cursor: Option<u64>,
 }
 impl QueuedInputMetadata {
-    fn with_content(self, content: Value) -> QueuedInput {
-        QueuedInput {
+    fn with_content(self, content: Value) -> Result<QueuedInput> {
+        if !self.origin.is_user_ingress() { return Err(RuntimeError::Invalid("message records use the read-only message API".into())); }
+        Ok(QueuedInput {
             id: self.id,
             thread_id: self.thread_id,
             branch_id: self.branch_id,
-            run_id: self.run_id,
+            run_id: self.run_id.ok_or_else(|| RuntimeError::Invalid("user input Run is missing".into()))?,
             mode: self.mode,
             state: self.state,
             revision: self.revision,
             cursor: self.cursor,
             content,
-        }
+        })
     }
 }
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
@@ -102,9 +121,9 @@ pub(super) fn initialize(tx: &Transaction<'_>) -> Result<()> {
                     "input queue exists without its schema identity".into(),
                 ));
             }
-            tx.execute_batch("CREATE TABLE input_queue(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),run_id TEXT NOT NULL REFERENCES runs(id),mode TEXT NOT NULL,state TEXT NOT NULL,cursor INTEGER NOT NULL,body TEXT NOT NULL); CREATE INDEX input_queue_pending ON input_queue(branch_id,run_id,state,mode,cursor); INSERT INTO runtime_domains(name,version) VALUES('input_queue',2);")?;
+            tx.execute_batch("CREATE TABLE input_queue(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),run_id TEXT REFERENCES runs(id),mode TEXT NOT NULL,state TEXT NOT NULL,cursor INTEGER NOT NULL,origin TEXT NOT NULL,activation TEXT NOT NULL,sender_thread_id TEXT,sender_branch_id TEXT,body TEXT NOT NULL); CREATE INDEX input_queue_pending ON input_queue(branch_id,state,activation,cursor); CREATE INDEX input_queue_outgoing ON input_queue(sender_thread_id,sender_branch_id,cursor); INSERT INTO runtime_domains(name,version) VALUES('input_queue',3);")?;
         }
-        Some(2) => check_format(tx)?,
+        Some(3) => check_format(tx)?,
         Some(version) => {
             return Err(RuntimeError::Invalid(format!(
                 "unsupported input queue domain version {version}; data was preserved"
@@ -121,7 +140,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             |row| row.get(0),
         )
         .optional()?;
-    if version != Some(2) {
+    if version != Some(3) {
         return Err(RuntimeError::Invalid(
             "unsupported input queue format; data was preserved".into(),
         ));
@@ -143,10 +162,14 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
     let expected = vec![
         ("id", "TEXT", 0, 1),
         ("branch_id", "TEXT", 1, 0),
-        ("run_id", "TEXT", 1, 0),
+        ("run_id", "TEXT", 0, 0),
         ("mode", "TEXT", 1, 0),
         ("state", "TEXT", 1, 0),
         ("cursor", "INTEGER", 1, 0),
+        ("origin", "TEXT", 1, 0),
+        ("activation", "TEXT", 1, 0),
+        ("sender_thread_id", "TEXT", 0, 0),
+        ("sender_branch_id", "TEXT", 0, 0),
         ("body", "TEXT", 1, 0),
     ]
     .into_iter()
@@ -161,13 +184,13 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
     db.prepare("SELECT id,intent,receipt FROM commands")?;
     Ok(())
 }
-fn write_input(tx: &Transaction<'_>, input: &QueuedInputMetadata) -> Result<()> {
+pub(super) fn write_input(tx: &Transaction<'_>, input: &QueuedInputMetadata) -> Result<()> {
     tx.execute(
-        "UPDATE input_queue SET state=?2,body=?3 WHERE id=?1",
+        "UPDATE input_queue SET state=?2,body=?3,run_id=?4 WHERE id=?1",
         params![
             input.id,
             encode(&input.state)?.trim_matches('"'),
-            encode(input)?
+            encode(input)?, input.run_id
         ],
     )?;
     Ok(())
@@ -370,13 +393,16 @@ impl Catalog {
             id: input_id.clone(),
             thread_id: command.thread_id.clone(),
             branch_id: command.branch_id.clone(),
-            run_id: run_id.clone(),
+            run_id: Some(run_id.clone()),
+            origin: InputOrigin::UserIngress,
+            activation: InputActivation::Activating,
+            delivered_cursor: None,
             mode: command.mode,
             state: InputState::Queued,
             revision: 1,
             cursor,
         };
-        tx.execute("INSERT INTO input_queue(id,branch_id,run_id,mode,state,cursor,body) VALUES(?1,?2,?3,?4,'queued',?5,?6)",params![input.id,input.branch_id,input.run_id,encode(&input.mode)?.trim_matches('"'),sql_number(cursor)?,encode(&input)?])?;
+        tx.execute("INSERT INTO input_queue(id,branch_id,run_id,mode,state,cursor,origin,activation,body) VALUES(?1,?2,?3,?4,'queued',?5,'user','activating',?6)",params![input.id,input.branch_id,input.run_id,encode(&input.mode)?.trim_matches('"'),sql_number(cursor)?,encode(&input)?])?;
         tx.execute(
             "INSERT INTO input_history_content(input_id,body) VALUES(?1,?2)",
             params![input.id, encode(&history_content)?],
@@ -413,6 +439,7 @@ impl Catalog {
     pub fn cancel_input(&mut self, id: &str, revision: u64) -> Result<QueuedInputRead> {
         let tx = self.db.transaction()?;
         let mut input: QueuedInputMetadata = record(&tx, "input_queue", id)?;
+        if !input.origin.is_user_ingress() { return Err(RuntimeError::Invalid("messages are immutable and cannot be cancelled as user input".into())); }
         if input.state == InputState::Cancelled {
             drop(tx);
             return self.capture_queued_input(id);
@@ -426,7 +453,7 @@ impl Catalog {
         input.revision += 1;
         write_input(&tx, &input)?;
         if input.mode == InputMode::NextRun {
-            let mut run: Run = record(&tx, "runs", &input.run_id)?;
+            let mut run: Run = record(&tx, "runs", input.run_id.as_deref().ok_or_else(|| RuntimeError::Invalid("user input Run is missing".into()))?)?;
             super::policy_switch::close_run_candidate(&tx, &run.id, run.revision + 1)?;
             run.state = RunState::Cancelled;
             run.cancel_requested = true;
@@ -440,7 +467,7 @@ impl Catalog {
     pub fn admit_input_delivery(
         &mut self,
         prepared: PreparedInputDelivery,
-    ) -> Result<Option<Vec<ConversationItem>>> {
+    ) -> Result<Option<InputBatch>> {
         let PreparedInputDelivery {
             run: captured,
             head,
@@ -460,13 +487,16 @@ impl Catalog {
             if current != *input
                 || current.state != InputState::Queued
                 || current.mode == InputMode::NextRun
-                || current.run_id != run.id
+                || current.branch_id != run.branch_id
+                || (current.activation == InputActivation::Activating && current.run_id.as_deref() != Some(run.id.as_str()))
             {
                 return Ok(None);
             }
         }
-        if !queued.is_empty(){super::goals::detach_ended_for_input(&tx,&run.id)?;}
-        let superseding = queued.last().map(|input| input.id.clone());
+        let input_ids = queued.iter().filter(|input| input.activation == InputActivation::Activating).map(|input| input.id.clone()).collect::<Vec<_>>();
+        let activating = !input_ids.is_empty();
+        if activating {super::goals::detach_ended_for_input(&tx,&run.id)?;}
+        let superseding = input_ids.last().cloned();
         for input in queued {
             deliver(&tx, &run, &input)?;
         }
@@ -486,7 +516,7 @@ impl Catalog {
             }
         }
         tx.commit()?;
-        Ok(Some(items))
+        Ok(Some(InputBatch { items, input_ids, activating }))
     }
 }
 fn deliver(tx: &Transaction<'_>, run: &Run, input: &QueuedInputMetadata) -> Result<()> {
@@ -506,7 +536,7 @@ fn deliver(tx: &Transaction<'_>, run: &Run, input: &QueuedInputMetadata) -> Resu
         id: input.id.clone(),
         thread_id: run.thread_id.clone(),
         parent,
-        source: HistorySource::User,
+        source: input.origin.history_source(),
         content: history_content,
         provider: None,
     };
@@ -520,15 +550,17 @@ fn deliver(tx: &Transaction<'_>, run: &Run, input: &QueuedInputMetadata) -> Resu
     )?;
     let mut input = input.clone();
     input.state = InputState::Delivered;
+    input.run_id = Some(run.id.clone());
     input.revision += 1;
-    write_input(tx, &input)?;
-    event(
+    let cursor = event(
         tx,
         &run.id,
         run.revision,
-        "input.delivered",
+        if input.activation == InputActivation::Activating { "input.delivered" } else { "message.delivered" },
         json!({"input_id":input.id,"mode":input.mode}),
     )?;
+    input.delivered_cursor = Some(cursor);
+    write_input(tx, &input)?;
     Ok(())
 }
 /// Called in the terminating Run's transaction, after releasing its branch execution owner.
@@ -547,7 +579,7 @@ pub(super) fn promote_next(tx: &Transaction<'_>, branch: &str) -> Result<Option<
             return Ok(None);
         };
         let mut input: QueuedInputMetadata = serde_json::from_str(&raw)?;
-        let mut run: Run = record(tx, "runs", &input.run_id)?;
+        let mut run: Run = record(tx, "runs", input.run_id.as_deref().ok_or_else(|| RuntimeError::Invalid("queued Run is missing".into()))?)?;
         if run.cancel_requested || run.state.terminal() {
             input.state = InputState::Cancelled;
             input.revision += 1;
@@ -574,12 +606,12 @@ pub(super) fn promote_next(tx: &Transaction<'_>, branch: &str) -> Result<Option<
 }
 
 pub(super) fn has_boundary_inputs(tx: &Connection, run_id: &str) -> Result<bool> {
-    Ok(tx.query_row("SELECT EXISTS(SELECT 1 FROM input_queue WHERE run_id=?1 AND state='queued' AND mode!='next_run')",[run_id],|row|row.get(0))?)
+    Ok(tx.query_row("SELECT EXISTS(SELECT 1 FROM input_queue WHERE run_id=?1 AND state='queued' AND mode!='next_run' AND activation='activating')",[run_id],|row|row.get(0))?)
 }
 pub(super) fn cancel_current(tx: &Transaction<'_>, run_id: &str) -> Result<()> {
     let inputs: Vec<QueuedInputMetadata> = {
         let mut statement =
-            tx.prepare("SELECT body FROM input_queue WHERE run_id=?1 AND state='queued'")?;
+            tx.prepare("SELECT body FROM input_queue WHERE run_id=?1 AND state='queued' AND origin='user'")?;
         let rows = statement.query_map([run_id], |row| row.get::<_, String>(0))?;
         let mut result = Vec::new();
         for row in rows {

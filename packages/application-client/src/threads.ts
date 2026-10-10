@@ -1,3 +1,4 @@
+import type { MessageSendParams, MessageListParams, MessageReceipt, MessagePage, MessageView } from '@varin/protocol';
 import type { FamilyList, FamilyRuns, FamilyRead, FamilyItem, FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
 import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildWait, TreeCancellationReceipt, Followup, LiveRoot, ContextPersonalization, ContextResources, ResourceActivation, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
 
@@ -75,6 +76,12 @@ export interface ThreadFamilyAPI {
   runs(identity: ThreadIdentity, request: Omit<FamilyRunsParams, 'callerThreadId'>, signal?: AbortSignal): Promise<FamilyRuns>;
   read(identity: ThreadIdentity, request: Omit<FamilyReadParams, 'callerThreadId'>, signal?: AbortSignal): Promise<FamilyRead>;
   item(identity: ThreadIdentity, request: Omit<FamilyItemParams, 'callerThreadId'>, signal?: AbortSignal): Promise<FamilyItem>;
+}
+/** Immutable task-family information. Acceptance and history delivery do not imply execution. */
+export interface ThreadMessagesAPI {
+  send(identity: ThreadIdentity, request: Omit<MessageSendParams, 'senderThreadId' | 'senderBranchId'>, signal?: AbortSignal): Promise<MessageReceipt>;
+  list(identity: ThreadIdentity, request: Omit<MessageListParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MessagePage>;
+  get(identity: ThreadIdentity, messageId: string, signal?: AbortSignal): Promise<MessageView>;
 }
 export interface ThreadCollaborationAPI {
   readReport(identity: ThreadIdentity, operationId: string, itemId: string, offset?: number, maxBytes?: number): Promise<ChildTextPage>;
@@ -172,6 +179,7 @@ export interface ThreadProcessesAPI {
   openTerminal(input: ThreadIdentity & { operationId: string }): Promise<ThreadProcessTerminal>;
 }
 export interface ThreadsAPI {
+  messages?: ThreadMessagesAPI;
   family?: ThreadFamilyAPI;
   processes?: ThreadProcessesAPI;
   goals: ThreadGoalsAPI;
