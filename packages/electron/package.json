@@ -19,7 +19,7 @@
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {
-    "electron": "^44.5.1",
+    "electron": "^44.7.0",
     "electron-builder": "^26.17.0",
     "node-abi": "^4.36.0"
   },
