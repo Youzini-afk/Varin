@@ -1,5 +1,94 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export type FollowupTrigger = { kind: 'process_stopped'; operation_id: string } | { kind: 'run_completed'; cursor: number } | { kind: 'goal_requested'; cursor: number };
+
+export type FollowupEvidence = { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | { kind: 'run_completed'; run_revision: number } | { kind: 'goal_requested'; run_revision: number };
+
+export type GoalState = 'active' | 'paused' | 'blocked' | 'budget_limited' | 'complete' | 'cancelled';
+
+export type GoalControl = 'active' | 'paused' | 'complete' | 'cancelled';
+
+export type GoalControlAction = 'pause' | 'resume' | 'complete' | 'cancel';
+
+export interface GoalBudget {
+  maxOutputTokens: number;
+}
+
+export interface GoalTokenAmount {
+  known: number;
+  unknown_receipts: number;
+}
+
+export interface GoalMeasuredUsage {
+  inferences: number;
+  input_tokens: GoalTokenAmount;
+  output_tokens: GoalTokenAmount;
+  cached_input_tokens: GoalTokenAmount;
+  cache_write_tokens: GoalTokenAmount;
+  reasoning_tokens: GoalTokenAmount;
+}
+
+export interface GoalUsage {
+  actual: GoalMeasuredUsage;
+  estimated: GoalMeasuredUsage;
+  missing_inferences: number;
+  pending_inferences: number;
+}
+
+export type GoalBlockReason = 'reported' | 'dependency' | 'run_failed' | 'waiting' | 'unsettled' | 'context_changed' | 'preparation_failed' | 'usage_unknown';
+
+export interface Goal {
+  id: string;
+  revision: number;
+  generation: number;
+  thread_id: string;
+  branch_id: string;
+  source_run_id: string;
+  objective: string;
+  control: GoalControl;
+  state: GoalState;
+  budget: GoalBudget | null;
+  usage: GoalUsage;
+  blocked_reason: GoalBlockReason | null;
+  reason: string | null;
+  dependency_operation_id: string | null;
+}
+
+export interface GoalControlReceipt {
+  id: string;
+  revision: number;
+  generation: number;
+  thread_id: string;
+  branch_id: string;
+  control: GoalControl;
+}
+
+export interface GoalStartParams {
+  key: string;
+  threadId: string;
+  branchId: string;
+  runId: string;
+  objective: string;
+  budget: GoalBudget | null;
+}
+
+export interface GoalUpdateParams {
+  goalId: string;
+  threadId: string;
+  branchId: string;
+  expectedRevision: number;
+  objective: string;
+  budget: GoalBudget | null;
+}
+
+export interface GoalControlParams {
+  goalId: string;
+  threadId: string;
+  branchId: string;
+  expectedRevision: number;
+  action: GoalControlAction;
+}
+
 export interface SourceResourceLink {
   path: string;
   target: SourceResourceTarget;
@@ -858,7 +947,7 @@ export interface FollowupControlParams {
 
 export interface FollowupWait {
   id: string;
-  kind: 'process_stopped';
+  kind: 'process_stopped' | 'run_completed' | 'goal_requested';
   after_cursor: number;
   trigger_cursor: number | null;
   state: 'waiting' | 'observed' | 'consumed' | 'cancelled';
@@ -868,11 +957,10 @@ export interface FollowupOccurrence {
   id: string;
   generation: number;
   trigger_cursor: number;
-  receipt_identity: string;
-  receipt_epoch: string;
   state: 'observed' | 'held' | 'admitted' | 'completed' | 'failed' | 'cancelled';
-  hold_reason: 'control_paused' | 'source_run_active' | 'source_unsettled' | 'branch_active' | 'context_scope_changed' | 'preparation_failed' | null;
+  hold_reason: 'control_paused' | 'source_run_active' | 'source_unsettled' | 'branch_active' | 'context_scope_changed' | 'preparation_failed' | 'goal_paused' | 'goal_budget' | 'goal_blocked' | 'goal_ended' | 'goal_superseded' | null;
   receipt: InputSubmitReceipt | null;
+  evidence: FollowupEvidence;
 }
 
 export interface Followup {
@@ -882,10 +970,12 @@ export interface Followup {
   thread_id: string;
   branch_id: string;
   source_run_id: string;
-  operation_id: string;
+  operation_id: string | null;
   state: 'active' | 'paused' | 'cancelled';
   wait: FollowupWait;
   occurrence: FollowupOccurrence | null;
+  goal_id: string | null;
+  trigger: FollowupTrigger;
 }
 
 export interface RunParams {

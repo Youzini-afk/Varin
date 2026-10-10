@@ -383,6 +383,7 @@ impl Catalog {
         )?;
         if immediate {
             let run: Run = record(&tx, "runs", &run_id)?;
+            super::goals::bind_admission(&tx,&run)?;
             deliver(&tx, &run, &input)?;
             tx.execute(
                 "UPDATE branches SET active_run=?2 WHERE id=?1",
@@ -464,6 +465,7 @@ impl Catalog {
                 return Ok(None);
             }
         }
+        if !queued.is_empty(){super::goals::detach_ended_for_input(&tx,&run.id)?;}
         let superseding = queued.last().map(|input| input.id.clone());
         for input in queued {
             deliver(&tx, &run, &input)?;
@@ -551,6 +553,7 @@ pub(super) fn promote_next(tx: &Transaction<'_>, branch: &str) -> Result<Option<
             write_input(tx, &input)?;
             continue;
         }
+        super::goals::bind_admission(tx,&run)?;
         deliver(tx, &run, &input)?;
         run.revision += 1;
         put(tx, "runs", &run.id, &run)?;

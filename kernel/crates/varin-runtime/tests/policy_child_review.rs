@@ -142,7 +142,7 @@ fn binding(f: &Fixture) -> RequestBinding {
             .unwrap()
             .selection;
     RequestBinding {
-        resource_activations: Vec::new(),
+        goal: None, resource_activations: Vec::new(),
         resource_checkpoint_id: None,
         connection_identity: launch.connection_identity,
         provider_family: launch.provider_family,

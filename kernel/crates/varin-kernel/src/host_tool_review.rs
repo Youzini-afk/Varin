@@ -74,7 +74,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
                 .unwrap(),
         );
         let binding = RequestBinding {
-            resource_activations: Vec::new(),
+            goal: None, resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "fixture".into(),
             provider_family: "fixture".into(),
@@ -463,7 +463,7 @@ fn rejected_newer_candidate_can_restore_the_prior_ready_directory_before_next_re
         .unwrap();
     let run = submitted.run_id.clone();
     let binding = RequestBinding {
-        resource_activations: Vec::new(),
+        goal: None, resource_activations: Vec::new(),
         resource_checkpoint_id: None,
         connection_identity: "fixture".into(),
         provider_family: "fixture".into(),

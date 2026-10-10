@@ -164,6 +164,7 @@ fn submit_input(
                     tools = crate::process_wait::schemas(tools);
                     tools.push(crate::memory::schema(true));
                     tools.push(crate::agent_resources::schema());
+                    tools.push(crate::agent_goals::schema());
                     if plan_eligible {
                         tools.push(crate::plan::schema());
                     }

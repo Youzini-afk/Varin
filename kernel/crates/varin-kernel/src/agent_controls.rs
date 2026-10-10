@@ -10,8 +10,14 @@ pub(super) struct ControlCommands {
 impl ControlCommands {
     /// Record intent in the actor's FIFO before an OS terminal fact can arrive. Only teardown
     /// and body work are deferred; dispatch cancellation remains tied to the durable command.
-    pub fn admit_cancellation(&self, method: &str, params: &Value) -> Result<(), KernelError> {
+    pub fn admit_control(&self, method: &str, params: &Value) -> Result<Option<Value>, KernelError> {
         match method {
+            "runtime.goal.control" => {
+                let p:GoalControlParams=serde_json::from_value(params.clone())?;
+                let revision=p.expected_revision.try_into().map_err(|_|KernelError::Protocol("Goal revision must be nonnegative".into()))?;
+                let receipt=self.runtime.catalog().lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?.control_goal(&p.goal_id,revision,&varin_runtime::catalog::goals::GoalScope{thread_id:p.thread_id,branch_id:p.branch_id},p.action).map_err(domain)?;
+                return Ok(Some(serde_json::to_value(receipt)?));
+            }
             "runtime.followup.control" => {
                 let p: FollowupControlParams = serde_json::from_value(params.clone())?;
                 let revision = u64::try_from(p.expected_revision).map_err(|_| KernelError::Protocol("follow-up revision must be nonnegative".into()))?;
@@ -56,7 +62,7 @@ impl ControlCommands {
             }
             _ => (),
         }
-        Ok(())
+        Ok(None)
     }
     fn finish_question(
         &self,

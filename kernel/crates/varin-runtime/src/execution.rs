@@ -174,6 +174,7 @@ pub enum Provenance {
     SystemInstruction {
         source: String,
     },
+    GoalInstruction { goal_id:String, generation:u64 },
     UserInstruction {
         input_id: String,
     },
@@ -292,6 +293,8 @@ pub struct HistoryRange {
 /// No keys, tokens, or authorization headers belong in a request snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RequestBinding {
+    #[serde(default)]
+    pub goal: Option<crate::catalog::goals::FrozenGoal>,
     pub resource_activations: Vec<crate::catalog::resources::ResourceActivation>,
     pub resource_checkpoint_id: Option<String>,
     #[serde(default)]
@@ -994,6 +997,10 @@ pub enum ToolResume {
 }
 
 pub trait Persistence: Send + Sync {
+    fn goal_tool_allowed(&self,_c:&ToolExecutionContext)->Result<bool,ExecutionError>{Ok(true)}
+    fn goal_context(&self,_run:&str,_epoch:u64)->Result<Option<crate::catalog::goals::GoalContext>,ExecutionError>{Ok(None)}
+    fn goal_boundary(&self,_run:&str,_epoch:u64)->Result<crate::catalog::goals::GoalBoundary,ExecutionError>{Ok(crate::catalog::goals::GoalBoundary::Continue)}
+
     fn resume_tool(
         &self,
         _context: &ToolExecutionContext,
@@ -1533,6 +1540,10 @@ impl<
                 }
             }
         }
+        if matches!(&event,PolicyEvent::ModelJobCompleted{receipt,..} if receipt.failure.as_ref().is_some_and(|f|f.code=="goal_changed")) {
+            event=PolicyEvent::Started;
+            recovered_decision=None;
+        }
         let mut steps = input.completed_model_steps;
         let mut interrupted_generation = false;
         macro_rules! finish {
@@ -1613,6 +1624,13 @@ impl<
                             },
                         )?;
                     }
+                }
+            }
+            if pending.is_none() {
+                match self.persistence.goal_boundary(&input.run_id,input.owner_generation)? {
+                    crate::catalog::goals::GoalBoundary::Continue=>(),
+                    crate::catalog::goals::GoalBoundary::Wait{wait_id}=>finish!('agent,RunState::Waiting,Some(wait_id),None),
+                    crate::catalog::goals::GoalBoundary::Finish{state}=>finish!('agent,state,None,None),
                 }
             }
             if pending.is_none() && recovered_decision.is_none() {
@@ -1763,7 +1781,7 @@ impl<
                         &intent,
                     ) {
                         Ok(receipt) => receipt,
-                        Err(error) if error.code == "input_pending" || cancel.is_cancelled() => {
+                        Err(error) if matches!(error.code.as_str(),"input_pending"|"goal_changed") || cancel.is_cancelled() => {
                             policy_state = previous_policy_state;
                             continue 'agent;
                         }
@@ -1821,7 +1839,7 @@ impl<
                         policy_state.clone(),
                     ) {
                         Ok(job) => job,
-                        Err(error) if error.code == "input_pending" => {
+                        Err(error) if matches!(error.code.as_str(),"input_pending"|"goal_changed") => {
                             policy_state = previous_policy_state;
                             continue 'agent;
                         }
@@ -1832,6 +1850,7 @@ impl<
                     };
                     control_state = None;
                     event = self.execute_model_job(&input, job, &cancel)?;
+                    if matches!(&event,PolicyEvent::ModelJobCompleted{receipt,..} if receipt.failure.as_ref().is_some_and(|f|f.code=="goal_changed")) {policy_state=previous_policy_state;event=PolicyEvent::Started;}
                 }
                 PolicyAction::ToolGraph { nodes } => {
                     let selected = match guarded("tool_selection_panicked", || {
@@ -1860,7 +1879,7 @@ impl<
                         match self.admit_tool_graph(&input, nodes, policy_state.clone(), &history, history_cursor.as_deref(), &cancel) {
                             Ok(graph) => graph,
                             Err(error)
-                                if error.code == "input_pending" || cancel.is_cancelled() =>
+                                if matches!(error.code.as_str(),"input_pending"|"goal_changed") || cancel.is_cancelled() =>
                             {
                                 policy_state = previous_policy_state;
                                 continue 'agent;
@@ -2006,6 +2025,9 @@ impl<
                         request_history.push(item.item);
                     }
                     binding.resource_activations = crate::catalog::resources::retained_activations(&request_history);
+                    let goal=self.persistence.goal_context(&input.run_id,input.owner_generation)?;
+                    binding.goal=goal.as_ref().map(|g|g.binding.clone());
+                    if let Some(item)=goal.and_then(|g|g.item){request_history.push(item);}
                     let view = RequestView {
                         request_id: format!(
                             "{}:{}:{}",
@@ -2064,7 +2086,7 @@ impl<
                             control_state = None;
                         }
                         Err(error)
-                            if error.code == "input_pending" || model_cancel.is_cancelled() =>
+                            if matches!(error.code.as_str(),"input_pending"|"goal_changed") || model_cancel.is_cancelled() =>
                         {
                             steps -= 1;
                             policy_state = previous_policy_state;
@@ -2108,9 +2130,9 @@ impl<
                     ) {
                         Ok(()) => {}
                         Err(error)
-                            if error.code == "input_pending" || model_cancel.is_cancelled() =>
+                            if matches!(error.code.as_str(),"input_pending"|"goal_changed") || model_cancel.is_cancelled() =>
                         {
-                            interrupted_generation = !cancel.is_cancelled();
+                            interrupted_generation = error.code != "goal_changed" && !cancel.is_cancelled();
                             self.commit(
                                 &input,
                                 ExecutionRecord::ModelFinished {
@@ -2744,7 +2766,7 @@ impl<
         let mut reservation = Some(reservation);
         let mut _admission_control = None;
         let mut executor_stopped = true;
-        let completion = if cancel.is_cancelled() {
+        let completion = if cancel.is_cancelled() || !self.persistence.goal_tool_allowed(context)? {
             ToolCompletion::NotDispatched {
                 reason: "cancelled".into(),
             }
@@ -2785,7 +2807,7 @@ impl<
                 ToolCompletion::NotDispatched {
                     reason: format!("{}: {}", error.code, error.message),
                 }
-            } else if cancel.is_cancelled() {
+            } else if cancel.is_cancelled() || !self.persistence.goal_tool_allowed(context)? {
                 ToolCompletion::NotDispatched {
                     reason: "cancelled".into(),
                 }

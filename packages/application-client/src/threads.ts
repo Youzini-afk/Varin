@@ -2,6 +2,7 @@ import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildW
 
 import type { RunModelSelection, RunModelSelections } from '@varin/protocol';
 import type { FollowupControlAction } from '@varin/protocol';
+import type { Goal, GoalBudget, GoalControlAction, GoalControlReceipt } from '@varin/protocol';
 import type { PolicySelection, PolicySelections } from '@varin/protocol';
 import type { ExtensionToolBinding, LaunchTool, McpBinding } from '@varin/protocol';
 import type { VarinExtensionServiceProvision } from '@varin/extension-contract';
@@ -91,6 +92,13 @@ export interface ThreadFollowupsAPI {
   /** Revision-checked definition control; a consumed occurrence returns its existing receipt. */
   control(input: ThreadIdentity & { followupId: string; expectedRevision: number; action: FollowupControlAction }): Promise<Followup>;
 }
+/** Explicit continuing-work authorization. Usage is reported by the original inference owner. */
+export interface ThreadGoalsAPI {
+  start(input: ThreadIdentity & { key: string; runId: string; objective: string; budget: GoalBudget | null }): Promise<GoalControlReceipt>;
+  update(input: ThreadIdentity & { goalId: string; expectedRevision: number; objective: string; budget: GoalBudget | null }): Promise<GoalControlReceipt>;
+  control(input: ThreadIdentity & { goalId: string; expectedRevision: number; action: GoalControlAction }): Promise<GoalControlReceipt>;
+  list(identity: ThreadIdentity): Promise<Goal[]>;
+}
 export interface ThreadSnapshot {
   identity: ThreadIdentity;
   /** Read before the snapshot's component queries. Replay after this cursor covers concurrent commits. */
@@ -102,6 +110,7 @@ export interface ThreadSnapshot {
   inputs: QueuedInput[];
   operations: Operation[];
   followups: Followup[];
+  goals: Goal[];
   launch: LaunchIntent | null;
   modelSelection: RunModelSelections;
   policySelection: ThreadPolicyInspection | null;
@@ -145,6 +154,7 @@ export interface ThreadPolicyInspection extends PolicySelections {
   preparation: ThreadPolicyPreparation | null;
 }
 export interface ThreadsAPI {
+  goals: ThreadGoalsAPI;
   plan?: ThreadPlanAPI;
   collaboration?: ThreadCollaborationAPI;
   followups: ThreadFollowupsAPI;

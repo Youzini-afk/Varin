@@ -28,7 +28,7 @@ fn request_snapshot(receipt: &Receipt) -> varin_runtime::execution::RequestSnaps
                 },
             },
             binding: RequestBinding {
-                resource_activations: Vec::new(),
+                goal: None, resource_activations: Vec::new(),
                 resource_checkpoint_id: None,
                 connection_identity: "fixture-connection".into(),
                 provider_family: "test".into(),
@@ -270,7 +270,7 @@ mod actual_engines {
             run_id: receipt.run_id,
             owner_generation: db.epoch(),
             binding: RequestBinding {
-                resource_activations: Vec::new(),
+                goal: None, resource_activations: Vec::new(),
                 resource_checkpoint_id: None,
                 connection_identity: "fixture-connection".into(),
                 provider_family: "test".into(),

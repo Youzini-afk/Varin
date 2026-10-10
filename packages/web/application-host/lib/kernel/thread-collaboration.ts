@@ -140,7 +140,7 @@ export class ThreadCollaboration {
       for (const event of events) {
         if (event.kind.startsWith('operation.')) { this.domainRecoveryNeeded = true; this.dirty = true; }
         const data = event.data as { run_id?: unknown } | null;
-        if ((event.kind === 'policy.resumed' || event.kind === 'followup.admitted') && data && typeof data.run_id === 'string') {
+        if ((event.kind === 'policy.resumed' || event.kind === 'followup.admitted' || event.kind === 'goal.run_ready') && data && typeof data.run_id === 'string') {
           void this.owners.continueRun(data.run_id, signal).catch(error => {
             if (!signal.aborted) this.owners.onError(undefined, error);
           });

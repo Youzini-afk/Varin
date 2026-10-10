@@ -5,6 +5,7 @@ import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel } f
 import { KernelClientError } from './kernel-client.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { controlThreadFollowup, listThreadFollowups, registerThreadFollowup } from './thread-followups.js';
+import { controlThreadGoal, listThreadGoals, startThreadGoal, updateThreadGoal } from './thread-goals.js';
 
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Request must be an object');
@@ -21,6 +22,15 @@ const revision = (value: unknown): number => {
 const identity = (body: Record<string, unknown>): ThreadIdentity => {
   if (body.runtime !== 'agent') throw new Error('Explicit thread runtime selection is required');
   return { runtime: 'agent', threadId: text(body.threadId), branchId: text(body.branchId) };
+};
+const goalBudget = (value: unknown): { maxOutputTokens: number } | null => {
+  if (value === null) return null;
+  const budget = object(value);
+  if (Object.keys(budget).some(key => key !== 'maxOutputTokens')
+    || !Number.isSafeInteger(budget.maxOutputTokens) || Number(budget.maxOutputTokens) < 0) {
+    throw new Error('Goal output-token budget must be a non-negative integer');
+  }
+  return { maxOutputTokens: Number(budget.maxOutputTokens) };
 };
 const modelSelection = (value: unknown): ThreadModel => {
   const model = object(value);
@@ -46,6 +56,10 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'followup/register': ['runtime', 'threadId', 'branchId', 'key', 'runId', 'operationId'],
     'followup/list': ['runtime', 'threadId', 'branchId'],
     'followup/control': ['runtime', 'threadId', 'branchId', 'followupId', 'expectedRevision', 'action'],
+    'goal/start': ['runtime', 'threadId', 'branchId', 'key', 'runId', 'objective', 'budget'],
+    'goal/update': ['runtime', 'threadId', 'branchId', 'goalId', 'expectedRevision', 'objective', 'budget'],
+    'goal/control': ['runtime', 'threadId', 'branchId', 'goalId', 'expectedRevision', 'action'],
+    'goal/list': ['runtime', 'threadId', 'branchId'],
     'plan/read': ['runtime', 'threadId', 'branchId'],
     'plan/update': ['runtime', 'threadId', 'branchId', 'key', 'expectedHeadId', 'expectedRef', 'content'],
     fork: ['runtime', 'threadId', 'branchId', 'key', 'headId'],
@@ -119,6 +133,18 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     return controlThreadFollowup(adapter, { ...identity(body), followupId: text(body.followupId),
       expectedRevision: revision(body.expectedRevision), action: body.action }, signal);
   });
+  post('goal/start', (body, signal) => startThreadGoal(adapter, { ...identity(body), key: text(body.key),
+    runId: text(body.runId), objective: text(body.objective), budget: goalBudget(body.budget) }, signal));
+  post('goal/update', (body, signal) => updateThreadGoal(adapter, { ...identity(body), goalId: text(body.goalId),
+    expectedRevision: revision(body.expectedRevision), objective: text(body.objective), budget: goalBudget(body.budget) }, signal));
+  post('goal/control', (body, signal) => {
+    if (body.action !== 'pause' && body.action !== 'resume' && body.action !== 'complete' && body.action !== 'cancel') {
+      throw new Error('Invalid Goal control');
+    }
+    return controlThreadGoal(adapter, { ...identity(body), goalId: text(body.goalId),
+      expectedRevision: revision(body.expectedRevision), action: body.action }, signal);
+  });
+  post('goal/list', (body, signal) => listThreadGoals(adapter, identity(body), signal));
   post('tools/inspect',(body,signal)=>adapter.inspectTools(identity(body),text(body.runId),signal));
   post('policy/inspect', body => adapter.inspectPolicy(identity(body), text(body.runId)));
   post('policy/restart', (body, signal) => adapter.restartPolicy(identity(body), text(body.runId), text(body.selectionId), signal));

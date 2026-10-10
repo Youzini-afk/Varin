@@ -12,8 +12,10 @@ import { registerThreadRoutes } from './thread-routes.js';
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:followup', branchId: 'branch:followup' };
 const run: Run = { id: 'run:source', thread_id: identity.threadId, branch_id: identity.branchId,
   state: 'waiting', revision: 2, epoch: 1, configuration: {}, cancel_requested: false, waiting_on: 'policy-pause:source' };
+const operationId = 'operation:process';
 const definition: Followup = { id: 'followup:process', revision: 1, generation: 1,
-  thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: run.id, operation_id: 'operation:process', state: 'active',
+  thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: run.id,
+  goal_id: null, trigger: { kind: 'process_stopped', operation_id: operationId }, operation_id: operationId, state: 'active',
   wait: { id: 'wait:process', kind: 'process_stopped', after_cursor: 4, trigger_cursor: null, state: 'waiting' }, occurrence: null };
 
 /** These are transport contract tests: real HTTP/client/admission functions, with a controlled RPC boundary.
@@ -40,7 +42,7 @@ function fixture() {
       case 'runtime.status': return { eventCursor: 5 };
       case 'runtime.history.page': return { head: null, previous: null, items: [] };
       case 'runtime.context.inspect': return null;
-      case 'runtime.input.list': case 'runtime.thread.operations.active': case 'runtime.context_job.list': case 'runtime.child.list': return [];
+      case 'runtime.input.list': case 'runtime.thread.operations.active': case 'runtime.context_job.list': case 'runtime.child.list': case 'runtime.goal.list': return [];
       default: throw new Error(`Unexpected RPC: ${method}`);
     }
   });
@@ -81,13 +83,13 @@ afterEach(() => vi.unstubAllGlobals());
 
 it('the public management client preserves registration keys, revisions and original consumed receipts', async () => {
   const f = fixture();
-  const input = { ...identity, key: 'register-once', runId: run.id, operationId: definition.operation_id };
+  const input = { ...identity, key: 'register-once', runId: run.id, operationId };
   const accepted = await f.api.followups.register(input);
   expect(await f.api.followups.register(input)).toEqual(accepted);
   const registrations = f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.register');
   expect(registrations).toHaveLength(2);
   for (const [, params, signal] of registrations) {
-    expect(params).toEqual({ key: input.key, runId: run.id, operationId: definition.operation_id });
+    expect(params).toEqual({ key: input.key, runId: run.id, operationId });
     expect(signal).toBeInstanceOf(AbortSignal);
   }
   for (const [action, state] of [['pause', 'paused'], ['resume', 'active'], ['cancel', 'cancelled']] as const) {
@@ -100,7 +102,8 @@ it('the public management client preserves registration keys, revisions and orig
     }]);
   }
   f.facts.reply = { ...accepted, revision: 7, wait: { ...accepted.wait, trigger_cursor: 9, state: 'consumed' }, occurrence: {
-    id: 'occurrence:process', generation: 1, trigger_cursor: 9, receipt_identity: 'process:receipt', receipt_epoch: 'process-epoch:one',
+    id: 'occurrence:process', generation: 1, trigger_cursor: 9,
+    evidence: { kind: 'process_stopped', receipt_identity: 'process:receipt', receipt_epoch: 'process-epoch:one' },
     state: 'admitted', hold_reason: null, receipt: { thread_id: identity.threadId,
       branch_id: identity.branchId, run_id: 'run:continued', input_id: 'environment:process', cursor: 10 },
   } };
@@ -121,7 +124,7 @@ it('list and snapshot expose only the selected branch and controls reject anothe
   expect(await f.api.followups.list({ ...identity, branchId: 'branch:other' })).toEqual([other]);
   await expect(f.api.followups.control({ ...identity, followupId: other.id, expectedRevision: 1, action: 'cancel' })).rejects.toMatchObject({ status: 400 });
   f.facts.source.branch_id = 'branch:other';
-  await expect(f.api.followups.register({ ...identity, key: 'foreign', runId: run.id, operationId: definition.operation_id })).rejects.toMatchObject({ status: 400 });
+  await expect(f.api.followups.register({ ...identity, key: 'foreign', runId: run.id, operationId })).rejects.toMatchObject({ status: 400 });
   await expect(f.api.followups.list({ ...identity, branchId: 'branch:unknown' })).rejects.toMatchObject({ status: 400 });
   expect(f.requests.mock.calls.some(([method]) => ['runtime.followup.register', 'runtime.followup.control'].includes(method))).toBe(false);
   f.facts.source.branch_id = identity.branchId; f.facts.registerError = true;
@@ -134,7 +137,7 @@ it('list and snapshot expose only the selected branch and controls reject anothe
 
 it('management routes enforce authentication, exact fields and revision conflict without exposing private errors', async () => {
   const f = fixture();
-  const register = { ...identity, key: 'register', runId: run.id, operationId: definition.operation_id };
+  const register = { ...identity, key: 'register', runId: run.id, operationId };
   for (const method of ['register', 'list', 'control']) {
     expect((await f.request(`/api/threads/followup/${method}`, identity, false)).status).toBe(401);
   }

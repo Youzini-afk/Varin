@@ -34,6 +34,13 @@ checkpoint at a closed decision boundary; the candidate ID and active generation
 Catalog. Conversation history and independent tasks remain intact. `cancelPolicyUpdate` cancels that
 unpublished candidate, not the Run. Neither operation resumes an explicit Pause.
 
+`ThreadsAPI.goals` starts an explicitly authorized continuing objective, updates its objective/budget,
+and applies revision-checked pause/resume/complete/cancel controls. Writes return short admission
+receipts; `list` and `ThreadSnapshot.goals` contain separately read current usage and objective views.
+An uncertain creation retry keeps its original key and input. Update/control conflicts require reading
+the current revision before a new explicit action. Ordinary message submission and conversation fork
+are not Goal creation commands. Goal-owned followups are controlled through their Goal.
+
 The desktop contract defines:
 
 - `VarinDesktopCommandMap` — typed `{ args, result }` for all 58 `desktop_*` commands

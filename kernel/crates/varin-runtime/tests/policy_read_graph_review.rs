@@ -182,7 +182,7 @@ impl Fixture {
             })
             .unwrap();
         let binding = RequestBinding {
-            resource_activations: Vec::new(),
+            goal: None, resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "local-review".into(),
             provider_family: "test".into(),

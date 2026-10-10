@@ -45,6 +45,7 @@ import type {
   ChildSourceReadyParams, ChildSettleParams, ChildResultCandidateParams, ChildResultPublishedParams, HostToolReconcileParams,
   ChildWait,
   Followup,
+  Goal, GoalControlReceipt, GoalStartParams, GoalUpdateParams, GoalControlParams,
   FollowupRegisterParams,
   FollowupControlParams,
   ContextRefreshParams,
@@ -586,6 +587,18 @@ export class AgentRuntimeClient {
   }
   registerFollowup(input: FollowupRegisterParams, signal?: AbortSignal): Promise<Followup> {
     return this.kernel.agentRuntimeRequest('runtime.followup.register', input, signal);
+  }
+  startGoal(input: GoalStartParams, signal?: AbortSignal): Promise<GoalControlReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.goal.start', input, signal);
+  }
+  updateGoal(input: GoalUpdateParams, signal?: AbortSignal): Promise<GoalControlReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.goal.update', input, signal);
+  }
+  controlGoal(input: GoalControlParams, signal?: AbortSignal): Promise<GoalControlReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.goal.control', input, signal);
+  }
+  goals(threadId: string, signal?: AbortSignal): Promise<Goal[]> {
+    return this.kernel.agentRuntimeRequest('runtime.goal.list', { threadId }, signal);
   }
   followups(threadId: string, signal?: AbortSignal): Promise<Followup[]> {
     return this.kernel.agentRuntimeRequest('runtime.followup.list', { threadId }, signal);

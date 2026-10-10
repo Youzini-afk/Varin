@@ -171,13 +171,13 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 21, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
+Catalog version 22, input domain 2 and collaboration domain 3 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
 history, all model outputs (including rejected output), original command intents, queued-history references, context
 checkpoints, memory projections, summary recipes and source parts, policy action/checkpoint bodies,
-and indexed graph calls/receipts, planning-model request/output references, ordinary tool arguments/results,
+and indexed graph calls/receipts, Goal objective/reason/creation-intent references, planning-model request/output references, ordinary tool arguments/results,
 external executor receipts and permission call/scope bodies, including historical receipt and completed
 permission audit events and original invocation completions. It verifies each distinct live object
 before sweeping and preserves unknown files; it never deletes history or invokes system-kernel GC.
@@ -423,8 +423,10 @@ identities. Current user work, queued inputs, explicit Pause and changed context
 occurrence rather than being overwritten. Same-source head/context refresh does not invalidate an
 authorization simply because history advanced.
 
-Definition pause/resume/cancel checks its revision. Cancelling the original Run cancels its unconsumed
-authorizations in the same transaction. Once consumed, definition controls return the original receipt;
+Independent definition pause/resume/cancel checks its revision. Cancelling the original Run cancels
+its independent unconsumed authorizations in the same transaction. A definition associated with an
+explicit Goal follows that Goal’s control instead; Run cancellation pauses the Goal and preserves its
+real dependency for a later explicit resume. Once consumed, definition controls return the original receipt;
 the new Run has its own cancellation identity. Its actual terminal transition settles the occurrence.
 Shutdown fences old-worker admission; a later owner can recover unconsumed work. Held states do not
 emit repeated events or drive a polling loop. Preparation failures remain visible and explicitly retryable.
@@ -435,6 +437,60 @@ Storage checks both original and current grants, Thread, workspace and physical 
 stdin, kill or new process Wait is delegated, and revoked original authority stays revoked. Process
 output remains in its existing owner, not in a second follow-up output store. Definition launch content
 and original receipt/history references remain normal ContentStore roots.
+
+## Explicit continuing Goals
+
+`runtime.goal.start` requires explicit user authorization on the latest primary Run, including an
+ended Run. Ordinary inputs and conversation forks do not create or duplicate that authorization.
+There is at most one unfinished Goal on a branch. Objective, report reason and creation intent use
+ContentStore references with publication leases; capture and commit hold only short metadata.
+`update` and `control` validate Thread/branch scope and the user-visible revision. Their generation
+fences prepared requests, policy boundaries, new tool effects and original `goal_report` calls.
+Controls return short admission receipts; reading the current objective and usage is separate.
+
+The original ModelStep or policy-model Operation records the dispatched Goal identity. Children and
+owner-triggered summaries inherit their original admitted/delegated ownership, including an accepted
+child not yet prepared. Only actual inference receipts update the small derived usage aggregate in
+that same transaction. Late and rejected output, cancellation and interrupted recovery retain their
+original attribution; reading results, nested tool receipts and repeated projection do not charge again.
+A new ordinary input delivered after Goal completion/cancellation detaches the current primary Run
+without changing the input's identity or rebilling the already dispatched inference/delegated work.
+History changes never rewind usage. Summary requests are charged to their owner but receive no Goal
+execution instruction; manual independent summaries have no implicit Goal owner.
+
+An optional budget limits provider-reported output tokens. Actual, estimated, missing and pending
+usage are separate; input/cache/reasoning fields retain provider semantics and are not added into a
+fabricated total. Already dispatched concurrent work can exceed the budget. Once a settled inference
+has no actual output count, a set budget blocks further inference and automatic continuation with
+`usage_unknown`. Resume does not erase this evidence; explicitly removing the budget permits progress.
+Budget exhaustion is not Goal completion, and zero is a valid budget that admits no new inference.
+
+The ordinary `goal_report` tool completes or blocks only its originating current primary Goal.
+Its original Operation/call receipt and Goal change commit atomically, without a fabricated ModelStep
+or a mandatory evaluation-model request. A real process dependency registers its original stop Wait;
+stop evidence observed before registration is rechecked in that transaction. Manual pause survives
+both dependency completion and other domain answers. Already dispatched effects and independent jobs
+retain their original lifetime and factual settlement.
+
+The existing followup owner also records typed `run_completed` and explicitly authorized
+`goal_requested` occurrences. Consuming an occurrence and admitting its Submission/Run/launch share
+one transaction, rechecking Goal generation, actual usage, unsettled operations, original waits,
+queued user work and branch/source scope. A normal final answer ends one Run, not its Goal. A Goal
+reporting a real blocker does not spin another model request. The original blocked report may end
+its own Run; later user work under the same blocked Goal stays parked instead of being marked
+completed without consumption. A paused, blocked or budget-limited live Run parks on `goal.ready`; the supervisor quiesces its old worker before durable `goal.run_ready` release.
+Question and policy Pause identities remain distinct and require their own valid resolution.
+
+The existing recovery path still holds a persisted but never-dispatched main ModelStep at an explicit
+recovery Wait after reopen. It safely refuses provider replay and reports no dispatched usage, but
+automatic recovery of this proven-unsent candidate is not yet implemented. This predates Goals and
+remains a tracked recovery capability gap; in-process stale Goal candidates do recompile normally.
+
+Calendar recurrence and generic event conditions are separate remaining domains; these Goals do not
+install another timer loop, scheduler, task tree or execution ledger. See
+[`goal_lifecycle.rs`](tests/goal_lifecycle.rs), the existing child/context/policy-model suites, and
+[`agent_goals.rs`](../varin-kernel/src/agent_goals.rs) for in-process behavior coverage. Their simulated
+providers do not establish model quality, live cost, or product transport/platform acceptance.
 
 ## Policy-originated planning models
 

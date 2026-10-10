@@ -35,7 +35,7 @@ impl Fixture {
             })
             .unwrap();
         let binding = RequestBinding {
-            resource_activations: Vec::new(),
+            goal: None, resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "main-account".into(),
             provider_family: "test".into(),
@@ -1588,4 +1588,24 @@ fn control_result(result: varin_runtime::OperationResultMetadata) -> Value {
             panic!("policy result is domain control state")
         }
     }
+}
+
+#[test]
+fn main_and_auxiliary_real_receipts_share_goal_without_counting_result_reads() {
+    use varin_runtime::catalog::goals::*;
+    struct CompleteGoal {inner:Policy, db:Arc<Mutex<Catalog>>}
+    impl AgentPolicy for CompleteGoal {
+        fn identity(&self)->PolicyIdentity{identity()}
+        fn decide(&self,v:&PolicyView<'_>,e:&PolicyEvent,s:&Value,c:&CancellationToken)->Result<PolicyDecision,ExecutionError>{
+            if matches!(e,PolicyEvent::ModelCompleted{..}){self.db.lock().unwrap().control_goal("goal",1,&GoalScope{thread_id:"thread".into(),branch_id:"main".into()},GoalControlAction::Complete).unwrap();}
+            self.inner.decide(v,e,s,c)
+        }
+    }
+    let f=Fixture::new();
+    {let mut db=f.db.lock().unwrap();let p=db.prepare_goal_start("goal",&f.input.run_id,GoalScope{thread_id:"thread".into(),branch_id:"main".into()},"GOAL_CONTEXT_SENTINEL".into(),Some(GoalBudget{max_output_tokens:100})).unwrap().load().unwrap();db.admit_goal_mutation(p).unwrap();}
+    let planner=Arc::new(Provider::new("ALLOW"));let (e,main)=engine(&f,planner.clone(),true,false);
+    let engine=ExecutionEngine{context_preparation:e.context_preparation,persistence:e.persistence,provider:e.provider,tools:e.tools,policy:Arc::new(CompleteGoal{inner:Policy{events:Mutex::new(vec![]),follow:true,repeat:false},db:f.db.clone()}),progress:e.progress};
+    let report=engine.run(f.input.clone(),CancellationToken::default()).unwrap();assert_eq!(report.state,RunState::Completed,"{:?}",report.failure);
+    for provider in [&planner,&main]{let seen=provider.requests.lock().unwrap();assert_eq!(seen.len(),1);assert_eq!(seen[0].view.binding.goal.as_ref().unwrap().id,"goal");assert!(seen[0].view.history.iter().any(|item|matches!(&item.provenance,Provenance::GoalInstruction{goal_id,..} if goal_id=="goal")&&serde_json::to_string(&item.content).unwrap().contains("GOAL_CONTEXT_SENTINEL")));}
+    let db=f.db.lock().unwrap();let goal=db.capture_goal("goal").unwrap().load().unwrap();assert_eq!(goal.state,GoalState::Complete);assert_eq!(goal.usage.actual.inferences,2);assert_eq!(goal.usage.actual.output_tokens.known,8);assert_eq!(goal.usage.pending_inferences,0);assert_eq!(goal.usage.missing_inferences,0);
 }

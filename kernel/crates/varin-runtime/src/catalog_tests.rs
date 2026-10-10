@@ -339,7 +339,16 @@ fn dispatched_model_is_interrupted_and_not_sent_again() {
         ModelStepState::Interrupted
     );
     assert!(db.dispatch_model_step("step", db.epoch()).is_err());
-    assert_eq!(db.model_step("step").unwrap().usage, None);
+    let reopened = db.model_step("step").unwrap();
+    assert_eq!(reopened.request, json!({"model":"test","history":["hello"]}));
+    let usage: crate::execution::UsageReceipt =
+        serde_json::from_value(reopened.usage.expect("interrupted usage is explicitly missing")).unwrap();
+    assert_eq!(usage.measurement, crate::execution::UsageMeasurement::Missing);
+    assert_eq!(
+        [usage.input_tokens, usage.output_tokens, usage.cached_input_tokens,
+         usage.cache_write_tokens, usage.reasoning_tokens],
+        [None; 5],
+    );
 }
 #[test]
 fn delivery_cannot_commit_a_fact_before_send() {
@@ -377,7 +386,7 @@ fn request_snapshot(receipt: &Receipt) -> crate::execution::RequestSnapshot {
                 },
             },
             binding: RequestBinding {
-                resource_activations: Vec::new(),
+                goal: None, resource_activations: Vec::new(),
                 resource_checkpoint_id: None,
                 connection_identity: "fixture-connection".into(),
                 provider_family: "test".into(),

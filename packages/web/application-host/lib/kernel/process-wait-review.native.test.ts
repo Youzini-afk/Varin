@@ -369,8 +369,8 @@ it('admits one process follow-up without the Host pump, then cold-prepares and r
     const admitted = (await f.api.followups.list(identity))[0]!;
     const continuation = admitted.occurrence!.receipt!; continuedRunId = continuation.run_id;
     expect(continuedRunId).not.toBe(source.run_id); expect(admitted.wait.state).toBe('consumed');
-    expect(admitted.occurrence!.receipt_identity).toBe(processId);
-    expect(typeof admitted.occurrence!.receipt_epoch).toBe('string');
+    expect(admitted.occurrence!.evidence).toMatchObject({ kind: 'process_stopped',
+      receipt_identity: processId, receipt_epoch: expect.any(String) });
     expect((await f.runtime.operation(processId)).outcome).toBe('succeeded');
     expect(await f.runtime.run(continuedRunId)).toMatchObject({ state: 'accepted', thread_id: identity.threadId, branch_id: identity.branchId });
     expect(await f.runtime.launch(continuedRunId)).toMatchObject({ startable: true, requires_rebind: true });

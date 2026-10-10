@@ -31,8 +31,10 @@ receipt facts.
 The Agent workbench has an explicit thread selector using the shared layout and Markdown
 renderer. Its projection controller reconstructs durable history, queue and operation facts and
 keeps transient progress separate. This is a vertical integration, not Pi parity. Default main-chat
-cutover, full multimodal coverage, automatic context-budget policy, memory, questions, goal/schedule domains, MCP/extension routing,
-remote environments, Pi asset import and final Pi removal still require their named owners.
+cutover, full multimodal coverage, calendar/general-event scheduling, remaining policy-origin domain
+consumers, remote environments and the broader capabilities recorded in the runtime implementation
+plan still require their named owners. Memory, questions, automatic summary preparation and bound
+MCP/ordinary extension tools already have native paths; each retains its documented scope.
 Next-run admission uses the saved launch credential scope and the core environment-owner reference
 to retain a materialized directory, rather than resetting files to the original source. Independent
 verification owns the restart, source-continuity and HTTP acceptance evidence. No public model endpoint,
@@ -125,8 +127,9 @@ The Host recovers eligible summary launches with their saved credential scope af
 their source branch, and strips the core-owned recipe marker before comparing model configuration.
 It does not retry unknown model effects or select a replacement paid model.
 
-This is explicit user-triggered compaction, not automatic budget management, prompt/skill loading,
-Agent memory CRUD, or parity with Pi context behavior. Source branches and ongoing runs remain
+This section describes explicit user-triggered compaction. Automatic capacity preparation, frozen
+instructions/skills and memory have their own owners and admission contracts; this route does not
+substitute for those contracts or establish Pi parity. Source branches and ongoing runs remain
 independent of the summary job; only a successful explicit publication changes later context views.
 
 
@@ -242,3 +245,32 @@ Cancellation, owner loss and stale UI submissions cannot approve it. Restart inv
 nondispatched permission decisions and returns those Operations to admission; recovery must bind
 fresh owners and evaluate current policy again. A Host map holds only live wakeup callbacks, never
 policy or durable approval authority. Opened/decided/consumed events retain the decision audit.
+
+
+## Continuing Goals
+
+`thread-goals.ts` exposes start/update/control/list through authenticated Thread routes and the typed
+application client. Start checks the selected source Run; every mutation also validates Thread/branch
+scope in the Catalog transaction. Objective and optional output-token budget remain separate from
+ordinary message input. There is no Host Goal database, inferred authorization or timer.
+
+Start/update return only their accepted identity/revision/generation/control. Control has the same
+short receipt contract and never hydrates large objective/report bodies before pause/cancel. Snapshot
+reads hydrate current Goals and select the displayed branch. `goal.run_ready` joins the existing
+single-flight launch consumer; new occurrence Runs still use `followup.admitted`. Startup discovery
+reuses saved launches and the same credential/preparation owner.
+
+The shared Goal panel keeps unsaved drafts and their original editing revision across background
+updates, offers explicit conflict review, and separates uncertain writes from accepted writes whose
+subsequent refresh failed. An uncertain start retries its frozen key/objective/budget/source Run.
+Switching conversation, branch or Host invalidates old asynchronous view results. Actual/estimated/
+missing/pending usage and provider-specific token fields remain distinct; no synthetic monetary total
+is shown. Complete/cancelled Goals retain their history; Goal-owned process continuations do not expose
+independent controls that could bypass a Goal pause.
+
+`thread-goals.test.ts`, `thread-followups.test.ts` and `thread-continuation.test.ts` exercise the public
+HTTP client, authenticated registered routes and actual launch-consumer logic with controlled RPC
+facts. UI behavior tests cover retained drafts, conflicts, uncertain writes and late views. Native
+Goal authority is separately exercised in Rust; these checks do not claim an unexecuted product
+Host/kernel transport round trip. User acceptance precedes user-managed runtime cutover and asset
+migration.

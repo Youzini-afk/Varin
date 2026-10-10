@@ -600,6 +600,14 @@ impl RunSupervisor {
     }
     /// The question wait was durably committed, so its worker has no further execution work.
     /// Join its final teardown before an answer can make the same Run runnable again.
+    pub fn reconcile_goal_waits(&self)->Result<()> {
+        let runs=self.catalog.lock().map_err(error)?.goal_waiting_runs().map_err(error)?;
+        for run in runs{
+            self.quiesce_run(&run,|r|r.state==RunState::Waiting&&r.waiting_on.as_deref().is_some_and(|w|w.starts_with("goal-wait:")))?;
+            self.catalog.lock().map_err(error)?.release_goal_wait(&run).map_err(error)?;
+        }
+        Ok(())
+    }
     pub fn resume_policy_pause(&self, run_id: &str, wait_id: &str) -> Result<crate::catalog::policy_control::PolicyResumeReceipt> {
         if let Some(receipt) = self.catalog.lock().map_err(error)?.policy_resume_receipt(run_id, wait_id).map_err(error)? { return Ok(receipt); }
         self.quiesce_run(run_id, |run| run.state == RunState::Waiting && run.waiting_on.as_deref() == Some(wait_id))?;

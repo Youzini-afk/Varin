@@ -6,6 +6,21 @@
 
 目标是完整实现[完整运行时设计](../design/agent-runtime-design.md)和[能力组合设计](../design/runtime-extensibility-design.md)共同定义的长期运行底座：及时交互、低开销执行、按真实资源调度、深层能力组合和可替换策略。完成聊天循环、迁移已有工具或删除 Pi 都不是单独的完成标准；Pi 退出是这套设计落地后的一个结果。当前生产仍使用 Pi session worker、TypeScript Host 协调和 Rust 资源内核；现有权威见[架构](../architecture.md)。
 
+交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
+
+## 2026-10-10 增量：显式持续 Goal 与真实用量续接
+
+- 显式 Goal 与单次 Run 分离，保存用户目标、控制状态、可选 output-token 预算和原始推理用量。普通输入和 fork 不自动创建持续授权；一个 branch 同时只有一个未结束 Goal。目标、报告原因和创建意图进入既有 ContentStore，worker 准备正文，Catalog 短事务核对实际 Thread/branch、revision/generation 并提交引用；控制 FIFO 直接返回当次短受理回执，不用后来状态冒充原命令结果。Catalog 内部格式为 **22**，旧格式明确拒绝。
+- 主 ModelStep、策略辅助模型 Operation、已受理 child 和 owner-triggered summary 保留实际归属。child 尚未准备时也从原 JobAccepted 固定归属；summary 计入原目标的真实用量，但不注入执行该目标的指令。已派发请求的归属不会因目标更新、完成、取消或同 Run 后来建立新 Goal 而改变。用量从原推理 receipt 同事务汇总，普通工具结果、嵌套投影和重读不重计；失败、中断、取消与被拒绝发布的真实结果同样保留事实。
+- actual、estimated、missing、pending 分开展示，input/cache/reasoning 沿 provider 原语义保留，不相加伪造总额或价格。可选预算按实际 output 控制后续推理，允许真实在途工作超出预算；零预算有效。已结束推理缺少实际 output 时，有预算的 Goal 以 `usage_unknown` 阻止继续推理/自动续接，resume 不清除证据，用户明确移除预算才可继续。预算耗尽、明确受阻与目标完成不混同。
+- `goal_report` 是原 ToolDirectory 上普通绑定工具，核对原 ModelStep/PolicyAction、Operation、当前 primary Goal 和冻结 generation；状态变更与 canonical 调用回执原子提交，不制造模型调用或每轮必跑的评估链。Goal pause/更新拦截尚未派发的新工具效果，已派发和独立作业继续按原 owner 结算。先处理已受理问题/观察的原 Wait，再结束 Goal 所在轮次，避免留下无法回答的问题。
+- 原 followup owner 增加类型化 `run_completed` 与 `goal_requested` 发生项，保留原 process stop 证据；消费发生项和新 Submission/Run/launch 同事务。普通 final 只结束本轮，Goal 仍可沿原身份继续；准入重核目标世代、预算、实际未结算操作、原依赖、用户队列与 branch/source scope。现有 coalesced worker 与 Host launch consumer 消费 `goal.run_ready`，没有第二 timer、任务树或执行账本。手动暂停不会被依赖完成、question answer、重连或预算修改覆盖。
+- 整合实测修复了输入和等待组合缺口：终态 Goal 后的新普通输入沿原交付事务解除当前 primary Run 关联，真实下一请求消费它而不续计旧 Goal；active-but-blocked Goal 下的新 Run、报告后的同 Run 输入和失败后 promoted 输入原样停靠，不能被直接标完成。原报告事件与其后的真实 input delivery 区分“已报告结束的本轮”和新工作，显式恢复后再执行。parent Goal 结束不会把未完成 child/summary 伪报成功；原已受理独立进程不被假称停止。
+- 公开 protocol/application-client/认证 HTTP/ThreadAdapter/snapshot 与共享 Goal 面板已接线。UI 保留编辑 revision 和草稿，冲突显式重读；不确定 start 重投原 key/objective/budget/Run，已受理但刷新失败不重新创建。分支/Host 晚响应不覆盖当前视图，Goal-owned followup 不提供绕开 Goal pause 的独立控制。
+- 最终完整 runtime **297 passed / 0 failed / 2 既有 ignored**，kernel lib **44 passed / 0 failed / 1 既有 ignored**；覆盖原 Engine、Goal tool、child/summary/辅助推理、用量重放、输入/Wait、fork/reopen/过程续接。首次完整回归暴露一个旧测试仍期待恢复 usage 为 absent，已按新明确 Missing 合同改为 typed 未知断言后完整重跑。Portable Host **3 文件 25/25**、UI **4 文件 49/49**，最后已结束目标提示修整后 Goal **8/8** 重跑通过（重叠不累加）。生成协议、Host 生产/测试类型、UI 类型、变更 lint、实际 Host bundle 与文档链接检查通过。Linux x64 开发内核 identity `0.9.25` 已 build/stage，SHA-256 `fd34e8f13b130f32649e861e0f8cb147479a6ed0ae3fbfec4ba1776a8b9d5cee`。
+- 独立审查先于实现形成六闭环标准，冻结后跟踪实际消费者。仓库外真实 Catalog/ContentStore 探针验证旧 epoch 候选拒绝、手动暂停跨重开保留、旧历史 fork 不继承授权、实际 GC 删除 orphan 后目标/用量仍可读，以及显式 resume 原子准入后重开仍是同一 Accepted Run、没有第二发生项。本 Goal 增量未发现剩余已证实的新行为阻断；独立恢复探针暴露的既有能力缺口如下保留。
+- **明确保留的既有恢复缺口**：RequestPrepared 已持久但 ModelDispatched 尚未提交时崩溃，原 Catalog→Supervisor 重开入口会因 unresolved gate 安全停在 Waiting，不发生 provider 请求，也不伪造用量/完成。独立探针对 Goal 有/无均复现，基线已有同门控；这不是本次 Goal 新回归，但未满足完整“已准入未派发”恢复能力。紧接本阶段先闭合该原生恢复边界，再推进一般策略的提问/计划/进程观察。通用日历/事件和剩余领域仍未完成，实际 Host IPC、真实模型及平台证据仍按原边界保留，默认迁移交用户验收后执行。
+
 ## 2026-10-10 增量：原生显式 skill 输入与原版本消费
 
 - `/skill:name args` 从既有 Host 资源 owner 的完整已选列表选择，hidden skill 可由用户显式选择。语法沿锁定 SDK 的起始命令和首个 ASCII 空格，只对参数元数据 trim；原始 text/images 原样保存。Host 解析原 checkpoint 中已捕获的 SKILL.md，材料独立进入原 input-history ContentStore 对象，不伪造模型调用、ToolResult、system 或用户原文，不建立 activation registry/第二队列。

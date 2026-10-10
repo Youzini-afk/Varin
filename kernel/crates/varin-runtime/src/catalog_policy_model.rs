@@ -101,6 +101,7 @@ impl PolicyModelAdmissionReferences {
         expected.history_range = snapshot.view.binding.history_range.clone();
         expected.instruction_sources = instructions.clone();
         expected.memory_checkpoint = snapshot.view.binding.memory_checkpoint.clone();
+        expected.goal = snapshot.view.binding.goal.clone();
         if expected != snapshot.view.binding
             || capability.status != PolicyModelStatus::Available
             || capability.purpose != "planning"
@@ -286,6 +287,8 @@ impl Catalog {
                 .prepare_policy_model_read(run_id, epoch)?
                 .ok_or_else(|| RuntimeError::Conflict("planning action superseded".into()));
         }
+        goals::check_dispatch(&self.db,run_id,snapshot.view.binding.goal.as_ref())?;
+        if snapshot.view.binding.goal != boundary.goal {return Err(RuntimeError::GoalChanged);}
         if run.cancel_requested
             || boundary != &self.policy_boundary(run_id, epoch)?
             || action_id != &format!("{run_id}:policy:{}", boundary.id)
@@ -314,6 +317,7 @@ impl Catalog {
         }
         // The caller retains publication ownership until this reference is committed.
         let result = PolicyModelResult {
+            goal:None,
             dispatch: PolicyModelDispatch::Prepared,
             request_ref: reference,
             original_ref: None,
@@ -341,6 +345,7 @@ impl Catalog {
             call_completion: None,
         };
         let tx = self.db.transaction()?;
+        goals::check_dispatch(&tx,run_id,snapshot.view.binding.goal.as_ref())?;
         if super::inputs::has_boundary_inputs(&tx, run_id)? {
             return Err(RuntimeError::InputPending);
         }
@@ -469,6 +474,10 @@ impl Catalog {
                 "planning dispatch boundary changed".into(),
             ));
         }
+        let mut result=model_result(&op)?;
+        result.goal=goals::check_dispatch(&tx,run_id,snapshot.view.binding.goal.as_ref())?;
+        if let Some(goal)=&result.goal{goals::dispatched(&tx,goal)?;}
+        op.result=Some(OperationResultMetadata::Control{value:serde_json::to_value(result)?});
         put(&tx, "operations", action, &op)?;
         super::memory::record_deliveries(&tx, deliveries, &run, action, DeliveryState::Sent)?;
         event(
@@ -585,6 +594,7 @@ impl Catalog {
         });
         op.revision += 1;
         let tx = self.db.transaction()?;
+        if let Some(receipt)=receipt{goals::measured(&tx,model_result(&op)?.goal.as_ref(),&receipt.usage)?;}
         put(&tx, "operations", action, &op)?;
         if receipt.is_some_and(|receipt| receipt.usable) {
             super::memory::record_deliveries(

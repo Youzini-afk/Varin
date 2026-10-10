@@ -163,7 +163,7 @@ impl Fixture {
                     history_range: range.clone(),
                 },
                 binding: RequestBinding {
-                    resource_activations: Vec::new(),
+                    goal: None, resource_activations: Vec::new(),
                     resource_checkpoint_id: None,
                     connection_identity: launch.connection_identity.clone(),
                     provider_family: launch.provider_family.clone(),
@@ -333,7 +333,7 @@ impl Fixture {
                     history_range: range.clone(),
                 },
                 binding: RequestBinding {
-                    resource_activations: Vec::new(),
+                    goal: None, resource_activations: Vec::new(),
                     resource_checkpoint_id: None,
                     connection_identity: self.launch.connection_identity.clone(),
                     provider_family: self.launch.provider_family.clone(),
