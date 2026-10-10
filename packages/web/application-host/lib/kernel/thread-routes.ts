@@ -42,6 +42,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'child/report': ['runtime', 'threadId', 'branchId', 'operationId', 'itemId', 'offset', 'maxBytes'],
     'child/list': ['runtime', 'threadId', 'branchId'], 'child/cancel': ['runtime', 'threadId', 'branchId', 'operationId'],
     'child/wait/cancel': ['runtime', 'threadId', 'branchId', 'waitId'], 'tree/cancel': ['runtime', 'threadId', 'branchId'],
+    'resources/refresh': ['runtime', 'threadId', 'branchId', 'expectedRevision', 'instructionDirectories', 'supportingFiles'],
     'followup/register': ['runtime', 'threadId', 'branchId', 'key', 'runId', 'operationId'],
     'followup/list': ['runtime', 'threadId', 'branchId'],
     'followup/control': ['runtime', 'threadId', 'branchId', 'followupId', 'expectedRevision', 'action'],
@@ -92,6 +93,24 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('child/cancel', body => adapter.cancelChild(identity(body), text(body.operationId)));
   post('child/wait/cancel', body => adapter.cancelChildWait(identity(body), text(body.waitId)));
   post('tree/cancel', async body => { await adapter.cancelTree(identity(body)); return {}; });
+  post('resources/refresh', (body, signal) => {
+    let instructionDirectories: string[] | undefined;
+    if (body.instructionDirectories !== undefined) {
+      if (!Array.isArray(body.instructionDirectories) || !body.instructionDirectories.every(path => typeof path === 'string')) throw new Error('Invalid instruction directories');
+      instructionDirectories = body.instructionDirectories;
+    }
+    let supportingFiles: Array<{ skillName: string; relativePath: string }> | undefined;
+    if (body.supportingFiles !== undefined) {
+      if (!Array.isArray(body.supportingFiles)) throw new Error('Invalid skill resource selection');
+      supportingFiles = body.supportingFiles.map(value => {
+        const file = object(value);
+        if (Object.keys(file).some(key => key !== 'skillName' && key !== 'relativePath')) throw new Error('Invalid skill resource field');
+        return { skillName: text(file.skillName), relativePath: text(file.relativePath) };
+      });
+    }
+    return adapter.refreshResources({ ...identity(body), expectedRevision: revision(body.expectedRevision),
+      ...(instructionDirectories ? { instructionDirectories } : {}), ...(supportingFiles ? { supportingFiles } : {}) }, signal);
+  });
   post('followup/register', (body, signal) => registerThreadFollowup(adapter,
     { ...identity(body), key: text(body.key), runId: text(body.runId), operationId: text(body.operationId) }, signal));
   post('followup/list', (body, signal) => listThreadFollowups(adapter, identity(body), signal));

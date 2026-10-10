@@ -1,4 +1,4 @@
-import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildWait, Followup, LiveRoot, ContextPersonalization, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
+import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, ChildWait, Followup, LiveRoot, ContextPersonalization, ContextResources, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
 
 import type { RunModelSelection, RunModelSelections } from '@varin/protocol';
 import type { FollowupControlAction } from '@varin/protocol';
@@ -49,6 +49,7 @@ export interface ContextJob {
   receipt: InputSubmitReceipt;
 }
 export interface ContextCheckpoint {
+  resources?: ContextResources;
   personalization?: ContextPersonalization;
   id: string;
   revision: number;
@@ -71,6 +72,16 @@ export interface ThreadCollaborationAPI {
   cancelChild(identity: ThreadIdentity, operationId: string): Promise<ChildTask>;
   cancelWait(identity: ThreadIdentity, waitId: string): Promise<ChildWait>;
   cancelTree(identity: ThreadIdentity): Promise<void>;
+}
+/** Prepare and atomically publish instructions and skills for this Thread branch. */
+export interface ThreadResourceRefresh extends ThreadIdentity {
+  expectedRevision: number;
+  instructionDirectories?: string[];
+  supportingFiles?: Array<{ skillName: string; relativePath: string }>;
+}
+export interface ThreadResourcesAPI {
+  /** Prepare a new resource snapshot; old in-flight requests keep their original version. */
+  refresh(input: ThreadResourceRefresh): Promise<ContextCheckpoint>;
 }
 /** One continuation of the original work after the exact native process has stopped. */
 export interface ThreadFollowupsAPI {
@@ -136,6 +147,7 @@ export interface ThreadsAPI {
   plan?: ThreadPlanAPI;
   collaboration?: ThreadCollaborationAPI;
   followups: ThreadFollowupsAPI;
+  resources: ThreadResourcesAPI;
   listModels(): Promise<ThreadModelInfo[]>;
   selectModel(input: ThreadIdentity & { runId: string; key: string; model: ThreadModel }): Promise<RunModelSelection>;
   list(): Promise<ThreadSummary[]>;

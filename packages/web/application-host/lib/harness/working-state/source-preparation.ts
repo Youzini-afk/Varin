@@ -2,7 +2,7 @@
 import type { createDocumentAuthority, DirtyBufferPublication } from '../../documents/authority.js';
 import type { CaptureToken } from '../../documents/mutation-authority.js';
 import { stateIdentity } from '../../recovery/journal-files.js';
-import type { ChildSourceProvenance } from '../../kernel/protocol.generated.js';
+import type { ChildSourceProvenance, SourceResourceCapture } from '../../kernel/protocol.generated.js';
 type CapturedSourceProvenance = Exclude<ChildSourceProvenance, { consistency: 'fixed-root' }>;
 import { createBranchWithDraftBaseline } from './draft-baseline.js';
 import type { RecoveryState, WorkingBranchRoot, WorkingStateRootStore, WorkingBranchCreateOptions } from './types.js';
@@ -20,6 +20,8 @@ export interface StableDirectoryCaptureInput {
   store: WorkingStateRootStore;
   directory: string;
   captureScopes: readonly string[];
+  /** Exact candidates, including observed absences; unlike scopes these do not recurse. */
+  capturePaths?: readonly string[];
   baseRef?: string;
   inspectInventory(directory: string, signal?: AbortSignal): Promise<BaselineInventory>;
   /** A caller may already have inspected Git for the immutable-baseline reuse path. */
@@ -50,10 +52,11 @@ export async function captureStableDirectoryBaseline(input: StableDirectoryCaptu
   };
   rejectGitlinks(inventory);
   const scopePaths = scopes.length ? [...new Set(await store.listCaptureScopePaths(directory, scopes, signal))].sort() : [];
+  const baselinePaths = inventory.kind === 'git' ? inventory.paths : await store.listWorkspaceBaselinePaths(directory, signal);
   const paths = inventory.kind === 'git'
-    ? withAncestorDirectories([...inventory.paths, ...scopePaths])
-    : [...new Set(await store.listWorkspaceBaselinePaths(directory, signal))].sort();
-  const identity = inventory.kind === 'git' ? gitBaselineFingerprint(inventory) : directoryBaselineFingerprint(paths);
+    ? withAncestorDirectories([...baselinePaths, ...scopePaths, ...input.capturePaths ?? []])
+    : [...new Set([...baselinePaths, ...input.capturePaths ?? []])].sort();
+  const identity = inventory.kind === 'git' ? gitBaselineFingerprint(inventory) : directoryBaselineFingerprint(baselinePaths);
   let captured: Record<string, RecoveryState> | undefined;
   try {
     const options = { ...(signal ? { signal } : {}), ...(inventory.kind === 'git' && inventory.indexModes ? { indexModes: inventory.indexModes } : {}) };
@@ -97,7 +100,15 @@ export async function captureStableDirectoryBaseline(input: StableDirectoryCaptu
 export type SourceCaptureDocuments = Pick<ReturnType<typeof createDocumentAuthority>,
   'beginDirtyStateBarrier' | 'beginCapture' | 'completeCapture' | 'inspectDirtyBuffers' | 'inspectMutation' | 'inspectWorkspace' | 'resolveWorkspace'>;
 
+export interface SourceResourceCapturePlan {
+  resources: SourceResourceCapture;
+  captureScopes: string[];
+  observedPaths: string[];
+  validate(states: Record<string, RecoveryState>, signal?: AbortSignal): Promise<void>;
+}
 export interface StableSourcePreparationOwners {
+  prepareResources?(input: { store: WorkingStateRootStore; directory: string; workspaceId: string;
+    captureWorkspaceId: string; branchId: string; signal?: AbortSignal }): Promise<SourceResourceCapturePlan>;
   documents: SourceCaptureDocuments;
   inspectInventory: StableDirectoryCaptureInput['inspectInventory'];
 }
@@ -153,7 +164,12 @@ export async function captureStableSourceBaseline(
       if (state.activeWriters.length) throw new SourceCaptureError('controlled writers are active');
     };
     await assertWriters();
-    captured = await captureStableDirectoryBaseline({ ...input, inspectInventory: owners.inspectInventory });
+    const resources = await owners.prepareResources?.({ store, directory: input.directory, workspaceId: input.workspaceId,
+      captureWorkspaceId, branchId: input.branchId, ...(signal ? { signal } : {}) });
+    captured = await captureStableDirectoryBaseline({ ...input,
+      captureScopes: [...input.captureScopes, ...resources?.captureScopes ?? []],
+      ...(resources ? { capturePaths: resources.observedPaths } : {}), inspectInventory: owners.inspectInventory });
+    await resources?.validate(captured.states, signal);
     await barrier.settle();
     const dirty = await documents.inspectDirtyBuffers(captureWorkspaceId);
     await assertWriters();
@@ -163,7 +179,10 @@ export async function captureStableSourceBaseline(
     signal?.throwIfAborted();
     const scopes = [...new Set(input.captureScopes)].sort();
     const provenance: CapturedSourceProvenance = { consistency: captured.consistency, contentMode: input.content.mode,
-      omittedDraftPaths: input.content.mode === 'saved-files' ? draftPaths(dirty) : [], captureScopes: scopes };
+      omittedDraftPaths: input.content.mode === 'saved-files' ? draftPaths(dirty) : [], captureScopes: scopes,
+      ...(resources ? { resources: { ...resources.resources, coverage: captured.consistency === 'stable-capture' ? { kind: 'complete' as const }
+        : { kind: 'selected' as const, paths: [...new Set([...Object.keys(captured.states), ...resources.observedPaths])].sort(),
+          subtrees: [...new Set([...scopes, ...resources.captureScopes])].filter(file => file === '.' || captured!.states[file]?.kind === 'directory').map(file => file === '.' ? '' : file).sort() } } } : {}) };
     const branch = await createCapturedSourceBranch(store, input.workspaceId, input.branchId, captured.states, captured.baseRef,
       scopes, input.content.mode === 'fixed-draft-baseline' ? input.content.draftBaselineId : undefined, { sourceProvenance: provenance });
     return { branch, provenance };

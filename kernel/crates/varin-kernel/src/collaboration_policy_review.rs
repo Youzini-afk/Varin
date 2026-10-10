@@ -304,6 +304,7 @@ fn execution_input(db: &Mutex<Catalog>, run: &str, policy: PolicyIdentity) -> Ex
     let launch = owner.launch_intent(run).unwrap().unwrap().selection;
     let run_record = owner.run(run).unwrap();
     let binding = RequestBinding {
+        resource_checkpoint_id: None,
         connection_identity: launch.connection_identity,
         provider_family: launch.provider_family,
         model: launch.model,
@@ -485,7 +486,7 @@ fn run_sequence(cancel_before_park: bool, pause_before_observation: bool) {
     source.revision = Some(0);
     let source_preparation=db.lock().unwrap().prepare_child_source(&operation,
         varin_runtime::catalog::collaboration::ChildSourcePin {pin_id:format!("child-source-pin:{operation}"),root:child.source.pin().unwrap().root.clone(),source:source.clone()},
-        source.clone(),varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot{root:child.source.pin().unwrap().root.clone()}).unwrap().load().unwrap();
+        source.clone(),varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot{root:child.source.pin().unwrap().root.clone(),resources:None}).unwrap().load().unwrap();
     db.lock().unwrap().attach_child_source(source_preparation).unwrap();
     let proposal = ContextProposal {
         key: format!("context:{operation}"),

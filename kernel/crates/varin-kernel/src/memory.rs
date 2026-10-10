@@ -242,6 +242,7 @@ impl ToolExecutor for MemoryTools {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Prepared {
+    resources: Option<varin_runtime::catalog::resources::ContextResources>,
     effective_system_prompt: String,
     instruction_sources: Vec<String>,
     memory_checkpoint: Option<String>,
@@ -292,6 +293,9 @@ impl ContextPreparation for Prepare {
             }
             let prepared: Prepared =
                 serde_json::from_value(reply["context"].clone()).map_err(error)?;
+            if prepared.resources != checkpoint.resources {
+                return Err(error("ordinary personalization synchronization changed resources"));
+            }
             let state: MemoryState =
                 serde_json::from_value(reply["state"].clone()).map_err(error)?;
             if cancel.is_cancelled() {

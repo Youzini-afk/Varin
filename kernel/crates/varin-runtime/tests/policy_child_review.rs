@@ -142,6 +142,7 @@ fn binding(f: &Fixture) -> RequestBinding {
             .unwrap()
             .selection;
     RequestBinding {
+        resource_checkpoint_id: None,
         connection_identity: launch.connection_identity,
         provider_family: launch.provider_family,
         model: launch.model,

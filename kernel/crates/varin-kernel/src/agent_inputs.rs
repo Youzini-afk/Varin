@@ -6,9 +6,14 @@ fn submit_input(
     params: Value,
     cancelled: Arc<AtomicBool>,
     order: Option<varin_runtime::resource_admission::ResourceReservation>,
+    receipt_only: bool,
 ) -> Result<Value, KernelError> {
     if cancelled.load(Ordering::Acquire) {
         return Err(KernelError::Cancelled);
+    }
+    let mut params = params;
+    if receipt_only {
+        if let Some(params) = params.as_object_mut() { params.remove("initialContext"); }
     }
     let p: InputSubmitParams = serde_json::from_value(params)?;
     validate_configuration(&p.configuration)?;
@@ -17,6 +22,7 @@ fn submit_input(
             "input idempotency key cannot be empty".into(),
         ));
     }
+    let initial_resources = p.initial_context.as_ref().and_then(|context| context.resources.clone());
     let initial_personalization = p
         .initial_context
         .as_ref()
@@ -48,7 +54,9 @@ fn submit_input(
         .lock()
         .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
         .prepare_submission(command, initial, initial_personalization)
-        .map_err(domain)?;
+        .map_err(domain)?
+        .with_resources(initial_resources)
+        .with_expected_context_checkpoint(p.expected_context_checkpoint);
     let plan_eligible = preparation.scope().is_some_and(|scope| {
         scope.mode == "agent"
             && scope.thread_role == "main"
@@ -143,6 +151,7 @@ fn submit_input(
                     );
                     tools = crate::process_wait::schemas(tools);
                     tools.push(crate::memory::schema(true));
+                    tools.push(crate::agent_resources::schema());
                     if plan_eligible {
                         tools.push(crate::plan::schema());
                     }
@@ -154,6 +163,11 @@ fn submit_input(
             })
         })
         .transpose()?;
+    if receipt_only {
+        let receipt = preparation.existing_receipt(&launch, inherit_source).map_err(domain)?;
+        if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+        return Ok(serde_json::to_value(receipt)?);
+    }
     let prepared = preparation.load(launch, inherit_source).map_err(domain)?;
     if cancelled.load(Ordering::Acquire) {
         return Err(KernelError::Cancelled);
@@ -215,7 +229,8 @@ pub(super) fn execute(
                 .map_err(domain)?;
             Ok(json!({"threadId":p.thread_id,"branchId":p.branch_id}))
         }
-        "runtime.input.submit" => submit_input(catalog, params, cancelled, order),
+        "runtime.input.submit" => submit_input(catalog, params, cancelled, order, false),
+        "runtime.input.receipt" => submit_input(catalog, params, cancelled, None, true),
         "runtime.child.prepare" => prepare_child_input(catalog, params, cancelled),
         "runtime.input.enqueue" => {
             let p: InputEnqueueParams = serde_json::from_value(params)?;
@@ -374,7 +389,8 @@ fn prepare_child_input(
         .lock()
         .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
         .capture_child_preparation(&p.operation_id, source, proposal, basis)
-        .map_err(domain)?;
+        .map_err(domain)?
+        .with_resources(p.context.resources);
     let prepared = preparation.load().map_err(domain)?;
     let result = {
         let mut owner = catalog
@@ -387,4 +403,39 @@ fn prepare_child_input(
         owner.capture_child_read(child)
     };
     Ok(serde_json::to_value(result.load().map_err(domain)?)?)
+}
+
+#[cfg(test)]
+mod resource_receipt_tests {
+    use super::*;
+    #[test]
+    fn receipt_read_reuses_submit_identity_without_consuming_context_or_admitting_a_run() {
+        let root=std::env::temp_dir().join(format!("varin-input-receipt-{}",uuid::Uuid::new_v4()));
+        let mut catalog=Catalog::open(&root).unwrap();catalog.create_thread("thread","branch").unwrap();
+        let catalog=Arc::new(Mutex::new(catalog));
+        let cancel=Arc::new(AtomicBool::new(false));
+        let mut input=json!({"key":"input","threadId":"thread","branchId":"branch","expectedHead":null,"input":"hello",
+            "configuration":{"providerFamily":"openai-responses","model":"fixture","endpoint":"https://fixture.invalid","credentialEnvironment":null,"allowAnonymous":true,"configurationGeneration":1},
+            "launch":{"source":null,"enabledTools":[],"inheritSource":false},
+            "initialContext":{"effectiveSystemPrompt":"old","instructionSources":[],"memoryCheckpoint":null,
+                "personalization":{"mode":"agent","threadRole":"main","revision":1,"configurationDigest":"fixture","memorySnapshot":{"revision":0,"memories":[]},
+                    "sessionId":"thread","projectId":null,"originalSections":[{"name":"system","content":"old"}],"instructionSources":[]}}});
+        assert_eq!(submit_input(catalog.clone(),input.clone(),cancel.clone(),None,true).unwrap(),Value::Null);
+        assert!(catalog.lock().unwrap().head("branch").unwrap().is_none());
+        let receipt=submit_input(catalog.clone(),input.clone(),cancel.clone(),None,false).unwrap();
+        input["initialContext"]=json!("not a prepared context");
+        assert_eq!(submit_input(catalog.clone(),input.clone(),cancel.clone(),None,true).unwrap(),receipt);
+        input.as_object_mut().unwrap().remove("initialContext");
+        assert_eq!(submit_input(catalog.clone(),input.clone(),cancel.clone(),None,true).unwrap(),receipt);
+        let mut different=input.clone();different["input"]=json!("changed command");
+        assert!(submit_input(catalog.clone(),different,cancel.clone(),None,true).is_err());
+        let mut different=input.clone();different["launch"]["source"]=json!({"mode":"fixed_branch","workspaceId":"workspace","executionWorkspaceId":"workspace","branchId":"source","revision":1,"liveRoot":null});
+        assert!(submit_input(catalog.clone(),different,cancel.clone(),None,true).is_err());
+        input["key"]=json!("not-yet-accepted");
+        assert_eq!(submit_input(catalog.clone(),input,cancel,None,true).unwrap(),Value::Null);
+        let sql=rusqlite::Connection::open(root.join("conversation.sqlite")).unwrap();
+        assert_eq!(sql.query_row("SELECT count(*) FROM runs",[],|row|row.get::<_,i64>(0)).unwrap(),1);
+        assert_eq!(sql.query_row("SELECT count(*) FROM commands",[],|row|row.get::<_,i64>(0)).unwrap(),1);
+        drop(sql);drop(catalog);std::fs::remove_dir_all(root).unwrap();
+    }
 }

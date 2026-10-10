@@ -120,6 +120,7 @@ fn combined(ending: Ending) {
             run_id: receipt.run_id,
             owner_generation: db.epoch(),
             binding: RequestBinding {
+                resource_checkpoint_id: None,
                 connection_identity: "review".into(),
                 provider_family: "review".into(),
                 model: "review".into(),
@@ -330,6 +331,7 @@ fn combined(ending: Ending) {
         arguments: json!({"action":"read"}),
     };
     let frozen = FrozenToolContext {
+        resource_checkpoint_id: None,
         run_id: input.run_id.clone(),
         origin: context.origin.clone(),
         tool_schema_generation: 1,
@@ -355,6 +357,7 @@ fn combined(ending: Ending) {
         arguments: json!({"action":"read"}),
     };
     let plan_frozen = FrozenToolContext {
+        resource_checkpoint_id: None,
         tools: Arc::new(vec![crate::plan::schema()]),
         ..frozen.clone()
     };

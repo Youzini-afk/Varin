@@ -168,6 +168,7 @@ fn snapshot(run: &str, head: &str, id: &str, projection: ContextProjection) -> R
             history_range: range.clone(),
         },
         binding: RequestBinding {
+            resource_checkpoint_id: None,
             connection_identity: "review-provider".into(),
             provider_family: "openai-responses".into(),
             model: "fixture".into(),

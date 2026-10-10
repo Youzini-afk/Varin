@@ -423,7 +423,7 @@ impl Catalog {
             submissions::SubmissionOrigin::Continuation { occurrence_id, .. } => format!("continuation-input:{occurrence_id}"),
             _ => child_operation.map(|id| format!("child-input:{id}")).unwrap_or_else(id),
         };
-        let run_id = id();
+        let run_id = prepared.run_id.clone();
         let history = HistoryItem {
             id: input_id.clone(),
             thread_id: thread.clone(),
@@ -1611,6 +1611,9 @@ pub mod context_jobs;
 
 #[path = "catalog_questions.rs"]
 pub mod questions;
+
+#[path = "catalog_resources.rs"]
+pub mod resources;
 
 #[path = "catalog_personalization.rs"]
 pub mod personalization;

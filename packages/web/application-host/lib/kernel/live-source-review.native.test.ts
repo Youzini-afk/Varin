@@ -1,3 +1,4 @@
+import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createMemoryOwner } from './memory-owner.js';
 import { createLiveSourceOwner } from './live-source.js';
 import { createThreadContext } from './thread-context.js';
@@ -61,9 +62,10 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const storage = new KernelStorageAdapter({ client: kernel, hostId: 'live-source-review', storageRoot: root, resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
   const liveSources = createLiveSourceOwner({ documents, kernel });
-  const prepare = createThreadSourcePreparer({ documents, workingStates, liveSources });
+  const resources = resourceScopeFixture(root, workingStates, documents, liveSources.validate);
+  const prepare = createThreadSourcePreparer({ documents, workingStates, liveSources, prepareResources: resources.prepareSourceCapture });
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }) });
-  const prepareContext = createThreadContext({ personalization, workingStates, liveSource: { documents, validate: liveSources.validate }, projectForWorkspace: async () => 'selected-project' });
+  const prepareContext = createThreadContext({ personalization, resources, projectForWorkspace: async () => 'selected-project' });
   kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
   let closed = false;
   const close = async () => { if (closed) return; closed = true; await storage.dispose(); await documents.dispose(); await kernel.close(); };
@@ -185,7 +187,8 @@ it('freezes actual Documents AGENTS revision at first context while live reads a
   const snapshot = await f.api.snapshot(identity);
   const frozen = snapshot.context.checkpoint!;
   expect(JSON.stringify(system(f.requests[0]!.body))).toContain('AT FIRST ADMISSION');
-  expect(frozen.proposal.instruction_sources.some(value => value.endsWith(`AGENTS.md:${document.revision}`))).toBe(true);
+  expect(frozen.resources?.snapshot.instructions.some(entry => entry.reference.path === 'AGENTS.md' && entry.reference.version === document.revision)).toBe(true);
+  expect(frozen.proposal.instruction_sources).toContain(frozen.resources!.snapshot.id);
   expect(outputs[0]).toContain('AT FIRST ADMISSION');
   await fs.writeFile(path.join(f.workspace, 'AGENTS.md'), 'LATER LIVE FILE CONTENT');
   const second = await f.api.submit({ ...identity, key: 'second', expectedHead: snapshot.historyPage.head, text: 'read again', model });

@@ -1,3 +1,4 @@
+import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createMemoryOwner, type MemoryQuery } from './memory-owner.js';
 import { createThreadContext } from './thread-context.js';
@@ -60,9 +61,10 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const documents = createDocumentAuthority({ hostId: 'memory-review', dataDir: path.join(root, 'documents'), isAllowedRoot: async () => true, isTrusted: async () => true });
   const storage = new KernelStorageAdapter({ client: kernel, hostId: 'memory-review', storageRoot: root, resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
-  const prepare = createThreadSourcePreparer({ documents, workingStates });
+  const resources = resourceScopeFixture(root, workingStates, documents);
+  const prepare = createThreadSourcePreparer({ documents, workingStates, prepareResources: resources.prepareSourceCapture });
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }) });
-  const prepareContext = createThreadContext({ personalization, workingStates, projectForWorkspace: async () => 'selected-project' });
+  const prepareContext = createThreadContext({ personalization, resources, projectForWorkspace: async () => 'selected-project' });
   const memoryQueries: MemoryQuery[] = [];
   const memoryControl = { synchronizeFailure: undefined as 'reject' | 'throw' | undefined, beforeSynchronize: undefined as (() => Promise<void>) | undefined, dropMutationReply: false, afterMutation: undefined as (() => Promise<void>) | undefined };
   const memoryOwner = createMemoryOwner({ personalization, prepareContext });

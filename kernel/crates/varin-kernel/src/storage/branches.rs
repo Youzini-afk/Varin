@@ -718,15 +718,15 @@ impl Storage {
         let entries = if let Some(paths) = requested {
             let mut selected = Vec::new();
             for path in paths.iter().filter_map(Value::as_str) {
-                let canonical = Self::validate_path(path)?.join("/");
+                let canonical = if path.is_empty() { String::new() } else { Self::validate_path(path)?.join("/") };
                 if let Some(scopes) = scopes.as_ref() {
-                    if !path_allowed_scopes(scopes, &canonical) {
+                    if !path_metadata_allowed_scopes(scopes, &canonical) {
                         return Err(KernelError::Authorization(format!(
                             "path is outside grant scope: {canonical}"
                         )));
                     }
                 }
-                if let Some(state) = self.root_get(&root, &canonical)? {
+                if let Some(state) = self.root_get(&root, &canonical)?.or_else(|| canonical.is_empty().then_some(PathState::Directory{mode:None})) {
                     selected.push(json!({"path": canonical, "state": state}));
                 }
             }
@@ -1435,16 +1435,16 @@ impl Storage {
         let entries = if let Some(paths) = params.get("paths").and_then(Value::as_array) {
             let mut selected = Vec::new();
             for path in paths.iter().filter_map(Value::as_str) {
-                let canonical = Self::validate_path(path)?.join("/");
+                let canonical = if path.is_empty() { String::new() } else { Self::validate_path(path)?.join("/") };
                 if scopes
                     .as_ref()
-                    .is_some_and(|scopes| !path_allowed_scopes(scopes, &canonical))
+                    .is_some_and(|scopes| !path_metadata_allowed_scopes(scopes, &canonical))
                 {
                     return Err(KernelError::Authorization(format!(
                         "path is outside grant scope: {canonical}"
                     )));
                 }
-                if let Some(state) = self.root_get(&root, &canonical)? {
+                if let Some(state) = self.root_get(&root, &canonical)?.or_else(|| canonical.is_empty().then_some(PathState::Directory{mode:None})) {
                     selected.push(json!({"path": canonical, "state": state}));
                 }
             }

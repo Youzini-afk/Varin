@@ -495,6 +495,7 @@ mod tests {
             arguments: json!({}),
         };
         let context = FrozenToolContext {
+            resource_checkpoint_id: None,
             run_id: "run".into(),
             origin: ToolOrigin::ModelStep {
                 request_id: "request".into(),
@@ -520,6 +521,7 @@ mod tests {
         );
         let next_token = CancellationToken::default();
         let next_context = FrozenToolContext {
+            resource_checkpoint_id: None,
             tools: Arc::new(next.schemas().to_vec()),
             ..context.clone()
         };

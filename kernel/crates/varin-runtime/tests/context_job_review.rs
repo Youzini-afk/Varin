@@ -132,6 +132,7 @@ impl ModelProvider for Provider {
 }
 fn binding() -> RequestBinding {
     RequestBinding {
+        resource_checkpoint_id: None,
         connection_identity: "fixture".into(),
         provider_family: "fixture".into(),
         model: "summary-model".into(),

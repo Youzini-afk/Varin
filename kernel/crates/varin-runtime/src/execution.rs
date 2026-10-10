@@ -290,6 +290,7 @@ pub struct HistoryRange {
 /// No keys, tokens, or authorization headers belong in a request snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RequestBinding {
+    pub resource_checkpoint_id: Option<String>,
     #[serde(default)]
     pub connection_identity: String,
     pub provider_family: String,
@@ -678,6 +679,7 @@ impl ToolOrigin {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FrozenToolContext {
+    pub resource_checkpoint_id: Option<String>,
     pub run_id: String,
     pub origin: ToolOrigin,
     pub tool_schema_generation: u64,
@@ -973,6 +975,7 @@ pub enum ExecutionRecord {
 /// Never retain a transaction or lock after return. Error means no new work may be dispatched.
 #[derive(Debug, Clone)]
 pub struct ContextProjection {
+    pub resource_checkpoint_id: Option<String>,
     pub checkpoint_id: String,
     pub history: Vec<ConversationItem>,
     pub instruction_sources: Vec<String>,
@@ -1962,6 +1965,7 @@ impl<
                         history_cursor.as_deref(),
                     )? {
                         history = context.history;
+                        binding.resource_checkpoint_id = context.resource_checkpoint_id;
                         binding.instruction_sources = context.instruction_sources;
                         binding.memory_checkpoint = context.memory_checkpoint;
                     }
@@ -2381,6 +2385,7 @@ impl<
         tools: Option<Arc<dyn ToolExecutor>>,
     ) -> Result<Vec<ToolResult>, ExecutionError> {
         let frozen = FrozenToolContext {
+            resource_checkpoint_id: snapshot.view.binding.resource_checkpoint_id.clone(),
             run_id: input.run_id.clone(),
             origin: ToolOrigin::ModelStep {
                 request_id: snapshot.view.request_id.clone(),

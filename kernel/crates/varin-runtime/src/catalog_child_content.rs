@@ -64,7 +64,7 @@ impl ChildAdmissionPreparation {
             || launch.tools.iter().any(|tool| {
                 !matches!(
                     tool.name.as_str(),
-                    "file_read" | "file_list" | "file_search"
+                    "file_read" | "file_list" | "file_search" | "resource_read"
                 ) && !(self.input.profile=="isolated_write" && matches!(tool.name.as_str(),"file_write"|"file_edit"))
             })
         {

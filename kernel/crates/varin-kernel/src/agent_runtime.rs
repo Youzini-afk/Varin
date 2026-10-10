@@ -184,6 +184,7 @@ pub(crate) fn spawn(
     language_bridge: crate::language::LanguageBridge,
     memory_bridge: crate::host_query::OwnerChannel,
     context_bridge: crate::host_query::OwnerChannel,
+    resource_bridge: crate::host_query::OwnerChannel,
     plan_bridge: crate::plan_bridge::PlanBridge,
     retrieval_bridge: crate::retrieval::RetrievalBridge,
     policy_bridge: crate::policy::PolicyBridge,
@@ -521,6 +522,7 @@ pub(crate) fn spawn(
                             method,
                             "runtime.thread.create"
                                 | "runtime.input.submit"
+                                | "runtime.input.receipt"
                                 | "runtime.input.enqueue"
                                 | "runtime.input.edit"
                                 | "runtime.child.prepare"
@@ -747,6 +749,7 @@ pub(crate) fn spawn(
                             method,
                             "runtime.thread.create"
                                 | "runtime.input.submit"
+                                | "runtime.input.receipt"
                                 | "runtime.input.enqueue"
                                 | "runtime.input.edit"
                                 | "runtime.input.cancel"
@@ -1120,6 +1123,7 @@ pub(crate) fn spawn(
                                 retrieval: retrieval_bridge.clone(),
                                 memory: memory_bridge.clone(),
                                 context: context_bridge.clone(),
+                                resource: resource_bridge.clone(),
                                 plan: plan_bridge.clone(),
                                 policy: policy_bridge.clone(),
                                 models: run_models
@@ -1192,6 +1196,22 @@ pub(crate) fn spawn(
                             assembly.observe_completion(handle);
                             return Ok(receipt);
                         }
+                        if method == "runtime.resources.refresh" || method == "runtime.resources.snapshot" {
+                            let catalog = runtime.catalog();
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            let resource_method = method.to_owned();
+                            thread::spawn(move || {
+                                let result = crate::agent_resources::execute_rpc(catalog, &resource_method, params, cancelled);
+                                let response = match result { Ok(value) => response_ok(&response_id,value), Err(error) => response_error(&response_id,&error) };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
+                            });
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
                         if method == "runtime.context.refresh"
                             || method == "runtime.context.inspect"
                         {
@@ -1224,7 +1244,8 @@ pub(crate) fn spawn(
                                             p.context.memory_checkpoint.0,
                                             basis,
                                         )
-                                        .map_err(domain)?,
+                                        .map_err(domain)?
+                                        .require_resources(p.context.resources),
                                 )
                             } else {
                                 None
@@ -1928,7 +1949,7 @@ fn validate_configuration(configuration: &Value) -> Result<(), KernelError> {
     Ok(())
 }
 
-fn personalization_basis(
+pub(crate) fn personalization_basis(
     value: ContextPersonalization,
 ) -> Result<varin_runtime::catalog::personalization::PersonalizationBasis, KernelError> {
     Ok(

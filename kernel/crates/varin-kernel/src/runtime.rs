@@ -649,6 +649,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mcp_bridge = crate::host_tools::ToolBridge::new(response_tx.clone());
     let memory_bridge = crate::host_query::OwnerChannel::new("memory", response_tx.clone());
     let context_bridge = crate::host_query::OwnerChannel::new("context", response_tx.clone());
+    let resource_bridge = crate::host_query::OwnerChannel::new("resource", response_tx.clone());
     let plan_bridge = crate::plan_bridge::PlanBridge::new(response_tx.clone());
     let language_bridge = crate::language::LanguageBridge::new(response_tx.clone());
     let retrieval_bridge = crate::retrieval::RetrievalBridge::new(response_tx.clone());
@@ -807,6 +808,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         language_bridge.clone(),
         memory_bridge.clone(),
         context_bridge.clone(),
+        resource_bridge.clone(),
         plan_bridge.clone(),
         retrieval_bridge.clone(),
         policy_bridge.clone(),
@@ -827,6 +829,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let worker_language = language_bridge.clone();
     let worker_memory = memory_bridge.clone();
     let worker_context = context_bridge.clone();
+    let worker_resource = resource_bridge.clone();
     let worker_plan = plan_bridge.clone();
     let worker_retrieval = retrieval_bridge.clone();
     let worker_policy = policy_bridge.clone();
@@ -1130,6 +1133,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     worker_language.initialize(epoch);
                     worker_memory.initialize(epoch);
                     worker_context.initialize(epoch);
+                    worker_resource.initialize(epoch);
                     worker_plan.initialize(epoch);
                     worker_retrieval.initialize(epoch);
                     worker_policy.initialize(epoch);
@@ -1288,6 +1292,10 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         if request.get("kind").and_then(Value::as_str) == Some("plan-response") {
             plan_bridge.receive(request);
+            continue;
+        }
+        if request.get("kind").and_then(Value::as_str) == Some("resource-response") {
+            resource_bridge.receive(request);
             continue;
         }
         if request.get("kind").and_then(Value::as_str) == Some("context-response") {
@@ -1503,6 +1511,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     language_bridge.close();
     memory_bridge.close();
     context_bridge.close();
+    resource_bridge.close();
     plan_bridge.close();
     retrieval_bridge.close();
     policy_bridge.close();

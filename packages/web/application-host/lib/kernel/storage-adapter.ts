@@ -1,3 +1,4 @@
+import { parseSourceResourceCapture, type ResourceSourceReadInput, type ResourceSourceReadView } from "./thread-resource-scope.js";
 import { runKernelCompute } from "./compute-runner.js";
 import type { WorkingStateFileQuery, WorkingStateQueryOptions, WorkingStateQueryResult } from "../harness/working-state/query-contract.js";
 import { randomUUID, createHash } from "node:crypto";
@@ -22,6 +23,7 @@ import type {
   WorkingBranchRoot,
   WorkingBranchCreateOptions,
   WorkingSourcePreparation,
+  WorkingOriginalSource,
   WorkingResult,
   WorkingResultCandidate,
   PrepareWorkingResultCandidate,
@@ -174,15 +176,16 @@ const asRecord = (value: unknown): Record<string, unknown> => (
 
 const parseSourceProvenance = (value: unknown): ChildSourceProvenance => {
   const source = asRecord(value);
+  const resources = source.resources === undefined ? undefined : parseSourceResourceCapture(source.resources);
   if (source.consistency === "fixed-root" && typeof source.root === "string" && source.root) {
-    return { consistency: source.consistency, root: source.root };
+    return { consistency: source.consistency, root: source.root, ...(resources ? { resources } : {}) };
   }
   if ((source.consistency === "stable-capture" || source.consistency === "git-base-with-overlay")
     && (source.contentMode === "saved-files" || source.contentMode === "fixed-draft-baseline")
     && Array.isArray(source.captureScopes) && source.captureScopes.every((item): item is string => typeof item === "string")
     && Array.isArray(source.omittedDraftPaths) && source.omittedDraftPaths.every((item): item is string => typeof item === "string")) {
     return { consistency: source.consistency, contentMode: source.contentMode,
-      captureScopes: [...source.captureScopes], omittedDraftPaths: [...source.omittedDraftPaths] };
+      captureScopes: [...source.captureScopes], omittedDraftPaths: [...source.omittedDraftPaths], ...(resources ? { resources } : {}) };
   }
   throw new Error("Working source provenance body is malformed");
 };
@@ -923,26 +926,26 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     };
   }
 
-  async readSourcePreparation(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingSourcePreparation | null> {
+  async readOriginalSource(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingOriginalSource | null> {
     const operation = await this.context.client.getOperation(`branch-create:${branchId}`, options?.signal);
     if (operation === null) {
-      if (await this.getBranchRoot(branchId, options)) throw new Error("Working source branch has no preparation receipt");
       return null;
     }
     if (operation.kind !== "branch.create" || operation.state !== "committed") {
       throw new Error("Working source preparation is not committed");
     }
     const receipt = asRecord(operation.result);
+    if (receipt.branchId !== branchId || receipt.workspaceId !== this.context.identity.workspaceId
+      || typeof receipt.root !== "string" || !receipt.root || receipt.writeRevision !== 0 || receipt.headRevision !== 0) {
+      throw new Error("Working source preparation receipt has inconsistent provenance");
+    }
+    if (receipt.sourceProvenance === undefined) return null;
     const reference = asRecord(receipt.sourceProvenance);
     if (receipt.branchId !== branchId || receipt.workspaceId !== this.context.identity.workspaceId
       || typeof receipt.root !== "string" || !receipt.root || receipt.writeRevision !== 0 || receipt.headRevision !== 0
       || typeof reference.objectHash !== "string" || !reference.objectHash
       || reference.recordId !== `working-source:${branchId}` || reference.slot !== "source-provenance") {
       throw new Error("Working source preparation receipt has inconsistent provenance");
-    }
-    const branch = await this.getBranchRoot(branchId, options);
-    if (!branch || branch.root !== receipt.root || branch.baseRoot !== receipt.root || branch.writeRevision !== 0 || branch.headRevision !== 0) {
-      throw new Error("Working source branch changed after preparation");
     }
     const chunks: Buffer[] = [];
     let offset = 0;
@@ -955,11 +958,28 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       offset = slice.nextOffset;
     }
     const provenance = parseSourceProvenance(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-    if (provenance.consistency === "fixed-root" ? provenance.root !== branch.root
-      : JSON.stringify(provenance.captureScopes) !== JSON.stringify(branch.captureScopes)) {
+    if (provenance.consistency === "fixed-root" && provenance.root !== receipt.root) {
       throw new Error("Working source provenance differs from its prepared branch");
     }
-    return { branch, provenance };
+    return { root: receipt.root, provenance };
+  }
+
+
+  async readSourcePreparation(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingSourcePreparation | null> {
+    const original = await this.readOriginalSource(branchId, options);
+    const branch = await this.getBranchRoot(branchId, options);
+    if (!original) {
+      if (branch) throw new Error("Working source branch has no preparation receipt");
+      return null;
+    }
+    if (!branch || branch.root !== original.root || branch.baseRoot !== original.root || branch.writeRevision !== 0 || branch.headRevision !== 0) {
+      throw new Error("Working source branch changed after preparation");
+    }
+    if (original.provenance.consistency !== "fixed-root"
+      && JSON.stringify(original.provenance.captureScopes) !== JSON.stringify(branch.captureScopes)) {
+      throw new Error("Working source provenance differs from its prepared branch");
+    }
+    return { branch, provenance: original.provenance };
   }
 
   async createBranch(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, baseRef?: string, draftBasePaths: string[] = [], captureScopes: string[] = [], options?: WorkingBranchCreateOptions): Promise<WorkingBranchRoot> {
@@ -1031,7 +1051,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     }
   }
 
-  async createBranchFromPin(workspaceId: string, branchId: string, pin: WorkingStatePin, parentRef: string, draftBaselineId?: string | null, captureScopes: string[] = []): Promise<WorkingBranchRoot> {
+  async createBranchFromPin(workspaceId: string, branchId: string, pin: WorkingStatePin, parentRef: string, draftBaselineId?: string | null, captureScopes: string[] = [], options?: WorkingBranchCreateOptions): Promise<WorkingBranchRoot> {
     if (pin.workspaceId !== workspaceId) throw new Error("Parent working-state pin belongs to another workspace");
     this.assertPinForBranch(pin.branchId, pin);
     const draft = draftBaselineId ? await this.getDraftBaseline(draftBaselineId) : null;
@@ -1046,7 +1066,11 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     for (const entry of parentEntries?.entries ?? []) if (directDraftPaths.some((file) => entry.path.startsWith(`${file}/`))) draftClosure.add(entry.path);
     const normalizedDraftPaths = [...draftClosure].sort();
     const normalizedCaptureScopes = [...new Set(captureScopes.map(normalize))].sort();
-    const created = await this.context.client.createBranch({
+    const provenanceUpload = options?.sourceProvenance
+      ? await this.context.client.putBlob(Buffer.from(JSON.stringify(parseSourceProvenance(options.sourceProvenance)), "utf8"), `source-provenance:${branchId}:${randomUUID()}`)
+      : undefined;
+    let created: Record<string, unknown>;
+    try { created = await this.context.client.createBranch({
       operationId: `branch-create:${branchId}`,
       branchId,
       workspaceId,
@@ -1055,7 +1079,12 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       parentRef,
       draftBasePaths: normalizedDraftPaths,
       captureScopes: normalizedCaptureScopes,
-    });
+      ...(provenanceUpload ? { sourceProvenance: { objectHash: provenanceUpload.hash, ownerId: provenanceUpload.ownerId } } : {}),
+    }); } catch (error) {
+      if (provenanceUpload) await this.context.client.releaseBlob(provenanceUpload.ownerId).catch(() => undefined);
+      throw error;
+    }
+    if (created.created !== true && provenanceUpload) await this.context.client.releaseBlob(provenanceUpload.ownerId);
     try {
       if (created.created === true && draft && directDraftPaths.length > 0) {
         const committed = await this.commitVirtualWrites(branchId, Number(created.writeRevision ?? 0), draft.pathStates);
@@ -1889,6 +1918,72 @@ export class KernelStorageAdapter {
     return this.contextUsingGrant(input.grant, { authorityId: this.options.hostId,
       canonicalRoot: "", filesystemProfile: process.platform === "win32" ? "windows-local" : `${process.platform}-local`,
       workspaceId: input.owningWorkspaceId }, undefined, true);
+  }
+
+  /** A frozen Context resource read never receives source capture, recovery or file-effect authority. */
+  async withResourceRead<T>(input: ResourceSourceReadInput, consume: (view: ResourceSourceReadView) => Promise<T>): Promise<T> {
+    const { source, signal } = input;
+    signal?.throwIfAborted();
+    if (!input.paths.length) throw new Error("Resource read requires an exact admitted path scope");
+    const paths = new Set(input.paths.map(value => normalizeViewPath(value)));
+    type Lease = { grant: KernelGrantHandle; pin?: WorkingStatePin; store?: KernelWorkingStateRootStore };
+    const leases: Lease[] = [];
+    const open = async () => {
+      signal?.throwIfAborted();
+      const grant = await this.client.issueGrant({ grantId: `resource-read:${randomUUID()}`,
+        threadId: input.identity.threadId, ...(input.runId ? { runId: input.runId } : {}),
+        owningWorkspace: source.workspaceId, executionWorkspace: source.executionWorkspaceId,
+        capabilities: ["storage.read"], pathScopes: [...paths] });
+      const lease: Lease = { grant }; leases.push(lease);
+      const store = new KernelWorkingStateRootStore(await this.contextFromBranchGrant({ grant,
+        owningWorkspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId }));
+      const pin = await store.pinBranch(source.branchId, { revision: source.revision, ...(signal ? { signal } : {}) });
+      lease.store = store; lease.pin = pin;
+      return { grant, store, pin };
+    };
+    let pending = Promise.resolve();
+    const release = async () => {
+      await pending.catch(() => undefined);
+      const failures: unknown[] = [];
+      for (const lease of leases.reverse()) {
+        try { await lease.pin?.release(); } catch (error) { failures.push(error); }
+        try { await this.client.revokeGrant(lease.grant.grantId); } catch (error) { failures.push(error); }
+      }
+      if (failures.length) throw new AggregateError(failures, "Resource read admission could not be completely released");
+    };
+    try {
+      let current = await open();
+      const pin = current.pin;
+      const original = await current.store.readOriginalSource(source.branchId, signal ? { signal } : {});
+      const admitSymlinkTarget = (target: string): Promise<void> => {
+        const next = pending.then(async () => {
+          // The original resolver supplies only a final context candidate, never its parent directory.
+          const relative = normalize(target);
+          if (paths.has(relative)) return;
+          paths.add(relative);
+          const derived = await open();
+          if (derived.pin.root !== pin.root || derived.pin.revision !== pin.revision) throw new Error("Resource scope derivation changed its original source root");
+          current = derived;
+        });
+        pending = next;
+        return next;
+      };
+      const store: ResourceSourceReadView["store"] = {
+        readPath: (branchId, target, options) => current.store.readPath(branchId, target, { ...options, pin: current.pin }),
+        listPaths: (branchId, roots, options) => current.store.listPaths(branchId, roots, { ...options, pin: current.pin }),
+        readContent: (entry, options) => {
+          const content = entry.contentSource;
+          const lease = content?.kind === "pin" ? leases.find(lease => lease.pin?.pinId === content.pinId) : undefined;
+          if (!lease?.store) throw new Error("Resource content has no admitted original pin");
+          return lease.store.readContent(entry, options);
+        },
+      };
+      signal?.throwIfAborted();
+      const result = await consume({ pin, original, store, admitSymlinkTarget });
+      await pending;
+      signal?.throwIfAborted();
+      return result;
+    } finally { await release(); }
   }
 
   private assertAdmittedWorkspace(input: KernelBranchStorageContextInput): void {

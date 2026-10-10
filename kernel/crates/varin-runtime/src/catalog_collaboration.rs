@@ -39,11 +39,11 @@ pub struct ChildSourcePin {
 #[serde(tag="consistency",deny_unknown_fields)]
 pub enum ChildSourceProvenance {
     #[serde(rename="fixed-root")]
-    FixedRoot {root:String},
+    FixedRoot {root:String, #[serde(skip_serializing_if="Option::is_none")] resources:Option<Value>},
     #[serde(rename="stable-capture")]
-    StableCapture {#[serde(rename="contentMode")] content_mode:ChildSourceContentMode,#[serde(rename="captureScopes")]capture_scopes:Vec<String>,#[serde(rename="omittedDraftPaths")]omitted_draft_paths:Vec<String>},
+    StableCapture {#[serde(rename="contentMode")] content_mode:ChildSourceContentMode,#[serde(rename="captureScopes")]capture_scopes:Vec<String>,#[serde(rename="omittedDraftPaths")]omitted_draft_paths:Vec<String>, #[serde(skip_serializing_if="Option::is_none")] resources:Option<Value>},
     #[serde(rename="git-base-with-overlay")]
-    GitBaseWithOverlay {#[serde(rename="contentMode")] content_mode:ChildSourceContentMode,#[serde(rename="captureScopes")]capture_scopes:Vec<String>,#[serde(rename="omittedDraftPaths")]omitted_draft_paths:Vec<String>},
+    GitBaseWithOverlay {#[serde(rename="contentMode")] content_mode:ChildSourceContentMode,#[serde(rename="captureScopes")]capture_scopes:Vec<String>,#[serde(rename="omittedDraftPaths")]omitted_draft_paths:Vec<String>, #[serde(skip_serializing_if="Option::is_none")] resources:Option<Value>},
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all="kebab-case")]
@@ -604,6 +604,7 @@ impl Catalog {
             source,
             proposal,
             basis,
+            resources: None,
             admitted,
             checkpoint,
             epoch: self.epoch,
@@ -649,6 +650,7 @@ pub struct ChildPreparation {
     source: launches::SourceSelection,
     proposal: context::ContextProposal,
     basis: personalization::PersonalizationBasis,
+    resources: Option<resources::ContextResources>,
     admitted: Option<context::CheckpointRead>,
     checkpoint: Option<String>,
     epoch: u64,
@@ -661,12 +663,17 @@ pub struct PreparedChild {
     receipt: Option<Receipt>,
 }
 impl ChildPreparation {
+    pub fn with_resources(mut self, resources: Option<resources::ContextResources>) -> Self {
+        self.resources = resources;
+        self
+    }
     pub fn load(self) -> Result<PreparedChild> {
         let Self {
             child,
             source,
             proposal,
             basis,
+            mut resources,
             admitted,
             checkpoint,
             epoch,
@@ -694,13 +701,16 @@ impl ChildPreparation {
                 "prepared source does not match child baseline identity".into(),
             ));
         }
-        if child.receipt.is_some() {
+        if let Some(receipt) = &child.receipt {
+            if let Some(resources) = resources.as_mut() {
+                resources.source = super::followups::normalized_source(resources.source.take(), &receipt.run_id);
+            }
             let admitted = admitted
                 .ok_or_else(|| {
                     RuntimeError::Invalid("child admission has no context checkpoint".into())
                 })?
                 .load()?;
-            if admitted.proposal != proposal || admitted.personalization.as_ref() != Some(&basis) {
+            if admitted.proposal != proposal || admitted.personalization.as_ref() != Some(&basis) || admitted.resources != resources {
                 return Err(RuntimeError::Conflict(
                     "child preparation retry changed its admitted context".into(),
                 ));
@@ -728,7 +738,9 @@ impl ChildPreparation {
             launch: Some(launch),
             inherit_source: false,
             initial: Some(proposal),
+            current: None,
             personalization: Some(basis),
+            resources,
             origin: submissions::SubmissionOrigin::Child {
                 operation_id: operation_id.clone(),
                 checkpoint,
@@ -1125,7 +1137,7 @@ impl ChildSourcePreparation {
             || self.pin.source.execution_workspace_id!=self.selection.execution_workspace_id || self.pin.root.is_empty() || self.pin.pin_id.is_empty()
         {return Err(RuntimeError::Conflict("prepared child source identity changed".into()));}
         if let ChildSourceRoot::Fixed{pin}=&handoff.root {
-            if pin.root!=self.pin.root || self.provenance!=(ChildSourceProvenance::FixedRoot{root:pin.root.clone()}) {
+            if pin.root!=self.pin.root || !matches!(&self.provenance,ChildSourceProvenance::FixedRoot{root,..} if root==&pin.root) {
                 return Err(RuntimeError::Conflict("fixed child source differs from its handoff".into()));
             }
         } else if matches!(self.provenance,ChildSourceProvenance::FixedRoot{..}) {

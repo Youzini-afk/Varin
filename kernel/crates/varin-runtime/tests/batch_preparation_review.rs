@@ -284,6 +284,7 @@ fn input(run: &str) -> ExecutionInput {
         run_id: run.into(),
         owner_generation: 1,
         binding: RequestBinding {
+            resource_checkpoint_id: None,
             connection_identity: "fixture".into(),
             provider_family: "fixture".into(),
             model: "fixture".into(),

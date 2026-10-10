@@ -260,9 +260,14 @@ impl Storage {
                 return Err(deny());
             }
         }
+        let parent_branch = match &handoff.root {
+            varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin } => pin.source.branch_id.as_deref(),
+            _ => None,
+        };
         if let Some(record) = params.get("recordId").and_then(Value::as_str) {
             if method != "storage.getBlob"
-                || record != format!("working-source:{branch}")
+                || (record != format!("working-source:{branch}")
+                    && !parent_branch.is_some_and(|parent| record == format!("working-source:{parent}")))
                 || params["slot"] != "source-provenance"
             {
                 return Err(deny());
@@ -271,6 +276,7 @@ impl Storage {
         if method == "operation.get"
             && params["operationId"] != id
             && params["operationId"] != format!("branch-create:{branch}")
+            && !parent_branch.is_some_and(|parent| params["operationId"] == format!("branch-create:{parent}"))
         {
             return Err(deny());
         }
@@ -560,6 +566,10 @@ mod handoff_tests {
     use super::*;
     use crate::tools::{FixedFileSource, ToolKind};
     use varin_runtime::{execution::ToolOrigin, SourceMode};
+    fn invoke(storage:&mut Storage, actor:&str, method:&str, params:Value)->Result<Value,KernelError>{
+        let (grant,params)=storage.authorize(Some(actor),"epoch","host","generation",method,&params)?;
+        storage.dispatch(method,&params,Some(actor),&grant)
+    }
     #[test]
     fn readonly_fixed_parent_dispatch_claim_only_authorizes_its_exact_private_source() {
         let root = std::env::temp_dir().join(format!("varin-handoff-scope-{}", Uuid::new_v4()));
@@ -567,14 +577,19 @@ mod handoff_tests {
         let identity = root.to_string_lossy().into_owned();
         storage.issue_grant(&json!({"grantId":"parent","hostGeneration":"generation","owningWorkspace":"workspace","executionWorkspace":"workspace","threadId":"parent-thread","runId":"parent-run","pathScopes":[""],"capabilities":["storage.read","storage.write"]}),"host","generation",&identity,"epoch").unwrap();
         let parent = storage.load_grant("parent").unwrap();
+        let text=r#"{"resources":{"skills":["captured-resource"]}}"#;
+        let upload=json!({"operationId":"provenance","streamId":"provenance","workspaceId":"workspace","byteLength":text.len()});
+        invoke(&mut storage,"parent","storage.putBlob.begin",upload.clone()).unwrap();
+        invoke(&mut storage,"parent","storage.putBlob.chunk",json!({"streamId":"provenance","sequence":0,"bytesBase64":BASE64.encode(text.as_bytes())})).unwrap();
+        let body=invoke(&mut storage,"parent","storage.putBlob.finish",upload).unwrap();
         for (method, params) in [
             (
                 "branch.create.begin",
-                json!({"operationId":"create","builderId":"create","workspaceId":"workspace","branchId":"fixed","draftBasePaths":[],"captureScopes":[]}),
+                json!({"operationId":"branch-create:fixed","builderId":"create","workspaceId":"workspace","branchId":"fixed","draftBasePaths":[],"captureScopes":[],"sourceProvenance":{"objectHash":body["hash"],"ownerId":body["ownerId"]}}),
             ),
             (
                 "branch.create.finish",
-                json!({"operationId":"create","builderId":"create"}),
+                json!({"operationId":"branch-create:fixed","builderId":"create"}),
             ),
         ] {
             let (grant, p) = storage
@@ -632,6 +647,17 @@ mod handoff_tests {
                 "epoch",
             )
             .unwrap();
+        let original=invoke(&mut storage,"claim","operation.get",json!({"operationId":"branch-create:fixed"})).unwrap();
+        assert_eq!(original["result"]["sourceProvenance"]["objectHash"],body["hash"]);
+        let bytes=invoke(&mut storage,"claim","storage.getBlob",json!({"hash":body["hash"],"recordId":"working-source:fixed","slot":"source-provenance"})).unwrap();
+        assert_eq!(bytes["bytesBase64"],BASE64.encode(text.as_bytes()));
+        for (method,params) in [
+            ("operation.get",json!({"operationId":"branch-create:other-parent"})),
+            ("storage.getBlob",json!({"hash":body["hash"],"recordId":"working-source:other-parent","slot":"source-provenance"})),
+            ("storage.getBlob",json!({"hash":body["hash"],"recordId":"working-source:fixed","slot":"other-slot"})),
+        ] {
+            assert!(invoke(&mut storage,"claim",method,params).is_err(),"must reject unrelated parent receipt/record/slot");
+        }
         let good = json!({"operationId":"branch-create:child-source:request:tool:dispatch","builderId":"child","workspaceId":"workspace","branchId":"child-source:request:tool:dispatch","baseRef":storage.branch("fixed").unwrap().head_root,"draftBasePaths":[],"captureScopes":[]});
         assert!(storage
             .authorize(

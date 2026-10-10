@@ -72,6 +72,23 @@ pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ResourceRefreshParams {
+    pub(crate) branch_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) context: InitialContext,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ResourceSnapshotParams {
+    pub(crate) run_id: String,
+    pub(crate) origin: varin_runtime::execution::ToolOrigin,
+    pub(crate) call_id: String,
+    pub(crate) resource_checkpoint_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FollowupRegisterParams {
     pub(crate) key: String,
     pub(crate) run_id: String,
@@ -359,6 +376,7 @@ pub(crate) struct ThreadCreateParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct InputSubmitParams {
+    pub(crate) expected_context_checkpoint: Option<String>,
     pub(crate) initial_context: Option<InitialContext>,
     pub(crate) launch: Option<SubmitLaunch>,
     pub(crate) key: String,
@@ -1507,6 +1525,16 @@ pub(crate) struct ChildWaitParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct InitialContext {
+    pub(crate) resources: Option<varin_runtime::catalog::resources::ContextResources>,
+    pub(crate) personalization: Option<ContextPersonalization>,
+    pub(crate) effective_system_prompt: String,
+    pub(crate) instruction_sources: Vec<String>,
+    pub(crate) memory_checkpoint: RequiredNullable<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct PlanForkCaptureParams {
     pub(crate) source_thread_id: String,
     pub(crate) source_branch_id: String,
@@ -1538,15 +1566,6 @@ pub(crate) struct CredentialScope {
     pub(crate) authority: String,
     pub(crate) account: String,
     pub(crate) generation: i64,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct InitialContext {
-    pub(crate) personalization: Option<ContextPersonalization>,
-    pub(crate) effective_system_prompt: String,
-    pub(crate) instruction_sources: Vec<String>,
-    pub(crate) memory_checkpoint: RequiredNullable<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1916,6 +1935,16 @@ pub(crate) struct KernelVerificationInputIdentity {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.resources.refresh" => {
+            serde_json::from_value::<ResourceRefreshParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.resources.snapshot" => {
+            serde_json::from_value::<ResourceSnapshotParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.followup.register" => {
             serde_json::from_value::<FollowupRegisterParams>(params.clone())
                 .map(|_| ())
@@ -2077,6 +2106,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.input.submit" => serde_json::from_value::<InputSubmitParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.input.receipt" => serde_json::from_value::<InputSubmitParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.run.scope" => serde_json::from_value::<RunParams>(params.clone())

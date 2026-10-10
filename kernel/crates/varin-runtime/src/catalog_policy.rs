@@ -255,11 +255,13 @@ impl Catalog {
             .optional()?;
         let previous =
             super::policy_body::latest_action(&self.db, run_id, true)?.map(|(op, _)| op.id);
+        let resource_checkpoint_id = self.capture_active_checkpoint(&run.branch_id)?.map(|checkpoint| checkpoint.id);
         let id = hex::encode(Sha256::digest(serde_json::to_vec(&(
             run_id,
             self.head(&run.branch_id)?,
             model,
             previous,
+            &resource_checkpoint_id,
             self.launch_metadata(run_id)?
                 .map(|l| l.policy_generation)
                 .unwrap_or(0),
@@ -267,7 +269,7 @@ impl Catalog {
         let source = self
             .launch_metadata(run_id)?
             .and_then(|launch| launch.selection.source);
-        Ok(PolicyBoundary { id, source })
+        Ok(PolicyBoundary { id, source, resource_checkpoint_id })
     }
     /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn policy_graph(&self, run_id: &str, epoch: u64) -> Result<Option<PolicyGraphState>> {

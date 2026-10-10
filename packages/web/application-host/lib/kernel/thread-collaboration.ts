@@ -178,9 +178,11 @@ export class ThreadCollaboration {
         if (!fixed.source.branch_id || fixed.source.revision === null) throw new Error('Fixed child source has incomplete identity');
         const pin = await store.openBranchHandoffPin(fixed.source.branch_id, fixed.pin_id,
           { root: fixed.root, revision: fixed.source.revision, writeRevision: fixed.source.revision }, signal);
-        const branch = await store.createBranchFromPin(workspace, sourceBranch, pin, `${fixed.source.branch_id}@${fixed.source.revision}`);
+        const original = await store.readOriginalSource(fixed.source.branch_id, { signal });
+        provenance = { consistency: 'fixed-root', root: fixed.root, ...(original?.provenance.resources ? { resources: original.provenance.resources } : {}) };
+        const branch = await store.createBranchFromPin(workspace, sourceBranch, pin, `${fixed.source.branch_id}@${fixed.source.revision}`,
+          undefined, [], { sourceProvenance: provenance });
         if (branch.baseRoot !== fixed.root) throw new Error('Child source root changed');
-        provenance = { consistency: 'fixed-root', root: fixed.root };
       } else {
         const restored = await store.readSourcePreparation(sourceBranch, { signal });
         if (restored) provenance = restored.provenance;

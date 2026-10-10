@@ -264,7 +264,7 @@ impl ToolExecutor for CollaborationTools {
                     launch.tools.retain(|tool| {
                         matches!(
                             tool.name.as_str(),
-                            "file_read" | "file_list" | "file_search"
+                            "file_read" | "file_list" | "file_search" | "resource_read"
                         )
                     });
                     if input.profile=="isolated_write" {

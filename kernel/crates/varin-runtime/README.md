@@ -79,6 +79,25 @@ writing Pi session files or the Host harness's existing execution records.
 The wire source remains `kernel/protocol/schema.json`; it generates the state enums and the
 Host request/response DTOs. Domain implementation types remain private to Rust.
 
+## Instruction and skill checkpoint binding
+
+`catalog_resources` retains the Host-selected `ContextResources` snapshot inside the ordinary immutable
+ContextCheckpoint object. Captured text has no second database or untracked content root. Catalog only
+captures short references and publishes prepared metadata; validation, prompt/body serialization and
+hydration run outside the owner. Model requests and policy nodes bind a `resource_checkpoint_id` alongside
+their existing context identity. Reading requires the actual Run/origin/call and selected checkpoint.
+
+Resource refresh is a separate compare-and-swap boundary. It preserves summary/history anchor, ordinary
+memory snapshot, personalization identity and composition while replacing resource sections/provenance.
+An explicit input source change prepares its new resource context and commits both in the original input
+transaction. Repeated accepted input keys return the original receipt without validating a newer candidate. The Host
+uses the same command/launch contract through read-only `runtime.input.receipt` before preparing new
+resources; it does not keep a second input deduplication map. Source replacement includes the checkpoint
+from which Host preparation started, so a refresh during that work cannot be silently overwritten.
+Fork and compaction retain the original resources; source provenance is not an inherited execution grant.
+The Host remains the only parser/selection owner. The kernel builtin uses its private resource channel,
+normal read-only tool lifecycle and cancellation/epoch fences; it does not expose arbitrary source selection.
+
 ## Run activity scope
 
 Each Run pins the context checkpoint present in its admission transaction, including queued
@@ -487,7 +506,7 @@ identity; their quoted source facts do not become instructions or fake ModelStep
 
 A successful explicit compaction atomically publishes its fixed candidate personalization together
 with the summary and system text. New notes do not advance the checkpoint CAS; explicit profile
-changes do. Context domain 3 is verified read-only before writable SQLite open, including table,
+changes do. Context domain 4 is verified read-only before writable SQLite open, including table,
 key and revision uniqueness contracts. Older or malformed formats are preserved and rejected.
 ## Isolated child tasks and fixed results
 
@@ -564,7 +583,7 @@ admission before committing only metadata.
 Collaboration domain version 2 is required by the read-only existing-catalog preflight. An older,
 missing or malformed domain is rejected before writable SQLite access or epoch advancement;
 there is no schema upgrade, fallback registry, or asset reset. New empty catalogs create the domain
-explicitly. Context scope uses the separate context domain version 3 contract.
+explicitly. Context scope uses the separate context domain version 4 contract.
 
 Child report metadata stores only references to the original child history bodies, plus a short
 runtime failure detail when relevant. Status/list and external receipts do not copy report text.

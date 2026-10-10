@@ -4,8 +4,8 @@ import type { ImageAttachment } from '@varin/protocol';
 import { threadInput } from './thread-images.js';
 import { listThreadFollowups } from './thread-followups.js';
 import { createHash } from 'node:crypto';
-import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadSubmit, ThreadSource, ThreadSnapshot, ThreadHistoryPage, ThreadCompact, ThreadContextState, ThreadPrepareSource, ThreadPreparedSource } from '@varin/application-client';
-import type { InputMode, InitialContext, ModelSessionConfiguration, CredentialScope, AgentRuntimeStreamEvent, PolicyResumeReceipt } from './protocol.generated.js';
+import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadSubmit, ThreadSource, ThreadSnapshot, ThreadHistoryPage, ThreadCompact, ThreadContextState, ThreadPrepareSource, ThreadPreparedSource, ThreadResourceRefresh } from '@varin/application-client';
+import type { InputMode, InitialContext, InputSubmitParams, ModelSessionConfiguration, CredentialScope, AgentRuntimeStreamEvent, PolicyResumeReceipt } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import { isAbortError, waitWithSignal } from '../cancellation.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
@@ -231,6 +231,22 @@ export class ThreadAdapter {
     return job;
   }
 
+  async refreshResources(input: ThreadResourceRefresh, signal?: AbortSignal) {
+    await this.requireIdentity(input);
+    if (!this.prepareContext?.refreshResources) throw new Error('Resource preparation is unavailable');
+    const checkpoint = await this.runtime.context(input.branchId, signal);
+    if (!checkpoint || checkpoint.revision !== input.expectedRevision) {
+      throw Object.assign(new Error('Resource checkpoint changed'), { code: 'thread-conflict' });
+    }
+    const context = await this.prepareContext.refreshResources(checkpoint, {
+      ...(input.instructionDirectories ? { instructionDirectories: input.instructionDirectories } : {}),
+      ...(input.supportingFiles ? { supportingFiles: input.supportingFiles } : {}),
+      ...(signal ? { signal } : {}),
+    });
+    signal?.throwIfAborted();
+    return this.runtime.refreshResources({ branchId: input.branchId, expectedRevision: input.expectedRevision, context }, signal);
+  }
+
   async context(identity: ThreadIdentity): Promise<ThreadContextState> {
     const [checkpoint, jobs] = await Promise.all([this.runtime.context(identity.branchId), this.runtime.contextJobs(identity.branchId)]);
     return { checkpoint, jobs: await Promise.all(jobs.map(async job => ({ job, run: await this.runtime.run(job.receipt.run_id) }))) };
@@ -273,32 +289,57 @@ export class ThreadAdapter {
     if (input.source) await this.admitSource(input.source, input);
     const model = await this.models.resolveModel(input.model);
     this.assertImagesSupported(input.images, model.configuration);
-    let initialContext: InitialContext | undefined;
-    if (this.prepareContext && !await this.runtime.context(input.branchId)) {
-      let source = input.source ?? null;
-      if (!source) {
-        const latest = thread.branches.find(branch => branch.branch_id === input.branchId)?.latest_run;
-        const previous = latest ? await this.runtime.launch(latest.id) : null;
-        const inherited = previous?.selection.source;
-        if (inherited) {
-          const base = { workspaceId: inherited.workspace_id, executionWorkspaceId: inherited.execution_workspace_id, tools: [] };
-          if (inherited.mode === 'live_root' && inherited.live_root) source = { ...base, mode: 'live_root', liveRoot: inherited.live_root };
-          else if (inherited.mode !== 'live_root' && inherited.branch_id && inherited.revision !== null) source = {
-            ...base, branchId: inherited.branch_id, revision: inherited.revision, mode: inherited.mode,
-          };
-        }
-      }
-      initialContext = await this.prepareContext.main(input, source);
-    }
-    // The same Rust transaction accepts input, initial context and source/credential/tool selection.
-    const receipt = await this.runtime.submit({ key: input.key, threadId: input.threadId, branchId: input.branchId,
+    const command: InputSubmitParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
       expectedHead: input.expectedHead, input: threadInput(input.text, input.images), configuration: model.configuration,
-      ...(initialContext ? { initialContext } : {}),
       launch: { inheritSource: input.source === undefined, source: input.source ? {
         workspaceId: input.source.workspaceId, executionWorkspaceId: input.source.executionWorkspaceId,
         branchId: input.source.branchId ?? null, revision: input.source.revision ?? null, mode: input.source.mode, liveRoot: input.source.liveRoot ?? null,
       } : null, enabledTools: input.source?.tools ?? [], credentialScope: await model.credentialOwner.scope() },
-    });
+    };
+    let initialContext: InitialContext | undefined;
+    const checkpoint = this.prepareContext ? await this.runtime.context(input.branchId) : null;
+    const preparesResources = this.prepareContext && (input.source !== undefined || !checkpoint);
+    if (preparesResources) {
+      // An accepted command owns its original receipt. A later malformed settings file must not
+      // make an uncertain reply depend on re-preparing a replacement resource generation.
+      const existing = await this.runtime.inputReceipt(command);
+      if (existing) {
+        void this.continueLaunch(existing.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
+        return existing;
+      }
+      try {
+        if (checkpoint && input.source) {
+          if (!this.prepareContext!.forSource) throw new Error('Resource source preparation is unavailable');
+          initialContext = await this.prepareContext!.forSource(checkpoint, input.source);
+          command.expectedContextCheckpoint = checkpoint.id;
+        } else if (!checkpoint) {
+          let source = input.source ?? null;
+          if (!source) {
+            const latest = thread.branches.find(branch => branch.branch_id === input.branchId)?.latest_run;
+            const previous = latest ? await this.runtime.launch(latest.id) : null;
+            const inherited = previous?.selection.source;
+            if (inherited) {
+              const base = { workspaceId: inherited.workspace_id, executionWorkspaceId: inherited.execution_workspace_id, tools: [] };
+              if (inherited.mode === 'live_root' && inherited.live_root) source = { ...base, mode: 'live_root', liveRoot: inherited.live_root };
+              else if (inherited.mode !== 'live_root' && inherited.branch_id && inherited.revision !== null) source = {
+                ...base, branchId: inherited.branch_id, revision: inherited.revision, mode: inherited.mode,
+              };
+            }
+          }
+          initialContext = await this.prepareContext!.main(input, source);
+        }
+      } catch (error) {
+        // Another identical request can finish after the first read. Only its authoritative,
+        // matching receipt recovers this failure; a miss leaves the preparation error visible.
+        const accepted = await this.runtime.inputReceipt(command);
+        if (!accepted) throw error;
+        void this.continueLaunch(accepted.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
+        return accepted;
+      }
+    }
+    // The same Rust transaction accepts input, a new or replaced resource context, and the
+    // explicit source/credential/tool selection. A competing checkpoint leaves all of them unchanged.
+    const receipt = await this.runtime.submit({ ...command, ...(initialContext ? { initialContext } : {}) });
     // The shared launch owner closes the initial context-refresh gap before preparation.
     void this.continueLaunch(receipt.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
     return receipt;

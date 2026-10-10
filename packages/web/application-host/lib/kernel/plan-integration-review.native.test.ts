@@ -1,3 +1,4 @@
+import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import express from 'express';
 import request from 'supertest';
 import { createServer, type ServerResponse } from 'node:http';
@@ -216,7 +217,7 @@ async function toolFixture(reply: (body: Record<string, unknown>, turn: number) 
   const storage = new KernelStorageAdapter({ client: f.kernel, hostId: 'plan-integration', storageRoot: f.root, resolveWorkspaceRoot: async () => f.root });
   cleanups.push(() => storage.dispose());
   const personalization = createAgentPersonalization({ client: f.kernel, context: async () => ({ bot: false }) });
-  const prepareContext = createThreadContext({ personalization, workingStates: createKernelWorkspaceWorkingStateAccess(storage), projectForWorkspace: async () => undefined });
+  const prepareContext = createThreadContext({ personalization, resources: resourceScopeFixture(f.root, createKernelWorkspaceWorkingStateAccess(storage)), projectForWorkspace: async () => undefined });
   f.scopeContext.prepare = identity => prepareContext.main(identity, null);
   f.kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
   const queries: PlanQuery[] = [];

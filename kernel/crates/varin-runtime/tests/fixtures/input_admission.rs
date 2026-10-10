@@ -203,7 +203,7 @@ impl InputAdmission for Catalog {
             let mut pin_source=source.clone();pin_source.mode=varin_runtime::SourceMode::FixedBranch;
             let prepared=self.prepare_child_source(operation,varin_runtime::catalog::collaboration::ChildSourcePin {
                 pin_id:format!("child-source-pin:{operation}"),root:root.clone(),source:pin_source},source.clone(),
-                varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot{root})?.load()?;
+                varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot{root,resources:None})?.load()?;
             self.attach_child_source(prepared)?;
         }
         let prepared = self
