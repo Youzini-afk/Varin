@@ -1,4 +1,4 @@
-import type { ChildCapabilityDescriptor, ChildDispatchCatalog, TreeCancelTarget, TreeCancellationReceipt } from './protocol.generated.js';
+import type { ChildCapabilityDescriptor, ChildDispatchCatalog, TreeCancelTarget, TreeCancellationReceipt, McpBinding, LiveMcpBinding } from './protocol.generated.js';
 import { savedSourceLaunch } from './source-launch.js';
 import type { PlanView, PlanForkCapture } from '@varin/protocol';
 import { randomUUID } from 'node:crypto';
@@ -8,9 +8,7 @@ import type { PolicyModelPreparer } from './policy-models.js';
 import { waitWithSignal } from '../cancellation.js';
 import type { AgentPolicyLease, AgentPolicyBinding, AgentPolicyArtifactBinding } from './agent-policy.js';
 import type {
-  HostToolLease,
-  HostToolBinding,
-  LiveHostToolBinding,
+  McpToolLease,
 } from './tool-bridge.js';
 import type {
   ExtensionToolPreparer,
@@ -18,7 +16,6 @@ import type {
   ExtensionToolLease,
 } from './extension-tool-owner.js';
 import type { LiveExtensionToolBinding } from './protocol.generated.js';
-import type { McpCompositionSelection } from '@varin/pi-host/mcp-authority';
 import { permissionService } from './permission-service.js';
 import type {
   ContextJob,
@@ -86,7 +83,9 @@ export interface McpPreparation {
   threadId: string;
   source: SourceLaunch | null;
   executionCwd?: string;
-  requiredBinding?: McpCompositionSelection;
+  requiredBinding?: McpBinding;
+  delegatedBinding?: McpBinding;
+  fixed?: boolean;
 }
 export interface RunPolicyScope { runId: string; threadId: string; projectId?: string }
 export interface RunPolicyPreparer {
@@ -98,10 +97,10 @@ interface PolicyObservation { scope: RunPolicyScope; controller: AbortController
 export type McpPreparer = (
   input: McpPreparation,
   signal?: AbortSignal,
-) => Promise<HostToolLease | undefined>;
+) => Promise<McpToolLease | undefined>;
 
 interface ToolCompositionState {
-  mcp: LiveHostToolBinding | undefined;
+  mcp: LiveMcpBinding | undefined;
   extensions: Map<string, LiveExtensionToolBinding>;
   scope?: ExtensionToolScope;
   controller: AbortController;
@@ -245,18 +244,15 @@ export class AgentRuntimeClient {
         );
       return [];
     }
-    if (await this.childForThread(run.thread_id, signal)) {
-      if (required.length)
-        throw new Error('Read-only child cannot acquire extension tools');
-      return [];
-    }
+    const child = await this.childForThread(run.thread_id, signal);
+    if (child && !required.length) return [];
     const admittedScope = await this.kernel.agentRuntimeRequest<
       RunContextScope | null,
       'runtime.run.scope'
     >('runtime.run.scope', { runId }, signal);
     const projectId = admittedScope?.projectId;
     const scope = await this.prepareExtensionOwner(
-      { runId, threadId: run.thread_id, ...(projectId ? { projectId } : {}) },
+      { runId, threadId: run.thread_id, ...(projectId ? { projectId } : {}), ...(child ? { fixed: true } : {}) },
       required,
       AbortSignal.any([signal, state.controller.signal]),
     );
@@ -284,6 +280,12 @@ export class AgentRuntimeClient {
           { runId, bindings: initial.map((e) => e.binding) },
           signal,
         );
+      if (child) {
+        // Original leases still enforce revocation. A frozen child does not subscribe to
+        // later routing candidates or turn them into additional admitted capabilities.
+        scope.start(async (_key, retained) => { retained?.lease.release(); });
+        return initial;
+      }
       scope.start(async (key, retained, revoked) => {
         if (state.closed) {
           retained?.lease.release();
@@ -898,17 +900,14 @@ export class AgentRuntimeClient {
     source: SourceLaunch | null,
     executionCwd?: string,
     signal?: AbortSignal,
-  ): Promise<HostToolBinding | undefined> {
+  ): Promise<McpBinding | undefined> {
     return this.withRunPreparation(runId, signal, async (signal) => {
       const existing = this.kernel.mcpBinding(runId);
       if (existing) return existing;
       const saved = await this.launch(runId, signal);
       const run = await this.run(runId, signal);
-      if (await this.childForThread(run.thread_id, signal)) {
-        if (saved?.selection.mcp_binding)
-          throw new Error('Read-only child cannot acquire MCP capabilities');
-        return undefined;
-      }
+      const child = await this.childForThread(run.thread_id, signal);
+      if (child && !saved?.selection.mcp_binding) return undefined;
       if (!this.prepareMcpOwner) {
         if (saved?.selection.mcp_binding)
           throw new Error(
@@ -922,13 +921,16 @@ export class AgentRuntimeClient {
         threadId: run.thread_id,
         source,
         ...(executionCwd ? { executionCwd } : {}),
+        ...(child ? { fixed: true } : {}),
       };
-      this.mcpPreparations.set(runId, input);
+      if (!child) this.mcpPreparations.set(runId, input);
       const preparation = this.prepareMcpOwner(
         {
           ...input,
           ...(saved?.selection.mcp_binding
-            ? { requiredBinding: saved.selection.mcp_binding }
+            ? child && isDeepStrictEqual(saved.selection.mcp_binding, child.launch.mcp_binding)
+              ? { delegatedBinding: saved.selection.mcp_binding }
+              : { requiredBinding: saved.selection.mcp_binding }
             : {}),
         },
         signal,
@@ -993,7 +995,7 @@ export class AgentRuntimeClient {
             lease?.release();
             return;
           }
-          let retained: LiveHostToolBinding | undefined;
+          let retained: LiveMcpBinding | undefined;
           try {
             if (lease && lease.binding.tools.length)
               retained = await this.kernel.registerMcpCandidate(runId, lease);
@@ -1461,6 +1463,7 @@ export class AgentRuntimeClient {
     toolBinding?: unknown,
   ): Promise<RunStartReceipt> {
     return this.withRunPreparation(runId, signal, async (signal) => {
+      const delegatedChild = await this.childForThread((await this.run(runId, signal)).thread_id, signal);
       const policyBinding = await this.preparePolicy(runId, signal);
       const mcpBinding = this.kernel.mcpLiveBinding(runId);
       const extensionBindings = await this.prepareExtensions(runId, signal);
@@ -1482,6 +1485,7 @@ export class AgentRuntimeClient {
           signal,
         );
         this.startedTools(runId);
+        if (delegatedChild) this.kernel.releaseChildToolHandoff(delegatedChild.parent_run_id, delegatedChild.operation_id);
         return receipt;
       } catch (error) {
         this.releaseToolComposition(runId);
@@ -1497,6 +1501,7 @@ export class AgentRuntimeClient {
     toolBinding?: unknown,
   ): Promise<RunStartReceipt> {
     return this.withRunPreparation(runId, signal, async (signal) => {
+      const delegatedChild = await this.childForThread((await this.run(runId, signal)).thread_id, signal);
       const selected = await this.modelSelections(runId, signal);
       const credentialScope = await this.kernel.registerCredentialOwner(
         runId,
@@ -1531,6 +1536,7 @@ export class AgentRuntimeClient {
           signal,
         );
         this.startedTools(runId);
+        if (delegatedChild) this.kernel.releaseChildToolHandoff(delegatedChild.parent_run_id, delegatedChild.operation_id);
         return receipt;
       } catch (error) {
         this.releaseToolComposition(runId);

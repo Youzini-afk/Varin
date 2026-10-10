@@ -159,6 +159,9 @@ test('a frozen installed tool makes its first call on v1 after v2 publishes and 
   const h = await fixture(); const id = 'dev.tools.replace';
   try {
     const original = await h.install(id); const old = original.pin();
+    const originalOwner = h.runtime.services.getSnapshot().providers.find(provider => provider.providerId === original.providerId)!;
+    const originalArtifact = h.runtime.supervisor.getRetainedArtifactIdentity(originalOwner);
+    assert.ok(originalArtifact);
     const staged = await h.runtime.installOrStage({ source: await h.source(id, '2.0.0'), expectedRevision: (await h.runtime.catalog.snapshot()).revision });
     const candidate = staged.extensions.find(entry => entry.manifest.id === id)!.candidate!;
     const requested = await h.runtime.requestCandidateApplication({ extensionId: id, candidateIntegrity: candidate.integrity, expectedRevision: staged.revision });
@@ -171,7 +174,13 @@ test('a frozen installed tool makes its first call on v1 after v2 publishes and 
     assert.equal(old.revocationSignal.aborted, false);
     const v1 = await old.invoke('execute', [null], undefined, scope('first-v1')) as { version: string };
     assert.equal(v1.version, '1.0.0');
-    old.release(); await selecting;
+    assert.equal(h.runtime.supervisor.getActiveArtifactIdentity(originalOwner), undefined);
+    assert.equal(h.runtime.supervisor.getRetainedArtifactIdentity(originalOwner), originalArtifact);
+    const child = h.runtime.services.bindPinned(`${id}.query`, 1, original.providerId).pin();
+    old.release();
+    assert.equal((await child.invoke('execute', [null], undefined, scope('child-v1')) as { version: string }).version, '1.0.0');
+    child.release(); await selecting;
+    assert.equal(h.runtime.supervisor.getRetainedArtifactIdentity(originalOwner), undefined);
     const next = await h.runtime.prepareService({ serviceId: `${id}.query`, version: 1, method: 'execute', args: [] });
     assert.equal((await next.invoke('execute', [null]) as { version: string }).version, '2.0.0');
     for (const [version, failure] of [['3.0.0', 'mismatch'], ['4.0.0', 'omit']] as const) {

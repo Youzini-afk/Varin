@@ -282,6 +282,7 @@ fn combined(ending: Ending) {
         db.clone(),
         Some(binding.clone()),
         client.clone(),
+        crate::host_tools::ToolBridge::new(std::sync::mpsc::sync_channel(1).0.into()),
     ));
     declarations.extend(crate::process_wait::declarations(
         db.clone(),

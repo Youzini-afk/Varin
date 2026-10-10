@@ -1866,6 +1866,28 @@ fn mcp_binding(binding: McpBinding) -> Result<crate::host_tools::McpBinding, Ker
         generation: u64::try_from(binding.generation)
             .map_err(|_| KernelError::Protocol("MCP generation must be nonnegative".into()))?,
         resources: binding.resources,
+        provenance: varin_runtime::catalog::launches::McpProvenance {
+            execution_scope: binding.provenance.execution_scope,
+            configuration: varin_runtime::catalog::launches::McpConfiguration {
+                agent_dir: binding.provenance.configuration.agent_dir,
+                config_cwd: binding.provenance.configuration.config_cwd,
+                project_trusted: binding.provenance.configuration.project_trusted,
+            },
+            servers: binding
+                .provenance
+                .servers
+                .into_iter()
+                .map(|(name, server)| {
+                    (
+                        name,
+                        varin_runtime::catalog::launches::McpServerSelection {
+                            definition_version: server.definition_version,
+                            resource_key: server.resource_key,
+                        },
+                    )
+                })
+                .collect(),
+        },
         tools: binding
             .tools
             .into_iter()
@@ -2126,6 +2148,13 @@ fn apply_process_terminal(
         Err(RuntimeError::NotFound(_)) => return Ok(()),
         Err(error) => return Err(domain(error)),
     };
+    if operation.execution_owner != Some(varin_runtime::ExecutorOwner::Kernel)
+        || operation.executor.as_deref() != Some("process_spawn")
+    {
+        return Err(KernelError::Authorization(
+            "process terminal does not belong to the original kernel executor".into(),
+        ));
+    }
     let confirmed = fact.receipt.get("treeConfirmed").and_then(Value::as_bool) == Some(true);
     let status = fact.receipt.get("status").and_then(Value::as_str);
     let code = fact.receipt.get("exitCode").and_then(Value::as_i64);

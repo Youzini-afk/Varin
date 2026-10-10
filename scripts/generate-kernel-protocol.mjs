@@ -78,7 +78,8 @@ const rustType = (type) => {
   if (schema.runtimeEnums?.[type]) return `varin_runtime::${type}`;
   if (type.endsWith('[]')) return `Vec<${rustType(type.slice(0, -2))}>`;
   if (type === 'string') return 'String';
-  if (type === 'Record<string, string>') return 'std::collections::BTreeMap<String, String>';
+  const map = /^Record<string, (.+)>$/u.exec(type);
+  if (map) return `std::collections::BTreeMap<String, ${rustType(map[1])}>`;
   if (type === 'number' || type === 'protocolVersion') return 'i64';
   if (type === 'boolean') return 'bool';
   if (type === 'unknown') return 'Value';
@@ -96,7 +97,12 @@ for (let changed = true; changed;) {
     const spec = schema.dto?.[name];
     if (!spec?.fields) continue;
     for (const descriptor of Object.values(spec.fields)) {
-      const bare = descriptor.type.replace(/\[\]$/u, '').replace(/ \| null$/u, '');
+      let bare = descriptor.type;
+      for (;;) {
+        const inner = bare.replace(/\[\]$/u, '').replace(/ \| null$/u, '').replace(/^Record<string, (.+)>$/u, '$1');
+        if (inner === bare) break;
+        bare = inner;
+      }
       if (schema.dto?.[bare] && !schema.dto[bare].raw && !schema.dto[bare].rustType && !rustDtoNames.has(bare)) {
         rustDtoNames.add(bare);
         changed = true;

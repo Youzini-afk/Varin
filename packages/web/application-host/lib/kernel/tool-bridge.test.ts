@@ -334,3 +334,58 @@ it('the composition registration pins an acknowledged candidate through select r
   f.bridge.unregister('run');
   expect(f.released).toEqual(['candidate']);
 });
+
+it('keeps accepted child owners through parent completion and channel reset, then releases by child facts', async () => {
+  const f = fixture();
+  const original = {
+    ...f.lease('original'),
+    slot: 'extension:example.query@1',
+    extensionBinding: {
+      providerKey: 'example:host:example.query@1',
+      extensionId: 'example',
+      extensionVersion: '1.0.0',
+      serviceId: 'example.query',
+      serviceVersion: 1,
+      artifactIntegrity: 'original-artifact',
+      declarationHash: schema.version,
+      configurationIdentity: null,
+      tool: schema,
+    },
+  };
+  f.bridge.register('run', original);
+  for (const operation of ['accepted-child', 'uncommitted-child']) {
+    f.bridge.consume({
+      v: 1,
+      kind: 'host-tool-child-retain',
+      kernelEpoch: 'epoch',
+      id: operation,
+      parentRunId: 'run',
+      childOperationId: operation,
+      mcpBinding: null,
+      extensionBindings: [original.extensionBinding],
+    });
+  }
+  await tick();
+  expect(
+    f.frames.filter((frame) => frame.kind === 'host-tool-response'),
+  ).toEqual([
+    expect.objectContaining({ id: 'accepted-child', ok: true }),
+    expect.objectContaining({ id: 'uncommitted-child', ok: true }),
+  ]);
+  f.bridge.unregister('run');
+  f.bridge.reconcileChildren([
+    { operation_id: 'accepted-child', report: null },
+  ]);
+  expect(f.released).toEqual([]);
+  f.setEpoch('replacement');
+  f.bridge.reset();
+  f.bridge.reconcileChildren([
+    { operation_id: 'accepted-child', report: null },
+  ]);
+  expect(f.released).toEqual([]);
+  f.bridge.releaseChild('run', 'accepted-child');
+  expect(f.released).toEqual(['original']);
+  expect(f.effects).toEqual([]);
+  f.bridge.releaseChild('run', 'accepted-child');
+  expect(f.released).toEqual(['original']);
+});

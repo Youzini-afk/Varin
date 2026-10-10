@@ -177,12 +177,25 @@ fn observe(tx: &Transaction<'_>, definition: &mut Definition) -> Result<()> {
     {
         return Ok(());
     }
-    let run:Run=record(tx,"runs",&definition.source_run_id)?;
-    let (trigger_cursor,evidence)=match &definition.trigger {
-        FollowupTrigger::ProcessStopped{operation_id}=>{
-            let operation:Operation=record(tx,"operations",operation_id)?;
-            let Some(receipt)=operation.external_receipt.as_ref().filter(|r|r.executor_stopped) else{return Ok(())};
-            if receipt.identity!=operation.id||receipt.executor!="process_spawn" {return Err(RuntimeError::Invalid("process stop receipt owner mismatch".into()));}
+    let run: Run = record(tx, "runs", &definition.source_run_id)?;
+    let (trigger_cursor, evidence) = match &definition.trigger {
+        FollowupTrigger::ProcessStopped { operation_id } => {
+            let operation: Operation = record(tx, "operations", operation_id)?;
+            let Some(receipt) = operation
+                .external_receipt
+                .as_ref()
+                .filter(|r| r.executor_stopped)
+            else {
+                return Ok(());
+            };
+            if receipt.identity != operation.id
+                || receipt.executor != "process_spawn"
+                || operation.execution_owner != Some(ExecutorOwner::Kernel)
+            {
+                return Err(RuntimeError::Invalid(
+                    "process stop receipt owner mismatch".into(),
+                ));
+            }
             let cursor:u64=tx.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind='operation.executor_stopped' AND json_extract(data,'$.receipt_identity')=?2 AND json_extract(data,'$.receipt_epoch')=?3 ORDER BY cursor LIMIT 1",params![operation.id,receipt.identity,receipt.epoch],|r|read_number(r,0))?;
             if let Some(goal)=&definition.goal_id{goals::clear_dependency(tx,goal,operation_id)?;}
             (cursor,TriggerEvidence::ProcessStopped{receipt_identity:receipt.identity.clone(),receipt_epoch:receipt.epoch.clone()})

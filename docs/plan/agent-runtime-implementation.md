@@ -8,6 +8,15 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-10 增量：普通扩展与 MCP 子任务委派
+
+- Child dispatch 现在以原 ToolDirectory、schema generation、工具与 Host bindings 冻结实际配置；native 描述只投影原 owner 声明，UI 与 Host 不再用第二份原生工具名白名单。普通扩展保留原 artifact/configuration/declaration，不因名字相同获得原生进程/文件权限。完整 preset 先验证，缩减不掩盖不可用项。
+- MCP 冻结配置来源、服务器定义和 global/workspace 执行作用域；子任务受理后在自己的实际目录派生执行资源，原未使用 Launch 仅允许一次精确绑定事务，恢复复用该原绑定。直接工具与 gateway 保留原可见服务器集合及别名，不能借新配置扩权；global server 仍用中立环境。Catalog 内部格式 **26**，直接拒绝旧格式。
+- private ToolBridge 在原端点仍活跃时交接轻量 child 引用，确认后 Catalog 才受理；不在该控制步骤启动服务。原 ServiceRegistry pin 与 MCP scope 支持仍存续旧实现的独立 child 接管，父结束/通道重建不丢已受理引用，取消、未受理恢复、child 接管及终态按原身份释放。原停用/撤权和当前权限继续生效，不保存第二份执行账本或伪造父授权。
+- 原停止屏障现在覆盖 workspace MCP 与 invocation-scoped 扩展的实际已派发调用，必须取得原执行端停止证据才能固定子目录。未知结果、协议取消或 Run 结束不被当作停止；同名 Host `process_spawn` / `wait_process` 不进入原生进程回放、观察和取消。文件差异仍由原 WorkingResult 计算。已取消 worker 与稍晚的明确取消请求交错，现在只补记真实意图一次，保持结果和重复幂等。
+- 独审按设计独立复现普通扩展更新后 child 丢原绑定、workspace MCP 未停却允许固定目录两个生产缺口，修后原探针均绿；同名 Host 取消尾项原探针也绿。完整 runtime **324/0、2 ignored**，kernel lib **61/0、11 ignored**，最终相关子域 **24/24**、真实 guardian **1/1**。Portable Host **50/50**、普通扩展 lifecycle **31/31**、共享 Pi/MCP **13/13**、UI **30/30**。类型、生成协议、lint、实际 Host bundle、all-targets、新 binary 与文档检查通过；最后格式改动已独审逐字规范化核对。Linux x64 staged binary identity `0.9.25`，SHA-256 `d79ca6e27516726f5851036e97605960eec1eaa4a785ac69b1c0557a4a3b05de`。
+- 本切片仍未完成 custom child AgentPolicy/planning、memory/plan/Goal、语言/Computer/远端等更广能力和 family 通信；两设计继续实施。完整 Host IPC 与不同 child provider HTTP 的未验范围不与组件证据混计。具体入口与边界见[本阶段验收记录](../reviews/runtime-child-host-delegation-2026-10-10.md)。
+
 ## 2026-10-10 增量：子任务执行配置、递归协作与真实进程结果
 
 - 原 harness settings / preset resolver 现在编译 native dispatch 的冻结目录，配置仍只有原 owner；模型与 UI 看同一目录、原指令和不可用原因。`dispatch` schema **2** 接 `task/preset/workMode/tools`，替换旧 `model/profile` 内部格式。normal 继承实际父模型和工具，显式工具可缩减；配置 preset 先检查完整定义，不能用缩减掩盖不支持项。继承与显式选择的模型来源分开，thinking/temperature 由原模型 owner 规范化，显式零值不被 catalog 默认温度覆盖。

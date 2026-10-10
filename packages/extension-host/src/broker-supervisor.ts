@@ -381,6 +381,7 @@ export class BrokeredHostSupervisor {
   // alive through retirement so an explicit revocation reaches old pinned generations too.
   readonly #ownerGrants = new Map<string, {
     owner: HostServiceOwnerIdentity;
+    artifactIntegrity: string;
     grants: VarinExtensionCapabilityGrant[];
     desiredRevision: number;
     slot: "candidate" | "selected";
@@ -397,6 +398,12 @@ export class BrokeredHostSupervisor {
     return instance && instance.owner.entrypointId === owner.entrypointId
       && instance.owner.generation === owner.generation && instance.owner.extensionVersion === owner.extensionVersion
       ? instance.artifactIntegrity : undefined;
+  }
+
+  /** Identity of the original live owner, including pinned draining generations. */
+  getRetainedArtifactIdentity(owner: HostServiceOwnerIdentity): string | undefined {
+    const retained = this.#ownerGrants.get(ownerStorageKey(owner));
+    return retained?.owner.extensionVersion === owner.extensionVersion ? retained.artifactIntegrity : undefined;
   }
 
   constructor(options: BrokeredHostSupervisorOptions) {
@@ -1025,7 +1032,7 @@ export class BrokeredHostSupervisor {
             void this.#handleCrash(entry.manifest.id, owner, error, snapshot.hostId, entry.desired.revision);
           },
         });
-      this.#ownerGrants.set(ownerStorageKey(owner), { owner, grants, desiredRevision: entry.desired.revision, slot: selection.slot, broker, native: selection.manifest.entrypoints?.host?.mode === "native" });
+      this.#ownerGrants.set(ownerStorageKey(owner), { owner, artifactIntegrity: selection.integrity, grants, desiredRevision: entry.desired.revision, slot: selection.slot, broker, native: selection.manifest.entrypoints?.host?.mode === "native" });
       const cancelPreparation = () => broker.forceTerminate();
       controller.signal.addEventListener("abort", cancelPreparation, { once: true });
       if (controller.signal.aborted) cancelPreparation();

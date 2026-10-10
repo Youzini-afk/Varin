@@ -1,4 +1,4 @@
-import type { KernelRecoveryOperationConflictsResult } from './protocol.generated.js';
+import type { KernelRecoveryOperationConflictsResult, McpBinding, LiveMcpBinding } from './protocol.generated.js';
 import { PlanBridge, type PrivatePlanResponse } from './plan-bridge.js';
 import type { PlanOwner } from './plan-owner.js';
 import { MemoryBridge, type PrivateMemoryResponse } from './memory-bridge.js';
@@ -11,7 +11,7 @@ import type { RetrievalOwner } from './retrieval-owner.js';
 import { LanguageBridge, type PrivateLanguageResponse } from './language-bridge.js';
 import type { LanguageToolOwner } from './language-owner.js';
 import { AgentPolicyBridge, type AgentPolicyLease, type AgentPolicyBinding, type PrivatePolicyResponse } from './agent-policy.js';
-import { ToolBridge, type HostToolLease, type HostToolBinding, type LiveHostToolBinding, type PrivateToolFrame } from './tool-bridge.js';
+import { ToolBridge, type McpToolLease, type PrivateToolFrame } from './tool-bridge.js';
 import { CredentialBridge, type PrivateCredentialResponse } from "./credential-bridge.js";
 import type { ExistingHostCredentialOwner, CredentialScope } from "./credential-owner.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -660,20 +660,24 @@ export class KernelClient {
     return this.credentialBridge.register(runId, owner, signal, bindingId);
   }
   unregisterCredentialOwner(runId: string, bindingId?: string | null): void { this.credentialBridge.unregister(runId, bindingId); }
-  async registerMcpOwner(runId: string, lease: HostToolLease): Promise<HostToolBinding> {
+  async registerMcpOwner(runId: string, lease: McpToolLease): Promise<McpBinding> {
     if (!this.handshakeResult) await this.start();
-    return this.toolBridge.register(runId, lease).binding;
+    this.toolBridge.register(runId, lease);
+    return lease.binding;
   }
-  async registerMcpCandidate(runId: string, lease: HostToolLease): Promise<LiveHostToolBinding> {
+  async registerMcpCandidate(runId: string, lease: McpToolLease): Promise<LiveMcpBinding> {
     if (!this.handshakeResult) await this.start();
-    return this.toolBridge.register(runId, lease, false);
+    const live = this.toolBridge.register(runId, lease, false);
+    return { ownerId: live.ownerId, binding: lease.binding };
   }
-  discardMcpCandidate(runId: string, binding: LiveHostToolBinding): void { this.toolBridge.discard(runId, binding); }
+  discardMcpCandidate(runId: string, binding: LiveMcpBinding): void { this.toolBridge.discard(runId, binding); }
   async registerExtensionTool(runId:string, retained:import('./extension-tool-owner.js').ExtensionToolLease):Promise<import('./protocol.generated.js').LiveExtensionToolBinding> {
     if(!this.handshakeResult)await this.start();
     const live=this.toolBridge.register(runId,retained.lease,false);
     return {ownerId:live.ownerId,generation:retained.generation,binding:retained.binding};
   }
+  releaseChildToolHandoff(parentRunId: string, childOperationId: string): void { this.toolBridge.releaseChild(parentRunId, childOperationId); }
+  reconcileChildToolHandoffs(children: readonly { operation_id: string; report: unknown }[]): void { this.toolBridge.reconcileChildren(children); }
   discardExtensionTool(runId:string,live:import('./protocol.generated.js').LiveExtensionToolBinding):void {
     this.toolBridge.discard(runId,{ownerId:live.ownerId,binding:{reference:live.binding.providerKey,generation:live.generation,resources:{},tools:[live.binding.tool]}});
   }
@@ -700,8 +704,8 @@ export class KernelClient {
   setPlanOwner(owner: PlanOwner): void { this.planBridge.setOwner(owner); }
   setLanguageOwner(owner: LanguageToolOwner): void { this.languageBridge.setOwner(owner); }
   toolAvailability(runId:string,name:string,version:string):boolean|undefined{return this.toolBridge.availability(runId,name,version);}
-  mcpBinding(runId: string): HostToolBinding | undefined { return this.toolBridge.binding(runId); }
-  mcpLiveBinding(runId:string):LiveHostToolBinding|undefined {return this.toolBridge.liveBinding(runId);}
+  mcpBinding(runId: string): McpBinding | undefined { return this.toolBridge.binding(runId) as McpBinding | undefined; }
+  mcpLiveBinding(runId:string):LiveMcpBinding|undefined {return this.toolBridge.liveBinding(runId) as LiveMcpBinding | undefined;}
   mcpImplementationIdentity(runId:string):string|undefined {return this.toolBridge.implementationIdentity(runId);}
   unregisterToolOwners(runId: string): void { this.toolBridge.unregister(runId); }
 

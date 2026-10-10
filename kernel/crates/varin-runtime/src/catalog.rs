@@ -34,7 +34,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 25;
+pub(crate) const FORMAT: i64 = 26;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -1672,31 +1672,44 @@ pub(super) fn request_cancel_run_in(tx: &Transaction<'_>, id: &str) -> Result<Ru
 }
 
 pub(super) fn request_cancel_operation_in(tx: &Transaction<'_>, key: &str) -> Result<Operation> {
-        let mut op: Operation = record(tx, "operations", key)?;
-        if matches!(
-            policy_body::PolicyActionMetadata::from_operation(&op)?,
-            Some(policy_body::PolicyActionMetadata::PolicyPauseV1 { .. })
-        ) {
-            return Err(RuntimeError::Invalid(
-                "policy pause requires explicit Run resume or Run cancellation".into(),
-            ));
-        }
-        let unproven_process = op.executor.as_deref() == Some("process_spawn") && op.effect != Effect::None
-            && !op.external_receipt.as_ref().is_some_and(|receipt| receipt.executor_stopped);
-        if (op.phase == OperationPhase::Terminal && op.outcome != Some(Outcome::Indeterminate) && !unproven_process)
-            || op.cancel_requested
-        {
-            return Ok(op);
-        }
-        op.cancel_requested = true;
-        op.revision += 1;
-        put(tx, "operations", key, &op)?;
-        event(
-            tx,
-            key,
-            op.revision,
-            "operation.cancel_requested",
-            Value::Null,
-        )?;
-        Ok(op)
+    let mut op: Operation = record(tx, "operations", key)?;
+    if matches!(
+        policy_body::PolicyActionMetadata::from_operation(&op)?,
+        Some(policy_body::PolicyActionMetadata::PolicyPauseV1 { .. })
+    ) {
+        return Err(RuntimeError::Invalid(
+            "policy pause requires explicit Run resume or Run cancellation".into(),
+        ));
+    }
+    let unproven_process = op.execution_owner == Some(ExecutorOwner::Kernel)
+        && op.executor.as_deref() == Some("process_spawn")
+        && op.effect != Effect::None
+        && !op
+            .external_receipt
+            .as_ref()
+            .is_some_and(|receipt| receipt.executor_stopped);
+    // The direct control signal may let the worker commit Cancelled before this
+    // transaction runs. Preserve the caller's explicit cancellation fact once,
+    // without rewriting the already-established outcome or ordinary terminal work.
+    if (op.phase == OperationPhase::Terminal
+        && !matches!(
+            op.outcome,
+            Some(Outcome::Indeterminate | Outcome::Cancelled)
+        )
+        && !unproven_process)
+        || op.cancel_requested
+    {
+        return Ok(op);
+    }
+    op.cancel_requested = true;
+    op.revision += 1;
+    put(tx, "operations", key, &op)?;
+    event(
+        tx,
+        key,
+        op.revision,
+        "operation.cancel_requested",
+        Value::Null,
+    )?;
+    Ok(op)
 }

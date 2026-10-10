@@ -41,8 +41,9 @@ it('compiles original configured profiles without losing unavailable choices, sc
   expect(profile('selected')).toMatchObject({ model_source: 'selected', model: { configuration: { model: 'model' } }, unavailable: null });
   expect(profile('off').unavailable?.code).toBe('child-profile-disabled');
   expect(profile('research').unavailable?.code).toBe('child-profile-scope_unavailable');
-  expect(profile('unsupported')).toMatchObject({ tools: ['file_read', 'computer'], unavailable: { code: 'child-capability-unsupported', capabilities: ['computer'] } });
-  expect(profile('physical').unavailable?.code).toBe('child-physical-source-required');
+  expect(profile('unsupported')).toMatchObject({ tools: ['file_read', 'computer'], unavailable: null });
+  expect(frozen.native_capabilities).toEqual(f.capabilities); // Actual request directory resolves non-native names, never a latest registry.
+  expect(profile('physical').unavailable).toBeNull(); // Actual directory decides whether a same-named tool is native or a Host service.
   expect(profile('process')).toMatchObject({ work_mode: 'isolated_write', unavailable: null });
   settings.harness.agents.reader.instructions = 'Changed later.';
   expect(profile('reader').instructions).toBe('Keep the original result.');

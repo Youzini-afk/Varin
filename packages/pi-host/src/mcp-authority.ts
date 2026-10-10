@@ -11,7 +11,7 @@ import {
   type LoadedMcpConfig, type McpServerConnection, type McpServerEntry, type McpTransportFactory,
   type McpSignInPrompt,
 } from '@earendil-works/pi-coding-agent';
-import type { McpOwnerConfig, McpOwnerConnectionSnapshot, McpOwnerEntry } from '@varin/protocol';
+import type { McpOwnerConfig, McpOwnerConnectionSnapshot, McpOwnerEntry, McpConfiguration, McpProvenance } from '@varin/protocol';
 import { ConfigTextFileEditor, resolveConfigDocumentPath } from './config-text-file-editor.js';
 import { ConfigWatchManager } from './config-watch-manager.js';
 
@@ -72,9 +72,13 @@ export interface McpAuthorityInspection {
 export interface McpAuthorityAcquireOptions {
   /** Deliberate dependency selection. Empty means no MCP dependency; never connect all implicitly. */
   servers: readonly string[];
+  /** Frozen configuration dependencies, checked before opening any selected transport.
+   * Execution location remains the new scope's own authority. */
+  provenance?: McpProvenance;
   signal?: AbortSignal;
 }
 export interface McpAuthorityBinding {
+  provenance: McpProvenance;
   reference: string;
   generation: number;
   tools: readonly McpAuthorityTool[];
@@ -111,6 +115,7 @@ interface ScopeRecord {
   config: LoadedMcpConfig;
   configRevision: string;
   entries: Map<string, McpServerEntry>;
+  definitions: Map<string, string>;
   connections: Map<string, ConnectionRecord>;
   released: boolean;
   inflight: number;
@@ -169,6 +174,9 @@ function normalizeScope(input: McpAuthorityScope): McpAuthorityScope {
 }
 function scopeKey(scope: McpAuthorityScope): string {
   return stable([scope.agentDir, scope.configCwd, scope.executionCwd, scope.environmentId, scope.executionScope, scope.projectTrusted]);
+}
+function configuration(scope: McpAuthorityScope): McpConfiguration {
+  return { agent_dir: scope.agentDir, config_cwd: scope.configCwd, project_trusted: scope.projectTrusted };
 }
 function compile(tool: McpTool): ValidateFunction {
   try { return compileToolJsonSchema(tool.inputSchema); }
@@ -252,7 +260,9 @@ export class McpAuthority {
     const configRevision = this.#configRevision(scope);
     const config = loadMcpConfig({ agentDir: scope.agentDir, cwd: scope.configCwd, projectTrusted: scope.projectTrusted });
     if (configRevision !== this.#configRevision(scope)) fail('mcp-config-changed');
-    const record: ScopeRecord = { handle: randomUUID(), scope, key, config, configRevision, entries: new Map(config.servers.map(entry => [entry.name, entry])), connections: new Map(), released: false, inflight: 0, shutdown: new AbortController() };
+    const record: ScopeRecord = { handle: randomUUID(), scope, key, config, configRevision, entries: new Map(config.servers.map(entry => [entry.name, entry])), definitions: new Map(), connections: new Map(), released: false, inflight: 0, shutdown: new AbortController() };
+    for (const entry of record.entries.values()) record.definitions.set(entry.name, this.#configurationIdentity(record, entry));
+    if (configRevision !== this.#configRevision(scope)) fail('mcp-config-changed');
     // Disable/removal is revocation, not an ordinary replacement that may keep old leases alive.
     if (config.errors.length === 0) for (const connection of this.#pool.values()) {
       if (connection.scopeKey !== key || connection.entry.scope === 'extension') continue;
@@ -278,6 +288,32 @@ export class McpAuthority {
     if (options.signal?.aborted) abort();
     try {
       if (record.released) fail('mcp-preparation-cancelled');
+      if (options.provenance) {
+        if (options.provenance.execution_scope !== record.scope.executionScope
+          || stable(options.provenance.configuration) !== stable(configuration(record.scope))) fail('mcp_configuration_source_changed');
+        for (const [name, selected] of Object.entries(options.provenance.servers)) {
+          const entry = record.entries.get(name);
+          if (!entry || entry.config.enabled === false) fail('mcp_saved_definition_unavailable');
+          if (this.#configurationIdentity(record, entry) !== selected.definition_version) {
+            // An accepted delegation can use the original retained definition after ordinary
+            // configuration replacement. Source, revocation and execution scope remain owned
+            // here; no persisted copy or latest-definition substitution is introduced.
+            const original = [...this.#scopes.values()].find(candidate => candidate !== record && !candidate.released
+              && candidate.scope.executionScope === record.scope.executionScope
+              && stable(configuration(candidate.scope)) === stable(configuration(record.scope))
+              && candidate.definitions.get(name) === selected.definition_version
+              && candidate.entries.has(name)
+              && this.#resourceKey(candidate, candidate.entries.get(name)!) === selected.resource_key
+              && !candidate.connections.get(name)?.revoked);
+            if (!original) fail('mcp_saved_definition_unavailable');
+            record.entries.set(name, original.entries.get(name)!);
+            record.definitions.set(name, selected.definition_version);
+          }
+        }
+        // This lease can discover only its admitted dependencies. Other scopes retain their
+        // full configuration and connection ownership; narrowing never revokes a sibling.
+        record.entries = new Map([...record.entries].filter(([name]) => name in options.provenance!.servers));
+      }
       const selected = new Set(options.servers);
       if (record.config.errors.length && selected.size > 0) fail('mcp-config-invalid');
       if ([...selected].some(name => !record.entries.has(name))) fail('mcp-selected-server-not-configured');
@@ -350,7 +386,10 @@ export class McpAuthority {
       return {
         implementationIdentity: createHash('sha256').update(stable([record.key,handles.map(connection=>connection.handle).sort(),
           [...record.entries.values()].map(entry=>this.#configurationIdentity(record,entry)).sort()])).digest('hex'),
-        binding: freeze({ reference: `mcp-owner:${createHash('sha256').update(record.key).digest('hex')}`,
+        binding: freeze({ provenance: { execution_scope: record.scope.executionScope, configuration: configuration(record.scope), servers: Object.fromEntries(
+          [...record.entries.values()].filter(entry => entry.config.enabled !== false && entry.config.exposure !== 'hidden').map(entry => [entry.name, {
+            definition_version: this.#configurationIdentity(record, entry), resource_key: this.#resourceKey(record, entry),
+          }])) }, reference: `mcp-owner:${createHash('sha256').update(record.key).digest('hex')}`,
           generation: 1 + Number.parseInt(createHash('sha256').update(stable([record.key,
             [...record.entries.values()].map(entry => ({ name: entry.name, identity: this.#configurationIdentity(record, entry) })).sort((a, b) => a.name.localeCompare(b.name)),
             tools])).digest('hex').slice(0, 12), 16),
@@ -388,6 +427,7 @@ export class McpAuthority {
       if (typeof config === 'string') fail('mcp-extension-config-invalid');
       entry = { name: requested.name, config, source: requested.source, scope: 'extension' };
       scope.entries.set(entry.name, entry);
+      scope.definitions.set(entry.name, this.#configurationIdentity(scope, entry));
     }
     if (entry.config.enabled === false) fail('mcp-server-disabled');
     if (entry.scope !== 'extension') {
@@ -615,6 +655,8 @@ export class McpAuthority {
     return this.#fileRevision([join(scope.agentDir, 'mcp.json'), ...(scope.projectTrusted ? [join(scope.configCwd, '.pi/mcp.json')] : [])]);
   }
   #configurationIdentity(scope: ScopeRecord, entry: McpServerEntry): string {
+    const frozen = scope.definitions.get(entry.name);
+    if (frozen !== undefined) return frozen;
     const config = entry.config;
     const sensitive = 'url' in config
       ? Boolean(Object.keys(config.headers ?? {}).length || config.oauth?.clientSecret || new URL(config.url).username || new URL(config.url).password || new URL(config.url).search)
@@ -624,7 +666,9 @@ export class McpAuthority {
     const transport = 'url' in config ? { ...publicEntry(entry).config, auth: config.auth,
       oauth: config.oauth ? { ...config.oauth, clientSecret: config.oauth.clientSecret === undefined ? undefined : '[credential-source]' } : undefined }
       : { ...publicEntry(entry).config, args: config.args, cwd: config.cwd, environmentNames: Object.keys(config.env ?? {}).sort() };
-    return createHash('sha256').update(stable([scope.key, entry.name, entry.source, entry.override ?? null,
+    // Definition identity follows its real configuration source, independently of a
+    // connection's execution directory. Scope/resource identities below remain distinct.
+    return createHash('sha256').update(stable([configuration(scope.scope), entry.name, entry.source, entry.override ?? null,
       transport, sensitive ? this.#fileRevision([entry.source, ...(entry.override ? [entry.override] : [])]) : null])).digest('hex');
   }
   #resourceKey(scope: ScopeRecord, entry: McpServerEntry): string {

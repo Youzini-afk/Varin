@@ -8,6 +8,7 @@ use varin_runtime::catalog::launches::LaunchSelection;
 use varin_runtime::catalog::process_wait::WAIT_TOOL;
 use varin_runtime::execution::*;
 use varin_runtime::*;
+const PROCESS: &str = "spawn-request:tool:process";
 
 struct Fixture {
     root: std::path::PathBuf,
@@ -24,7 +25,8 @@ impl Fixture {
         db.create_thread("thread", "branch").unwrap();
         let launch: LaunchSelection = serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"fixture",
             "provider_family":"fixture","model":"model","configuration_generation":1,"tool_schema_generation":1,
-            "tools":[{"name":WAIT_TOOL,"version":"1","description":"Wait for fixture operation","output_schema":null,"metadata":null,"schema":{"type":"object"}}],"policy":{"name":"fixture","version":"1"},"source":null})).unwrap();
+            "tools":[{"name":WAIT_TOOL,"version":"1","description":"Wait for fixture operation","output_schema":null,"metadata":null,"schema":{"type":"object"}},
+                {"name":"process_spawn","version":"1","description":"Original native process","output_schema":null,"metadata":null,"schema":{"type":"object"}}],"policy":{"name":"fixture","version":"1"},"source":null})).unwrap();
         let receipt = db
             .submit_with_launch(
                 &SubmitInput {
@@ -44,13 +46,99 @@ impl Fixture {
             run: receipt.run_id,
         };
         f.state(RunState::Runnable, None);
-        // Real accepted external owner: the observer does not synthesize a process completion.
-        f.db.admit_operation("process", &f.run, f.db.epoch(), Lifetime::Thread, json!({}))
-            .unwrap();
-        f.db.dispatch_operation("process", f.db.epoch(), "process_spawn", true)
-            .unwrap();
-        f.db.handoff_operation("process", f.db.epoch()).unwrap();
+        f.spawn();
         f
+    }
+    fn spawn(&mut self) {
+        let range = HistoryRange {
+            branch_id: "branch".into(),
+            ancestor_id: None,
+            leaf_id: self.db.head("branch").unwrap(),
+        };
+        let binding: RequestBinding = serde_json::from_value(json!({"child_dispatch":null,"goal":null,"resource_activations":[],"resource_checkpoint_id":null,
+            "connection_identity":"fixture","provider_family":"fixture","model":"model","credential_ref":null,"configuration_generation":1,"tool_schema_generation":1,
+            "tools":self.db.launch_intent(&self.run).unwrap().unwrap().selection.tools,"instruction_sources":[],"memory_checkpoint":null,"attachment_refs":[],"environment_cursor":0,"history_range":range})).unwrap();
+        let call = ToolCall {
+            call_id: "process".into(),
+            name: "process_spawn".into(),
+            schema_version: "1".into(),
+            arguments: json!({}),
+        };
+        self.record(ExecutionRecord::RequestPrepared {
+            snapshot: RequestSnapshot {
+                view: RequestView {
+                    request_id: "spawn-request".into(),
+                    run_id: self.run.clone(),
+                    origin: RequestOrigin::Conversation {
+                        step: 0,
+                        history_range: range,
+                    },
+                    binding,
+                    history: vec![],
+                },
+                serialized: json!({}),
+            },
+        });
+        self.record(ExecutionRecord::ModelDispatched {
+            request_id: "spawn-request".into(),
+        });
+        self.record(ExecutionRecord::ModelFinished {
+            request_id: "spawn-request".into(),
+            outcome: ModelOutcome::Completed,
+            finish_reason: Some(FinishReason::ToolCalls),
+            items: vec![ProviderItem {
+                id: "spawn".into(),
+                content: Content::ToolCall { call: call.clone() },
+                opaque: None,
+            }],
+            interrupted_deltas: vec![],
+            usage: UsageReceipt::default(),
+            failure: None,
+        });
+        let context = ToolExecutionContext {
+            run_id: self.run.clone(),
+            operation_id: PROCESS.into(),
+            origin: ToolOrigin::ModelStep {
+                request_id: "spawn-request".into(),
+            },
+        };
+        self.record(ExecutionRecord::ToolAdmitted {
+            context: context.clone(),
+            tool: AdmittedTool {
+                call,
+                contract: ToolContract {
+                    name: "process_spawn".into(),
+                    schema_version: "1".into(),
+                    read_only: false,
+                    completion: CompletionKind::Job,
+                    lifetime: Lifetime::Thread,
+                    resources: vec![],
+                },
+            },
+        });
+        self.record(ExecutionRecord::ToolDispatched {
+            context: context.clone(),
+            executor_owner: ExecutorOwner::Kernel,
+        });
+        let completion = ToolCompletion::JobAccepted {
+            operation_id: PROCESS.into(),
+            phase: "running".into(),
+            effect: Effect::Dispatched,
+            lifetime: Lifetime::Thread,
+        };
+        self.record(ExecutionRecord::ToolSettled {
+            context,
+            completion: completion.clone(),
+            executor_stopped: false,
+        });
+        self.record(ExecutionRecord::ToolBatchCommitted {
+            request_id: "spawn-request".into(),
+            results: vec![ToolResult {
+                request_id: "spawn-request".into(),
+                call_id: "process".into(),
+                completion,
+            }],
+        });
     }
     fn record(&mut self, r: ExecutionRecord) {
         self.db
@@ -67,14 +155,6 @@ impl Fixture {
             ancestor_id: None,
             leaf_id: self.db.head("branch").unwrap(),
         };
-        let schema = ToolSchema {
-            description: "Wait for fixture operation".into(),
-            output_schema: None,
-            metadata: None,
-            name: WAIT_TOOL.into(),
-            version: "1".into(),
-            schema: json!({"type":"object"}),
-        };
         let binding = RequestBinding {
             child_dispatch: None,
             goal: None,
@@ -86,7 +166,13 @@ impl Fixture {
             credential_ref: None,
             configuration_generation: 1,
             tool_schema_generation: 1,
-            tools: vec![schema],
+            tools: self
+                .db
+                .launch_intent(&self.run)
+                .unwrap()
+                .unwrap()
+                .selection
+                .tools,
             instruction_sources: vec![],
             memory_checkpoint: None,
             attachment_refs: vec![],
@@ -115,7 +201,7 @@ impl Fixture {
             call_id: "wait".into(),
             name: WAIT_TOOL.into(),
             schema_version: "1".into(),
-            arguments: json!({"processId":"process"}),
+            arguments: json!({"processId":PROCESS}),
         };
         self.record(ExecutionRecord::ModelFinished {
             request_id: request.clone(),
@@ -174,7 +260,7 @@ impl Fixture {
                 request_id: request.clone(),
             },
         };
-        let wait = self.db.wait_for_process(&context, "process").unwrap();
+        let wait = self.db.wait_for_process(&context, PROCESS).unwrap();
         let result = ToolResult {
             request_id: request.clone(),
             call_id: "wait".into(),
@@ -209,9 +295,9 @@ impl Fixture {
         wait
     }
     fn terminal(&mut self) {
-        self.db.record_external_receipt_with_stop("process",ExternalReceipt{executor:"process_spawn".into(),identity:"process".into(),
+        self.db.record_external_receipt_with_stop(PROCESS,ExternalReceipt{executor:"process_spawn".into(),identity:PROCESS.into(),
             epoch:"process-epoch".into(),outcome:Outcome::Succeeded,effect:Effect::Confirmed,
-            result:json!({"processId":"process","kernelEpoch":"process-epoch","treeConfirmed":true,"exitCode":0,"signal":null,"outputAvailable":true})},true).unwrap();
+            result:json!({"processId":PROCESS,"kernelEpoch":"process-epoch","treeConfirmed":true,"exitCode":0,"signal":null,"outputAvailable":true})},true).unwrap();
     }
     fn reopen(self) -> Self {
         let Self { root, db, run } = self;
@@ -240,7 +326,7 @@ fn reopen_live_process_does_not_treat_recovery_indeterminate_as_a_terminal_fact(
     let mut f = Fixture::new();
     let wait = f.wait("live");
     let mut f = f.reopen();
-    let pending = f.db.operation("process").unwrap();
+    let pending = f.db.operation(PROCESS).unwrap();
     assert_eq!(pending.outcome, Some(Outcome::Indeterminate));
     assert!(pending.external_receipt.is_none());
     assert!(f
@@ -279,12 +365,12 @@ fn early_terminal_and_delivered_before_host_launch_reopen_keep_one_fact() {
 fn cancel_observation_leaves_external_operation_running() {
     let mut f = Fixture::new();
     let wait = f.wait("cancel");
-    let process = f.db.operation("process").unwrap();
+    let process = f.db.operation(PROCESS).unwrap();
     f.db.cancel_process_wait(wait.id.strip_prefix("process-wait:").unwrap())
         .unwrap();
     assert_eq!(f.db.deliver_process_waits().unwrap(), vec![f.run.clone()]);
     assert_eq!(
-        f.db.operation("process").unwrap(),
+        f.db.operation(PROCESS).unwrap(),
         process,
         "observation cancellation cannot cancel or settle process owner"
     );
@@ -315,7 +401,7 @@ fn durable_observer_cancel_intent_survives_crash_before_wait_flag_write() {
         f.db.operation(observer).unwrap().outcome,
         Some(Outcome::Cancelled)
     );
-    assert!(!f.db.operation("process").unwrap().cancel_requested);
+    assert!(!f.db.operation(PROCESS).unwrap().cancel_requested);
     f.cleanup();
 }
 
@@ -353,7 +439,7 @@ fn cancelled_run_never_resumes_from_late_process_terminal() {
         Some(Outcome::Cancelled)
     );
     assert_eq!(
-        f.db.operation("process").unwrap().outcome,
+        f.db.operation(PROCESS).unwrap().outcome,
         Some(Outcome::Succeeded)
     );
     assert!(f.facts().is_empty());
@@ -364,9 +450,9 @@ fn cancelled_run_never_resumes_from_late_process_terminal() {
 fn process_terminal_fact_preserves_the_guardians_string_signal() {
     let mut f = Fixture::new();
     f.wait("signal");
-    f.db.record_external_receipt_with_stop("process",ExternalReceipt{executor:"process_spawn".into(),identity:"process".into(),
+    f.db.record_external_receipt_with_stop(PROCESS,ExternalReceipt{executor:"process_spawn".into(),identity:PROCESS.into(),
         epoch:"process-epoch".into(),outcome:Outcome::Failed,effect:Effect::Confirmed,
-        result:json!({"processId":"process","kernelEpoch":"process-epoch","treeConfirmed":true,"exitCode":null,"signal":"Killed"})},true).unwrap();
+        result:json!({"processId":PROCESS,"kernelEpoch":"process-epoch","treeConfirmed":true,"exitCode":null,"signal":"Killed"})},true).unwrap();
     f.db.deliver_process_waits().unwrap();
     let facts = f.facts();
     assert_eq!(facts.len(), 1);
@@ -397,7 +483,7 @@ fn prepared_process_result_cannot_undo_observer_cancel_and_cancel_needs_no_resul
         "a stale process result cannot revive the cancelled observation"
     );
     assert!(f.facts().is_empty());
-    let process = f.db.operation("process").unwrap();
+    let process = f.db.operation(PROCESS).unwrap();
     let reference = &process.external_receipt.as_ref().unwrap().result_ref;
     let path = varin_runtime::content::object_path(
         &f.root.join("content"),
@@ -410,7 +496,7 @@ fn prepared_process_result_cannot_undo_observer_cancel_and_cancel_needs_no_resul
         f.db.operation(observer).unwrap().outcome,
         Some(Outcome::Cancelled)
     );
-    assert_eq!(f.db.operation("process").unwrap(), process);
+    assert_eq!(f.db.operation(PROCESS).unwrap(), process);
     assert_eq!(f.facts().len(), 1);
     f.cleanup();
 }
@@ -428,7 +514,7 @@ impl Fixture {
             call_id: node.into(),
             name: WAIT_TOOL.into(),
             schema_version: "1".into(),
-            arguments: json!({"processId":"process"}),
+            arguments: json!({"processId":PROCESS}),
         };
         let launch = self.db.launch_intent(&self.run).unwrap().unwrap().selection;
         let context = FrozenToolContext {
@@ -484,7 +570,7 @@ impl Fixture {
             context: context.clone(),
             executor_owner: ExecutorOwner::Kernel,
         });
-        let wait = self.db.wait_for_process(&context, "process").unwrap();
+        let wait = self.db.wait_for_process(&context, PROCESS).unwrap();
         let completion = ToolCompletion::JobAccepted {
             operation_id: context.operation_id.clone(),
             phase: "awaiting_process".into(),
@@ -531,7 +617,7 @@ fn policy_process_fact_waits_for_original_graph_acceptance_consumption_after_reo
             .call_completion,
         Some(varin_runtime::catalog::result_content::ToolCompletionMetadata::JobAccepted { .. })
     ));
-    let duplicate = f.db.wait_for_process(&context, "process").unwrap();
+    let duplicate = f.db.wait_for_process(&context, PROCESS).unwrap();
     assert_eq!(duplicate.id, wait.id);
     assert_eq!(
         f.db.operation(&context.operation_id).unwrap().phase,
@@ -543,7 +629,7 @@ fn policy_process_fact_waits_for_original_graph_acceptance_consumption_after_reo
 fn policy_process_observer_cancel_before_park_is_delivered_without_stopping_process() {
     let mut f = Fixture::new();
     let (wait, context, completion) = f.policy_observation("observe-cancel");
-    let process = f.db.operation("process").unwrap();
+    let process = f.db.operation(PROCESS).unwrap();
     f.db.cancel_process_wait(&context.operation_id).unwrap();
     let receipt = f.consume_policy_observation(&context, completion);
     f.record(ExecutionRecord::PolicyCheckpoint {
@@ -566,7 +652,7 @@ fn policy_process_observer_cancel_before_park_is_delivered_without_stopping_proc
     });
     f.state(RunState::Waiting, Some(wait.id));
     assert_eq!(f.db.deliver_process_waits().unwrap(), vec![f.run.clone()]);
-    assert_eq!(f.db.operation("process").unwrap(), process);
+    assert_eq!(f.db.operation(PROCESS).unwrap(), process);
     assert_eq!(
         f.db.operation(&context.operation_id).unwrap().outcome,
         Some(Outcome::Cancelled)

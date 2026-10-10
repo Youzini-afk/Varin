@@ -100,7 +100,7 @@ export async function retainExtensionTool(
       .getSnapshot()
       .providers.find((p) => p.providerId === selected.providerId);
     const artifact =
-      provider && runtime.supervisor.getActiveArtifactIdentity(provider);
+      provider && runtime.supervisor.getRetainedArtifactIdentity(provider);
     if (!provider || !artifact)
       throw new Error('extension_tool_artifact_unavailable');
     // A service has no separate configuration authority in this contract. Null states that fact.
@@ -204,6 +204,7 @@ export async function retainExtensionTool(
       };
     };
     const lease: HostToolLease = {
+      extensionBinding: binding,
       slot: `extension:${binding.serviceId}@${binding.serviceVersion}`,
       implementationIdentity: selected.providerId,
       binding: {
@@ -278,7 +279,14 @@ export async function retainExtensionTool(
         // Scope lifetime follows the actual pin callback, including cancellation/worker exit.
         try {
           const output = await withToolInvocation(
-            { authority: context, owner: provider, signal: combined, onEffectReceipt: receipt => { domainReceipt = receipt; } },
+            {
+              authority: context,
+              owner: provider,
+              signal: combined,
+              onEffectReceipt: (receipt) => {
+                domainReceipt = receipt;
+              },
+            },
             (scope) =>
               pin.invoke(
                 'execute',
@@ -358,7 +366,7 @@ export interface ExtensionToolScope {
   close(): void;
 }
 export type ExtensionToolPreparer = (
-  run: { runId: string; threadId: string; projectId?: string },
+  run: { runId: string; threadId: string; projectId?: string; fixed?: boolean },
   required: ExtensionToolBinding[],
   signal: AbortSignal,
 ) => Promise<ExtensionToolScope>;
@@ -455,6 +463,28 @@ export function createExtensionTools(
       throw new Error('extension_tool_catalog_unavailable');
     try {
       for (const binding of required) {
+        // A live original exchange can outlast ordinary package replacement. Derive an
+        // independent pin before consulting the installed package, which now may be newer.
+        const original = runtime.services
+          .getSnapshot()
+          .providers.find(
+            (candidate) =>
+              candidate.providerKey === binding.providerKey &&
+              candidate.extensionId === binding.extensionId &&
+              candidate.extensionVersion === binding.extensionVersion &&
+              runtime.supervisor.getRetainedArtifactIdentity(candidate) ===
+                binding.artifactIntegrity,
+          );
+        if (original) {
+          const selected = runtime.services.bindPinned(
+            binding.serviceId,
+            binding.serviceVersion,
+            original.providerId,
+          );
+          initial.push(await retainExtensionTool(options, selected, binding));
+          signal.throwIfAborted();
+          continue;
+        }
         const entry = snapshot.catalog.extensions.find(
           (e) =>
             e.manifest.id === binding.extensionId &&
@@ -494,7 +524,7 @@ export function createExtensionTools(
         initial.push(retained);
         signal.throwIfAborted();
       }
-      if (!required.length)
+      if (!required.length && !run.fixed)
         for (const entry of services(snapshot).values()) {
           // Read the existing routing owner's pure resolution, without starting a cold provider.
           // Candidate construction and legacy explicit-selection precedence match prepareService.
@@ -588,6 +618,7 @@ export function createExtensionTools(
     }
     let seenRevision = snapshot.revision;
     const refresh = async () => {
+      if (run.fixed) return;
       const current = await runtime.state();
       if (
         closed ||
@@ -643,9 +674,11 @@ export function createExtensionTools(
     };
     let unsubscribe: () => void;
     try {
-      unsubscribe = runtime.subscribe(() => {
-        if (publish) void refresh().catch(() => undefined);
-      });
+      unsubscribe = run.fixed
+        ? () => undefined
+        : runtime.subscribe(() => {
+            if (publish) void refresh().catch(() => undefined);
+          });
     } catch (error) {
       for (const retained of initial) retained.lease.release();
       throw error;

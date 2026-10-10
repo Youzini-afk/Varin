@@ -14,6 +14,7 @@ impl Catalog {
         if (owner.id != run.id && delegated.as_deref() != Some(owner.id.as_str()))
             || owner.thread_id != run.thread_id
             || process.executor.as_deref() != Some("process_spawn")
+            || process.execution_owner != Some(ExecutorOwner::Kernel)
         {
             return Err(RuntimeError::Conflict(
                 "process is not owned by this Run".into(),
@@ -129,6 +130,7 @@ impl Catalog {
         for raw in statement.query_map([run_id], |row| row.get::<_, String>(0))? {
             let operation: Operation = serde_json::from_str(&raw?)?;
             if operation.executor.as_deref() == Some(WAIT_TOOL)
+                && operation.execution_owner == Some(ExecutorOwner::Kernel)
                 && operation.phase != OperationPhase::Terminal
             {
                 if let Some(wait) = operation.waiting_on {
@@ -142,7 +144,9 @@ impl Catalog {
     pub fn cancel_process_wait(&mut self, operation_id: &str) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let mut operation: Operation = record(&tx, "operations", operation_id)?;
-        if operation.executor.as_deref() != Some(WAIT_TOOL) {
+        if operation.executor.as_deref() != Some(WAIT_TOOL)
+            || operation.execution_owner != Some(ExecutorOwner::Kernel)
+        {
             return Err(RuntimeError::Invalid(
                 "operation is not a process observation wait".into(),
             ));
@@ -187,6 +191,7 @@ impl Catalog {
         let mut released = Vec::new();
         for mut operation in read_all::<Operation>(&tx, "operations")? {
             if operation.executor.as_deref() != Some(WAIT_TOOL)
+                || operation.execution_owner != Some(ExecutorOwner::Kernel)
                 || operation.phase == OperationPhase::Terminal
             {
                 continue;
@@ -249,6 +254,7 @@ pub(super) fn pending_cancelled_observation(
     if op.run_id != run.id
         || op.epoch != run.epoch
         || op.executor.as_deref() != Some(WAIT_TOOL)
+        || op.execution_owner != Some(ExecutorOwner::Kernel)
         || op.phase != OperationPhase::Waiting
         || !op.handed_off
         || op.waiting_on.as_deref() != Some(wait.id.as_str())
@@ -264,5 +270,6 @@ pub(super) fn pending_cancelled_observation(
     };
     Ok(admitted.call().name == WAIT_TOOL
         && process.run_id == run.id
-        && process.executor.as_deref() == Some("process_spawn"))
+        && process.executor.as_deref() == Some("process_spawn")
+        && process.execution_owner == Some(ExecutorOwner::Kernel))
 }

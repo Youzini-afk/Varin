@@ -215,6 +215,7 @@ pub struct LaunchChangePreparation {
     read: LaunchRead,
     change: LaunchChange,
     epoch: u64,
+    child_selection: Option<LaunchSelectionMetadata>,
 }
 pub struct ChildLaunchPreparation {
     read: LaunchRead,
@@ -238,9 +239,25 @@ impl ChildLaunchPreparation {
             || self.child.credential_scope != self.selected.model.credential_scope
             || self.child.model != self.selected.model.configuration.model
             || self.child.provider_family != self.selected.model.configuration.provider_family
-            || self.child.configuration_generation != self.selected.model.configuration.configuration_generation
-            || self.child.mcp_binding.is_some() || !self.child.extension_bindings.is_empty() || !self.child.policy_models.is_empty()
-            || self.child.child_dispatch.as_ref().map(|catalog| crate::content::ContentStore::reference(&serde_json::to_value(catalog)?)).transpose()?.as_ref() != Some(&self.selected.catalog_ref)
+            || self.child.configuration_generation
+                != self.selected.model.configuration.configuration_generation
+            || self.child.mcp_binding != self.selected.mcp_binding
+            || self.child.extension_bindings != self.selected.extension_bindings
+            || !self.child.policy_models.is_empty()
+            || self.child.tool_schema_generation != self.selected.tool_schema_generation
+            || self.read.metadata.selection.tool_schema_generation
+                != self.selected.tool_schema_generation
+            || self.read.metadata.selection.tools_ref != self.selected.parent_tools_ref
+            || self
+                .child
+                .child_dispatch
+                .as_ref()
+                .map(|catalog| {
+                    crate::content::ContentStore::reference(&serde_json::to_value(catalog)?)
+                })
+                .transpose()?
+                .as_ref()
+                != Some(&self.selected.catalog_ref)
         {
             return Err(RuntimeError::Conflict("child launch differs from its frozen selection".into()));
         }
@@ -249,7 +266,7 @@ impl ChildLaunchPreparation {
             selected_profile: self.selected.profile,
             configuration: serde_json::to_value(self.selected.model.configuration)?,
             frozen_reference: self.selected.frozen_reference,
-            parent_tools_ref: self.read.metadata.selection.tools_ref,
+            parent_tools_ref: self.selected.parent_tools_ref,
             _publication: self.read._publication,
         })
     }
@@ -286,10 +303,31 @@ impl LaunchChangePreparation {
             LaunchChange::Mcp(binding) => {
                 binding.validate()?;
                 let reference = content.save(&serde_json::to_value(&binding)?)?;
+                let delegated = if let Some(child) = &self.child_selection {
+                    let original_ref = child.mcp_binding_ref.as_ref().ok_or_else(|| {
+                        RuntimeError::Invalid("child has no delegated MCP capability".into())
+                    })?;
+                    if selection.mcp_binding_ref.as_ref() == Some(original_ref) {
+                        let original: HostToolBinding =
+                            serde_json::from_value(content.load(original_ref)?)?;
+                        if !binding.derives_from(&original) {
+                            return Err(RuntimeError::Conflict(
+                                "child MCP execution binding differs from its frozen delegation"
+                                    .into(),
+                            ));
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
                 if selection
                     .mcp_binding_ref
                     .as_ref()
                     .is_some_and(|previous| previous != &reference)
+                    && !delegated
                 {
                     return Err(RuntimeError::Conflict(
                         "MCP owner generation changed".into(),
@@ -313,6 +351,15 @@ impl LaunchChangePreparation {
                 "run.mcp_prepared"
             }
             LaunchChange::Extensions(bindings) => {
+                if let Some(child) = &self.child_selection {
+                    let original: Vec<ExtensionToolBinding> =
+                        serde_json::from_value(content.load(&child.extension_bindings_ref)?)?;
+                    if bindings != original {
+                        return Err(RuntimeError::Conflict(
+                            "child extension selection differs from its frozen delegation".into(),
+                        ));
+                    }
+                }
                 let mut full = metadata.selection.clone().load(&content)?;
                 if !full.extension_bindings.is_empty() && full.extension_bindings != bindings {
                     return Err(RuntimeError::Conflict(
@@ -335,6 +382,11 @@ impl LaunchChangePreparation {
                 models,
                 target,
             } => {
+                if self.child_selection.is_some() {
+                    return Err(RuntimeError::Invalid(
+                        "child policy replacement is not supported".into(),
+                    ));
+                }
                 target.validate()?;
                 policy_target = target;
                 if identity.name.is_empty() || identity.version.is_empty() {
@@ -418,6 +470,7 @@ impl Catalog {
         binding: HostToolBinding,
     ) -> Result<LaunchChangePreparation> {
         Ok(LaunchChangePreparation {
+            child_selection: self.require_child_launch(run_id)?.map(|child| child.launch),
             read: self
                 .capture_launch(run_id)?
                 .ok_or_else(|| RuntimeError::NotFound(run_id.into()))?,
@@ -431,6 +484,7 @@ impl Catalog {
         bindings: Vec<ExtensionToolBinding>,
     ) -> Result<LaunchChangePreparation> {
         Ok(LaunchChangePreparation {
+            child_selection: self.require_child_launch(run_id)?.map(|child| child.launch),
             read: self
                 .capture_launch(run_id)?
                 .ok_or_else(|| RuntimeError::NotFound(run_id.into()))?,
@@ -447,6 +501,7 @@ impl Catalog {
         target: super::policy_switch::PolicyTarget,
     ) -> Result<LaunchChangePreparation> {
         Ok(LaunchChangePreparation {
+            child_selection: self.require_child_launch(run_id)?.map(|child| child.launch),
             read: self
                 .capture_launch(run_id)?
                 .ok_or_else(|| RuntimeError::NotFound(run_id.into()))?,

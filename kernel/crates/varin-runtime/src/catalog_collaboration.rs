@@ -1030,29 +1030,117 @@ impl Catalog {
         {return Err(RuntimeError::Conflict("child source preparation was cancelled or superseded".into()));}
         child.source=prepared.source;self.commit_child_metadata(child,"child.source_ready")
     }
-    pub fn begin_child_settlement(&mut self,operation_id:&str)->Result<ChildTask> {
-        let mut child=self.child_task(operation_id)?;
-        let receipt=child.receipt.as_ref().ok_or_else(||RuntimeError::Conflict("child has no admitted Run".into()))?;
-        if !self.run(&receipt.run_id)?.state.terminal(){return Err(RuntimeError::Conflict("child execution is still active".into()));}
-        self.require_child_process_writers_stopped(operation_id)?;
-        if !matches!(child.code_result,ChildCodeResult::Pending){return Ok(child);}
-        child.code_result=ChildCodeResult::Settling{publication_id:format!("child-result:{operation_id}")};
-        child.state="settling".into();self.commit_child_metadata(child,"child.settling")
+    /// Synchronous fixture convenience; production loads writer bindings outside Catalog.
+    pub fn begin_child_settlement(&mut self, operation_id: &str) -> Result<ChildTask> {
+        let _synchronous = self.content.begin_synchronous()?;
+        let bindings = self.capture_child_writer_bindings(operation_id)?.load()?;
+        self.begin_child_settlement_bound(operation_id, &bindings)
     }
-    pub fn attach_child_candidate(&mut self,operation_id:&str,candidate:crate::KernelWorkingResultCandidate)->Result<ChildTask> {
-        self.require_child_process_writers_stopped(operation_id)?;
-        let mut child=self.child_task(operation_id)?;
-        let publication_id=format!("child-result:{operation_id}");
-        if candidate.publication_id!=publication_id || candidate.candidate_operation_id!=format!("result-prepare:{publication_id}")
-            || candidate.branch_id!=format!("child-source:{operation_id}") || candidate.workspace_id!=child.source.handoff().source.workspace_id
-        {return Err(RuntimeError::Conflict("result candidate does not belong to this child".into()));}
-        if let ChildCodeResult::Candidate{candidate:old}=&child.code_result {return if old==&candidate{Ok(child)}else{Err(RuntimeError::Conflict("child result candidate changed".into()))};}
-        if child.code_result!=(ChildCodeResult::Settling{publication_id}){return Err(RuntimeError::Conflict("child is not ready to attach a result candidate".into()));}
-        child.code_result=ChildCodeResult::Candidate{candidate};self.commit_child_metadata(child,"child.result_candidate")
+    pub fn begin_child_settlement_bound(
+        &mut self,
+        operation_id: &str,
+        bindings: &ChildWriterBindings,
+    ) -> Result<ChildTask> {
+        if operation_id != bindings.operation_id {
+            return Err(RuntimeError::Conflict(
+                "child writer identity changed".into(),
+            ));
+        }
+        let mut child = self.child_task(operation_id)?;
+        let receipt = child
+            .receipt
+            .as_ref()
+            .ok_or_else(|| RuntimeError::Conflict("child has no admitted Run".into()))?;
+        if !self.run(&receipt.run_id)?.state.terminal() {
+            return Err(RuntimeError::Conflict(
+                "child execution is still active".into(),
+            ));
+        }
+        self.require_child_writers_stopped(bindings)?;
+        if !matches!(child.code_result, ChildCodeResult::Pending) {
+            return Ok(child);
+        }
+        child.code_result = ChildCodeResult::Settling {
+            publication_id: format!("child-result:{operation_id}"),
+        };
+        child.state = "settling".into();
+        self.commit_child_metadata(child, "child.settling")
     }
-    pub fn attach_child_result(&mut self,operation_id:&str,result:ChildWorkingResultRef,effect:Effect)->Result<ChildTask> {
-        self.require_child_process_writers_stopped(operation_id)?;
-        let mut child=self.child_task(operation_id)?;
+    /// Synchronous fixture convenience; production loads writer bindings outside Catalog.
+    pub fn attach_child_candidate(
+        &mut self,
+        operation_id: &str,
+        candidate: crate::KernelWorkingResultCandidate,
+    ) -> Result<ChildTask> {
+        let _synchronous = self.content.begin_synchronous()?;
+        let bindings = self.capture_child_writer_bindings(operation_id)?.load()?;
+        self.attach_child_candidate_bound(operation_id, candidate, &bindings)
+    }
+    pub fn attach_child_candidate_bound(
+        &mut self,
+        operation_id: &str,
+        candidate: crate::KernelWorkingResultCandidate,
+        bindings: &ChildWriterBindings,
+    ) -> Result<ChildTask> {
+        if operation_id != bindings.operation_id {
+            return Err(RuntimeError::Conflict(
+                "child writer identity changed".into(),
+            ));
+        }
+        self.require_child_writers_stopped(bindings)?;
+        let mut child = self.child_task(operation_id)?;
+        let publication_id = format!("child-result:{operation_id}");
+        if candidate.publication_id != publication_id
+            || candidate.candidate_operation_id != format!("result-prepare:{publication_id}")
+            || candidate.branch_id != format!("child-source:{operation_id}")
+            || candidate.workspace_id != child.source.handoff().source.workspace_id
+        {
+            return Err(RuntimeError::Conflict(
+                "result candidate does not belong to this child".into(),
+            ));
+        }
+        if let ChildCodeResult::Candidate { candidate: old } = &child.code_result {
+            return if old == &candidate {
+                Ok(child)
+            } else {
+                Err(RuntimeError::Conflict(
+                    "child result candidate changed".into(),
+                ))
+            };
+        }
+        if child.code_result != (ChildCodeResult::Settling { publication_id }) {
+            return Err(RuntimeError::Conflict(
+                "child is not ready to attach a result candidate".into(),
+            ));
+        }
+        child.code_result = ChildCodeResult::Candidate { candidate };
+        self.commit_child_metadata(child, "child.result_candidate")
+    }
+    /// Synchronous fixture convenience; production loads writer bindings outside Catalog.
+    pub fn attach_child_result(
+        &mut self,
+        operation_id: &str,
+        result: ChildWorkingResultRef,
+        effect: Effect,
+    ) -> Result<ChildTask> {
+        let _synchronous = self.content.begin_synchronous()?;
+        let bindings = self.capture_child_writer_bindings(operation_id)?.load()?;
+        self.attach_child_result_bound(operation_id, result, effect, &bindings)
+    }
+    pub fn attach_child_result_bound(
+        &mut self,
+        operation_id: &str,
+        result: ChildWorkingResultRef,
+        effect: Effect,
+        bindings: &ChildWriterBindings,
+    ) -> Result<ChildTask> {
+        if operation_id != bindings.operation_id {
+            return Err(RuntimeError::Conflict(
+                "child writer identity changed".into(),
+            ));
+        }
+        self.require_child_writers_stopped(bindings)?;
+        let mut child = self.child_task(operation_id)?;
         match &child.code_result {
             ChildCodeResult::Candidate{candidate} if candidate.publication_id==result.publication_id && candidate.workspace_id==result.workspace_id
                 && candidate.branch_id==result.branch_id && candidate.root==result.root && candidate.base_root==result.base_root=>(),
@@ -1064,31 +1152,186 @@ impl Catalog {
         if let Some(report)=&child.report {child.state=match report.outcome{Outcome::Succeeded=>"completed",Outcome::Cancelled=>"cancelled",_=>"failed"}.into();}
         self.commit_child_metadata(child,"child.result_ready")
     }
-    pub fn require_child_process_writers_stopped(&self, operation_id: &str) -> Result<()> {
-        if !self.child_process_writers_stopped(operation_id)? { return Err(RuntimeError::Conflict("child process owner has not confirmed stop".into())); }
+    /// Synchronous fixture convenience; production loads the original binding bodies outside Catalog.
+    pub fn child_writers_stopped_sync(&self, operation_id: &str) -> Result<bool> {
+        let _synchronous = self.content.begin_synchronous()?;
+        let bindings = self.capture_child_writer_bindings(operation_id)?.load()?;
+        self.child_writers_stopped(&bindings)
+    }
+    /// Synchronous fixture convenience; production uses child_file_effect_bound.
+    pub fn child_file_effect(&self, operation_id: &str) -> Result<Effect> {
+        let _synchronous = self.content.begin_synchronous()?;
+        let bindings = self.capture_child_writer_bindings(operation_id)?.load()?;
+        self.child_file_effect_bound(&bindings)
+    }
+    fn require_child_writers_stopped(&self, bindings: &ChildWriterBindings) -> Result<()> {
+        if !self.child_writers_stopped(bindings)? {
+            return Err(RuntimeError::Conflict(
+                "child execution owner has not confirmed stop".into(),
+            ));
+        }
         Ok(())
     }
-    pub fn child_process_writers_stopped(&self, operation_id: &str) -> Result<bool> {
-        let child = self.child_task(operation_id)?;
-        let Some(receipt) = child.receipt else { return Ok(true); };
-        let live: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.executor')='process_spawn' AND json_extract(body,'$.effect')!='none' AND coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0)", [&receipt.run_id], |row| row.get(0))?;
-        Ok(!live)
+    pub fn child_writers_stopped(&self, bindings: &ChildWriterBindings) -> Result<bool> {
+        let operations = self.child_writer_operations(bindings)?;
+        Ok(!operations.iter().any(|operation| {
+            bindings.is_writer(operation, false)
+                && !matches!(
+                    operation.call_completion,
+                    Some(super::result_content::ToolCompletionMetadata::NotDispatched { .. })
+                )
+                && !operation
+                    .external_receipt
+                    .as_ref()
+                    .is_some_and(|receipt| receipt.executor_stopped)
+        }))
     }
-    pub fn child_file_effect(&self,operation_id:&str)->Result<Effect> {
-        let child=self.child_task(operation_id)?;
-        let Some(receipt)=&child.receipt else{return Ok(Effect::None);};
-        let mut confirmed=false;let mut partial=false;
-        let mut statement=self.db.prepare("SELECT json_extract(body,'$.effect') FROM operations WHERE run_id=?1 AND json_extract(body,'$.executor') IN ('file_write','file_edit','process_spawn')")?;
-        let effects=statement.query_map([&receipt.run_id],|row|row.get::<_,String>(0))?;
-        for effect in effects {
-            let effect:Effect=serde_json::from_value(Value::String(effect?))?;
-            match effect {Effect::Unknown|Effect::Dispatched=>return Ok(Effect::Unknown),Effect::Confirmed=>confirmed=true,Effect::Partial=>partial=true,_=>()}
+    pub fn child_file_effect_bound(&self, bindings: &ChildWriterBindings) -> Result<Effect> {
+        let operations = self.child_writer_operations(bindings)?;
+        let Some(run_id) = &bindings.run_id else {
+            return Ok(Effect::None);
+        };
+        let mut confirmed = false;
+        let mut partial = false;
+        for operation in operations
+            .iter()
+            .filter(|operation| bindings.is_writer(operation, true))
+        {
+            match operation.effect {
+                Effect::Unknown | Effect::Dispatched => return Ok(Effect::Unknown),
+                Effect::Confirmed => confirmed = true,
+                Effect::Partial => partial = true,
+                _ => (),
+            }
         }
-        if partial || (confirmed && self.run(&receipt.run_id)?.state!=RunState::Completed){Ok(Effect::Partial)}
-        else if confirmed {Ok(Effect::Confirmed)} else {Ok(Effect::None)}
+        if partial || (confirmed && self.run(run_id)?.state != RunState::Completed) {
+            Ok(Effect::Partial)
+        } else if confirmed {
+            Ok(Effect::Confirmed)
+        } else {
+            Ok(Effect::None)
+        }
+    }
+    fn child_writer_operations(
+        &self,
+        bindings: &ChildWriterBindings,
+    ) -> Result<Vec<OperationMetadata>> {
+        let child = self.child_task(&bindings.operation_id)?;
+        if child.receipt.as_ref().map(|receipt| &receipt.run_id) != bindings.run_id.as_ref() {
+            return Err(RuntimeError::Conflict("child writer Run changed".into()));
+        }
+        let Some(run_id) = &bindings.run_id else {
+            return Ok(Vec::new());
+        };
+        let launch = self
+            .launch_metadata(run_id)?
+            .ok_or_else(|| RuntimeError::NotFound("child launch".into()))?;
+        if launch.selection.mcp_binding_ref != bindings.mcp_binding_ref
+            || Some(&launch.selection.extension_bindings_ref)
+                != bindings.extension_bindings_ref.as_ref()
+        {
+            return Err(RuntimeError::Conflict(
+                "child writer bindings changed".into(),
+            ));
+        }
+        let mut statement = self
+            .db
+            .prepare("SELECT body FROM operations WHERE run_id=?1")?;
+        let rows = statement.query_map([run_id], |row| row.get::<_, String>(0))?;
+        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+    }
+    pub fn capture_child_writer_bindings(
+        &self,
+        operation_id: &str,
+    ) -> Result<ChildWriterBindingsRead> {
+        let child = self.child_task(operation_id)?;
+        let run_id = child.receipt.map(|receipt| receipt.run_id);
+        let launch = run_id
+            .as_ref()
+            .map(|run_id| {
+                self.launch_metadata(run_id).and_then(|launch| {
+                    launch.ok_or_else(|| RuntimeError::NotFound("child launch".into()))
+                })
+            })
+            .transpose()?;
+        Ok(ChildWriterBindingsRead {
+            operation_id: operation_id.into(),
+            run_id,
+            mcp_binding_ref: launch
+                .as_ref()
+                .and_then(|launch| launch.selection.mcp_binding_ref.clone()),
+            extension_bindings_ref: launch.map(|launch| launch.selection.extension_bindings_ref),
+            content: self.content.clone(),
+            _publication: self.content.begin_publication(),
+        })
     }
     fn commit_child_metadata(&mut self,mut child:ChildTask,kind:&str)->Result<ChildTask> {
         let tx=self.db.transaction()?;child.revision+=1;put(&tx,"child_tasks",&child.operation_id,&child)?;
         event(&tx,&child.operation_id,child.revision,kind,Value::Null)?;tx.commit()?;Ok(child)
+    }
+}
+
+/// A derived read of the child's exact committed launch, never another execution authority.
+pub struct ChildWriterBindingsRead {
+    operation_id: String,
+    run_id: Option<String>,
+    mcp_binding_ref: Option<Value>,
+    extension_bindings_ref: Option<Value>,
+    content: crate::content::ContentStore,
+    _publication: crate::content::ContentPublication,
+}
+pub struct ChildWriterBindings {
+    operation_id: String,
+    run_id: Option<String>,
+    mcp_binding_ref: Option<Value>,
+    extension_bindings_ref: Option<Value>,
+    external_writers: std::collections::BTreeSet<(String, String)>,
+    _publication: crate::content::ContentPublication,
+}
+impl ChildWriterBindingsRead {
+    pub fn load(self) -> Result<ChildWriterBindings> {
+        let mut external_writers = std::collections::BTreeSet::new();
+        if let Some(reference) = &self.mcp_binding_ref {
+            let binding: launches::HostToolBinding =
+                serde_json::from_value(self.content.load(reference)?)?;
+            binding.validate()?;
+            if binding.provenance.execution_scope == launches::McpExecutionScope::Workspace {
+                external_writers.extend(
+                    binding
+                        .tools
+                        .into_iter()
+                        .map(|tool| (binding.reference.clone(), tool.name)),
+                );
+            }
+        }
+        if let Some(reference) = &self.extension_bindings_ref {
+            let bindings: Vec<launches::ExtensionToolBinding> =
+                serde_json::from_value(self.content.load(reference)?)?;
+            for binding in bindings {
+                binding.validate()?;
+                // Ordinary services receive the child's own invocation source authority.
+                external_writers.insert((binding.provider_key, binding.tool.name));
+            }
+        }
+        Ok(ChildWriterBindings {
+            operation_id: self.operation_id,
+            run_id: self.run_id,
+            mcp_binding_ref: self.mcp_binding_ref,
+            extension_bindings_ref: self.extension_bindings_ref,
+            external_writers,
+            _publication: self._publication,
+        })
+    }
+}
+impl ChildWriterBindings {
+    fn is_writer(&self, operation: &OperationMetadata, include_native_files: bool) -> bool {
+        match (&operation.execution_owner, operation.executor.as_deref()) {
+            (Some(ExecutorOwner::External { identity, .. }), Some(name)) => self
+                .external_writers
+                .contains(&(identity.clone(), name.into())),
+            (Some(ExecutorOwner::Kernel), Some("process_spawn")) => true,
+            (Some(ExecutorOwner::Kernel), Some("file_write" | "file_edit")) => include_native_files,
+            _ => false,
+        }
     }
 }

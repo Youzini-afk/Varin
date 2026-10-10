@@ -176,7 +176,7 @@ impl ToolBridge {
                 return Err(failed("host_tool_cancelled_before_dispatch"));
             }
             self.send(json!({"v":1,"kind":"host-tool-request","id":id,"kernelEpoch":epoch,"phase":phase,
-                "binding":{"ownerId":generation.owner_id,"reference":binding.reference,"generation":binding.generation,"holderId":holder},
+                "binding":{"ownerId":generation.owner_id,"reference":binding.reference(),"generation":binding.generation(),"holderId":holder},
                 "call":{"runId":context.run_id,"origin":context.origin,"operationId":context.operation_id,
                     "callId":call.call_id,"name":call.name,"schemaVersion":call.schema_version,"arguments":call.arguments}}))
                 .map_err(|_| failed("host_tool_not_dispatched"))?;
@@ -205,18 +205,109 @@ impl ToolBridge {
         }
         result
     }
+    /// Transfer only live retention from this request's original owners. No service is prepared here.
+    pub(crate) fn retain_child(
+        &self,
+        context: &ToolExecutionContext,
+        mcp: Option<&McpBinding>,
+        extensions: &[varin_runtime::catalog::launches::ExtensionToolBinding],
+        cancel: &CancellationToken,
+    ) -> Result<Option<ChildHostRetention>, ExecutionError> {
+        if mcp.is_none() && extensions.is_empty() {
+            return Ok(None);
+        }
+        if cancel.is_cancelled() {
+            return Err(failed("child_retention_cancelled"));
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let (tx, rx) = mpsc::channel();
+        let (wake, changed) = mpsc::sync_channel(1);
+        let _registration = cancel.wake_on_cancel(wake.clone());
+        let epoch = {
+            let mut state = self
+                .state
+                .lock()
+                .map_err(|_| failed("host_tool_channel_failed"))?;
+            let epoch = state
+                .epoch
+                .clone()
+                .ok_or_else(|| failed("host_tool_channel_unavailable"))?;
+            state
+                .pending
+                .insert(id.clone(), Pending { reply: tx, wake });
+            epoch
+        };
+        let retained = ChildHostRetention {
+            bridge: self.clone(),
+            epoch: epoch.clone(),
+            parent_run_id: context.run_id.clone(),
+            operation_id: context.operation_id.clone(),
+            armed: true,
+        };
+        let result = (|| {
+            self.send(
+                json!({"v":1,"kind":"host-tool-child-retain","id":id,"kernelEpoch":epoch,
+                "parentRunId":context.run_id,"childOperationId":context.operation_id,
+                "mcpBinding":mcp,"extensionBindings":extensions}),
+            )?;
+            loop {
+                // This local owner acknowledgement must precede rollback: independent content
+                // streams can otherwise deliver a short release before its larger retain body.
+                match rx.try_recv() {
+                    Ok(_) if cancel.is_cancelled() => {
+                        return Err(failed("child_retention_cancelled"))
+                    }
+                    Ok(reply)
+                        if reply.ok
+                            && reply.completion.is_none()
+                            && reply.executor_stopped.is_none() =>
+                    {
+                        return Ok(())
+                    }
+                    Ok(reply) => {
+                        return Err(failed(
+                            reply
+                                .error
+                                .as_ref()
+                                .map(|error| error._code.as_str())
+                                .unwrap_or("child_retention_rejected"),
+                        ))
+                    }
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        return Err(failed("host_tool_channel_closed"))
+                    }
+                    Err(mpsc::TryRecvError::Empty) => (),
+                }
+                changed
+                    .recv()
+                    .map_err(|_| failed("host_tool_channel_closed"))?;
+            }
+        })();
+        if let Ok(mut state) = self.state.lock() {
+            state.pending.remove(&id);
+        }
+        result?;
+        Ok(Some(retained))
+    }
     pub(crate) fn prepare_generation(
         &self,
         run_id: String,
         live: LiveMcpBinding,
     ) -> Result<Arc<ToolGeneration>, ExecutionError> {
-        if live.owner_id.is_empty() {
-            return Err(failed("host_tool_live_owner_required"));
-        }
-        let binding = live.binding;
-        binding
+        live.binding
             .validate()
             .map_err(|_| failed("host_tool_binding_invalid"))?;
+        self.retain_generation(run_id, live.owner_id, GenerationBinding::Mcp(live.binding))
+    }
+    fn retain_generation(
+        &self,
+        run_id: String,
+        owner_id: String,
+        binding: GenerationBinding,
+    ) -> Result<Arc<ToolGeneration>, ExecutionError> {
+        if owner_id.is_empty() {
+            return Err(failed("host_tool_live_owner_required"));
+        }
         let epoch = self
             .state
             .lock()
@@ -227,7 +318,7 @@ impl ToolBridge {
         let holder = uuid::Uuid::new_v4().to_string();
         self.send(
             json!({"v":1,"kind":"host-tool-binding-retain","kernelEpoch":epoch,
-            "runId":run_id,"ownerId":live.owner_id,"holderId":holder}),
+            "runId":run_id,"ownerId":owner_id,"holderId":holder}),
         )?;
         Ok(Arc::new(ToolGeneration {
             run_id,
@@ -235,8 +326,7 @@ impl ToolBridge {
             bridge: self.clone(),
             epoch,
             holder,
-            owner_id: live.owner_id,
-            extension: None,
+            owner_id,
         }))
     }
     pub(crate) fn prepare_extension(
@@ -247,22 +337,14 @@ impl ToolBridge {
         live.binding
             .validate()
             .map_err(|_| failed("extension_binding_invalid"))?;
-        let mut generation = self.prepare_generation(
+        self.retain_generation(
             run_id,
-            LiveMcpBinding {
-                owner_id: live.owner_id,
-                binding: McpBinding {
-                    reference: live.binding.provider_key.clone(),
-                    generation: live.generation,
-                    tools: vec![live.binding.tool.clone()],
-                    resources: Default::default(),
-                },
+            live.owner_id,
+            GenerationBinding::Extension {
+                binding: live.binding,
+                generation: live.generation,
             },
-        )?;
-        Arc::get_mut(&mut generation)
-            .expect("new retained generation")
-            .extension = Some(live.binding);
-        Ok(generation)
+        )
     }
     pub(crate) fn deactivate(&self, run_id: &str) -> Result<(), ExecutionError> {
         self.deactivate_slot(run_id, "mcp")
@@ -276,6 +358,29 @@ impl ToolBridge {
             .clone()
             .ok_or_else(|| failed("host_tool_channel_unavailable"))?;
         self.send(json!({"v":1,"kind":"host-tool-binding-deactivate","kernelEpoch":epoch,"runId":run_id,"slot":slot}))
+    }
+}
+/// The accepted ChildTask becomes the retention owner; failure before acceptance rolls back.
+pub(crate) struct ChildHostRetention {
+    bridge: ToolBridge,
+    epoch: String,
+    parent_run_id: String,
+    operation_id: String,
+    armed: bool,
+}
+impl ChildHostRetention {
+    pub(crate) fn handoff(mut self) {
+        self.armed = false;
+    }
+}
+impl Drop for ChildHostRetention {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self.bridge.send(
+                json!({"v":1,"kind":"host-tool-child-release","kernelEpoch":self.epoch,
+                "parentRunId":self.parent_run_id,"childOperationId":self.operation_id}),
+            );
+        }
     }
 }
 #[derive(Deserialize)]
@@ -307,40 +412,73 @@ fn unknown() -> ToolCompletion {
         content: json!({"error":"host_tool_effect_unknown"}),
     }
 }
+enum GenerationBinding {
+    Mcp(McpBinding),
+    Extension {
+        binding: varin_runtime::catalog::launches::ExtensionToolBinding,
+        generation: u64,
+    },
+}
+impl GenerationBinding {
+    fn reference(&self) -> &str {
+        match self {
+            Self::Mcp(binding) => &binding.reference,
+            Self::Extension { binding, .. } => &binding.provider_key,
+        }
+    }
+    fn generation(&self) -> u64 {
+        match self {
+            Self::Mcp(binding) => binding.generation,
+            Self::Extension { generation, .. } => *generation,
+        }
+    }
+    fn schemas(&self) -> &[ToolSchema] {
+        match self {
+            Self::Mcp(binding) => &binding.tools,
+            Self::Extension { binding, .. } => std::slice::from_ref(&binding.tool),
+        }
+    }
+    fn extension(&self) -> Option<&varin_runtime::catalog::launches::ExtensionToolBinding> {
+        match self {
+            Self::Mcp(_) => None,
+            Self::Extension { binding, .. } => Some(binding),
+        }
+    }
+}
 pub(crate) struct ToolGeneration {
     run_id: String,
-    binding: McpBinding,
+    binding: GenerationBinding,
     bridge: ToolBridge,
     epoch: String,
     holder: String,
     owner_id: String,
-    extension: Option<varin_runtime::catalog::launches::ExtensionToolBinding>,
 }
 impl ToolGeneration {
     pub(crate) fn matches(&self, live: &LiveMcpBinding) -> bool {
-        self.owner_id == live.owner_id && self.binding == live.binding
+        self.owner_id == live.owner_id
+            && matches!(&self.binding, GenerationBinding::Mcp(binding) if binding == &live.binding)
     }
     pub(crate) fn matches_extension(&self, live: &LiveExtensionBinding) -> bool {
         self.owner_id == live.owner_id
-            && self.binding.generation == live.generation
-            && self.extension.as_ref() == Some(&live.binding)
+            && self.binding.generation() == live.generation
+            && self.binding.extension() == Some(&live.binding)
     }
     pub(crate) fn declarations(
         self: &Arc<Self>,
     ) -> Vec<varin_runtime::composition::tools::ToolDeclaration> {
         self.binding
-            .tools
+            .schemas()
             .iter()
             .map(
                 |schema| varin_runtime::composition::tools::ToolDeclaration {
                     schema: schema.clone(),
                     content_version: format!(
                         "{}:{}:{}",
-                        self.extension
-                            .as_ref()
+                        self.binding
+                            .extension()
                             .map(|b| serde_json::to_string(b).expect("binding JSON"))
-                            .unwrap_or_else(|| self.binding.reference.clone()),
-                        self.binding.generation,
+                            .unwrap_or_else(|| self.binding.reference().to_string()),
+                        self.binding.generation(),
                         schema.version
                     ),
                     implementation: Arc::new(HostTools {
@@ -381,11 +519,11 @@ impl HostTools {
     fn contract(&self, call: &ToolCall) -> Result<ToolContract, ExecutionError> {
         if self.schema.name != call.name
             || self.schema.version != call.schema_version
-            || (self.generation.extension.is_none() && !call.arguments.is_object())
+            || (self.generation.binding.extension().is_none() && !call.arguments.is_object())
         {
             return Err(failed("host_tool_schema_changed"));
         }
-        if self.generation.extension.is_some() {
+        if self.generation.binding.extension().is_some() {
             // Author read/effect describes the service contract, not trusted replay or domain locks.
             // First domain adapter reads immutable material. Future effects obtain claims from their real resource owner.
             return Ok(ToolContract {
@@ -412,9 +550,10 @@ impl HostTools {
         let resources = if discovery {
             Vec::new()
         } else {
-            let key = self
-                .generation
-                .binding
+            let GenerationBinding::Mcp(binding) = &self.generation.binding else {
+                unreachable!("extension contract returned above")
+            };
+            let key = binding
                 .resources
                 .get(&target)
                 .ok_or_else(|| failed("mcp_target_unbound"))?;
@@ -487,7 +626,7 @@ impl ToolExecutor for HostTools {
     }
     fn executor_owner(&self) -> ExecutorOwner {
         ExecutorOwner::External {
-            identity: self.generation.binding.reference.clone(),
+            identity: self.generation.binding.reference().to_string(),
             epoch: self.generation.owner_id.clone(),
         }
     }
@@ -696,6 +835,15 @@ mod tests {
                 generation: 1,
                 tools: vec![],
                 resources: std::collections::BTreeMap::new(),
+                provenance: varin_runtime::catalog::launches::McpProvenance {
+                    execution_scope: varin_runtime::catalog::launches::McpExecutionScope::Global,
+                    configuration: varin_runtime::catalog::launches::McpConfiguration {
+                        agent_dir: "/fixture/agent".into(),
+                        config_cwd: "/fixture/project".into(),
+                        project_trusted: true,
+                    },
+                    servers: Default::default(),
+                },
             };
             let context = ToolExecutionContext {
                 run_id: "run".into(),
@@ -712,12 +860,11 @@ mod tests {
             };
             let generation = ToolGeneration {
                 run_id: "run".into(),
-                binding,
+                binding: GenerationBinding::Mcp(binding),
                 bridge: bridge.clone(),
                 epoch: "epoch".into(),
                 holder: "holder".into(),
                 owner_id: "owner-id".into(),
-                extension: None,
             };
             let _ = done.send(bridge.call(&generation, "execute", &context, &call, &cancel));
         });
@@ -764,5 +911,120 @@ mod tests {
             bridge.receive(json!({"v":1,"kind":"host-tool-response","id":request["id"],"kernelEpoch":"epoch","ok":true}));
             bridge.close();
         }
+    }
+    #[test]
+    fn child_retention_requires_ack_and_rolls_back_failure_or_cancel_without_tool_execution() {
+        for outcome in [
+            "accepted",
+            "admission_failed",
+            "rejected",
+            "cancelled",
+            "channel_reset",
+        ] {
+            let (bridge, frames) = fixture();
+            let schema = ToolSchema {
+                name: "helper".into(),
+                version: "declaration".into(),
+                description: "Original helper".into(),
+                schema: json!({"type":"object"}),
+                output_schema: None,
+                metadata: Some(ToolMetadata {
+                    service_id: "helper.service".into(),
+                    service_version: 1,
+                    completion: RegisteredToolCompletion::Result,
+                    operation: ToolOperation::Read,
+                    examples: None,
+                    source: None,
+                }),
+            };
+            let original = varin_runtime::catalog::launches::ExtensionToolBinding {
+                provider_key: "original-provider".into(),
+                extension_id: "extension".into(),
+                extension_version: "1".into(),
+                service_id: "helper.service".into(),
+                service_version: 1,
+                artifact_integrity: "original-artifact".into(),
+                declaration_hash: "declaration".into(),
+                configuration_identity: None,
+                tool: schema,
+            };
+            let context = ToolExecutionContext {
+                run_id: "original-parent".into(),
+                operation_id: "request:tool:dispatch".into(),
+                origin: ToolOrigin::ModelStep {
+                    request_id: "request".into(),
+                },
+            };
+            let cancel = CancellationToken::default();
+            let worker_cancel = cancel.clone();
+            let worker_bridge = bridge.clone();
+            let (done, result) = mpsc::channel();
+            std::thread::spawn(move || {
+                let retained =
+                    worker_bridge.retain_child(&context, None, &[original], &worker_cancel);
+                let ok = retained.is_ok();
+                if outcome == "accepted" {
+                    retained.unwrap().unwrap().handoff();
+                }
+                done.send(ok).unwrap();
+            });
+            let request = frames
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            assert_eq!(request["kind"], "host-tool-child-retain");
+            assert_eq!(request["parentRunId"], "original-parent");
+            assert_eq!(request["childOperationId"], "request:tool:dispatch");
+            assert!(request["mcpBinding"].is_null());
+            assert_eq!(request["extensionBindings"].as_array().unwrap().len(), 1);
+            assert!(
+                matches!(result.try_recv(), Err(mpsc::TryRecvError::Empty)),
+                "acceptance cannot precede original owner acknowledgement"
+            );
+            match outcome {
+                "cancelled" => {
+                    cancel.cancel();
+                    assert!(matches!(result.try_recv(), Err(mpsc::TryRecvError::Empty)));
+                    assert!(matches!(frames.try_recv(), Err(mpsc::TryRecvError::Empty)));
+                    bridge.receive(json!({"v":1,"kind":"host-tool-response","id":request["id"],"kernelEpoch":"epoch","ok":true}));
+                },
+                "channel_reset" => bridge.initialize("replacement-epoch"),
+                "rejected" => bridge.receive(json!({"v":1,"kind":"host-tool-response","id":request["id"],"kernelEpoch":"epoch","ok":false,"error":{"code":"original_owner_missing"}})),
+                _ => bridge.receive(json!({"v":1,"kind":"host-tool-response","id":request["id"],"kernelEpoch":"epoch","ok":true})),
+            }
+            assert_eq!(
+                result
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap(),
+                matches!(outcome, "accepted" | "admission_failed")
+            );
+            if outcome == "accepted" {
+                assert!(matches!(frames.try_recv(), Err(mpsc::TryRecvError::Empty)));
+            } else {
+                let release = frames
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap();
+                assert_eq!(
+                    release,
+                    json!({"v":1,"kind":"host-tool-child-release","kernelEpoch":"epoch","parentRunId":"original-parent","childOperationId":"request:tool:dispatch"})
+                );
+            }
+            bridge.close();
+        }
+        let (bridge, _) = fixture();
+        bridge.close();
+        let context = ToolExecutionContext {
+            run_id: "native-parent".into(),
+            operation_id: "native-child".into(),
+            origin: ToolOrigin::ModelStep {
+                request_id: "native".into(),
+            },
+        };
+        assert!(
+            bridge
+                .retain_child(&context, None, &[], &CancellationToken::default())
+                .unwrap()
+                .is_none(),
+            "native dispatch needs no Host channel"
+        );
     }
 }

@@ -180,14 +180,14 @@ impl ControlCommands {
             }
             "runtime.operation.cancel" => {
                 let p: OperationParams = serde_json::from_value(params)?;
-                let executor = runtime
+                let original = runtime
                     .catalog()
                     .lock()
                     .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                     .operation(&p.operation_id)
-                    .map_err(domain)?
-                    .executor;
-                if executor.as_deref() == Some("wait_process") {
+                    .map_err(domain)?;
+                let native = original.execution_owner == Some(varin_runtime::ExecutorOwner::Kernel);
+                if native && original.executor.as_deref() == Some("wait_process") {
                     runtime
                         .quiesce_process_waits()
                         .map_err(|e| KernelError::Operation(e.to_string()))?;
@@ -199,7 +199,7 @@ impl ControlCommands {
                         .map_err(domain)?;
                     return Ok(operation_cancellation_receipt(&operation));
                 }
-                if executor.as_deref() == Some("ask_user") {
+                if native && original.executor.as_deref() == Some("ask_user") {
                     return Ok(operation_cancellation_receipt(&self.finish_question(
                         &p.operation_id,
                         None,
@@ -210,6 +210,7 @@ impl ControlCommands {
                     .cancel_operation(&p.operation_id)
                     .map_err(|e| KernelError::Operation(e.to_string()))?;
                 if operation.cancel_requested
+                    && operation.execution_owner == Some(varin_runtime::ExecutorOwner::Kernel)
                     && operation.executor.as_deref() == Some("process_spawn")
                 {
                     let known = self.resources.cancel_known_process(&operation.id)?;

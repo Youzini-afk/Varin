@@ -2,6 +2,8 @@
  * each direct dependency independently; snapshots retain only their concrete selected leases. */
 import { createHash, randomUUID } from 'node:crypto';
 import { createMcpToolName } from '@earendil-works/pi-coding-agent';
+import { isDeepStrictEqual } from 'node:util';
+import type { McpProvenance } from '@varin/protocol';
 import type { McpAuthority, McpAuthorityLease, McpAuthorityScope, McpAuthorityTool, McpChange } from './mcp-authority.js';
 
 interface Generation {
@@ -33,6 +35,7 @@ export interface McpCompositionScope {
   release(): void;
 }
 export interface McpCompositionSelection {
+  provenance: McpProvenance;
   tools: readonly { name: string; version: string }[];
   resources: Readonly<Record<string, string>>;
 }
@@ -141,6 +144,14 @@ class Scope {
     }
   }
   private requiredServers(selection: McpCompositionSelection): Set<string> {
+    if (selection.provenance.execution_scope !== this.gateway.lease.binding.provenance.execution_scope || !isDeepStrictEqual(selection.provenance.configuration, this.gateway.lease.binding.provenance.configuration)) throw new Error('mcp_configuration_source_changed');
+    for (const [name, expected] of Object.entries(selection.provenance.servers)) {
+      // A ready contribution can legitimately retain its original definition while a new
+      // candidate prepares. The current gateway must not relabel that endpoint's identity.
+      const actual = this.servers.get(name)?.current?.lease.binding.provenance.servers[name]
+        ?? this.gateway.lease.binding.provenance.servers[name];
+      if (!isDeepStrictEqual(actual, expected)) throw new Error('mcp_saved_definition_unavailable');
+    }
     const resources = new Set(selection.tools.map(tool => selection.resources[tool.name]).filter(value => typeof value === 'string'));
     const selected = new Set<string>();
     for (const server of this.gateway.lease.binding.servers) if (resources.delete(server.resourceKey)) selected.add(server.name);
@@ -192,8 +203,22 @@ class Scope {
       targets.set(targetKey(name, tool.schemaVersion), { generation: owner, original: tool });
       return Object.freeze({ ...tool, name });
     }).sort((a, b) => a.name.localeCompare(b.name));
-    const readiness = gateway.lease.inspect();
-    const binding = Object.freeze({ ...gateway.lease.binding, tools: Object.freeze(tools), readiness, servers: readiness.servers,
+    const inspect = () => {
+      const observed = gateway.lease.inspect();
+      if (!selection) return observed;
+      const servers = observed.servers.filter(server => server.name in selection.provenance.servers);
+      return { ...observed, servers, configuredServerCount: servers.length,
+        connectedServerCount: servers.filter(server => server.status === 'connected').length,
+        cachedToolCount: servers.reduce((sum, server) => sum + server.cachedToolCount, 0) };
+    };
+    const readiness = inspect();
+    const provenance = structuredClone(gateway.lease.binding.provenance);
+    for (const owner of contributions) for (const tool of owner.lease.binding.tools) {
+      const original = owner.lease.binding.provenance.servers[tool.server];
+      if (original) provenance.servers[tool.server] = structuredClone(original);
+    }
+    if (selection) provenance.servers = Object.fromEntries(Object.entries(provenance.servers).filter(([name]) => name in selection.provenance.servers));
+    const binding = Object.freeze({ ...gateway.lease.binding, provenance, tools: Object.freeze(tools), readiness, servers: readiness.servers,
       generation: 1 + Number.parseInt(createHash('sha256').update(JSON.stringify([gateway.lease.binding.generation,
         readiness.configErrorCount, tools.filter(tool => tool.exposure === 'direct').map(tool => [tool.name, tool.schemaVersion, tool.exposure])])).digest('hex').slice(0, 12), 16) });
     let released = false;
@@ -210,15 +235,17 @@ class Scope {
       binding,
       implementationIdentity:createHash('sha256').update(JSON.stringify([gateway.identity,
         contributions.map(owner=>owner.identity).sort(),tools.map(tool=>[tool.name,tool.schemaVersion])])).digest('hex'),
-      inspect: () => { if (released) throw new Error('mcp_lease_released'); return gateway.lease.inspect(); },
+      inspect: () => { if (released) throw new Error('mcp_lease_released'); return inspect(); },
       discover: async (server, signal) => {
         if (released) throw new Error('mcp_lease_released');
+        if (selection && !(server in selection.provenance.servers)) throw new Error('mcp_target_unbound');
         const tools=await gateway.lease.discover(server,signal);
         for(const tool of tools) discovered.add(targetKey(tool.name,tool.schemaVersion));
         return tools;
       },
       prepareTool: async (server,tool,version,signal) => {
         if (released) throw new Error('mcp_lease_released');
+        if (selection && !(server in selection.provenance.servers)) throw new Error('mcp_target_unbound');
         const selected=await gateway.lease.prepareTool(server,tool,version,signal);
         discovered.add(targetKey(selected.name,selected.schemaVersion));return selected;
       },

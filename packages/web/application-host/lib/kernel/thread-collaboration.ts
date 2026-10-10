@@ -80,6 +80,7 @@ export class ThreadCollaboration {
         }
         const resumed = [...new Set([...await this.owners.runtime.reconcileChildren(epoch.signal), ...await this.owners.runtime.reconcileProcessWaits(epoch.signal)])];
         const children = await this.owners.runtime.children(epoch.signal);
+        this.owners.kernel.reconcileChildToolHandoffs(children);
         const unaccepted = await this.owners.runtime.unacceptedChildSources(epoch.signal);
         for (const source of unaccepted) {
           if (this.cleaningSources.has(source.operation_id)) continue;
@@ -301,6 +302,7 @@ export class ThreadCollaboration {
     } finally {
       if (!ownerSignal.aborted) {
         child = await runtime.child(child.operation_id, ownerSignal);
+        if (child.report) this.owners.kernel.releaseChildToolHandoff(child.parent_run_id, child.operation_id);
         await this.releaseHandoff(child, ownerSignal);
         if (child.report && child.receipt && ['published', 'no_changes', 'unavailable'].includes(child.code_result.kind)) await runtime.releaseSourceGrants(child.receipt.run_id);
       }

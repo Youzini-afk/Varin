@@ -31,8 +31,14 @@ impl PreparedRunTools {
     pub fn schemas(&self) -> &[ToolSchema] {
         self.directory.schemas()
     }
-    pub fn into_static(self) -> Arc<dyn ToolExecutor> {
-        self.directory
+    pub fn into_static(self) -> Result<Arc<dyn ToolExecutor>, ExecutionError> {
+        if let Some(mcp) = &self.mcp {
+            mcp.generation.activate()?;
+        }
+        for extension in &self.extensions {
+            extension.generation.activate()?;
+        }
+        Ok(self.directory)
     }
 }
 struct Active {
@@ -138,6 +144,9 @@ fn declarations(
     selected
 }
 impl RunTools {
+    pub(crate) fn bridge(&self) -> ToolBridge {
+        self.bridge.clone()
+    }
     pub fn new(catalog: Arc<Mutex<Catalog>>, bridge: ToolBridge) -> Arc<Self> {
         Arc::new(Self {
             catalog,

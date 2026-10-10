@@ -349,11 +349,21 @@ export class HostServiceRegistry {
 
   /** Bind after scoped routing/preparation. Only the affected service's index is consulted. */
   bind(serviceId: string, version: number, providerId?: string): HostServiceBinding {
+    return this.#bind(serviceId, version, providerId, false);
+  }
+
+  /** Derive an independent exchange from an already pinned exact generation. This never
+   * revives an unretained retired provider or relaxes explicit revocation. */
+  bindPinned(serviceId: string, version: number, providerId: string): HostServiceBinding {
+    return this.#bind(serviceId, version, providerId, true);
+  }
+
+  #bind(serviceId: string, version: number, providerId: string | undefined, retained: boolean): HostServiceBinding {
     const key = serviceKey(serviceId, version);
     const selected = providerId ?? this.#selections.get(key);
     const matches = this.#activeByService.get(key) ?? [];
     const provider = selected ? this.#providers.get(selected) : matches.length === 1 ? matches[0] : undefined;
-    if (!provider || provider.status !== "active" || provider.revoked || serviceKey(provider.descriptor.id, provider.descriptor.version) !== key) {
+    if (!provider || (provider.status !== "active" && (!retained || provider.pins.size === 0)) || provider.revoked || serviceKey(provider.descriptor.id, provider.descriptor.version) !== key) {
       throw new HostServiceBindingError(selected ? "selected_unavailable" : matches.length > 1 ? "ambiguous" : "missing",
         `Host service provider is unavailable or ambiguous: ${key}`);
     }
@@ -372,7 +382,7 @@ export class HostServiceRegistry {
         return this.#invokeProvider(provider, method, args, signal);
       },
       pin: () => {
-        available(false);
+        available(retained && provider.pins.size > 0);
         provider.inFlight += 1;
         let released = false;
         const release = () => {

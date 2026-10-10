@@ -666,8 +666,10 @@ were used. The model reranking and fixed-source limits above remain in force; se
 `ThreadCollaboration` consumes committed Catalog collaboration facts. Its maps only coalesce live
 preparation, launch and receipt reconciliation. It never starts a Pi session or adds a native child to
 ThreadRegistry. `child-profiles.ts` compiles the original global harness settings and shared
-`observePresets` resolver against `runtime.child.capabilities`, which projects the real native child
-tool declarations. It creates no profile registry. Missing, disabled, invalid, unsupported and
+`observePresets` resolver and freezes the `runtime.child.capabilities` presentation descriptors.
+The actual Rust directory validates native and frozen Host capabilities together, including name
+collisions; configuration parsing never rejects a valid Host tool using a native-only list. It creates
+no profile registry. Missing, disabled, invalid, unsupported and
 unavailable selections remain distinct; the entire explicit preset is validated before overrides.
 Native Threads do not infer a work focus from a project or shell: a focus-restricted preset is
 unavailable while that scope is unknown. No Pi Session is created to read user settings.
@@ -682,9 +684,28 @@ Schema-2 dispatch takes task/preset?/workMode?/tools?. Native children can use t
 file, resource, question, recursive collaboration and managed process capabilities. The read-only
 source projection and private text-write projection remain explicit; process capability additionally
 requires real configured/delegated authority and existing permission gates. A private cwd is not an
-OS sandbox. Arbitrary extension/MCP, LSP, memory/planning/Goal, Computer and remote child bindings remain
-unavailable until their complete owner contracts are connected; no unsupported list is silently trimmed.
-The UI shows the actual frozen choices, selected child model/tools, and precise unavailable reasons.
+OS sandbox. Ordinary extensions and MCP use the exact original frozen Host declarations. LSP,
+memory/planning/Goal, custom policies, Computer and remote child bindings remain unavailable until
+their complete owner contracts are connected; no unsupported list is silently trimmed. The UI displays
+the frozen native descriptors together with actual Launch Host bindings and selected profile facts.
+
+Child extension scopes hold selected original service pins without subscribing to new routing candidates.
+The original supervisor supplies artifact identity for live draining owners as well as active owners;
+`HostServiceRegistry.bindPinned` can derive an independent child pin from a retained generation. The
+child's fresh invocation scope and current permission policy are checked for every call.
+
+`mcp-child-preparation.ts` uses the same original `McpAuthority`. Required provenance includes explicit
+execution scope, configuration directory/trust and selected server definitions. Workspace MCP receives
+the child's real materialized cwd; global MCP keeps the neutral environment. One unused-launch CAS
+publishes the actual child binding, after which restoration requires it exactly. Direct tools preserve
+their original server and disambiguated public name; discovery cannot expand the frozen server set.
+
+The private ToolBridge acknowledges an original-owner child retention before Catalog accepts dispatch.
+Its child holders keep only live resources, independently of parent Run completion and channel reset.
+After `runtime.run.start` has successfully bound independent child leases, Host releases the handoff.
+The collaboration consumer also releases terminal child holders and old-epoch unaccepted handoffs using
+real Catalog facts. A current-epoch missing ChildTask can still be between ACK and accept and is not
+prematurely reclaimed. Host shutdown releases its holders; exact unavailable artifacts fail on restart.
 
 A durable accepted child precedes slow source capture and context preparation. A fixed source reuses
 its original pin. A physical source uses the shared Documents capture window, complete inventory and
@@ -695,9 +716,11 @@ The branch-create transaction retains provenance through the existing blob/recor
 reads the original fixed source receipt before attempting any current directory or Git observation.
 
 Child Run termination, report production, process lifetime and file settlement are separate facts.
-Actual worker/root leases, original file receipts and guardian-confirmed process stop determine when
-a fixed file candidate may be published. The Host stops before directory capture if child settlement
-still reports pending. Original process receipts wake settlement even when ChildTask revision does
+Actual worker/root leases, original file receipts, guardian-confirmed process stop and original
+workspace Host callback stop facts determine when a fixed file candidate may be published. A cancelled
+MCP request with unknown execution remains pending until its original owner can prove stop; a protocol
+cancel response is not that proof. The Host stops before directory capture if child settlement
+still reports pending. Original operation receipts wake settlement even when ChildTask revision does
 not change, including a receipt arriving while an earlier attempt drains.
 Storage atomically fixes a candidate and base pins, then prepares its result document on a readonly
 worker before the short original branch revision/WorkingResult/receipt commit. An existing candidate

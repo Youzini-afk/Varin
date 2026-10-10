@@ -2028,7 +2028,27 @@ fn tool_activation_retains_its_exact_composition_through_collection_and_reopen()
         reference: "exact-owner".into(),
         generation: 42,
         tools: vec![schema.clone()],
-        resources: Default::default(),
+        resources: [
+            ("query".into(), "server-resource".into()),
+            ("server:fixture".into(), "server-resource".into()),
+        ]
+        .into(),
+        provenance: launches::McpProvenance {
+            execution_scope: launches::McpExecutionScope::Global,
+            configuration: launches::McpConfiguration {
+                agent_dir: "/fixture/agent".into(),
+                config_cwd: "/fixture/project".into(),
+                project_trusted: true,
+            },
+            servers: [(
+                "fixture".into(),
+                launches::McpServerSelection {
+                    definition_version: "definition".into(),
+                    resource_key: "server-resource".into(),
+                },
+            )]
+            .into(),
+        },
     };
     let preparation = db
         .capture_tool_update(&receipt.run_id, db.epoch())
