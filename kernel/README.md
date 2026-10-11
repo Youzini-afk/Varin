@@ -84,6 +84,20 @@ finite rename/directory durability operations remain with that owner to preserve
 Original mutation/reconciliation observations reuse the body algorithm synchronously and remain an
 explicit separate control boundary. See [capture acceptance](../docs/reviews/runtime-file-capture-2026-10-11.md).
 
+`storage.getBlob` and fixed-source native `file_read` share one immutable-object body worker.
+Storage admits the original grant and owner/record-slot/branch-path/pin-path source, recorded length
+and range. Filesystem metadata, cold whole-object integrity verification, range reads and base64/text
+projection run on the existing file workers. Completion rechecks current grant/source/cancellation and
+moves the prepared body; only a successfully verified and still-authorized completion warms the original
+process-local integrity cache. Losing the source never becomes an empty successful read.
+
+Transient exact-hash reader references join original GC roots and pending physical deletion checks.
+They retain bytes through concurrent readers, queued completion and actual worker exit, but grant no
+access rights and create no durable query Operation. Revocation closes authority without deleting an
+in-flight reader's bytes. Shutdown joins the same workers before releasing Storage ownership; reopening
+starts with no transient readers. Other Storage writes and GC traversal retain their existing execution
+boundaries. See [blob-reader acceptance](../docs/reviews/runtime-blob-reader-2026-10-11.md).
+
 R5 adds read-only `compute.start/read/cancel/release` and grammar-recipe registration over those admitted
 resources. A job reads exactly one source class: an immutable WorkingState pin, a registered live root, or
 explicit fixed objects. Pinned jobs clone a short-lived reader pin; live records carry the revision actually

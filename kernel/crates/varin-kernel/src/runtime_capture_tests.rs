@@ -72,7 +72,7 @@ impl Fixture {
     }
     fn read_capture(&mut self, captured: &Value) -> Vec<u8> {
         let state: Value = serde_json::from_str(captured["stateJson"].as_str().unwrap()).unwrap();
-        let read = self.short("storage.getBlob", json!({"hash":state["objectHash"],"ownerId":captured["ownerId"],"offset":0,"length":1024}), Some("writer"));
+        let read = self.blob(json!({"hash":state["objectHash"],"ownerId":captured["ownerId"],"offset":0,"length":1024}), "writer").unwrap();
         base64::engine::general_purpose::STANDARD
             .decode(read["bytesBase64"].as_str().unwrap())
             .unwrap()
@@ -617,3 +617,6 @@ fn revocation_and_retirement_cannot_drop_an_implicit_capture_lease_before_real_d
         );
     }
 }
+
+#[path = "runtime_blob_read_tests.rs"]
+mod blob_reads;

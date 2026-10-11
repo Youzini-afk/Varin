@@ -27,7 +27,17 @@ struct PendingRootRegistration {
     remaining: usize,
 }
 
+enum BlobReadReply {
+    Wire(Value),
+    Resource(crate::tools::ResourceCall),
+}
+
 enum WorkerRequest {
+    BlobReadDone {
+        reply: BlobReadReply,
+        task: crate::storage::blob_reads::BlobReadTask,
+        result: Result<crate::storage::blob_reads::PreparedBlobRead, KernelError>,
+    },
     Wire(Value, Arc<AtomicBool>),
     Resource(crate::tools::ResourceCall),
     FileObservation(crate::file_observation::Command),
@@ -146,7 +156,8 @@ fn admission_revoke_target(request: &Value, current_epoch: Option<&str>) -> Opti
 fn pending_file_worker(method: &str) -> bool {
     matches!(
         method,
-        "file.capture"
+        "storage.getBlob"
+            | "file.capture"
             | "file.captureBatch"
             | "file.scan"
             | "file.measure"
@@ -171,6 +182,11 @@ struct Kernel {
     #[cfg(test)]
     capture_hold: Option<(
         crate::storage::capture_resources::CapturePhase,
+        Box<dyn FnOnce() + Send>,
+    )>,
+    #[cfg(test)]
+    blob_read_hold: Option<(
+        crate::storage::blob_reads::BlobReadPhase,
         Box<dyn FnOnce() + Send>,
     )>,
     pending_root_registrations: HashMap<String, PendingRootRegistration>,
@@ -204,6 +220,8 @@ impl Kernel {
             inventory_traversal_hold: None,
             #[cfg(test)]
             capture_hold: None,
+            #[cfg(test)]
+            blob_read_hold: None,
             pending_root_registrations: HashMap::new(),
             active_materializations: 0,
             agent_control: crate::agent_runtime::AgentControl::default(),
@@ -469,6 +487,12 @@ impl Kernel {
             method,
             &params_value,
         )?;
+        if method == "storage.getBlob" {
+            let task =
+                storage.prepare_blob_read(&authorized_params, &authorized_grant, cancellation)?;
+            self.spawn_blob_read(task, BlobReadReply::Wire(request.clone()), completions)?;
+            return Ok(None);
+        }
         if method == "working.result.publish" {
             use crate::storage::result_publication::ResultPublicationAdmission;
             match storage.prepare_result_publication(
@@ -778,6 +802,72 @@ impl Kernel {
             storage.finish_retained_file_lease(id);
         }
         completed
+    }
+
+    fn spawn_blob_read(
+        &mut self,
+        mut task: crate::storage::blob_reads::BlobReadTask,
+        reply: BlobReadReply,
+        completions: &mpsc::Sender<WorkerRequest>,
+    ) -> Result<(), KernelError> {
+        #[cfg(test)]
+        if let Some((phase, hold)) = self.blob_read_hold.take() {
+            task.hold_at(phase, hold);
+        }
+        #[cfg(not(test))]
+        let _ = &mut task;
+        let cancellation = task.cancellation();
+        let retention = task.retain_worker();
+        let completed = completions.clone();
+        self.file_workers
+            .retain(|(_, worker)| !worker.is_finished());
+        let worker = thread::Builder::new()
+            .name("blob-read".into())
+            .spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task.run()))
+                    .unwrap_or_else(|_| {
+                        Err(KernelError::Storage("blob read worker panicked".into()))
+                    });
+                let _ = completed.send(WorkerRequest::BlobReadDone {
+                    reply,
+                    task,
+                    result,
+                });
+                drop(retention);
+            })?;
+        self.file_workers.push((cancellation, worker));
+        Ok(())
+    }
+    fn complete_blob_read(
+        &mut self,
+        request: &Value,
+        task: &crate::storage::blob_reads::BlobReadTask,
+        result: Result<crate::storage::blob_reads::PreparedBlobRead, KernelError>,
+        revoked: &Mutex<HashSet<String>>,
+    ) -> Result<Value, KernelError> {
+        let storage = self
+            .storage
+            .as_mut()
+            .ok_or_else(|| KernelError::Storage("kernel stopped".into()))?;
+        let (grant, _) = storage.authorize(
+            request["grantId"].as_str(),
+            &self.epoch,
+            self.host_id.as_deref().unwrap_or(""),
+            self.host_generation.as_deref().unwrap_or(""),
+            "storage.getBlob",
+            task.params(),
+        )?;
+        if request["epoch"].as_str() != Some(&self.epoch)
+            || revoked
+                .lock()
+                .map(|set| set.contains(&grant.grant_id))
+                .unwrap_or(true)
+        {
+            return Err(KernelError::Authorization(
+                "blob reader owner changed or revoked".into(),
+            ));
+        }
+        storage.finish_blob_read(task, result, &grant)
     }
 
     fn spawn_materialization(
@@ -1287,6 +1377,69 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     continue;
                 }
+                WorkerRequest::BlobReadDone {
+                    reply,
+                    task,
+                    result,
+                } => {
+                    match reply {
+                        BlobReadReply::Wire(request) => {
+                            let id = request["id"].as_str().unwrap_or("");
+                            let value = kernel.complete_blob_read(
+                                &request,
+                                &task,
+                                result,
+                                &worker_revoked_grants,
+                            );
+                            worker_cancellations
+                                .lock()
+                                .ok()
+                                .map(|mut active| active.remove(id));
+                            let response = match value {
+                                Ok(value) => response_ok(id, value),
+                                Err(error) => response_error(id, &error),
+                            };
+                            if worker_response_tx.send(response).is_err() {
+                                break;
+                            }
+                        }
+                        BlobReadReply::Resource(call) => {
+                            let denied = worker_revoked_grants
+                                .lock()
+                                .map(|set| set.contains(&call.binding.grant_id))
+                                .unwrap_or(true);
+                            let value = if denied {
+                                Err(crate::tools::ResourceFailure {
+                                    error: KernelError::Authorization("grant is revoked".into()),
+                                    dispatched: true,
+                                })
+                            } else if let Some(storage) = kernel.storage.as_mut() {
+                                crate::tools::finish_resource_blob_read(
+                                    storage,
+                                    &kernel.epoch,
+                                    kernel.host_id.as_deref().unwrap_or(""),
+                                    kernel.host_generation.as_deref().unwrap_or(""),
+                                    &call,
+                                    &task,
+                                    result,
+                                )
+                            } else {
+                                Err(crate::tools::ResourceFailure {
+                                    error: KernelError::Storage("kernel stopped".into()),
+                                    dispatched: true,
+                                })
+                            };
+                            if let Some(key) = &call.admission_key {
+                                worker_cancellations
+                                    .lock()
+                                    .ok()
+                                    .map(|mut active| active.remove(key));
+                            }
+                            let _ = call.reply.send(value);
+                        }
+                    }
+                    continue;
+                }
                 WorkerRequest::InventoryDone {
                     request,
                     task,
@@ -1422,7 +1575,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                         kernel.host_id.as_deref(),
                         kernel.host_generation.as_deref(),
                     ) {
-                        crate::tools::serve_resource(
+                        crate::tools::prepare_resource(
                             storage,
                             &kernel.epoch,
                             host_id,
@@ -1434,6 +1587,31 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                             error: KernelError::Authorization("kernel handshake required".into()),
                             dispatched: false,
                         })
+                    };
+                    let result = match result {
+                        Ok(crate::tools::ResourceWork::Ready(value)) => Ok(value),
+                        Ok(crate::tools::ResourceWork::BlobRead(task)) => {
+                            // A failed spawn drops the original reply and retention; its receiver
+                            // reports disconnection, never a fabricated successful/cancelled read.
+                            let key = call.admission_key.clone();
+                            if kernel
+                                .spawn_blob_read(
+                                    task,
+                                    BlobReadReply::Resource(call),
+                                    &capture_completions,
+                                )
+                                .is_err()
+                            {
+                                if let Some(key) = key {
+                                    worker_cancellations
+                                        .lock()
+                                        .ok()
+                                        .map(|mut active| active.remove(&key));
+                                }
+                            }
+                            continue;
+                        }
+                        Err(error) => Err(error),
                     };
                     if let Some(key) = &call.admission_key {
                         if let Ok(mut active) = worker_cancellations.lock() {

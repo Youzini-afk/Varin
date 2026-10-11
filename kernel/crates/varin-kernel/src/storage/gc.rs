@@ -12,6 +12,9 @@ impl Storage {
         let mut reclaimed_bytes = 0_u64;
         let mut failures = Vec::new();
         for (hash, raw_path) in rows {
+            if self.blob_read_roots.contains(&hash) {
+                continue;
+            }
             // An object may have been installed again after an earlier cleanup
             // failure. A stale delete intent cannot revoke a newer catalog fact.
             let installed: bool = self.conn.query_row(
@@ -199,7 +202,7 @@ impl Storage {
             roots.insert(root.to_string());
         }
         let mut nodes = BTreeSet::new();
-        let mut blobs = BTreeSet::new();
+        let mut blobs = self.blob_read_roots.active_hashes();
         for root in roots {
             self.check_cancelled()?;
             self.collect_reachable(&root, &mut nodes, &mut blobs)?;

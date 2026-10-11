@@ -578,6 +578,40 @@ pub(crate) struct ResourceCall {
     pub cancellation: CancellationToken,
     pub reply: ResourceReply,
 }
+#[cfg(test)]
+pub(crate) fn fixed_read_fixture(
+    binding: ToolBinding,
+    path: &str,
+    cancellation: CancellationToken,
+) -> (ResourceCall, mpsc::Receiver<Result<Value, ResourceFailure>>) {
+    let (sender, receiver) = mpsc::channel();
+    (
+        ResourceCall {
+            admission_key: Some("fixture-read-admission".into()),
+            context: ToolExecutionContext {
+                run_id: binding.run_id.clone(),
+                operation_id: "fixture-read".into(),
+                origin: ToolOrigin::ModelStep {
+                    request_id: "fixture-model".into(),
+                },
+            },
+            binding,
+            operation: ResourceOperation::FileRead(FileReadArgs {
+                path: path.into(),
+                offset: 1,
+                length: Some(3),
+            }),
+            authorize_only: false,
+            expected_resource_key: None,
+            cancellation,
+            reply: ResourceReply {
+                sender: Some(sender),
+                wake: None,
+            },
+        },
+        receiver,
+    )
+}
 type AdmissionControl = dyn Fn(
         &ToolBinding,
         &CancellationToken,
@@ -1788,9 +1822,146 @@ fn validate_binding(
     }
     Ok(())
 }
+pub(crate) enum ResourceWork {
+    Ready(Value),
+    BlobRead(crate::storage::blob_reads::BlobReadTask),
+}
+/// Fixed file bodies use the same immutable reader as wire getBlob. Other domains
+/// retain their original owner and execution path.
+pub(crate) fn prepare_resource(
+    storage: &mut Storage,
+    epoch: &str,
+    host_id: &str,
+    host_generation: &str,
+    request: &ResourceCall,
+) -> Result<ResourceWork, ResourceFailure> {
+    let ResourceOperation::FileRead(args) = &request.operation else {
+        return serve_resource_immediate(storage, epoch, host_id, host_generation, request)
+            .map(ResourceWork::Ready);
+    };
+    if request.authorize_only || request.binding.source_mode != SourceMode::FixedBranch {
+        return serve_resource_immediate(storage, epoch, host_id, host_generation, request)
+            .map(ResourceWork::Ready);
+    }
+    let mut dispatched = false;
+    let result = (|| -> Result<ResourceWork, KernelError> {
+        if request.cancellation.is_cancelled() {
+            return Err(KernelError::Cancelled);
+        }
+        let (method, params) = request.operation.params(&request.binding, &request.context);
+        let (grant, authorized) = storage.authorize(
+            Some(&request.binding.grant_id),
+            epoch,
+            host_id,
+            host_generation,
+            method,
+            &params,
+        )?;
+        validate_binding(&grant, &request.binding, &request.context)?;
+        dispatched = true;
+        let state =
+            storage.dispatch(method, &authorized, Some(&request.binding.grant_id), &grant)?;
+        let source = request
+            .binding
+            .file_source
+            .as_ref()
+            .expect("validated fixed source");
+        let entries = state
+            .get("entries")
+            .and_then(Value::as_array)
+            .ok_or_else(|| KernelError::Storage("branch read omitted entries".into()))?;
+        let Some(state) = entries.first().and_then(|entry| entry.get("state")) else {
+            return Ok(ResourceWork::Ready(
+                json!({"path":args.path,"source":source,"missing":true}),
+            ));
+        };
+        if state.get("kind").and_then(Value::as_str) != Some("regular-file") {
+            return Ok(ResourceWork::Ready(
+                json!({"path":args.path,"source":source,"state":state,"missing":false}),
+            ));
+        }
+        let hash = state
+            .get("objectHash")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::Storage("file state omitted object identity".into()))?;
+        let mut params = json!({"hash":hash,"branchId":source.branch_id,"revision":source.revision,"path":args.path,"offset":args.offset});
+        if let Some(length) = args.length {
+            params["length"] = json!(length);
+        }
+        let (grant, authorized) = storage.authorize(
+            Some(&request.binding.grant_id),
+            epoch,
+            host_id,
+            host_generation,
+            "storage.getBlob",
+            &params,
+        )?;
+        validate_binding(&grant, &request.binding, &request.context)?;
+        let task =
+            storage.prepare_blob_read(&authorized, &grant, request.cancellation.shared_flag())?;
+        Ok(ResourceWork::BlobRead(task.with_file_output(
+            args.path.clone(),
+            serde_json::to_value(source)?,
+        )))
+    })();
+    result.map_err(|error| ResourceFailure { error, dispatched })
+}
+pub(crate) fn finish_resource_blob_read(
+    storage: &mut Storage,
+    epoch: &str,
+    host_id: &str,
+    host_generation: &str,
+    request: &ResourceCall,
+    task: &crate::storage::blob_reads::BlobReadTask,
+    result: Result<crate::storage::blob_reads::PreparedBlobRead, KernelError>,
+) -> Result<Value, ResourceFailure> {
+    (|| {
+        let (grant, _) = storage.authorize(
+            Some(&request.binding.grant_id),
+            epoch,
+            host_id,
+            host_generation,
+            "storage.getBlob",
+            task.params(),
+        )?;
+        validate_binding(&grant, &request.binding, &request.context)?;
+        storage.finish_blob_read(task, result, &grant)
+    })()
+    .map_err(|error| ResourceFailure {
+        error,
+        dispatched: true,
+    })
+}
+/// Unit owner fixtures may synchronously drive the same stages. Production never
+/// performs body I/O here: Kernel retains the original reply through worker completion.
+#[cfg(test)]
+pub(crate) fn serve_resource(
+    storage: &mut Storage,
+    epoch: &str,
+    host_id: &str,
+    host_generation: &str,
+    request: &ResourceCall,
+) -> Result<Value, ResourceFailure> {
+    match prepare_resource(storage, epoch, host_id, host_generation, request)? {
+        ResourceWork::Ready(value) => Ok(value),
+        ResourceWork::BlobRead(task) => {
+            let result = task.run();
+            finish_resource_blob_read(
+                storage,
+                epoch,
+                host_id,
+                host_generation,
+                request,
+                &task,
+                result,
+            )
+        }
+    }
+}
+
 /// Called only on the sole Storage actor. Host/epoch values come from its handshake, not the model.
 /// Existing domain APIs accept validated Values; no JSON serialization or protocol loopback occurs.
-pub(crate) fn serve_resource(
+fn serve_resource_immediate(
     storage: &mut Storage,
     epoch: &str,
     host_id: &str,
@@ -1970,63 +2141,6 @@ pub(crate) fn serve_resource(
         let result = storage.dispatch(method, &authorized, Some(&request.binding.grant_id), &grant);
         storage.clear_cancellation();
         let result = result?;
-        if let ResourceOperation::FileRead(args) = &request.operation {
-            let source = request
-                .binding
-                .file_source
-                .as_ref()
-                .expect("validated source");
-            let entries = result
-                .get("entries")
-                .and_then(Value::as_array)
-                .ok_or_else(|| KernelError::Storage("branch read omitted entries".into()))?;
-            let state = entries.first().and_then(|entry| entry.get("state"));
-            let Some(state) = state else {
-                return Ok(json!({"path":args.path,"source":source,"missing":true}));
-            };
-            if state.get("kind").and_then(Value::as_str) != Some("regular-file") {
-                return Ok(json!({"path":args.path,"source":source,"state":state,"missing":false}));
-            }
-            let hash = state
-                .get("objectHash")
-                .and_then(Value::as_str)
-                .ok_or_else(|| KernelError::Storage("file state omitted object identity".into()))?;
-            let mut params = json!({"hash":hash,"branchId":source.branch_id,"revision":source.revision,"path":args.path,"offset":args.offset});
-            if let Some(length) = args.length {
-                params["length"] = json!(length);
-            }
-            let (grant, authorized) = storage.authorize(
-                Some(&request.binding.grant_id),
-                epoch,
-                host_id,
-                host_generation,
-                "storage.getBlob",
-                &params,
-            )?;
-            validate_binding(&grant, &request.binding, &request.context)?;
-            if request.cancellation.is_cancelled() {
-                return Err(KernelError::Cancelled);
-            }
-            let mut content = storage.dispatch(
-                "storage.getBlob",
-                &authorized,
-                Some(&request.binding.grant_id),
-                &grant,
-            )?;
-            let encoded = content
-                .get("bytesBase64")
-                .and_then(Value::as_str)
-                .ok_or_else(|| KernelError::Storage("content read omitted bytes".into()))?;
-            let bytes = BASE64.decode(encoded).map_err(|_| {
-                KernelError::Storage("content read returned malformed bytes".into())
-            })?;
-            if let Ok(text) = String::from_utf8(bytes) {
-                let object = content.as_object_mut().expect("content result object");
-                object.remove("bytesBase64");
-                object.insert("text".into(), Value::String(text));
-            }
-            return Ok(json!({"path":args.path,"source":source,"missing":false,"content":content}));
-        }
         Ok(result)
     })();
     result.map_err(|error| ResourceFailure { error, dispatched })

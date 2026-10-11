@@ -8,6 +8,12 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-11 增量：共享 immutable object reader；完成本片后暂停
+
+- 原 getBlob 与 fixed-source file_read 共享已有 file worker：短 admission/finish、同句柄 cold 全 hash/range 读取与正文转换锁外；原四种 source/grant 仍独占访问权威。短暂 exact-hash 引用只保原 GC/删除生命周期，不增加权限、持久读 Operation 或格式。
+- Host getBlob 等实际取消终态，原 input transfer close 不再先 retire 尚在读取的 grant。独立精确基线模块+原 consumer 的同两条反例修后通过；native worker、同 hash 多读/GC、撤权、Drop 及真实 fixed reply 分层验证。详见[本片验收与复跑入口](../reviews/runtime-blob-reader-2026-10-11.md)。
+- 按用户最新要求，完整收尾与发布本片后暂停，不进入 log literal/log_end 或下一个领域。日志条件仅有方案，尚未实现；其他两设计能力和外层验收缺口见该验收记录的续接清单。两设计整体仍未完成，默认 runtime/用户资产迁移仍归用户验收后负责。
+
 ## 2026-10-11 增量：原研究产物与收集事实续接
 
 - 普通 follow_up **版本6** 与 User/API/UI 新增独立 artifact/collection 叶，原 accepted Job binding 与实际 family 读权限贯穿。artifact 可按ID或name选择，once读当前适用快照、each按原每件revision；真实collection完成与产物可用、空收集、失败/未知分开。明确Any才同时消费两者，不因一次收集完成偷加模型轮。

@@ -19,6 +19,20 @@ stops queued admission or signals the active kernel operation without returning 
 child to exit. A missing executable, protocol mismatch, malformed response, revoked grant, or child exit is
 an explicit Host failure; it never selects the old backend as a fallback.
 
+## Immutable object reader settlement
+
+The unchanged `getBlob` API uses the original scoped source and byte-range DTO. Abort sends the
+existing cancellation control frame and keeps the caller Promise pending until the native response,
+so input-transfer `close()` and resource-reader `finally` cannot mistake an abort signal for stopped
+hashing or reading. Fixed-source native `file_read` uses the same Storage worker. Original grants,
+record slots, branch paths and pins remain the access authority; temporary native read roots protect
+bytes through GC without granting access. Worker completion rechecks current authority.
+
+Transport failure is still an explicit disconnected error, not a successful reader-drain receipt.
+Native Storage ownership remains held until its real workers stop, independently of a rejected Host
+Promise. See the [finite blob-reader acceptance](../../../../../docs/reviews/runtime-blob-reader-2026-10-11.md)
+for the native/consumer evidence and the separately unverified full IPC boundary.
+
 ## Same-task conversation views
 
 The four authenticated `/api/threads/family/{list,runs,read,item}` routes use the original

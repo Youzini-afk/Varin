@@ -8,6 +8,7 @@ Last updated: 2026-10-11
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [原 immutable object reader（2026-10-11）](runtime-blob-reader-2026-10-11.md) | 共同 getBlob/fixed FileRead、cold hash 锁外、取消真实排空与原 GC 保活；有限片后暂停 |
 | [原研究产物与收集事实续接（2026-10-11）](runtime-artifact-followups-2026-10-11.md) | 独立 artifact/collection、原修订/metadata、精确发生项与真实 root/child 消费；分层验收 |
 | [明确重复授权与原发生项（2026-10-11）](runtime-repeated-followups-2026-10-11.md) | 明确 each、FIFO 来源事实、精确发生项与原文件/child/公开消费者；分层验收 |
 | [原 accepted Job 事件与工作续接（2026-10-11）](runtime-job-followups-2026-10-11.md) | 原 Job 停止事实、确切旧回执、家系发现与 root/child 续接；分层组件验收 |
