@@ -53,6 +53,15 @@ captured at takeover, with its root informed. Ended or replaced Runs do not rece
 The latest observer/usage record never selects the recipient. Remote control assignments subscribe
 to the owning Host's control stream without frames, even when no viewer is open.
 
+For an already resolved local desktop, explicit cancel/takeover and the control bar's original
+`automation.cancelDesktop` route fence the existing lane and start its physical interrupt before
+waiting for catalog reads, script revocation, control persistence or diagnostic writes. Placement is
+remembered only after the original desktop record is loaded; an unknown or remote target still uses
+its owning resolver. An observer releasing its assignment does not stop another controller.
+The release acknowledgement and the old lane callback must both finish before cleanup is confirmed.
+A persistence/revocation failure after input release remains an actionable partial failure; it does
+not pretend that human-control persistence succeeded or restart the old queued input.
+
 Windows owns synthetic input in `input-controller.cs` on a thread separate from PowerShell's UIA
 calls. A release side channel fences the native owner and acknowledges key/button release before
 the Host closes that helper. The next operation starts a new helper. A crashed helper cannot prove
