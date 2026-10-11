@@ -13,6 +13,18 @@ use crate::execution::{
     deny_unknown_fields
 )]
 pub enum FollowupRegistrationSource {
+    LogLiteral {
+        operation_id: String,
+        stream: LogStream,
+        literal: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from_offset: Option<u64>,
+    },
+    LogEnd {
+        operation_id: String,
+        stream: LogStream,
+    },
+
     At {
         at_ms: u64,
     },
@@ -40,6 +52,10 @@ pub enum FollowupRegistrationSource {
 impl FollowupRegistrationSource {
     fn source(&self) -> FollowupSource {
         match self {
+            Self::LogLiteral { operation_id, stream, literal, from_offset } => FollowupSource::LogLiteral {
+                operation_id: operation_id.clone(), stream: *stream, from_offset: from_offset.unwrap_or(0), literal_bytes: literal.len() as u64,
+            },
+            Self::LogEnd { operation_id, stream } => FollowupSource::LogEnd { operation_id: operation_id.clone(), stream: *stream },
             Self::Artifact {
                 operation_id,
                 artifact_id,
@@ -74,6 +90,18 @@ impl FollowupRegistrationSource {
     deny_unknown_fields
 )]
 pub enum FollowupRegistrationTrigger {
+    LogLiteral {
+        operation_id: String,
+        stream: LogStream,
+        literal: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from_offset: Option<u64>,
+    },
+    LogEnd {
+        operation_id: String,
+        stream: LogStream,
+    },
+
     Artifact {
         operation_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -121,6 +149,10 @@ impl FollowupRegistrationTrigger {
     }
     fn trigger(&self) -> FollowupTrigger {
         match self {
+            Self::LogLiteral { operation_id, stream, literal, from_offset } => FollowupTrigger::LogLiteral {
+                operation_id: operation_id.clone(), stream: *stream, from_offset: from_offset.unwrap_or(0), literal_bytes: literal.len() as u64,
+            },
+            Self::LogEnd { operation_id, stream } => FollowupTrigger::LogEnd { operation_id: operation_id.clone(), stream: *stream },
             Self::Artifact {
                 operation_id,
                 artifact_id,
@@ -168,7 +200,9 @@ impl FollowupRegistrationTrigger {
                 | FollowupSource::File { .. }
                 | FollowupSource::JobStopped { .. }
                 | FollowupSource::Artifact { .. }
-                | FollowupSource::Collection { .. } => None,
+                | FollowupSource::Collection { .. }
+                | FollowupSource::LogLiteral { .. }
+                | FollowupSource::LogEnd { .. } => None,
             })
             .collect()
     }
@@ -207,13 +241,19 @@ impl FollowupRegistration {
             };
             if !valid {
                 return Err(RuntimeError::Invalid(
-                    "each requires repeatable artifact, collection or changed-file facts; every All leaf must emit new edges"
+                    "each requires repeatable log matches, artifact, collection or changed-file facts; every All leaf must emit new edges"
                         .into(),
                 ));
             }
         }
         for source in sources {
             match source {
+                FollowupSource::LogLiteral { operation_id, literal_bytes, from_offset, .. } => {
+                    artifacts::validate_source(&operation_id, None, None)?;
+                    if from_offset > 9_007_199_254_740_991 { return Err(RuntimeError::Invalid("Log byte offset exceeds the exact JSON integer representation".into())); }
+                    if literal_bytes == 0 { return Err(RuntimeError::Invalid("log_literal requires a nonempty UTF-8 literal".into())); }
+                }
+                FollowupSource::LogEnd { operation_id, .. } => artifacts::validate_source(&operation_id, None, None)?,
                 FollowupSource::Artifact {
                     operation_id,
                     artifact_id,
@@ -336,7 +376,7 @@ pub struct FollowupRegistrationAdmission {
     pub accepted: bool,
     pub completion: Option<ToolCompletion>,
 }
-fn key(id: &str) -> String {
+pub(super) fn key(id: &str) -> String {
     format!("followup-register:{id}")
 }
 impl Catalog {
@@ -446,7 +486,9 @@ impl Catalog {
                     require_process(&self.db, &p.run, &operation_id)?
                 }
                 FollowupSource::Artifact { operation_id, .. }
-                | FollowupSource::Collection { operation_id } => {
+                | FollowupSource::Collection { operation_id }
+                | FollowupSource::LogLiteral { operation_id, .. }
+                | FollowupSource::LogEnd { operation_id, .. } => {
                     artifacts::require_target(&self.db, &p.run, &operation_id)?;
                 }
                 FollowupSource::JobStopped { operation_id } => {
@@ -496,7 +538,9 @@ impl Catalog {
                     require_process(&tx, &run, &operation_id)?
                 }
                 FollowupSource::Artifact { operation_id, .. }
-                | FollowupSource::Collection { operation_id } => {
+                | FollowupSource::Collection { operation_id }
+                | FollowupSource::LogLiteral { operation_id, .. }
+                | FollowupSource::LogEnd { operation_id, .. } => {
                     artifacts::require_target(&tx, &run, &operation_id)?;
                 }
                 FollowupSource::JobStopped { operation_id } => {
@@ -606,7 +650,7 @@ impl FollowupRegistrationPreparation {
         self.input.trigger.normalize_paths()?;
         let instruction = self.content.save(&json!(self.input.instruction))?;
         let completion=invocation.as_ref().map(|_|->Result<_>{
-            let completion=if self.input.wait.is_some(){ToolCompletion::JobAccepted{operation_id:self.operation.as_ref().expect("operation").id.clone(),phase:"awaiting_followup".into(),effect:Effect::Confirmed,lifetime:Lifetime::Thread, content: None,}}else{ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::Confirmed,content:json!({"accepted":true,"followupId":self.id,"threadId":self.run.thread_id,"branchId":self.run.branch_id,"trigger":self.input.trigger})}};
+            let completion=if self.input.wait.is_some(){ToolCompletion::JobAccepted{operation_id:self.operation.as_ref().expect("operation").id.clone(),phase:"awaiting_followup".into(),effect:Effect::Confirmed,lifetime:Lifetime::Thread, content: None,}}else{ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::Confirmed,content:json!({"accepted":true,"followupId":self.id,"threadId":self.run.thread_id,"branchId":self.run.branch_id,"trigger":self.input.trigger.trigger()})}};
             let metadata=result_content::ToolCompletionMetadata::write(&self.content,&completion)?;Ok((completion,metadata))
         }).transpose()?;
         Ok(PreparedFollowupRegistration {

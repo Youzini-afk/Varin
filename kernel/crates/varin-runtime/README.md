@@ -293,7 +293,7 @@ appends history or publishes a later context. Branch creation participates in th
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 40, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
+Catalog version 41, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
@@ -591,11 +591,11 @@ pending requests. See the ordinary [SDK example](../../../examples/extensions/de
 
 ## Explicit follow-ups and repeated occurrences
 
-The ordinary `follow_up` tool (version 6) supports register/list/get/jobs/occurrences/occurrence/control from the actual ModelStep or policy
+The ordinary `follow_up` tool (version 7) supports register/list/get/jobs/occurrences/occurrence/control from the actual ModelStep or policy
 invocation. `runtime.followup.register` is the authenticated User path. Each registration retains one
 explicit instruction and an absolute `at` instant, the original accepted `process_spawn` identity,
 an original accepted Host domain `job_stopped` identity, an exact original-source file condition,
-original research `artifact`/`collection` facts, or a
+original research `artifact`/`collection` facts, byte-exact `log_literal` / drained `log_end`, or a
 flat `any`/`all` combination of these sources. Every process/Job/file leaf is authorized even when
 another leaf is already satisfied. Empty combinations and nested conditions are invalid; there is no separate
 workflow executor or arbitrary source-count limit.
@@ -625,8 +625,8 @@ time branch can satisfy `any` without waiting for its other processes to stop; `
 source. Only the occurrence's actual process/Job stop evidence contributes receipt bodies to preparation.
 With `once`, one combination produces one occurrence; a time check followed by a later completion
 check needs two explicit registrations. `each` is continuing authorization for this same instruction.
-Its single source must be file `changed`, research `artifact` or `collection`; repeated `any` requires at least one repeatable source and creates
-one occurrence per accepted leaf edge. Finite time/stop/exists/ready leaves contribute at most once.
+Its single source must be file `changed`, research `artifact`, `collection` or `log_literal`; repeated `any` requires at least one repeatable source and creates
+one occurrence per accepted leaf edge. Finite time/stop/exists/ready/log-end leaves contribute at most once.
 Repeated `all` requires repeatable leaves and pairs their oldest unconsumed evidence: A1,A2,B1 yields
 (A1,B1), retaining A2 for B2, including across restart. It never overwrites unpaired facts with latest.
 
@@ -673,6 +673,31 @@ continues to read the current domain record under current authority. `occurrence
 metadata by source index and accepted cursor on a read worker; short evidence never exposes private
 content references. Public event reads likewise expand the original body outside Catalog.
 
+A research `log_literal` selects stdout or stderr, a nonempty exact UTF-8 literal and a byte
+`fromOffset` (default zero, including published history). Matching reads raw original bytes, including
+invalid UTF-8, rather than display text. Explicit `each` includes overlapping matches. `log_end`
+accepts only the original output-drained fact at the committed stream end; empty streams are valid,
+and artifact collection is independent. A future offset is never silently moved backwards.
+
+ExperimentService owns log publication through its original Job byte high-water. Durable chunk
+records ahead of that CAS are not observable input. Its family-authorized reader uses the original
+Storage chunk index and object reader; there is no second log store. The transient Host matcher
+retains no durable state. Catalog commits one short byte offset/prefix/ended cursor and at most one
+match edge atomically, so restart between overlapping hits cannot skip the remaining page. Pause,
+cancel, original source binding, cursor and owner epoch fence late pages. Reader work cannot hold
+Job control/terminal reconciliation. A source read failure is explicit; Resume retries the original
+cursor without re-registering or resubmitting the Job.
+
+The literal stays in the original ContentStore command intent. `get.registration_trigger` restores
+that intent on a read worker; lists and events retain only short cursor/range evidence. Existing GC
+roots protect the original intent and accepted occurrences. EOF without a match produces no input.
+`exhausted` is derived from the original source queues: queued All facts remain usable, while an
+impossible combination stops further observation and releases file watches. The original optional
+Wait returns `exhausted` once when no occurrence ever triggered it. A committed earlier match still
+wins if EOF arrives before Wait reconciliation; delivery retains that exact original occurrence.
+The observation projects `delivery_pending` from actual history delivery and its original Run state.
+A terminal Run needs no new result history; `delivered` stays false rather than inventing delivery.
+
 A Job leaf retains the exact HostJobBinding, original receipt identity/epoch and original
 `operation.executor_stopped` event cursor. Job acceptance, submitting Run completion, observation
 cancellation and unknown business effects do not prove stop. An actual stopped receipt can retain
@@ -718,7 +743,7 @@ Startup and stale preparation reuse original identities. Failures remain explici
 healthy continuations can advance. Shutdown fences old workers, publication leases protect staged
 bodies, and original instructions/input/history remain normal GC roots. Continuing authorization
 requires explicit `each`; it is never inferred from a delivered one-time instruction. Calendar
-definitions have their separate original asset/occurrence contract; log/metric adapters
+definitions have their separate original asset/occurrence contract; metric adapters
 and broader domain combinations remain separate work.
 
 ### File conditions and source ownership
@@ -946,7 +971,7 @@ or model-selection admission commits its reference atomically; retries keep the 
 Runtime-specific tool selections are resolved before that snapshot is admitted. Existing user arrays
 remain exact choices; the original settings owner also accepts separate `pi`/`agent` selections.
 Native worker/retrieval defaults project `default_presets` from the owning builtin declarations,
-not a Host name list or Pi alias map. These descriptors are retained in Catalog 40's frozen content.
+not a Host name list or Pi alias map. These descriptors are retained in Catalog's frozen content.
 An unconfigured custom runtime is unavailable; an explicit empty list is a valid no-tools choice.
 Changing settings does not rewrite an accepted selection or alter configured-preset source authority.
 

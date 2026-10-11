@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -27,6 +28,7 @@ async function fixture() {
   cleanup.push(() => fs.rm(root, { recursive: true, force: true }));
   await fs.writeFile(path.join(root, "input.txt"), "immutable input");
   const records = new Map<string, KernelRecordResult>();
+  const blobs = new Map<string, Buffer>();
   const operations = new Map<string, Record<string, unknown>>();
   const branches = new Map<string, { root: string; paths: string[] }>();
   const events: string[] = [];
@@ -76,6 +78,13 @@ async function fixture() {
       const size = input.pageSize ?? 128, page = all.slice(0,size);
       return { records: structuredClone(page), nextCursor: all.length > size ? page.at(-1)!.recordId : null };
     },
+    async experimentLogChunks(input: { workspaceId: string; attemptId: string; stream: string; offset: number; endOffset: number }) {
+      const chunks = [...records.values()].filter(record => {
+        const p = JSON.parse(record.payloadJson);
+        return record.workspaceId === input.workspaceId && record.recordType === "experiment.artifact" && p.internalLogChunk === true && p.attemptId === input.attemptId && p.stream === input.stream && p.streamOffset + p.byteLength > input.offset && p.streamOffset < input.endOffset;
+      }).sort((a,b) => JSON.parse(a.payloadJson).streamOffset - JSON.parse(b.payloadJson).streamOffset);
+      return { records: structuredClone(chunks), nextOffset: null };
+    },
     async fileLeaseAcquire(input: { leaseId: string }) { activeLeases.add(input.leaseId); return { status: "acquired" }; },
     async fileLeaseRelease(input: { leaseId: string }) { activeLeases.delete(input.leaseId); return { released: true }; },
     async fileRootRegister() { return { rootId: "source-root" }; },
@@ -105,7 +114,12 @@ async function fixture() {
       return result;
     },
     async getOperation(id: string) { return structuredClone(operations.get(id) ?? null); },
-    async putBlob(bytes: Buffer) { return { hash: `fixture-blob-${bytes.byteLength}`, ownerId: `fixture-blob-owner-${++sequence}` }; },
+    async putBlob(bytes: Buffer) { const hash = `sha256-${createHash("sha256").update(bytes).digest("hex")}`; blobs.set(hash, Buffer.from(bytes)); return { hash, ownerId: `fixture-blob-owner-${++sequence}` }; },
+    async getBlob(hash: string, _source: unknown, options: { offset?: number; length?: number; signal?: AbortSignal } = {}) {
+      options.signal?.throwIfAborted(); const bytes = blobs.get(hash); if (!bytes) throw new Error("Original blob unavailable");
+      const offset = options.offset ?? 0, end = Math.min(bytes.length, offset + (options.length ?? bytes.length));
+      return { bytesBase64: bytes.subarray(offset,end).toString("base64"), nextOffset: end, eof: end >= bytes.length };
+    },
     async releaseBlob() {},
   } as unknown as KernelScopedClient;
   const client = { start: async () => ({}), issueGrant: async (grant:object) => grant, retireGrant: async () => ({}), retireOperationGrants: async (operationId:string) => {events.push(`authority-retired:${operationId}`);return {};}, scoped: () => scoped } as unknown as KernelClient;
@@ -600,6 +614,9 @@ it('installed ordinary research tools hand original model and policy invocations
 
 it("publishes drained execution before slow collection and preserves its reader through reentrant observer replacement", async () => {
   const f = await fixture();
+  // This case installs only the native owner below. Retire the unused fixture
+  // service so its resumer cannot survive the later simulated process restart.
+  f.service.detachObservers();
   const { prepareExperimentInput } = await import("./experiment-workspace.js");
   const source = {
     workspace_id: "ws", execution_workspace_id: "exec", mode: "live_root" as const,
@@ -791,4 +808,45 @@ it('records not_started only after original unspawned cancellation drains its ca
   gate.resolve();
   await vi.waitFor(async () => assert.equal((await f.service.readArtifactObservation(f.caller, target, {})).completion?.outcome, 'not_started'));
   assert.equal(f.counters().spawnCalls, 0);
+});
+
+it('reads only the original published log byte boundary, including raw UTF-8 splits, EOF and family authority', async () => {
+  const { prepareExperimentInput } = await import('./experiment-workspace.js');
+  const f = await fixture();
+  const source = { workspace_id: 'ws', execution_workspace_id: 'exec', mode: 'live_root' as const, branch_id: null, revision: null, live_root: { hostId: 'fixture-host', canonicalRoot: f.root, rootId: 'source-root' } };
+  const caller: ExperimentCaller = { workspaceId: 'ws', executionWorkspaceId: 'exec', threadId: 'thread', runId: 'run', workspaceScope: [],
+    owner: { runtime: 'agent', actor: { kind: 'user', key: 'log-owner' }, rootThreadId: 'thread', threadId: 'thread', branchId: 'branch', runId: 'run', operationId: 'log-operation', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'log-owner' }, source },
+    access: { kind: 'family', readThreadIds: ['thread'], controlThreadIds: ['thread'] } };
+  const service = f.makeService({ async admit() { return { kind: 'physical', selection: source, canonicalRoot: f.root, cwd: '' }; },
+    async capture(owner, _source, options) { return prepareExperimentInput(f.client, owner, f.root, options); }, async release() {}, async reconcileUnaccepted() { return true; } });
+  const entered = deferred(), release = deferred(); cleanup.push(() => release.resolve());
+  const bytes = Buffer.concat([Buffer.from('中ababa'), Buffer.from([0xff]), Buffer.from('tail')]);
+  const put = f.scoped.putRecord.bind(f.scoped); let gated = false;
+  f.scoped.putRecord = async input => {
+    const payload = JSON.parse(input.payloadJson);
+    if (input.recordType === 'experiment.job' && payload.stdoutBytes === bytes.length && !gated) { gated = true; entered.resolve(); await release.promise; }
+    return put(input);
+  };
+  const read = f.backend.read.bind(f.backend);
+  f.backend.read = async (site, job, cursor) => cursor === 0 ? { chunks: [{ channel: 'stdout', bytesBase64: bytes.toString('base64') }], nextCursor: bytes.length, endCursor: bytes.length, observation: { status: 'running', writerActive: true } } : read(site, job, cursor);
+  const accepted = await service.submit(caller, { requestId: 'log-owner', command: 'fixture-command' });
+  const binding = { operationId: 'log-operation', executionOwner: { kind: 'external' as const, identity: 'research.experiment', epoch: 'log-owner' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws', subjectId: accepted.attempt.attemptId };
+  await entered.promise;
+  const unpublished = await service.readLogObservation(caller, binding, { stream: 'stdout', offset: 0 });
+  assert.equal(unpublished.publishedBytes, 0); assert.equal(unpublished.bytes.length, 0); assert.equal(unpublished.eof, false);
+  release.resolve(); await until(() => [...f.records.values()].some(r => r.recordType === 'experiment.job' && JSON.parse(r.payloadJson).stdoutBytes === bytes.length));
+  const one = await service.readLogObservation(caller, binding, { stream: 'stdout', offset: 0, maxBytes: 1 });
+  assert.deepEqual(one.bytes, bytes.subarray(0,1)); assert.equal(one.nextOffset,1);
+  const rest = await service.readLogObservation(caller, binding, { stream: 'stdout', offset:1 });
+  assert.deepEqual(Buffer.concat([one.bytes,rest.bytes]),bytes); assert.equal(rest.eof,false);
+  const beyond = await service.readLogObservation(caller,binding,{stream:'stdout',offset:100});
+  assert.equal(beyond.nextOffset,100);assert.equal(beyond.eof,false);
+  await assert.rejects(service.readLogObservation({ ...caller, access: {kind:'family',readThreadIds:[],controlThreadIds:[]} },binding,{stream:'stdout',offset:0}), /Unknown experiment attempt/);
+  await service.cancel(caller,binding.subjectId); await service.wait(caller,binding.subjectId,2000);
+  const final = await service.readLogObservation(caller,binding,{stream:'stdout',offset:100});
+  assert.equal(final.nextOffset,100);assert.equal(final.eof,true);
+  assert.equal((await service.readLogObservation(caller,binding,{stream:'stderr',offset:0})).eof,true);
+  const chunk = [...f.records.entries()].find(([,r]) => r.recordType === 'experiment.artifact' && JSON.parse(r.payloadJson).internalLogChunk === true)!;
+  f.records.delete(chunk[0]);
+  await assert.rejects(service.readLogObservation(caller,binding,{stream:'stdout',offset:0}),/missing durable page/);
 });

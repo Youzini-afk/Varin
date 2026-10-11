@@ -142,14 +142,15 @@ Catalog checks the frozen invocation and original input ancestry before choosing
 current scope/trust and cancellation still apply. Older Pi resource/catalog/command consumers remain a
 subsequent convergence step and retain their existing native session authority.
 
-## Explicit one-shot follow-ups
+## Explicit follow-ups and source observations
 
 The authenticated `/api/threads/followup/{register,list,get,control}` POST routes implement
 `ThreadsAPI.followups`. Registration carries a stable key, selected Thread/branch, original source Run,
-one `at` instant, `process_stopped` operation, exact-source `file` condition, or flat `any`/`all` sources,
+one `at` instant, accepted process/Job, exact-source `file`, original research artifact/collection/log condition, or flat `any`/`all` sources,
 and the retained instruction.
-Host validates each leaf shape and Run ownership;
-Catalog validates the actual trigger and accepted process. Agent tools use their own original invocation,
+Host validates the outer request, flat container traversal and selected Run ownership;
+Catalog decodes leaf shapes and validates the actual trigger and accepted source. Only actual file
+leaves require Host path extraction and their private source grant, not a second kind/field decoder. Agent tools use their own original invocation,
 not this User route. Caller-supplied actor, wait and extra trigger fields are rejected by the User API.
 List/control stay metadata-only; `get` checks branch scope before hydrating the original instruction.
 
@@ -204,6 +205,15 @@ missing. `ready` means a stable regular file with no original managed writer, no
 quiescence or semantic completion. Directory-entry invalidations are also consumed by Document
 Registry, semantic inventory, LSP open documents and the original Pi write tracker; none treats a
 directory notification as proven descendant file content.
+
+Research log leaves are selected from the original Job directory's `observationKinds`, without
+another Host/UI domain allowlist. Their registration keeps literal whitespace and byte offset;
+short lists show original cursor, EOF, failure and owner-derived exhaustion. Detail reads restore the
+original literal intent, and exact occurrence views preserve the accepted byte range after the log
+grows. UI history classification retains pending occurrences and an undelivered optional Wait result.
+The original Wait owner projects `delivery_pending` separately from actual history delivery; a failed
+original Run does not leave an exhausted card waiting for a result it can no longer receive.
+The original repeat/occurrence, source authority and independent research-control contracts apply.
 
 ## Responsibility table
 

@@ -141,6 +141,13 @@ pub(super) fn execute(
                 .map_err(domain)?;
             Ok(json!({"works":works,"nextCursor":next}))
         }
+        "runtime.followup.log.observe" => {
+            let input = serde_json::from_value(params)?;
+            let accepted = runtime.catalog().lock()
+                .map_err(|_| KernelError::Storage("Catalog owner failed".into()))?
+                .apply_log_observation(input).map_err(domain)?;
+            Ok(json!({"accepted":accepted}))
+        }
         "runtime.followup.research.observe" => {
             let p = serde_json::from_value(params)?;
             let prepare = runtime

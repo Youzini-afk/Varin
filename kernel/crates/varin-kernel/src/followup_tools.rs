@@ -31,6 +31,12 @@ pub(crate) fn schema() -> ToolSchema {
         {"type":"object","description":"Observe available, failed or expired artifact records from a job. Omit the selector for any artifact. Absence is determined after collection completes.",
          "properties":{"kind":{"const":"artifact"},"operationId":text,"artifactId":text,"name":text},
          "required":["kind","operationId"],"not":{"required":["artifactId","name"]},"additionalProperties":false},
+        {"type":"object","description":"Match UTF-8 literal bytes in original published stdout/stderr. Starts at byte zero unless fromOffset is specified. Each includes overlapping matches and retained history; no regex or line matching.",
+         "properties":{"kind":{"const":"log_literal"},"operationId":text,"stream":{"enum":["stdout","stderr"]},"literal":{"type":"string","minLength":1},"fromOffset":{"type":"integer","minimum":0,"maximum":9007199254740991u64}},
+         "required":["kind","operationId","stream","literal"],"additionalProperties":false},
+        {"type":"object","description":"Observe the original stdout/stderr stream once after all published output drains, independently of artifact collection.",
+         "properties":{"kind":{"const":"log_end"},"operationId":text,"stream":{"enum":["stdout","stderr"]}},
+         "required":["kind","operationId","stream"],"additionalProperties":false},
         {"type":"object","description":"Observe a job's collection result, including failed or empty collections.",
          "properties":{"kind":{"const":"collection"},"operationId":text},
          "required":["kind","operationId"],"additionalProperties":false}
@@ -42,16 +48,16 @@ pub(crate) fn schema() -> ToolSchema {
     ]});
     ToolSchema {
         name: followups::TOOL.into(),
-        version: "6".into(),
+        version: "7".into(),
         description: "Schedule an instruction to continue this conversation when a condition is met. Registration returns immediately; idle conversations start a new run. Current pauses, unanswered questions and goal limits remain in effect. jobs lists accepted task-family jobs; list shows registrations; get reads an instruction; occurrences pages delivery history; occurrence reads one occurrence's evidence. control pauses, resumes or cancels a registration using its current revision. Pause holds observation and pending delivery; cancel removes future and undelivered work while preserving existing results and observed jobs.".into(),
         output_schema: None,
         metadata: None,
         schema: json!({"oneOf":[
             {"type":"object","properties":{
                 "action":{"const":"register"},"trigger":trigger,
-                "repeat":{"enum":["once","each"],"description":"Defaults to once. Each repeats on observed file changes, artifact revisions or collection results. Any requires at least one repeatable condition; all requires every condition to repeat and pairs their oldest unconsumed facts. Unobserved changes are not reconstructed."},
+                "repeat":{"enum":["once","each"],"description":"Defaults to once. Each repeats on original log matches, observed file changes, artifact revisions or collection results. Any requires at least one repeatable condition; all requires every condition to repeat and pairs their oldest unconsumed facts. Retained log bytes are replayable; unobserved file changes are not reconstructed."},
                 "instruction":text,
-                "wait":{"type":"object","description":"Also wait for the first occurrence. Cancelling this wait keeps the registration.","additionalProperties":false}
+                "wait":{"type":"object","description":"Also wait for the first occurrence or an exhausted condition. Cancelling this wait keeps the registration.","additionalProperties":false}
              },"required":["action","trigger","instruction"],"additionalProperties":false},
             {"type":"object","properties":{"action":{"enum":["list","jobs"]}},"required":["action"],"additionalProperties":false},
             {"type":"object","properties":{"action":{"const":"get"},"followupId":text},"required":["action","followupId"],"additionalProperties":false},

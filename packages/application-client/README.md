@@ -49,15 +49,17 @@ the current revision before a new explicit action. Ordinary message submission a
 are not Goal creation commands. Goal-owned followups are controlled through their Goal.
 
 `ThreadsAPI.followups` registers one explicit instruction for an absolute `at` instant, accepted
-`process_stopped`/`job_stopped` operation, original-source file condition, research `artifact`/`collection`, or flat `any`/`all` combination. Register retains a stable key and exact source Run/trigger/body for uncertain
-retries. `list` exposes short lifecycle metadata, while abortable `get` reads the original instruction.
+`process_stopped`/`job_stopped` operation, original-source file condition, research `artifact`/`collection`,
+original-job `log_literal`/`log_end`, or flat `any`/`all` combination. Register retains a stable key and
+exact source Run/trigger/body for uncertain retries. `list` exposes short lifecycle metadata, while
+abortable `get` reads the original instruction and `registration_trigger` (including literal text).
 Control uses the displayed revision. Triggering, input binding and actual history delivery are distinct:
 a bound but undelivered occurrence can still be paused/cancelled without cancelling its shared Run or
 process. Agent-only optional waiting is not part of this User API. Independently registered followups
 retain their explicit actor even under a Goal; automatic Goal-owned definitions use Goal controls.
 
-`repeat: 'each'` explicitly authorizes the same instruction on each accepted file-change or research metadata edge; omitted
-`repeat` means once. Repeated Any consumes finite leaves once; repeated All pairs FIFO changes from
+`repeat: 'each'` explicitly authorizes the same instruction on each accepted file-change, research
+metadata edge or log-literal match; omitted `repeat` means once. Repeated Any consumes finite leaves once; repeated All pairs FIFO changes from
 every repeatable leaf. The definition retains its observer after delivery. Pause holds accepted work;
 Cancel withdraws future and undelivered occurrences, without changing delivered Runs or results.
 `pending_occurrences` and latest `.occurrence` are compact projections. Abortable
@@ -76,6 +78,22 @@ remain current-domain operations with their own authority and availability.
 `collection` explicitly observes the original collection completion, including empty or failed results.
 An explicit Any observes both. Failed collection absence, missing in a completed snapshot, pending
 metadata and a zero-byte available artifact retain different meanings.
+
+`log_literal` selects stdout or stderr and matches exact UTF-8 literal bytes, preserving whitespace
+and case. An omitted `fromOffset` starts at byte 0, including already published output; a future offset
+waits for new output. Each includes overlapping matches; Once observes the first. `log_end` is a finite
+single fact for one stream, independent of artifact collection. It can join repeated Any alongside a
+repeatable source; repeated All requires every source to repeat. Empty literals are invalid.
+Short sources expose only the stream, offset and literal byte length; source `log` state exposes cursor,
+end and short failure status. `exhausted` is the Catalog's projection of whether the original source
+queues can produce another occurrence; consumers do not infer it from individual leaves. Exhaustion
+without a match has no occurrence, and an Agent observation can finish as `exhausted`. The original
+observation owner derives `delivery_pending`: an undelivered observation on a terminal Run has no
+further delivery obligation. Consumers distinguish it from a live observation awaiting history delivery.
+Original literals
+are read only on explicit detail expansion. Occurrence evidence freezes the matched byte range or stream end, publication high-water and original Job/attempt
+revisions; log text is not copied into list or occurrence metadata reads. Pause/resume keep the cursor,
+and cancelling the observation never cancels its accepted Job.
 
 `followups.jobSources(identity, runId)` discovers original accepted domain Jobs in the actual task
 family, including independent User, historical and child/sibling work absent from the current history

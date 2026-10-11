@@ -1125,6 +1125,22 @@ new partial results as missing. Full accepted metadata lives in ContentStore; ar
 their original owner. The authenticated `POST /api/threads/followup/occurrence` route checks the selected
 Thread/branch before expanding an exact old occurrence, independently of the latest projection.
 
+Research `log_literal` and `log_end` use this same observer discovery and original accepted Job
+binding. `readLogObservation` reads raw bytes only through the original Job stdout/stderr high-water;
+chunk records persisted before that CAS are not published input. Its indexed Storage query and
+`getBlob` retain actual family/record authority. EOF requires original output drainage, even for an
+empty stream, independently of artifact collection. The ordinary display log reader shares that
+publication boundary but retains its own UTF-8 display pagination.
+
+`experiment-log-matcher.ts` performs exact incremental UTF-8 byte matching, including overlap and
+split pages, with cooperative CPU yields. Only Catalog persists offset/prefix/ended and accepted
+range evidence. Each match commits before the reader advances further. The literal comes from the
+original registration intent on demand; compiled patterns are transient and discarded when their
+work leaves the original scan. Source failures expose a short retryable diagnostic; original Resume
+retries without resetting cursor or intent. Log reads share the metadata flight, independently of
+research cancellation/terminal reconciliation. An exhausted combination releases unrelated original
+watch resources while preserving already accepted occurrences and the optional Wait result.
+
 The following `followups.ts` service describes the still-supported Pi runtime path.
 
 Run settlement clears execution yield and live input/stall attention. A retained follow-up wait has

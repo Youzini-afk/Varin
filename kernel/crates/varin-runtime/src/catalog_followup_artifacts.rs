@@ -56,6 +56,7 @@ pub struct FollowupResearchWork {
     pub binding: host_jobs::HostJobBinding,
     pub observer: host_jobs::ResearchScope,
     pub source: FollowupSource,
+    pub log: Option<FollowupLogState>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -114,13 +115,13 @@ pub(super) fn require_target(
         .any(|kind| kind == "artifact")
     {
         return Err(RuntimeError::Invalid(
-            "artifact and collection require the original accepted research.experiment v1 Job"
+            "Research observation requires the original accepted research.experiment v1 Job"
                 .into(),
         ));
     }
     Ok(binding)
 }
-fn work(db: &Connection, d: &Definition, index: usize, epoch: u64) -> Result<FollowupResearchWork> {
+pub(super) fn work(db: &Connection, d: &Definition, index: usize, epoch: u64) -> Result<FollowupResearchWork> {
     let source = d
         .trigger
         .sources()
@@ -129,7 +130,9 @@ fn work(db: &Connection, d: &Definition, index: usize, epoch: u64) -> Result<Fol
         .ok_or_else(|| RuntimeError::Invalid("research source index".into()))?;
     let operation = match &source {
         FollowupSource::Artifact { operation_id, .. }
-        | FollowupSource::Collection { operation_id } => operation_id,
+        | FollowupSource::Collection { operation_id }
+        | FollowupSource::LogLiteral { operation_id, .. }
+        | FollowupSource::LogEnd { operation_id, .. } => operation_id,
         _ => {
             return Err(RuntimeError::Invalid(
                 "not a research observation source".into(),
@@ -155,10 +158,12 @@ fn work(db: &Connection, d: &Definition, index: usize, epoch: u64) -> Result<Fol
         binding,
         observer,
         source,
+        log: d.sources[index].log.clone(),
     })
 }
-fn open(d: &Definition, index: usize) -> bool {
-    d.state == FollowupState::Active
+pub(super) fn open(d: &Definition, index: usize) -> bool {
+    !d.sources[index].log.as_ref().is_some_and(|l| l.ended || l.failure_code.is_some())
+        && d.state == FollowupState::Active
         && d.wait.state != NextRunWaitState::Cancelled
         && (d.repeat == FollowupRepeat::Each
             || (d.wait.state == NextRunWaitState::Waiting && d.sources[index].observed.is_none()))
@@ -286,11 +291,12 @@ impl Catalog {
         let mut works = vec![];
         for row in q.query_map([&id], |r| r.get::<_, String>(0))? {
             let d: Definition = serde_json::from_str(&row?)?;
+            if sources::exhausted(&self.db, &d)? { continue; }
             for (i, source) in d.trigger.sources().iter().enumerate() {
                 if (after.is_some() && d.id == id && i <= index)
                     || !matches!(
                         source,
-                        FollowupSource::Artifact { .. } | FollowupSource::Collection { .. }
+                        FollowupSource::Artifact { .. } | FollowupSource::Collection { .. } | FollowupSource::LogLiteral { .. } | FollowupSource::LogEnd { .. }
                     )
                     || !open(&d, i)
                 {
@@ -330,7 +336,7 @@ impl Catalog {
         }
         validate_evidence(&current, &input.evidence)?;
         let (entity, revision) = identity(&input.evidence)?;
-        if !open(&d, input.key.source_index)
+        if sources::exhausted(&self.db, &d)? || !open(&d, input.key.source_index)
             || already_observed(&self.db, &d, input.key.source_index, &entity, revision)?
         {
             return Ok(None);
@@ -348,7 +354,7 @@ impl Catalog {
         let tx = self.db.transaction()?;
         let mut d: Definition = record(&tx, "followups", &p.key.followup_id)?;
         let current = work(&tx, &d, p.key.source_index, self.epoch)?;
-        if current.key != p.key || !open(&d, p.key.source_index) {
+        if current.key != p.key || !open(&d, p.key.source_index) || sources::exhausted(&tx, &d)? {
             return Ok(false);
         }
         validate_evidence(&current, &p.evidence)?;

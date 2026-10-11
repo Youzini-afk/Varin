@@ -89,6 +89,7 @@ export type KernelMethod =
   | "runtime.status"
   | "runtime.followup.research"
   | "runtime.followup.research.observe"
+  | "runtime.followup.log.observe"
   | "runtime.followup.files"
   | "runtime.followup.file.observe"
   | "runtime.followup.file.release"
@@ -164,6 +165,7 @@ export type KernelMethod =
   | "storage.record.put"
   | "storage.record.get"
   | "storage.experiment.artifacts"
+  | "storage.experiment.logChunks"
   | "storage.record.list"
   | "storage.record.workspaces"
   | "storage.record.release"
@@ -306,7 +308,7 @@ export interface HostJobPending {
 }
 
 export interface HostJobSource {
-  observationKinds: ('job_stopped' | 'artifact' | 'collection')[];
+  observationKinds: ('job_stopped' | 'artifact' | 'collection' | 'log_literal' | 'log_end')[];
   binding: HostJobBinding;
   sourceRunId: string;
   threadId: string;
@@ -586,6 +588,42 @@ export interface MessagePage {
   nextCursor: string | null;
 }
 
+export type LogStream = 'stdout' | 'stderr';
+
+export interface FollowupLogState {
+  offset: number;
+  matched_prefix: number;
+  ended: boolean;
+  failure_code: string | null;
+}
+
+export type FollowupLogEvidence = { kind: 'log_literal'; binding: HostJobBinding; stream: LogStream; start_offset: number; end_offset: number; published_bytes: number; job_revision: number } | { kind: 'log_end'; binding: HostJobBinding; stream: LogStream; published_bytes: number; job_revision: number | null; attempt_revision: number };
+
+export interface FollowupLogObserveParams {
+  key: FollowupResearchKey;
+  binding: HostJobBinding;
+  expected: FollowupLogState;
+  next: FollowupLogState;
+  evidence: FollowupLogEvidence | null;
+}
+
+export interface FollowupLogObserveResult {
+  accepted: boolean;
+}
+
+export interface KernelExperimentLogChunksParams {
+  workspaceId: string;
+  attemptId: string;
+  stream: LogStream;
+  offset: number;
+  endOffset: number;
+}
+
+export interface KernelExperimentLogChunksResult {
+  records: KernelRecordResult[];
+  nextOffset: number | null;
+}
+
 export type ResearchCollectionOutcome = 'done' | 'failed' | 'not_started';
 
 export interface ResearchArtifactCounts {
@@ -628,6 +666,7 @@ export interface FollowupResearchWork {
   binding: HostJobBinding;
   observer: ResearchScope;
   source: FollowupSource;
+  log: FollowupLogState | null;
 }
 
 export interface FollowupResearchWorksParams {
@@ -814,9 +853,9 @@ export type FileObservationOwnerResult = { ok: false; code: string } | { ok: tru
 
 export type FileObservationOwnerHint = {v: 1; kind: 'file-observation-invalidated'; kernelEpoch: string} & ({scope: 'root'; rootId: string; canonicalRoot: string} | {scope: 'receipt'; receiptId: string});
 
-export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string } | { kind: 'job_stopped'; operation_id: string } | { kind: 'file'; path: string; condition: FileCondition } | { kind: 'artifact'; operation_id: string; artifact_id?: string; name?: string } | { kind: 'collection'; operation_id: string };
+export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string } | { kind: 'job_stopped'; operation_id: string } | { kind: 'file'; path: string; condition: FileCondition } | { kind: 'artifact'; operation_id: string; artifact_id?: string; name?: string } | { kind: 'collection'; operation_id: string } | { kind: 'log_literal'; operation_id: string; stream: LogStream; from_offset: number; literal_bytes: number } | { kind: 'log_end'; operation_id: string; stream: LogStream };
 
-export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | { kind: 'job_stopped'; binding: HostJobBinding; outcome: Outcome; effect: Effect; receipt_identity: string; receipt_epoch: string } | FollowupFileEvidence | FollowupArtifactEvidence | FollowupCollectionEvidence;
+export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | { kind: 'job_stopped'; binding: HostJobBinding; outcome: Outcome; effect: Effect; receipt_identity: string; receipt_epoch: string } | FollowupFileEvidence | FollowupArtifactEvidence | FollowupCollectionEvidence | FollowupLogEvidence;
 
 export interface FollowupSourceObservation {
   accepted_cursor: number;
@@ -830,6 +869,7 @@ export interface FollowupSourceState {
   after_cursor: number;
   observed: FollowupSourceObservation | null;
   file: FollowupFileSourceState | null;
+  log: FollowupLogState | null;
 }
 
 export interface FollowupSourceEvidence {
@@ -1897,7 +1937,7 @@ export interface FollowupOccurrencesResult {
 
 export type FollowupControlAction = 'pause' | 'resume' | 'cancel';
 
-export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string } | { kind: 'job_stopped'; operationId: string } | { kind: 'file'; path: string; condition: FileCondition } | { kind: 'artifact'; operationId: string; artifactId?: string; name?: string } | { kind: 'collection'; operationId: string };
+export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string } | { kind: 'job_stopped'; operationId: string } | { kind: 'file'; path: string; condition: FileCondition } | { kind: 'artifact'; operationId: string; artifactId?: string; name?: string } | { kind: 'collection'; operationId: string } | { kind: 'log_literal'; operationId: string; stream: LogStream; literal: string; fromOffset?: number } | { kind: 'log_end'; operationId: string; stream: LogStream };
 
 export type FollowupRegistrationTrigger = FollowupRegistrationSource | { kind: 'any' | 'all'; sources: FollowupRegistrationSource[] };
 
@@ -1910,14 +1950,16 @@ export interface FollowupGetParams {
 export interface FollowupView {
   followup: Followup;
   instruction: string | null;
+  registration_trigger: FollowupRegistrationTrigger | null;
 }
 
 export interface FollowupObservation {
   wait_id: string;
   operation_id: string;
   run_id: string;
-  state: 'waiting' | 'triggered' | 'cancelled';
+  state: 'waiting' | 'triggered' | 'exhausted' | 'cancelled';
   delivered: boolean;
+  delivery_pending: boolean;
 }
 
 export interface FollowupDelivery {
@@ -1946,7 +1988,7 @@ export interface FollowupControlParams {
 
 export interface FollowupWait {
   id: string;
-  kind: 'process_stopped' | 'job_stopped' | 'run_completed' | 'goal_requested' | 'at' | 'any' | 'all' | 'file' | 'artifact' | 'collection';
+  kind: 'process_stopped' | 'job_stopped' | 'run_completed' | 'goal_requested' | 'at' | 'any' | 'all' | 'file' | 'artifact' | 'collection' | 'log_literal' | 'log_end';
   after_cursor: number;
   trigger_cursor: number | null;
   state: 'waiting' | 'observed' | 'consumed' | 'cancelled';
@@ -1982,6 +2024,7 @@ export interface Followup {
   has_instruction: boolean;
   registered_at_ms: number;
   observation: FollowupObservation | null;
+  exhausted: boolean;
 }
 
 export interface RunParams {
@@ -3819,6 +3862,7 @@ export type KernelMethodParams = {
   "runtime.followup.files": FollowupFilesParams;
   "runtime.followup.research": FollowupResearchWorksParams;
   "runtime.followup.research.observe": FollowupResearchObserveParams;
+  "runtime.followup.log.observe": FollowupLogObserveParams;
   "runtime.followup.file.observe": FollowupFileObserveParams;
   "runtime.followup.file.release": FollowupFileReleaseParams;
   "runtime.followup.list": ThreadParams;
@@ -3937,6 +3981,7 @@ export type KernelMethodParams = {
   "storage.record.get": KernelRecordGetParams;
   "storage.record.list": KernelRecordListParams;
   "storage.experiment.artifacts": KernelExperimentArtifactsParams;
+  "storage.experiment.logChunks": KernelExperimentLogChunksParams;
   "storage.record.workspaces": KernelRecordWorkspacesParams;
   "storage.record.release": KernelRecordReleaseParams;
   "working.result.prepare": KernelWorkingResultPrepareParams;
@@ -4315,6 +4360,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.followup.research.observe";
       params: FollowupResearchObserveParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.log.observe";
+      params: FollowupLogObserveParams;
       epoch?: string;
       grantId?: string;
     }
@@ -5377,6 +5431,15 @@ export type KernelRequest =
       id: string;
       method: "storage.experiment.artifacts";
       params: KernelExperimentArtifactsParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "storage.experiment.logChunks";
+      params: KernelExperimentLogChunksParams;
       epoch?: string;
       grantId?: string;
     }

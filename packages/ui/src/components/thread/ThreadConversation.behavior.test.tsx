@@ -201,8 +201,8 @@ it('registers a process follow-up through an uncertain reply and preserves the a
     intent: {}, result: null, external_receipt: null, call_completion: {
       kind: 'job_accepted', operation_id: 'process:original', phase: 'running', effect: 'dispatched', lifetime: 'environment',
     }, execution_owner: { kind: 'kernel' } }];
-  const followup: ThreadSnapshot['followups'][number] = { repeat: 'once', pending_occurrences: 0, id: 'followup:one', revision: 1, generation: 1,
-    thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 1, observed: null, file: null }], state: 'active', goal_id: null,
+  const followup: ThreadSnapshot['followups'][number] = { repeat: 'once', exhausted: false, pending_occurrences: 0, id: 'followup:one', revision: 1, generation: 1,
+    thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 1, observed: null, file: null, log: null }], state: 'active', goal_id: null,
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
     trigger: { kind: 'process_stopped', operation_id: 'process:original' },
     wait: { id: 'wait:process', kind: 'process_stopped', after_cursor: 1, trigger_cursor: null, state: 'waiting' }, occurrence: null };
@@ -213,7 +213,7 @@ it('registers a process follow-up through an uncertain reply and preserves the a
     followup.state = input.action === 'pause' ? 'paused' : input.action === 'resume' ? 'active' : 'cancelled';
     return structuredClone(followup);
   });
-  const get = vi.fn<ThreadsAPI['followups']['get']>(async () => ({ followup, instruction: 'Read the original output.' }));
+  const get = vi.fn<ThreadsAPI['followups']['get']>(async () => ({ followup, instruction: 'Read the original output.', registration_trigger: { kind: 'process_stopped', operationId: 'process:original' } }));
   const resumeRun = vi.fn(f.api.resume); f.api.resume = resumeRun;
   f.api.followups = { ...f.api.followups, register, control, get, list: async () => f.view.followups };
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
@@ -254,8 +254,8 @@ it('registers a process follow-up through an uncertain reply and preserves the a
 it('retains an exact absolute time across an uncertain retry and exposes explicit Goal follow-ups without reviving the stopped Run', async () => {
   const f = fixture(true); const source = { ...f.view.activeRun!, state: 'cancelled' as const, cancel_requested: true };
   f.view.activeRun = null; f.view.thread.branches[0]!.active_run_id = null; f.view.thread.branches[0]!.latest_run = source;
-  const followup: ThreadSnapshot['followups'][number] = { repeat: 'once', pending_occurrences: 0, id: 'followup:time', revision: 1, generation: 1, thread_id: identity.threadId,
-    branch_id: identity.branchId, source_run_id: source.id, sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 0, observed: null, file: null }], state: 'active', goal_id: 'goal:original',
+  const followup: ThreadSnapshot['followups'][number] = { repeat: 'once', exhausted: false, pending_occurrences: 0, id: 'followup:time', revision: 1, generation: 1, thread_id: identity.threadId,
+    branch_id: identity.branchId, source_run_id: source.id, sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 0, observed: null, file: null, log: null }], state: 'active', goal_id: 'goal:original',
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
     trigger: { kind: 'at', at_ms: 0 }, wait: { id: 'time-wait', kind: 'at', after_cursor: 0, trigger_cursor: null, state: 'waiting' }, occurrence: null };
   const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValueOnce(new Error('reply lost')).mockImplementation(async input => {
@@ -282,11 +282,11 @@ it.each(['any', 'all'] as const)('registers %s conditions as one retained intent
     intent: {}, result: null, external_receipt: null, call_completion: { kind: 'job_accepted', operation_id: 'process:original',
       phase: 'running', effect: 'dispatched', lifetime: 'environment' }, execution_owner: { kind: 'kernel' } }];
   const chosen = '2030-02-03T04:05:06'; const atMs = new Date(chosen).getTime();
-  const followup: ThreadSnapshot['followups'][number] = { repeat: 'once', pending_occurrences: 0, id: `followup:${kind}`, revision: 1, generation: 1,
+  const followup: ThreadSnapshot['followups'][number] = { repeat: 'once', exhausted: false, pending_occurrences: 0, id: `followup:${kind}`, revision: 1, generation: 1,
     thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', state: 'active', goal_id: null,
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
     trigger: { kind, sources: [{ kind: 'at', at_ms: atMs }, { kind: 'process_stopped', operation_id: 'process:original' }] },
-    sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 1, observed: null, file: null }, { consumed_cursor: 0, source_index: 1, after_cursor: 1, observed: null, file: null }],
+    sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 1, observed: null, file: null, log: null }, { consumed_cursor: 0, source_index: 1, after_cursor: 1, observed: null, file: null, log: null }],
     wait: { id: `wait:${kind}`, kind, after_cursor: 1, trigger_cursor: null, state: 'waiting' }, occurrence: null };
   const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValueOnce(new Error('acceptance reply lost'))
     .mockImplementation(async () => { f.view.followups = [followup]; return followup; });
@@ -1084,11 +1084,11 @@ it('continues a completed child with its exact predecessor and retries an uncert
 
 it('retains an original file condition after a lost reply and displays unavailable and immutable evidence without evaluating it', async () => {
   const f = fixture(true);
-  const followup: ThreadSnapshot['followups'][number] = { repeat: 'once', pending_occurrences: 0, id: 'followup:file', revision: 1, generation: 1,
+  const followup: ThreadSnapshot['followups'][number] = { repeat: 'once', exhausted: false, pending_occurrences: 0, id: 'followup:file', revision: 1, generation: 1,
     thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', state: 'active', goal_id: null,
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1, observation: null,
     trigger: { kind: 'file', path: 'results/output.txt', condition: 'changed' },
-    sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 1, observed: null, file: { receipt_id: 'receipt:file', revision: 1,
+    sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 1, observed: null, log: null, file: { receipt_id: 'receipt:file', revision: 1,
       baseline: null, current: null, immutable: true, watch_id: null,
       position: null, gap: true, failure_code: 'source_unavailable', released: false } }],
     wait: { id: 'wait:file', kind: 'file', after_cursor: 1, trigger_cursor: null, state: 'waiting' }, occurrence: null };
@@ -1195,11 +1195,11 @@ it('discards a late accepted-job query from the previous work Run and keeps a fa
 });
 
 function repeatedFollowup(): ThreadSnapshot['followups'][number] {
-  return { id: 'followup:each', repeat: 'each', pending_occurrences: 0, revision: 1, generation: 1,
+  return { id: 'followup:each', repeat: 'each', exhausted: false, pending_occurrences: 0, revision: 1, generation: 1,
     thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', state: 'active', goal_id: null,
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1, observation: null,
     trigger: { kind: 'file', path: 'results/output.txt', condition: 'changed' },
-    sources: [{ source_index: 0, after_cursor: 1, consumed_cursor: 0, observed: null, file: null }],
+    sources: [{ source_index: 0, after_cursor: 1, consumed_cursor: 0, observed: null, file: null, log: null }],
     wait: { id: 'wait:each', kind: 'file', after_cursor: 1, trigger_cursor: null, state: 'waiting' }, occurrence: null };
 }
 function repeatedOccurrence(id: string, accepted: number, delivered: boolean): NonNullable<ThreadSnapshot['followups'][number]['occurrence']> {
@@ -1222,7 +1222,7 @@ it('requires legal repeat conditions and keeps the original repeated authorizati
   await edit('[aria-label="Follow-up time"]', '2030-02-03T04:05:06');
   await edit('[aria-label="Follow-up instruction"]', 'Read each accepted change.');
   expect(button('Register repeating follow-up').disabled).toBe(true);
-  expect(container.textContent).toContain('Repetition requires a file-change, artifact or collection condition');
+  expect(container.textContent).toContain('Repetition requires a file-change, artifact, collection or log-literal condition');
   await edit('[aria-label="Follow-up trigger"]', 'any', 'change');
   await edit('[aria-label="Condition 1 time"]', '2030-02-03T04:05:06');
   await edit('[aria-label="Condition 2 kind"]', 'file', 'change');
@@ -1510,4 +1510,224 @@ it('keeps failed collection with no records distinct from a genuinely empty comp
   await act(async () => f.emit({ cursor: 50, subject: followup.id, revision: 2, kind: 'followup.changed', data: {} }));
   expect(latest().textContent).toContain('collection done'); expect(latest().textContent).toContain('empty collection');
   expect(button('Cancel follow-up')).toBeDefined(); expect(button('Pause follow-up')).toBeDefined();
+});
+
+function logJob(): ReturnType<typeof researchJob> {
+  return { ...researchJob(), observationKinds: ['job_stopped', 'log_literal', 'log_end'] };
+}
+function logFollowup(): ThreadSnapshot['followups'][number] {
+  return { ...repeatedFollowup(), id: 'followup:log',
+    wait: { id: 'wait:log', kind: 'log_literal', after_cursor: 1, trigger_cursor: null, state: 'waiting' },
+    trigger: { kind: 'log_literal', operation_id: logJob().binding.operationId, stream: 'stderr', from_offset: 0, literal_bytes: 3 },
+    sources: [{ source_index: 0, after_cursor: 1, consumed_cursor: 0, observed: null, file: null,
+      log: { offset: 0, matched_prefix: 0, ended: false, failure_code: null } }] };
+}
+function logOccurrence(id: string, accepted: number): ReturnType<typeof repeatedOccurrence> {
+  return { ...repeatedOccurrence(id, accepted, true), evidence: { kind: 'log_literal', binding: logJob().binding, stream: 'stderr',
+    start_offset: 2, end_offset: 5, published_bytes: 8, job_revision: 4 } };
+}
+
+// Controlled application API: these tests exercise the real React consumer, not Host/Rust IPC.
+it('registers exact log bytes on accepted task-family work and preserves the complete uncertain intent', async () => {
+  const f = fixture(true); const job = logJob(); const unsupported = researchJob();
+  unsupported.binding = { ...unsupported.binding, operationId: 'job:without-log-observation', subjectId: 'no-log-support' };
+  f.api.followups.jobSources = vi.fn(async () => [job, unsupported]);
+  const followup = logFollowup(); const get = vi.fn<ThreadsAPI['followups']['get']>(async () => ({ followup, instruction: 'Use the matching output.',
+    registration_trigger: { kind: 'log_literal', operationId: job.binding.operationId, stream: 'stderr', literal: ' A中\nA ', fromOffset: 50000 } }));
+  f.api.followups.get = get;
+  const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValueOnce(new Error('acceptance reply lost'))
+    .mockImplementation(async input => {
+      if (input.trigger.kind !== 'log_literal') throw new Error('expected log literal');
+      followup.trigger = { kind: 'log_literal', operation_id: input.trigger.operationId, stream: input.trigger.stream,
+        from_offset: input.trigger.fromOffset ?? 0, literal_bytes: new TextEncoder().encode(input.trigger.literal).length };
+      f.view.followups = [followup]; return followup;
+    }); f.api.followups.register = register;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Schedule a follow-up').click());
+  await edit('[aria-label="Follow-up trigger"]', 'log_literal', 'change');
+  expect(container.querySelector('[aria-label="Follow-up job"]')?.textContent).toContain(job.binding.subjectId);
+  expect(container.querySelector('[aria-label="Follow-up job"]')?.textContent).not.toContain('no-log-support');
+  await edit('[aria-label="Follow-up job"]', job.binding.operationId, 'change');
+  await edit('[aria-label="Follow-up repetition"]', 'each', 'change');
+  await edit('[aria-label="Follow-up log stream"]', 'stderr', 'change');
+  await edit('[aria-label="Follow-up instruction"]', 'Use the matching output.');
+  expect(button('Register repeating follow-up').disabled).toBe(true);
+  await edit('[aria-label="Follow-up log literal"]', ' A中\nA ');
+  await edit('[aria-label="Follow-up log offset"]', '-1'); expect(button('Register repeating follow-up').disabled).toBe(true);
+  await edit('[aria-label="Follow-up log offset"]', '1.5'); expect(button('Register repeating follow-up').disabled).toBe(true);
+  await edit('[aria-label="Follow-up log offset"]', '50000'); expect(button('Register repeating follow-up').disabled).toBe(false);
+  await act(async () => button('Register repeating follow-up').click());
+  const original = register.mock.calls[0]![0];
+  expect(original).toMatchObject({ ...identity, runId: 'ui-run', repeat: 'each', instruction: 'Use the matching output.',
+    trigger: { kind: 'log_literal', operationId: job.binding.operationId, stream: 'stderr', literal: ' A中\nA ', fromOffset: 50000 } });
+  expect(original.runId).not.toBe(job.sourceRunId); expect(get).not.toHaveBeenCalled();
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Follow-up log literal"]')!.disabled).toBe(true);
+  f.view.activeRun = { ...f.view.activeRun!, id: 'new-work' };
+  await act(async () => f.emit({ cursor: 8, subject: 'new-work', revision: 1, kind: 'run.accepted', data: {} }));
+  await act(async () => button('Retry original follow-up').click());
+  expect(register.mock.calls[1]![0]).toEqual(original);
+  const pending = container.querySelector('[aria-label="Pending follow-up"]')!;
+  expect(pending.textContent).toContain('8 literal bytes from byte 50000');
+  expect(pending.textContent).not.toContain(' A中\nA '); expect(get).not.toHaveBeenCalled();
+  await act(async () => button('Read follow-up instruction and literal').click());
+  expect(get).toHaveBeenCalledExactlyOnceWith(identity, followup.id, expect.any(AbortSignal));
+  expect(container.querySelector('[aria-label="Condition 1 original literal"]')?.textContent).toBe(' A中\nA ');
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled(); expect(f.cancelRun).not.toHaveBeenCalled();
+});
+
+it('defaults log matching to published history, accepts whitespace literals and keeps finite log-end leaves out of repeated All', async () => {
+  const f = fixture(true); const job = logJob(); f.api.followups.jobSources = async () => [job];
+  const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValue(new Error('uncertain')); f.api.followups.register = register;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Schedule a follow-up').click());
+  await edit('[aria-label="Follow-up trigger"]', 'any', 'change');
+  await edit('[aria-label="Follow-up repetition"]', 'each', 'change');
+  await edit('[aria-label="Condition 1 kind"]', 'log_literal', 'change');
+  await edit('[aria-label="Condition 1 job"]', job.binding.operationId, 'change');
+  await edit('[aria-label="Condition 1 log literal"]', '  ');
+  await edit('[aria-label="Condition 2 kind"]', 'log_end', 'change');
+  await edit('[aria-label="Condition 2 job"]', job.binding.operationId, 'change');
+  await edit('[aria-label="Condition 2 log stream"]', 'stderr', 'change');
+  await edit('[aria-label="Follow-up instruction"]', 'Read each accepted fact.');
+  expect(button('Register repeating follow-up').disabled).toBe(false);
+  await edit('[aria-label="Follow-up trigger"]', 'all', 'change');
+  expect(button('Register repeating follow-up').disabled).toBe(true);
+  expect(container.textContent).toContain('Repeated All requires every condition');
+  await edit('[aria-label="Follow-up trigger"]', 'any', 'change');
+  await act(async () => button('Register repeating follow-up').click());
+  expect(register.mock.calls[0]![0].trigger).toEqual({ kind: 'any', sources: [
+    { kind: 'log_literal', operationId: job.binding.operationId, stream: 'stdout', literal: '  ' },
+    { kind: 'log_end', operationId: job.binding.operationId, stream: 'stderr' },
+  ] });
+});
+
+it('keeps frozen log occurrence evidence while the source advances and controls only its observation', async () => {
+  const f = fixture(true); const followup = logFollowup(); const first = logOccurrence('log:O1', 10); const second = logOccurrence('log:O2', 20);
+  if (second.evidence.kind !== 'log_literal') throw new Error('expected log evidence');
+  second.evidence = { ...second.evidence, start_offset: 15, end_offset: 18, published_bytes: 21, job_revision: 8 };
+  followup.occurrence = first; followup.sources[0]!.log!.offset = 8; f.view.followups = [followup];
+  const history = vi.fn<ThreadsAPI['followups']['occurrences']>(async () => ({ occurrences: [structuredClone(first)], nextCursor: null }));
+  const details = vi.fn(f.api.followups.occurrence); const get = vi.fn(f.api.followups.get);
+  const control = vi.fn<ThreadsAPI['followups']['control']>(async input => {
+    followup.revision++; followup.state = input.action === 'pause' ? 'paused' : input.action === 'resume' ? 'active' : 'cancelled';
+    if (input.action === 'resume') followup.sources[0]!.log!.failure_code = null;
+    return structuredClone(followup);
+  }); f.api.followups = { ...f.api.followups, occurrences: history, occurrence: details, get, control };
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(container.textContent).toContain('stderr literal match · bytes 2–5 (end exclusive) · 8 published bytes · job revision 4');
+  await act(async () => button('Read occurrence history').click());
+  followup.occurrence = second; followup.sources[0]!.log!.offset = 21;
+  await act(async () => f.emit({ cursor: 21, subject: followup.id, revision: 2, kind: 'followup.changed', data: {} }));
+  expect(container.querySelector('[aria-label="Follow-up occurrence history"]')?.textContent).toContain('bytes 2–5');
+  expect(container.querySelector('[aria-label="Follow-up occurrence history"]')?.textContent).not.toContain('bytes 15–18');
+  expect(container.querySelector('[aria-label="Latest follow-up occurrence"]')?.textContent).toContain('bytes 15–18');
+  expect(get).not.toHaveBeenCalled(); expect(details).not.toHaveBeenCalled();
+  followup.sources[0]!.log = { offset: 21, matched_prefix: 2, ended: false, failure_code: 'log_blob_unavailable' };
+  followup.repeat = 'once'; followup.occurrence = null;
+  await act(async () => f.emit({ cursor: 22, subject: followup.id, revision: 3, kind: 'followup.changed', data: {} }));
+  expect(container.textContent).toContain('Log observation unavailable · log_blob_unavailable');
+  await act(async () => button('Retry log observation').click());
+  expect(control.mock.calls.at(-1)![0]).toMatchObject({ followupId: followup.id, action: 'resume' });
+  expect(followup.sources[0]!.log).toMatchObject({ offset: 21, matched_prefix: 2 });
+  await act(async () => button('Pause follow-up').click()); await act(async () => button('Resume follow-up').click());
+  await act(async () => button('Cancel follow-up').click());
+  expect(followup.sources[0]!.log).toMatchObject({ offset: 21, matched_prefix: 2 });
+  expect(f.cancelRun).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
+});
+
+it('discards late literal reads after close, Host replacement and branch navigation, then retries a failed original read', async () => {
+  const f = fixture(true); const followup = logFollowup(); f.view.followups = [followup];
+  type Detail = Awaited<ReturnType<ThreadsAPI['followups']['get']>>;
+  const releases: ((value: Detail) => void)[] = [];
+  const get = vi.fn<ThreadsAPI['followups']['get']>(() => new Promise(resolve => releases.push(resolve))); f.api.followups.get = get;
+  const result: Detail = { followup, instruction: 'Read original output.', registration_trigger: { kind: 'log_literal', operationId: logJob().binding.operationId, stream: 'stderr', literal: 'OLD-LITERAL' } };
+  const open = async () => { await act(async () => button('Read follow-up instruction and literal').click()); return get.mock.calls.at(-1)![2]!; };
+  const late = async (index: number) => { await act(async () => releases[index]!(result)); expect(container.textContent).not.toContain('OLD-LITERAL'); };
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  const closed = await open(); await act(async () => button('Hide follow-up instruction and literal').click()); expect(closed.aborted).toBe(true); await late(0);
+  const host = await open(); await act(async () => { endpoint.generation++; for (const listener of endpoint.listeners) listener(); });
+  expect(host.aborted).toBe(true); await late(1);
+  const branch = await open(); const nextIdentity = { ...identity, branchId: 'branch:next' }; const next = fixture(true);
+  next.view.identity = nextIdentity; next.view.thread.branches[0]!.branch_id = nextIdentity.branchId;
+  const nextFollowup = { ...logFollowup(), branch_id: nextIdentity.branchId }; next.view.followups = [nextFollowup];
+  const currentResult = { ...result, followup: nextFollowup, registration_trigger: { kind: 'log_literal' as const, operationId: logJob().binding.operationId, stream: 'stderr' as const, literal: '<img src=x>' } };
+  next.api.followups.get = vi.fn<ThreadsAPI['followups']['get']>().mockRejectedValueOnce(new Error('read unavailable')).mockResolvedValue(currentResult);
+  await act(async () => root.render(<ThreadConversation api={next.api} identity={nextIdentity} />));
+  expect(branch.aborted).toBe(true); await late(2);
+  await act(async () => button('Read follow-up instruction and literal').click());
+  expect(container.textContent).toContain('The original follow-up could not be read.');
+  await act(async () => button('Retry original follow-up details').click());
+  expect(container.querySelector('[aria-label="Condition 1 original literal"]')?.textContent).toBe('<img src=x>');
+  expect(container.querySelector('[aria-label="Original follow-up details"] img')).toBeNull();
+  expect(f.cancelRun).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled();
+});
+
+it('moves exhausted logs into history only after pending deliveries finish, without inventing a trigger', async () => {
+  const f = fixture(true); const followup = logFollowup(); followup.repeat = 'once';
+  followup.sources[0]!.log = { offset: 100, matched_prefix: 0, ended: true, failure_code: null };
+  followup.exhausted = true;
+  followup.observation = { wait_id: 'wait:log-observation', operation_id: 'operation:log-observation', run_id: 'ui-run', state: 'exhausted', delivered: false, delivery_pending: true };
+  f.view.followups = [followup];
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(container.querySelector('[aria-label="Pending follow-up"]')).not.toBeNull();
+  expect(container.textContent).toContain('Log ended without satisfying the condition');
+  expect(container.textContent).toContain('Stream ended without a literal match');
+  expect(container.textContent).toContain('ended without triggering · result awaiting delivery');
+  expect(container.querySelector('[aria-label="Latest follow-up occurrence"]')).toBeNull();
+  expect(container.textContent).not.toContain('Waiting for the original trigger');
+  followup.observation.delivered = true; followup.observation.delivery_pending = false;
+  await act(async () => f.emit({ cursor: 12, subject: followup.id, revision: 2, kind: 'followup.changed', data: {} }));
+  expect(container.querySelector('[aria-label="Pending follow-up"]')).toBeNull();
+  expect(button('Past follow-ups (1)')).toBeDefined();
+  await act(async () => button('Past follow-ups (1)').click());
+  expect(container.querySelector('[aria-label="Past follow-up"]')?.textContent).toContain('Log ended without satisfying the condition');
+  expect(button('Pause follow-up')).toBeUndefined(); expect(button('Cancel follow-up')).toBeUndefined();
+  expect(container.textContent).toContain('ended without triggering · result delivered');
+  // Real Catalog probe: failed original Run -> terminal Wait cleanup -> no-match EOF.
+  // Its cancelled observation has no history delivery and no remaining delivery obligation.
+  followup.observation.state = 'cancelled'; followup.observation.delivered = false;
+  f.view.thread.branches[0]!.latest_run = { ...f.view.activeRun!, state: 'failed' };
+  f.view.thread.branches[0]!.active_run_id = null; f.view.activeRun = null;
+  await act(async () => f.emit({ cursor: 14, subject: followup.id, revision: 3, kind: 'followup.changed', data: {} }));
+  expect(container.querySelector('[aria-label="Pending follow-up"]')).toBeNull();
+  expect(container.querySelector('[aria-label="Past follow-up"]')?.textContent).toContain('cancelled · no result pending delivery');
+  expect(container.querySelector('[aria-label="Latest follow-up occurrence"]')).toBeNull();
+  expect(button('End follow-up observation')).toBeUndefined(); expect(button('Cancel follow-up')).toBeUndefined();
+  followup.repeat = 'each'; followup.observation = null; followup.pending_occurrences = 1;
+  followup.occurrence = { ...logOccurrence('log:pending', 15), state: 'held', hold_reason: 'manual_pause', delivery: null };
+  followup.sources[0]!.observed = { accepted_cursor: 15, trigger_cursor: 15, evidence: followup.occurrence.evidence as Extract<typeof followup.occurrence.evidence, { kind: 'log_literal' }> };
+  await act(async () => f.emit({ cursor: 16, subject: followup.id, revision: 4, kind: 'followup.changed', data: {} }));
+  expect(container.querySelector('[aria-label="Pending follow-up"]')).not.toBeNull();
+  expect(container.textContent).toContain('Log observation ended'); expect(container.textContent).not.toContain('Continuing to observe changes');
+  expect(button('Cancel follow-up')).toBeDefined();
+  expect(followup.sources[0]!.log!.offset).toBe(100);
+});
+
+it('registers a single stream end and shows its fixed empty-stream evidence separately from collection', async () => {
+  const f = fixture(true); const job = logJob(); f.api.followups.jobSources = async () => [job];
+  const followup = logFollowup(); followup.repeat = 'once'; followup.exhausted = true;
+  followup.trigger = { kind: 'log_end', operation_id: job.binding.operationId, stream: 'stdout' };
+  followup.wait.kind = 'log_end'; followup.wait.state = 'consumed';
+  const occurrence = { ...logOccurrence('log:end', 10), evidence: { kind: 'log_end' as const, binding: job.binding, stream: 'stdout' as const,
+    published_bytes: 0, job_revision: null, attempt_revision: 5 } };
+  followup.occurrence = occurrence;
+  followup.sources[0]!.log = { offset: 0, matched_prefix: 0, ended: true, failure_code: null };
+  followup.sources[0]!.observed = { accepted_cursor: 10, trigger_cursor: 10, evidence: occurrence.evidence };
+  const register = vi.fn<ThreadsAPI['followups']['register']>(async () => { f.view.followups = [followup]; return followup; }); f.api.followups.register = register;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Schedule a follow-up').click());
+  await edit('[aria-label="Follow-up trigger"]', 'log_end', 'change');
+  await edit('[aria-label="Follow-up job"]', job.binding.operationId, 'change');
+  await edit('[aria-label="Follow-up instruction"]', 'Check the completed output.');
+  await edit('[aria-label="Follow-up repetition"]', 'each', 'change'); expect(button('Register repeating follow-up').disabled).toBe(true);
+  await edit('[aria-label="Follow-up repetition"]', 'once', 'change');
+  expect(container.textContent).toContain('Artifact collection may finish later.');
+  await act(async () => button('Register one-time follow-up').click());
+  expect(register.mock.calls[0]![0].trigger).toEqual({ kind: 'log_end', operationId: job.binding.operationId, stream: 'stdout' });
+  expect(container.querySelector('[aria-label="Pending follow-up"]')).toBeNull();
+  await act(async () => button('Past follow-ups (1)').click());
+  expect(container.textContent).toContain('stdout ended · 0 published bytes · attempt revision 5');
+  expect(container.textContent).toContain('Log condition 1: Stream ended');
+  expect(container.textContent).not.toContain('without a literal match');
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
 });

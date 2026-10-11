@@ -1085,6 +1085,81 @@ impl Storage {
         }
     }
 
+    /// A bounded page of original chunk records. Bytes, publication and drain remain
+    /// owned by ExperimentService's existing records, not this index projection.
+    pub(super) fn experiment_log_chunk_page(
+        &self,
+        input: &Value,
+        grant_id: &str,
+    ) -> Result<Value, KernelError> {
+        let workspace = input["workspaceId"]
+            .as_str()
+            .ok_or_else(|| KernelError::Operation("Log workspace required".into()))?;
+        let attempt = input["attemptId"]
+            .as_str()
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| KernelError::Operation("Log attempt required".into()))?;
+        let stream = input["stream"]
+            .as_str()
+            .filter(|v| matches!(*v, "stdout" | "stderr"))
+            .ok_or_else(|| KernelError::Operation("Log stream required".into()))?;
+        let offset = input["offset"]
+            .as_u64()
+            .and_then(|v| i64::try_from(v).ok())
+            .ok_or_else(|| KernelError::Operation("Log byte offset is not representable".into()))?;
+        let end = input["endOffset"]
+            .as_u64()
+            .and_then(|v| i64::try_from(v).ok())
+            .filter(|v| *v >= offset)
+            .ok_or_else(|| KernelError::Operation("Log byte range is not representable".into()))?;
+        let grant = self.load_grant(grant_id)?;
+        if grant.owning_workspace.as_deref() != Some(workspace)
+            && !grant.capabilities.contains("storage.admin")
+        {
+            return Err(KernelError::Authorization(
+                "Log workspace differs from its grant".into(),
+            ));
+        }
+        let mut q = self.conn.prepare("SELECT record_id FROM domain_records
+            WHERE workspace_id=?1 AND record_type='experiment.artifact'
+              AND json_extract(payload_json,'$.attemptId')=?2 AND json_extract(payload_json,'$.stream')=?3
+              AND json_extract(payload_json,'$.internalLogChunk')=1
+              AND json_extract(payload_json,'$.streamOffset')>=COALESCE((SELECT max(json_extract(payload_json,'$.streamOffset')) FROM domain_records
+                WHERE workspace_id=?1 AND record_type='experiment.artifact' AND json_extract(payload_json,'$.attemptId')=?2
+                  AND json_extract(payload_json,'$.stream')=?3 AND json_extract(payload_json,'$.internalLogChunk')=1
+                  AND json_extract(payload_json,'$.streamOffset')<=?4),?4)
+              AND json_extract(payload_json,'$.streamOffset')<?5
+            ORDER BY json_extract(payload_json,'$.streamOffset') LIMIT 129")?;
+        let ids = q
+            .query_map(params![workspace, attempt, stream, offset, end], |r| {
+                r.get::<_, String>(0)
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut records = Vec::new();
+        let mut next_offset = None;
+        for id in ids.iter().take(128) {
+            let record = self
+                .domain_record_value(workspace, id)?
+                .ok_or_else(|| KernelError::Storage("Indexed log record disappeared".into()))?;
+            if !self.grant_can_access_domain_record(&record, grant_id)? {
+                return Err(KernelError::Authorization(
+                    "Log record belongs to another actor".into(),
+                ));
+            }
+            let payload: Value =
+                serde_json::from_str(record["payloadJson"].as_str().ok_or_else(|| {
+                    KernelError::Storage("Log record payload is unreadable".into())
+                })?)?;
+            next_offset = payload["streamOffset"].as_u64().and_then(|v| {
+                payload["byteLength"]
+                    .as_u64()
+                    .and_then(|n| v.checked_add(n))
+            });
+            records.push(record);
+        }
+        Ok(json!({"records":records,"nextOffset":if ids.len()>128 { next_offset } else { None }}))
+    }
+
     /// Concrete original-domain index. Keyset identity is unaffected by record updates.
     pub(super) fn experiment_artifact_page(
         &self,
@@ -2116,6 +2191,90 @@ mod artifact_page_tests {
             )
             .is_err());
         drop(storage);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+#[cfg(test)]
+mod log_page_tests {
+    use super::*;
+
+    #[test]
+    fn original_log_index_pages_byte_ranges_and_rechecks_record_authority() {
+        let root = std::env::temp_dir().join(format!("log-index-{}", Uuid::new_v4()));
+        let mut storage = Storage::open(&root, "host").unwrap();
+        for (id, capabilities, thread) in [
+            ("owner", vec!["storage.admin"], "thread"),
+            ("reader", vec!["storage.read"], "thread"),
+            ("other", vec!["storage.read"], "foreign"),
+        ] {
+            storage.issue_grant(&json!({"grantId":id,"hostGeneration":"generation","capabilities":capabilities,"pathScopes":[""],"threadId":thread,"owningWorkspace":"workspace","executionWorkspace":"workspace"}),"host","generation",&root.to_string_lossy(),"epoch").unwrap();
+        }
+        for (attempt, stream, count) in [
+            ("selected", "stdout", 130),
+            ("selected", "stderr", 1),
+            ("different", "stdout", 1),
+        ] {
+            for chunk in 0..count {
+                let id = format!("{attempt}:{stream}:{chunk}");
+                let payload = json!({"id":id,"attemptId":attempt,"name":id,"internalLogChunk":true,"stream":stream,"streamOffset":chunk*4,"byteLength":4});
+                let input = json!({"operationId":id,"recordId":format!("experiment.artifact:{id}"),"workspaceId":"workspace","recordType":"experiment.artifact","state":"available","threadId":"thread","ownerIds":[],"references":[],"payloadJson":payload.to_string()});
+                let (grant, input) = storage
+                    .authorize(
+                        Some("owner"),
+                        "epoch",
+                        "host",
+                        "generation",
+                        "storage.record.put",
+                        &input,
+                    )
+                    .unwrap();
+                storage
+                    .dispatch("storage.record.put", &input, Some("owner"), &grant)
+                    .unwrap();
+            }
+        }
+        let input = json!({"workspaceId":"workspace","attemptId":"selected","stream":"stdout","offset":2,"endOffset":520});
+        let read = |storage: &mut Storage, input: &Value, actor: &str| {
+            let (grant, input) = storage.authorize(
+                Some(actor),
+                "epoch",
+                "host",
+                "generation",
+                "storage.experiment.logChunks",
+                input,
+            )?;
+            storage.dispatch("storage.experiment.logChunks", &input, Some(actor), &grant)
+        };
+        let first = read(&mut storage, &input, "reader").unwrap();
+        assert_eq!(first["records"].as_array().unwrap().len(), 128);
+        assert_eq!(
+            first["records"][0]["recordId"],
+            "experiment.artifact:selected:stdout:0"
+        );
+        assert_eq!(first["nextOffset"], 512);
+        let mut next = input.clone();
+        next["offset"] = first["nextOffset"].clone();
+        let second = read(&mut storage, &next, "reader").unwrap();
+        assert_eq!(second["records"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            second["records"][0]["recordId"],
+            "experiment.artifact:selected:stdout:128"
+        );
+        assert!(second["nextOffset"].is_null());
+        assert!(matches!(
+            read(&mut storage, &input, "other"),
+            Err(KernelError::Authorization(_))
+        ));
+        let mut wrong_workspace = input.clone();
+        wrong_workspace["workspaceId"] = json!("different");
+        assert!(matches!(
+            read(&mut storage, &wrong_workspace, "reader"),
+            Err(KernelError::Authorization(_))
+        ));
+        drop(storage);
+        let mut reopened = Storage::open(&root, "host").unwrap();
+        assert_eq!(read(&mut reopened, &next, "reader").unwrap(), second);
+        drop(reopened);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

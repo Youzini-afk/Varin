@@ -1,4 +1,5 @@
 /** Transient consumer of original Catalog leaves and ExperimentService facts. No domain state or scheduler. */
+import { createResearchLogReader } from './research-log-followups.js';
 import type { ExperimentService } from '../harness/experiments.js';
 import type { ExperimentCaller } from '../harness/research-identity.js';
 import type { KernelClient } from './kernel-client.js';
@@ -8,7 +9,8 @@ export function createResearchArtifactObserver(options: { kernel: KernelClient; 
   const seen = new Set<string>();
   const controller = new AbortController();
   const request = options.kernel.agentRuntimeRequest.bind(options.kernel);
-  const observe = async (work: FollowupResearchWork) => {
+  const logs = createResearchLogReader({ ...options, signal: controller.signal });
+  const observe = async (work: FollowupResearchWork): Promise<boolean> => {
     const { observer, binding, source, key } = work;
     const caller: ExperimentCaller = {
       workspaceId: binding.workspaceId,
@@ -18,6 +20,7 @@ export function createResearchArtifactObserver(options: { kernel: KernelClient; 
         threadId: observer.threadId, branchId: observer.branchId, runId: observer.sourceRunId, source: observer.source },
       access: { kind: 'family', readThreadIds: observer.readThreadIds, controlThreadIds: [] },
     };
+    if (source.kind === 'log_literal' || source.kind === 'log_end') return logs.observe(work, caller);
     if (source.kind !== 'artifact' && source.kind !== 'collection') throw new Error('Original research leaf changed');
     const selector = source.kind === 'artifact' ? { ...(source.artifact_id ? { artifactId: source.artifact_id } : {}), ...(source.name ? { name: source.name } : {}) } : {};
     const snapshot = await options.experiments.readArtifactObservation(caller, binding, selector, controller.signal);
@@ -56,9 +59,11 @@ export function createResearchArtifactObserver(options: { kernel: KernelClient; 
       }
     }
     seen.add(identity);
+    return false;
   };
   const scan = async () => {
       const current = new Set<string>();
+      let moreLogBytes = false;
       let after: string | undefined;
       do {
         controller.signal.throwIfAborted();
@@ -68,12 +73,14 @@ export function createResearchArtifactObserver(options: { kernel: KernelClient; 
           // Discard unstarted metadata reads and recheck the original Catalog projection.
           if (dirty) return;
           current.add(JSON.stringify([work.key.ownerEpoch, work.key.followupId, work.key.generation, work.key.sourceIndex]));
-          try { await observe(work); } catch (error) { if (controller.signal.aborted) throw error; options.onError(error); }
+          try { moreLogBytes = await observe(work) || moreLogBytes; } catch (error) { if (controller.signal.aborted) throw error; options.onError(error); }
         }
         if (page.nextCursor !== null && page.nextCursor === after) throw new Error('Research observation cursor did not advance');
         after = page.nextCursor ?? undefined;
       } while (after !== undefined);
       for (const identity of seen) if (!current.has(identity)) seen.delete(identity);
+      logs.retain(current);
+      if (moreLogBytes) dirty = true;
   };
   let dirty = false;
   let work: Promise<void> | undefined;

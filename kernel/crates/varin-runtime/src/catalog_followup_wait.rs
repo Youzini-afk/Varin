@@ -2,11 +2,13 @@
 use super::*;
 pub const PREFIX: &str = "followup-observation:";
 pub const EVENT: &str = "followup.observed";
+const EXHAUSTED: &str = "followup.exhausted";
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FollowupObservationState {
     Waiting,
     Triggered,
+    Exhausted,
     Cancelled,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -16,6 +18,7 @@ pub struct FollowupObservation {
     pub run_id: String,
     pub state: FollowupObservationState,
     pub delivered: bool,
+    pub delivery_pending: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct ObservationResult {
@@ -24,28 +27,65 @@ struct ObservationResult {
     wait_id: String,
     state: FollowupObservationState,
 }
-fn state(w: &Wait) -> FollowupObservationState {
+fn state(db: &Connection, w: &Wait) -> Result<FollowupObservationState> {
     if w.cancelled {
-        FollowupObservationState::Cancelled
-    } else if w.trigger_cursor.is_some() {
-        FollowupObservationState::Triggered
-    } else {
-        FollowupObservationState::Waiting
+        return Ok(FollowupObservationState::Cancelled);
+    }
+    let Some(cursor) = w.trigger_cursor else {
+        return Ok(FollowupObservationState::Waiting);
+    };
+    let kind: String = db.query_row(
+        "SELECT kind FROM events WHERE cursor=?1 AND subject=?2",
+        params![sql_number(cursor)?, w.subject],
+        |r| r.get(0),
+    )?;
+    match kind.as_str() {
+        EVENT => Ok(FollowupObservationState::Triggered),
+        EXHAUSTED => Ok(FollowupObservationState::Exhausted),
+        _ => Err(RuntimeError::Invalid(
+            "Original follow-up observation event changed".into(),
+        )),
     }
 }
+pub(super) fn exhausted(tx: &Transaction<'_>, d: &Definition) -> Result<()> {
+    let Some(operation) = &d.observation_operation_id else {
+        return Ok(());
+    };
+    if !sources::exhausted(tx, d)? {
+        return Ok(());
+    }
+    let mut w: Wait = record(tx, "waits", &format!("{PREFIX}{operation}"))?;
+    if w.cancelled || w.trigger_cursor.is_some() {
+        return Ok(());
+    }
+    // A committed match can precede generic Wait reconciliation. Preserve the
+    // original earliest occurrence rather than letting a later EOF win this race.
+    let observed: Option<u64> = tx.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind=?2 AND cursor>?3 ORDER BY cursor LIMIT 1",params![d.id,EVENT,sql_number(w.after_cursor)?],|r|read_number(r,0)).optional()?;
+    let cursor = match observed {
+        Some(cursor) => cursor,
+        None => event(tx, &d.id, d.revision, EXHAUSTED, json!({"wait_id":w.id}))?,
+    };
+    w.trigger_cursor = Some(cursor);
+    put(tx, "waits", &w.id, &w)?;
+    Catalog::enqueue_resume(tx, &w, cursor)?;
+    Ok(())
+}
+
 pub(super) fn project(db: &Connection, id: &str) -> Result<FollowupObservation> {
     let w: Wait = record(db, "waits", &format!("{PREFIX}{id}"))?;
-    let delivered = db.query_row(
+    let delivered: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM history WHERE id=?1)",
         [format!("followup-observation-result:{}", w.id)],
         |r| r.get(0),
     )?;
+    let run: Run = record(db, "runs", &w.run_id)?;
     Ok(FollowupObservation {
         wait_id: w.id.clone(),
         operation_id: id.into(),
         run_id: w.run_id.clone(),
-        state: state(&w),
+        state: state(db, &w)?,
         delivered,
+        delivery_pending: !delivered && !run.state.terminal(),
     })
 }
 pub(super) fn register(tx: &Transaction<'_>, op: &mut Operation, d: &Definition) -> Result<()> {
@@ -114,28 +154,13 @@ pub(in crate::catalog) fn pending_cancelled(db: &Connection, r: &Run, w: &Wait) 
         && matches!(&o.call_completion,Some(result_content::ToolCompletionMetadata::JobAccepted{operation_id,phase,effect:Effect::Confirmed,lifetime:Lifetime::Thread, ..}) if operation_id==id && phase=="awaiting_followup"))
 }
 fn result(db: &Connection, w: &Wait) -> Result<ObservationResult> {
-    Ok(ObservationResult {
-        followup_id: w.subject.clone(),
-        occurrence_id: w
-            .trigger_cursor
-            .map(|cursor| {
-                let raw: String = db.query_row(
-                    "SELECT data FROM events WHERE cursor=?1 AND subject=?2 AND kind=?3",
-                    params![sql_number(cursor)?, w.subject, EVENT],
-                    |r| r.get(0),
-                )?;
-                let data: Value = serde_json::from_str(&raw)?;
-                data["occurrence_id"]
-                    .as_str()
-                    .map(str::to_owned)
-                    .ok_or_else(|| {
-                        RuntimeError::Invalid("follow-up observation occurrence missing".into())
-                    })
-            })
-            .transpose()?,
-        wait_id: w.id.clone(),
-        state: state(w),
-    })
+    let state = state(db,w)?;
+    let occurrence_id = if state == FollowupObservationState::Triggered {
+        let raw: String = db.query_row("SELECT data FROM events WHERE cursor=?1 AND subject=?2 AND kind=?3",params![sql_number(w.trigger_cursor.expect("triggered"))?,w.subject,EVENT],|r|r.get(0))?;
+        let data: Value = serde_json::from_str(&raw)?;
+        Some(data["occurrence_id"].as_str().ok_or_else(||RuntimeError::Invalid("Follow-up observation occurrence missing".into()))?.to_owned())
+    } else { None };
+    Ok(ObservationResult { followup_id:w.subject.clone(), occurrence_id, wait_id:w.id.clone(), state })
 }
 pub struct FollowupWaitPreparation {
     run: Run,
@@ -153,7 +178,7 @@ pub struct PreparedFollowupWait {
 }
 impl FollowupWaitPreparation {
     pub fn load(self) -> Result<PreparedFollowupWait> {
-        let item=ConversationItem{resource_activation:None,id:format!("followup-observation-result:{}",self.wait.id),provenance:Provenance::EnvironmentFact{event_id:self.wait.id.clone()},content:Content::Text{text:format!("This follow-up observation ended. The original registered instruction is delivered separately through its occurrence. Ending observation does not cancel the definition or stop its process. Do not register the same intent again merely because observation ended.\n{}",serde_json::to_string(&self.result)?)},opaque:None};
+        let item=ConversationItem{resource_activation:None,id:format!("followup-observation-result:{}",self.wait.id),provenance:Provenance::EnvironmentFact{event_id:self.wait.id.clone()},content:Content::Text{text:format!("This follow-up observation ended. A triggered instruction is delivered through its occurrence. Exhausted means the original condition can no longer match and no occurrence was created. Ending observation does not cancel the definition or stop its process. Do not register the same intent again merely because observation ended.\n{}",serde_json::to_string(&self.result)?)},opaque:None};
         let history = self
             .content
             .save_history(&serde_json::to_value(item)?, &None)?;
@@ -253,7 +278,7 @@ impl Catalog {
             if r.state != RunState::Waiting
                 || r.cancel_requested
                 || r.waiting_on.as_deref() != Some(&w.id)
-                || state(&w) == FollowupObservationState::Waiting
+                || state(&self.db, &w)? == FollowupObservationState::Waiting
             {
                 continue;
             }
