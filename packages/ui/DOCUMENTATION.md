@@ -417,3 +417,20 @@ selection before confirmation, and refreshes the existing Thread/space projectio
 Version sizes include shared objects; only the Host cleanup response reports removed bytes. Interrupted
 cleanup keeps the same retry request across panel refreshes. Target changes discard old responses and
 selection; this feature adds no polling or persistent browser-side history authority.
+
+## Agent profile settings
+
+The Agents settings page uses the Host's `AgentProfilesAPI` for built-in and custom profiles in both
+runtime editing modes. Choosing Pi or Varin Agent changes only the tool configuration being edited;
+shared fields are labelled, and deletion explicitly covers both runtimes. Pi plugin Agents retain
+their own catalog/actions and appear only in Pi mode. The Agent model picker uses `ThreadsAPI.listModels`,
+not a Pi provider/session catalog. Built-in tool names and defaults come from the Host capability owner.
+Names outside that directory may be supplied by a selected extension or MCP provider; settings do not
+claim to observe a Run's frozen capability bindings. New custom profiles start with the selected runtime's
+retrieval tool defaults, while existing unconfigured custom selections remain unconfigured.
+
+Profile reads, saves and drafts are scoped by Host and editing runtime. Drafts keep their original
+revision across selection changes and refreshed snapshots; conflicts preserve the draft until an
+explicit discard. A late read or write cannot publish after a Host/runtime change. Tool omission,
+explicit empty selection and reset remain different requests; editing shared fields never rewrites
+an untouched tool selection. Visible demand and settings events refresh the same shared projection.

@@ -1,101 +1,189 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { beforeEach, afterEach, test, expect, vi } from 'vitest';
-import type { PiAgentCatalogSnapshot, PiAgentDescriptor } from '@varin/protocol';
+import { createAgentProfilesHttpAPI, type AgentProfilesAPI, type AgentProfileSaveRequest, type AgentRuntime } from '@varin/application-client';
+import { GlobalSettingsAuthority } from '../../../../../pi-host/src/settings-authority';
+import { createAgentProfilesAPI, agentProfileFailure } from '../../../../../web/application-host/lib/kernel/agent-profiles';
 import { I18nProvider } from '@/lib/i18n';
 import { AgentsPage } from './AgentsPage';
 import { AgentsSidebar } from './AgentsSidebar';
-import { beginAgentsCatalogTarget, refreshAgentsCatalog, useAgentsCatalogState } from './agents-catalog-store';
+import { beginAgentProfilesHost, selectAgentProfile, selectAgentProfilesRuntime } from './agent-profiles-store';
+import { agentProfileDrafts } from './agent-profile-draft';
 
-const fixture = vi.hoisted(() => ({ catalog: {} as PiAgentCatalogSnapshot, targetKey: 'target', runtimeKey: 'runtime-a', focus: 'code',
-  update: vi.fn(async (..._args: unknown[]) => ({ success: true, message: 'Saved', providerId: 'varin' })) }));
-const target = { cwd: '/workspace' };
-vi.mock('@/lib/pi-runtime/agent-providers', () => ({ listPiAgentProviders: async () => fixture.catalog, runPiAgentProviderAction: fixture.update }));
+const fixture = vi.hoisted(() => ({ api: {} as { agentProfiles: AgentProfilesAPI; threads: { listModels: ReturnType<typeof vi.fn> } },
+  piCatalog: vi.fn(), piModel: vi.fn(), host: '', writes: [] as AgentProfileSaveRequest[] }));
+vi.mock('@/lib/pi-runtime/agent-providers', () => ({ listPiAgentProviders: () => { throw new Error('Unexpected Pi catalog request in profile test'); } }));
+vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => fixture.api }));
+vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: (select: (state: { currentDirectory: string }) => unknown) => select({ currentDirectory: '/workspace' }) }));
+vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: (select: (state: object) => unknown) => select({ projects: [], activeProjectId: null }) }));
+vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
+vi.mock('@/lib/persistence', () => ({ reportSettingsSaveState: vi.fn() }));
 vi.mock('./useAgentsPageCatalog', () => ({ useAgentsPageCatalog: () => {
-  const state = useAgentsCatalogState();
-  const agents = state.catalog.agents.filter(agent => state.showAllFocuses || !agent.workFocus?.length || agent.workFocus.includes(fixture.focus as 'code'));
-  return { cwd: '/workspace', runtimeKey: fixture.runtimeKey, target, targetKey: fixture.targetKey,
-    focus: fixture.focus, state, catalog: state.catalog, agents,
-    selected: agents.find(agent => agent.id === state.selectedAgentId) ?? agents[0] ?? null,
-    refresh: (afterMutation = false) => refreshAgentsCatalog(target, fixture.targetKey, afterMutation) };
+  fixture.piCatalog();
+  return { focus: 'code', targetKey: 'pi-plugins', state: { providerFilter: 'all', definitionRequest: null }, selected: null,
+    catalog: { agents: [], providers: [], diagnostics: [] }, agents: [], refresh: async () => {} };
 } }));
-vi.mock('../harness/useHarnessSettings', () => ({ useHarnessSettings: () => ({ harness: null, error: null }) }));
-vi.mock('./PluginAgentDetails', () => ({ PluginAgentDetails: ({ agent }: { agent: PiAgentDescriptor | null }) => <div data-plugin-detail={agent?.id ?? 'new'} /> }));
-vi.mock('./ModelSelector', () => ({ ModelSelector: () => <div data-model-selector /> }));
+vi.mock('./PluginAgentDetails', () => ({ PluginAgentDetails: () => <div data-plugin-detail /> }));
+vi.mock('./ModelSelector', () => ({ ModelSelector: () => { fixture.piModel(); return <div data-pi-model-selector />; } }));
 vi.mock('@/components/sections/shared/SettingsSidebarLayout', () => ({ SettingsSidebarLayout: ({ children, header }: { children: React.ReactNode; header: React.ReactNode }) => <aside>{header}{children}</aside> }));
-vi.mock('@/components/sections/shared/SettingsPageLayout', () => ({ SettingsPageLayout: ({ children, title }: { children: React.ReactNode; title: React.ReactNode }) => <main><h1>{title}</h1>{children}</main> }));
-vi.mock('@/components/ui/select', () => ({
-  Select: ({ children }: { children: React.ReactNode }) => <>{children}</>, SelectContent: () => null,
-  SelectTrigger: () => null, SelectValue: () => null, SelectItem: () => null,
-}));
+vi.mock('@/components/sections/shared/SettingsPageLayout', () => ({ SettingsPageLayout: ({ children, title, headerEnd }: { children: React.ReactNode; title: React.ReactNode; headerEnd: React.ReactNode }) => <main><h1>{title}</h1>{headerEnd}{children}</main> }));
+vi.mock('@/components/ui/dialog', () => ({ Dialog: ({ open, children }: { open: boolean; children: React.ReactNode }) => open ? <div role="dialog">{children}</div> : null,
+  DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>, DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>, DialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p> }));
+vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} onInput={onChange as React.FormEventHandler<HTMLInputElement>} /> }));
+vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea {...props} onInput={onChange as React.FormEventHandler<HTMLTextAreaElement>} /> }));
+vi.mock('@/components/ui/select', () => ({ Select: ({ children }: { children: React.ReactNode }) => <>{children}</>, SelectContent: () => null, SelectTrigger: () => null, SelectValue: () => null, SelectItem: () => null }));
 vi.mock('@/components/ui/switch', () => ({ Switch: ({ checked, disabled, onCheckedChange, id }: { checked: boolean; disabled?: boolean; onCheckedChange(value: boolean): void; id?: string }) =>
   <button type="button" id={id} role="switch" aria-checked={checked} disabled={disabled} onClick={() => onCheckedChange(!checked)} /> }));
 
-let root: Root;
-let container: HTMLDivElement;
-const entry = (id: string, focus: 'code' | 'research'): PiAgentDescriptor => ({
-  id, name: id, providerId: 'varin', description: `Role ${id}`, kind: 'delegatable', status: 'available', source: { scope: 'user' },
-  model: 'provider/model', workFocus: [focus], definition: { revision: 'owner-revision', config: { kind: 'custom', agent: {
-    name: id, description: `Role ${id}`, instructions: 'Read carefully.', enabled: true, tools: ['read'], worktree: 'none', workFocus: [focus],
-  } } }, actions: [{ id: 'disable', label: 'Disable' }],
-});
+let root: Root, container: HTMLDivElement, directory: string, owner: AgentProfilesAPI;
+let hold: { action: 'read' | 'save'; runtime: AgentRuntime; release?: () => void } | undefined;
+const originalFetch = globalThis.fetch;
+const custom = { name: 'Saved helper', description: 'Existing explicit tools', instructions: 'Read carefully.', enabled: true,
+  model: { providerId: 'local', modelId: 'fixture' }, worktree: 'none', workFocus: [] };
 beforeEach(async () => {
+  directory = await mkdtemp(join(tmpdir(), 'varin-agent-settings-ui-'));
+  await writeFile(join(directory, 'settings.json'), JSON.stringify({ harness: {
+    models: { retrievalAgent: { providerId: 'local', modelId: 'fixture' } },
+    agents: { legacy: { ...custom, tools: ['read', 'external_tool'] }, split: { ...custom, name: 'Runtime helper', tools: { pi: ['read'], agent: [] } } },
+  } }));
+  owner = createAgentProfilesAPI({ settings: new GlobalSettingsAuthority(directory),
+    // Controlled registered-directory input; this test does not establish Rust IPC discovery.
+    capabilities: async () => [
+      { name: 'file_read', version: '1', source_requirement: 'source', default_presets: ['worker', 'retrieval'] },
+      { name: 'file_write', version: '1', source_requirement: 'physical', default_presets: ['worker'] },
+    ],
+  });
+  fixture.writes = []; fixture.piCatalog.mockClear(); fixture.piModel.mockClear(); hold = undefined;
   const { window, document } = parseHTML('<html><body></body></html>');
+  Object.defineProperty(window, 'location', { value: { origin: 'http://ui.test', href: 'http://ui.test/' }, configurable: true });
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('HTMLElement', window.HTMLElement); vi.stubGlobal('Element', window.Element); vi.stubGlobal('Node', window.Node);
-  vi.stubGlobal('Event', window.Event);
-  vi.stubGlobal('CustomEvent', window.CustomEvent);
+  vi.stubGlobal('Event', window.Event); vi.stubGlobal('CustomEvent', window.CustomEvent);
+  globalThis.fetch = async (input, init) => {
+    const action = String(input).split('/').at(-1) as 'read' | 'save' | 'remove';
+    const body = JSON.parse(String(init?.body));
+    if (action === 'save') fixture.writes.push(body);
+    try {
+      const result = action === 'read' ? await owner.read(body) : action === 'save' ? await owner.save(body) : await owner.remove(body);
+      if (hold?.action === action && hold.runtime === body.runtime) {
+        const pending = hold;
+        await new Promise<void>(resolve => { pending.release = resolve; });
+      }
+      return Response.json(result);
+    } catch (error) {
+      const failure = agentProfileFailure(error);
+      return Response.json({ code: failure.code, message: failure.message }, { status: failure.status });
+    }
+  };
+  fixture.api = { agentProfiles: createAgentProfilesHttpAPI(), threads: { listModels: vi.fn(async () => [{ providerId: 'local', modelId: 'fixture', name: 'Local fixture' }]) } };
+  agentProfileDrafts.clear();
+  beginAgentProfilesHost(`reset:${directory}`); selectAgentProfilesRuntime('agent');
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
-  fixture.targetKey = 'target'; fixture.runtimeKey = 'runtime-a'; fixture.focus = 'code'; fixture.update.mockReset().mockResolvedValue({ success: true, message: 'Saved', providerId: 'varin' });
-  fixture.catalog = { projectTrusted: true, diagnostics: [], providers: [{ id: 'varin', label: 'Varin', description: '', available: true, actions: [] }], agents: [
-    entry('code-helper', 'code'), entry('research-helper', 'research'),
-    { ...entry('plugin-helper', 'code'), providerId: 'plugin', workFocus: [], actions: [{ id: 'inspect', label: 'Inspect' }] },
-  ] };
-  beginAgentsCatalogTarget('reset');
-  await refreshAgentsCatalog(target, fixture.targetKey);
 });
-afterEach(async () => { await act(async () => root.unmount()); vi.unstubAllGlobals(); });
-const render = () => act(async () => root.render(<I18nProvider><AgentsSidebar /><AgentsPage /></I18nProvider>));
-
-test('selects native and plugin details in the same split view, with focus filtering in the list', async () => {
-  await render();
-  expect(container.querySelector('aside [data-agent-id="code-helper"]')).not.toBeNull();
-  expect(container.querySelector('aside [data-agent-id="research-helper"]')).toBeNull();
-  expect(container.querySelector('main [data-agent-editor="native"]')).not.toBeNull();
-  await act(async () => (container.querySelector('main [role="switch"]') as HTMLButtonElement).click());
-  await act(async () => (container.querySelector('[data-agent-id="plugin-helper"] button') as HTMLButtonElement).click());
-  expect(container.querySelector('[data-plugin-detail="plugin-helper"]')).not.toBeNull();
-  await act(async () => (container.querySelector('[data-agent-id="code-helper"] button') as HTMLButtonElement).click());
-  expect(container.querySelector('main [data-agent-editor="native"]')).not.toBeNull();
-  expect(container.querySelector('main [role="switch"]')!.getAttribute('aria-checked')).toBe('false');
-  fixture.focus = 'research';
-  await render();
-  expect(container.querySelector('[data-agent-id="code-helper"]')).toBeNull();
-  expect(container.querySelector('[data-agent-id="research-helper"]')).not.toBeNull();
+afterEach(async () => {
+  hold?.release?.(); hold = undefined;
+  await act(async () => root.unmount());
+  globalThis.fetch = originalFetch; vi.unstubAllGlobals();
+  await rm(directory, { recursive: true, force: true });
 });
+const settle = async () => act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+const render = async () => { await act(async () => root.render(<I18nProvider><AgentsSidebar /><AgentsPage /></I18nProvider>)); await settle(); };
+const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === label)!;
+const click = async (value: HTMLElement) => { await act(async () => value.click()); await settle(); };
+const edit = async (label: string, value: string) => {
+  const input = container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;
+  await act(async () => { input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); });
+};
+const switchRuntime = async (runtime: AgentRuntime) => { await act(async () => selectAgentProfilesRuntime(runtime)); await settle(); };
+const save = async () => { await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))); await settle(); };
+const persisted = async () => JSON.parse(await readFile(join(directory, 'settings.json'), 'utf8'));
 
-test('saves edits against the revision shown when editing began', async () => {
+test('renders actual Host worker/retrieval defaults and native model catalog without mounting Pi consumers', async () => {
   await render();
-  await act(async () => (container.querySelector('main [role="switch"]') as HTMLButtonElement).click());
-  const next = { ...fixture.catalog.agents[0]!, definition: { ...fixture.catalog.agents[0]!.definition!, revision: 'outside-revision' } };
-  fixture.catalog = { ...fixture.catalog, agents: [next, ...fixture.catalog.agents.slice(1)] };
-  await act(async () => refreshAgentsCatalog(target, fixture.targetKey, true));
-  await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-  expect(fixture.update).toHaveBeenCalledWith(target, 'varin', 'update', 'code-helper', {
-    expectedRevision: 'owner-revision', config: expect.objectContaining({ enabled: false, instructions: 'Read carefully.' }),
-  }, 'runtime-a');
+  expect(container.querySelector('[data-agent-id="varin:builtin:worker"]')).not.toBeNull();
+  expect(container.querySelector('[data-agent-id="varin:builtin:retrievalAgent"]')).not.toBeNull();
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Tools (comma or newline separated)"]')?.value).toBe('file_read, file_write');
+  expect(container.querySelector('[data-tools-source="default"]')).not.toBeNull();
+  expect(fixture.api.threads.listModels).toHaveBeenCalled();
+  expect(fixture.piCatalog).not.toHaveBeenCalled(); expect(fixture.piModel).not.toHaveBeenCalled();
+  await click(container.querySelector('[data-agent-id="varin:builtin:retrievalAgent"] button')!);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Tools (comma or newline separated)"]')?.value).toBe('file_read');
+  expect(container.textContent).toContain('shared by Pi and Varin Agent');
 });
 
-test('does not refresh the new runtime from an old mutation response', async () => {
-  let release!: (result: { success: boolean; message: string; providerId: string }) => void;
-  fixture.update.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+test('preserves old explicit names on shared edits and isolates empty/reset/missing tool choices by runtime', async () => {
+  await render(); await act(async () => selectAgentProfile('varin:custom:legacy')); await settle();
+  expect(container.textContent).toContain('Not in the built-in directory');
+  await click(container.querySelector('main [role="switch"]')!); await save();
+  expect(Object.hasOwn(fixture.writes.at(-1)!, 'tools')).toBe(false);
+  expect((await persisted()).harness.agents.legacy.tools).toEqual(['read', 'external_tool']);
+  await act(async () => selectAgentProfile('varin:custom:split')); await settle();
+  expect(container.querySelector('[data-tools-source="explicit"]')).not.toBeNull();
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Tools (comma or newline separated)"]')?.value).toBe('');
+  await click(button('Reset runtime tools')); await save();
+  expect(fixture.writes.at(-1)!.tools).toBeNull();
+  expect((await persisted()).harness.agents.split.tools).toEqual({ pi: ['read'] });
+  expect(container.querySelector('[data-tools-source="unconfigured"]')).not.toBeNull();
+  await click(button('Use no tools')); await save();
+  expect((await persisted()).harness.agents.split.tools).toEqual({ pi: ['read'], agent: [] });
+  await switchRuntime('pi');
+  expect(fixture.piCatalog).toHaveBeenCalled(); expect(fixture.piModel).toHaveBeenCalled();
+  await act(async () => selectAgentProfile('varin:custom:split')); await settle();
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Tools (comma or newline separated)"]')?.value).toBe('read');
+});
+
+test('creates a custom Agent through the Host API with explicit runtime tools and all shared fields', async () => {
+  await render(); await click(container.querySelector('[aria-label="Create agent"]')!);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Tools (comma or newline separated)"]')?.value).toBe('file_read');
+  await edit('Name', 'New helper'); await edit('Responsibility', 'Created here'); await edit('Instructions', 'Inspect the source.'); await edit('Tools (comma or newline separated)', 'file_read');
+  await save();
+  const input = fixture.writes.at(-1)!;
+  expect(input.id).toBeUndefined(); expect(input.config).toMatchObject({ kind: 'custom', key: '', agent: { name: 'New helper', description: 'Created here', instructions: 'Inspect the source.', enabled: true, worktree: 'none', workFocus: [] } });
+  expect(input.tools).toEqual(['file_read']);
+  const added = Object.values((await persisted()).harness.agents).find((value: unknown) => (value as { name: string }).name === 'New helper');
+  expect(added).toMatchObject({ tools: { agent: ['file_read'] } });
+  expect(container.querySelector('h1')?.textContent).toBe('New helper');
+});
+
+test('keeps draft revisions across refresh and runtime switches; conflicts do not silently retry or overwrite', async () => {
+  await render(); await act(async () => selectAgentProfile('varin:custom:legacy')); await settle();
+  await click(container.querySelector('main [role="switch"]')!);
+  const before = await owner.read({ runtime: 'agent' });
+  const external = before.profiles.find(profile => profile.id === 'varin:custom:legacy')!;
+  if (external.config.kind !== 'custom') throw new Error('Expected custom fixture');
+  await owner.save({ runtime: 'agent', expectedRevision: before.revision, id: external.id, config: { ...external.config, agent: { ...external.config.agent, description: 'External change' } } });
+  await click(button('Refresh'));
+  await switchRuntime('pi'); await switchRuntime('agent');
+  await act(async () => selectAgentProfile('varin:custom:legacy')); await settle();
+  expect(container.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('false');
+  await save();
+  expect(fixture.writes).toHaveLength(1); expect(fixture.writes[0]!.expectedRevision).toBe(before.revision);
+  expect(container.textContent).toContain('Agent settings changed. Reload them before saving.');
+  expect((await persisted()).harness.agents.legacy.enabled).toBe(true);
+  await click(button('Discard draft'));
+  expect(container.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Responsibility"]')?.value).toBe('External change');
+});
+
+test('discards delayed read and save projections after switching the editing runtime', async () => {
+  hold = { action: 'read', runtime: 'agent' };
   await render();
-  await act(async () => (container.querySelector('main [role="switch"]') as HTMLButtonElement).click());
-  await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-  fixture.targetKey = 'next'; fixture.runtimeKey = 'runtime-b';
-  await act(async () => refreshAgentsCatalog(target, fixture.targetKey));
-  await render();
-  await act(async () => release({ success: true, message: 'Saved', providerId: 'varin' }));
-  expect(container.querySelector('main [data-agent-editor="native"]')).not.toBeNull();
+  expect(hold.release).toBeDefined();
+  await switchRuntime('pi');
+  const pendingRead = hold; hold = undefined;
+  await act(async () => pendingRead.release?.()); await settle();
+  expect(container.querySelector('form')?.getAttribute('data-runtime')).toBe('pi');
+  await switchRuntime('agent');
+  hold = { action: 'save', runtime: 'agent' };
+  await click(container.querySelector('main [role="switch"]')!); await save();
+  expect(hold.release).toBeDefined();
+  await switchRuntime('pi');
+  const pendingSave = hold; hold = undefined;
+  await act(async () => pendingSave.release?.()); await settle();
+  expect(container.querySelector('form')?.getAttribute('data-runtime')).toBe('pi');
+  expect(container.querySelector('main [role="switch"]')?.getAttribute('aria-checked')).toBe('false');
 });

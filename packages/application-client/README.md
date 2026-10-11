@@ -10,6 +10,13 @@ etc.), typed failures (`DocumentsError`, `FilesystemError`, `LanguageServicesErr
 `LanguageSupportError`, `RunServicesError`, `WorkspaceSearchError`), pure DTO types (`WorktreeMetadata`,
 `DraftStarterRef`, `FileEditorSettingsPatch`, `ThreadResultHistory`), and the single desktop IPC contract (`desktop.ts`).
 
+`AgentProfilesAPI` edits Pi or Agent profiles through the authenticated Host, without selecting a
+conversation runtime or creating a Pi Session. Read projections separate shared fields from the selected
+runtime's default, explicit or unconfigured tools. Save uses the original settings revision: omitted tools
+preserve the choice, `[]` selects no tools, and `null` resets that runtime. Deleting a custom profile removes
+it for both runtimes. `AgentProfilesError` retains the Host's safe failure code/message. Host changes and
+aborted reads cannot publish a stale settings view; accepted tasks retain their original frozen profile.
+
 `thread-history.ts` describes the user-only Thread history list and release response. The Host owns
 selection validation and object cleanup; the UI sends a frozen branch/revision selection. Logical bytes
 referenced by a version and bytes actually removed by cleanup are distinct fields. These DTOs do not
@@ -178,3 +185,15 @@ its next Run must use the dedicated continuation admission.
 
 This package was extracted from the former UI-owned API and transport modules to clarify the boundary
 between framework-neutral client behavior and React presentation.
+
+## Agent profile settings
+
+`AgentProfilesAPI` reads and revision-checks updates to the original user Agent profile settings for
+an explicit `pi` or `agent` runtime. The Host returns editable shared configuration separately from
+runtime tool selection (`default`, `explicit`, or `unconfigured`) and the actual Agent capability
+directory. Pi's directory is `null`, not an observed empty list. Raw persisted tool-selection unions
+never enter these DTOs. Save omits tools to preserve them, sends `[]` for no tools, or `null` to reset
+only the selected runtime. Creation requires a custom config with an empty key and explicit tools;
+the Host allocates its identity. Removing a custom profile removes its shared definition for both
+runtimes. The HTTP client preserves the Host's safe failure code and message and rejects late
+responses after Host changes or cancellation. No operation changes the conversation runtime.

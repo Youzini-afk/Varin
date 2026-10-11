@@ -20,7 +20,7 @@ export interface AgentsCatalogState {
   selectedAgentId: string | null;
   statusFilter: AgentStatusFilter;
   targetKey: string;
-  definitionRequest: 'create-agent' | 'create-native' | null;
+  definitionRequest: 'create-agent' | null;
   showAllFocuses: boolean;
 }
 
@@ -82,7 +82,7 @@ export function selectAgentsCatalogAgent(selectedAgentId: string | null): void {
 }
 
 export function requestAgentsCatalogDefinition(
-  definitionRequest: 'create-agent' | 'create-native' | null,
+  definitionRequest: 'create-agent' | null,
 ): void {
   publish({ ...state, definitionRequest });
 }
@@ -109,7 +109,9 @@ export async function refreshAgentsCatalog(
   const runtimeKey = getRuntimeKey();
   publish({ ...state, error: null, loading: true });
   try {
-    const catalog = await listPiAgentProviders(runtimeTarget);
+    const fullCatalog = await listPiAgentProviders(runtimeTarget);
+    const catalog = { ...fullCatalog, agents: fullCatalog.agents.filter(agent => agent.providerId !== 'varin'),
+      providers: fullCatalog.providers.filter(provider => provider.id !== 'varin') };
     if (
       requestGeneration !== generation
       || state.targetKey !== targetKey

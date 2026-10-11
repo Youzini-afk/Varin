@@ -15,7 +15,8 @@ import type { VarinAgentPolicyInput } from '@varin/extension-contract';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { createAgentPolicy } from './agent-policy.js';
 import { afterEach, expect, it } from 'vitest';
-import { configureRuntimeUrlResolver, createThreadsHttpAPI, setRuntimeExtraHeaders, type ThreadIdentity } from '@varin/application-client';
+import { configureRuntimeUrlResolver, createAgentProfilesHttpAPI, createThreadsHttpAPI, setRuntimeExtraHeaders, type ThreadIdentity } from '@varin/application-client';
+import { GlobalSettingsAuthority } from '@varin/pi-host/settings-authority';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
 import { openUserKnowledgeStore } from '../harness/recall-tool.js';
@@ -27,6 +28,8 @@ import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { ThreadCollaboration } from './thread-collaboration.js';
 import { createChildProfilePreparer } from './child-profiles.js';
+import { createAgentProfilesAPI } from './agent-profiles.js';
+import { registerAgentProfileRoutes } from './agent-profile-routes.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { createThreadContext, type ContextPreparer } from './thread-context.js';
 import { registerThreadRoutes } from './thread-routes.js';
@@ -101,6 +104,8 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
   cleanup.push(() => fs.rm(root, { recursive: true, force: true }));
   const workspace = path.join(root, 'workspace');
   await fs.mkdir(workspace);
+  const agentDir = path.join(root, 'agent');
+  await fs.mkdir(agentDir);
   await fs.writeFile(path.join(workspace, 'source.txt'), 'fixed child source before parent changes');
   const requests: RecordedRequest[] = [];
   const provider = await listen(createServer((request, response) => {
@@ -192,12 +197,18 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
       if (selection.providerId !== model.providerId || selection.modelId !== model.modelId) throw new Error('Unknown fixture model');
       return { configuration, credentialOwner };
     }, rebindModel: async () => credentialOwner };
+    const settings = new GlobalSettingsAuthority(agentDir);
+    const profiles = createAgentProfilesAPI({ settings, capabilities: signal => runtime.childCapabilities(signal) });
     const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, workingStates, runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ documents, workingStates, prepareResources: resources.prepareSourceCapture }), prepareContext, plans, undefined, undefined,
-      createChildProfilePreparer({ settings: async () => ({}), capabilities: signal => runtime.childCapabilities(signal), models }));
+      createChildProfilePreparer({ settings: async () => (await settings.read()).document, capabilities: signal => runtime.childCapabilities(signal), models }));
     const collaboration = options.collaboration === false ? undefined : new ThreadCollaboration({ kernel, storageAdapter: storage, resolveLiveSource: async () => { throw new Error("Fixed source fixture"); }, sourceCaptureOwners: { documents, prepareResources: resources.prepareSourceCapture, inspectInventory: async () => { throw new Error("Fixed source fixture"); } }, runtime, workingStates, prepareContext, continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal), onError: (_operation, error) => { errors.push(error); } });
     const app = express();
     registerCommonRequestMiddleware(app, { express });
     registerThreadRoutes(app, adapter, (request, response, next) => {
+      if (request.headers['x-review-auth'] !== 'child-review') { response.sendStatus(401); return; }
+      next();
+    });
+    registerAgentProfileRoutes(app, profiles, (request, response, next) => {
       if (request.headers['x-review-auth'] !== 'child-review') { response.sendStatus(401); return; }
       next();
     });
@@ -221,7 +232,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
       await exited; await kernel.close();
     };
     return { kernel, grants, crash, runtime, adapter, collaboration, models, prepareContext, workingStates, personalization, documents, memoryQueries, memoryControl, policyDecisions,
-      errors, close, selectParentPolicy, api: createThreadsHttpAPI(), hostUrl: host.url };
+      errors, close, selectParentPolicy, api: createThreadsHttpAPI(), profiles: createAgentProfilesHttpAPI(), hostUrl: host.url };
   }
   return { root, workspace, requests, openHost, setProject(value: string) { projectId = value; }, setTrusted(value: boolean) { trusted = value; } };
 }
@@ -482,14 +493,14 @@ it('selected read-only child owns its ordinary notes and plan through real Host 
   } finally { release.release(); }
 });
 
-it('real dispatch returns before child preparation; parent reads, waits, and receives fixed-source scoped report exactly once', async () => {
+it('the configured retrieval preset returns before preparation and delivers one fixed-source scoped report', async () => {
   const entered = gate(); const release = gate();
   let parentSteps = 0; let childSteps = 0; let operationId = '';
   const f = await fixture(({ body, response }) => {
     assertPairing(body);
     if (isParent(body)) {
       parentSteps++;
-      if (parentSteps === 1) complete(response, [tool('dispatch', dispatch, 'dispatch'), tool('file_read', { path: 'source.txt' }, 'parent-read')]);
+      if (parentSteps === 1) complete(response, [tool('dispatch', { task: dispatch.task, preset: 'retrieval' }, 'dispatch'), tool('file_read', { path: 'source.txt' }, 'parent-read')]);
       else if (parentSteps === 2) {
         operationId = job(body);
         expect(JSON.stringify(result(body, 'file_read'))).toContain('fixed child source before parent changes');
@@ -505,6 +516,13 @@ it('real dispatch returns before child preparation; parent reads, waits, and rec
     }
   });
   const h = await f.openHost({ context: original => blockChild(original, entered, release) });
+  const catalog = await h.profiles.read({ runtime: 'agent' });
+  const retrieval = catalog.profiles.find(profile => profile.id === 'varin:builtin:retrievalAgent')!;
+  expect(retrieval.effective.modelSource).toBe('unconfigured');
+  expect(retrieval.tools.source).toBe('default');
+  if (retrieval.config.kind !== 'builtin') throw new Error('Expected the shipped retrieval preset');
+  await h.profiles.save({ runtime: 'agent', expectedRevision: catalog.revision, id: retrieval.id,
+    config: { ...retrieval.config, binding: { ...retrieval.config.binding, ...model } } });
   const identity = await h.api.create('child-review-scope');
   await h.personalization.saveNote({ scope: { kind: 'session', id: identity.threadId }, content: 'PARENT_SESSION_SECRET' });
   await h.personalization.saveNote({ scope: { kind: 'project', id: 'child-review-project' }, content: 'SHARED_ADMITTED_PROJECT_NOTE' });
@@ -528,7 +546,7 @@ it('real dispatch returns before child preparation; parent reads, waits, and rec
   expect(child.report).toMatchObject({ outcome: 'succeeded', sender_thread_id: child.child_thread_id });
   expect(child.code_result).toEqual({ kind: 'no_changes' });
   expect((await h.runtime.readChildReport(operationId, child.report!.history_ids.at(-1)!)).text).toContain('CHILD_REPORT');
-  expect(child.launch.tools.map(item => item.name)).toEqual(['file_read']);
+  expect(child.launch.tools.map(item => item.name).sort()).toEqual([...retrieval.tools.names].sort());
   const childBodies = f.requests.filter(request => !isParent(request.body));
   expect(childBodies).toHaveLength(2);
   expect(JSON.stringify(childBodies[0]!.body)).toContain('SHARED_ADMITTED_PROJECT_NOTE');
@@ -551,13 +569,13 @@ it('real dispatch returns before child preparation; parent reads, waits, and rec
   expect(parentSteps).toBe(3); expect(childSteps).toBe(2);
 }, 30_000);
 
-it('a fixed read-only parent dispatches a private writable child, waits for its fixed result and reopens without replay', async () => {
+it('the shipped worker preset writes a private child from a fixed read-only parent and reopens without replay', async () => {
   let parentSteps = 0; let childSteps = 0; let operationId = '';
   const finalText = 'alpha\ngamma\n';
   const f = await fixture(({ body, response }) => {
     assertPairing(body);
     if (isParent(body)) {
-      if (++parentSteps === 1) complete(response, [tool('dispatch', { task: 'Read source.txt, write alpha/beta, edit beta to gamma, and report', workMode: 'isolated_write' }, 'dispatch-write')]);
+      if (++parentSteps === 1) complete(response, [tool('dispatch', { task: 'Read source.txt, write alpha/beta, edit beta to gamma, and report', preset: 'worker' }, 'dispatch-write')]);
       else if (parentSteps === 2) { operationId = job(body); complete(response, [tool('wait_child', { operationId }, 'wait-written-child')]); }
       else {
         expect(JSON.stringify(body.input)).toContain('child-result:');
@@ -586,12 +604,18 @@ it('a fixed read-only parent dispatches a private writable child, waits for its 
     }
   });
   const h = await f.openHost();
+  const profiles = await h.profiles.read({ runtime: 'agent' });
+  const worker = profiles.profiles.find(profile => profile.id === 'varin:builtin:worker')!;
+  expect(worker.tools.source).toBe('default');
+  expect(worker.tools.names).toEqual(expect.arrayContaining(['file_read', 'file_write', 'file_edit']));
+  expect(worker.tools.names).not.toContain('read');
   const identity = await h.api.create('isolated-write-review');
   const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
   prepared.source.tools = ['file_read'];
   const parent = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'Delegate isolated edits and wait', model, source: prepared.source });
   await expect.poll(async () => (await h.runtime.run(parent.run_id)).state, { timeout: 15_000 }).toBe('completed');
   const child = await h.runtime.child(operationId);
+  expect(child.launch.tools.map(item => item.name).sort()).toEqual([...worker.tools.names].sort());
   expect(child.source).toMatchObject({ kind: 'ready', selection: { mode: 'materialized', revision: 0 }, provenance: { consistency: 'fixed-root' } });
   expect(child.code_result.kind).toBe('published');
   if (child.code_result.kind !== 'published') throw new Error('Expected the original fixed WorkingResult');
@@ -643,25 +667,45 @@ it('parent final survives independently; cancelling preparing child fences late 
   expect(parentSteps).toBe(2);
 }, 20_000);
 
-it('accepted child preparation resumes after Host/kernel reopen without replaying the parent model request', async () => {
-  let parentSteps = 0; let childSteps = 0; let operationId = '';
+it('a saved runtime-specific preset stays frozen across a later edit and Host/kernel reopen', async () => {
+  let parentSteps = 0; let childSteps = 0; let operationId = ''; let preset = '';
   const f = await fixture(({ body, response }) => {
     assertPairing(body);
     if (isParent(body)) {
-      if (++parentSteps === 1) complete(response, [tool('dispatch', dispatch, 'dispatch')]);
+      if (++parentSteps === 1) complete(response, [tool('dispatch', { task: dispatch.task, preset }, 'dispatch')]);
       else { operationId = job(body); complete(response, [answer('Parent done', 'parent-final')]); }
     } else {
+      expect(JSON.stringify(body)).toContain('ORIGINAL_PROFILE_INSTRUCTIONS');
+      expect(JSON.stringify(body)).not.toContain('LATER_PROFILE_INSTRUCTIONS');
       if (++childSteps === 1) complete(response, [tool('file_read', { path: 'source.txt' }, 'child-read')]);
       else { expect(JSON.stringify(result(body))).toContain('fixed child source before parent changes'); complete(response, [answer('REOPENED_CHILD_REPORT', 'child-final')]); }
     }
   });
   const h = await f.openHost({ collaboration: false });
+  const empty = await h.profiles.read({ runtime: 'agent' });
+  const saved = await h.profiles.save({ runtime: 'agent', expectedRevision: empty.revision,
+    config: { kind: 'custom', key: '', agent: { name: 'Frozen review profile', description: 'Reads its original source',
+      instructions: 'ORIGINAL_PROFILE_INSTRUCTIONS', enabled: true, worktree: 'none', workFocus: [] } }, tools: ['file_read'] });
+  const original = saved.snapshot.profiles.find(profile => profile.id === saved.profileId)!;
+  if (original.config.kind !== 'custom') throw new Error('Expected the newly saved custom profile');
+  preset = `custom:${original.config.key}`;
+  const pi = await h.profiles.read({ runtime: 'pi' });
+  const piProfile = pi.profiles.find(profile => profile.id === saved.profileId)!;
+  expect(piProfile.tools.source).toBe('unconfigured');
+  await h.profiles.save({ runtime: 'pi', expectedRevision: pi.revision, id: saved.profileId,
+    config: piProfile.config, tools: ['read'] });
+  expect((await h.profiles.read({ runtime: 'agent' })).profiles.find(profile => profile.id === saved.profileId)?.tools)
+    .toEqual({ source: 'explicit', names: ['file_read'] });
   const identity = await h.api.create('child-review-reopen-prepare');
   const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', path: f.workspace, mode: 'fixed_branch' });
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'dispatch and finish', model, source: prepared.source });
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state).toBe('completed');
   const child = await h.runtime.child(operationId);
   expect(child.state).toBe('preparing'); expect(child.receipt).toBeNull(); expect(childSteps).toBe(0);
+  const current = await h.profiles.read({ runtime: 'agent' });
+  await h.profiles.save({ runtime: 'agent', expectedRevision: current.revision, id: saved.profileId,
+    config: { ...original.config, agent: { ...original.config.agent, instructions: 'LATER_PROFILE_INSTRUCTIONS' } }, tools: [] });
+  expect((await h.profiles.read({ runtime: 'pi' })).profiles.find(profile => profile.id === saved.profileId)?.tools.names).toEqual(['read']);
   await h.close();
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'new live data after restart');
   const reopened = await f.openHost();
@@ -669,6 +713,11 @@ it('accepted child preparation resumes after Host/kernel reopen without replayin
   await expect.poll(async () => (await reopened.runtime.child(operationId)).report?.outcome, { timeout: 10_000 }).toBe('succeeded');
   const finished = await reopened.runtime.child(operationId);
   expect(finished.child_thread_id).toBe(child.child_thread_id);
+  expect(finished.selected_profile).toEqual(child.selected_profile);
+  expect(finished.configuration).toEqual(child.configuration);
+  expect(finished.launch.tools.map(tool => tool.name)).toEqual(['file_read']);
+  expect((await reopened.profiles.read({ runtime: 'agent' })).profiles.find(profile => profile.id === saved.profileId)?.tools)
+    .toEqual({ source: 'explicit', names: [] });
   expect((await reopened.runtime.readChildReport(operationId, finished.report!.history_ids.at(-1)!)).text).toBe('REOPENED_CHILD_REPORT');
   expect(await reopened.runtime.children()).toHaveLength(1);
   expect(parentSteps).toBe(2); expect(childSteps).toBe(2);

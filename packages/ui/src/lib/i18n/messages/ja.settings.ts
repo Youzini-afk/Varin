@@ -2,6 +2,7 @@ import { settingsDict as englishSettingsDict } from './en.settings';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "settings.agents.configured": "設定済み",
   "settings.page.harness.index.cpu.title": "ローカル CPU 使用量",
   "settings.page.harness.index.cpu.description": "負荷に合わせてバッチとバックグラウンド処理を調整し、検索を優先します。変更は Host の再起動後に適用されます。",
   "settings.page.harness.index.cpu.mode": "リソース設定",

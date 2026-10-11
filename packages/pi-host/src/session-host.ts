@@ -1,3 +1,4 @@
+import { commitSettingsUpdate, settingsSnapshot } from './settings-authority.js';
 import { createHostModelRuntime } from './host-model-runtime.js';
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, type Dirent } from "node:fs";
@@ -124,7 +125,7 @@ import { resolveConfigTextAuthority } from "./config-text-authority-resolver.js"
 import { ConfigWatchManager } from "./config-watch-manager.js";
 import { createExtensionStateBridgeExtension } from "./extension-state-bridge.js";
 import { ExtensionUiBridge } from "./extension-ui-bridge.js";
-import { applyTopLevelJsonChanges, JsonObjectFileEditor } from "./json-object-file-editor.js";
+import { JsonObjectFileEditor } from "./json-object-file-editor.js";
 import { toJsonValue } from "./json.js";
 import { ProjectTrustController } from "./project-trust-controller.js";
 import { packageManifestFromPath, packageNameFromSource } from "./package-descriptor.js";
@@ -177,19 +178,11 @@ import { excludedWorkFocusTools } from "./harness/work-focus.js";
 import { dispatchToolPresentation, sendToolPresentation } from "./harness/thread-tools.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
-  HarnessSettingsValidationError,
-  HarnessInferenceSettingsValidationError,
-  PermissionPolicyValidationError,
   mergeHarnessSettings,
   mergePolicies,
   normalizeFrozenHarnessPermissions,
   type PermissionPolicy,
-  parseHarnessEmbeddingSettings,
-  parseHarnessFastDecisionSettings,
-  parseHarnessRerankSettings,
   resolveHarnessContextSettings,
-  resolveHarnessCodeRetrievalSettings,
-  resolveHarnessDocumentReadingSettings,
   resolvePresets,
   type HarnessSettingsInput,
   type ModelSelection,
@@ -603,6 +596,7 @@ export class SessionHost {
   #settingsSessionReloadPending = false;
   #settingsSessionReloadActive: Promise<void> | null = null;
   #settingsSessionReloadGeneration = 0;
+  #settingsGlobalRevision: string | undefined;
   // Settings writes commit the file but defer settingsManager.reload() to a
   // settled boundary so an in-flight tool bridge response stays valid. The
   // resolved candidate is kept here so snapshot/context readers observe the
@@ -1723,11 +1717,12 @@ export class SessionHost {
 
   async compact(sessionId: string, customInstructions?: string) {
     this.assertSession(sessionId);
-    await this.#applyPendingSettingsReload();
-    this.assertSession(sessionId);
-    const session = this.session;
+    const runtime = this.runtime;
+    const session = runtime.session;
     const activity = this.#beginStoppableActivity(session, "manualCompaction");
     try {
+      await this.#applyPendingSettingsReload(runtime, false, activity);
+      this.assertSession(sessionId);
       if (activity.cancelRequested) throw new HostError("aborted", "Pi compaction was cancelled before start");
       return await session.compact(customInstructions);
     } finally {
@@ -2748,18 +2743,7 @@ export class SessionHost {
   }
 
   async #settingsSnapshot(): Promise<PiSettingsSnapshot> {
-    const settings = this.runtime.services.settingsManager;
-    const [globalSource, projectSource] = await Promise.all([
-      new JsonObjectFileEditor(join(this.#agentDir, "settings.json")).read(),
-      new JsonObjectFileEditor(join(this.runtime.cwd, ".pi", "settings.json")).read(),
-    ]);
-    return {
-      global: globalSource.document,
-      globalRevision: globalSource.revision,
-      project: projectSource.document,
-      projectRevision: projectSource.revision,
-      projectTrusted: settings.isProjectTrusted(),
-    };
+    return settingsSnapshot(this.runtime.services.settingsManager, this.#agentDir, this.runtime.cwd);
   }
 
   async getConfigDocument(
@@ -3062,118 +3046,43 @@ export class SessionHost {
     remove: readonly string[],
     expectedRevision: string,
   ): Promise<PiSettingsSnapshot> {
-    const settings = this.runtime.services.settingsManager;
-    if (scope === "project" && !settings.isProjectTrusted()) {
-      throw new HostError(
-        "project_not_trusted",
-        "Project is not trusted; refusing to write project settings",
-      );
-    }
-    await settings.flush();
-    const pendingErrors = settings.drainErrors();
-    if (pendingErrors.length > 0) {
-      throw new HostError(
-        "settings_write_failed",
-        pendingErrors.map((entry) => entry.error.message).join("; "),
-      );
-    }
-    const settingsPath = scope === "global"
-      ? join(this.#agentDir, "settings.json")
-      : join(this.runtime.cwd, ".pi", "settings.json");
-    const editor = new JsonObjectFileEditor(settingsPath);
-    let globalContextSettingChanged = false;
-    let committedContext: HarnessContextSettings | undefined;
-    if (typeof set !== "object" || set === null || Array.isArray(set)) {
-      throw new HostError("invalid_config", "Configuration set must be an object");
-    }
-    const current = await editor.read();
-    const candidate = applyTopLevelJsonChanges(
-      current.document,
-      set,
-      remove,
-    );
-    try {
-      const [globalDocument, projectDocument] = scope === "global"
-        ? [candidate, settings.isProjectTrusted()
-            ? (await new JsonObjectFileEditor(join(this.runtime.cwd, ".pi", "settings.json")).read()).document
-            : {}]
-        : [(await new JsonObjectFileEditor(join(this.#agentDir, "settings.json")).read()).document, candidate];
-      const globalHarnessValue = globalDocument.harness;
-      const projectHarnessValue = projectDocument.harness;
-      if (globalHarnessValue !== undefined && (
-        typeof globalHarnessValue !== "object" || globalHarnessValue === null || Array.isArray(globalHarnessValue)
-      )) {
-        throw new HarnessSettingsValidationError("harness must be an object");
-      }
-      if (projectHarnessValue !== undefined && (
-        typeof projectHarnessValue !== "object" || projectHarnessValue === null || Array.isArray(projectHarnessValue)
-      )) {
-        throw new HarnessSettingsValidationError("project harness must be an object");
-      }
-      const globalHarness = (globalHarnessValue ?? {}) as HarnessSettingsInput;
-      const projectHarness = (projectHarnessValue ?? {}) as HarnessSettingsInput;
-      // This is the same merge/validator used to assemble a new Run. It catches
-      // malformed permission rules, context values, and scope overlays
-      // before the revisioned editor commits the candidate.
-      mergeHarnessSettings(globalHarness, projectHarness);
-      parseHarnessEmbeddingSettings(globalHarness.embedding);
-      parseHarnessRerankSettings(globalHarness.rerank);
-      parseHarnessFastDecisionSettings(globalHarness.fastDecision);
-      resolveHarnessCodeRetrievalSettings(globalHarness.codeRetrieval);
-      resolveHarnessDocumentReadingSettings(globalHarness.documentReading);
-      if (scope === "global") {
-        const candidateContext = resolveHarnessContextSettings(
-          globalHarness.context,
-          globalHarness.memory,
-        );
-        committedContext = candidateContext;
-        const currentHarness = current.document.harness as Record<string, unknown> | undefined;
-        let currentContext: ReturnType<typeof resolveHarnessContextSettings> | undefined;
-        try {
-          currentContext = resolveHarnessContextSettings(currentHarness?.context, currentHarness?.memory);
-        } catch {
-          // A valid candidate may repair malformed persisted context settings.
-        }
-        globalContextSettingChanged = currentContext === undefined
-          || currentContext.backgroundPreparation !== candidateContext.backgroundPreparation
-          || currentContext.preparationWaterline !== candidateContext.preparationWaterline
-          || JSON.stringify(currentContext.compactionRecovery) !== JSON.stringify(candidateContext.compactionRecovery);
-      }
-    } catch (error) {
-      if (
-        error instanceof HarnessSettingsValidationError
-        || error instanceof HarnessInferenceSettingsValidationError
-        || error instanceof PermissionPolicyValidationError
-      ) {
-        throw new HostError("invalid_settings", error.message);
-      }
-      throw error;
-    }
-    await editor.updateRevisioned(
-      set,
-      remove,
-      expectedRevision,
+    const { committedContext, globalContextSettingChanged } = await commitSettingsUpdate(
+      this.runtime.services.settingsManager, this.#agentDir, this.runtime.cwd, scope, set, remove, expectedRevision,
     );
     if (committedContext !== undefined) this.#pendingContextSettings = committedContext;
     if (globalContextSettingChanged) this.#contextLastFailure = undefined;
     this.#settingsSessionReloadGeneration += 1;
     this.#settingsSessionReloadPending = true;
-    // A settings tool executes inside the current agent runner. Reloading that
-    // runner before its bridge response returns invalidates the caller after the
-    // file has already committed. The pending state is picked up only at
-    // agent_settled / the next prompt boundary.
+    // The caller's current tool exchange settles before the Pi session reloads.
     return this.#settingsSnapshot();
   }
 
-  async #applyPendingSettingsReload(expectedRuntime = this.#runtime): Promise<void> {
+  async #applyPendingSettingsReload(expectedRuntime = this.#runtime, inspectExternal = true, activity?: StoppableActivity): Promise<void> {
+    // Manual compaction retains its original local pending-settings path. External profile
+    // revisions are observed at prompt/inspection/settled boundaries.
     if (this.#settingsSessionReloadActive) return this.#settingsSessionReloadActive;
-    if (!this.#settingsSessionReloadPending || !expectedRuntime || this.#runtime !== expectedRuntime) return;
+    if (!inspectExternal && !this.#settingsSessionReloadPending) return;
+    if (!expectedRuntime || this.#runtime !== expectedRuntime || !expectedRuntime.session.isIdle
+      || (this.#pendingActivity?.session === expectedRuntime.session && this.#pendingActivity !== activity)) return;
     const apply = async () => {
       const settings = expectedRuntime.services.settingsManager;
+      // An external profile save uses the same file owner but cannot set this worker's flag.
+      // Observe it only at an existing safe boundary, never during an open tool exchange.
+      const global = new JsonObjectFileEditor(join(this.#agentDir, "settings.json"));
+      if (inspectExternal) {
+        const observed = await global.read();
+        if (this.#runtime !== expectedRuntime || !expectedRuntime.session.isIdle
+          || (this.#pendingActivity?.session === expectedRuntime.session && this.#pendingActivity !== activity)) return;
+        if (observed.revision !== this.#settingsGlobalRevision) {
+          this.#settingsSessionReloadPending = true;
+          this.#settingsSessionReloadGeneration += 1;
+        }
+      }
       while (this.#settingsSessionReloadPending && this.#runtime === expectedRuntime) {
         const generation = this.#settingsSessionReloadGeneration;
         this.#settingsSessionReloadPending = false;
         try {
+          const beforeReload = await global.read();
           await settings.reload();
           const reloadErrors = settings.drainErrors();
           if (reloadErrors.length > 0) {
@@ -3185,6 +3094,9 @@ export class SessionHost {
           if (this.#runtime !== expectedRuntime) return;
           await expectedRuntime.session.reload();
           if (this.#runtime !== expectedRuntime) return;
+          // Record only a revision observed before reload. A concurrent newer write must
+          // remain detectable at the next boundary even when reload happened to see it.
+          this.#settingsGlobalRevision = beforeReload.revision;
           this.#refreshThreadAgentTools();
           expectedRuntime.session.setToolExclusions([...excludedWorkFocusTools(this.#workFocus.id), ...(this.#memoryMode === "agent" ? ["recall"] : [])]);
           // A second settings write can commit while either reload is awaiting.
@@ -3495,9 +3407,11 @@ export class SessionHost {
         (!requiresTrust || (storedDecision !== null && storedDecision));
       const shouldPrompt =
         this.#projectTrustOverride === undefined && requiresTrust && storedDecision === null;
+      const initialSettings = await new JsonObjectFileEditor(join(agentDir, "settings.json")).read();
       const settingsManager = SettingsManager.create(cwd, agentDir, {
         projectTrusted: initialTrust,
       });
+      this.#settingsGlobalRevision = initialSettings.revision;
       // Read merged HarnessSettings from Pi settings (user + project)
       const userHarness = (settingsManager.getGlobalSettings() as { harness?: HarnessSettingsInput }).harness ?? {};
       const projectHarness = settingsManager.isProjectTrusted()
@@ -4065,7 +3979,7 @@ export class SessionHost {
           });
         });
       }
-      if (event.type === "agent_settled" && this.#settingsSessionReloadPending) {
+      if (event.type === "agent_settled") {
         queueMicrotask(() => {
           void this.#applyPendingSettingsReload(runtime).catch((error) => {
             this.#emit("host.error", {

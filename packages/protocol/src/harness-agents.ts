@@ -2,6 +2,44 @@ import { HarnessSettingsValidationError, type ModelSelection } from "./harness-s
 import { isWorkFocusId, type WorkFocusId } from "./work-focus.js";
 import { THINKING_LEVELS, type ThinkingLevel } from "./types.js";
 
+/** A plain array is an exact user choice for either runtime, never a name mapping. */
+export type AgentRuntime = "pi" | "agent";
+export type AgentToolSelection = string[] | Partial<Record<AgentRuntime, string[]>>;
+export interface AgentToolsView {
+  source: "default" | "explicit" | "unconfigured";
+  names: string[];
+}
+
+export function parseAgentToolSelection(value: unknown): AgentToolSelection {
+  const names = (input: unknown): string[] => {
+    if (!Array.isArray(input) || input.some(name => typeof name !== "string" || !name.trim())) {
+      throw new HarnessSettingsValidationError("Agent tools must contain non-empty registered tool names");
+    }
+    return [...new Set(input as string[])];
+  };
+  if (Array.isArray(value)) return names(value);
+  if (!value || typeof value !== "object" || Object.keys(value).some(key => key !== "pi" && key !== "agent")) {
+    throw new HarnessSettingsValidationError("Agent tools must be an array or an object with pi and agent selections");
+  }
+  return Object.fromEntries(Object.entries(value).map(([runtime, input]) => [runtime, names(input)]));
+}
+
+/** One projection shared by configuration previews and both execution consumers. */
+export function resolveAgentTools(selection: AgentToolSelection | undefined, runtime: AgentRuntime, defaults?: readonly string[]): AgentToolsView {
+  const selected = Array.isArray(selection) ? selection : selection?.[runtime];
+  return selected !== undefined ? { source: "explicit", names: [...selected] }
+    : defaults !== undefined ? { source: "default", names: [...defaults] }
+      : { source: "unconfigured", names: [] };
+}
+
+/** Called only for an explicit tools edit. Other runtime choices remain unchanged. */
+export function updateAgentToolSelection(selection: AgentToolSelection | undefined, runtime: AgentRuntime, names: string[] | null): AgentToolSelection {
+  const next = Array.isArray(selection) ? { pi: [...selection], agent: [...selection] } : { ...selection };
+  if (names === null) delete next[runtime];
+  else next[runtime] = parseAgentToolSelection(names) as string[];
+  return next;
+}
+
 export interface HarnessAgentModelSettings {
   temperature?: number;
   thinkingLevel?: ThinkingLevel;
@@ -12,7 +50,7 @@ export interface HarnessAgentOverrides {
   name?: string;
   description?: string;
   instructions?: string;
-  tools?: string[];
+  tools?: AgentToolSelection;
   worktree?: "none" | "isolated";
   modelSettings?: HarnessAgentModelSettings;
 }
@@ -36,7 +74,6 @@ export function parseHarnessAgentOverrides(value: unknown): HarnessAgentOverride
     || (v.name !== undefined && (typeof v.name !== "string" || !v.name.trim()))
     || (v.description !== undefined && typeof v.description !== "string")
     || (v.instructions !== undefined && typeof v.instructions !== "string")
-    || (v.tools !== undefined && (!Array.isArray(v.tools) || v.tools.some(tool => typeof tool !== "string" || !tool.trim())))
     || (v.worktree !== undefined && v.worktree !== "none" && v.worktree !== "isolated")) {
     throw new HarnessSettingsValidationError("Invalid built-in agent overrides");
   }
@@ -44,20 +81,20 @@ export function parseHarnessAgentOverrides(value: unknown): HarnessAgentOverride
     ...(v.name === undefined ? {} : { name: (v.name as string).trim() }),
     ...(v.description === undefined ? {} : { description: v.description as string }),
     ...(v.instructions === undefined ? {} : { instructions: v.instructions as string }),
-    ...(v.tools === undefined ? {} : { tools: [...new Set(v.tools as string[])] }),
+    ...(v.tools === undefined ? {} : { tools: parseAgentToolSelection(v.tools) }),
     ...(v.worktree === undefined ? {} : { worktree: v.worktree as "none" | "isolated" }),
     ...(v.modelSettings === undefined ? {} : { modelSettings: parseHarnessAgentModelSettings(v.modelSettings) }),
   };
 }
 
 export function customizeHarnessAgent<T extends { tools: string[]; worktree: "none" | "isolated"; systemPromptFragment: string }>(
-  definition: T, overrides?: HarnessAgentOverrides,
+  definition: T, overrides?: HarnessAgentOverrides, runtime: AgentRuntime = "pi",
 ): T & { name?: string; description?: string; modelSettings?: HarnessAgentModelSettings } {
   return { ...definition,
     ...(overrides?.name === undefined ? {} : { name: overrides.name }),
     ...(overrides?.description === undefined ? {} : { description: overrides.description }),
     ...(overrides?.instructions === undefined ? {} : { systemPromptFragment: overrides.instructions }),
-    ...(overrides?.tools === undefined ? {} : { tools: [...overrides.tools] }),
+    tools: resolveAgentTools(overrides?.tools, runtime, definition.tools).names,
     ...(overrides?.worktree === undefined ? {} : { worktree: overrides.worktree }),
     ...(overrides?.modelSettings === undefined ? {} : { modelSettings: { ...overrides.modelSettings } }),
   };
@@ -71,7 +108,7 @@ export interface HarnessCustomAgent {
   /** Unset inherits the caller's model at dispatch. */
   model?: ModelSelection;
   modelSettings?: HarnessAgentModelSettings;
-  tools: string[];
+  tools: AgentToolSelection;
   worktree: "none" | "isolated";
   /** Empty means available in either work focus. */
   workFocus: WorkFocusId[];
@@ -84,7 +121,7 @@ export function parseHarnessAgent(value: unknown): HarnessCustomAgent {
   if (Object.keys(v).some(key => !["name", "description", "instructions", "enabled", "model", "modelSettings", "tools", "worktree", "workFocus"].includes(key))
     || typeof v.name !== "string" || !v.name.trim()
     || typeof v.description !== "string" || typeof v.instructions !== "string"
-    || typeof v.enabled !== "boolean" || !Array.isArray(v.tools) || v.tools.some(tool => typeof tool !== "string" || !tool.trim())
+    || typeof v.enabled !== "boolean" || v.tools === undefined
     || (v.worktree !== "none" && v.worktree !== "isolated") || !Array.isArray(v.workFocus) || !v.workFocus.every(isWorkFocusId)) return fail();
   let model: ModelSelection | undefined;
   if (v.model !== undefined) {
@@ -96,7 +133,7 @@ export function parseHarnessAgent(value: unknown): HarnessCustomAgent {
     model = { providerId: binding.providerId, modelId: binding.modelId };
   }
   return { name: v.name.trim(), description: v.description, instructions: v.instructions,
-    enabled: v.enabled, tools: [...new Set(v.tools as string[])], worktree: v.worktree,
+    enabled: v.enabled, tools: parseAgentToolSelection(v.tools), worktree: v.worktree,
     workFocus: [...new Set(v.workFocus as WorkFocusId[])], ...(model ? { model } : {}),
     ...(v.modelSettings === undefined ? {} : { modelSettings: parseHarnessAgentModelSettings(v.modelSettings) }) };
 }

@@ -2500,6 +2500,7 @@ export interface WorkspaceTestAPI {
 }
 
 export interface RuntimeAPIs {
+  agentProfiles?: import("./agent-profiles.js").AgentProfilesAPI;
   schedules?: import("./schedules.js").ScheduledTasksAPI;
   threads?: import("./threads.js").ThreadsAPI;
   runtime: RuntimeDescriptor;

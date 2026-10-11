@@ -1,40 +1,34 @@
 //! Child availability projects actual owning declarations, never a second tool registry.
 use crate::tools::ToolKind;
-use std::collections::BTreeSet;
-use varin_runtime::catalog::dispatch::{ChildCapabilityDescriptor, ChildSourceRequirement};
+use varin_runtime::catalog::dispatch::ChildCapabilityDescriptor;
+#[cfg(test)]
+use varin_runtime::catalog::dispatch::ChildSourceRequirement;
 use varin_runtime::execution::ToolSchema;
 
+fn definitions() -> Vec<crate::run_tools::BuiltinSchema> {
+    crate::run_tools::builtin_definitions(&ToolKind::all().collect(), true, true, false)
+        .into_iter()
+        .filter(|definition| definition.child.is_some())
+        .collect()
+}
 pub(crate) fn schemas() -> Vec<ToolSchema> {
-    let source = BTreeSet::from([
-        ToolKind::FileRead,
-        ToolKind::FileList,
-        ToolKind::FileSearch,
-        ToolKind::FileWrite,
-        ToolKind::FileEdit,
-        ToolKind::ProcessSpawn,
-        ToolKind::ProcessInspect,
-        ToolKind::ProcessRead,
-        ToolKind::ProcessWrite,
-        ToolKind::ProcessResize,
-    ]);
-    crate::run_tools::builtin_schemas(&source, true, true, false)
+    definitions()
+        .into_iter()
+        .map(|definition| definition.schema)
+        .collect()
 }
 pub(crate) fn descriptors() -> Vec<ChildCapabilityDescriptor> {
-    schemas()
+    definitions()
         .into_iter()
-        .map(|schema| ChildCapabilityDescriptor {
-            source_requirement: match schema.name.as_str() {
-                "file_write" | "file_edit" | "process_spawn" | "process_inspect"
-                | "process_read" | "process_write" | "process_resize" | "wait_process" => {
-                    ChildSourceRequirement::Physical
-                }
-                "file_read" | "file_list" | "file_search" | "dispatch" => {
-                    ChildSourceRequirement::Source
-                }
-                _ => ChildSourceRequirement::None,
-            },
-            name: schema.name,
-            version: schema.version,
+        .map(|definition| {
+            let (source_requirement, default_presets) =
+                definition.child.expect("child declaration");
+            ChildCapabilityDescriptor {
+                name: definition.schema.name,
+                version: definition.schema.version,
+                source_requirement,
+                default_presets,
+            }
         })
         .collect()
 }

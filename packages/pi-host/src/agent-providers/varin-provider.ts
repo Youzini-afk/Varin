@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   EXECUTION_PRESETS, RESEARCH_CAPABILITY_DEFINITIONS, mergeHarnessSettings,
-  parseHarnessAgent, parseHarnessModelSlots, resolveHarnessModelSlot,
+  parseHarnessAgent, parseHarnessModelSlots, resolveHarnessModelSlot, resolveAgentTools,
   type HarnessModelRole, type HarnessSettingsInput, type JsonValue,
   type PiAgentDescriptor, type PiAgentProviderActionResult,
 } from "@varin/protocol";
@@ -36,7 +36,7 @@ export class VarinAgentProvider implements AgentProviderAdapter {
         ...(displayedModel ? { model: `${displayedModel.providerId}/${displayedModel.modelId}` } : {}),
         definition: { revision: snapshot.globalRevision,
           config: { kind: "builtin", slot, binding: { ...settings.models[slot] } as unknown as JsonValue,
-            tools: overrides?.tools ?? tools, instructions: overrides?.instructions ?? instructions,
+            tools: resolveAgentTools(overrides?.tools, 'pi', tools).names, instructions: overrides?.instructions ?? instructions,
             worktree: overrides?.worktree ?? worktree,
             ...(overrides?.modelSettings ? { modelSettings: overrides.modelSettings as JsonValue } : {}),
             defaults: { name, description, tools, instructions, worktree }, ...dispatch } },
@@ -49,10 +49,11 @@ export class VarinAgentProvider implements AgentProviderAdapter {
       entry.tools, entry.systemPromptFragment, entry.worktree, ["research"], { capability: entry.capability });
     for (const [id, agent] of Object.entries(settings.agents)) {
       const model = agent.model ?? main;
+      const tools = resolveAgentTools(agent.tools, 'pi');
       agents.push({ id: `varin:custom:${id}`, providerId: "varin", kind: "delegatable", name: agent.name, description: agent.description,
-        source: { scope: "user" }, status: !agent.enabled ? "disabled" : model ? "available" : "unconfigured",
+        source: { scope: "user" }, status: !agent.enabled ? "disabled" : tools.source === 'unconfigured' || !model ? "unconfigured" : "available",
         workFocus: agent.workFocus, ...(model ? { model: `${model.providerId}/${model.modelId}` } : {}),
-        definition: { revision: snapshot.globalRevision, config: { kind: "custom", key: id, agent: agent as unknown as JsonValue, preset: `custom:${id}` } },
+        definition: { revision: snapshot.globalRevision, config: { kind: "custom", key: id, agent: agent as unknown as JsonValue, tools: tools.names, preset: `custom:${id}` } },
         actions: [{ id: agent.enabled ? "disable" : "enable", label: agent.enabled ? "Disable" : "Enable" },
           { id: "update", label: "Edit" }, { id: "delete", label: "Delete", destructive: true }],
       });

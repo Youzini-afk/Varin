@@ -2,6 +2,7 @@ import { settingsDict as englishSettingsDict } from './en.settings';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "settings.agents.configured": "Configuré",
   "settings.page.harness.index.cpu.title": "Utilisation du CPU local",
   "settings.page.harness.index.cpu.description": "Adapte les lots et les tâches de fond à la charge, en donnant priorité aux recherches. Les modifications prennent effet après redémarrage du Host.",
   "settings.page.harness.index.cpu.mode": "Préférence de ressources",

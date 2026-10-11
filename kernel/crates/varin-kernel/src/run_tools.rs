@@ -129,6 +129,32 @@ pub(crate) struct RunTools {
 fn failed(error: impl ToString) -> ExecutionError {
     ExecutionError::new("tool_composition", error.to_string())
 }
+/// The same owning declaration supplies execution schema and child preset metadata.
+pub(crate) struct BuiltinSchema {
+    pub schema: ToolSchema,
+    pub child: Option<(
+        varin_runtime::catalog::dispatch::ChildSourceRequirement,
+        Vec<varin_runtime::catalog::dispatch::ChildPresetDefault>,
+    )>,
+}
+impl BuiltinSchema {
+    pub fn child(
+        schema: ToolSchema,
+        source: varin_runtime::catalog::dispatch::ChildSourceRequirement,
+        presets: &[varin_runtime::catalog::dispatch::ChildPresetDefault],
+    ) -> Self {
+        Self {
+            schema,
+            child: Some((source, presets.to_vec())),
+        }
+    }
+    pub fn main_only(schema: ToolSchema) -> Self {
+        Self {
+            schema,
+            child: None,
+        }
+    }
+}
 /// Shared declarations for input admission, launch selection and child capability discovery.
 /// Live executors bind these same owning schemas during assembly.
 pub(crate) fn builtin_schemas(
@@ -137,27 +163,39 @@ pub(crate) fn builtin_schemas(
     plan_eligible: bool,
     include_goal: bool,
 ) -> Vec<ToolSchema> {
-    let mut tools = crate::process_wait::schemas(
-        crate::tools::KernelToolExecutor::selected_schemas(enabled),
+    builtin_definitions(enabled, has_source, plan_eligible, include_goal)
+        .into_iter()
+        .map(|definition| definition.schema)
+        .collect()
+}
+pub(crate) fn builtin_definitions(
+    enabled: &std::collections::BTreeSet<crate::tools::ToolKind>,
+    has_source: bool,
+    plan_eligible: bool,
+    include_goal: bool,
+) -> Vec<BuiltinSchema> {
+    let mut tools = crate::process_wait::builtin_schemas(
+        crate::tools::KernelToolExecutor::selected_builtin_schemas(enabled),
     );
-    tools = crate::questions::schemas(tools);
-    tools = crate::collaboration::schemas(tools, has_source);
-    tools.extend(crate::family_tools::schemas());
+    tools = crate::questions::builtin_schemas(tools);
+    tools.extend(crate::collaboration::builtin_schemas(has_source));
+    tools.extend(crate::family_tools::builtin_schemas());
     tools.extend([
-        crate::message_tools::schema(),
-        crate::followup_tools::schema(),
-        crate::memory::schema(true),
-        crate::agent_resources::schema(),
+        crate::message_tools::builtin_schema(),
+        crate::followup_tools::builtin_schema(),
+        crate::memory::builtin_schema(),
+        crate::agent_resources::builtin_schema(),
     ]);
     if plan_eligible {
-        tools.push(crate::plan::schema());
+        tools.push(crate::plan::builtin_schema());
     }
     if include_goal {
-        tools.push(crate::agent_goals::schema());
+        tools.push(BuiltinSchema::main_only(crate::agent_goals::schema()));
     }
-    tools.sort_by(|left, right| left.name.cmp(&right.name));
+    tools.sort_by(|left, right| left.schema.name.cmp(&right.schema.name));
     tools
 }
+
 fn declarations(
     base: &[ToolDeclaration],
     mcp: Option<&RetainedMcp>,

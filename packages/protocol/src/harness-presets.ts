@@ -19,12 +19,20 @@
 
 import type { HarnessModelRole, ModelSelection } from "./harness-settings.js";
 import { resolveHarnessModelSlot, type HarnessModelBinding } from "./harness-model-slots.js";
-import { customizeHarnessAgent, type HarnessCustomAgent, type HarnessAgentModelSettings } from "./harness-agents.js";
+import { customizeHarnessAgent, resolveAgentTools, type AgentRuntime, type HarnessCustomAgent, type HarnessAgentModelSettings } from "./harness-agents.js";
 import type { WorkFocusId } from "./work-focus.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
 export type PresetId = "worker" | "retrieval";
+
+/** Projects the selected runtime's owning declarations; this is not a tool-name registry. */
+export function agentPresetTools(capabilities: readonly { name: string; default_presets: readonly PresetId[] }[]): Record<PresetId, string[]> {
+  return {
+    worker: capabilities.filter(tool => tool.default_presets.includes("worker")).map(tool => tool.name),
+    retrieval: capabilities.filter(tool => tool.default_presets.includes("retrieval")).map(tool => tool.name),
+  };
+}
 
 /**
  * Preset materialization policy. Write-capable work defaults to an
@@ -115,7 +123,7 @@ export interface PresetObservation {
   model: ModelSelection | null;
   modelSource: "inherit" | "selected";
   definition: ExecutionPreset;
-  availability: "available" | "disabled" | "unconfigured" | "scope_unavailable";
+  availability: "available" | "disabled" | "unconfigured" | "scope_unavailable" | "runtime_unconfigured";
 }
 
 export function observePresets(
@@ -123,12 +131,15 @@ export function observePresets(
   mainModel: ModelSelection | null,
   custom: Record<string, HarnessCustomAgent> = {},
   focus?: WorkFocusId,
+  runtime: AgentRuntime = "pi",
+  builtinTools?: Readonly<Record<PresetId, readonly string[]>>,
 ): PresetObservation[] {
   const observations: PresetObservation[] = [];
   for (const preset of Object.values(EXECUTION_PRESETS)) {
     const binding = slots[preset.slot];
     const model = resolveHarnessModelSlot(preset.slot, slots, mainModel);
-    const definition = customizeHarnessAgent(preset, binding?.agent);
+    if (runtime === "agent" && !builtinTools) throw new Error("Agent runtime preset defaults are unavailable");
+    const definition = customizeHarnessAgent({ ...preset, tools: [...(builtinTools?.[preset.id as PresetId] ?? preset.tools)] }, binding?.agent, runtime);
     if (definition.description !== undefined) definition.teamDescription = definition.description;
     observations.push({ id: preset.id, model, definition,
       modelSource: binding?.providerId && binding.modelId ? "selected" : "inherit",
@@ -137,13 +148,14 @@ export function observePresets(
           : model ? "available" : "unconfigured" });
   }
   for (const [key, agent] of Object.entries(custom)) {
+    const tools = resolveAgentTools(agent.tools, runtime);
     const model = agent.model ?? mainModel;
     const id = `custom:${key}`;
     observations.push({ id, model, modelSource: agent.model ? "selected" : "inherit",
-      availability: !agent.enabled ? "disabled"
+      availability: !agent.enabled ? "disabled" : tools.source === "unconfigured" ? "runtime_unconfigured"
         : focus && agent.workFocus.length && !agent.workFocus.includes(focus) ? "scope_unavailable"
           : model ? "available" : "unconfigured",
-      definition: { id, tools: agent.tools, worktree: agent.worktree,
+      definition: { id, tools: tools.names, worktree: agent.worktree,
         systemPromptFragment: agent.instructions, teamDescription: `${agent.name}: ${agent.description}`,
         name: agent.name, workFocus: [...agent.workFocus], ...(agent.modelSettings ? { modelSettings: { ...agent.modelSettings } } : {}) } });
   }
@@ -155,8 +167,10 @@ export function resolvePresets(
   mainModel: ModelSelection | null,
   custom: Record<string, HarnessCustomAgent> = {},
   focus?: WorkFocusId,
+  runtime: AgentRuntime = "pi",
+  builtinTools?: Readonly<Record<PresetId, readonly string[]>>,
 ): ResolvedPreset[] {
-  return observePresets(slots, mainModel, custom, focus).flatMap(entry => entry.availability === "available" && entry.model
+  return observePresets(slots, mainModel, custom, focus, runtime, builtinTools).flatMap(entry => entry.availability === "available" && entry.model
     ? [{ id: entry.id, model: entry.model, modelSource: entry.modelSource, definition: entry.definition }] : []);
 }
 

@@ -1,3 +1,4 @@
+import { GlobalSettingsAuthority } from './settings-authority.js';
 import { NativeAnthropicCredentialOwner, type AnthropicFederationSource } from './native-anthropic-auth.js';
 import { NativeAwsCredentialOwner, type CredentialDispatch } from './native-aws-auth.js';
 import { NativeGoogleCredentialOwner } from './native-google-auth.js';
@@ -9,7 +10,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID, createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import * as fs from 'node:fs/promises';
-import { FileAuthStorageBackend, ModelRuntime, SettingsManager, getAgentDir } from '@earendil-works/pi-coding-agent';
+import { FileAuthStorageBackend, ModelRuntime, getAgentDir } from '@earendil-works/pi-coding-agent';
 import type { AuthOperationOptions, AuthResult, Credential, CredentialInfo, CredentialStore } from '@earendil-works/pi-ai';
 
 import { ProviderConfigurationManager } from './provider-configuration.js';
@@ -82,8 +83,7 @@ export class HostCredentialAuthority implements CredentialStore {
   readonly authorityId: string;
   #runtime: Promise<ModelRuntime> | undefined;
   #inferenceProviders: ProviderConfigurationManager | undefined;
-  #inferenceSettings: SettingsManager | undefined;
-  #inferenceSettingsTail: Promise<void> = Promise.resolve();
+  #globalSettingsAuthority: GlobalSettingsAuthority | undefined;
   readonly #inferenceRevocations = new Map<string, number>();
   readonly #inferenceCredentialBindings = new Map<string, { source: string; scope: HostCredentialScope }>();
   readonly #modelsPath: string | null;
@@ -427,21 +427,13 @@ export class HostCredentialAuthority implements CredentialStore {
     return this.#inferenceProviders;
   }
   /** Same global settings authority used by Pi; no project or worker request participates. */
-  readGlobalInferenceSettings(): Promise<unknown> {
-    // SettingsManager reload yields at its write queue and keeps a shared error queue.
-    // Reload, error consumption and snapshot must be one narrow owner transaction; otherwise
-    // parallel workspace captures can consume another reload's error and accept stale data.
-    const read = this.#inferenceSettingsTail.then(async () => {
-      const agentDir = this.#modelsPath ? dirname(this.#modelsPath) : getAgentDir();
-      this.#inferenceSettings ??= SettingsManager.create(agentDir, agentDir, { projectTrusted: false });
-      await this.#inferenceSettings.reload();
-      const errors = this.#inferenceSettings.drainErrors();
-      if (errors.length) throw publicFailure(errors.every(entry => entry.error instanceof SyntaxError) ? 'inference-settings-invalid' : 'inference-settings-unavailable');
-      return structuredClone(this.#inferenceSettings.getGlobalSettings());
-    });
-    this.#inferenceSettingsTail = read.then(() => undefined, () => undefined);
-    return read;
+  get globalSettingsAuthority(): GlobalSettingsAuthority {
+    return this.#globalSettingsAuthority ??= new GlobalSettingsAuthority(this.#modelsPath ? dirname(this.#modelsPath) : getAgentDir());
   }
+  async readGlobalInferenceSettings(): Promise<unknown> {
+    return (await this.globalSettingsAuthority.read()).document;
+  }
+
   async #inferenceCredentialState(credentialRef: string, accepted?: InferenceCredentialConfiguration): Promise<{ scope: HostCredentialScope; auth: AuthResult; configuration: InferenceCredentialConfiguration }> {
     const providers = this.#inferenceOwner();
     const cwd = this.#modelsPath ? dirname(this.#modelsPath) : getAgentDir();

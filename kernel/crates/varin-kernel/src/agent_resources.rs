@@ -94,6 +94,13 @@ pub(crate) fn execute_rpc(
 fn failed(value: impl ToString) -> ExecutionError {
     ExecutionError::new("agent_resources", value.to_string())
 }
+pub(crate) fn builtin_schema() -> crate::run_tools::BuiltinSchema {
+    use varin_runtime::catalog::dispatch::{
+        ChildPresetDefault::{Retrieval, Worker},
+        ChildSourceRequirement::None,
+    };
+    crate::run_tools::BuiltinSchema::child(schema(), None, &[Worker, Retrieval])
+}
 pub(crate) fn schema() -> ToolSchema {
     ToolSchema { name:"resource_read".into(),version:"2".into(),
         description:"Read a selected skill, a file within its bundle, or the instructions applying to a target in the admitted source. Pass a retained explicit skill input's activationId and matching resourceId to select its original version. Without activationId, read from this invocation's current frozen catalog. Returned text retains its original source and scope.".into(),

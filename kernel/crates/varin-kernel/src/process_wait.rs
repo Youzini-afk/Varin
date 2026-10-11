@@ -28,6 +28,24 @@ fn observes(name: &str) -> bool {
 fn error(value: impl ToString) -> ExecutionError {
     ExecutionError::new("process_wait", value.to_string())
 }
+pub(crate) fn builtin_schemas(
+    mut tools: Vec<crate::run_tools::BuiltinSchema>,
+) -> Vec<crate::run_tools::BuiltinSchema> {
+    use varin_runtime::catalog::dispatch::{
+        ChildPresetDefault::Worker, ChildSourceRequirement::Physical,
+    };
+    let schemas = schemas(tools.iter().map(|tool| tool.schema.clone()).collect());
+    for schema in schemas {
+        if !tools.iter().any(|tool| tool.schema.name == schema.name) {
+            tools.push(crate::run_tools::BuiltinSchema::child(
+                schema,
+                Physical,
+                &[Worker],
+            ));
+        }
+    }
+    tools
+}
 pub(crate) fn schemas(mut tools: Vec<ToolSchema>) -> Vec<ToolSchema> {
     tools.retain(|tool| tool.name != WAIT_TOOL);
     if tools.iter().any(|tool| tool.name == "process_inspect") {

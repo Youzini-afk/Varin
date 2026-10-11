@@ -36,6 +36,23 @@ pub(crate) fn is_tool(name: &str) -> bool {
             | collaboration::REPORT_TOOL
     )
 }
+pub(crate) fn builtin_schemas(fixed: bool) -> Vec<crate::run_tools::BuiltinSchema> {
+    use varin_runtime::catalog::dispatch::{
+        ChildPresetDefault::{Retrieval, Worker},
+        ChildSourceRequirement::{None, Source},
+    };
+    schemas(Vec::new(), fixed)
+        .into_iter()
+        .map(|schema| {
+            let (source, presets): (_, &[_]) = if schema.name == collaboration::DISPATCH_TOOL {
+                (Source, &[Worker])
+            } else {
+                (None, &[Worker, Retrieval])
+            };
+            crate::run_tools::BuiltinSchema::child(schema, source, presets)
+        })
+        .collect()
+}
 pub(crate) fn schemas(mut tools: Vec<ToolSchema>, fixed: bool) -> Vec<ToolSchema> {
     tools.retain(|tool| !is_tool(&tool.name));
     tools.push(ToolSchema{description:"Read the original dispatch and its exact delegated executions. An optional executionId selects one execution; absence never selects a latest result. This is a snapshot, not polling advice.".into(),output_schema:None,metadata:None,name:collaboration::STATUS_TOOL.into(),version:"2".into(),schema:json!({"type":"object","properties":{"operationId":{"type":"string","minLength":1},"executionId":{"type":"string","minLength":1}},"required":["operationId"],"additionalProperties":false})});

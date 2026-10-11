@@ -94,6 +94,16 @@ fn arguments(call: &ToolCall) -> Result<Arguments, ExecutionError> {
         _ => Err(error("unknown family tool")),
     }
 }
+pub(crate) fn builtin_schemas() -> Vec<crate::run_tools::BuiltinSchema> {
+    use varin_runtime::catalog::dispatch::{
+        ChildPresetDefault::{Retrieval, Worker},
+        ChildSourceRequirement::None,
+    };
+    schemas()
+        .into_iter()
+        .map(|schema| crate::run_tools::BuiltinSchema::child(schema, None, &[Worker, Retrieval]))
+        .collect()
+}
 pub(crate) fn schemas() -> Vec<ToolSchema> {
     let positive = json!({"type":"integer","minimum":1});
     let mut variants = Vec::new();

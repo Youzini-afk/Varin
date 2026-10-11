@@ -86,3 +86,26 @@ describe("Harness model slots", () => {
     }), {});
   });
 });
+
+describe('Runtime tool selections', () => {
+  it('keeps user arrays exact and resolves explicit runtime choices in one place', async () => {
+    const { parseAgentToolSelection, resolveAgentTools, updateAgentToolSelection, observePresets } = await import('../src/index.js');
+    const original = ['read', 'plugin_tool'];
+    assert.deepEqual(resolveAgentTools(original, 'agent'), { source: 'explicit', names: original });
+    const edited = updateAgentToolSelection(original, 'agent', ['file_read']);
+    assert.deepEqual(edited, { pi: original, agent: ['file_read'] });
+    assert.deepEqual(original, ['read', 'plugin_tool']);
+    assert.deepEqual(resolveAgentTools({ agent: [] }, 'agent'), { source: 'explicit', names: [] });
+    assert.deepEqual(resolveAgentTools({ agent: [] }, 'pi'), { source: 'unconfigured', names: [] });
+    assert.deepEqual(resolveAgentTools({ agent: [] }, 'pi', ['read']), { source: 'default', names: ['read'] });
+    assert.throws(() => parseAgentToolSelection({ future: ['read'] }), /pi and agent/);
+    const settings = mergeHarnessSettings({ agents: { reader: { name: 'Reader', description: '', instructions: '', enabled: true,
+      tools: { agent: ['file_read'] }, worktree: 'none', workFocus: [] } } }, {});
+    const model = { providerId: 'provider', modelId: 'model' };
+    assert.equal(observePresets({}, model, settings.agents, undefined, 'pi').find(p => p.id === 'custom:reader')?.availability, 'runtime_unconfigured');
+    const native = observePresets({}, model, settings.agents, undefined, 'agent', { worker: ['file_write'], retrieval: ['file_read'] });
+    assert.deepEqual(native.find(p => p.id === 'worker')?.definition.tools, ['file_write']);
+    assert.deepEqual(native.find(p => p.id === 'custom:reader')?.definition.tools, ['file_read']);
+    assert.equal(native.find(p => p.id === 'retrieval')?.availability, 'unconfigured');
+  });
+});

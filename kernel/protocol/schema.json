@@ -976,7 +976,7 @@
     "ChildPrepareParams": {"fields":{"executionId":{"type":"string"},"source":{"type":"LaunchSourceParams"},"context":{"type":"InitialContext"},"expectedContextCheckpoint":{"type":"string | null"},"inputPreparation":{"type":"InputResourcePreparation","optional":true}}},
     "ChildFailParams": {"fields":{"executionId":{"type":"string"},"code":{"type":"string"}}},
     "ChildWaitParams": {"fields": {"waitId": {"type": "string"}}},
-    "ChildCapabilityDescriptor": {"fields":{"name":{"type":"string"},"version":{"type":"string"},"source_requirement":{"type":"'none' | 'source' | 'physical'"}}},
+    "ChildCapabilityDescriptor": {"fields":{"name":{"type":"string"},"version":{"type":"string"},"source_requirement":{"type":"'none' | 'source' | 'physical'"},"default_presets":{"type":"('worker' | 'retrieval')[]"}}},
     "ChildWorkMode": {"raw":"export type ChildWorkMode = 'read_only' | 'isolated_write';","rustType":"varin_runtime::catalog::dispatch::ChildWorkMode"},
     "ChildModelBinding": {"fields":{"configuration":{"type":"ModelSessionConfiguration"},"credential_scope":{"type":"CredentialScope | null"}},"rustType":"varin_runtime::catalog::dispatch::ChildModelBinding"},
     "ChildCapabilityFailure": {"fields":{"code":{"type":"string"},"capabilities":{"type":"string[]"}},"rustType":"varin_runtime::catalog::dispatch::ChildCapabilityFailure"},

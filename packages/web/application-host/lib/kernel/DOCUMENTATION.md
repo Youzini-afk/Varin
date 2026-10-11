@@ -774,6 +774,16 @@ were used. The model reranking and fixed-source limits above remain in force; se
 
 ## Native child source and result owners
 
+The authenticated `/api/agent-profiles/{read,save,remove}` API edits the original global
+`harness.models[role].agent` and `harness.agents` settings without constructing a Pi Session.
+`GlobalSettingsAuthority` reuses the original SettingsManager validation and JSON-file lock/revision CAS;
+it owns no parallel profile database. A tools edit changes only the selected runtime key, preserving
+the other runtime and unrelated settings. Shared model/instruction/work-mode fields remain shared.
+Existing arrays keep their exact names; missing builtin keys use shipped defaults, missing custom keys
+are unconfigured, and explicit empty arrays mean no tools. Native defaults come from Rust's owning
+capability descriptors. Extension/MCP availability still requires the actual frozen Run bindings.
+Owner failures expose short safe codes/messages through the client, not raw upstream errors.
+
 `ThreadCollaboration` consumes committed Catalog collaboration facts. Its maps only coalesce live
 preparation, launch and receipt reconciliation. It never starts a Pi session or adds a native child to
 ThreadRegistry. `child-profiles.ts` compiles the original global harness settings and shared

@@ -25,3 +25,6 @@ export { TERMINAL_PROTOCOL_VERSION } from './terminal-protocol.js';
 
 export * from "./schedules.js";
 export * from "./schedules-http.js";
+
+export * from "./agent-profiles.js";
+export * from "./agent-profiles-http.js";
