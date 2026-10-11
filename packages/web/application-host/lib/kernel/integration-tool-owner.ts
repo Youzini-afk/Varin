@@ -5,7 +5,7 @@ import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { LaunchIntent, LaunchSource } from './protocol.generated.js';
 import type { IntegrationCoordinator, IntegrationPlanInput, IntegrationOperationReceipt } from '../harness/working-state/integration-coordinator.js';
 import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
-import { runToolDomainEffect, type ToolInvocationAuthority } from './tool-invocation.js';
+import { runToolDomainCall, type ToolInvocationAuthority } from './tool-invocation.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
 import { admitRunSourceAuthority, sourceToolSchemas, type SourceLaunch } from './source-launch.js';
 import { KernelWorkingStateRootStore } from './storage-adapter.js';
@@ -48,7 +48,7 @@ export function createIntegrationToolOwner(options: IntegrationToolOwnerOptions)
   return async (method, params, context) => {
     if (method !== 'apply') throw new Error(`Unknown child integration method: ${method}`);
     const input = readInput(params);
-    return runToolDomainEffect(context, { domain: CHILD_INTEGRATION_CAPABILITY, toolName: 'integrate_child', arguments: params }, async authority => {
+    return runToolDomainCall(context, { operation: 'effect', domain: CHILD_INTEGRATION_CAPABILITY, toolName: 'integrate_child', arguments: params }, async authority => {
       let target: IntegrationTargetScope | undefined;
       let admitted: IntegrationPlanInput & { operationId: string } | undefined;
       let enteredCoordinator = false;

@@ -111,8 +111,8 @@ describe("computer driver host (BC4)", () => {
     }
   });
 
-  it("an unexpected driver exit rejects the in-flight request and the next request respawns", async () => {
-    const driver = createDriverSession(echoSpec());
+  it("capture may respawn after an unexpected exit", async () => {
+    const driver = createDriverSession({ ...echoSpec(), env: { ...process.env, VARIN_DRIVER_ROLE: 'capture' } });
     try {
       const exitResult = await driver.request({ tool: "exit" }).catch((error: unknown) => error);
       expect(exitResult).toBeInstanceOf(Error);
@@ -125,16 +125,29 @@ describe("computer driver host (BC4)", () => {
     }
   });
 
-  it("a wedged request times out, kills the driver, and frees the queue", async () => {
+  it("a wedged input helper ends its session instead of forging a replacement release identity", async () => {
     const driver = createDriverSession(echoSpec());
     try {
       await expect(driver.request({ tool: "hang" }, { timeoutMs: 300 }))
         .rejects.toThrow(/timed out/);
-      const recovered = await driver.request({ tool: "ping" });
-      expect(recovered.ok).toBe(true);
+      await expect(driver.request({ tool: "ping" })).rejects.toThrow(/original Computer input helper exited/);
     } finally {
-      driver.dispose();
+      await driver.dispose();
     }
+  });
+
+  it('an exited input helper cannot respawn inside its old pool identity', async () => {
+    const { createDesktopDriverPool } = await import('./desktop-drivers.js');
+    const pool = createDesktopDriverPool({ resolve: async id => ({ spec: echoSpec(), desktop: { id } as never }), onInputReset: () => {} });
+    try {
+      const first = (await pool.acquire('desktop')).driver;
+      const firstId = pool.inputOwnerId(first);
+      await expect(first.request({ tool: 'exit' })).rejects.toThrow(/exited/);
+      await expect(first.request({ tool: 'release_input' })).rejects.toThrow(/original Computer input helper exited/);
+      const next = (await pool.acquire('desktop')).driver;
+      expect(next).not.toBe(first); expect(pool.inputOwnerId(next)).not.toBe(firstId);
+      expect((await next.request({ tool: 'ping' })).ok).toBe(true);
+    } finally { await pool.dispose(); }
   });
 
   it("cancel() writes the in-flight request's flag file on the side-channel", async () => {

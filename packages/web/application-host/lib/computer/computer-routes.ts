@@ -1,7 +1,8 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { HarnessServiceError } from "../harness/service-error.js";
 import type { ComputerService } from "./computer-service.js";
-import type { ComputerActor, ComputerAccess } from '@varin/protocol';
+import { computerWorkKey, parseComputerActor, type ComputerAccess } from '@varin/protocol';
+import { ComputerError } from './computer-error.js';
 
 /**
  * Computer catalog routes (BC4): environment selection surfaces read machines
@@ -16,6 +17,7 @@ export interface ComputerRoutesOptions {
 const noAuth: RequestHandler = (_request, _response, next) => next();
 
 const sendError = (response: Response, error: unknown, fallback: string): void => {
+  if (error instanceof ComputerError) { response.status(error.computerCode === 'computer-work-not-found' ? 404 : error.computerCode === 'computer-request-invalid' ? 400 : error.computerCode === 'computer-execution-stale' ? 409 : 503).json({ code: error.computerCode, error: error.message }); return; }
   if (error instanceof HarnessServiceError) {
     const status = error.harnessCode === "invalid-params" ? 400
       : error.harnessCode === "not-found" ? 404
@@ -59,29 +61,39 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
   app.get('/api/computers/automation', requireAuth, async (request, response) => {
     response.setHeader('Cache-Control', 'no-store');
     try {
-      const sessionId = String(request.query.sessionId ?? '');
-      const state = await computers.automation.snapshot(sessionId);
-      const sessions = new Set([sessionId, state.rootSessionId, ...state.leases.map(lease => lease.actor.sessionId), ...state.requests.map(item => item.actor.sessionId)]);
-      response.json({ state, activities: computers.activities().filter(entry => entry.activity.sessionId && sessions.has(entry.activity.sessionId)) });
+      if (typeof request.query.sessionId !== 'string' || !request.query.sessionId.trim()) throw new ComputerError('computer-request-invalid', 'Choose the Pi conversation whose Computer state you want to read');
+      const sessionId = request.query.sessionId;
+      const state = await computers.automation.snapshot({ runtime: 'pi', sessionId });
+      const works = new Set([computerWorkKey(state.work), computerWorkKey(state.rootWork), ...state.leases.map(lease => computerWorkKey(lease.actor.execution.work)), ...state.cleanups.map(item => computerWorkKey(item.execution.work))]);
+      response.json({ state, activities: computers.activities().filter(entry => entry.activity.execution ? works.has(computerWorkKey(entry.activity.execution.work)) : entry.activity.sessionId === sessionId) });
     }
     catch (error) { sendError(response, error, 'Unable to read Computer Use state'); }
   });
   app.post('/api/computers/automation/stop', requireAuth, async (request, response) => {
-    try { response.json({ state: await computers.automation.stop(String(request.body?.sessionId ?? ''), typeof request.body?.desktopId === 'string' ? request.body.desktopId : undefined) }); }
+    try {
+      if (typeof request.body?.sessionId !== 'string' || !request.body.sessionId.trim() || typeof request.body?.runId !== 'string' || !request.body.runId.trim()) throw new ComputerError('computer-request-invalid', 'Stop requires the Pi session and execution shown by the conversation');
+      if (Object.keys(request.body).some(key => !['sessionId', 'runId', 'desktopId'].includes(key)) || request.body.desktopId !== undefined && (typeof request.body.desktopId !== 'string' || !request.body.desktopId.trim())) throw new ComputerError('computer-request-invalid', 'Stop accepts the captured Pi session, Run and optional desktop only');
+      response.json({ state: await computers.automation.stop({ work: { runtime: 'pi', sessionId: request.body.sessionId }, runId: request.body.runId }, typeof request.body?.desktopId === 'string' ? request.body.desktopId : undefined) });
+    }
     catch (error) { sendError(response, error, 'Unable to confirm Computer Use stop'); }
+  });
+  app.post('/api/computers/desktops/:desktopId/stop', requireAuth, async (request, response) => {
+    try {
+      if (!request.body || typeof request.body.automationEpoch !== 'string' || Object.keys(request.body).some(key => key !== 'automationEpoch')) throw new ComputerError('computer-request-invalid', 'Stop requires only the control generation shown by this desktop view');
+      response.json(await computers.stopDesktop({ desktopId: String(request.params.desktopId), automationEpoch: request.body.automationEpoch }));
+    } catch (error) { sendError(response, error, 'Unable to confirm desktop input stop'); }
   });
   app.post('/api/computers/desktops/:desktopId/assignment', requireAuth, async (request, response) => {
     try {
       const body = request.body;
-      const actor = body?.actor;
-      if (typeof body?.origin !== 'string' || !body.origin.trim() || typeof body.assignmentId !== 'string' || !body.assignmentId.trim() || !actor || typeof actor.readOnly !== 'boolean'
-        || ['sessionId', 'runId', 'threadId', 'scopeId', 'rootSessionId', 'rootRunId', 'label'].some(field => typeof actor[field] !== 'string' || !actor[field].trim())) {
+      const actor = parseComputerActor(body?.actor);
+      if (typeof body?.origin !== 'string' || !body.origin.trim() || typeof body.assignmentId !== 'string' || !body.assignmentId.trim()) {
         throw new HarnessServiceError('invalid-params', 'A trusted Host execution identity is required');
       }
       const desktopId = String(request.params.desktopId);
-      if (body.op === 'drop' && ['observe', 'control'].includes(body.access)) { await computers.dropDesktopClaim(body.origin, body.assignmentId, actor as ComputerActor, desktopId, body.access as ComputerAccess); response.json({ released: true }); }
+      if (body.op === 'drop' && ['observe', 'control'].includes(body.access)) { await computers.dropDesktopClaim(body.origin, body.assignmentId, actor, desktopId, body.access as ComputerAccess); response.json({ released: true }); }
       else if (body.op === 'claim' && ['observe', 'control'].includes(body.access)) {
-        response.json({ token: await computers.claimDesktop(body.origin, body.assignmentId, actor as ComputerActor, desktopId, body.access as ComputerAccess) });
+        response.json({ token: await computers.claimDesktop(body.origin, body.assignmentId, actor, desktopId, body.access as ComputerAccess) });
       } else throw new HarnessServiceError('invalid-params', 'Unknown desktop assignment operation');
     } catch (error) { sendError(response, error, 'Unable to coordinate desktop assignment'); }
   });

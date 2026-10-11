@@ -82,10 +82,19 @@ export interface ExtensionToolLease {
   lease: HostToolLease;
   revocationSignal: AbortSignal;
 }
+export type ExtensionToolConfiguration = (descriptor: VarinExtensionServiceProvision, original?: string | null) => string | null;
+class ExtensionToolConfigurationError extends Error {
+  constructor(serviceId: string, cause: unknown) {
+    super(`extension_tool_configuration_unavailable:${serviceId}`, { cause });
+  }
+}
 export interface ExtensionToolOwnerOptions {
   runtime: ApplicationExtensionRuntime;
   kernel: KernelClient;
   currentPolicy(runId: string): Promise<PermissionPolicy>;
+  /** Domain configuration is captured once by the ordinary Run preparation owner. */
+  prepareConfiguration?(run: { runId: string; threadId: string; projectId?: string; fixed?: boolean }, required: readonly ExtensionToolBinding[]): Promise<ExtensionToolConfiguration>;
+  configurationIdentity?: ExtensionToolConfiguration;
 }
 export async function retainExtensionTool(
   options: ExtensionToolOwnerOptions,
@@ -104,7 +113,11 @@ export async function retainExtensionTool(
       provider && runtime.supervisor.getRetainedArtifactIdentity(provider);
     if (!provider || !artifact)
       throw new Error('extension_tool_artifact_unavailable');
-    // A service has no separate configuration authority in this contract. Null states that fact.
+    let configurationIdentity: string | null;
+    try {
+      configurationIdentity = options.configurationIdentity?.(descriptor, required ? required.configurationIdentity : undefined) ?? null;
+    } catch (error) { throw new ExtensionToolConfigurationError(descriptor.id, error); }
+    // Null states that this service has no separate configuration authority.
     const binding: ExtensionToolBinding = {
       providerKey: selected.providerKey,
       extensionId: provider.extensionId,
@@ -113,7 +126,7 @@ export async function retainExtensionTool(
       serviceVersion: descriptor.version,
       artifactIntegrity: artifact,
       declarationHash: schema.version,
-      configurationIdentity: null,
+      configurationIdentity,
       tool: schema,
     };
     if (required && !isDeepStrictEqual(binding, required))
@@ -202,6 +215,7 @@ export async function retainExtensionTool(
         operation: descriptor.tool!.operation,
         arguments: structuredClone(call.arguments),
         source: launch.selection.source,
+        configurationIdentity: binding.configurationIdentity,
       };
     };
     const lease: HostToolLease = {
@@ -377,6 +391,7 @@ export function createExtensionTools(
   options: ExtensionToolOwnerOptions,
 ): ExtensionToolPreparer {
   return async (run, required, signal) => {
+    const preparedOptions = options.prepareConfiguration ? { ...options, configurationIdentity: await options.prepareConfiguration(run, required) } : options;
     const runtime = options.runtime,
       initial: ExtensionToolLease[] = [],
       states = new Map<string, ThreadToolPreparation>(),
@@ -453,7 +468,7 @@ export function createExtensionTools(
         },
         { expectedRoutingRevision: routingRevision },
       );
-      return retainExtensionTool(options, selected);
+      return retainExtensionTool(preparedOptions, selected);
     };
     const snapshot = await runtime.state();
     signal.throwIfAborted();
@@ -482,7 +497,7 @@ export function createExtensionTools(
             binding.serviceVersion,
             original.providerId,
           );
-          initial.push(await retainExtensionTool(options, selected, binding));
+          initial.push(await retainExtensionTool(preparedOptions, selected, binding));
           signal.throwIfAborted();
           continue;
         }
@@ -521,7 +536,7 @@ export function createExtensionTools(
           binding.serviceVersion,
           provider.providerId,
         );
-        const retained = await retainExtensionTool(options, selected, binding);
+        const retained = await retainExtensionTool(preparedOptions, selected, binding);
         initial.push(retained);
         signal.throwIfAborted();
       }
@@ -568,7 +583,12 @@ export function createExtensionTools(
             providerId,
           );
           if (!selected.descriptor.tool) continue;
-          initial.push(await retainExtensionTool(options, selected));
+          try { initial.push(await retainExtensionTool(preparedOptions, selected)); }
+          catch (error) {
+            if (!(error instanceof ExtensionToolConfigurationError)) throw error;
+            states.set(`${entry.id}@${entry.version}`, { serviceId: entry.id, version: entry.version,
+              declarations: entry.declarations, status: 'unavailable', error: error.message });
+          }
           signal.throwIfAborted();
         }
     } catch (error) {
@@ -661,14 +681,14 @@ export function createExtensionTools(
               if (!closed) watch(slot, retained);
             } else retained.lease.release();
           })
-          .catch(() => {
+          .catch((error: unknown) => {
             if (!closed && tokens.get(slot) === token)
               states.set(slot, {
                 serviceId: entry.id,
                 version: entry.version,
                 declarations: entry.declarations,
                 status: 'unavailable',
-                error: 'extension_tool_preparation_failed',
+                error: error instanceof ExtensionToolConfigurationError ? error.message : 'extension_tool_preparation_failed',
               });
           });
       }

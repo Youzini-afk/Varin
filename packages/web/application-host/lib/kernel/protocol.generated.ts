@@ -14,6 +14,7 @@ export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.history.body"] as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
 
 export type KernelMethod =
+  | "runtime.computer.scope"
   | "runtime.research.scopes"
   | "runtime.host_job.begin"
   | "runtime.host_job.user"
@@ -258,6 +259,23 @@ export type KernelMethod =
   | "runtime.messages.send"
   | "runtime.messages.list"
   | "runtime.messages.get";
+
+export interface ComputerScopeParams {
+  threadId: string;
+  branchId: string;
+  runId?: string;
+  operationId?: string;
+}
+
+export interface ComputerScope {
+  threadId: string;
+  branchId: string;
+  rootThreadId: string;
+  rootBranchId: string;
+  currentRunId: string | null;
+  currentRootRunId: string | null;
+  canExecute: boolean;
+}
 
 export interface HostJobBinding {
   operationId: string;
@@ -3904,6 +3922,7 @@ export interface FamilyRead {
 export interface FamilyItem { threadId: string; branchId: string; runId: string | null; headId: string | null; itemId: string; format: 'conversation_json'; text: string; offset: number; nextOffset: number | null; totalBytes: number }
 
 export type KernelMethodParams = {
+  "runtime.computer.scope": ComputerScopeParams;
   "runtime.research.scopes": ResearchScopeParams;
   "runtime.host_job.begin": HostJobBeginParams;
   "runtime.host_job.user": HostJobUserParams;
@@ -4151,6 +4170,15 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.computer.scope";
+      params: ComputerScopeParams;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";

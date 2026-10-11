@@ -15,7 +15,7 @@ import type { SourceService } from '../harness/sources.js';
 import type { ResourceService } from '../harness/resources.js';
 import type { ExperimentCaller, ResearchOwner } from '../harness/research-identity.js';
 import { HarnessServiceError } from '../harness/service-error.js';
-import { requireToolInvocation, runToolDomainEffect, type ToolInvocationAuthority } from './tool-invocation.js';
+import { requireToolInvocation, runToolDomainCall, type ToolInvocationAuthority } from './tool-invocation.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
 import { decodeResearchParams, type ResearchMethod } from './research-params.js';
 export { createResearchSourceAuthority } from './research-source.js';
@@ -250,7 +250,7 @@ export function createResearchRuntime(options: {
       const { scope, owner } = await toolScope(authority);
       return parseVarinToolJson(await read(method as ResearchMethod, caller(scope, owner), params));
     }
-    return runToolDomainEffect(context, { domain: RESEARCH_CAPABILITY, toolName: authority.toolName, arguments: input }, a => own((async () => {
+    return runToolDomainCall(context, { operation: 'effect', domain: RESEARCH_CAPABILITY, toolName: authority.toolName, arguments: input }, a => own((async () => {
       const { scope, owner, contract } = await toolScope(a);
       if (method === 'submit' || method === 'wait') {
         if (contract.completion !== 'job' || contract.lifetime !== 'thread')

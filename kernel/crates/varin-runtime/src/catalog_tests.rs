@@ -3140,3 +3140,6 @@ fn reply_deadline_short_facts_recheck_clock_and_catch_up_without_replacing_a_win
         tx.commit().unwrap();
     }
 }
+
+#[path = "catalog_computer_tests.rs"]
+mod computer;

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createComputerService, type ComputerServiceOptions } from "./computer-service.js";
+import { createComputerService as createOwner, type ComputerServiceOptions } from "./computer-service.js";
 import type { ComputerActor } from '@varin/protocol';
 import express from 'express';
 import type { AddressInfo } from 'node:net';
@@ -126,10 +126,40 @@ afterEach(() => {
   for (const dir of dirs) if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
 });
 
+const piWork = (sessionId: string) => ({ runtime: 'pi' as const, sessionId });
+const piActor = (sessionId: string, runId = `${sessionId}:run`, rootSessionId = sessionId, rootRunId = runId): ComputerActor => ({
+  execution: { work: piWork(sessionId), runId }, rootWork: piWork(rootSessionId), rootExecution: { work: piWork(rootSessionId), runId: rootRunId },
+  registry: { scopeId: 'scope', threadId: sessionId }, label: sessionId, readOnly: false,
+});
+const directActions = new WeakMap<ReturnType<typeof createOwner>, ReturnType<typeof createOwner>['act']>();
+const createComputerService = (options: ComputerServiceOptions) => {
+  const resolveActor: NonNullable<ComputerServiceOptions['resolveActor']> = options.resolveActor ?? (async work => work.runtime === 'pi' ? piActor(work.sessionId) : null);
+  const resolveScope: NonNullable<ComputerServiceOptions['resolveScope']> = options.resolveScope ?? (async work => {
+    const actor = await resolveActor(work); return actor ? { work, rootWork: actor.rootWork, currentExecution: actor.execution, currentRootExecution: actor.rootExecution } : null;
+  });
+  const service = createOwner({ notifyActor: async () => {}, ...options, resolveActor, resolveScope });
+  directActions.set(service, service.act);
+  // Direct owner tests enter through the same real assignment admission as product tools.
+  for (const name of ['observe', 'act', 'open', 'browser', 'office'] as const) {
+    const original = service[name].bind(service) as (params: { desktopId?: string; sessionId?: string }) => Promise<unknown>;
+    Object.assign(service, { [name]: async (params: { desktopId?: string; sessionId?: string }) => {
+      if (service.automation.context.getStore() || options.remoteHosts && !options.resolveActor) return original(params);
+      const desktop = await service.resolveDesktop(params.desktopId);
+      const work = piWork(params.sessionId ?? 'main');
+      return service.automation.authorize(work, name === 'observe' || name === 'browser' && ['status', 'tabs', 'snapshot'].includes((params as { op?: string }).op ?? '') || name === 'office' && ['status', 'docs'].includes((params as { op?: string }).op ?? '') ? 'observe' : 'control', desktop, () => original(params));
+    } });
+  }
+  return service;
+};
 const makeService = (driver?: FakeDriver, extra: Partial<ComputerServiceOptions> = {}) => {
   const kernel = fakeKernel();
   let spec: DriverSpawnSpec | null = null;
+  const resolveActor: NonNullable<ComputerServiceOptions['resolveActor']> = extra.resolveActor ?? (async work => work.runtime === 'pi' ? piActor(work.sessionId) : null);
+  const resolveScope: NonNullable<ComputerServiceOptions['resolveScope']> = extra.resolveScope ?? (async work => {
+    const actor = await resolveActor(work); return actor ? { work, rootWork: actor.rootWork, currentExecution: actor.execution, currentRootExecution: actor.rootExecution } : null;
+  });
   const service = createComputerService({
+    ...(extra.remoteHosts && !extra.resolveActor ? {} : { resolveActor, resolveScope }),
     client: kernel.client as never,
     hostId: "host-1",
     platform: "windows",
@@ -171,7 +201,7 @@ describe("computer service (BC4)", () => {
     const server = app.listen(0, '127.0.0.1');
     await new Promise<void>(resolve => server.once('listening', resolve));
     const apiUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    const main: ComputerActor = { sessionId: 'main', runId: 'run', threadId: 'main', scopeId: 'scope', rootSessionId: 'main', rootRunId: 'run', label: 'Main', readOnly: false };
+    const main = piActor('main', 'run');
     const source = () => makeService(undefined, { resolveActor: async () => main, notifyActor: async () => {},
       remoteHosts: async () => [{ id: 'target', label: 'VM', apiUrl }] }).service;
     const a = source(), b = source();
@@ -179,47 +209,47 @@ describe("computer service (BC4)", () => {
       const remoteId = (await a.list()).desktops.find(desktop => desktop.remote)?.id;
       expect(remoteId).toBeDefined(); await b.list();
       const id = remoteId!;
-      const call = <T>(service: typeof a, access: 'control' | 'observe', run: () => Promise<T>) => service.automation.authorize('main', access, id, run);
+      const call = <T>(service: typeof a, access: 'control' | 'observe', run: () => Promise<T>) => service.automation.authorize(piWork('main'), access, id, run);
       const control = await call(a, 'observe', () => a.control(id));
       const observed = await call(a, 'observe', () => a.observe({ desktopId: id, app: 'notepad' }));
       await call(a, 'control', () => a.act({ desktopId: id, action: { kind: 'key', app: 'notepad', key: 'enter' }, automationEpoch: control.automationEpoch }));
       await call(b, 'observe', () => b.observe({ desktopId: id, app: 'notepad' }));
-      await b.automation.release('main');
+      await b.automation.release(piWork('main'));
       expect((await call(a, 'control', () => a.act({ desktopId: id, action: { kind: 'click', app: 'notepad', observationId: observed.id, elementIndex: 1 }, automationEpoch: control.automationEpoch }))).accepted).toBe(true);
       await expect(call(b, 'control', () => b.act({ desktopId: id, action: { kind: 'key', app: 'notepad', key: 'enter' } }))).rejects.toMatchObject({ harnessCode: 'forbidden' });
-      expect((await a.automation.stop('main')).status).toBe('enabled');
+      expect((await a.automation.stop(main.execution)).status).toBe('enabled');
       const resumedControl = await call(b, 'observe', () => b.control(id));
       await call(b, 'observe', () => b.observe({ desktopId: id, app: 'notepad' }));
       expect((await call(b, 'control', () => b.act({ desktopId: id, automationEpoch: resumedControl.automationEpoch,
         action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(true);
     } finally {
-      await Promise.allSettled([a.automation.release('main'), b.automation.release('main')]);
+      await Promise.allSettled([a.automation.release(piWork('main')), b.automation.release(piWork('main'))]);
       await Promise.all([a.dispose(), b.dispose(), target.dispose()]);
       server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
     }
   });
   it('keeps observations isolated per execution, fences old app epochs, and allows fresh work after user cancellation', async () => {
-    const actors = new Map<string, ComputerActor>(['main', 'lookup'].map(id => [id, { sessionId: id, runId: `${id}:run`, threadId: id, scopeId: 'scope', rootSessionId: 'main', rootRunId: 'main:run', label: id, readOnly: id === 'lookup' }]));
+    const actors = new Map<string, ComputerActor>(['main', 'lookup'].map(id => [id, { ...piActor(id, `${id}:run`, 'main', 'main:run'), readOnly: id === 'lookup' }]));
     const driver = makeDriver(async op => op.tool === 'get_app_state' ? okResponse({ snapshot: appSnapshot() }) : okResponse());
-    const { service } = makeService(driver, { resolveActor: async id => actors.get(id) ?? null, notifyActor: async () => {} });
+    const { service } = makeService(driver, { resolveActor: async ref => actors.get(ref.runtime === 'pi' ? ref.sessionId : '') ?? null, notifyActor: async () => {} });
     const c = service.automation;
     try {
-      const call = <T>(session: string, access: 'control' | 'observe', run: () => Promise<T>) => c.authorize(session, access, 'local-console', run);
+      const call = <T>(session: string, access: 'control' | 'observe', run: () => Promise<T>) => c.authorize(piWork(session), access, 'local-console', run);
       const control = await call('main', 'observe', () => service.control('local-console'));
       const observation = await call('main', 'observe', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
-      const requested = await c.request('lookup', 'local-console', 'observe', 'Read UI'); await c.decide('main', requested.id, true);
+      const requested = await c.request(piWork('lookup'), 'local-console', 'observe', 'Read UI'); await c.decide(piWork('main'), requested.id, true);
       await call('lookup', 'observe', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
       await expect(call('lookup', 'observe', () => service.observe({ desktopId: 'local-console', app: 'notepad', observationId: observation.id, offset: 1 })))
         .rejects.toMatchObject({ harnessCode: 'forbidden' });
       expect((await call('main', 'control', () => service.act({ desktopId: 'local-console', automationEpoch: control.automationEpoch,
         action: { kind: 'click', app: 'notepad', observationId: observation.id, elementIndex: 1 } }))).accepted).toBe(true);
-      await c.stop('main');
+      await c.stop((await service.automation.snapshot(piWork('main'))).currentExecution!);
       expect((await call('main', 'control', () => service.act({ desktopId: 'local-console', automationEpoch: control.automationEpoch,
         action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(false);
       await call('main', 'observe', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
       expect((await call('main', 'control', () => service.act({ desktopId: 'local-console', action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(true);
-      await c.finishRun('main:run');
-      actors.set('main', { ...actors.get('main')!, runId: 'next', rootRunId: 'next' });
+      await c.finishRun(piActor('main').execution);
+      actors.set('main', piActor('main', 'next'));
       expect((await call('main', 'control', () => service.act({ desktopId: 'local-console', automationEpoch: control.automationEpoch,
         action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(false);
     } finally { await service.dispose(); }
@@ -455,8 +485,7 @@ describe("computer service (BC4)", () => {
       const actionResult = deferred<DriverResponse>();
       let armed = false, held = false;
       const blocked = async () => { gateEntered.resolve(); await gate.promise; };
-      const actor: ComputerActor = { sessionId: 'main', runId: 'run', threadId: 'thread', scopeId: 'scope',
-        rootSessionId: 'main', rootRunId: 'run', label: 'Main', readOnly: false };
+      const actor = piActor('main', 'run');
       const driver = makeDriver(async op => {
         if (op.tool === 'type_text') { held = true; actionStarted.resolve(); return actionResult.promise; }
         return op.tool === 'get_app_state' ? okResponse({ snapshot: appSnapshot() }) : okResponse();
@@ -479,8 +508,8 @@ describe("computer service (BC4)", () => {
         return putRecord(params);
       };
       try {
-        await service.automation.authorize('main', 'observe', 'local-console', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
-        const action = service.automation.authorize('main', 'control', 'local-console', () => service.act({
+        await service.automation.authorize(piWork('main'), 'observe', 'local-console', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
+        const action = service.automation.authorize(piWork('main'), 'control', 'local-console', () => service.act({
           desktopId: 'local-console', action: { kind: 'type', app: 'notepad', text: 'sample' },
         }));
         await actionStarted.promise;
@@ -495,7 +524,7 @@ describe("computer service (BC4)", () => {
         const stopped = await stopping;
         if (stopped) expect(stopped.released).toBe(true);
         expect((await action).cancelled).toBe(true);
-        if (mode === 'automation-cancel-read') expect(await service.automation.snapshot('main')).toMatchObject({ active: false, status: 'enabled' });
+        if (mode === 'automation-cancel-read') expect(await service.automation.snapshot(piWork('main'))).toMatchObject({ active: false, status: 'enabled' });
       } finally {
         armed = false; gate.resolve(); actionResult.resolve(okResponse()); await service.dispose();
       }
@@ -563,14 +592,14 @@ describe("computer service (BC4)", () => {
       await started.promise;
       armed = true;
       await expect(service.takeover({ desktopId: 'local-console', holderId: 'viewer' })).rejects.toThrow(
-        failure === 'release' ? 'Input release was not confirmed' : 'Input was released, but human control could not be saved',
+        failure === 'release' ? 'Input release was not confirmed' : 'Input was released, but its durable cleanup could not be saved',
       );
       expect(driver.interrupt).toHaveBeenCalledOnce();
       expect((await action).cancelled).toBe(true);
       expect(await service.control('local-console')).toMatchObject({ owner: 'human', reachable: false });
       armed = false;
       if (failure === 'control-write') expect(await service.takeover({ desktopId: 'local-console', holderId: 'viewer' })).toMatchObject({ released: true });
-      else await expect(service.handback({ desktopId: 'local-console', holderId: 'viewer' })).rejects.toThrow('Input release was not confirmed');
+      else await expect(service.handback({ desktopId: 'local-console', holderId: 'viewer' })).rejects.toThrow(/confirmed release|release was not confirmed/i);
     } finally { armed = false; actionResult.resolve(okResponse()); await service.dispose(); }
   });
 
@@ -758,7 +787,7 @@ describe("computer service (BC5 control + view)", () => {
     // generation it reports cancelled rather than resuming under human control.
     expect(slowResult.cancelled).toBe(true);
     cancelled = true;
-    expect(await service.act({ desktopId, action: { kind: "key", app: "x", key: "enter" } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'control-changed' } } });
+    expect(await directActions.get(service)!({ desktopId, action: { kind: "key", app: "x", key: "enter" } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'control-changed' } } });
     expect(order.lastIndexOf("release_input")).toBeGreaterThan(-1);
     expect(cancelled).toBe(true);
   });
@@ -798,7 +827,7 @@ describe("computer service (BC5 control + view)", () => {
     holdRelease = true;
     const taking = service.takeover({ desktopId, holderId: "v1" });
     await vi.waitFor(() => expect(finishRelease).toBeDefined());
-    expect(await service.act({ desktopId, action: { kind: "key", app: "notepad", key: "enter" } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'control-changed' } } });
+    expect(await directActions.get(service)!({ desktopId, action: { kind: "key", app: "notepad", key: "enter" } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'control-changed' } } });
     finishRelease!(okResponse());
     await taking;
     holdRelease = false;
@@ -823,7 +852,7 @@ describe("computer service (BC5 control + view)", () => {
     expect(restarted.activities()).toEqual([]);
     await restarted.list({ localOnly: true });
     expect(await restarted.control(desktopId)).toMatchObject({ owner: "human", holderId: "v1", reachable: false });
-    expect(await restarted.act({ desktopId, action: { kind: "key", app: "notepad", key: "enter" } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'control-changed' } } });
+    expect(await directActions.get(restarted)!({ desktopId, action: { kind: "key", app: "notepad", key: "enter" } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'control-changed' } } });
     await restarted.dispose();
   });
 
@@ -1041,7 +1070,7 @@ describe("computer service (BC6 remote hosts)", () => {
           } });
         }
         if (url.endsWith("/act")) {
-          return jsonResponse({ result: { accepted: true, detail: "done" } });
+          return jsonResponse({ result: { inputWriterStopped: true, accepted: true, detail: "done" } });
         }
         return jsonResponse({ error: "unexpected" }, 404);
       }),
@@ -1082,7 +1111,7 @@ describe("computer service (BC6 remote hosts)", () => {
 
   it("a lost response body or changed Host identity never becomes an ordinary rejected action", async () => {
     const replies = [new Response('{', { headers: { 'X-Varin-Computer-Host': 'remote-h' } }),
-      new Response(JSON.stringify({ result: { accepted: true } }), { headers: { 'X-Varin-Computer-Host': 'another-host' } })];
+      new Response(JSON.stringify({ result: { inputWriterStopped: true, accepted: true } }), { headers: { 'X-Varin-Computer-Host': 'another-host' } })];
     const service = createComputerService({
       client: fakeKernel().client as never, hostId: 'h', platform: 'windows', dataDir: newDataDir(),
       createDriver: () => makeDriver(async () => okResponse()), remoteHosts: async () => [remoteHost],
@@ -1313,13 +1342,13 @@ describe("computer service work association (BC8)", () => {
     const kernel = fakeKernel();
     const delivered: string[] = [];
     const options = { client: kernel.client as never, hostId: "h", platform: "windows" as const, dataDir: newDataDir(),
-      resolveActor: async (): Promise<ComputerActor> => ({ sessionId: 's1', runId: 'r1', rootSessionId: 's1', rootRunId: 'r1', threadId: 't1', scopeId: 'bot:b', label: 'Worker', readOnly: false }),
+      resolveActor: async (): Promise<ComputerActor> => ({ ...piActor('s1', 'r1'), registry: { scopeId: 'bot:b', threadId: 't1' } }),
       notifyActor: async () => {},
       createDriver: () => makeDriver(async (op) => op.tool === "get_app_state" ? okResponse({ snapshot: appSnapshot() }) : okResponse()),
       resolveWork: async () => ({ scopeId: "bot:b", threadId: "t1" }) };
     const first = createComputerService({ ...options, onHandback: async (event) => { delivered.push(event.id); throw new Error("Thread unavailable"); } });
     await first.ensureLocal();
-    await first.automation.authorize('s1', 'control', 'local-console', async () => {});
+    await first.automation.authorize(piWork('s1'), 'control', 'local-console', async () => {});
     await first.observe({ desktopId: "local-console", app: "notepad", sessionId: "s1" });
     const unsubscribe = await first.subscribeFrames("local-console", "viewer", () => {}, { frames: false });
     await first.takeover({ desktopId: "local-console", holderId: "viewer" });
@@ -1342,7 +1371,7 @@ describe("computer service work association (BC8)", () => {
     const options = { client: kernel.client as never, hostId: "h", platform: "windows" as const, dataDir: newDataDir(),
       createDriver: () => makeDriver(async (op) => op.tool === "get_app_state" ? okResponse({ snapshot: appSnapshot() })
         : op.tool === "capabilities" ? okResponse({ capabilities: { platform: "windows", driver: "windows-uia", status: "ready" } }) : okResponse()),
-      resolveWork: async (sessionId: string) => ({ scopeId: "bot:b", threadId: sessionId === "s2" ? "t2" : "t1" }) };
+      resolveActor: async (work: import('@varin/protocol').ComputerWorkRef) => work.runtime === 'pi' ? { ...piActor(work.sessionId), registry: { scopeId: 'bot:b', threadId: work.sessionId === 's2' ? 't2' : 't1' } } : null };
     const service = createComputerService(options);
     await service.ensureLocal();
     for (const sessionId of ["s1", "s2", "s3"]) {
@@ -1351,8 +1380,8 @@ describe("computer service work association (BC8)", () => {
     await service.probe("local-console");
     const association = (await service.workDesktops("bot:b"))[0]?.work;
     expect(association).toHaveLength(2);
-    expect(association?.find((item) => item.threadId === "t1")?.sessionId).toBe("s3");
-    expect(association?.find((item) => item.threadId === "t2")?.sessionId).toBe("s2");
+    expect(association?.find((item) => item.registry?.threadId === "t1")?.work).toEqual(piWork("s3"));
+    expect(association?.find((item) => item.registry?.threadId === "t2")?.work).toEqual(piWork("s2"));
     await service.dispose();
     const reopened = createComputerService(options);
     expect((await reopened.workDesktops("bot:b"))[0]?.work).toEqual(association);
@@ -1372,7 +1401,7 @@ describe("computer service work association (BC8)", () => {
 
     await service.observe({ desktopId: "local-console", app: "notepad", includeScreenshot: false, sessionId: "ses_work-1" });
     catalog = await service.list();
-    expect(catalog.desktops[0]?.usage?.sessionId).toBe("ses_work-1");
+    expect(catalog.desktops[0]?.usage?.execution.work).toEqual(piWork("ses_work-1"));
 
     const observation = catalog.desktops[0] && (await service.observe({ desktopId: "local-console", app: "notepad", includeScreenshot: false }));
     await service.act({
@@ -1381,7 +1410,7 @@ describe("computer service work association (BC8)", () => {
       sessionId: "ses_work-2",
     });
     catalog = await service.list();
-    expect(catalog.desktops[0]?.usage?.sessionId).toBe("ses_work-2");
+    expect(catalog.desktops[0]?.usage?.execution.work).toEqual(piWork("ses_work-2"));
     expect(observation).toBeDefined();
   });
 
@@ -1396,7 +1425,7 @@ describe("computer service work association (BC8)", () => {
     await service.observe({ desktopId: "local-console", app: "notepad", includeScreenshot: false, sessionId: "ses_keep" });
     await service.probe("local-console");
     const catalog = await service.list();
-    expect(catalog.desktops[0]?.usage?.sessionId).toBe("ses_keep");
+    expect(catalog.desktops[0]?.usage?.execution.work).toEqual(piWork("ses_keep"));
   });
 });
 
@@ -1695,7 +1724,7 @@ describe("evidence journal (EE6, §10)", () => {
     await service.ensureLocal();
     const unsubscribe = await service.subscribeFrames("local-console", "human", () => {}, { frames: false });
     await service.takeover({ desktopId: "local-console", holderId: "human" });
-    expect(await service.act({ desktopId: "local-console", action: { kind: "type", app: "notepad", text: "x" } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'control-changed' } } });
+    expect(await directActions.get(service)!({ desktopId: "local-console", action: { kind: "type", app: "notepad", text: "x" } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'control-changed' } } });
     const { entries } = await service.evidence({ desktopId: "local-console" });
     const takeover = entries.find((e) => e.op === "takeover");
     const refused = entries.find((e) => e.tool === "act");
@@ -1709,6 +1738,7 @@ describe("evidence journal (EE6, §10)", () => {
     const { service } = makeService(driver);
     await service.ensureLocal();
     await service.open({ desktopId: "local-console", path: "C:/tmp/a.txt", sessionId: "s1" });
+    await service.automation.release(piWork("s1"));
     await service.open({ desktopId: "local-console", path: "C:/tmp/b.txt", sessionId: "s2" });
     const mine = await service.evidence({ desktopId: "local-console", sessionId: "s2" });
     expect(mine.entries.length).toBe(1);

@@ -102,6 +102,15 @@ pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ComputerScopeParams {
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) run_id: Option<String>,
+    pub(crate) operation_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ResearchScopeParams {
     pub(crate) thread_id: String,
     pub(crate) branch_id: String,
@@ -2444,6 +2453,9 @@ pub(crate) struct KernelVerificationInputIdentity {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.computer.scope" => serde_json::from_value::<ComputerScopeParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.research.scopes" => serde_json::from_value::<ResearchScopeParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

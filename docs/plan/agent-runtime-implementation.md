@@ -19,6 +19,14 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-11 增量：Native Root Computer 与原物理 owner
+
+- 发行 `varin.builtin.computer` 的六个普通单调用工具接原 SDK/broker、真实 ModelStep/PolicyAction、原 ToolBridge/回执和 ComputerService；无文件来源也可执行。共享声明拥有 schema，原配置/权限与 immutable binding 仍生效，默认桌面按 Run 冻结。坏 Computer 默认配置只让该 service candidate 不可用，不阻断无依赖的普通工具，required 原绑定不降级。
+- Rust 只投影原 Thread/branch/family 与 active Run，辅助上下文 Run 不冒充当前工作。Pi/Native work 与 execution 显式区分，idle 为 null；认证 client/Host、共享会话概览与桌面 Stop 使用真实身份和确切 Run/控制 epoch，旧回包不能消掉新的未确认清理。自然终态由原通知唤醒并核真实 Catalog 后收尾，不要求模型先调用 release。
+- 原 desktop runtime metadata **版本2** 在 input 前保存物理 owner；新 Host/helper、空 peer map、probe ready 不证明旧输入释放。效果、调用 writer 排空和旧 assignment/按键释放各按原证据结算，Unknown 不重放。原 release ACK 与 callback drain 后持久清理失败可按同一证明重试。旧/坏 metadata 明确不可用且保目录与其他桌面独立，不迁外部资产。
+- 独审实际发行包/broker→普通 bridge→原 Computer owner、真实客户端→已注册认证 route、自然三终态及实际 bridge reset/reconnect 均通过，边界仍是受控 Catalog/driver 与内存 HTTP。原失败探针修后复验通过；Rust scope、Host/消费者、完整 types、实际 bundle/binary 证据与复跑入口见[本片验收](../reviews/runtime-computer-root-2026-10-11.md)。完整真实 IPC fixture 已修整并类型检查，尚未运行；不扩称真机/平台或两设计完成。
+- 接续 Native child request/grant/持久 Wait、可信环境通知/人工交还、持久 Computer scripts 和剩余环境能力。当前 child 可发现能力，缺 assignment 的目标操作明确拒绝；Native handback 原事件保 pending，未伪投 Pi。全面迁移和默认切换仍由用户验收后负责。
+
 ## 2026-10-11 增量：原 Computer 紧急停止前置边界
 
 - 接 Native Computer 前先闭合原 owner 的确认缺口：已有本地输入执行时，public cancel、takeover 和实际控制条 automation.cancelDesktop 会等目录、脚本撤销或控制写入才请求物理 release。四条独立交错均复现，不把 cancel flag 当按键已释放。

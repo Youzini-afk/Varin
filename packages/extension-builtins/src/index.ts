@@ -1,3 +1,5 @@
+import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS, VARIN_BUILTIN_COMPUTER_EXTENSION_ID } from './computer-tools.js';
+export { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS, VARIN_BUILTIN_COMPUTER_EXTENSION_ID } from './computer-tools.js';
 import type {
   JsonObject,
   VarinApplicationSurface,
@@ -584,6 +586,13 @@ export const VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION: VarinBuiltinExtensionDefi
   },
 };
 
+export const VARIN_BUILTIN_COMPUTER_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: { id: VARIN_BUILTIN_COMPUTER_EXTENSION_ID, displayName: 'Computer Use', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
+    capabilities: { host: [COMPUTER_CAPABILITY] }, provides: { services: [...COMPUTER_TOOL_DECLARATIONS] } },
+};
+
 export const VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION: VarinBuiltinExtensionDefinition = {
   enabledByDefault: true,
   manifest: {
@@ -676,6 +685,7 @@ export const VARIN_BUILTIN_EXTENSION_DEFINITIONS: readonly VarinBuiltinExtension
   VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION,
   VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION,
   VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION,
+  VARIN_BUILTIN_COMPUTER_EXTENSION,
   VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION,
   VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION,
   VARIN_BUILTIN_RETRIEVAL_SEMANTIC_EXTENSION,

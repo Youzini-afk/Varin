@@ -228,7 +228,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, requi
         computers.workDesktops(scopeId), computers.listArtifacts(scopeId),
       ]) : [[], []];
       response.json({ threads: work.map((item) => ({ ...item,
-        desktops: desktops.filter((desktop) => desktop.work?.some((association) => association.threadId === item.thread.id)),
+        desktops: desktops.filter((desktop) => desktop.work?.some((association) => association.registry?.scopeId === scopeId && association.registry.threadId === item.thread.id)),
         artifacts: artifacts.filter((artifact) => artifact.threadId === item.thread.id) }))
         .filter((item) => item.thread.purpose !== 'bot-root' || item.desktops.length > 0 || item.artifacts.length > 0) });
     } catch (error) {

@@ -9,7 +9,7 @@ const vm = (id: string): ComputerVmDescriptor => ({ machineId: id, name: id, sta
   binding: { domainUuid: id, guest: { state: 'ready', connectionId: `vm:${id}`, hostId: `guest-${id}` } },
 } as ComputerVmDescriptor);
 const desktop = (id: string, scopeId = 'bot:b'): ComputerDesktop => ({ id: `desktop-${id}`, machineId: id,
-  label: id, kind: 'remote-session', status: 'available', work: [{ scopeId, threadId: 't', sessionId: 's', at: '' }] });
+  label: id, kind: 'remote-session', status: 'available', work: [{ work: { runtime: 'pi', sessionId: 's' }, registry: { scopeId, threadId: 't' }, at: '' }] });
 const setup = () => {
   let machines = [vm('owned')];
   let desktops = [desktop('owned')];
@@ -47,7 +47,7 @@ it('only plans automatic shutdown for exclusive Bot VMs and retains shared or co
   coordinator.binding.guest!.hostId = 'coordinator';
   setMachines([vm('owned'), vm('shared'), coordinator]);
   const shared = desktop('shared');
-  shared.work!.push({ scopeId: 'bot:other', threadId: 'other', sessionId: 'other', at: '' });
+  shared.work!.push({ work: { runtime: 'pi', sessionId: 'other' }, registry: { scopeId: 'bot:other', threadId: 'other' }, at: '' });
   setDesktops([desktop('owned'), shared, desktop('coordinator')]);
   const machines = await runtime.planMachines(bot);
   expect(machines.map((item) => [item.machineId, item.state])).toEqual([
@@ -57,9 +57,9 @@ it('only plans automatic shutdown for exclusive Bot VMs and retains shared or co
 
 it('does not cancel a shared desktop lane when a Bot sleeps', async () => {
   const { runtime, computers, setDesktops } = setup();
-  const owned = { ...desktop('owned'), usage: { sessionId: 's', at: '' } };
-  const shared = { ...desktop('shared'), usage: { sessionId: 's', at: '' } };
-  shared.work!.push({ scopeId: 'bot:other', threadId: 'other', sessionId: 'other', at: '' });
+  const owned: ComputerDesktop = { ...desktop('owned'), usage: { execution: { work: { runtime: 'pi', sessionId: 's' }, runId: 'run' }, at: '' } };
+  const shared: ComputerDesktop = { ...desktop('shared'), usage: { execution: { work: { runtime: 'pi', sessionId: 's' }, runId: 'run' }, at: '' } };
+  shared.work!.push({ work: { runtime: 'pi', sessionId: 'other' }, registry: { scopeId: 'bot:other', threadId: 'other' }, at: '' });
   setDesktops([owned, shared]);
   await runtime.stopScope(bot);
   expect(computers.cancel).toHaveBeenCalledExactlyOnceWith(owned.id);

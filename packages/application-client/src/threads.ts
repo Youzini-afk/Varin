@@ -1,3 +1,4 @@
+import type { ComputerAutomationProjection, ComputerAutomationState } from '@varin/protocol';
 import type { MessageSendParams, MessageListParams, MessageReceipt, MessagePage, MessageView } from '@varin/protocol';
 import type { FamilyList, FamilyRuns, FamilyRead, FamilyItem, FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
 import type { PlanSnapshot, PlanMutationResult, ChildTextPage, ChildTask, DelegatedExecution, ChildWait, TreeCancellationReceipt, Followup, FollowupView, FollowupRegisterParams, LiveRoot, ContextPersonalization, ContextResources, ResourceActivation, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
@@ -202,7 +203,14 @@ export interface ThreadProcessesAPI {
   /** Open a view of the original PTY job; this never launches another shell. */
   openTerminal(input: ThreadIdentity & { operationId: string }): Promise<ThreadProcessTerminal>;
 }
+export interface ThreadComputerAPI {
+  /** Read the original Computer owner without probing or capturing the desktop. */
+  state(identity: ThreadIdentity, signal?: AbortSignal): Promise<ComputerAutomationProjection>;
+  /** Stop only the displayed execution; transport cancellation does not undo acceptance. */
+  stop(identity: ThreadIdentity, request: { runId: string; desktopId?: string }, signal?: AbortSignal): Promise<{ state: ComputerAutomationState }>;
+}
 export interface ThreadsAPI {
+  computer: ThreadComputerAPI;
   research?: import('./research.js').ThreadResearchAPI;
   messages?: ThreadMessagesAPI;
   family?: ThreadFamilyAPI;

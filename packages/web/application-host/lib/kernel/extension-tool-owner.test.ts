@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { expect, it, vi } from 'vitest';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
+import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS, VARIN_BUILTIN_COMPUTER_EXTENSION_ID } from '@varin/extension-builtins';
 import { parseVarinExtensionManifest } from '@varin/extension-contract';
 import { createMaterialStoreFixture } from '../harness/web-materials.test-helper.js';
 import {
@@ -22,6 +23,7 @@ import {
   type PrivateToolFrame,
 } from './tool-bridge.js';
 import type { KernelClient } from './kernel-client.js';
+import { createComputerRuntime } from './computer-runtime.js';
 
 it('installed SDK declaration reaches shared bridge, compiled schemas, validated model/policy scope and real material adapter', async () => {
   const repository = path.resolve(
@@ -309,6 +311,25 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
     expect(scope.inspect()[0]?.status).toBe('ready');
     scope.close();
     for (const initial of scope.initial) initial.lease.release();
+    // An already active Computer provider is inspected before the Run's explicit
+    // tool selection. Its broken configuration must not hide an independent tool.
+    runtime.capabilities.register(COMPUTER_CAPABILITY, async () => null);
+    await runtime.activateExtension(VARIN_BUILTIN_COMPUTER_EXTENSION_ID);
+    const computer = createComputerRuntime({ kernel, runtime: {} as never, enabled: async () => true,
+      computers: { defaultDesktop: async () => { throw new Error('malformed original Computer default'); } } as never });
+    const isolated = await createExtensionTools({ ...options, prepareConfiguration: computer.prepareConfiguration })(
+      { runId: 'independent-custom-selection', threadId: 'thread' }, [], new AbortController().signal,
+    );
+    try {
+      expect(isolated.initial.map(value => value.binding.serviceId)).toEqual([descriptor.id]);
+      for (const declaration of COMPUTER_TOOL_DECLARATIONS) expect(isolated.inspect()).toContainEqual(expect.objectContaining({
+        serviceId: declaration.id, status: 'unavailable', error: `extension_tool_configuration_unavailable:${declaration.id}`,
+      }));
+      // Exact saved bindings remain mandatory even though optional candidates isolate failure.
+      await expect(createExtensionTools({ ...options, configurationIdentity: () => { throw new Error('required configuration unavailable'); } })(
+        { runId: 'required', threadId: 'thread' }, [retained.binding], new AbortController().signal,
+      )).rejects.toThrow(`extension_tool_configuration_unavailable:${descriptor.id}`);
+    } finally { isolated.close(); for (const initial of isolated.initial) initial.lease.release(); }
     bridge.close();
     await expect(
       retainExtensionTool(options, selected, {

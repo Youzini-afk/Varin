@@ -9,6 +9,15 @@ import {
 import { HostError } from './errors.js';
 import { JsonObjectFileEditor, applyTopLevelJsonChanges, type JsonObjectDocument, type JsonObjectDocumentReadResult } from './json-object-file-editor.js';
 
+/** Configuration-only read shared by trusted Host consumers, without an AgentSession. */
+export function readHostHarnessSettings(agentDir: string, configCwd: string, projectTrusted: boolean) {
+  const settings = SettingsManager.create(configCwd, agentDir, { projectTrusted });
+  if (settings.drainErrors().length) throw new Error('Harness configuration is unavailable');
+  const global = settings.getGlobalSettings() as { harness?: HarnessSettingsInput };
+  const project = settings.getProjectSettings() as { harness?: HarnessSettingsInput };
+  return mergeHarnessSettings(global.harness ?? {}, projectTrusted ? project.harness ?? {} : {});
+}
+
 /** Original SettingsManager/file-lock authority, usable without constructing an AgentSession. */
 export async function settingsSnapshot(settings: SettingsManager, agentDir: string, cwd: string): Promise<PiSettingsSnapshot> {
   const [global, project] = await Promise.all([

@@ -17,6 +17,7 @@ export interface ToolInvocationAuthority {
   readonly source: Readonly<LaunchSource> | null;
   readonly toolName: string;
   readonly operation: 'read' | 'effect';
+  readonly configurationIdentity?: string | null;
   readonly arguments: unknown;
 }
 interface Registration {
@@ -92,13 +93,13 @@ export function requireToolInvocation(context: HostCapabilityCallContext): ToolI
 /** Bind an effectful trusted domain to this exact admitted call. The original domain journal
  * remains the effect owner. This only retains its actual promise and projects its receipt back
  * through the existing ToolBridge; extension JSON can never supply stop/effect evidence. */
-export function runToolDomainEffect(
+export function runToolDomainCall(
   context: HostCapabilityCallContext,
-  input: { domain: string; toolName: string; arguments: JsonValue },
+  input: { domain: string; toolName: string; operation: 'read' | 'effect'; arguments: JsonValue },
   execute: (authority: ToolInvocationAuthority) => Promise<ToolExecutionReceipt>,
 ): Promise<JsonValue> {
   const authority = requireToolInvocation(context);
-  if (authority.operation !== 'effect' || authority.toolName !== input.toolName || !isDeepStrictEqual(authority.arguments, input.arguments)) {
+  if (authority.operation !== input.operation || authority.toolName !== input.toolName || !isDeepStrictEqual(authority.arguments, input.arguments)) {
     throw new Error('tool_domain_call_changed');
   }
   const registration = registrations.get(context.invocation!)!;
