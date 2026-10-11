@@ -114,6 +114,22 @@ describe('Varin events', () => {
     unsubscribe();
   });
 
+  test('decodes Computer invalidation identities without accepting bodies or incomplete work references', async () => {
+    const { subscribeVarinEvents } = await import('./varinEvents');
+    const events: unknown[] = [];
+    const unsubscribe = subscribeVarinEvents(event => events.push(event));
+    try {
+      const source = MockEventSource.instances[0];
+      const work = { runtime: 'agent', threadId: 'root', branchId: 'original-branch' };
+      const send = (properties: unknown) => source.onmessage?.({ data: JSON.stringify({ type: 'varin:computer-automation-invalidated', properties }) });
+      send({ work });
+      send({ work, reason: 'Bodies do not belong in invalidations' });
+      send({ work: { runtime: 'agent', threadId: 'root' } });
+      send({ work: { runtime: 'agent', sessionId: 'root' } });
+      expect(events).toEqual([{ type: 'computer-automation-invalidated', work }]);
+    } finally { unsubscribe(); }
+  });
+
   test('dispatches native plan identity hints and rejects malformed envelopes', async () => {
     const { subscribeVarinEvents } = await import('./varinEvents');
     const events: unknown[] = [];
@@ -201,6 +217,25 @@ describe('Varin events', () => {
     expect(bindCalls).toEqual(['session-a', 'session-b', 'session-b']);
     expect(MockEventSource.instances.at(-1)?.url).toContain('session=session-b');
     unsubscribe();
+  });
+
+  test('ignores messages and errors from a replaced Host stream', async () => {
+    const { subscribeVarinEvents } = await import('./varinEvents');
+    const events: unknown[] = [];
+    const unsubscribe = subscribeVarinEvents(event => events.push(event));
+    try {
+      const oldSource = MockEventSource.instances[0];
+      runtimeListener?.();
+      const currentSource = MockEventSource.instances.at(-1)!;
+      expect(currentSource).not.toBe(oldSource);
+      const envelope = { data: JSON.stringify({ type: 'varin:event-stream-ready', properties: {} }) };
+      oldSource.onmessage?.(envelope);
+      expect(events).toEqual([]);
+      oldSource.onerror?.();
+      expect(currentSource.readyState).not.toBe(MockEventSource.CLOSED);
+      currentSource.onmessage?.(envelope);
+      expect(events).toEqual([{ type: 'stream-ready' }]);
+    } finally { unsubscribe(); }
   });
 
   test('dispatches stream readiness and typed harness thread changes', async () => {

@@ -8,6 +8,7 @@ Last updated: 2026-10-11
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [Native child Computer 请求与持久观察（2026-10-11）](runtime-computer-requests-2026-10-11.md) | 原请求/环境输入/决定/Wait/独立 child 生命周期与真实消费者；无文件来源 child 尚待实现 |
 | [Native Root Computer 与原物理 owner（2026-10-11）](runtime-computer-root-2026-10-11.md) | 普通发行工具、真实身份/回执、物理 marker、精确 Stop/自然收尾及产品消费者；完整 IPC 未验 |
 | [原 Computer 紧急输入停止（2026-10-11）](runtime-computer-stop-2026-10-11.md) | 原 cancel/takeover/控制条在慢目录与持久操作前释放输入；Native 接入的有限前置片 |
 | [原机器指标与自动采样续接（2026-10-11）](runtime-metric-followups-2026-10-11.md) | 原 ResourceService 自动采样、阈值边沿、取消与 epoch、公开消费和实际 root/child 接续；分层验收 |

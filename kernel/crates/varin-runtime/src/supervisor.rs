@@ -665,6 +665,7 @@ impl RunSupervisor {
                     crate::catalog::process_delivery::deliver_waits(&self.catalog),
                     crate::catalog::messages::reply_wait::deliver_waits(&self.catalog),
                     crate::catalog::followups::observation::deliver_waits(&self.catalog),
+                    crate::catalog::computer_wait::deliver_waits(&self.catalog),
                 ] {
                     if let Err(cause) = result {
                         failure.get_or_insert_with(|| error(cause));
@@ -858,6 +859,7 @@ impl RunSupervisor {
     pub fn quiesce_observations(&self) -> Result<()> {
         self.quiesce_child_waits()?;
         self.quiesce_waits(crate::catalog::host_jobs::WAIT_PREFIX)?;
+        self.quiesce_waits(crate::catalog::computer_wait::PREFIX)?;
         self.quiesce_process_waits()?;
         self.quiesce_waits("reply-wait:")
     }

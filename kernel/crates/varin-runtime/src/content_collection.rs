@@ -339,6 +339,8 @@ impl ContentCollection {
              UNION ALL SELECT body FROM model_outputs
              UNION ALL SELECT body FROM input_history_content
              UNION ALL SELECT intent FROM commands".to_string();
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.claim.reasonRef') FROM computer_requests WHERE json_extract(body,'$.claim.reasonRef') IS NOT NULL UNION ALL SELECT json_extract(data,'$.detailRef') FROM events WHERE kind='computer.request_decided' AND json_extract(data,'$.detailRef') IS NOT NULL UNION ALL SELECT json_extract(data,'$.claim.reasonRef') FROM events WHERE kind='computer.request_decided' AND json_extract(data,'$.claim.reasonRef') IS NOT NULL");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.requestRef') FROM computer_requests UNION ALL SELECT json_extract(body,'$.detailRef') FROM computer_requests WHERE json_extract(body,'$.detailRef') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.host_job.acceptanceRef') FROM operations WHERE json_extract(body,'$.host_job.acceptanceRef') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.request_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='user_host_job'");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.objective_ref') FROM goals UNION ALL SELECT json_extract(body,'$.start_intent') FROM goals UNION ALL SELECT json_extract(body,'$.reason_ref') FROM goals WHERE json_extract(body,'$.reason_ref') IS NOT NULL");

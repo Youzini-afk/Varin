@@ -85,7 +85,8 @@ pub(in crate::catalog) fn fact(row: &QueuedInputMetadata) -> Result<&IngressActi
     match &row.origin {
         InputOrigin::Message { activation, .. }
         | InputOrigin::Followup { activation, .. }
-        | InputOrigin::Calendar { activation, .. } => Ok(activation),
+        | InputOrigin::Calendar { activation, .. }
+        | InputOrigin::ComputerRequest { activation, .. } => Ok(activation),
         _ => Err(RuntimeError::Invalid(
             "ingress activation requires a typed activating input".into(),
         )),
@@ -94,7 +95,8 @@ pub(in crate::catalog) fn fact(row: &QueuedInputMetadata) -> Result<&IngressActi
 pub(in crate::catalog) fn set_fact(row: &mut QueuedInputMetadata, next: IngressActivationFact) {
     if let InputOrigin::Message { activation, .. }
     | InputOrigin::Followup { activation, .. }
-    | InputOrigin::Calendar { activation, .. } = &mut row.origin
+    | InputOrigin::Calendar { activation, .. }
+    | InputOrigin::ComputerRequest { activation, .. } = &mut row.origin
     {
         *activation = next;
     }
@@ -292,6 +294,7 @@ pub(in crate::catalog) fn write_changed(
         match row.origin {
             InputOrigin::Followup { .. } => "followup.activation_changed",
             InputOrigin::Calendar { .. } => "calendar.activation_changed",
+            InputOrigin::ComputerRequest { .. } => "computer.request_activation_changed",
             _ => "message.activation_changed",
         },
         json!({"input_id":row.id}),
@@ -305,7 +308,7 @@ pub(in crate::catalog) fn bind_pending(tx: &Transaction<'_>, run: &Run) -> Resul
     }
     let execution_id = execution_for_run(tx, &run.id)?;
     let rows = {
-        let mut q=tx.prepare("SELECT body FROM input_queue WHERE branch_id=?1 AND origin IN ('message','followup','calendar') AND state='queued' AND json_extract(body,'$.origin.activation.state')='pending' ORDER BY cursor")?;
+        let mut q=tx.prepare("SELECT body FROM input_queue WHERE branch_id=?1 AND origin IN ('message','followup','calendar','computer_request') AND state='queued' AND json_extract(body,'$.origin.activation.state')='pending' ORDER BY cursor")?;
         let rows = q.query_map([&run.branch_id], |r| r.get::<_, String>(0))?;
         rows.map(|r| Ok(serde_json::from_str(&r?)?))
             .collect::<Result<Vec<QueuedInputMetadata>>>()?
@@ -337,7 +340,7 @@ pub(in crate::catalog) fn bind_execution(
     execution_id: &str,
 ) -> Result<()> {
     let rows = {
-        let mut q=tx.prepare("SELECT body FROM input_queue WHERE branch_id=?1 AND origin IN ('message','followup','calendar') AND state='queued' AND json_extract(body,'$.origin.activation.state')='pending' AND json_extract(body,'$.origin.activation.execution_id') IS NULL ORDER BY cursor")?;
+        let mut q=tx.prepare("SELECT body FROM input_queue WHERE branch_id=?1 AND origin IN ('message','followup','calendar','computer_request') AND state='queued' AND json_extract(body,'$.origin.activation.state')='pending' AND json_extract(body,'$.origin.activation.execution_id') IS NULL ORDER BY cursor")?;
         let rows = q.query_map([branch], |r| r.get::<_, String>(0))?;
         rows.map(|r| Ok(serde_json::from_str(&r?)?))
             .collect::<Result<Vec<QueuedInputMetadata>>>()?
@@ -432,7 +435,7 @@ fn cancel_unlaunched_trigger(
         Value::Null,
     )?;
     let rows: Vec<QueuedInputMetadata> = {
-        let mut query = tx.prepare("SELECT body FROM input_queue WHERE origin IN ('message','followup','calendar') AND state='queued' AND json_extract(body,'$.origin.activation.state')='pending' AND json_extract(body,'$.origin.activation.execution_id')=?1")?;
+        let mut query = tx.prepare("SELECT body FROM input_queue WHERE origin IN ('message','followup','calendar','computer_request') AND state='queued' AND json_extract(body,'$.origin.activation.state')='pending' AND json_extract(body,'$.origin.activation.execution_id')=?1")?;
         let rows = query.query_map([execution_id], |r| r.get::<_, String>(0))?;
         rows.map(|r| Ok(serde_json::from_str(&r?)?))
             .collect::<Result<_>>()?
@@ -449,7 +452,7 @@ fn cancel_unlaunched_trigger(
 
 pub(in crate::catalog) fn cancel_run(tx: &Transaction<'_>, run: &str) -> Result<()> {
     let rows = {
-        let mut q=tx.prepare("SELECT body FROM input_queue WHERE run_id=?1 AND origin IN ('message','followup','calendar') AND state='queued' AND activation='activating'")?;
+        let mut q=tx.prepare("SELECT body FROM input_queue WHERE run_id=?1 AND origin IN ('message','followup','calendar','computer_request') AND state='queued' AND activation='activating'")?;
         let rows = q.query_map([run], |r| r.get::<_, String>(0))?;
         rows.map(|r| Ok(serde_json::from_str(&r?)?))
             .collect::<Result<Vec<QueuedInputMetadata>>>()?
@@ -461,7 +464,7 @@ pub(in crate::catalog) fn cancel_run(tx: &Transaction<'_>, run: &str) -> Result<
 }
 pub(in crate::catalog) fn cancel_thread(tx: &Transaction<'_>, thread: &str) -> Result<()> {
     let rows = {
-        let mut q=tx.prepare("SELECT q.body FROM input_queue q JOIN branches b ON b.id=q.branch_id WHERE b.thread_id=?1 AND q.origin IN ('message','followup','calendar') AND q.state='queued' AND q.activation='activating'")?;
+        let mut q=tx.prepare("SELECT q.body FROM input_queue q JOIN branches b ON b.id=q.branch_id WHERE b.thread_id=?1 AND q.origin IN ('message','followup','calendar','computer_request') AND q.state='queued' AND q.activation='activating'")?;
         let rows = q.query_map([thread], |r| r.get::<_, String>(0))?;
         rows.map(|r| Ok(serde_json::from_str(&r?)?))
             .collect::<Result<Vec<QueuedInputMetadata>>>()?
@@ -676,7 +679,7 @@ impl Catalog {
             return Ok((Vec::new(), None));
         }
         let rows = {
-            let mut q=self.db.prepare("SELECT body FROM input_queue WHERE origin IN ('message','followup','calendar') AND state='queued' AND activation='activating' ORDER BY cursor")?;
+            let mut q=self.db.prepare("SELECT body FROM input_queue WHERE origin IN ('message','followup','calendar','computer_request') AND state='queued' AND activation='activating' ORDER BY cursor")?;
             let rows = q.query_map([], |r| r.get::<_, String>(0))?;
             rows.map(|r| Ok(serde_json::from_str(&r?)?))
                 .collect::<Result<Vec<QueuedInputMetadata>>>()?
@@ -697,7 +700,7 @@ impl Catalog {
                     } else if run.state.terminal()
                         && matches!(
                             row.origin,
-                            InputOrigin::Followup { .. } | InputOrigin::Calendar { .. }
+                            InputOrigin::Followup { .. } | InputOrigin::Calendar { .. } | InputOrigin::ComputerRequest { .. }
                         )
                     {
                         row.run_id = None;
@@ -1021,6 +1024,7 @@ impl Catalog {
             {
                 continue;
             }
+            let ordinary:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM input_queue WHERE run_id=?1 AND activation='activating' AND mode!='next_run' AND state='queued' AND origin!='computer_request')",[&id],|r|r.get(0))?;
             for op in super::observations::operations(&self.db, Some(&id))? {
                 let wait: Wait = record(
                     &self.db,
@@ -1030,8 +1034,12 @@ impl Catalog {
                 if wait.cancelled || wait.trigger_cursor.is_some() {
                     continue;
                 }
-                self.cancel_observation(&op.id)?;
-                changed = true;
+                if ordinary {
+                    self.cancel_observation(&op.id)?;
+                    changed = true;
+                } else if let Some(request) = computer_requests::interrupting_request(&self.db, &run, &wait)? {
+                    changed |= self.interrupt_computer_dependency(&op.id, &request)?;
+                }
             }
         }
         Ok(changed)

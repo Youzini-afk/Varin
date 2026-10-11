@@ -13,6 +13,7 @@ pub(super) fn hold(
             Ok(followups::ingress_hold(db, row, run)?.map(|reason| format!("{reason:?}")))
         }
         InputOrigin::Calendar { .. } => calendar::ingress_hold(db, row, run),
+        InputOrigin::ComputerRequest { .. } => computer_requests::ingress_hold(db, row),
         _ => Ok(None),
     }
 }
@@ -38,6 +39,7 @@ pub(super) fn insert_occurrence(
     let origin_name = match origin {
         InputOrigin::Followup { .. } => "followup",
         InputOrigin::Calendar { .. } => "calendar",
+        InputOrigin::ComputerRequest { .. } => "computer_request",
         _ => {
             return Err(RuntimeError::Invalid(
                 "occurrence input requires its actual domain origin".into(),
@@ -45,7 +47,7 @@ pub(super) fn insert_occurrence(
         }
     };
     let run_id = match &origin {
-        InputOrigin::Followup { activation, .. } | InputOrigin::Calendar { activation, .. } => {
+        InputOrigin::Followup { activation, .. } | InputOrigin::Calendar { activation, .. } | InputOrigin::ComputerRequest { activation, .. } => {
             activation.run_id().map(str::to_owned)
         }
         _ => unreachable!(),

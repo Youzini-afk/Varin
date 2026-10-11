@@ -124,7 +124,8 @@ export interface ComputerActor {
   rootExecution: ComputerExecutionRef | null;
   registry: ComputerRegistryRef | null;
   label: string;
-  readOnly: boolean;
+  /** Native tools retain their original per-invocation permission checks; this is not an assignment grant. */
+  roleAccess: { kind: "pi-role"; readOnly: boolean } | { kind: "tool-invocation" };
 }
 
 export const computerWorkKey = (work: ComputerWorkRef): string => JSON.stringify(work.runtime === "pi"
@@ -157,7 +158,7 @@ export function parseComputerExecutionRef(value: unknown): ComputerExecutionRef 
 }
 
 export function parseComputerActor(value: unknown): ComputerActor {
-  if (!computerObject(value) || !computerId(value.label) || typeof value.readOnly !== "boolean") throw new Error("computer_actor_invalid");
+  if (!computerObject(value) || !computerId(value.label)) throw new Error("computer_actor_invalid");
   const execution = parseComputerExecutionRef(value.execution);
   const rootWork = parseComputerWorkRef(value.rootWork);
   const rootExecution = value.rootExecution === null ? null : parseComputerExecutionRef(value.rootExecution);
@@ -165,12 +166,18 @@ export function parseComputerActor(value: unknown): ComputerActor {
     || sameComputerWork(execution.work, rootWork) && (!rootExecution || !sameComputerExecution(execution, rootExecution))) {
     throw new Error("computer_actor_family_invalid");
   }
+  const role = value.roleAccess;
+  if (!computerObject(role) || (execution.work.runtime === "pi"
+    ? role.kind !== "pi-role" || typeof role.readOnly !== "boolean" || Object.keys(role).some(key => key !== "kind" && key !== "readOnly")
+    : role.kind !== "tool-invocation" || Object.keys(role).some(key => key !== "kind")) || "readOnly" in value) throw new Error("computer_actor_role_invalid");
+  const roleAccess: ComputerActor["roleAccess"] = role.kind === "pi-role"
+    ? { kind: "pi-role", readOnly: role.readOnly as boolean } : { kind: "tool-invocation" };
   let registry: ComputerRegistryRef | null = null;
   if (execution.work.runtime === "pi") {
     if (!computerObject(value.registry) || !computerId(value.registry.scopeId) || !computerId(value.registry.threadId)) throw new Error("computer_actor_registry_invalid");
     registry = { scopeId: value.registry.scopeId, threadId: value.registry.threadId };
   } else if (value.registry !== null) throw new Error("computer_actor_registry_invalid");
-  return { execution, rootWork, rootExecution, registry, label: value.label, readOnly: value.readOnly };
+  return { execution, rootWork, rootExecution, registry, label: value.label, roleAccess };
 }
 
 export type ComputerAccess = "observe" | "control";
@@ -190,7 +197,10 @@ export interface ComputerAccessRequest {
   actor: ComputerActor;
   access: ComputerAccess;
   reason: string;
-  status: "pending" | "granted" | "denied" | "released";
+  revision: number;
+  status: "pending" | "granting" | "granted" | "denied" | "cancelled" | "indeterminate" | "released" | "unavailable";
+  /** Original physical assignment identity. Its presence alone never authorizes input. */
+  assignmentId?: string;
   createdAt: string;
   detail?: string;
 }
@@ -229,6 +239,13 @@ export function parseComputerActivity(value: unknown): ComputerActivity {
     ...(value.sessionId === undefined ? {} : { sessionId: value.sessionId }), ...(execution ? { execution } : {}) };
 }
 
+/** A projection wake-up, not an assignment or a complete state replacement. */
+export interface ComputerAutomationInvalidation { work: ComputerWorkRef }
+export function parseComputerAutomationInvalidation(value: unknown): ComputerAutomationInvalidation {
+  if (!computerObject(value) || Object.keys(value).some(key => key !== "work")) throw new Error("computer_automation_invalidation_invalid");
+  return { work: parseComputerWorkRef(value.work) };
+}
+
 export function parseComputerAutomationProjection(value: unknown): ComputerAutomationProjection {
   if (!computerObject(value) || !Array.isArray(value.activities)) throw new Error("computer_automation_projection_invalid");
   return { state: parseComputerAutomationState(value.state), activities: value.activities.map((entry: unknown) => {
@@ -264,10 +281,12 @@ export function parseComputerAutomationState(value: unknown): ComputerAutomation
   const requests: ComputerAccessRequest[] = value.requests.map((entry: unknown) => {
     const base = assignment(entry);
     if (!computerObject(entry) || !computerId(entry.createdAt) || !computerId(entry.reason)
-      || !["pending", "granted", "denied", "released"].includes(String(entry.status))
+      || !["pending", "granting", "granted", "denied", "cancelled", "indeterminate", "released", "unavailable"].includes(String(entry.status))
+      || !Number.isSafeInteger(entry.revision) || Number(entry.revision) < 1
+      || entry.assignmentId !== undefined && !computerId(entry.assignmentId)
       || entry.detail !== undefined && typeof entry.detail !== "string") throw new Error("computer_request_invalid");
     return { ...base, access: base.access as ComputerAccess, reason: entry.reason, createdAt: entry.createdAt,
-      status: entry.status as ComputerAccessRequest["status"], ...(entry.detail === undefined ? {} : { detail: entry.detail }) };
+      revision: Number(entry.revision), status: entry.status as ComputerAccessRequest["status"], ...(entry.assignmentId === undefined ? {} : { assignmentId: entry.assignmentId }), ...(entry.detail === undefined ? {} : { detail: entry.detail }) };
   });
   const cleanups: ComputerCleanup[] = value.cleanups.map((entry: unknown) => {
     if (!computerObject(entry) || entry.status !== "cancelling" && entry.status !== "cancel-unconfirmed"

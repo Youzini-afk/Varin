@@ -24,6 +24,7 @@ import type {
   ComputerAccess,
   ComputerGesture,
   ComputerAutomationState,
+  ComputerAutomationInvalidation,
   ComputerActivity,
   ComputerActivityEntry,
   ComputerArtifact,
@@ -423,6 +424,7 @@ export interface ComputerServiceOptions {
   resolveScope?: (work: ComputerWorkRef) => Promise<ComputerWorkScope | null>;
   notifyActor?: (actor: ComputerActor, text: string, wake: boolean, id: string, recipient?: 'actor' | 'root') => Promise<void>;
   onAutomationChange?: (state: ComputerAutomationState) => void;
+  onAutomationInvalidated?: (event: ComputerAutomationInvalidation) => void;
   revokeSession?: (actor: ComputerActor) => Promise<void>;
   bindDesktop?: (actor: ComputerActor, desktopId: string) => Promise<void>;
   client: KernelClient;
@@ -468,6 +470,8 @@ export interface ComputerServiceOptions {
 }
 
 export interface ComputerService {
+  /** The existing physical owner generation, never a replacement runtime identity. */
+  controlOwnerEpoch: string;
   automation: ReturnType<typeof createComputerAutomation>;
   resolveDesktop(desktopId?: string, frozenDefault?: string | null): Promise<string>;
   stopDesktop(params: import('@varin/protocol').ComputerDesktopStopParams): Promise<import('@varin/protocol').ComputerDesktopStopResult>;
@@ -596,6 +600,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     notify: options.notifyActor ?? (async () => { throw new HarnessServiceError('unavailable', 'Computer Use message delivery is unavailable'); }),
     revokeSession: options.revokeSession ?? (async () => {}),
     bindDesktop: options.bindDesktop ?? (async () => {}),
+    onInvalidate: work => {
+      if (!disposed) options.onAutomationInvalidated?.({ work });
+      queueMicrotask(() => { if (!disposed) for (const id of lanes.keys()) broadcastControl(id); });
+    },
     onChange: state => { options.onAutomationChange?.(state); queueMicrotask(() => { if (!disposed) for (const id of lanes.keys()) broadcastControl(id); }); },
     reserve: (lease, signal) => reserveDesktop(lease, signal),
     describeDesktop: async (id) => (await desktopRecord(id)).desktop.label,
@@ -723,7 +731,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       const body = JSON.parse(record.payloadJson) as Record<string, unknown>;
       const runtime = decodeComputerRuntime(body);
       const at = new Date().toISOString();
-      body.runtimeVersion = 2;
+      body.runtimeVersion = 3;
       body.usage = { execution: actor.execution, at };
       body.work = [...(runtime.work ?? []).filter(item => actor.registry && item.registry ? item.registry.scopeId !== actor.registry.scopeId || item.registry.threadId !== actor.registry.threadId : !sameComputerWork(item.work, actor.execution.work)),
         { work: actor.execution.work, registry: actor.registry, at }];
@@ -926,7 +934,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       ? { id: interrupted.id, actor: interrupted.actor,
         desktopId, label: desktop.label, at: new Date().toISOString() } satisfies PendingHandback : null;
     await putRecord(record.recordId, "computer.desktop", record.state, {
-      ...body, runtimeVersion: 2,
+      ...body, runtimeVersion: 3,
       ...(localControl ? { control: { ...laneFor(desktopId).control } } : {}),
       interrupted: handback ? null : interrupted ?? null,
       ...(event ? { handbackEvents: [...decodeComputerRuntime(body).handbackEvents, event] } : {}),
@@ -1401,7 +1409,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     if (JSON.stringify(stored) !== JSON.stringify(previous)) throw new ComputerError('computer-input-release-unconfirmed', 'The desktop physical owner changed while saving its release; refresh and retry Stop');
     try {
       await client.putRecord({ operationId: `computer.desktop:physical:${randomUUID()}`, workspaceId: COMPUTER_CATALOG_WORKSPACE_ID,
-        recordId, recordType: 'computer.desktop', state: record.state, payloadJson: JSON.stringify({ ...body, runtimeVersion: 2, physicalControl: next ?? null }),
+        recordId, recordType: 'computer.desktop', state: record.state, payloadJson: JSON.stringify({ ...body, runtimeVersion: 3, physicalControl: next ?? null }),
         ownerIds: [], references: [], expectedRecordRevision: record.recordRevision });
     } catch { throw new ComputerError('computer-input-release-unconfirmed', next
       ? 'The physical input owner could not be saved; no new input was sent. Retry the operation'
@@ -3538,7 +3546,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   };
 
   return {
-    automation, resolveDesktop: resolveDesktopId,
+    automation, controlOwnerEpoch: origin, resolveDesktop: resolveDesktopId,
     async stopDesktop({ desktopId, automationEpoch }) {
       if (!automationEpoch?.trim()) throw new ComputerError('computer-request-invalid', 'Use the control generation shown by this desktop view');
       const bound = boundLocalDesktop(desktopId);
@@ -3558,7 +3566,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     },
     async finishExecution(execution) {
       await automation.finishRun(execution);
-      const matches = (actor: ComputerActor | undefined) => actor && (sameComputerExecution(actor.execution, execution) || Boolean(actor.rootExecution && sameComputerExecution(actor.rootExecution, execution)));
+      const matches = (actor: ComputerActor | undefined) => actor && (sameComputerExecution(actor.execution, execution) || Boolean(actor.execution.work.runtime === 'pi' && actor.rootExecution && sameComputerExecution(actor.rootExecution, execution)));
       for (const [id, lane] of lanes) {
         if (matches(lane.interrupted?.actor)) {
           delete lane.interrupted;

@@ -292,14 +292,25 @@ pairing and stage their new prompt on a worker. The commit uses that frozen cut 
 appends history or publishes a later context. Branch creation participates in the same ingress ordering;
 retries preserve the original fork, and a previous owner cannot publish a late candidate.
 
+Computer requests reuse ordinary tool Operations and the shared observation machinery. Request
+metadata and a typed root Environment input commit together after worker-side body staging. Root
+ModelStep/PolicyAction decisions and explicit user commands bind their original choice/reason to one
+physical assignment claim; only the existing Computer owner proves ready/released state. A request
+Wait is a separate Job observation, with once-only history delivery and original continuation/rebind
+handling after recovery. Its cancellation does not cancel the requester or its physical assignment.
+Notifications interrupt only an actual parked child-dependency path to that requester. Idle-root
+activation and terminal-requester invalidation preserve the normal Goal/pause/question boundaries.
+Metadata reconciliation and cancellation never need request reason bodies. Current child admission
+still requires its original real file source; pure-capability source-less children are separate work.
+
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 42, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
+Catalog version 43, input domain 6 and collaboration domain 7 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,
 history, all model outputs (including rejected output), original command intents, queued-history references, context
 checkpoints, memory projections, summary recipes and source parts, policy action/checkpoint bodies,
-and indexed graph calls/receipts, follow-up and calendar instructions/intents, Goal objective/reason/creation-intent references, planning-model request/output references, ordinary tool arguments/results,
+and indexed graph calls/receipts, follow-up and calendar instructions/intents, Computer request/decision reasons and event details, Goal objective/reason/creation-intent references, planning-model request/output references, ordinary tool arguments/results,
 external executor receipts, immutable Host Job acceptance and User command bodies, and permission call/scope bodies, including historical receipt and completed
 permission audit events and original invocation completions. It verifies each distinct live object
 before sweeping and preserves unknown files; it never deletes history or invokes system-kernel GC.

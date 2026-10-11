@@ -38,6 +38,10 @@ export function createThreadsHttpAPI(): ThreadsAPI {
         const result = await post<{ state: unknown }>('computer/stop', { ...identity, ...request }, signal);
         return { state: parseComputerAutomationState(result.state) };
       },
+      decide: async (identity, request, signal) => {
+        const result = await post<{ state: unknown }>('computer/decide', { ...identity, ...request }, signal);
+        return { state: parseComputerAutomationState(result.state) };
+      },
     },
     research: {
       scopes: (identity, signal) => post('research/scopes', identity, signal),

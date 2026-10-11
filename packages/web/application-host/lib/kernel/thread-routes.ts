@@ -65,6 +65,7 @@ const modelSelection = (value: unknown): ThreadModel => {
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
 export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler, research?: ThreadResearchAPI, computer?: ThreadComputerAPI): void {
   const fields: Record<string, readonly string[]> = {
+    'computer/decide': ['runtime', 'threadId', 'branchId', 'requestId', 'expectedRevision', 'decision', 'key', 'reason'],
     'computer/state': ['runtime', 'threadId', 'branchId'],
     'computer/stop': ['runtime', 'threadId', 'branchId', 'runId', 'desktopId'],
     'research/scopes': ['runtime', 'threadId', 'branchId'],
@@ -133,14 +134,18 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
         try {
           body = object(request.body);
           if (Object.keys(body).some(key => !fields[method]!.includes(key))) throw new Error('Unsupported thread request field');
-          if (method === 'computer/state' || method === 'computer/stop') {
+          if (method.startsWith('computer/')) {
             const work = parseComputerWorkRef(body);
             if (work.runtime !== 'agent') throw new Error('Agent Thread required');
             if (method === 'computer/stop') parseComputerExecutionRef({ work, runId: body.runId });
+            if (method === 'computer/decide' && (typeof body.requestId !== 'string' || !body.requestId.trim()
+              || !Number.isSafeInteger(body.expectedRevision) || Number(body.expectedRevision) < 1
+              || body.decision !== 'grant' && body.decision !== 'deny' || typeof body.key !== 'string' || !body.key.trim()
+              || body.reason !== undefined && typeof body.reason !== 'string')) throw new Error('Invalid Computer decision');
             if (body.desktopId !== undefined && (typeof body.desktopId !== 'string' || !body.desktopId.trim())) throw new Error('Desktop must be nonempty');
           }
         } catch (error) {
-          if (method === 'computer/state' || method === 'computer/stop') throw new ComputerError('computer-request-invalid', 'Choose an Agent Thread and branch; Stop also requires the exact Run shown in its Computer state');
+          if (method.startsWith('computer/')) throw new ComputerError('computer-request-invalid', 'Choose an Agent Thread and branch; Stop also requires the exact Run shown in its Computer state');
           throw error;
         }
         response.json(await action(body, controller.signal));
@@ -158,6 +163,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     });
   };
   if (computer) {
+    post('computer/decide', (body, signal) => computer.decide(identity(body), { requestId: text(body.requestId), expectedRevision: Number(body.expectedRevision), decision: body.decision as 'grant' | 'deny', key: text(body.key), ...(body.reason === undefined ? {} : { reason: body.reason as string }) }, signal));
     post('computer/state', (body, signal) => computer.state(identity(body), signal));
     post('computer/stop', body => computer.stop(identity(body), { runId: text(body.runId), ...(body.desktopId === undefined ? {} : { desktopId: text(body.desktopId) }) }));
   }

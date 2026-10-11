@@ -184,7 +184,9 @@ impl ChildWaitPreparation {
             });
         }
         let text = if self.wait.cancelled {
-            "The observation wait was cancelled. The child task was not cancelled.".into()
+            if let Some(request)=self.op.result.as_ref().and_then(|r|r.control().ok()).and_then(|v|v.get("interrupted_for_computer_request")).and_then(Value::as_str) {
+                format!("This child observation was interrupted for Computer request {request}. The child task was not cancelled and has not been reported complete. Decide the pending resource request, then wait for the original child again if needed.")
+            } else { "The observation wait was cancelled. The child task was not cancelled.".into() }
         } else {
             {
                 let report = self.child.report.as_ref().expect("checked report");
@@ -386,7 +388,7 @@ impl Catalog {
         });
         op.effect = Effect::None;
         op.result = Some(OperationResultMetadata::Control {
-            value: json!({"child_operation_id":child.operation_id,"report_history_id":item_id,"wait_cancelled":wait.cancelled}),
+            value: json!({"child_operation_id":child.operation_id,"report_history_id":item_id,"wait_cancelled":wait.cancelled,"interrupted_for_computer_request":capture.op.result.as_ref().and_then(|r|r.control().ok()).and_then(|v|v.get("interrupted_for_computer_request"))}),
         });
         op.revision += 1;
         put(&tx, "operations", &op.id, &op)?;

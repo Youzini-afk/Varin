@@ -24,10 +24,10 @@ const invalid = (): never => { throw new ComputerError('computer-runtime-record-
 
 export function decodeComputerRuntime(body: Record<string, unknown>): ComputerRuntimeRecord {
   const nonempty = (value: unknown) => value !== undefined && value !== null && (!Array.isArray(value) || value.length > 0);
-  if (body.runtimeVersion !== 2 && ['usage', 'work', 'interrupted', 'handbackEvents', 'physicalControl'].some(key => nonempty(body[key]))) {
+  if (body.runtimeVersion !== 3 && ['usage', 'work', 'interrupted', 'handbackEvents', 'physicalControl'].some(key => nonempty(body[key]))) {
     throw new ComputerError('computer-runtime-format-unsupported', 'This desktop has an obsolete internal work/control record; stop its original physical session before resetting its runtime metadata');
   }
-  if (body.runtimeVersion !== undefined && body.runtimeVersion !== 2) return invalid();
+  if (body.runtimeVersion !== undefined && body.runtimeVersion !== 3) return invalid();
   try {
     const result: ComputerRuntimeRecord = { handbackEvents: [] };
     if (body.usage != null) {

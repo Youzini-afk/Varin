@@ -1940,6 +1940,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (work.runtime !== 'pi') throw new ComputerError('computer-owner-unavailable', 'Agent Computer environment input is not connected');
       await piRuntimeBroker.requestForSession(work.sessionId, wake ? 'agent.threadRequest' : 'agent.notify', { sessionId: work.sessionId, messageId: `computer:${id}`, text });
     },
+    onAutomationInvalidated: (event) => broadcastGlobalUiEvent?.({ type: 'varin:computer-automation-invalidated', properties: event }),
     onAutomationChange: (state) => {
       // A previous Run can finish releasing input after the next one has started. Project the
       // registry's current root execution, never publish that old cleanup as the new round's state.

@@ -1,5 +1,93 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export interface ComputerRequestExecution {
+  threadId: string;
+  branchId: string;
+  runId: string;
+}
+
+export type ComputerRequestAccess = 'observe' | 'control';
+
+export type ComputerRequestStatus = 'pending' | 'granting' | 'granted' | 'denied' | 'cancelled' | 'indeterminate';
+
+export type ComputerDecisionActor = {kind:'tool';operationId:string} | {kind:'user';threadId:string;branchId:string;key:string};
+
+export interface ComputerDecisionClaim {
+  actor: ComputerDecisionActor;
+  manager: ComputerRequestExecution | null;
+  hostEpoch: string;
+  assignmentId: string;
+  approved: boolean;
+  reasonRef: unknown | null;
+}
+
+export interface ComputerRequestRecord {
+  id: string;
+  operationId: string;
+  rootThreadId: string;
+  rootBranchId: string;
+  desktopId: string;
+  executionOwner: ExecutorOwner;
+  requester: ComputerRequestExecution;
+  access: ComputerRequestAccess;
+  revision: number;
+  status: ComputerRequestStatus;
+  createdAtMs: number;
+  requestRef: unknown;
+  detailRef: unknown | null;
+  claim: ComputerDecisionClaim | null;
+}
+
+export interface ComputerRequestView {
+  request: ComputerRequestRecord;
+  reason: string;
+  detail: string | null;
+}
+
+export interface ComputerRequestCreateParams {
+  operationId: string;
+  desktopId: string;
+  access: ComputerRequestAccess;
+  reason: string;
+}
+
+export interface ComputerRequestListParams {
+  rootThreadId?: string;
+  rootBranchId?: string;
+}
+
+export interface ComputerDecisionBeginParams {
+  requestId: string;
+  expectedRevision: number;
+  actor: ComputerDecisionActor;
+  approved: boolean;
+  hostEpoch: string;
+  assignmentId: string;
+  reason?: string;
+}
+
+export interface ComputerDecisionSettleParams {
+  requestId: string;
+  claim: ComputerDecisionClaim;
+  status: ComputerRequestStatus;
+  reason?: string;
+}
+
+export type ComputerRequestCancelTarget = {kind:'requests';requestIds:string[]} | {kind:'execution';execution:ComputerRequestExecution;family:boolean;desktopId:string | null};
+
+export interface ComputerRequestCancelParams {
+  target: ComputerRequestCancelTarget;
+}
+
+export interface ComputerRequestReconcileParams {
+  hostEpoch?: string;
+}
+
+export interface ComputerRequestWaitParams {
+  operationId: string;
+  requestId: string;
+}
+
 export interface HostJobBinding {
   operationId: string;
   executionOwner: ExecutorOwner;

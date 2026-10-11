@@ -1,4 +1,4 @@
-import { computerExecutionKey, sameComputerWork } from '@varin/protocol';
+import { computerExecutionKey, sameComputerExecution, sameComputerWork } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
@@ -14,9 +14,8 @@ export function ComputerAutomationSection({ view, directory }: { view: ReturnTyp
     ...view.activities.map(entry => entry.desktopId),
     ...state?.cleanups.flatMap(item => item.desktopId ? [item.desktopId] : []) ?? [],
   ]);
-  const pending = state?.requests.filter(item => item.status === 'pending') ?? [];
   const status = state?.status ?? 'enabled';
-  const execution = state?.currentRootExecution ?? state?.currentExecution;
+  const execution = state?.currentExecution;
   return <div className="space-y-3">
     {status !== 'enabled' ? <p role="status" className="typography-meta text-muted-foreground">{t(`computer.automation.${status}`)}</p> : null}
     {status === 'cancel-unconfirmed' || state?.cleanups.some(item => item.status === 'cancel-unconfirmed') ? <p className="typography-micro text-muted-foreground">{t('computer.automation.error.releaseUnconfirmed')}</p> : null}
@@ -26,19 +25,38 @@ export function ComputerAutomationSection({ view, directory }: { view: ReturnTyp
       const activity = view.activities.find(entry => entry.desktopId === desktopId)?.activity;
       const desktopLabel = leases.find(lease => lease.desktopLabel)?.desktopLabel ?? desktopId;
       const operator = controller && state && sameComputerWork(controller.actor.execution.work, state.rootWork) ? t('computer.automation.main') : controller?.actor.label;
-      return <button key={desktopId} type="button" className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-interactive-hover"
+      const controllerExecution = controller?.actor.execution;
+      const stopController = controllerExecution && state
+        && (sameComputerWork(state.work, state.rootWork) || sameComputerWork(controllerExecution.work, state.work))
+        && (!execution || !sameComputerExecution(controllerExecution, execution))
+        && !state?.cleanups.some(cleanup => sameComputerExecution(cleanup.execution, controllerExecution) && (!cleanup.desktopId || cleanup.desktopId === desktopId));
+      return <div key={desktopId}><button type="button" className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-interactive-hover"
         onClick={() => openTab(directory, { mode: 'computer', targetPath: desktopId, dedupeKey: `desktop:${desktopId}`, label: desktopLabel })}>
         <Icon name={activity?.status === 'running' ? 'loader-4' : 'computer'} className={`size-4 shrink-0 text-muted-foreground ${activity?.status === 'running' ? 'animate-spin' : ''}`} />
         <span className="min-w-0 flex-1"><span className="block truncate typography-meta">{desktopLabel}</span>
           <span className="block truncate typography-micro text-muted-foreground">{controller?.suspended ? t('settings.computers.view.control.you') : operator ?? t('computer.automation.observeOnly')}{activity?.status === 'running' ? ` · ${t(`computer.operation.${activity.operation}`)}` : ''}</span>
           {activity ? <span className="block truncate typography-micro text-muted-foreground/75">{activity.app}</span> : null}</span>
         <Icon name="arrow-right-s" className="size-3.5 text-muted-foreground" />
-      </button>;
+      </button>
+        {stopController ? <Button size="sm" variant="outline" disabled={view.busy} className="mt-1"
+          onClick={() => void view.stop(controllerExecution, desktopId)}>{t('computer.automation.stop')}</Button> : null}
+      </div>;
     })}
-    {pending.map(item => <div key={item.id} className="rounded-lg bg-muted/25 px-2 py-2 typography-meta">
+    {state?.requests.map(item => <div key={item.id} className="rounded-lg bg-muted/25 px-2 py-2 typography-meta">
       <span className="block text-[var(--status-warning)]">{t('computer.automation.request', { name: item.actor.label })}</span>
       <span className="block truncate typography-micro text-muted-foreground">{item.desktopLabel ?? item.desktopId} · {t(item.access === 'control' ? 'computer.automation.control' : 'computer.automation.observeOnly')}</span>
-      <p className="mt-1 line-clamp-2 text-muted-foreground">{item.reason}</p>
+      <p role="status" className="typography-micro text-muted-foreground">{t(`computer.automation.requestStatus.${item.status}`)}</p>
+      <p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">{item.reason}</p>
+      {item.detail ? <p className="mt-1 whitespace-pre-wrap break-words typography-micro text-muted-foreground">{item.detail}</p> : null}
+      {view.decisionRequestId === item.id ? <p role="status" className="typography-micro text-muted-foreground">{t('computer.automation.deciding')}</p> : null}
+      {item.status === 'indeterminate' || item.status === 'unavailable' ? <div className="mt-1">
+        <p className="typography-micro text-muted-foreground">{t(`computer.automation.requestHelp.${item.status}`)}</p>
+        <Button size="sm" variant="ghost" disabled={view.busy} onClick={() => void view.refresh()}>{t('settings.harness.retry')}</Button>
+      </div> : null}
+      {item.status === 'pending' && view.canDecideRequests ? <div className="mt-2 flex gap-2">
+        <Button size="sm" variant="outline" disabled={view.busy || Boolean(view.decisionRequestId)} onClick={() => void view.decide(item, 'grant')}>{t('computer.automation.grant')}</Button>
+        <Button size="sm" variant="ghost" disabled={view.busy || Boolean(view.decisionRequestId)} onClick={() => void view.decide(item, 'deny')}>{t('computer.automation.deny')}</Button>
+      </div> : null}
     </div>)}
     {state?.cleanups.map(cleanup => <div key={JSON.stringify([computerExecutionKey(cleanup.execution), cleanup.desktopId])} className="rounded-lg bg-muted/25 px-2 py-2 typography-meta">
       <p role="status">{t(`computer.automation.${cleanup.status}`)}</p>
