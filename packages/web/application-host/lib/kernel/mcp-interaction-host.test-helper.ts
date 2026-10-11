@@ -14,7 +14,7 @@ import { createInteractionConsumer } from './mcp-interaction-consumer.test-helpe
 import { createInteractionHttpPeer, writeInteractionStdioConfiguration } from './mcp-interaction-peer.test-helper.js';
 
 export async function createInteractionFixture(options: { root: string; mode: 'http' | 'stdio'; kernel: KernelClient;
-  runtime: AgentRuntimeClient; bridge: ToolBridge; onError(error: Error): void }) {
+  runtime: AgentRuntimeClient; bridge: ToolBridge; sampling?: boolean; onError(error: Error): void }) {
   const { root, kernel, runtime, bridge } = options;
   const interactions = createMcpInteractionRuntime({ kernel, runtime, onError: options.onError });
   runtime.setMcpInteractionOwner(interactions);
@@ -28,13 +28,15 @@ export async function createInteractionFixture(options: { root: string; mode: 'h
   const { StreamableHttpTransport } = await import(sdkUrl.href) as { StreamableHttpTransport: new (options: { url: string; fetch: ReturnType<typeof createInteractionHttpPeer>['fetch'] }) => ReturnType<NonNullable<McpAuthorityOptions['createTransport']>> };
   const authority = new McpAuthority({ interactions: input => interactions.receiver(input),
     interactionErrors: input => interactions.errorReceiver(input),
+    ...(options.sampling ? { sampling: input => interactions.samplingReceiver(input) } satisfies Partial<McpAuthorityOptions> : {}),
     ...(http ? { createTransport: () => new StreamableHttpTransport({ url: 'https://receiver.invalid/mcp', fetch: http.fetch }) } : {}) });
   const compositions = new McpCompositions(authority, code => options.onError(new Error(code)));
   const recovery = createMcpTaskRecovery({ kernel, authority, agentDir, hostId: 'fixture-host',
     inspectWorkspace: async () => { throw new Error('Source-less interaction acquired a workspace'); }, projectTrusted: () => false,
     validateLiveSource: async () => { throw new Error('Source-less interaction acquired a file source'); } });
   const tasks = createMcpTaskRuntime({ kernel, runtime, recover: recovery, onError: options.onError });
-  const consumer = createInteractionConsumer(runtime);
+  const models = options.sampling ? (await import('./mcp-sampling-model.test-helper.js')).createSamplingModelAuthority() : undefined;
+  const consumer = createInteractionConsumer(runtime, models);
   const scopes: McpCompositionScope[] = [];
   let nested: Awaited<ReturnType<typeof import('./mcp-consumer-host.test-helper.js').createMcpConsumers>> | undefined;
   const baseScope = { agentDir, configCwd: agentDir, executionCwd: agentDir, environmentId: 'fixture-host:global', executionScope: 'global' as const, projectTrusted: false };

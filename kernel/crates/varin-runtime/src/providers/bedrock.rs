@@ -95,17 +95,14 @@ impl ModelProvider for BedrockProvider {
                     continue;
                 }
             }
-            let role = if matches!(
-                item.provenance,
-                Provenance::Assistant | Provenance::PolicyOutput { .. }
-            ) {
+            let role = if item.provenance.is_assistant() {
                 "assistant"
             } else {
                 "user"
             };
             match item.content {
                 Content::Text { text } | Content::ReasoningSummary { text } => {
-                    if matches!(item.provenance, Provenance::SystemInstruction { .. }) {
+                    if item.provenance.is_system() {
                         system.push(json!({"text":text}));
                     } else if !text.is_empty() {
                         push(&mut messages, role, json!({"text":text}));
@@ -136,8 +133,9 @@ impl ModelProvider for BedrockProvider {
                     }
                 }
                 Content::Output { output } => {
+                    let role = evidence_role(&item.provenance, role);
                     for block in bedrock_parts(evidence_parts(&output, &item.provenance))? {
-                        push(&mut messages, "user", block);
+                        push(&mut messages, role, block);
                     }
                 }
                 Content::ProviderOnly => {}

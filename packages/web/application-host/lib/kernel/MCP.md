@@ -166,7 +166,7 @@ also exist for Runs without a child-delegation directory; this does not enable c
 
 For `input_required`, the coordinator opens the actual `tasks/result` request, preserving the
 original roots handler and related-task association. Form/URL elicitation now uses the original
-interaction owner below. Sampling remains unadvertised and explicitly unsupported.
+interaction owner below. Basic sampling uses the separate two-review model execution below.
 
 ## Reviewed server-initiated form and URL requests
 
@@ -196,8 +196,47 @@ URL content is plain remote text with the exact URL/host. Opening uses the exist
 only on an explicit user action; no fetch, preview, favicon, embedded access or inferred completion.
 Server completion can precede local consent or arrive after the finite RPC ends, while that actual
 client still owns the matching elicitation ID. Consent/opening does not itself prove completion.
-Sampling remains subsequent work. Subscribe and explicit unsubscribe retain their own real invocation
+Subscribe and explicit unsubscribe retain their own real invocation
 association/error body; background observer cleanup cannot impersonate a user-facing call.
+
+### Reviewed isolated sampling
+
+An installed sampling receiver advertises only the basic `sampling` capability before initialize.
+It uses the same original HTTP response-stream or accepted-Task association; ordinary unassociated
+stdio cannot borrow a Thread. The original interaction links a real generation Operation in the
+existing Catalog. Its execution is distinct from the parent MCP call and from response delivery.
+
+The first review edits the complete request and explicitly selects a model from the existing model
+authority. Renderer input cannot supply provider endpoints or credentials. The actual registered
+adapter, serializer, transport and private credential bridge execute that selection. Approved
+systemPrompt/user/assistant roles apply only inside this isolated sampling request, with explicit
+sampling provenance. Main Thread history, memory, Goal instructions, tools and opaque continuation
+are not imported. Model preferences are hints, not authority to change the reviewed selection.
+The original tool origin's frozen Goal identity still governs inference admission and usage through
+the existing Goal budget ledger. Isolated prompt content does not exempt the generation from its
+execution budget; observed usage and interrupted missing usage remain accounted for exactly once.
+
+A second review accepts or rejects the actual generated output before it is sent to the original
+server. Rejection cannot erase observed output, usage or a provider receipt. The interaction owns
+review/delivery; the generation Operation owns dispatch, cancellation and execution evidence. The
+original RunSupervisor observes that worker independently, including when an accepted Task outlives
+its parent Run. Its exact operation-scoped credential binding survives natural Run cleanup but not
+current account/scope withdrawal, original request fences or kernel close.
+
+Original and edited requests, the exact provider snapshot, observed output and receipt use the sole
+ContentStore, publication protection and GC. Pages and lifecycle sweeps carry short projections;
+explicit reads hydrate bodies outside Catalog. Previous failed preparation attempts stay readable
+through their original Operation after the user corrects the request. Reopening never regenerates
+a dispatched model request or resends an interrupted reply.
+
+This implementation accepts text/image blocks and block arrays and returns text. Tools/toolChoice,
+audio, context inclusion, task-augmented sampling and unmapped provider metadata receive explicit
+diagnostics rather than being silently discarded. Original `_meta` Task association is distinct from
+requesting task augmentation. Token limits are bounded by the reviewed original request and selected
+model capacity; unsupported adapter limits or stop sequences remain actionable errors. Provider
+completion, local executor stop, missing/actual usage and reply delivery are separate facts.
+The [sampling verification record](../../../../../docs/reviews/runtime-mcp-sampling-2026-10-11.md)
+separates actual native/Host/SDK composition, controlled model streams and product/platform limits.
 
 ### Error-source URL requirements
 

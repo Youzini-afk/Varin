@@ -23,7 +23,7 @@ const makeView = (): McpInteractionView => ({ record: { id: 'elicitation:first',
     { name: 'choice', title: 'Choice', kind: 'enum', required: true, default: '', options: [{ value: '', title: 'Empty choice' }, { value: 'b', title: 'Second choice' }] },
     { name: 'many', title: 'Several choices', kind: 'multi_enum', required: true, default: [], options: [{ value: 'a', title: 'A' }, { value: 'b', title: 'B' }], minItems: 0, maxItems: 2 },
   ] } });
-type API = Pick<ThreadsAPI, 'listMcpInteractions' | 'readMcpInteraction' | 'respondMcpInteraction'>;
+type API = Pick<ThreadsAPI, 'listMcpInteractions' | 'readMcpInteraction' | 'respondMcpInteraction' | 'reviewMcpSamplingRequest' | 'reviewMcpSamplingOutput' | 'cancelOperation'>;
 const item = ({ record, presentation, response }: McpInteractionItem): McpInteractionItem => structuredClone({ record, presentation, response });
 const errorView = (): McpInteractionView => {
   const view = makeView();
@@ -35,6 +35,9 @@ const errorView = (): McpInteractionView => {
 function fixture() {
   let view = makeView();
   const api = {
+    reviewMcpSamplingRequest: vi.fn<API['reviewMcpSamplingRequest']>(),
+    reviewMcpSamplingOutput: vi.fn<API['reviewMcpSamplingOutput']>(),
+    cancelOperation: vi.fn<API['cancelOperation']>(),
     listMcpInteractions: vi.fn<API['listMcpInteractions']>(async () => ({ items: [item(view)], nextCursor: null })),
     readMcpInteraction: vi.fn<API['readMcpInteraction']>(async () => structuredClone(view)),
     respondMcpInteraction: vi.fn<API['respondMcpInteraction']>(async input => {

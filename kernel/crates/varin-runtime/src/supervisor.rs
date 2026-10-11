@@ -57,6 +57,12 @@ struct Worker {
     join: Option<JoinHandle<()>>,
     pending: Option<PendingLaunch>,
 }
+struct OperationWorker {
+    run_id: String,
+    parent_operation_id: String,
+    cancel: CancellationToken,
+    join: Option<JoinHandle<()>>,
+}
 struct RunDrain {
     serial: Mutex<()>,
     active: AtomicBool,
@@ -75,6 +81,7 @@ pub struct RunSupervisor {
     stopping: AtomicBool,
     catalog: Arc<Mutex<Catalog>>,
     workers: Mutex<HashMap<String, Worker>>,
+    operation_workers: Mutex<HashMap<String, OperationWorker>>,
     quiescence: Mutex<HashMap<String, Arc<RunDrain>>>,
     failures: Arc<Mutex<HashMap<String, ExecutionError>>>,
     wake: Arc<Mutex<Option<mpsc::Sender<()>>>>,
@@ -85,10 +92,14 @@ impl RunSupervisor {
             stopping: AtomicBool::new(false),
             catalog: Arc::new(Mutex::new(catalog)),
             workers: Mutex::new(HashMap::new()),
+            operation_workers: Mutex::new(HashMap::new()),
             quiescence: Mutex::new(HashMap::new()),
             failures: Arc::new(Mutex::new(HashMap::new())),
             wake: Arc::new(Mutex::new(None)),
         }
+    }
+    pub fn is_stopping(&self) -> bool {
+        self.stopping.load(Ordering::Acquire)
     }
     pub fn catalog(&self) -> Arc<Mutex<Catalog>> {
         self.catalog.clone()
@@ -577,6 +588,7 @@ impl RunSupervisor {
             .unwrap_or(false)
     }
     pub fn cancel_control(&self, run_id: &str) -> bool {
+        if let Ok(workers) = self.operation_workers.lock() { for worker in workers.values().filter(|w|w.run_id==run_id) { worker.cancel.cancel(); } }
         if let Ok(workers) = self.workers.lock() {
             let tokens: Vec<_> = workers
                 .iter()
@@ -595,12 +607,14 @@ impl RunSupervisor {
         false
     }
     pub fn cancel_operation_control(&self, operation_id: &str) -> bool {
+        let mut found = false;
+        if let Ok(workers) = self.operation_workers.lock() { for (id,worker) in workers.iter() { if id==operation_id || worker.parent_operation_id==operation_id { worker.cancel.cancel(); found=true; } } }
         self.workers
             .lock()
             .map(|workers| {
                 workers
                     .values()
-                    .any(|worker| worker.cancel.cancel_child(operation_id))
+                    .fold(found, |found,worker| worker.cancel.cancel_child(operation_id) || found)
             })
             .unwrap_or(false)
     }
@@ -967,7 +981,78 @@ impl RunSupervisor {
             })
             .collect())
     }
+    /// Independent, Catalog-owned operation execution. Direct control remains in this supervisor.
+    pub fn start_operation(
+        self: &Arc<Self>,
+        operation_id: &str,
+        parent_operation_id: &str,
+        run_id: &str,
+        execute: impl FnOnce(&CancellationToken) -> Result<()> + Send + 'static,
+    ) -> Result<()> {
+        let token = CancellationToken::default();
+        let mut workers = self.operation_workers.lock().map_err(error)?;
+        if self.stopping.load(Ordering::Acquire) {
+            return Err(error("runtime is stopping"));
+        }
+        if workers.contains_key(operation_id) {
+            return Ok(());
+        }
+        let token_worker = token.clone();
+        let owner = self.clone();
+        let id = operation_id.to_owned();
+        let join = thread::Builder::new()
+            .name("mcp-sampling".into())
+            .spawn(move || {
+                let result = execute(&token_worker);
+                if let Err(failure) = result {
+                    if let Ok(mut errors) = owner.failures.lock() {
+                        errors.insert(id, failure);
+                    }
+                }
+                if let Ok(wake) = owner.wake.lock() {
+                    if let Some(wake) = wake.as_ref() {
+                        let _ = wake.send(());
+                    }
+                }
+            })
+            .map_err(error)?;
+        workers.insert(
+            operation_id.into(),
+            OperationWorker {
+                run_id: run_id.into(),
+                parent_operation_id: parent_operation_id.into(),
+                cancel: token,
+                join: Some(join),
+            },
+        );
+        Ok(())
+    }
+    /// Durable Goal/source/interaction fences signal live operations without waiting for body I/O.
+    pub fn reconcile_operation_controls(&self) -> Result<()> {
+        let entries: Vec<_> = self.operation_workers.lock().map_err(error)?
+            .iter().map(|(id, worker)| (id.clone(), worker.cancel.clone())).collect();
+        let catalog = self.catalog.lock().map_err(error)?;
+        for (id, token) in entries {
+            if !catalog.sampling_generation_live(&id).unwrap_or(false) {
+                token.cancel();
+            }
+        }
+        Ok(())
+    }
     pub fn reap(&self) -> Result<()> {
+        self.reconcile_operation_controls()?;
+        let completed_operations = {
+            let mut workers = self.operation_workers.lock().map_err(error)?;
+            let ids: Vec<_> = workers.iter()
+                .filter(|(_, worker)| worker.join.as_ref().is_some_and(JoinHandle::is_finished))
+                .map(|(id, _)| id.clone()).collect();
+            ids.into_iter()
+                .filter_map(|id| workers.remove(&id).and_then(|worker| worker.join))
+                .collect::<Vec<_>>()
+        };
+        for join in completed_operations {
+            join.join().map_err(|_| error("operation worker panicked"))?;
+        }
         let completed = {
             let mut workers = self.workers.lock().map_err(error)?;
             let ids: Vec<_> = workers
@@ -987,6 +1072,18 @@ impl RunSupervisor {
     }
     pub fn shutdown(&self) -> Result<()> {
         self.stopping.store(true, Ordering::Release);
+        let operations = {
+            let mut workers = self.operation_workers.lock().map_err(error)?;
+            for worker in workers.values() {
+                worker.cancel.cancel();
+            }
+            std::mem::take(&mut *workers)
+        };
+        for (_, worker) in operations {
+            if let Some(join) = worker.join {
+                join.join().map_err(|_| error("operation worker panicked"))?;
+            }
+        }
         {
             let catalog = self.catalog.lock().map_err(error)?;
             catalog.stop_followup_admission();

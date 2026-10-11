@@ -44,6 +44,7 @@ impl ControlCommands {
                         p.action,
                     )
                     .map_err(domain)?;
+                self.runtime.reconcile_operation_controls().map_err(|e|KernelError::Operation(e.to_string()))?;
                 return Ok(Some(serde_json::to_value(receipt)?));
             }
             "runtime.followup.control" => {
@@ -104,6 +105,7 @@ impl ControlCommands {
             .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
             .cancel_tree_checked(target, expected_parent_thread_id)
             .map_err(domain)?;
+        self.runtime.reconcile_operation_controls().map_err(|e|KernelError::Operation(e.to_string()))?;
         for run in &capture.run_ids {
             self.runtime.cancel_control(run);
         }

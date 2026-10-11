@@ -60,9 +60,9 @@ impl ModelProvider for CodexProvider {
         let mut instructions = Vec::new();
         compiled
             .history
-            .retain(|item| !matches!(item.provenance, Provenance::SystemInstruction { .. }));
+            .retain(|item| !item.provenance.is_system());
         for item in &view.history {
-            if matches!(item.provenance, Provenance::SystemInstruction { .. }) {
+            if item.provenance.is_system() {
                 if let Content::Text { text } = &item.content {
                     instructions.push(text.clone());
                 } else {
@@ -83,7 +83,9 @@ impl ModelProvider for CodexProvider {
         body["tool_choice"] = json!("auto");
         body["parallel_tool_calls"] = json!(true);
         // A branch is the stable cache/session boundary. The run ID handles branchless callers.
-        let session = if let crate::execution::RequestOrigin::PolicyModelJob{action_id,..} = &view.origin {
+        let session = if let crate::execution::RequestOrigin::McpSampling{operation_id,..} = &view.origin {
+            operation_id
+        } else if let crate::execution::RequestOrigin::PolicyModelJob{action_id,..} = &view.origin {
             action_id
         } else if view.binding.history_range.branch_id.is_empty() {
             &view.run_id

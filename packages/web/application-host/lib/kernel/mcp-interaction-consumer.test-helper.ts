@@ -6,12 +6,12 @@ import type { Express, Request as ExpressRequest, RequestHandler, Response as Ex
 import { createThreadsHttpAPI, type ThreadIdentity } from '@varin/application-client';
 import type { McpElicitationResponse } from '@varin/protocol';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
-import { ThreadAdapter } from './thread-adapter.js';
+import { ThreadAdapter, type ThreadModelAuthority } from './thread-adapter.js';
 import { registerThreadRoutes } from './thread-routes.js';
 
-export function createInteractionConsumer(runtime: AgentRuntimeClient) {
+export function createInteractionConsumer(runtime: AgentRuntimeClient, models?: ThreadModelAuthority) {
   const unexpected = async (): Promise<never> => { throw new Error('MCP user response must not launch a Run or acquire a model/source'); };
-  const adapter = new ThreadAdapter(runtime, { resolveModel: unexpected, rebindModel: unexpected }, unexpected, unexpected);
+  const adapter = new ThreadAdapter(runtime, models ?? { resolveModel: unexpected, rebindModel: unexpected }, unexpected, unexpected);
   const routes = new Map<string, RequestHandler[]>();
   const app = { post(path: string, ...handlers: RequestHandler[]) { routes.set(path, handlers); }, get() {} } as unknown as Express;
   registerThreadRoutes(app, adapter, (request, response, next) => {
@@ -46,8 +46,16 @@ export function createInteractionConsumer(runtime: AgentRuntimeClient) {
     async perform(frame: Record<string, unknown>) {
       const identity: ThreadIdentity = { runtime: 'agent', threadId: String(frame.threadId), branchId: String(frame.branchId) };
       if (frame.action === 'list') return api.listMcpInteractions(identity);
+      if (frame.action === 'run') return runtime.run(String(frame.runId));
+      if (frame.action === 'cancel-generation') return api.cancelOperation(String(frame.generationOperationId));
+      if (frame.action === 'operation') return api.operation(String(frame.generationOperationId));
       const target = { ...identity, operationId: String(frame.operationId), interactionId: String(frame.interactionId) };
       if (frame.action === 'read') return api.readMcpInteraction(target);
+      if (frame.action === 'sampling-request') {
+        const input = { ...target, expectedRevision: Number(frame.expectedRevision), action: frame.choice, editedRequest: frame.editedRequest, model: frame.model };
+        return api.reviewMcpSamplingRequest(input as Parameters<typeof api.reviewMcpSamplingRequest>[0]);
+      }
+      if (frame.action === 'sampling-output') return api.reviewMcpSamplingOutput({ ...target, expectedRevision: Number(frame.expectedRevision), action: frame.choice as 'accept' | 'decline' | 'cancel' });
       assert.equal(frame.action, 'respond');
       return api.respondMcpInteraction({ ...target, expectedRevision: Number(frame.expectedRevision), response: frame.response as McpElicitationResponse });
     },

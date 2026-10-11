@@ -14,6 +14,7 @@ pub(super) struct Host {
     pub(super) responses: mpsc::Sender<Value>,
     pub(super) cursor: u64,
     pub(super) permissions: usize,
+    pub(super) credentials: crate::credential_bridge::CredentialBridge,
     pub(super) reject_acceptance_reply: bool,
     pub(super) interrupted_acceptance: bool,
     pub(super) hold_acceptance: bool,
@@ -38,6 +39,17 @@ impl Host {
         let output = child.stdout.take().unwrap();
         let (tx, frames) = mpsc::channel();
         let responses = tx.clone();
+        let (credential_tx, credential_rx) = mpsc::sync_channel(16);
+        let credentials = crate::credential_bridge::CredentialBridge::new(credential_tx);
+        credentials.initialize(EPOCH).unwrap();
+        let credential_frames = tx.clone();
+        thread::spawn(move || {
+            for frame in credential_rx {
+                if credential_frames.send(frame).is_err() {
+                    break;
+                }
+            }
+        });
         thread::spawn(move || {
             for line in BufReader::new(output).lines() {
                 let Ok(line) = line else { break };
@@ -55,6 +67,7 @@ impl Host {
             responses,
             cursor: 0,
             permissions: 0,
+            credentials,
             reject_acceptance_reply: false,
             interrupted_acceptance: false,
             hold_acceptance: false,
@@ -90,6 +103,14 @@ impl Host {
             Err(error) => panic!("MCP Host closed: {error}"),
         };
         match frame["kind"].as_str().unwrap() {
+            "credential-request" => {
+                self.send(frame);
+                None
+            }
+            "credential-response" => {
+                self.credentials.receive(frame);
+                None
+            }
             "fixture-request" => {
                 let method = frame["method"].as_str().unwrap();
                 let params = frame["params"].clone();
@@ -124,6 +145,15 @@ impl Host {
                     Err(KernelError::Operation(
                         "fixture: original acceptance was unavailable before commit".into(),
                     ))
+                } else if method == "runtime.operation.status" {
+                    let p: OperationParams = serde_json::from_value(params.clone()).unwrap();
+                    runtime
+                        .catalog()
+                        .lock()
+                        .unwrap()
+                        .operation(&p.operation_id)
+                        .map(|op| operation_cancellation_receipt(&op))
+                        .map_err(|error| KernelError::Operation(error.to_string()))
                 } else if method == "runtime.operation.cancel" {
                     let p: OperationParams = serde_json::from_value(params.clone()).unwrap();
                     let op = runtime
@@ -132,16 +162,23 @@ impl Host {
                         .unwrap()
                         .operation(&p.operation_id)
                         .unwrap();
-                    assert!(op.mcp_resource_subscription.is_some() && op.managed_process.is_none());
-                    // This fixture has only external MCP observers, not process/question teardown.
+                    assert!(
+                        (op.mcp_resource_subscription.is_some()
+                            || op.executor.as_deref() == Some("mcp-sampling.v1"))
+                            && op.managed_process.is_none()
+                    );
+                    // This fixture has MCP observers and sampling, not process/question teardown.
                     // Use the same original supervisor control and short receipt as ControlCommands.
                     runtime
                         .cancel_operation(&p.operation_id)
                         .map(|op| operation_cancellation_receipt(&op))
                         .map_err(|error| KernelError::Operation(error.to_string()))
-                } else if method.starts_with("runtime.mcp.interaction.") {
+                } else if method.starts_with("runtime.mcp.interaction.")
+                    || method.starts_with("runtime.mcp.sampling.")
+                {
                     mcp_interaction_commands::execute(
                         runtime.clone(),
+                        &self.credentials,
                         method,
                         params.clone(),
                         &AtomicBool::new(false),
@@ -223,14 +260,16 @@ impl Host {
                 }
                 if method == "runtime.permission.open" {
                     self.permissions += 1;
-                    assert!(runtime
-                        .catalog()
-                        .lock()
-                        .unwrap()
-                        .operation(params["operationId"].as_str().unwrap())
-                        .unwrap()
-                        .waiting_on
-                        .is_some());
+                    assert!(
+                        runtime
+                            .catalog()
+                            .lock()
+                            .unwrap()
+                            .operation(params["operationId"].as_str().unwrap())
+                            .unwrap()
+                            .waiting_on
+                            .is_some()
+                    );
                     self.send(json!({"kind":"fixture-permission","operationId":params["operationId"],"permissionId":params["permissionId"]}));
                 }
                 None
@@ -313,6 +352,7 @@ impl Host {
 }
 impl Drop for Host {
     fn drop(&mut self) {
+        self.credentials.close();
         let _ = self.child.kill();
         let _ = self.child.wait();
     }

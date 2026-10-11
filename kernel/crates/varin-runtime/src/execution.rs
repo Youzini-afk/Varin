@@ -174,6 +174,7 @@ impl CancellationToken {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Provenance {
+    Sampling { interaction_id: String, role: crate::mcp_sampling::SamplingRole },
     SystemInstruction {
         source: String,
     },
@@ -204,6 +205,11 @@ pub enum Provenance {
     EnvironmentFact {
         event_id: String,
     },
+}
+
+impl Provenance {
+    pub fn is_system(&self) -> bool { matches!(self, Self::SystemInstruction { .. } | Self::Sampling { role: crate::mcp_sampling::SamplingRole::System, .. }) }
+    pub fn is_assistant(&self) -> bool { matches!(self, Self::Assistant | Self::PolicyOutput { .. } | Self::Sampling { role: crate::mcp_sampling::SamplingRole::Assistant, .. }) }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -362,6 +368,7 @@ pub struct RequestView<M = ResolvedMedia> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RequestOrigin {
+    McpSampling { interaction_id: String, operation_id: String, parent_operation_id: String },
     Conversation {
         step: u64,
         history_range: HistoryRange,

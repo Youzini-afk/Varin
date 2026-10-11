@@ -667,10 +667,10 @@ export class KernelClient {
 
 
   /** Host-only owner registration. This is not exposed through tool grants or renderer APIs. */
-  async registerCredentialOwner(runId: string, owner: ExistingHostCredentialOwner, signal?: AbortSignal, bindingId?: string): Promise<CredentialScope> {
+  async registerCredentialOwner(runId: string, owner: ExistingHostCredentialOwner, signal?: AbortSignal, bindingId?: string, lifetime?: import('./credential-bridge.js').CredentialLifetime): Promise<CredentialScope> {
     if (!this.handshakeResult) await this.start();
     signal?.throwIfAborted();
-    return this.credentialBridge.register(runId, owner, signal, bindingId);
+    return this.credentialBridge.register(runId, owner, signal, bindingId, lifetime);
   }
   unregisterCredentialOwner(runId: string, bindingId?: string | null): void { this.credentialBridge.unregister(runId, bindingId); }
   async registerMcpOwner(runId: string, lease: McpToolLease): Promise<McpBinding> {

@@ -914,19 +914,21 @@ pub(crate) fn spawn(
                         }
                         if method.starts_with("runtime.mcp.resource.")
                             || method.starts_with("runtime.mcp.interaction.")
+                            || method.starts_with("runtime.mcp.sampling.")
                             || method.starts_with("runtime.host_job.")
                             || method == "runtime.research.scopes"
                             || method.starts_with("runtime.computer.")
                         {
                             let runtime = runtime.clone();
+                            let credentials = credential_bridge.clone();
                             let method = method.to_owned();
                             let response_id = id.clone();
                             let response_sender = responses.clone();
                             let done = finished.clone();
                             let cancelled = cancellation.clone();
                             thread::spawn(move || {
-                                let result = if method.starts_with("runtime.mcp.interaction.") {
-                                    mcp_interaction_commands::execute(runtime, &method, params, &cancelled)
+                                let result = if method.starts_with("runtime.mcp.interaction.") || method.starts_with("runtime.mcp.sampling.") {
+                                    mcp_interaction_commands::execute(runtime, &credentials, &method, params, &cancelled)
                                 } else if method.starts_with("runtime.mcp.resource.") {
                                     mcp_resource_commands::execute(runtime, &method, params, &cancelled)
                                 } else if method.starts_with("runtime.computer.") {

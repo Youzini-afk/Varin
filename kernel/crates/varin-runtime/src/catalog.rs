@@ -38,7 +38,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 53;
+pub(crate) const FORMAT: i64 = 54;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -1468,6 +1468,7 @@ impl Catalog {
                 put(&tx, "operations", &op.id, &op)?;
                 continue;
             }
+            if mcp_interactions::sampling::recover(&tx, &mut op)? { continue; }
             if let Some(intent) = policy::graph_metadata(&op)? {
                 policy_body::PolicyGraphProgress::read(&op, &intent)?;
                 // The graph owns orchestration only. Each durable node retains its own invocation/dispatch evidence; only trusted light reads can replay.

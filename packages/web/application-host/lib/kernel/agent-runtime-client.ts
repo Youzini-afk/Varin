@@ -455,6 +455,14 @@ export class AgentRuntimeClient {
 
   private mcpInteractionOwner?: import('./mcp-interaction-runtime.js').McpInteractionRuntime;
   setMcpInteractionOwner(owner: import('./mcp-interaction-runtime.js').McpInteractionRuntime): void { this.mcpInteractionOwner = owner; }
+  reviewMcpSamplingRequest(input: import('./protocol.generated.js').McpSamplingRequestReviewParams, model?: import('./mcp-interaction-runtime.js').SamplingModelSelection, signal?: AbortSignal): Promise<import('./protocol.generated.js').McpInteractionView> {
+    if (!this.mcpInteractionOwner) return Promise.reject(new Error('MCP interaction owner is unavailable'));
+    return this.mcpInteractionOwner.reviewRequest(input, model, signal);
+  }
+  reviewMcpSamplingOutput(input: import('./protocol.generated.js').McpSamplingOutputReviewParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').McpInteractionView> {
+    if (!this.mcpInteractionOwner) return Promise.reject(new Error('MCP interaction owner is unavailable'));
+    return this.mcpInteractionOwner.reviewOutput(input, signal);
+  }
   listMcpInteractions(input: import('./protocol.generated.js').McpInteractionListParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').McpInteractionPage> {
     return this.kernel.agentRuntimeRequest('runtime.mcp.interaction.list', input, signal);
   }

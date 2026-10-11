@@ -137,23 +137,20 @@ impl ModelProvider for GoogleProvider {
                 }
                 // Signatures are model-bound even within a protocol family. Keep only semantics.
             }
-            let role = if matches!(
-                item.provenance,
-                Provenance::Assistant | Provenance::PolicyOutput { .. }
-            ) {
+            let role = if item.provenance.is_assistant() {
                 "model"
             } else {
                 "user"
             };
             if new_turn
                 && role == "user"
-                && !matches!(item.provenance, Provenance::SystemInstruction { .. })
+                && !item.provenance.is_system()
             {
                 contents.push(json!({"role":"user","parts":[]}));
             }
             match item.content {
                 Content::Text { text } | Content::ReasoningSummary { text } => {
-                    if matches!(item.provenance, Provenance::SystemInstruction { .. }) {
+                    if item.provenance.is_system() {
                         if !contents.is_empty() {
                             return Err(ExecutionError::new(
                                 "unsupported_mid_conversation_system",
@@ -198,8 +195,9 @@ impl ModelProvider for GoogleProvider {
                     }
                 }
                 Content::Output { output } => {
+                    let role = evidence_role(&item.provenance, role);
                     for part in google_parts(evidence_parts(&output, &item.provenance))? {
-                        push(&mut contents, "user", part);
+                        push(&mut contents, role, part);
                     }
                 }
                 Content::ProviderOnly => {}

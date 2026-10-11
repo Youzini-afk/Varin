@@ -1,5 +1,47 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export interface McpInteractionPending extends McpInteractionRecord {
+  generation?: McpSamplingGeneration;
+}
+
+export type McpInteractionPresentation = McpElicitationPresentation | { mode: 'sampling'; message: string };
+
+export interface McpSamplingGenerateParams {
+  operationId: string;
+  interactionId: string;
+  expectedRevision: number;
+  editedRequest: Record<string, unknown>;
+  configuration: ModelSessionConfiguration;
+  credentialScope?: CredentialScope;
+}
+
+export interface McpSamplingOutputReviewParams {
+  operationId: string;
+  interactionId: string;
+  expectedRevision: number;
+  action: McpSamplingOutputAction;
+}
+
+export interface McpSamplingRequestReviewParams {
+  operationId: string;
+  interactionId: string;
+  expectedRevision: number;
+  action: McpSamplingRequestAction;
+  editedRequest?: Record<string, unknown>;
+}
+
+export type McpSamplingOutputAction = 'accept' | 'decline' | 'cancel';
+
+export type McpSamplingRequestAction = 'generate' | 'decline' | 'cancel';
+
+export interface McpSamplingBodies { editedRequest: Record<string, unknown> | null; output: McpSamplingResult | null; providerOutput: unknown | null; receipt: unknown | null; snapshot: unknown | null; }
+
+export interface McpSamplingResult { role: 'assistant'; model: string; content: { type: 'text'; text: string } | { type: 'text'; text: string }[]; stopReason?: string; }
+
+export interface McpSamplingGeneration { operationId: string; phase: OperationPhase; outcome: Outcome | null; cancelRequested: boolean; dispatch: 'not_started' | 'started' | 'completed' | 'interrupted'; model: { providerId: string | null; providerFamily: string; model: string; maxTokens: number } | null; usage: { measurement: 'missing' | 'estimated' | 'actual'; inputTokens: number | null; outputTokens: number | null; cachedInputTokens: number | null; cacheWriteTokens: number | null; reasoningTokens: number | null; pricingVersion: string | null }; problem: string | null; }
+
+export interface McpSamplingState { generationOperationId: string | null; review: 'request' | 'output' | 'closed'; }
+
 export type McpRequestId = string | number;
 
 export type McpInteractionRelation = { kind: 'rpc_response_stream'; outgoingRequestId: McpRequestId } | { kind: 'task'; taskId: string };
@@ -12,7 +54,7 @@ export interface McpElicitationField { name: string; title: string; description?
 
 export type McpElicitationPresentation = { mode: 'form'; message: string; fields: McpElicitationField[] } | { mode: 'url'; message: string; url: string; elicitationId: string };
 
-export type McpInteractionMode = 'form' | 'url';
+export type McpInteractionMode = 'form' | 'url' | 'sampling';
 
 export type McpInteractionChoice = 'accept' | 'decline' | 'cancel';
 
@@ -41,16 +83,19 @@ export interface McpInteractionRecord {
   delivery: McpInteractionDelivery | null;
   completionReported: boolean;
   problem: string | null;
+  sampling?: McpSamplingState;
 }
 
 export interface McpInteractionItem {
   record: McpInteractionRecord;
-  presentation: McpElicitationPresentation;
+  presentation: McpInteractionPresentation;
   response: McpElicitationResponse | null;
+  generation?: McpSamplingGeneration;
 }
 
 export interface McpInteractionView extends McpInteractionItem {
   request: Record<string, unknown>;
+  sampling?: McpSamplingBodies;
 }
 
 export interface McpInteractionPage {
@@ -63,7 +108,7 @@ export interface McpInteractionOpenParams {
   binding: McpInteractionBinding;
   mode: McpInteractionMode;
   request: Record<string, unknown>;
-  presentation: McpElicitationPresentation;
+  presentation: McpInteractionPresentation;
 }
 
 export interface McpInteractionErrorItem {
@@ -136,7 +181,7 @@ export interface ContentRef { content_object: string }
 
 export type OutputSource = {kind:'conversation';provenance:ContentProvenance} | {kind:'tool';context:{run_id:string;origin:ToolOrigin;operation_id:string}} | {kind:'operation';operation_id:string};
 
-export type ContentProvenance = {kind:'system_instruction';source:string} | {kind:'goal_instruction';goal_id:string;generation:number} | {kind:'user_instruction';input_id:string} | {kind:'assistant'} | {kind:'policy_output';action_id:string;identity:{name:string;version:string}} | {kind:'tool_data';call_id:string} | {kind:'policy_tool_data';reference:OutputEvidenceRef} | {kind:'external_data';source:string} | {kind:'agent_message';thread_id:string} | {kind:'environment_fact';event_id:string};
+export type ContentProvenance = {kind:'system_instruction';source:string} | {kind:'goal_instruction';goal_id:string;generation:number} | {kind:'user_instruction';input_id:string} | {kind:'sampling';interaction_id:string;role:'system'|'user'|'assistant'} | {kind:'assistant'} | {kind:'policy_output';action_id:string;identity:{name:string;version:string}} | {kind:'tool_data';call_id:string} | {kind:'policy_tool_data';reference:OutputEvidenceRef} | {kind:'external_data';source:string} | {kind:'agent_message';thread_id:string} | {kind:'environment_fact';event_id:string};
 
 export interface OutputEvidenceRef { action_id: string; node_id: string; content_ref: string }
 
@@ -1182,7 +1227,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 8; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 9; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 

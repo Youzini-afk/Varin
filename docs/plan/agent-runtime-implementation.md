@@ -19,6 +19,14 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-12 增量：原 MCP sampling 与双重用户审查
+
+- 原 authority/client 在 initialize 前只协商 basic sampling，真实 HTTP 原响应流或 accepted Task 保 Operation/endpoint/权限关联。原 Catalog **54**、wire **9**直接拒旧；原 interaction 链接真实独立 generation Operation，唯一 RunSupervisor 执行，未造 ModelStep、Run、主会话历史或第二推理服务。
+- 第一次公开 review 审改完整请求并从真实模型 owner 明确选模型，原 adapter/serializer/private credential 执行；第二次确认后才返原 server。采样保自身 system/user/assistant 角色，但不导入主上下文或工具；原 tool origin 的 FrozenGoal 仍按原账核预算、pending 与实录/缺失计量。Task 父 Run 自然结束不误释放独立 operation credential，原撤权/取消/恢复门仍在。
+- 六处真实接缝已修并原条件复验：取消先丢已到达输出；Goal 预算/用量漏账；模型目录前置拒绝把 UI 锁成发送未知；同键改模型冲突被旧结果吞掉；短 token cap 破坏已选 thinking 预算；新 sampling 角色映射改变旧 policy typed 输出角色。没有用重复名单、第二计量库或自动收费重放兜底。
+- 原 MCP **15** 组真实组合、provider/Goal/HostJob/公共入口/UI 回归与独立原红探针按同冻结源通过；fresh wire9 kernel、Host/Web/CLI/cloud 布局已核。有限合同、复跑入口、SHA 与分层证据见[本片验收](../reviews/runtime-mcp-sampling-2026-10-11.md)。当前是 text/image 输入、text 输出；tools/context/audio/provider metadata/task-augmented sampling 明确不支持，不把有限实现称全协议或整产品验收。
+- 后续继续两设计中的环境/Web/材料/PDF/学术/Bot、来源/检索/上下文/provider 等能力及必要 MCP 组合；先依据真实产品 owner 复核下一片，不按提交数推完成率。最终默认切换、Pi 删除与资产迁移仍交用户验收后负责。
+
 ## 2026-10-12 增量：原 RPC 错误的 MCP URL 要求
 
 - 原 SDK pending-response 位置保完整 `-32042` 与真实 outgoing ID，普通工具、资源/prompt、显式订阅清理、Task 创建/get/result/cancel 同合同；不伪造 inbound request。Catalog **53**、wire **8**直接拒旧，正文仍唯一 ContentStore，共享错误正文一次 stage、多个短记录原子发布；公开分页不重复携带完整错误。

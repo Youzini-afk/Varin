@@ -1,9 +1,9 @@
-import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams } from '@varin/protocol';
+import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpSamplingOutputReviewParams } from '@varin/protocol';
 import type { MediaReadParams, MediaReadChunk } from './protocol.generated.js';
 import type { MessageSendParams, MessageListParams } from '@varin/protocol';
 import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
 import type { ChildProfilePreparer } from './child-profiles.js';
-import type { ThreadToolInspection } from '@varin/application-client';
+import type { ThreadToolInspection, ThreadMcpSamplingRequestReview } from '@varin/application-client';
 import type { PlanService } from './plan-service.js';
 import type { ImageAttachment } from '@varin/protocol';
 import { threadInput } from './thread-images.js';
@@ -24,6 +24,16 @@ export interface ThreadModelAuthority {
   listModels?(): Promise<ThreadModelInfo[]>;
   resolveModel(selection: ThreadModel): Promise<{ configuration: ModelSessionConfiguration; credentialOwner: ExistingHostCredentialOwner }>;
   rebindModel(configuration: ModelSessionConfiguration, expectedScope: CredentialScope): Promise<ExistingHostCredentialOwner>;
+}
+
+/** This boundary has not invoked native generation admission. Do not infer that from error codes. */
+export class ThreadPreAdmissionError extends Error {
+  readonly code: string;
+  constructor(reason: unknown) {
+    super('Thread request preparation failed before admission');
+    this.code = reason && typeof reason === 'object' && 'code' in reason && typeof reason.code === 'string'
+      ? reason.code : 'mcp_sampling_model_selection_failed';
+  }
 }
 
 /** Projection and admission only: Rust owns all conversation, queue and execution facts. */
@@ -161,6 +171,23 @@ export class ThreadAdapter {
     await this.readMcpInteraction(input, signal);
     return this.runtime.respondMcpInteraction({ operationId: input.operationId, interactionId: input.interactionId,
       expectedRevision: input.expectedRevision, response: input.response }, signal);
+  }
+  async reviewMcpSamplingRequest(input: ThreadMcpSamplingRequestReview, signal?: AbortSignal) {
+    await this.readMcpInteraction(input, signal);
+    let model: Awaited<ReturnType<ThreadModelAuthority['resolveModel']>> | undefined;
+    if (input.action === 'generate') {
+      try { model = await this.models.resolveModel(input.model); }
+      catch (error) { throw new ThreadPreAdmissionError(error); }
+    }
+    signal?.throwIfAborted();
+    return this.runtime.reviewMcpSamplingRequest({ operationId: input.operationId, interactionId: input.interactionId,
+      expectedRevision: input.expectedRevision, action: input.action,
+      ...(input.action === 'generate' ? { editedRequest: input.editedRequest } : {}) }, model, signal);
+  }
+  async reviewMcpSamplingOutput(input: ThreadIdentity & McpSamplingOutputReviewParams, signal?: AbortSignal) {
+    await this.readMcpInteraction(input, signal);
+    return this.runtime.reviewMcpSamplingOutput({ operationId: input.operationId, interactionId: input.interactionId,
+      expectedRevision: input.expectedRevision, action: input.action }, signal);
   }
   async answerQuestion(input: ThreadIdentity & { operationId: string; answer: string }) {
     await this.requireIdentity(input);

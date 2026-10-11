@@ -24,7 +24,7 @@ export interface NestedToolReceipt {
 
 export interface OutputEvidenceRef { action_id: string; node_id: string; content_ref: string }
 
-export type ContentProvenance = {kind:'system_instruction';source:string} | {kind:'goal_instruction';goal_id:string;generation:number} | {kind:'user_instruction';input_id:string} | {kind:'assistant'} | {kind:'policy_output';action_id:string;identity:{name:string;version:string}} | {kind:'tool_data';call_id:string} | {kind:'policy_tool_data';reference:OutputEvidenceRef} | {kind:'external_data';source:string} | {kind:'agent_message';thread_id:string} | {kind:'environment_fact';event_id:string};
+export type ContentProvenance = {kind:'system_instruction';source:string} | {kind:'goal_instruction';goal_id:string;generation:number} | {kind:'user_instruction';input_id:string} | {kind:'sampling';interaction_id:string;role:'system'|'user'|'assistant'} | {kind:'assistant'} | {kind:'policy_output';action_id:string;identity:{name:string;version:string}} | {kind:'tool_data';call_id:string} | {kind:'policy_tool_data';reference:OutputEvidenceRef} | {kind:'external_data';source:string} | {kind:'agent_message';thread_id:string} | {kind:'environment_fact';event_id:string};
 
 export type OutputSource = {kind:'conversation';provenance:ContentProvenance} | {kind:'tool';context:{run_id:string;origin:ToolOrigin;operation_id:string}} | {kind:'operation';operation_id:string};
 

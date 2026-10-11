@@ -1099,7 +1099,7 @@ impl GoalReportPreparation {
         })
     }
 }
-fn origin_goal(
+pub(super) fn origin_goal(
     db: &Connection,
     origin: &crate::execution::ToolOrigin,
 ) -> Result<Option<FrozenGoal>> {

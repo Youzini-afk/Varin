@@ -7,7 +7,8 @@ export interface PrivateCredentialResponse {
   error?: { code: string; message: string };
 }
 interface Request { v: 1; kind: 'credential-request'; id: string; kernelEpoch: string; runId: string; bindingId?: string | null; scope: CredentialScope; dispatch?: CredentialDispatch | null }
-interface OwnerEntry { runId: string; owner: ExistingHostCredentialOwner; scope: CredentialScope; epoch: string; abort: AbortController; active: Set<string> }
+export type CredentialLifetime = { kind: 'run' } | { kind: 'operation'; operationId: string; assertLive?: () => Promise<void> };
+interface OwnerEntry { lifetime: CredentialLifetime; runId: string; owner: ExistingHostCredentialOwner; scope: CredentialScope; epoch: string; abort: AbortController; active: Set<string> }
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const scopeValid = (value: unknown): value is CredentialScope => record(value)
   && ['reference', 'authority', 'account'].every(key => typeof value[key] === 'string' && Boolean(value[key]))
@@ -20,19 +21,19 @@ export class CredentialBridge {
   constructor(private readonly currentEpoch: () => string | null,
     private readonly send: (response: PrivateCredentialResponse) => Promise<void>,
     private readonly transportFailed: () => void) {}
-  async register(runId: string, owner: ExistingHostCredentialOwner, signal?: AbortSignal, bindingId?: string): Promise<CredentialScope> {
+  async register(runId: string, owner: ExistingHostCredentialOwner, signal?: AbortSignal, bindingId?: string, lifetime: CredentialLifetime = { kind: 'run' }): Promise<CredentialScope> {
     const key = ownerKey(runId, bindingId);
     const epoch = this.currentEpoch();
-    if (!epoch || !runId || bindingId === '' || this.#owners.has(key)) throw new CredentialOwnerError('credential-owner-registration-invalid');
+    if (!epoch || !runId || bindingId === '' || (lifetime.kind === 'operation' && (!lifetime.operationId || !bindingId)) || this.#owners.has(key)) throw new CredentialOwnerError('credential-owner-registration-invalid');
     const scope = await waitWithSignal(owner.scope(), signal);
     signal?.throwIfAborted();
     if (this.currentEpoch() !== epoch || this.#owners.has(key)) throw new CredentialOwnerError('credential-owner-registration-stale');
-    this.#owners.set(key, { runId, owner, scope, epoch, abort: new AbortController(), active: new Set() });
+    this.#owners.set(key, { lifetime, runId, owner, scope, epoch, abort: new AbortController(), active: new Set() });
     return { ...scope };
   }
   unregister(runId: string, bindingId?: string | null): void {
     for (const [key, entry] of this.#owners) {
-      if (entry.runId === runId && (bindingId === undefined || key === ownerKey(runId, bindingId))) {
+      if (entry.runId === runId && (bindingId === undefined ? entry.lifetime.kind === 'run' : key === ownerKey(runId, bindingId))) {
         this.#owners.delete(key); entry.abort.abort();
       }
     }
@@ -69,7 +70,9 @@ export class CredentialBridge {
   }
   async #resolve(request: Request, entry: OwnerEntry): Promise<void> {
     try {
+      if(entry.lifetime.kind === 'operation')await entry.lifetime.assertLive?.();
       const result = await entry.owner.resolve(entry.scope, entry.abort.signal, request.dispatch ?? undefined);
+      if(entry.lifetime.kind === 'operation')await entry.lifetime.assertLive?.();
       if (this.currentEpoch() !== request.kernelEpoch || this.#owners.get(ownerKey(request.runId, request.bindingId)) !== entry || entry.abort.signal.aborted) return;
       if (!same(result.scope, entry.scope)) { await this.#reject(request, 'credential-scope-changed'); return; }
       await this.send({ v: 1, kind: 'credential-response', id: request.id, kernelEpoch: request.kernelEpoch, ok: true,

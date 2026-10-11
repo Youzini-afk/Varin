@@ -18,6 +18,28 @@ impl AnthropicProvider {
         }
     }
 }
+/// Manual thinking without tools cannot interleave multiple reasoning turns. The selected
+/// budget must fit inside the actual request output cap; reviewed options are never rewritten.
+pub(super) fn validate_thinking_capacity(
+    view: &RequestView,
+    thinking: Option<&Value>,
+    max_tokens: Option<u64>,
+) -> Result<(), ExecutionError> {
+    if view.binding.tools.is_empty()
+        && thinking.is_some_and(|thinking| {
+            thinking["type"] == "enabled"
+                && thinking["budget_tokens"].as_u64().is_some_and(|budget| {
+                    max_tokens.is_some_and(|max| budget >= max)
+                })
+        })
+    {
+        return Err(ExecutionError::new(
+            "model-thinking-output-capacity-insufficient",
+            "Selected thinking budget does not fit the reviewed output limit; choose a lower thinking setting or another model",
+        ));
+    }
+    Ok(())
+}
 // Locked Pi Messages adapter's Claude subscription tool naming contract.
 fn oauth_tool_name(name: &str) -> &str {
     const NAMES: &[&str] = &[
@@ -113,6 +135,7 @@ impl ModelProvider for AnthropicProvider {
                 "Anthropic requires a positive output token budget",
             ));
         }
+        validate_thinking_capacity(view, self.thinking.as_ref(), Some(self.max_tokens))?;
         let mut messages = Vec::new();
         let mut system = Vec::new();
         if self.oauth {
@@ -129,10 +152,7 @@ impl ModelProvider for AnthropicProvider {
                 push_block(&mut messages, "assistant", original.value);
                 continue;
             }
-            let role = if matches!(
-                item.provenance,
-                Provenance::Assistant | Provenance::PolicyOutput { .. }
-            ) {
+            let role = if item.provenance.is_assistant() {
                 "assistant"
             } else {
                 "user"
@@ -140,7 +160,7 @@ impl ModelProvider for AnthropicProvider {
             let block = match item.content {
                 Content::Text { text } | Content::ReasoningSummary { text } => {
                     let block = json!({"type":"text","text":text});
-                    if matches!(item.provenance, Provenance::SystemInstruction { .. }) {
+                    if item.provenance.is_system() {
                         system.push(block);
                         continue;
                     }
@@ -160,8 +180,9 @@ impl ModelProvider for AnthropicProvider {
                     continue;
                 }
                 Content::Output { output } => {
+                    let role = evidence_role(&item.provenance, role);
                     for block in anthropic_parts(evidence_parts(&output, &item.provenance))? {
-                        push_block(&mut messages, "user", block);
+                        push_block(&mut messages, role, block);
                     }
                     continue;
                 }
