@@ -8,6 +8,7 @@ Last updated: 2026-10-11
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [文件 inventory 与真实 reader 排空（2026-10-11）](runtime-file-inventory-2026-10-11.md) | 原 scan/measure 锁外遍历、取消与 source lease 寿命；分层组件验收 |
 | [原生研究作业与真实领域消费者（2026-10-11）](runtime-research-jobs-2026-10-11.md) | 原 Job/Wait/User 与实验 owner、精确来源/grant、产物独立收集和共享 UI；完整 Host IPC 待验 |
 | [实验短受理与真实排空（2026-10-11）](runtime-experiment-admission-2026-10-11.md) | 原实验/资源 owner、异步准备、取消恢复与 Pi/User 消费；独立七条反例修后通过 |
 | [原来源文件条件（2026-10-11）](runtime-file-followups-2026-10-11.md) | 精确来源/权限、真实 watcher/capture/writer、取消恢复与公开消费者；已完成分层验证 |

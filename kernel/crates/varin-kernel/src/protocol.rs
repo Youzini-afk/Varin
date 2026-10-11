@@ -59,7 +59,12 @@ pub(crate) fn object_path(root: &Path, hash: &str) -> Result<PathBuf, KernelErro
         .map_err(|_| KernelError::Operation(format!("malformed content hash: {hash}")))
 }
 pub(crate) fn response_ok(id: &str, result: Value) -> Value {
-    json!({"v": PROTOCOL_VERSION, "kind": "response", "id": id, "ok": true, "result": result})
+    let mut response = json!({"v": PROTOCOL_VERSION, "kind": "response", "id": id, "ok": true});
+    response
+        .as_object_mut()
+        .expect("response envelope")
+        .insert("result".into(), result);
+    response
 }
 
 pub(crate) fn reject_unknown_fields(

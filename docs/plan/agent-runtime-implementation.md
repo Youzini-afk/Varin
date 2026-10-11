@@ -8,6 +8,14 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-11 增量：文件 inventory 与真实 reader 排空
+
+- 原 file.scan/measure 复用 Kernel file_workers 和原 pending/cancel/完成链。Storage 只持原 grant/root/参数短事实；实际路径解析、目录遍历/stat、排序/hash/结果构造在 worker，公共 envelope 移动原结果。旧同步两实现删除，无新 Job、数据库或快照缓存。
+- Experiment 前后两次扫描用可选 leaseId 保原 source lease，与 captureBatch 共用实际 drain tracking；取消帧先行但 Promise 等真响应，断线不伪造排空。原 release/revoke/retire 只在实际 worker 完成后移除 retained lease，原同 scope 重获与 Storage owner lock 继续证明恢复排空。普通未绑定扫描/measure 不新建锁。
+- 保留 scope、symlink、缺失/null、Unix allocation 和分页错误。Fingerprint 是路径集合而非正文/OS snapshot，每页仍重扫，不宣称性能目标全部达成。单次 OS 调用和排序仍按实际结束保 ownership。
+- 冻结 Kernel **119/0、11 ignored**、all-targets、Host **17/17**、类型/lint/协议与实际 bundle 通过；准确 fresh binary 的原 process/Storage 回归 **1/1**。独立实际 Host consumer→client wire 窄探针 **4/4** 通过，冻结指纹吻合，独审接受且无确认代码阻断。入口、同源 SHA 和分层边界见[文件 inventory 验收](../reviews/runtime-file-inventory-2026-10-11.md)。
+- 下一片沿实际本地实验 artifact / FileResourceBackend 收口原单文件 file.capture 正文路径，然后继续其余领域事件和两设计能力；不把 metadata 隔离当作所有文件操作都已锁外。完整 Host/平台验收与用户最终迁移边界保持。
+
 ## 2026-10-11 增量：原生研究 Job 与真实消费者
 
 - 原 Catalog Operation 关联确切 domain/version/workspace/subject，Job 接受正文与 User 原意图沿 ContentStore；已计划不等已接受，调用接受与执行终态分开。普通已安装 research-tools 经真实 ModelStep/PolicyAction/ToolDirectory，User 命令同事务持久原意图与 subject，不伪装模型轮。Canonical settlement 在真实两执行路径消费同一原接受，不重写已交付 Unknown 或重放未知工作。

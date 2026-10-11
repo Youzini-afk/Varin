@@ -1076,6 +1076,7 @@ pub(crate) struct KernelFileScanParams {
     pub(crate) cursor: Option<i64>,
     pub(crate) page_size: Option<i64>,
     pub(crate) expected_fingerprint: Option<String>,
+    pub(crate) lease_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

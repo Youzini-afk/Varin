@@ -2395,6 +2395,7 @@ export interface KernelFileScanParams {
   cursor?: number;
   pageSize?: number;
   expectedFingerprint?: string;
+  leaseId?: string;
 }
 
 export interface KernelFileMeasureParams {

@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, describe, it } from "vitest";
 import { KernelClientError, type KernelClient, type KernelScopedClient } from "../kernel/kernel-client.js";
 import { createLocalExperimentBackend, ExperimentPreparationError } from "./experiment-backend.js";
-import { materializeExperimentAttempt, reconcileExperimentPreparation, openExperimentInputTransfer, type ExperimentInputSnapshot } from "./experiment-workspace.js";
+import { materializeExperimentAttempt, reconcileExperimentPreparation, openExperimentInputTransfer, prepareExperimentInput, ExperimentInputCaptureError, type ExperimentInputSnapshot } from "./experiment-workspace.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -90,4 +90,47 @@ it('transfer close waits for the actual content iterator and retires once withou
  finish();assert.equal(Buffer.from((await first).value!).toString(),'abc');assert.equal(closed,false);await reader.return?.();await closing;await transfer.close();
  assert.equal(f.calls.filter(c=>c.operation==='retire').length,1);
  await assert.rejects(async()=>{for await(const _ of transfer.readObject('sha256-bytes',3))void _;},/closed/);
+});
+
+
+it.each([1, 2])('keeps the original source lease and drain fact through inventory pass %s', async failingPass => {
+  for (const kind of ['cancelled', 'kernel-disconnected'] as const) {
+    const f = await fixture();
+    f.setLease('acquired');
+    let finish!: () => void;
+    let enter!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const held = new Promise<void>(resolve => { finish = resolve; });
+    const controller = new AbortController();
+    let pass = 0;
+    const scans: Array<{ leaseId: string }> = [];
+    Object.assign(f.scoped, {
+      fileScan: async (params: { leaseId: string }) => {
+        scans.push(params);
+        if (++pass === failingPass) {
+          enter(); await held;
+          throw new KernelClientError({ code: kind, message: kind });
+        }
+        return { paths: [], fingerprint: 'empty', nextCursor: null };
+      },
+    });
+    let settled = false;
+    const preparing = prepareExperimentInput(f.client, f.caller, f.input.sourceRoot!, {
+      captureScopes: [], signal: controller.signal,
+    }).catch(error => { settled = true; return error; });
+    await entered;
+    controller.abort();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(settled, false, 'an abort is not the inventory worker stop receipt');
+    assert.equal(f.calls.filter(call => call.operation === 'release' || call.operation === 'retire').length, 0);
+    const acquired = f.calls.find(call => call.operation === 'lease')!.value as { leaseId: string };
+    assert.ok(scans.every(scan => scan.leaseId === acquired.leaseId), 'both scans must bind the original capture lease');
+    finish();
+    const error = await preparing;
+    assert.ok(error instanceof ExperimentInputCaptureError);
+    assert.equal(error.drained, kind === 'cancelled');
+    assert.equal(error.branchCreateDispatched, false);
+    assert.equal(f.calls.filter(call => call.operation === 'retire').length, kind === 'cancelled' ? 1 : 0);
+    assert.equal(f.calls.filter(call => call.operation === 'release').length, 1, 'lease release requests defer to the original active kernel worker');
+  }
 });

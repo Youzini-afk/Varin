@@ -1,19 +1,20 @@
 import { expect, it } from 'vitest';
-import { KernelClient, type KernelGrantHandle } from './kernel-client.js';
+import { KernelClient, KernelClientError, type KernelGrantHandle } from './kernel-client.js';
 
 /** Real client admission/cancellation with only the transport replaced by an in-memory fixture. */
 function fixture() {
   const client = new KernelClient({ hostId: 'credit-review', storageRoot: '/unused', buildVersion: 'review' });
   const owner = client as unknown as {
-    epoch: string; handshakeResult: unknown; grantFromResponse(value: Record<string, unknown>): KernelGrantHandle; transport: { send(frame: Record<string, unknown>, lane: string): Promise<void>; cancelRequest(): void };
+    epoch: string; handshakeResult: unknown; grantFromResponse(value: Record<string, unknown>): KernelGrantHandle; transport: { send(frame: Record<string, unknown>, lane: string): Promise<void>; cancelRequest(): void; close(): Promise<void> };
     pending: Map<string, unknown>;
     requestRaw(method: string, params: unknown, options: unknown): Promise<unknown>;
     consumeFrame(frame: unknown): void;
+    failAll(error: Error): void;
     whenRequestsIdle(): Promise<void>;
   };
   owner.epoch = 'epoch'; owner.handshakeResult = {};
   const sent: Array<{ frame: Record<string, unknown>; lane: string }> = [];
-  owner.transport = { async send(frame, lane) { sent.push({ frame, lane }); }, cancelRequest() {} };
+  owner.transport = { async send(frame, lane) { sent.push({ frame, lane }); }, cancelRequest() {}, async close() {} };
   const request = (method: string, signal?: AbortSignal) => owner.requestRaw(method, {}, { allowBootstrap: true, signal });
   const release = (index: number) => owner.consumeFrame({ v: 1, kind: 'request-credit-released', id: sent[index]!.frame.id,
     kernelEpoch: 'epoch', method: sent[index]!.frame.method });
@@ -58,13 +59,17 @@ it('keeps an aborted admitted input until its original effect response after cre
   f.finish(0); await drained; expect(idle).toBe(true);
 });
 
-it.each(['capture', 'materialize'] as const)('retains the %s worker promise until its original completion while control remains available', async kind => {
+it.each(['capture', 'materialize', 'scan', 'measure'] as const)('retains the %s worker promise until its original completion while control remains available', async kind => {
   const f = fixture(); const controller = new AbortController();
   const grant = f.owner.grantFromResponse({ grant_id: 'preparation', kernel_epoch: 'epoch' });
   let settled = false;
   const work = (kind === 'capture'
     ? f.client.fileCaptureBatch({ operationId: 'capture', workspaceId: 'workspace', rootId: 'root', paths: ['input'], leaseId: 'input-lease', store: true }, grant, controller.signal)
-    : f.client.fileMaterialize({ operationId: 'materialize', workspaceId: 'workspace', rootId: 'root', path: 'attempt', sourceRoot: 'source' }, grant, controller.signal))
+    : kind === 'materialize'
+      ? f.client.fileMaterialize({ operationId: 'materialize', workspaceId: 'workspace', rootId: 'root', path: 'attempt', sourceRoot: 'source' }, grant, controller.signal)
+      : kind === 'scan'
+        ? f.client.fileScan({ workspaceId: 'workspace', rootId: 'root', path: '', leaseId: 'input-lease' }, grant, controller.signal)
+        : f.client.fileMeasure({ workspaceId: 'workspace', rootId: 'root', path: '' }, grant, controller.signal))
     .finally(() => { settled = true; });
   await tick(); controller.abort(); await tick();
   expect(settled).toBe(false);
@@ -92,4 +97,18 @@ it.each(['retire', 'revoke'] as const)('%s closes the original grant caller over
   f.finish(1); await other; await denied;
   expect(f.sent).toHaveLength(4); expect(f.owner.pending.size).toBe(1);
   f.finish(0); await f.owner.whenRequestsIdle();
+});
+
+
+it.each(['scan', 'measure'] as const)('keeps a disconnected %s distinct from its cancellation acknowledgement', async kind => {
+  const f = fixture(); const controller = new AbortController();
+  const grant = f.owner.grantFromResponse({ grant_id: 'source', kernel_epoch: 'epoch' });
+  const reading = (kind === 'scan'
+    ? f.client.fileScan({ workspaceId: 'workspace', rootId: 'root', path: '' }, grant, controller.signal)
+    : f.client.fileMeasure({ workspaceId: 'workspace', rootId: 'root', path: '' }, grant, controller.signal));
+  const rejected = expect(reading).rejects.toMatchObject({ code: 'kernel-disconnected' });
+  await tick(); controller.abort(); await tick();
+  expect(f.owner.pending.size).toBe(1);
+  f.owner.failAll(new KernelClientError({ code: 'kernel-disconnected', message: 'transport lost before worker receipt' }));
+  await rejected;
 });

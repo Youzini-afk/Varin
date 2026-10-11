@@ -648,7 +648,7 @@
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "fromPath": {"type": "string"}, "toPath": {"type": "string"}, "targetMustBeMissing": {"type": "boolean", "optional": true}, "expectedFromJson": {"type": "string", "optional": true}, "expectedToJson": {"type": "string", "optional": true}, "leaseId": {"type": "string", "optional": true}
     }},
     "KernelFileScanParams": {"fields": {
-      "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "scopes": {"type": "string[]", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}, "expectedFingerprint": {"type": "string", "optional": true}
+      "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "scopes": {"type": "string[]", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}, "expectedFingerprint": {"type": "string", "optional": true}, "leaseId": {"type": "string", "optional": true}
     }},
     "KernelFileMeasureParams": {"fields": {
       "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}

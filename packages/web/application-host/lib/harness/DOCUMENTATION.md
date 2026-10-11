@@ -221,9 +221,13 @@ A pending attempt is visible and cancellable, but cannot rerun or collect a none
 The accepted worker owns its lifetime independently of the submit response. Capture uses Rust's
 existing source lease and cancellable capture-batch worker; the original branch/create identity is
 saved before publication. Recovery reads that receipt and exact branch, never recaptures a missing
-committed branch from current files. File inventory scanning still uses the existing synchronous Rust
-metadata scan; this slice does not claim that arbitrary large directory enumeration is off the
-Storage actor. No file bytes are copied or hashed by the TypeScript control owner.
+committed branch from current files. Both inventory passes use Rust's independent metadata worker and
+retain that same source lease until the real response. Cancellation sends control immediately but waits
+for the worker acknowledgement; transport loss remains unknown, with reconciliation checking the
+original lease rather than claiming drain. Ordinary scan/measure reads need no new lease. Pagination
+still rescans the path inventory; its fingerprint is neither a content hash nor an OS snapshot. No file
+bytes are copied or hashed by the TypeScript control owner. The local artifact backend's single-file
+`file.capture` body path remains a separate synchronous Storage boundary.
 
 Cancellation first commits `cancelRequested`/`stopping` through a short record update. It does not
 wait behind preparation, spawn, or workspace reconciliation. The original worker/late dispatch receipt

@@ -1284,11 +1284,11 @@ export class KernelClient {
   }
 
   async fileScan(params: KernelMethodParams["file.scan"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.requestRaw<Record<string, unknown>>("file.scan", params, { signal, grant });
+    return this.requestRaw<Record<string, unknown>>("file.scan", params, { signal, grant, settleCancellation: true });
   }
 
   async fileMeasure(params: KernelMethodParams["file.measure"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.requestRaw<Record<string, unknown>>("file.measure", params, { signal, grant });
+    return this.requestRaw<Record<string, unknown>>("file.measure", params, { signal, grant, settleCancellation: true });
   }
 
   computeStart(params: KernelMethodParams["compute.start"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelComputeReadResult> {

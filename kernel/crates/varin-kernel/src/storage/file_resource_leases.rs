@@ -5,7 +5,10 @@ use super::*;
 use crate::model::CanonicalFileLeaseResource;
 use crate::protocol_generated::{KernelFileLeaseAcquireParams, KernelFileLeaseReleaseParams};
 
-fn covers(held: &CanonicalFileLeaseResource, requested: &CanonicalFileLeaseResource) -> bool {
+pub(super) fn covers(
+    held: &CanonicalFileLeaseResource,
+    requested: &CanonicalFileLeaseResource,
+) -> bool {
     if held.absolute == requested.absolute {
         return held.subtree || !requested.subtree;
     }
@@ -120,6 +123,29 @@ impl Storage {
         }
         Ok(())
     }
+    /// Original caller/root identity and sole active-worker check, without filesystem work.
+    pub(super) fn active_file_worker_lease(
+        &self,
+        grant: &Grant,
+        root_id: &str,
+        lease_id: &str,
+    ) -> Result<&FileLease, KernelError> {
+        if self.retained_file_leases.contains_key(lease_id) {
+            return Err(KernelError::Operation(
+                "file lease is retained by an active file worker".into(),
+            ));
+        }
+        let lease = self.file_leases.get(lease_id).ok_or_else(|| {
+            KernelError::Operation("file resource lease is no longer active".to_string())
+        })?;
+        if lease.grant_id != grant.grant_id || lease.root_id != root_id {
+            return Err(KernelError::Authorization(
+                "file resource lease belongs to another grant or root".to_string(),
+            ));
+        }
+        Ok(lease)
+    }
+
     pub(super) fn assert_file_lease(
         &self,
         grant: &Grant,
@@ -129,19 +155,7 @@ impl Storage {
     ) -> Result<(), KernelError> {
         let requested = self.canonical_lease_resources(root_id, paths, grant)?;
         if let Some(lease_id) = lease_id {
-            if self.retained_file_leases.contains_key(lease_id) {
-                return Err(KernelError::Operation(
-                    "file lease is retained by an active file worker".into(),
-                ));
-            }
-            let lease = self.file_leases.get(lease_id).ok_or_else(|| {
-                KernelError::Operation("file resource lease is no longer active".to_string())
-            })?;
-            if lease.grant_id != grant.grant_id || lease.root_id != root_id {
-                return Err(KernelError::Authorization(
-                    "file resource lease belongs to another grant or root".to_string(),
-                ));
-            }
+            let lease = self.active_file_worker_lease(grant, root_id, lease_id)?;
             if requested.iter().any(|resource| {
                 !lease
                     .canonical_resources
