@@ -105,13 +105,7 @@ impl Storage {
                 serde_json::from_str(intent["targetJson"].as_str().ok_or_else(|| {
                     KernelError::Storage("mutation intent omitted target".into())
                 })?)?;
-            let (observed, _) = self.capture_file_state(
-                &resource,
-                false,
-                "observe",
-                workspace_id,
-                &grant.grant_id,
-            )?;
+            let observed = self.capture_file_state(&resource)?;
             if !Self::file_state_matches(&observed, &target) {
                 return Ok(None);
             }

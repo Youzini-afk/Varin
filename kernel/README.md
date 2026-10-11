@@ -70,9 +70,19 @@ pages still rescan and verify the original continuation fingerprint.
 An optional scan `leaseId` retains only a lease the caller already owns. Experiment preparation passes
 its existing source lease through both inventory passes and capture, so a lost response cannot falsely
 prove that source readers drained. Ordinary metadata reads acquire no new lease. Explicit release,
-revocation and retirement defer that retained lease's physical removal until the worker stops. Single-file
-`file.capture` body I/O remains a separate synchronous path; metadata isolation does not claim all file
-operations are off the actor. See [inventory acceptance](../docs/reviews/runtime-file-inventory-2026-10-11.md).
+revocation and retirement defer that retained lease's physical removal until the worker stops.
+See [inventory acceptance](../docs/reviews/runtime-file-inventory-2026-10-11.md).
+
+Single `file.capture` and `file.captureBatch` share one body reader with file observations. Reading,
+staging, hashing both source passes and verifying an existing object run on original file workers.
+Single capture retains its original `{path,stateJson,ownerId}` response and non-indexed operation owner;
+batch retains indexed owners. A supplied lease stays caller-owned. An unbound single capture temporarily
+retains an exact resource in the same physical lease map, preserving managed-writer exclusion until its
+reader stops. Admission checks and insertion use one canonical resource identity. Worker completion
+rechecks original authority, installs verified staging bytes and commits object ownership in Storage;
+finite rename/directory durability operations remain with that owner to preserve its existing GC order.
+Original mutation/reconciliation observations reuse the body algorithm synchronously and remain an
+explicit separate control boundary. See [capture acceptance](../docs/reviews/runtime-file-capture-2026-10-11.md).
 
 R5 adds read-only `compute.start/read/cancel/release` and grammar-recipe registration over those admitted
 resources. A job reads exactly one source class: an immutable WorkingState pin, a registered live root, or

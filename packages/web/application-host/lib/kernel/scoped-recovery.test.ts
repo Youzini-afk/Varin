@@ -50,7 +50,7 @@ it('keeps file capture, apply and original journal receipt on the admitted actor
   });
   expect(h.entered).toHaveBeenCalledOnce();
   expect(h.client.fileLeaseAcquire).toHaveBeenCalledOnce();
-  expect(h.client.fileCapture).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'owning', rootId: 'admitted-root', path: 'a.txt' }));
+  expect(h.client.fileCapture).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'owning', rootId: 'admitted-root', path: 'a.txt' }), undefined);
   expect(h.client.fileApply).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'owning', rootId: 'admitted-root', expectedJson: '{"kind":"missing"}' }));
   await h.durableRecoveryStore.createOperation({ operationId: 'operation', workspaceId: 'owning', kind: 'integration', state: 'planned', data: {}, targets: {} });
   expect(h.client.recoveryOperationCreate).toHaveBeenCalledWith(expect.objectContaining({ threadId: 'parent-thread', runId: 'parent-run' }));

@@ -1260,7 +1260,7 @@ export class KernelClient {
   }
 
   async fileCapture(params: KernelMethodParams["file.capture"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.requestRaw<Record<string, unknown>>("file.capture", params, { signal, grant });
+    return this.requestRaw<Record<string, unknown>>("file.capture", params, { signal, grant, settleCancellation: true });
   }
 
   async fileCaptureBatch(params: KernelMethodParams["file.captureBatch"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {

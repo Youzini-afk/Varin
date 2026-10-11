@@ -8,6 +8,14 @@
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
 
+## 2026-10-11 增量：单文件正文 capture 与原消费者
+
+- 原 file.capture 进入共同 CaptureTask/file_workers，Single/Batch/Observation 共享唯一 read/hash/verify/stage 算法。原单结果和 non-indexed object owner 保留，batch仍indexed；旧重复同步store分支删除。原mutation/reconciliation观察只作同算法同步适配，该其他控制边界仍明确保留。
+- 显式lease和未显式绑定的single读取都沿原file_leases保物理排他到实际worker停止；后者用原表内短寿命exact lease，不造Job。一次canonical资源用于原overlap核对及insert；原pending取消表覆盖single。正文先durable，原Storage短安装/owner事务保持GC顺序。
+- 真实FileResourceBackend gate传原signal，嵌套合并本层/外层取消并共用同lease；原Experiment backend等实际collection回执再释放。旧epoch/失效credit拒绝断线后的lease/process释放，新Kernel owner lock仍证明旧reader退出，不把Promise拒绝伪称drain。
+- 最终Kernel **128/0、11 ignored**、all-targets、Host **30/30**、类型/lint/协议/真实bundle通过；准确fresh binary原child guardian/固定source组合 **1/1**，1,262输入指纹一致。独立真实consumer窄探针 **4/4**、原生GC/Drop两项 **2/2**，最终指纹吻合，独审接受无确认代码阻断；完整证据与边界见[单文件capture验收](../reviews/runtime-file-capture-2026-10-11.md)。
+- 下一步回到领域事件与两设计能力余项，保留同步mutation/GC、增量inventory和产品/平台验收的明确剩余；不因本片读路径闭合就宣称整个文件域或两设计完成。用户最终默认切换/Pi与资产全面迁移分工不变。
+
 ## 2026-10-11 增量：文件 inventory 与真实 reader 排空
 
 - 原 file.scan/measure 复用 Kernel file_workers 和原 pending/cancel/完成链。Storage 只持原 grant/root/参数短事实；实际路径解析、目录遍历/stat、排序/hash/结果构造在 worker，公共 envelope 移动原结果。旧同步两实现删除，无新 Job、数据库或快照缓存。

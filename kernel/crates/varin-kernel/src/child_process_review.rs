@@ -54,6 +54,19 @@ impl Harness {
         let (grant, params) = storage
             .authorize(Some(actor), EPOCH, HOST, GENERATION, method, &params)
             .unwrap_or_else(|e| panic!("{method} authorization: {e}"));
+        if matches!(method, "file.capture" | "file.captureBatch") {
+            let task = storage.prepare_capture(method, &params, &grant, Arc::new(AtomicBool::new(false))).unwrap();
+            drop(lock);
+            let captured = task.run();
+            let mut lock = self.storage.lock().unwrap();
+            let storage = lock.as_mut().unwrap();
+            let result = (|| {
+                let (grant, _) = storage.authorize(Some(actor), EPOCH, HOST, GENERATION, method, &params)?;
+                storage.publish_capture(&task, captured?, &grant)
+            })();
+            storage.finish_retained_file_lease(task.lease_id());
+            return result.unwrap_or_else(|e: KernelError| panic!("{method}: {e}"));
+        }
         storage
             .dispatch(method, &params, Some(actor), &grant)
             .unwrap_or_else(|e| panic!("{method}: {e}"))

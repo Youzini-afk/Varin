@@ -141,6 +141,22 @@ fn admission_revoke_target(request: &Value, current_epoch: Option<&str>) -> Opti
         .map(str::to_string)
 }
 
+/// A pending file response retains its original cancellation identity until the
+/// matching worker completion, including single-path capture.
+fn pending_file_worker(method: &str) -> bool {
+    matches!(
+        method,
+        "file.capture"
+            | "file.captureBatch"
+            | "file.scan"
+            | "file.measure"
+            | "working.result.publish"
+            | "file.materialize"
+            | "file.root.register"
+            | "file.operation.reconcile"
+    )
+}
+
 struct Kernel {
     epoch: String,
     host_id: Option<String>,
@@ -152,6 +168,11 @@ struct Kernel {
     file_workers: Vec<(Arc<AtomicBool>, thread::JoinHandle<()>)>,
     #[cfg(test)]
     inventory_traversal_hold: Option<Box<dyn FnOnce() + Send>>,
+    #[cfg(test)]
+    capture_hold: Option<(
+        crate::storage::capture_resources::CapturePhase,
+        Box<dyn FnOnce() + Send>,
+    )>,
     pending_root_registrations: HashMap<String, PendingRootRegistration>,
     active_materializations: usize,
     agent_control: crate::agent_runtime::AgentControl,
@@ -181,6 +202,8 @@ impl Kernel {
             file_workers: Vec::new(),
             #[cfg(test)]
             inventory_traversal_hold: None,
+            #[cfg(test)]
+            capture_hold: None,
             pending_root_registrations: HashMap::new(),
             active_materializations: 0,
             agent_control: crate::agent_runtime::AgentControl::default(),
@@ -535,12 +558,21 @@ impl Kernel {
             }
             return Ok(None);
         }
-        if method == "file.captureBatch" {
-            let task = storage.prepare_capture_batch(
+        if matches!(method, "file.capture" | "file.captureBatch") {
+            let task = storage.prepare_capture(
+                method,
                 &authorized_params,
                 &authorized_grant,
                 cancellation.clone(),
             )?;
+            #[cfg(test)]
+            let task = {
+                let mut task = task;
+                if let Some((phase, hold)) = self.capture_hold.take() {
+                    task.hold_at(phase, hold);
+                }
+                task
+            };
             let lease_id = task.lease_id().to_string();
             let request = request.clone();
             let completed = completions.clone();
@@ -676,6 +708,41 @@ impl Kernel {
         let result = storage.dispatch(method, &authorized_params, grant_id, &authorized_grant);
         storage.clear_cancellation();
         Ok(Some(response_ok(id, result?)))
+    }
+
+    fn complete_file_capture(
+        &mut self,
+        request: &Value,
+        task: &crate::storage::capture_resources::CaptureTask,
+        result: Result<crate::storage::capture_resources::CapturedBatch, KernelError>,
+        revoked_grants: &Arc<Mutex<HashSet<String>>>,
+    ) -> Result<Value, KernelError> {
+        let published = (|| {
+            let storage = self
+                .storage
+                .as_mut()
+                .ok_or_else(|| KernelError::Authorization("kernel stopped".into()))?;
+            let (grant, _) = storage.authorize(
+                request["grantId"].as_str(),
+                &self.epoch,
+                self.host_id.as_deref().unwrap_or(""),
+                self.host_generation.as_deref().unwrap_or(""),
+                request["method"].as_str().unwrap_or(""),
+                &request["params"],
+            )?;
+            if revoked_grants
+                .lock()
+                .map(|revoked| revoked.contains(&grant.grant_id))
+                .unwrap_or(true)
+            {
+                return Err(KernelError::Authorization("grant is revoked".into()));
+            }
+            storage.publish_capture(task, result?, &grant)
+        })();
+        if let Some(storage) = self.storage.as_mut() {
+            storage.finish_retained_file_lease(task.lease_id());
+        }
+        published
     }
 
     fn complete_file_inventory(
@@ -1251,31 +1318,12 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     result,
                 } => {
                     let id = request["id"].as_str().unwrap_or("");
-                    let published = (|| {
-                        let storage = kernel
-                            .storage
-                            .as_mut()
-                            .ok_or_else(|| KernelError::Authorization("kernel stopped".into()))?;
-                        let (grant, _) = storage.authorize(
-                            request["grantId"].as_str(),
-                            &kernel.epoch,
-                            kernel.host_id.as_deref().unwrap_or(""),
-                            kernel.host_generation.as_deref().unwrap_or(""),
-                            "file.captureBatch",
-                            &request["params"],
-                        )?;
-                        let denied = worker_revoked_grants
-                            .lock()
-                            .map(|revoked| revoked.contains(&grant.grant_id))
-                            .unwrap_or(true);
-                        if denied {
-                            return Err(KernelError::Authorization("grant is revoked".into()));
-                        }
-                        storage.publish_capture_batch(&task, result?, &grant)
-                    })();
-                    if let Some(storage) = kernel.storage.as_mut() {
-                        storage.finish_retained_file_lease(task.lease_id());
-                    }
+                    let published = kernel.complete_file_capture(
+                        &request,
+                        &task,
+                        result,
+                        &worker_revoked_grants,
+                    );
                     worker_cancellations
                         .lock()
                         .ok()
@@ -1425,18 +1473,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             let response = match handled {
                 Ok(Some(response)) => response,
                 Ok(None) => {
-                    if method.as_deref().is_some_and(|method| {
-                        matches!(
-                            method,
-                            "file.captureBatch"
-                                | "file.scan"
-                                | "file.measure"
-                                | "working.result.publish"
-                                | "file.materialize"
-                                | "file.root.register"
-                                | "file.operation.reconcile"
-                        )
-                    }) {
+                    if method.as_deref().is_some_and(pending_file_worker) {
                         continue;
                     }
                     worker_cancellations

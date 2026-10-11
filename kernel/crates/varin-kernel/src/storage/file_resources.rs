@@ -6,9 +6,9 @@
 //! Documents-authorized canonical root after every kernel restart.
 use super::*;
 use crate::protocol_generated::{
-    KernelFileApplyParams, KernelFileCaptureParams, KernelFileMkdirParams,
-    KernelFileOperationListParams, KernelFileOperationReconcileParams, KernelFileRemoveParams,
-    KernelFileRenameParams, KernelFileRootRegisterParams,
+    KernelFileApplyParams, KernelFileMkdirParams, KernelFileOperationListParams,
+    KernelFileOperationReconcileParams, KernelFileRemoveParams, KernelFileRenameParams,
+    KernelFileRootRegisterParams,
 };
 use serde::de::DeserializeOwned;
 use std::path::{Component, Path};
@@ -423,168 +423,8 @@ impl Storage {
         resolve_admitted_resource(&root, relative, grant, allow_root)
     }
 
-    pub(super) fn capture_file_state(
-        &mut self,
-        resource: &ResolvedFileResource,
-        store: bool,
-        operation_id: &str,
-        workspace_id: &str,
-        grant_id: &str,
-    ) -> Result<(FileState, Option<String>), KernelError> {
-        self.check_cancelled()?;
-        let metadata = match fs::symlink_metadata(&resource.absolute) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Ok((FileState::Missing, None))
-            }
-            Err(error) => return Err(error.into()),
-        };
-        if metadata.file_type().is_symlink() {
-            let target = fs::read_link(&resource.absolute)?
-                .into_os_string()
-                .into_string()
-                .map_err(|_| KernelError::Operation("symlink target is not UTF-8".to_string()))?;
-            return Ok((
-                FileState::Symlink {
-                    symlink_target: target,
-                    mode: Some(file_mode(&metadata)),
-                },
-                None,
-            ));
-        }
-        if metadata.is_dir() {
-            return Ok((
-                FileState::Directory {
-                    mode: Some(file_mode(&metadata)),
-                },
-                None,
-            ));
-        }
-        if !metadata.is_file() {
-            return Ok((FileState::Unsupported, None));
-        }
-        let mode = file_mode(&metadata);
-        if !store {
-            let (hash, byte_length) = hash_file(&resource.absolute)?;
-            let after = fs::symlink_metadata(&resource.absolute)?;
-            let (after_hash, after_length) = hash_file(&resource.absolute)?;
-            if !after.is_file()
-                || file_mode(&after) != mode
-                || hash != after_hash
-                || byte_length != after_length
-            {
-                return Err(KernelError::Operation(format!(
-                    "file changed while being captured: {}",
-                    resource.path
-                )));
-            }
-            return Ok((
-                FileState::RegularFile {
-                    object_hash: hash,
-                    byte_length,
-                    mode: Some(mode),
-                },
-                None,
-            ));
-        }
-
-        let staging_dir = self.root.join("staging");
-        fs::create_dir_all(&staging_dir)?;
-        let staging = staging_dir.join(format!("file-capture-{}", Uuid::new_v4()));
-        let mut source = BufReader::new(File::open(&resource.absolute)?);
-        let mut target_file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .read(true)
-            .open(&staging)?;
-        let mut digest = Sha256::new();
-        let mut byte_length = 0u64;
-        let mut buffer = [0u8; 128 * 1024];
-        loop {
-            self.check_cancelled()?;
-            let read = source.read(&mut buffer)?;
-            if read == 0 {
-                break;
-            }
-            target_file.write_all(&buffer[..read])?;
-            digest.update(&buffer[..read]);
-            byte_length = byte_length
-                .checked_add(read as u64)
-                .ok_or_else(|| KernelError::Storage("file size overflow".to_string()))?;
-        }
-        target_file.sync_all()?;
-        drop(target_file);
-        let hash = format!("sha256-{}", hex::encode(digest.finalize()));
-        let after = fs::symlink_metadata(&resource.absolute)?;
-        let (after_hash, after_length) = hash_file(&resource.absolute)?;
-        if !after.is_file()
-            || file_mode(&after) != mode
-            || hash != after_hash
-            || byte_length != after_length
-        {
-            let _ = fs::remove_file(&staging);
-            return Err(KernelError::Operation(format!(
-                "file changed while being captured: {}",
-                resource.path
-            )));
-        }
-        let object = object_path(&self.root, &hash)?;
-        if object.exists() {
-            let (existing_hash, existing_length) = hash_file(&object)?;
-            if existing_hash != hash || existing_length != byte_length {
-                let _ = fs::remove_file(&staging);
-                return Err(KernelError::Storage(format!(
-                    "content object is corrupt: {hash}"
-                )));
-            }
-            fs::remove_file(&staging)?;
-            sync_directory(&staging_dir)?;
-        } else {
-            let shard = object.parent().expect("object path has shard");
-            if !shard.exists() {
-                fs::create_dir_all(shard)?;
-                sync_directory(&self.root.join("objects"))?;
-            }
-            durable_rename(&staging, &object)?;
-            OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(&object)?
-                .sync_all()?;
-            sync_directory(&staging_dir)?;
-            sync_directory(shard)?;
-        }
-        self.conn.execute(
-            "INSERT OR IGNORE INTO blobs(hash, byte_length) VALUES (?1, ?2)",
-            params![
-                hash,
-                i64::try_from(byte_length).map_err(|_| KernelError::Operation(
-                    "content object is too large".to_string()
-                ))?
-            ],
-        )?;
-        self.verified_objects.insert(hash.clone());
-        let owner_id = blob_owner_id(operation_id);
-        self.record_object_owner(
-            &owner_id,
-            &hash,
-            Some(workspace_id),
-            Some(operation_id),
-            grant_id,
-        )?;
-        Ok((
-            FileState::RegularFile {
-                object_hash: hash,
-                byte_length,
-                mode: Some(mode),
-            },
-            Some(owner_id),
-        ))
-    }
-
     fn observe_state(&mut self, resource: &ResolvedFileResource) -> Result<FileState, KernelError> {
-        self.capture_file_state(resource, false, "observe", "", "")
-            .map(|value| value.0)
+        self.capture_file_state(resource)
     }
 
     fn apply_file_state(
@@ -1375,34 +1215,6 @@ impl Storage {
             "reconciledOperations": reconciled_operations,
             "pendingOperations": pending_operations,
         }))
-    }
-
-    pub(super) fn file_capture(
-        &mut self,
-        params_value: &Value,
-        grant: &Grant,
-    ) -> Result<Value, KernelError> {
-        let params: KernelFileCaptureParams = parse_file_params(params_value)?;
-        let resource = self.resolve_file_resource(&params.root_id, &params.path, grant, true)?;
-        self.assert_file_lease(
-            grant,
-            &params.root_id,
-            &[FileLeaseResource {
-                path: resource.path.clone(),
-                subtree: false,
-            }],
-            params.lease_id.as_deref(),
-        )?;
-        let (state, owner_id) = self.capture_file_state(
-            &resource,
-            params.store,
-            &params.operation_id,
-            &params.workspace_id,
-            &grant.grant_id,
-        )?;
-        Ok(
-            json!({"path": resource.path, "stateJson": serde_json::to_string(&state)?, "ownerId": owner_id}),
-        )
     }
 
     pub(super) fn file_apply(
