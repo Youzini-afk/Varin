@@ -41,13 +41,21 @@ An uncertain creation retry keeps its original key and input. Update/control con
 the current revision before a new explicit action. Ordinary message submission and conversation fork
 are not Goal creation commands. Goal-owned followups are controlled through their Goal.
 
-`ThreadsAPI.followups` registers one explicit instruction for an absolute `at` instant or an accepted
-`process_stopped` operation. Register retains a stable key and exact source Run/trigger/body for uncertain
+`ThreadsAPI.followups` registers one explicit instruction for an absolute `at` instant, accepted
+`process_stopped`/`job_stopped` operation, original-source file condition, or flat `any`/`all` combination. Register retains a stable key and exact source Run/trigger/body for uncertain
 retries. `list` exposes short lifecycle metadata, while abortable `get` reads the original instruction.
 Control uses the displayed revision. Triggering, input binding and actual history delivery are distinct:
 a bound but undelivered occurrence can still be paused/cancelled without cancelling its shared Run or
 process. Agent-only optional waiting is not part of this User API. Independently registered followups
 retain their explicit actor even under a Goal; automatic Goal-owned definitions use Goal controls.
+
+`followups.jobSources(identity, runId)` discovers original accepted domain Jobs in the actual task
+family, including independent User, historical and child/sibling work absent from the current history
+page. It returns short binding/origin/lifecycle metadata and accepts AbortSignal. The selected Run must
+belong to the selected Thread/branch; a target Job's `sourceRunId` remains attribution, never the
+follow-up execution source. A Job's executor stop is separate from artifact collection and unknown
+business outcomes. The UI retains the original selected Run/key/trigger when retrying an uncertain
+registration and discards stale Host/selection responses.
 
 `ThreadsAPI.family` reads the original task family without selecting another execution target.
 The caller `ThreadIdentity` is separate from the target request. `list` discovers actual related

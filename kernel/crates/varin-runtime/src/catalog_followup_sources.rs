@@ -12,6 +12,9 @@ pub enum FollowupSource {
     ProcessStopped {
         operation_id: String,
     },
+    JobStopped {
+        operation_id: String,
+    },
     File {
         path: String,
         condition: FileCondition,
@@ -35,6 +38,13 @@ pub enum FollowupLeafEvidence {
         observed_at_ms: u64,
     },
     ProcessStopped {
+        receipt_identity: String,
+        receipt_epoch: String,
+    },
+    JobStopped {
+        binding: host_jobs::HostJobBinding,
+        outcome: Outcome,
+        effect: Effect,
         receipt_identity: String,
         receipt_epoch: String,
     },
@@ -63,6 +73,9 @@ pub struct FollowupSourceEvidence {
 impl FollowupTrigger {
     pub fn sources(&self) -> Vec<FollowupSource> {
         match self {
+            Self::JobStopped { operation_id } => vec![FollowupSource::JobStopped {
+                operation_id: operation_id.clone(),
+            }],
             Self::At { at_ms } => vec![FollowupSource::At { at_ms: *at_ms }],
             Self::ProcessStopped { operation_id } => vec![FollowupSource::ProcessStopped {
                 operation_id: operation_id.clone(),
@@ -84,6 +97,37 @@ impl TriggerEvidence {
                 .iter()
                 .any(|s| matches!(s.evidence, FollowupLeafEvidence::At { .. })),
             _ => false,
+        }
+    }
+    pub(super) fn job_receipts(
+        &self,
+        cursor: u64,
+    ) -> Vec<(&host_jobs::HostJobBinding, &str, &str, u64)> {
+        match self {
+            Self::JobStopped {
+                binding,
+                receipt_identity,
+                receipt_epoch,
+                ..
+            } => vec![(binding, receipt_identity, receipt_epoch, cursor)],
+            Self::Any { sources } | Self::All { sources } => sources
+                .iter()
+                .filter_map(|s| match &s.evidence {
+                    FollowupLeafEvidence::JobStopped {
+                        binding,
+                        receipt_identity,
+                        receipt_epoch,
+                        ..
+                    } => Some((
+                        binding,
+                        receipt_identity.as_str(),
+                        receipt_epoch.as_str(),
+                        s.trigger_cursor,
+                    )),
+                    _ => None,
+                })
+                .collect(),
+            _ => vec![],
         }
     }
     pub(super) fn process_receipts(&self) -> Vec<(&str, &str)> {
@@ -131,6 +175,29 @@ fn observe_leaf(
                 FollowupLeafEvidence::At {
                     at_ms: *at_ms,
                     observed_at_ms: now,
+                },
+            )
+        }
+        FollowupSource::JobStopped { operation_id } => {
+            let run: Run = record(tx, "runs", &d.source_run_id)?;
+            let op = host_jobs::require_observation(tx, &run, operation_id)?;
+            let Some(receipt) = op.external_receipt.as_ref().filter(|r| r.executor_stopped) else {
+                return Ok(None);
+            };
+            host_jobs::require_stop_receipt(&op, receipt)?;
+            let cursor = tx.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind='operation.executor_stopped' AND json_extract(data,'$.receipt_identity')=?2 AND json_extract(data,'$.receipt_epoch')=?3 ORDER BY cursor LIMIT 1", params![op.id, receipt.identity, receipt.epoch], |r| read_number(r, 0))?;
+            let binding = &op.host_job.as_ref().expect("accepted job").binding;
+            let original =
+                host_jobs::stop_receipt(tx, cursor, binding, &receipt.identity, &receipt.epoch)?;
+            host_jobs::require_stop_receipt(&op, &original)?;
+            (
+                cursor,
+                FollowupLeafEvidence::JobStopped {
+                    binding: binding.clone(),
+                    outcome: original.outcome,
+                    effect: original.effect,
+                    receipt_identity: original.identity,
+                    receipt_epoch: original.epoch,
                 },
             )
         }
@@ -251,6 +318,19 @@ pub(super) fn observe_sources(
                 at_ms: *at_ms,
                 observed_at_ms: *observed_at_ms,
             },
+            FollowupLeafEvidence::JobStopped {
+                binding,
+                outcome,
+                effect,
+                receipt_identity,
+                receipt_epoch,
+            } => TriggerEvidence::JobStopped {
+                binding: binding.clone(),
+                outcome: *outcome,
+                effect: *effect,
+                receipt_identity: receipt_identity.clone(),
+                receipt_epoch: receipt_epoch.clone(),
+            },
             FollowupLeafEvidence::ProcessStopped {
                 receipt_identity,
                 receipt_epoch,
@@ -279,9 +359,43 @@ fn process_settled(db: &Connection, identity: &str, epoch: &str) -> Result<bool>
                 && r.epoch == epoch
         }))
 }
+fn job_settled(
+    db: &Connection,
+    binding: &host_jobs::HostJobBinding,
+    identity: &str,
+    epoch: &str,
+) -> Result<bool> {
+    let op: Operation = record(db, "operations", &binding.operation_id)?;
+    if op.host_job.as_ref().map(|link| &link.binding) != Some(binding) {
+        return Err(RuntimeError::Conflict(
+            "original follow-up Job binding changed".into(),
+        ));
+    }
+    let Some(receipt) = op.external_receipt.as_ref() else {
+        return Ok(false);
+    };
+    host_jobs::require_stop_receipt(&op, receipt)?;
+    let occupied: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM resource_occupancy WHERE operation_id=?1)",
+        [&op.id],
+        |r| r.get(0),
+    )?;
+    // Business outcome may remain Unknown. Only the exact original stop fact and writers matter.
+    Ok(op.phase == OperationPhase::Terminal
+        && !occupied
+        && receipt.executor_stopped
+        && receipt.identity == identity
+        && receipt.epoch == epoch)
+}
 fn leaf_settled(db: &Connection, evidence: &FollowupLeafEvidence) -> Result<bool> {
     match evidence {
         FollowupLeafEvidence::At { .. } | FollowupLeafEvidence::File { .. } => Ok(true),
+        FollowupLeafEvidence::JobStopped {
+            binding,
+            receipt_identity,
+            receipt_epoch,
+            ..
+        } => job_settled(db, binding, receipt_identity, receipt_epoch),
         FollowupLeafEvidence::ProcessStopped {
             receipt_identity,
             receipt_epoch,
@@ -290,6 +404,12 @@ fn leaf_settled(db: &Connection, evidence: &FollowupLeafEvidence) -> Result<bool
 }
 pub(super) fn evidence_settled(db: &Connection, evidence: &TriggerEvidence) -> Result<bool> {
     match evidence {
+        TriggerEvidence::JobStopped {
+            binding,
+            receipt_identity,
+            receipt_epoch,
+            ..
+        } => job_settled(db, binding, receipt_identity, receipt_epoch),
         TriggerEvidence::ProcessStopped {
             receipt_identity,
             receipt_epoch,

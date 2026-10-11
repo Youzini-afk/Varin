@@ -18,6 +18,7 @@ export type KernelMethod =
   | "runtime.host_job.begin"
   | "runtime.host_job.user"
   | "runtime.host_job.accept"
+  | "runtime.host_job.sources"
   | "runtime.host_job.pending"
   | "runtime.host_job.terminal"
   | "runtime.host_job.observe"
@@ -296,6 +297,17 @@ export interface HostJobPending {
   accepted: boolean;
   cancelRequested: boolean;
   phase: OperationPhase;
+  origin: HostJobOrigin;
+}
+
+export interface HostJobSource {
+  binding: HostJobBinding;
+  sourceRunId: string;
+  threadId: string;
+  branchId: string;
+  cancelRequested: boolean;
+  phase: OperationPhase;
+  executorStopped: boolean;
   origin: HostJobOrigin;
 }
 
@@ -720,9 +732,9 @@ export type FileObservationOwnerResult = { ok: false; code: string } | { ok: tru
 
 export type FileObservationOwnerHint = {v: 1; kind: 'file-observation-invalidated'; kernelEpoch: string} & ({scope: 'root'; rootId: string; canonicalRoot: string} | {scope: 'receipt'; receiptId: string});
 
-export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string } | { kind: 'file'; path: string; condition: FileCondition };
+export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string } | { kind: 'job_stopped'; operation_id: string } | { kind: 'file'; path: string; condition: FileCondition };
 
-export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | FollowupFileEvidence;
+export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | { kind: 'job_stopped'; binding: HostJobBinding; outcome: Outcome; effect: Effect; receipt_identity: string; receipt_epoch: string } | FollowupFileEvidence;
 
 export interface FollowupSourceObservation {
   trigger_cursor: number;
@@ -1772,7 +1784,7 @@ export interface RunContextScope {
 
 export type FollowupControlAction = 'pause' | 'resume' | 'cancel';
 
-export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string } | { kind: 'file'; path: string; condition: FileCondition };
+export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string } | { kind: 'job_stopped'; operationId: string } | { kind: 'file'; path: string; condition: FileCondition };
 
 export type FollowupRegistrationTrigger = FollowupRegistrationSource | { kind: 'any' | 'all'; sources: FollowupRegistrationSource[] };
 
@@ -1820,7 +1832,7 @@ export interface FollowupControlParams {
 
 export interface FollowupWait {
   id: string;
-  kind: 'process_stopped' | 'run_completed' | 'goal_requested' | 'at' | 'any' | 'all' | 'file';
+  kind: 'process_stopped' | 'job_stopped' | 'run_completed' | 'goal_requested' | 'at' | 'any' | 'all' | 'file';
   after_cursor: number;
   trigger_cursor: number | null;
   state: 'waiting' | 'observed' | 'consumed' | 'cancelled';
@@ -3661,6 +3673,7 @@ export type KernelMethodParams = {
   "runtime.host_job.begin": HostJobBeginParams;
   "runtime.host_job.user": HostJobUserParams;
   "runtime.host_job.accept": HostJobAcceptParams;
+  "runtime.host_job.sources": RunParams;
   "runtime.host_job.pending": KernelEmptyParams;
   "runtime.host_job.terminal": HostJobTerminalParams;
   "runtime.host_job.observe": HostJobObserveParams;
@@ -3927,6 +3940,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.host_job.accept";
       params: HostJobAcceptParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_job.sources";
+      params: RunParams;
       epoch?: string;
       grantId?: string;
     }

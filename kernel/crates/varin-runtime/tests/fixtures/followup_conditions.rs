@@ -1,6 +1,6 @@
 use super::*;
 
-fn register(f: &mut Fixture, key: &str, trigger: FollowupRegistrationTrigger) -> Followup {
+pub(super) fn register(f: &mut Fixture, key: &str, trigger: FollowupRegistrationTrigger) -> Followup {
     let p =
         f.db.prepare_followup_registration(
             key,

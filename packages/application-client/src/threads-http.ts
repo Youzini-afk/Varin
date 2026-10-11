@@ -63,6 +63,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     },
     resources: { refresh: input => post('resources/refresh', input) },
     followups: {
+      jobSources: (identity, runId, signal) => post('followup/jobs', { ...identity, runId }, signal),
       register: input => post('followup/register', input),
       pendingRegistrations: (identity, signal) => post('followup/registrations/pending', identity, signal),
       cancelRegistration: input => post('followup/registration/cancel', input),

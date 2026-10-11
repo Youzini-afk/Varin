@@ -46,7 +46,7 @@ function fixture(active = false) {
   });
   let listener: Parameters<ThreadsAPI['observe']>[1] | undefined;
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
-  const api: ThreadsAPI = { goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused }, followups: { register: unused, list: unused, get: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
+  const api: ThreadsAPI = { goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, retryPreparation: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
@@ -1130,4 +1130,57 @@ it('discovers retained unconfirmed file resources and retries their explicit can
   ]);
   expect(container.querySelector('[aria-label="Unconfirmed file registration"]')).toBeNull();
   expect(f.submit).not.toHaveBeenCalled(); expect(f.cancelRun).not.toHaveBeenCalled();
+});
+
+
+it.each(['job_stopped', 'any', 'all'] as const)('registers %s from accepted family jobs outside visible operations using current work and stable retry', async kind => {
+  const f = fixture(true);
+  const job: Awaited<ReturnType<ThreadsAPI['followups']['jobSources']>>[number] = {
+    binding: { operationId: 'user-job:original', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original-domain' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'workspace', subjectId: 'attempt:historical' },
+    sourceRunId: 'old-completed-run', threadId: 'thread:family-child', branchId: 'branch:family-child', cancelRequested: false, phase: 'terminal', executorStopped: true, origin: { kind: 'user', key: 'submit-original' },
+  };
+  f.api.followups.jobSources = vi.fn(async () => [job]);
+  const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValueOnce(new Error('accepted response lost')).mockRejectedValueOnce(new Error('still uncertain'));
+  f.api.followups.register = register;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Schedule a follow-up').click());
+  expect(f.view.operations).toEqual([]);
+  await edit('[aria-label="Follow-up trigger"]', kind, 'change');
+  if (kind === 'job_stopped') await edit('[aria-label="Follow-up job"]', job.binding.operationId, 'change');
+  else {
+    await edit('[aria-label="Condition 1 time"]', '2030-02-03T04:05:06');
+    await edit('[aria-label="Condition 2 kind"]', 'job_stopped', 'change');
+    await edit('[aria-label="Condition 2 job"]', job.binding.operationId, 'change');
+  }
+  expect(f.api.followups.jobSources).toHaveBeenCalledWith(identity, 'ui-run', expect.any(AbortSignal));
+  expect(container.textContent).toContain('attempt:historical');
+  await edit('[aria-label="Follow-up instruction"]', 'Read the original job result in this work.');
+  await act(async () => button('Register one-time follow-up').click());
+  const original = register.mock.calls[0]![0];
+  expect(original.runId).toBe('ui-run'); expect(original.runId).not.toBe(job.sourceRunId);
+  const leaf = { kind: 'job_stopped', operationId: job.binding.operationId };
+  if (kind === 'job_stopped') expect(original.trigger).toEqual(leaf);
+  else expect(original.trigger).toMatchObject({ kind, sources: [expect.objectContaining({ kind: 'at' }), leaf] });
+  f.view.activeRun = { ...f.view.activeRun!, id: 'new-current-run' };
+  await act(async () => f.emit({ cursor: 2, subject: 'new-current-run', revision: 1, kind: 'run.accepted', data: {} }));
+  await act(async () => button('Retry original follow-up').click());
+  expect(register.mock.calls[1]![0]).toEqual(original);
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled(); expect(f.cancelRun).not.toHaveBeenCalled();
+});
+
+it('discards a late accepted-job query from the previous work Run and keeps a failed query explicit', async () => {
+  const f = fixture(true);
+  let release: ((value: Awaited<ReturnType<ThreadsAPI['followups']['jobSources']>>) => void) | undefined;
+  f.api.followups.jobSources = vi.fn<ThreadsAPI['followups']['jobSources']>().mockImplementationOnce(() => new Promise(resolve => { release = resolve; })).mockRejectedValue(new Error('original source unavailable'));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Schedule a follow-up').click());
+  await edit('[aria-label="Follow-up trigger"]', 'job_stopped', 'change');
+  f.view.activeRun = { ...f.view.activeRun!, id: 'new-work' };
+  await act(async () => f.emit({ cursor: 2, subject: 'new-work', revision: 1, kind: 'run.accepted', data: {} }));
+  await act(async () => release!([{ binding: { operationId: 'late-job', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'old' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws', subjectId: 'late-attempt' }, sourceRunId: 'old-work', threadId: identity.threadId, branchId: identity.branchId, phase: 'running', executorStopped: false, cancelRequested: false, origin: { kind: 'user', key: 'old' } }]));
+  await edit('[aria-label="Follow-up trigger"]', 'job_stopped', 'change');
+  await edit('[aria-label="Follow-up instruction"]', 'Wait for a real candidate');
+  expect(container.textContent).toContain('Accepted jobs could not be read');
+  expect(container.textContent).not.toContain('late-attempt');
+  expect(button('Register one-time follow-up').disabled).toBe(true);
 });

@@ -137,6 +137,12 @@ pub(crate) struct HostJobAcceptParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RunParams {
+    pub(crate) run_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelEmptyParams {}
 
 #[derive(Clone, Debug, Deserialize)]
@@ -397,12 +403,6 @@ pub(crate) struct ContextJobCreateParams {
     pub(crate) memory_checkpoint: RequiredNullable<String>,
     pub(crate) configuration: Value,
     pub(crate) credential_scope: Option<CredentialScope>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct RunParams {
-    pub(crate) run_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2381,6 +2381,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.host_job.accept" => serde_json::from_value::<HostJobAcceptParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.host_job.sources" => serde_json::from_value::<RunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.host_job.pending" => serde_json::from_value::<KernelEmptyParams>(params.clone())

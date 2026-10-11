@@ -5,7 +5,7 @@ import { createThreadsHttpAPI } from '@varin/application-client';
 import type { ThreadIdentity } from '@varin/application-client';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClientError, type KernelClient } from './kernel-client.js';
-import type { FollowupPendingRegistration, Followup, Run } from './protocol.generated.js';
+import type { HostJobSource, FollowupPendingRegistration, Followup, Run } from './protocol.generated.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { registerThreadRoutes } from './thread-routes.js';
 
@@ -25,7 +25,7 @@ const definition: Followup = { id: 'followup:process', revision: 1, generation: 
  * Catalog durability, process-stop proof and atomic occurrence consumption are native suite obligations. */
 function fixture() {
   const facts = { reply: structuredClone(definition), list: [structuredClone(definition)], conflict: false,
-    source: structuredClone(run), registerError: false, pendingError: false, pending: [] as FollowupPendingRegistration[],
+    source: structuredClone(run), jobs: [] as HostJobSource[], registerError: false, pendingError: false, pending: [] as FollowupPendingRegistration[],
     liveInvalid: false, launch: { selection: { source: { mode: 'materialized', workspace_id: 'workspace:original',
       execution_workspace_id: 'execution:original', branch_id: 'files:original', revision: 3, live_root: null } } } };
   const issueGrant = vi.fn(async (input: { grantId: string }) => ({ ...input }));
@@ -44,6 +44,7 @@ function fixture() {
         if (facts.registerError) throw new KernelClientError({ code: 'operation-error', message: 'operation error: operation belongs to another Run' });
         return facts.reply;
       }
+      case 'runtime.host_job.sources': return facts.jobs;
       case 'runtime.followup.list': return facts.list;
       case 'runtime.followup.registrations.pending': {
         if (facts.pendingError) throw new KernelClientError({ code: 'storage-error', message: 'original acceptance metadata cannot be read' });
@@ -256,4 +257,24 @@ it('discovers and explicitly cancels an original unconfirmed file registration w
   f.facts.source.branch_id = 'branch:other';
   await expect(f.api.followups.cancelRegistration({ ...identity, key: 'unconfirmed-original-key', runId: run.id })).rejects.toMatchObject({ status: 400 });
   expect((await f.request('/api/threads/followup/registration/cancel', { ...identity, key: 'one', runId: run.id, actor: 'user' })).status).toBe(400);
+});
+
+
+it('accepted-job discovery and explicit job conditions use the observer work identity through the original public route', async () => {
+  const f = fixture();
+  f.facts.jobs = [{ binding: { operationId: 'user-job:accepted', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, domain: 'research.experiment', domainVersion: 1, workspaceId: 'ws', subjectId: 'attempt:original' }, sourceRunId: 'historical-completed-run', threadId: 'thread:child', branchId: 'branch:child', phase: 'running', executorStopped: false, cancelRequested: false, origin: { kind: 'user', key: 'accepted-key' } }];
+  expect(await f.api.followups.jobSources(identity, run.id)).toEqual(f.facts.jobs);
+  expect(f.requests.mock.calls.find(([method]) => method === 'runtime.host_job.sources')?.[1]).toEqual({ runId: run.id });
+  for (const trigger of [{ kind: 'job_stopped', operationId: f.facts.jobs[0]!.binding.operationId }, { kind: 'all', sources: [{ kind: 'at', atMs: 0 }, { kind: 'job_stopped', operationId: f.facts.jobs[0]!.binding.operationId }] }] as const) {
+    const response = await f.request('/api/threads/followup/register', { ...identity, key: 'explicit-job', runId: run.id, trigger, instruction: 'Read actual stopped job' });
+    expect(response.status).toBe(200);
+    expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.register').at(-1)?.[1]).toEqual({ key: 'explicit-job', runId: run.id, trigger, instruction: 'Read actual stopped job' });
+  }
+  expect((await f.request('/api/threads/followup/jobs', { ...identity, runId: run.id }, false)).status).toBe(401);
+  expect((await f.request('/api/threads/followup/jobs', { ...identity, runId: run.id, workspaceId: 'forged' })).status).toBe(400);
+  f.facts.source = { ...run, thread_id: 'foreign' };
+  const before = f.requests.mock.calls.filter(([method]) => method === 'runtime.host_job.sources').length;
+  await expect(f.api.followups.jobSources(identity, run.id)).rejects.toMatchObject({ status: 400 });
+  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.host_job.sources')).toHaveLength(before);
+  expect(f.models.resolveModel).not.toHaveBeenCalled();
 });

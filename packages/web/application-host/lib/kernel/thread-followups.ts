@@ -3,6 +3,13 @@ import type { ThreadAdapter } from './thread-adapter.js';
 
 type FollowupOwner = Pick<ThreadAdapter, 'runtime' | 'requireIdentity'>;
 
+export async function listThreadFollowupJobs(owner: FollowupOwner, identity: ThreadIdentity, runId: string, signal?: AbortSignal) {
+  await owner.requireIdentity(identity, signal);
+  const run = await owner.runtime.run(runId, signal);
+  if (run.thread_id !== identity.threadId || run.branch_id !== identity.branchId) throw new Error('Job observer Run belongs to another Thread branch');
+  return owner.runtime.hostJobSources(run.id, signal);
+}
+
 /** The Catalog owns definitions, waits and occurrences. The Host checks the selected branch only. */
 export async function listThreadFollowups(owner: FollowupOwner, identity: ThreadIdentity, signal?: AbortSignal) {
   await owner.requireIdentity(identity, signal);
@@ -17,7 +24,7 @@ export async function registerThreadFollowup(owner: FollowupOwner,
   if (run.thread_id !== input.threadId || run.branch_id !== input.branchId) {
     throw new Error('Follow-up source Run belongs to another Thread branch');
   }
-  // Catalog validates the trigger, original process evidence (when selected), and registration
+  // Catalog validates the trigger, original accepted operation evidence (when selected), and registration
   // identity atomically. Registration never hydrates process output or starts work in the Host.
   return owner.runtime.registerFollowup({ key: input.key, runId: run.id, trigger: input.trigger, instruction: input.instruction }, signal);
 }

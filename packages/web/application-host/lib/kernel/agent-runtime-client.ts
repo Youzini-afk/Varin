@@ -695,6 +695,9 @@ export class AgentRuntimeClient {
   goals(threadId: string, signal?: AbortSignal): Promise<Goal[]> {
     return this.kernel.agentRuntimeRequest('runtime.goal.list', { threadId }, signal);
   }
+  hostJobSources(runId: string, signal?: AbortSignal): Promise<CalendarProtocol.HostJobSource[]> {
+    return this.kernel.agentRuntimeRequest('runtime.host_job.sources', { runId }, signal);
+  }
   followups(threadId: string, signal?: AbortSignal): Promise<Followup[]> {
     return this.kernel.agentRuntimeRequest('runtime.followup.list', { threadId }, signal);
   }

@@ -50,6 +50,17 @@ export interface HostJobPending {
   origin: HostJobOrigin;
 }
 
+export interface HostJobSource {
+  binding: HostJobBinding;
+  sourceRunId: string;
+  threadId: string;
+  branchId: string;
+  cancelRequested: boolean;
+  phase: OperationPhase;
+  executorStopped: boolean;
+  origin: HostJobOrigin;
+}
+
 export interface HostJobLink {
   binding: HostJobBinding;
   acceptanceRef: unknown | null;
@@ -384,9 +395,9 @@ export interface FollowupRegistrationCancelResult {
   followup: Followup | null;
 }
 
-export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string } | { kind: 'file'; path: string; condition: FileCondition };
+export type FollowupSource = { kind: 'at'; at_ms: number } | { kind: 'process_stopped'; operation_id: string } | { kind: 'job_stopped'; operation_id: string } | { kind: 'file'; path: string; condition: FileCondition };
 
-export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | FollowupFileEvidence;
+export type FollowupLeafEvidence = { kind: 'at'; at_ms: number; observed_at_ms: number } | { kind: 'process_stopped'; receipt_identity: string; receipt_epoch: string } | { kind: 'job_stopped'; binding: HostJobBinding; outcome: Outcome; effect: Effect; receipt_identity: string; receipt_epoch: string } | FollowupFileEvidence;
 
 export interface FollowupSourceObservation {
   trigger_cursor: number;
@@ -1364,7 +1375,7 @@ export interface RunContextScope {
 
 export type FollowupControlAction = 'pause' | 'resume' | 'cancel';
 
-export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string } | { kind: 'file'; path: string; condition: FileCondition };
+export type FollowupRegistrationSource = { kind: 'at'; atMs: number } | { kind: 'process_stopped'; operationId: string } | { kind: 'job_stopped'; operationId: string } | { kind: 'file'; path: string; condition: FileCondition };
 
 export type FollowupRegistrationTrigger = FollowupRegistrationSource | { kind: 'any' | 'all'; sources: FollowupRegistrationSource[] };
 
@@ -1412,7 +1423,7 @@ export interface FollowupControlParams {
 
 export interface FollowupWait {
   id: string;
-  kind: 'process_stopped' | 'run_completed' | 'goal_requested' | 'at' | 'any' | 'all' | 'file';
+  kind: 'process_stopped' | 'job_stopped' | 'run_completed' | 'goal_requested' | 'at' | 'any' | 'all' | 'file';
   after_cursor: number;
   trigger_cursor: number | null;
   state: 'waiting' | 'observed' | 'consumed' | 'cancelled';
