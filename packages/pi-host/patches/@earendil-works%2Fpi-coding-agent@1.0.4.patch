@@ -1497,7 +1497,25 @@ diff --git a/dist/core/compaction/compaction.d.ts b/dist/core/compaction/compact
 diff --git a/dist/extensions/mcp/runtime.js b/dist/extensions/mcp/runtime.js
 --- a/dist/extensions/mcp/runtime.js
 +++ b/dist/extensions/mcp/runtime.js
-@@ -190,29 +190,33 @@
+@@ -125,6 +125,8 @@
+     createTransport;
+     authProvider;
+     onTools;
++    clientCapabilities;
++    onClientCreated;
+     onChange;
+     log;
+     constructor(options) {
+@@ -132,6 +134,8 @@
+         this.cwd = options.cwd;
+         this.createTransport = options.createTransport;
+         this.onTools = options.onTools;
++        this.clientCapabilities = options.clientCapabilities;
++        this.onClientCreated = options.onClientCreated;
+         this.onChange = options.onChange;
+         this.log = options.log;
+         const url = this.oauthUrl;
+@@ -190,29 +194,33 @@
          });
          return this.opening;
      }
@@ -1538,7 +1556,7 @@ diff --git a/dist/extensions/mcp/runtime.js b/dist/extensions/mcp/runtime.js
          for (let attempt = 1;; attempt++) {
              const client = await this.getClient();
              try {
-@@ -227,8 +231,16 @@
+@@ -227,8 +235,16 @@
                      // The server no longer knows the session (restart, deploy), so it did not run the request.
                      // Retry once on a new session. The old client is detached but not closed: closing would
                      // fail its other in-flight calls, which instead get the same 404 and retry the same way.
@@ -1556,18 +1574,40 @@ diff --git a/dist/extensions/mcp/runtime.js b/dist/extensions/mcp/runtime.js
                      continue;
                  }
                  if (!this.needsSignIn(error))
-@@ -297,6 +309,7 @@
+@@ -297,8 +313,10 @@
              name: "pi",
              version: VERSION,
              requestTimeoutMs: this.timeoutMs,
-+            capabilities: { tasks: {} },
++            capabilities: { tasks: {}, ...this.clientCapabilities },
              roots: [{ uri: pathToFileURL(this.cwd).href, name: basename(this.cwd) }],
          });
++        this.onClientCreated?.(client);
          const log = this.log;
+         if (log)
+             client.onNotification("notifications/message", (params) => log.write(this.entry.name, params));
 diff --git a/dist/extensions/mcp/runtime.d.ts b/dist/extensions/mcp/runtime.d.ts
 --- a/dist/extensions/mcp/runtime.d.ts
 +++ b/dist/extensions/mcp/runtime.d.ts
-@@ -68,12 +68,14 @@
+@@ -46,6 +46,8 @@
+     private readonly createTransport;
+     private readonly authProvider;
+     private readonly onTools;
++    private readonly clientCapabilities;
++    private readonly onClientCreated;
+     private readonly onChange;
+     private readonly log;
+     constructor(options: {
+@@ -56,6 +58,9 @@
+         /** The current token of a pi provider, for servers with `auth.provider`. */
+         providerToken?: (provider: string) => Promise<string | undefined>;
+         onTools: (connection: McpServerConnection) => void;
++        /** Installed before initialize; advertised only by an owning host with real handlers. */
++        clientCapabilities?: import("@earendil-works/pi-mcp").ClientCapabilities;
++        onClientCreated?: (client: McpClient) => void;
+         /** Called when `state`, `error`, or `tools` change. */
+         onChange?: (connection: McpServerConnection) => void;
+         /** Receives the server's log messages (`notifications/message`). */
+@@ -68,12 +73,14 @@
      get oauthUrl(): string | undefined;
      oauthSettings(): McpOAuthSettings;
      getClient(): Promise<McpClient>;

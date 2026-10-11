@@ -1,5 +1,104 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export type McpRequestId = string | number;
+
+export type McpInteractionRelation = { kind: 'rpc_response_stream'; outgoingRequestId: McpRequestId } | { kind: 'task'; taskId: string };
+
+export type McpElicitationResponse = { action: 'accept'; content?: Record<string, string | number | boolean | string[]> } | { action: 'decline' | 'cancel' };
+
+export interface McpElicitationField { name: string; title: string; description?: string; required: boolean; kind: 'string' | 'number' | 'integer' | 'boolean' | 'enum' | 'multi_enum'; options?: { value: string; title: string }[]; default?: string | number | boolean | string[]; minLength?: number; maxLength?: number; minimum?: number; maximum?: number; minItems?: number; maxItems?: number; pattern?: string; format?: 'email' | 'uri' | 'date' | 'date-time'; }
+
+export type McpElicitationPresentation = { mode: 'form'; message: string; fields: McpElicitationField[] } | { mode: 'url'; message: string; url: string; elicitationId: string };
+
+export type McpInteractionMode = 'form' | 'url';
+
+export type McpInteractionChoice = 'accept' | 'decline' | 'cancel';
+
+export type McpInteractionAvailability = 'live' | 'cancelled' | 'connection_lost' | 'owner_unavailable' | 'rpc_closed';
+
+export type McpInteractionDelivery = 'not_started' | 'sending' | 'sent' | 'unknown' | 'not_sent';
+
+export interface McpInteractionBinding {
+  operationId: string;
+  executionOwner: ExecutorOwner;
+  endpoint: McpEndpoint;
+  connectionId: string;
+  requestId: McpRequestId;
+  relation: McpInteractionRelation;
+}
+
+export interface McpInteractionRecord {
+  id: string;
+  revision: number;
+  binding: McpInteractionBinding;
+  runId: string;
+  threadId: string;
+  branchId: string;
+  mode: McpInteractionMode;
+  availability: McpInteractionAvailability;
+  choice: McpInteractionChoice | null;
+  delivery: McpInteractionDelivery;
+  completionReported: boolean;
+  problem: string | null;
+}
+
+export interface McpInteractionView {
+  record: McpInteractionRecord;
+  request: Record<string, unknown>;
+  presentation: McpElicitationPresentation;
+  response: McpElicitationResponse | null;
+}
+
+export interface McpInteractionPage {
+  items: McpInteractionView[];
+  nextCursor: string | null;
+}
+
+export interface McpInteractionOpenParams {
+  id: string;
+  binding: McpInteractionBinding;
+  mode: McpInteractionMode;
+  request: Record<string, unknown>;
+  presentation: McpElicitationPresentation;
+}
+
+export interface McpInteractionListParams {
+  threadId: string;
+  branchId: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface McpInteractionReadParams {
+  operationId: string;
+  interactionId: string;
+}
+
+export interface McpInteractionRespondParams {
+  operationId: string;
+  interactionId: string;
+  expectedRevision: number;
+  response: McpElicitationResponse;
+}
+
+export interface McpInteractionControlParams {
+  binding: McpInteractionBinding;
+  interactionId: string;
+}
+
+export interface McpInteractionSettleParams {
+  binding: McpInteractionBinding;
+  interactionId: string;
+  delivery: McpInteractionDelivery;
+}
+
+export interface McpInteractionCloseParams {
+  binding: McpInteractionBinding;
+  interactionId: string;
+  availability: McpInteractionAvailability;
+  problem?: string;
+}
+
 export interface MediaReadChunk { media:StoredMedia;partIndex:number;chunkIndex:number;chunkCount:number;totalBytes:number;bytesBase64:string }
 
 export interface MediaReadParams { threadId:string;branchId:string;holder:OutputMediaHolder;partIndex:number;chunkIndex:number;expectedContentRef:string }
@@ -1068,7 +1167,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 6; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 7; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 

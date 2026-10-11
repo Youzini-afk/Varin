@@ -1,3 +1,4 @@
+import type { McpElicitationResponse } from '@varin/protocol';
 import type { OutputMediaHolder } from '@varin/protocol';
 import { parseComputerWorkRef, parseComputerExecutionRef } from '@varin/protocol';
 import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams, FollowupRegistrationTrigger } from '@varin/protocol';
@@ -84,6 +85,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'model/select': ['runtime','threadId','branchId','runId','key','model'],
     'permission/decide': ['runtime', 'threadId', 'branchId', 'operationId', 'permissionId', 'decision'],
     'question/answer': ['runtime', 'threadId', 'branchId', 'operationId', 'answer'],
+    'mcp/interactions/list': ['runtime', 'threadId', 'branchId', 'cursor', 'limit'],
+    'mcp/interactions/read': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId'],
+    'mcp/interactions/respond': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'response'],
     'source/prepare': ['runtime', 'threadId', 'branchId', 'key', 'path', 'mode'],
     'context/compact': ['runtime', 'threadId', 'branchId', 'key', 'throughId', 'expectedRevision', 'model'],
     'context/publish': ['runtime', 'threadId', 'branchId', 'runId'], 'context/cancel': ['runtime', 'threadId', 'branchId', 'runId'], 'context/resume': ['runtime', 'threadId', 'branchId', 'runId'],
@@ -201,6 +205,14 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       expectedHeadId: body.expectedHeadId === null ? null : text(body.expectedHeadId),
       expectedRef: body.expectedRef === null ? null : text(body.expectedRef), content: body.content }, signal);
   });
+  post('mcp/interactions/list', (body, signal) => adapter.listMcpInteractions({ ...identity(body),
+    ...(body.cursor === undefined ? {} : { cursor: text(body.cursor) }), ...(body.limit === undefined ? {} : { limit: revision(body.limit) }) }, signal));
+  post('mcp/interactions/read', (body, signal) => adapter.readMcpInteraction({ ...identity(body),
+    operationId: text(body.operationId), interactionId: text(body.interactionId) }, signal));
+  // The original interaction owner decodes and validates the response against its saved request.
+  post('mcp/interactions/respond', (body, signal) => adapter.respondMcpInteraction({ ...identity(body),
+    operationId: text(body.operationId), interactionId: text(body.interactionId), expectedRevision: revision(body.expectedRevision),
+    response: body.response as McpElicitationResponse }, signal));
   post('permission/decide', body => {
     if (body.decision !== 'allow_once' && body.decision !== 'deny') throw new Error('Invalid permission decision');
     return adapter.decidePermission({ ...identity(body), operationId: text(body.operationId), permissionId: text(body.permissionId), decision: body.decision });

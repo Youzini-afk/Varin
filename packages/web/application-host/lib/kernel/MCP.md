@@ -98,10 +98,10 @@ Before transport entry, rejection has a `not_dispatched` receipt. A received suc
 confirms the tool result. A remote `isError` response retains its content and the existing
 Indeterminate/Unknown result because it does not prove rollback; a returned response ends that RPC.
 Cancellation, disconnect or failure after dispatch reports an unknown effect and is never retried here.
-For native service requests, the original connection's one-shot lifecycle detaches an expired HTTP
-session without replaying the call or closing another in-flight RPC. Only the original transport's
-session-expired error provides stopped=true and the local `mcp-session-expired` reason; effects remain
-Unknown. The default policy still stops at that barrier. A separately chosen new operation can
+For native tool and service requests, the original connection's one-shot lifecycle detaches an expired HTTP
+session without replaying the call or closing another in-flight RPC. A real matching RPC response or the original transport's session-expired error ends that finite
+request; effects can remain Unknown. The latter retains the local `mcp-session-expired` reason.
+A locally synthesized stream-EOF error is not a received response and cannot provide stop evidence. The default policy still stops at that barrier. A separately chosen new operation can
 reconnect through the same owner and must pass current schema, credential and permission checks.
 Late owner promises remain observed after cancellation, so rejected late work does not leak unhandled
 promises or reopen a completed call. MCP Tasks recovery is a separate negotiated capability, not
@@ -165,9 +165,43 @@ visible, and no current account or workspace is substituted. Original frozen MCP
 also exist for Runs without a child-delegation directory; this does not enable child dispatch.
 
 For `input_required`, the coordinator opens the actual `tasks/result` request, preserving the
-original client's supported roots handler and related-task association. Sampling and elicitation
-are not advertised or silently answered by this slice; unsupported requests remain explicit.
-Fuller server-initiated sampling/elicitation interactions remain separate capabilities.
+original roots handler and related-task association. Form/URL elicitation now uses the original
+interaction owner below. Sampling remains unadvertised and explicitly unsupported.
+
+## Reviewed server-initiated form and URL requests
+
+The original authority's installed receiver supplies form/URL capability before initialize. Pi-first
+and Native-later users of that same authority share its client; a Pi-only authority without a receiver
+does not advertise unsupported interaction. Each real native call supplies its Operation/executor
+identity, not a second enabled-tools or grant list. Known related-task identity wins over the HTTP
+response stream even if another call owns that stream. Unknown Task or unassociated ordinary stdio
+requests receive an explicit unavailable-association error rather than an inferred current Thread.
+
+Original Catalog `mcp_interactions` rows contain short original-client/request/Operation facts and
+immutable ContentStore references. The sole decoder normalizes the saved form schema and validates
+answers without coercion, filling defaults or interpreting remote text as instructions. UI renders
+those fields and submits original primitive/enum-array values, including false, zero and empty text.
+Authenticated `ThreadsAPI` list/read/respond routes verify exact Thread/branch before reaching this
+same owner. Cursor events refresh a separate paged panel, and revisions prevent stale read replies
+from replacing newer facts. No synthetic User input, tool permission, Run Wait or continuation is
+created. Model, policy, child and installed nested tool calls retain their real origin.
+
+A persisted choice, send admission, send completion/uncertainty, and URL external completion are
+separate facts. Original grant/client/source/Goal/cancel fences run before the one SDK response send.
+Send failure never sends a second error response. Interrupted local result acknowledgements retry
+only the same short fact; identical UI retries cannot resend remote content. Catalog reopen preserves
+history but closes lost inbound requests, never attaching them to a replacement client.
+
+URL content is plain remote text with the exact URL/host. Opening uses the existing external opener
+only on an explicit user action; no fetch, preview, favicon, embedded access or inferred completion.
+Server completion can precede local consent or arrive after the finite RPC ends, while that actual
+client still owns the matching elicitation ID. Consent/opening does not itself prove completion.
+Dedicated `-32042` error-source interaction cards and sampling remain subsequent work; original RPC
+error bodies are preserved without replay. Subscribe and explicit unsubscribe retain their own real
+invocation association/error body; background observer cleanup cannot impersonate a user-facing call.
+
+The [verification record](../../../../../docs/reviews/runtime-mcp-interactions-2026-10-11.md) distinguishes
+original Rust/Host/SDK composition, controlled peer work and outstanding full product/platform checks.
 
 ## Resource observers
 

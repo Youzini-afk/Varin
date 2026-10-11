@@ -21,6 +21,8 @@ use varin_runtime::{Catalog, SubmitInput, model_session, supervisor::RunSupervis
 mod computer_commands;
 #[path = "agent_mcp_resources.rs"]
 mod mcp_resource_commands;
+#[path = "agent_mcp_interactions.rs"]
+mod mcp_interaction_commands;
 #[path = "agent_host_jobs.rs"]
 mod host_job_commands;
 #[path = "agent_managed_process.rs"]
@@ -911,6 +913,7 @@ pub(crate) fn spawn(
                             return Ok(Value::Null);
                         }
                         if method.starts_with("runtime.mcp.resource.")
+                            || method.starts_with("runtime.mcp.interaction.")
                             || method.starts_with("runtime.host_job.")
                             || method == "runtime.research.scopes"
                             || method.starts_with("runtime.computer.")
@@ -922,7 +925,9 @@ pub(crate) fn spawn(
                             let done = finished.clone();
                             let cancelled = cancellation.clone();
                             thread::spawn(move || {
-                                let result = if method.starts_with("runtime.mcp.resource.") {
+                                let result = if method.starts_with("runtime.mcp.interaction.") {
+                                    mcp_interaction_commands::execute(runtime, &method, params, &cancelled)
+                                } else if method.starts_with("runtime.mcp.resource.") {
                                     mcp_resource_commands::execute(runtime, &method, params, &cancelled)
                                 } else if method.starts_with("runtime.computer.") {
                                     computer_commands::execute(runtime, &method, params, &cancelled)
@@ -3010,3 +3015,7 @@ mod mcp_resource_review;
 #[cfg(test)]
 #[path = "mcp_task_review.rs"]
 mod mcp_task_review;
+
+#[cfg(test)]
+#[path = "mcp_interaction_review.rs"]
+mod mcp_interaction_review;

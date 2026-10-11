@@ -38,7 +38,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 51;
+pub(crate) const FORMAT: i64 = 52;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -124,6 +124,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
         followups::check_format(db)?;
         calendar::check_format(db)?;
         goals::check_format(db)?;
+        mcp_interactions::check_format(db)?;
         db.prepare("SELECT run_id,identity,kind,state_ref,pending_state_ref,action_ref,continuation_ref,activation_cursor,pending,wait_id FROM policy_checkpoints")?;
         db.prepare("SELECT action_id,node_id,call_id,position,call,receipt,outcome FROM policy_graph_nodes")?;
         db.prepare("SELECT action_id,node_id,dependency_id FROM policy_graph_dependencies")?;
@@ -175,6 +176,7 @@ fn initialize_metadata(
         followups::initialize_new(&tx)?;
         calendar::initialize_new(&tx)?;
         goals::initialize_new(&tx)?;
+        mcp_interactions::initialize_new(&tx)?;
     }
     let epoch = tx.query_row(
         "UPDATE runtime_meta SET epoch=epoch+1 WHERE id=1 RETURNING epoch",
@@ -258,6 +260,7 @@ impl Catalog {
             },
         };
         this.recover()?;
+        this.recover_mcp_interactions()?;
         {
             let mut rows = this
                 .db
@@ -1757,6 +1760,7 @@ mod content_collection_tests;
 pub(super) fn request_cancel_run_in(tx: &Transaction<'_>, id: &str) -> Result<Run> {
     let mut run: Run = record(tx, "runs", id)?;
     mcp_resources::cancel_run(tx, id, false)?;
+    mcp_interactions::cancel_run(tx, id, false)?;
     if run.state.terminal() || run.cancel_requested {
         return Ok(run);
     }
@@ -1778,6 +1782,7 @@ pub(super) fn request_cancel_run_in(tx: &Transaction<'_>, id: &str) -> Result<Ru
 
 pub(super) fn request_cancel_operation_in(tx: &Transaction<'_>, key: &str) -> Result<Operation> {
     let mut op: Operation = record(tx, "operations", key)?;
+    mcp_interactions::cancel_operation(tx, key)?;
     if matches!(
         policy_body::PolicyActionMetadata::from_operation(&op)?,
         Some(policy_body::PolicyActionMetadata::PolicyPauseV1 { .. })
@@ -1846,3 +1851,6 @@ pub mod managed_process;
 
 #[path = "catalog_mcp_resources.rs"]
 pub mod mcp_resources;
+
+#[path = "catalog_mcp_interactions.rs"]
+pub mod mcp_interactions;

@@ -117,6 +117,9 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     cancelOperation: operationId => post('operation/cancel', { operationId }),
     decidePermission: input => post('permission/decide', input),
     answerQuestion: input => post('question/answer', input),
+    listMcpInteractions: (input, signal) => post('mcp/interactions/list', input, signal),
+    readMcpInteraction: (input, signal) => post('mcp/interactions/read', input, signal),
+    respondMcpInteraction: (input, signal) => post('mcp/interactions/respond', input, signal),
     resume: (runId, waitId) => post('run/resume', { runId, waitId }),
     async retryPreparation(runId) { await post('run/retry-preparation', { runId }); }, events: cursor => post('events', { cursor }),
     async observe(cursor, listener, { signal }) {

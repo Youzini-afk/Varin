@@ -1,3 +1,4 @@
+import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpInteractionPage, McpInteractionView } from '@varin/protocol';
 import type { MediaReadParams, MediaReadChunk } from '@varin/protocol';
 import type { ComputerAutomationProjection, ComputerAutomationState } from '@varin/protocol';
 import type { MessageSendParams, MessageListParams, MessageReceipt, MessagePage, MessageView } from '@varin/protocol';
@@ -254,6 +255,10 @@ export interface ThreadsAPI {
   operation(operationId: string): Promise<Operation>;
   cancelOperation(operationId: string): Promise<OperationCancellationReceipt>;
   decidePermission(input: ThreadIdentity & { operationId: string; permissionId: string; decision: 'allow_once' | 'deny' }): Promise<Operation>;
+  /** Server requests remain on their original Operation, including after its Run ends. */
+  listMcpInteractions(input: ThreadIdentity & Omit<McpInteractionListParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<McpInteractionPage>;
+  readMcpInteraction(input: ThreadIdentity & McpInteractionReadParams, signal?: AbortSignal): Promise<McpInteractionView>;
+  respondMcpInteraction(input: ThreadIdentity & McpInteractionRespondParams, signal?: AbortSignal): Promise<McpInteractionView>;
   answerQuestion(input: ThreadIdentity & { operationId: string; answer: string }): Promise<Operation>;
   resume(runId: string, waitId: string): Promise<PolicyResumeReceipt>;
   retryPreparation(runId: string): Promise<void>;

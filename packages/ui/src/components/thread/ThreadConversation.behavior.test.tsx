@@ -5,7 +5,7 @@ import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ThreadRequestError } from '@varin/application-client';
 import type { ContextCheckpoint, ThreadIdentity, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
-import type { ChildTask, DelegatedExecution, StoredMedia } from '@varin/protocol';
+import type { ChildTask, DelegatedExecution, StoredMedia, McpInteractionView } from '@varin/protocol';
 import { ThreadConversation } from './ThreadConversation';
 import { AgentWorkspaceShell } from '@/workbenches/agent/AgentWorkspaceShell';
 
@@ -57,6 +57,7 @@ function fixture(active = false) {
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
   const api: ThreadsAPI = { computer: { state: vi.fn<ThreadsAPI['computer']['state']>(async target => ({ state: { work: target, rootWork: target, currentExecution: null, currentRootExecution: null, active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] })), stop: vi.fn(unused), decide: vi.fn(unused) }, goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     mediaRead: vi.fn(async input => ({ media: storedImage, partIndex: input.partIndex, chunkIndex: 0, chunkCount: 1, totalBytes: Buffer.from(imageData, 'base64').length, bytesBase64: imageData })),
+    listMcpInteractions: vi.fn(async () => ({ items: [], nextCursor: null })), readMcpInteraction: unused, respondMcpInteraction: unused,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, retryPreparation: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
@@ -2213,4 +2214,40 @@ it('allows retrying Stop until local resource observation is released, even if c
   await act(async () => button('Stop resource observation').click());
   expect(cancel.mock.calls).toEqual([[operation.id], [operation.id]]);
   expect(button('Stop resource observation')).toBeUndefined();
+});
+
+
+it('projects original MCP interaction events onto idle Task requests without active Operations or an automatic Run continuation', async () => {
+  const f = fixture(false);
+  const request: McpInteractionView = { record: { id: 'request:server', revision: 1, runId: 'run:already-finished',
+    threadId: identity.threadId, branchId: identity.branchId, mode: 'form', availability: 'live', choice: null,
+    delivery: 'not_started', completionReported: false, problem: null,
+    binding: { operationId: 'operation:accepted-task', executionOwner: { kind: 'external', identity: 'original-owner', epoch: 'epoch' },
+      connectionId: 'original-connection', requestId: 0, relation: { kind: 'task', taskId: 'original-remote-task' },
+      endpoint: { server: 'original-server', resourceKey: 'server-key', configurationVersion: 'configuration', credentialVersion: 'grant' } } },
+    request: {}, presentation: { mode: 'form', message: 'The retained task needs your choice.', fields: [
+      { name: 'enabled', title: 'Enable task option', kind: 'boolean', required: true, default: false },
+    ] }, response: null };
+  let visible = false;
+  f.api.listMcpInteractions = vi.fn(async () => ({ items: visible ? [structuredClone(request)] : [], nextCursor: null }));
+  f.api.respondMcpInteraction = vi.fn(async input => {
+    request.response = input.response; request.record.choice = input.response.action; request.record.delivery = 'sending'; request.record.revision += 1;
+    return structuredClone(request);
+  });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(container.textContent).not.toContain('The retained task needs your choice');
+  visible = true; f.view.eventCursor = 1;
+  await act(async () => f.emit({ cursor: 1, subject: request.record.id, revision: 1, kind: 'mcp.interaction.opened', data: {} }));
+  expect(container.textContent).toContain('The retained task needs your choice');
+  expect(f.view.operations).toEqual([]); expect(f.view.activeRun).toBeNull();
+  const form = container.querySelector<HTMLFormElement>('[aria-label="Respond to MCP request request:server"]')!;
+  await submitForm(form);
+  expect(f.api.respondMcpInteraction).toHaveBeenCalledWith({ ...identity, operationId: 'operation:accepted-task', interactionId: 'request:server', expectedRevision: 1,
+    response: { action: 'accept', content: { enabled: false } } });
+  expect(container.textContent).toContain('Your choice: accept · Response delivery started');
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
+  const other = { ...identity, branchId: 'branch:other' };
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={other} />));
+  expect(container.querySelector('[aria-label="MCP request request:server"]')).toBeNull();
+  expect(f.api.respondMcpInteraction).toHaveBeenCalledOnce();
 });

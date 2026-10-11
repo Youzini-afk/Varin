@@ -139,6 +139,13 @@ impl Host {
                         .cancel_operation(&p.operation_id)
                         .map(|op| operation_cancellation_receipt(&op))
                         .map_err(|error| KernelError::Operation(error.to_string()))
+                } else if method.starts_with("runtime.mcp.interaction.") {
+                    mcp_interaction_commands::execute(
+                        runtime.clone(),
+                        method,
+                        params.clone(),
+                        &AtomicBool::new(false),
+                    )
                 } else if method.starts_with("runtime.mcp.resource.") {
                     mcp_resource_commands::execute(
                         runtime.clone(),
@@ -161,7 +168,7 @@ impl Host {
                         .capture_launch(params["runId"].as_str().unwrap())
                         .unwrap();
                     Ok(serde_json::to_value(read.map(|read| read.load().unwrap())).unwrap())
-                } else if method == "runtime.run.inspect" {
+                } else if method == "runtime.run.inspect" || method == "runtime.thread.inspect" {
                     dispatch(
                         &mut runtime.catalog().lock().unwrap(),
                         method,
@@ -284,7 +291,10 @@ impl Host {
                 self.expected_resource_diagnostics.remove(index);
                 None
             }
-            "fixture-prepared" | "fixture-finished" | "fixture-child-prepared" => Some(frame),
+            "fixture-prepared"
+            | "fixture-finished"
+            | "fixture-child-prepared"
+            | "fixture-interaction-consumer-result" => Some(frame),
             _ => panic!("unexpected Host frame: {frame}"),
         }
     }

@@ -8,6 +8,7 @@ export const requiresMcpTask = (tool:{taskSupport:McpTaskSupport;taskCapable:boo
 export interface McpTaskResponse { task: McpTaskState; result: Record<string, unknown> }
 export interface McpTaskLease {
   readonly endpoint: McpEndpoint;
+  bindInteraction?(taskId: string, origin: import('./mcp-authority.js').McpInteractionOrigin): () => void;
   start(name: string, arguments_: Record<string, unknown>, options: {schemaVersion:string;signal:AbortSignal;ttl?:number;beforeDispatch?:()=>void|Promise<void>}): Promise<McpTaskResponse>;
   get(taskId:string, signal:AbortSignal):Promise<McpTaskResponse>;
   result(taskId:string, signal:AbortSignal):Promise<Record<string,unknown>>;

@@ -3,17 +3,27 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 6 as const;
+export const KERNEL_PROTOCOL_VERSION = 7 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
-export const KERNEL_CONTROL_METHODS = ["runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
-export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
+export const KERNEL_CONTROL_METHODS = ["runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
+export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
-export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v6" as const;
+export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.mcp.interaction.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v7" as const;
 
 export type KernelMethod =
+  | "runtime.mcp.interaction.open"
+  | "runtime.mcp.interaction.list"
+  | "runtime.mcp.interaction.read"
+  | "runtime.mcp.interaction.respond"
+  | "runtime.mcp.interaction.pending"
+  | "runtime.mcp.interaction.response.begin"
+  | "runtime.mcp.interaction.response.settle"
+  | "runtime.mcp.interaction.close"
+  | "runtime.mcp.interaction.complete"
+  | "runtime.mcp.interaction.release_source"
   | "runtime.managed_process.pending"
   | "runtime.managed_process.terminal"
   | "runtime.managed_process.cell"
@@ -288,6 +298,105 @@ export type KernelMethod =
   | "runtime.mcp.resource.context"
   | "runtime.mcp.resource.access"
   | "runtime.mcp.resource.release_source";
+
+export type McpRequestId = string | number;
+
+export type McpInteractionRelation = { kind: 'rpc_response_stream'; outgoingRequestId: McpRequestId } | { kind: 'task'; taskId: string };
+
+export type McpElicitationResponse = { action: 'accept'; content?: Record<string, string | number | boolean | string[]> } | { action: 'decline' | 'cancel' };
+
+export interface McpElicitationField { name: string; title: string; description?: string; required: boolean; kind: 'string' | 'number' | 'integer' | 'boolean' | 'enum' | 'multi_enum'; options?: { value: string; title: string }[]; default?: string | number | boolean | string[]; minLength?: number; maxLength?: number; minimum?: number; maximum?: number; minItems?: number; maxItems?: number; pattern?: string; format?: 'email' | 'uri' | 'date' | 'date-time'; }
+
+export type McpElicitationPresentation = { mode: 'form'; message: string; fields: McpElicitationField[] } | { mode: 'url'; message: string; url: string; elicitationId: string };
+
+export type McpInteractionMode = 'form' | 'url';
+
+export type McpInteractionChoice = 'accept' | 'decline' | 'cancel';
+
+export type McpInteractionAvailability = 'live' | 'cancelled' | 'connection_lost' | 'owner_unavailable' | 'rpc_closed';
+
+export type McpInteractionDelivery = 'not_started' | 'sending' | 'sent' | 'unknown' | 'not_sent';
+
+export interface McpInteractionBinding {
+  operationId: string;
+  executionOwner: ExecutorOwner;
+  endpoint: McpEndpoint;
+  connectionId: string;
+  requestId: McpRequestId;
+  relation: McpInteractionRelation;
+}
+
+export interface McpInteractionRecord {
+  id: string;
+  revision: number;
+  binding: McpInteractionBinding;
+  runId: string;
+  threadId: string;
+  branchId: string;
+  mode: McpInteractionMode;
+  availability: McpInteractionAvailability;
+  choice: McpInteractionChoice | null;
+  delivery: McpInteractionDelivery;
+  completionReported: boolean;
+  problem: string | null;
+}
+
+export interface McpInteractionView {
+  record: McpInteractionRecord;
+  request: Record<string, unknown>;
+  presentation: McpElicitationPresentation;
+  response: McpElicitationResponse | null;
+}
+
+export interface McpInteractionPage {
+  items: McpInteractionView[];
+  nextCursor: string | null;
+}
+
+export interface McpInteractionOpenParams {
+  id: string;
+  binding: McpInteractionBinding;
+  mode: McpInteractionMode;
+  request: Record<string, unknown>;
+  presentation: McpElicitationPresentation;
+}
+
+export interface McpInteractionListParams {
+  threadId: string;
+  branchId: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface McpInteractionReadParams {
+  operationId: string;
+  interactionId: string;
+}
+
+export interface McpInteractionRespondParams {
+  operationId: string;
+  interactionId: string;
+  expectedRevision: number;
+  response: McpElicitationResponse;
+}
+
+export interface McpInteractionControlParams {
+  binding: McpInteractionBinding;
+  interactionId: string;
+}
+
+export interface McpInteractionSettleParams {
+  binding: McpInteractionBinding;
+  interactionId: string;
+  delivery: McpInteractionDelivery;
+}
+
+export interface McpInteractionCloseParams {
+  binding: McpInteractionBinding;
+  interactionId: string;
+  availability: McpInteractionAvailability;
+  problem?: string;
+}
 
 export interface MediaReadChunk { media:StoredMedia;partIndex:number;chunkIndex:number;chunkCount:number;totalBytes:number;bytesBase64:string }
 
@@ -1630,7 +1739,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 6; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 7; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -4740,6 +4849,16 @@ export const MCP_CAPABILITIES: readonly (LaunchTool & { route: McpRoute; operati
 ];
 
 export type KernelMethodParams = {
+  "runtime.mcp.interaction.open": McpInteractionOpenParams;
+  "runtime.mcp.interaction.list": McpInteractionListParams;
+  "runtime.mcp.interaction.read": McpInteractionReadParams;
+  "runtime.mcp.interaction.respond": McpInteractionRespondParams;
+  "runtime.mcp.interaction.pending": KernelEmptyParams;
+  "runtime.mcp.interaction.response.begin": McpInteractionControlParams;
+  "runtime.mcp.interaction.response.settle": McpInteractionSettleParams;
+  "runtime.mcp.interaction.close": McpInteractionCloseParams;
+  "runtime.mcp.interaction.complete": McpInteractionControlParams;
+  "runtime.mcp.interaction.release_source": RunParams;
   "runtime.managed_process.pending": KernelEmptyParams;
   "runtime.managed_process.terminal": ManagedProcessTerminalParams;
   "runtime.managed_process.cell": ManagedProcessCellParams;
@@ -5017,6 +5136,96 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.interaction.open";
+      params: McpInteractionOpenParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.interaction.list";
+      params: McpInteractionListParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.interaction.read";
+      params: McpInteractionReadParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.interaction.respond";
+      params: McpInteractionRespondParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.interaction.pending";
+      params: KernelEmptyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.interaction.response.begin";
+      params: McpInteractionControlParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.interaction.response.settle";
+      params: McpInteractionSettleParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.interaction.close";
+      params: McpInteractionCloseParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.interaction.complete";
+      params: McpInteractionControlParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.mcp.interaction.release_source";
+      params: RunParams;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";

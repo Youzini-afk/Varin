@@ -3,14 +3,14 @@ import { test } from 'node:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { McpAuthority, type McpAuthorityOptions, type McpResourceChange } from '../src/mcp-authority.js';
+import { McpAuthority, McpAuthorityError, type McpAuthorityOptions, type McpResourceChange } from '../src/mcp-authority.js';
 const signal = new AbortController().signal;
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 function fixture(subscribe = true) {
   const root = mkdtempSync(join(tmpdir(), 'varin-mcp-resources-'));
   writeFileSync(join(root, 'mcp.json'), JSON.stringify({ mcpServers: { peer: { url: 'https://fixture.invalid/mcp', exposure: 'deferred', auth: { provider: 'fixture' } } } }));
   type Factory = NonNullable<McpAuthorityOptions['createTransport']>;
-  let grant = 1, held = false;
+  let grant = 1, held = false, rejectSubscribe = false, rejectCleanup = false;
   const pending: Array<() => void> = [], sent: Array<Record<string, unknown>> = [];
   const peers: Array<{ notify(params: Record<string, unknown>): void }> = [];
   const createTransport: Factory = () => {
@@ -28,15 +28,15 @@ function fixture(subscribe = true) {
           case 'initialize': return reply({ protocolVersion: '2025-11-25', capabilities: { resources: { subscribe } }, serverInfo: { name: 'peer', version: '1' } });
           case 'resources/list': return reply({ resources: [] });
           case 'resources/templates/list': return reply({ resourceTemplates: [] });
-          case 'resources/subscribe': if (held) pending.push(() => reply({ _meta: { accepted: true } })); else reply({ _meta: { accepted: true } }); return;
-          case 'resources/unsubscribe': return reply({ _meta: { released: true } });
+          case 'resources/subscribe': if(rejectSubscribe){receive({jsonrpc:'2.0',id:message.id,error:{code:-32042,message:'Review subscription',data:{original:['subscribe',false,0]}}});return;} if (held) pending.push(() => reply({ _meta: { accepted: true } })); else reply({ _meta: { accepted: true } }); return;
+          case 'resources/unsubscribe': if(rejectCleanup){receive({jsonrpc:'2.0',id:message.id,error:{code:-32042,message:'Review cleanup',data:{original:['unsubscribe',false,0]}}});return;} return reply({ _meta: { released: true } });
           default: throw new Error(`Unexpected ${message.method}`);
         }
       } };
   };
   const authority = new McpAuthority({ createTransport, providerToken: async () => `token-${grant}`, credentialScope: async () => ({ reference: `grant-${grant}`, generation: 1 }) });
   const scope = { agentDir: root, configCwd: root, executionCwd: root, environmentId: 'host:global', executionScope: 'global' as const, projectTrusted: false, sessionId: 'thread:one' };
-  return { authority, scope, sent, peers, hold() { held = true; }, finish() { held = false; for (const release of pending.splice(0)) release(); }, changeGrant() { grant++; },
+  return { authority, scope, sent, peers, rejectSubscribe(){rejectSubscribe=true;}, rejectCleanup(){rejectCleanup=true;}, hold() { held = true; }, finish() { held = false; for (const release of pending.splice(0)) release(); }, changeGrant() { grant++; },
     async close() { await authority.close(); rmSync(root, { recursive: true, force: true }); } };
 }
 test('original client shares exact URI holders across Threads and contains nonexact notification bodies', async () => {
@@ -92,4 +92,21 @@ test('capability refusal and changed original credentials never deliver a raw bo
     assert(changes.some(change => change.kind === 'unavailable')); assert(!changes.some(change => change.kind === 'updated'));
     assert.deepEqual(await observer.detach(), { status: 'unknown' }); lease.release();
   } finally { await f.close(); }
+});
+
+test('resource RPC errors keep their full protocol bodies separately from holder removal and cleanup uncertainty', async () => {
+  const f=fixture();try{
+    const lease=await f.authority.acquire(f.scope,{servers:[]}),service=(await lease.discoverServices('peer',signal))[0]!;
+    const observer=await lease.observeResource(service,'opaque:accepted',{signal,onChange(){}});
+    f.rejectCleanup();
+    assert.deepEqual(await observer.detach(),{status:'unknown',protocolError:{code:-32042,message:'Review cleanup',data:{original:['unsubscribe',false,0]}}});
+    f.rejectSubscribe();
+    await assert.rejects(lease.observeResource(service,'opaque:refused',{signal,onChange(){}}),error=>{
+      assert.ok(error instanceof McpAuthorityError);assert.equal(error.settlement,'rpc_response');
+      assert.deepEqual(error.protocolError,{code:-32042,message:'Review subscription',data:{original:['subscribe',false,0]}});return true;
+    });
+    assert.equal(f.sent.filter(m=>m.method==='resources/subscribe').length,2);
+    assert.equal(f.sent.filter(m=>m.method==='resources/unsubscribe').length,1,'a rejected subscribe creates no remote accepted subscription to clean');
+    lease.release();
+  }finally{await f.close();}
 });

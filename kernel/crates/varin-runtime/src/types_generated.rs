@@ -3,6 +3,41 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum McpInteractionMode {
+    Form,
+    Url,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpInteractionChoice {
+    Accept,
+    Decline,
+    Cancel,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpInteractionAvailability {
+    Live,
+    Cancelled,
+    ConnectionLost,
+    OwnerUnavailable,
+    RpcClosed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpInteractionDelivery {
+    NotStarted,
+    Sending,
+    Sent,
+    Unknown,
+    NotSent,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum FollowupControlAction {
     Pause,
     Resume,
