@@ -457,10 +457,17 @@ impl ChildContinuationPreparation {
         let provenance_ref = self
             .previous
             .as_ref()
-            .map(|previous| -> Result<Value> {
+            .map(|previous| -> Result<Option<Value>> {
                 let source = previous.source.as_ref().ok_or_else(|| {
                     RuntimeError::Conflict("previous immutable source is unavailable".into())
                 })?;
+                if matches!(source, ChildSource::Absent) {
+                    if previous.launch.source.is_some() || previous.source_basis.is_some()
+                        || previous.code_result != ChildCodeResult::NotApplicable {
+                        return Err(RuntimeError::Conflict("source-free predecessor has file state".into()));
+                    }
+                    return Ok(None);
+                }
                 let ChildSource::Ready {
                     pin,
                     provenance_ref,
@@ -479,9 +486,9 @@ impl ChildContinuationPreparation {
                 let resources = provenance.get("resources").cloned();
                 self.content.save(&serde_json::to_value(
                     collaboration::ChildSourceProvenance::FixedRoot { root, resources },
-                )?)
+                )?).map(Some)
             })
-            .transpose()?;
+            .transpose()?.flatten();
         let selection = self
             .launch
             .as_ref()
@@ -558,8 +565,12 @@ impl Catalog {
             let launch = self
                 .launch_metadata(&run.id)?
                 .ok_or_else(|| RuntimeError::NotFound("previous Run launch".into()))?;
-            let writers = self.capture_child_writer_bindings(&previous.execution_id)?;
-            (Some(previous), Some(run), Some(launch), Some(writers))
+            let writers = if matches!(previous.source, Some(ChildSource::Absent)) {
+                None
+            } else {
+                Some(self.capture_child_writer_bindings(&previous.execution_id)?)
+            };
+            (Some(previous), Some(run), Some(launch), writers)
         };
         Ok(ChildContinuationPreparation {
             ingress: None,
@@ -628,12 +639,12 @@ impl Catalog {
             .ok_or_else(|| RuntimeError::Conflict("continuation predecessor changed".into()))?;
         let run = prepared.run.expect("captured predecessor");
         let launch = prepared.launch.expect("captured launch");
-        let writers = prepared.writers.expect("captured writer bindings");
+        let writers = prepared.writers;
         // A published immutable result fixes the next source even when its original
         // business effect remains Unknown. Native synchronous writes were quiesced
         // by that result's existing Storage publication owner; independently-lived
         // processes and Host source callbacks still require their original stop receipt.
-        if !self.child_writers_stopped(&writers)? {
+        if writers.as_ref().map(|writers| self.child_writers_stopped(writers)).transpose()? == Some(false) {
             if prepared.ingress.is_some() {
                 return Err(RuntimeError::RequestActivationHeld);
             }
@@ -652,49 +663,60 @@ impl Catalog {
         let source = previous.source.as_ref().ok_or_else(|| {
             RuntimeError::Conflict("previous immutable source is unavailable".into())
         })?;
-        let ChildSource::Ready { pin, selection, .. } = source else {
-            return Err(RuntimeError::Conflict(
-                "previous source is not ready".into(),
-            ));
-        };
-        let provenance_ref = prepared.provenance_ref.expect("prepared source provenance");
-        let basis = match &previous.code_result {
-            ChildCodeResult::Published { result, .. } => {
-                let mut source = selection.clone();
-                source.mode = SourceMode::FixedBranch;
-                source.branch_id = Some(result.branch_id.clone());
-                source.revision = Some(result.result_revision);
-                source.environment_run_id = None;
-                source.live_root = None;
-                ChildSourceBasis::WorkingResult {
-                    source,
-                    root: result.root.clone(),
-                    result: result.clone(),
-                    provenance_ref: provenance_ref.clone(),
-                }
+        let absent = matches!(source, ChildSource::Absent);
+        let basis = if absent {
+            if previous.launch.source.is_some() || launch.selection.source.is_some()
+                || previous.source_basis.is_some() || prepared.provenance_ref.is_some()
+                || previous.code_result != ChildCodeResult::NotApplicable {
+                return Err(RuntimeError::Conflict("source-free predecessor has file state".into()));
             }
-            ChildCodeResult::NoChanges => ChildSourceBasis::ImmutableSource {
-                source: pin.source.clone(),
-                root: pin.root.clone(),
-                pin: pin.clone(),
-                provenance_ref: provenance_ref.clone(),
-            },
-            ChildCodeResult::Unavailable {
-                effect: Effect::None,
-                ..
-            } if self.child_file_effect_bound(&writers)? == Effect::None => {
-                ChildSourceBasis::ImmutableSource {
+            None
+        } else {
+            let ChildSource::Ready { pin, selection, .. } = source else {
+                return Err(RuntimeError::Conflict(
+                    "previous source is not ready".into(),
+                ));
+            };
+            let provenance_ref = prepared.provenance_ref.expect("prepared source provenance");
+            let basis = match &previous.code_result {
+                ChildCodeResult::Published { result, .. } => {
+                    let mut source = selection.clone();
+                    source.mode = SourceMode::FixedBranch;
+                    source.branch_id = Some(result.branch_id.clone());
+                    source.revision = Some(result.result_revision);
+                    source.environment_run_id = None;
+                    source.live_root = None;
+                    ChildSourceBasis::WorkingResult {
+                        source,
+                        root: result.root.clone(),
+                        result: result.clone(),
+                        provenance_ref: provenance_ref.clone(),
+                    }
+                }
+                ChildCodeResult::NoChanges => ChildSourceBasis::ImmutableSource {
                     source: pin.source.clone(),
                     root: pin.root.clone(),
                     pin: pin.clone(),
                     provenance_ref: provenance_ref.clone(),
+                },
+                ChildCodeResult::Unavailable {
+                    effect: Effect::None,
+                    ..
+                } if self.child_file_effect_bound(writers.as_ref().expect("captured file writer bindings"))? == Effect::None => {
+                    ChildSourceBasis::ImmutableSource {
+                        source: pin.source.clone(),
+                        root: pin.root.clone(),
+                        pin: pin.clone(),
+                        provenance_ref: provenance_ref.clone(),
+                    }
                 }
-            }
-            _ => {
-                return Err(RuntimeError::Conflict(
-                    "previous source has no exact settled continuation basis".into(),
-                ))
-            }
+                _ => {
+                    return Err(RuntimeError::Conflict(
+                        "previous source has no exact settled continuation basis".into(),
+                    ))
+                }
+            };
+            Some(basis)
         };
         let tx = self.db.transaction()?;
         let current = execution(&tx, &previous.execution_id)?;
@@ -798,9 +820,11 @@ impl Catalog {
             configuration_ref: prepared.configuration_ref.expect("captured configuration"),
             launch: selected,
             policy_target: launch.policy_target,
-            source_basis: Some(basis),
-            source: None,
-            code_result: if matches!(previous.code_result, ChildCodeResult::NoChanges) {
+            source_basis: basis,
+            source: absent.then_some(ChildSource::Absent),
+            code_result: if absent {
+                ChildCodeResult::NotApplicable
+            } else if matches!(previous.code_result, ChildCodeResult::NoChanges) {
                 ChildCodeResult::NoChanges
             } else {
                 ChildCodeResult::Pending
@@ -951,6 +975,12 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             return Err(RuntimeError::Invalid(
                 "malformed original dispatch execution; user data was preserved".into(),
             ));
+        }
+        if matches!(execution.source, Some(ChildSource::Absent)) != (execution.code_result == ChildCodeResult::NotApplicable)
+            || (matches!(execution.source, Some(ChildSource::Absent))
+                && (execution.source_basis.is_some() || execution.launch.source.is_some()))
+        {
+            return Err(RuntimeError::Invalid("malformed source-free execution; user data was preserved".into()));
         }
         if execution.execution_id != id
             || execution.child_operation_id != child

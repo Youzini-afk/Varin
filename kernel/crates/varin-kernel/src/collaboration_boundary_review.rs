@@ -21,7 +21,7 @@ fn dispatch(storage: &mut Storage, method: &str, params: Value) -> Value {
 fn boundary(revoke_before: bool, policy: bool) {
     let kinds = BTreeSet::from([ToolKind::FileRead]);
     let read = KernelToolExecutor::selected_schemas(&kinds).remove(0);
-    let schema = crate::collaboration::schemas(vec![], true)
+    let schema = crate::collaboration::schemas(vec![])
         .into_iter()
         .find(|s| s.name == "dispatch")
         .unwrap();

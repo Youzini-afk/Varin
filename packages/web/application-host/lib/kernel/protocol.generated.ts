@@ -3661,7 +3661,7 @@ export type ChildSourceRoot = { kind: 'fixed'; pin: ChildSourcePin } | { kind: '
 
 export type ChildSourceProvenance = { consistency: 'fixed-root'; root: string; resources?: SourceResourceCapture } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; resources?: SourceResourceCapture };
 
-export type ChildSource = { kind: 'pending'; handoff: ChildSourceHandoff } | { kind: 'ready'; handoff: ChildSourceHandoff | null; pin: ChildSourcePin; selection: LaunchSource; provenance: ChildSourceProvenance };
+export type ChildSource = { kind: 'absent' } | { kind: 'pending'; handoff: ChildSourceHandoff } | { kind: 'ready'; handoff: ChildSourceHandoff | null; pin: ChildSourcePin; selection: LaunchSource; provenance: ChildSourceProvenance };
 
 export interface ChildWorkingResultRef {
   publication_id: string;
@@ -3673,7 +3673,7 @@ export interface ChildWorkingResultRef {
   record_id: string;
 }
 
-export type ChildCodeResult = { kind: 'pending' } | { kind: 'settling'; publication_id: string } | { kind: 'candidate'; candidate: KernelWorkingResultCandidate } | { kind: 'published'; result: ChildWorkingResultRef; effect: Effect } | { kind: 'no_changes' } | { kind: 'unavailable'; code: string; effect: Effect };
+export type ChildCodeResult = { kind: 'not_applicable' } | { kind: 'pending' } | { kind: 'settling'; publication_id: string } | { kind: 'candidate'; candidate: KernelWorkingResultCandidate } | { kind: 'published'; result: ChildWorkingResultRef; effect: Effect } | { kind: 'no_changes' } | { kind: 'unavailable'; code: string; effect: Effect };
 
 export interface ChildSourceReadyParams {
   executionId: string;
@@ -3701,7 +3701,7 @@ export interface ChildResultPublishedParams {
 
 export interface ChildPrepareParams {
   executionId: string;
-  source: LaunchSourceParams;
+  source: LaunchSourceParams | null;
   context: InitialContext;
   expectedContextCheckpoint: string | null;
   inputPreparation?: InputResourcePreparation;
@@ -3736,6 +3736,7 @@ export interface ChildCapabilityFailure {
 }
 
 export interface ChildPreset {
+  tools_source: 'default' | 'explicit';
   id: string;
   name: string;
   instructions: string;

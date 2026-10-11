@@ -227,11 +227,12 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       </article>)}
       {!historyView && progress && <article className="mx-auto max-w-3xl" aria-label="Streaming assistant response"><MarkdownRenderer messageId={`${identity.threadId}:progress`} isStreaming content={progress} /></article>}
       {snapshot?.children?.map(child => <div key={child.operation_id} className="mx-auto max-w-3xl rounded border p-3 text-sm" aria-label="Child task">
-        <div>{child.selected_profile.preset_id ?? 'Normal child'} · {child.selected_profile.work_mode === 'read_only' ? 'Read-only source' : 'Private working copy'} · {child.state}</div>
-        <div className="text-xs text-muted-foreground">{child.source.kind === 'pending' ? 'Preparing a stable source' : `Source ready · ${child.source.provenance.consistency}`}</div>
+        <div>{child.selected_profile.preset_id ?? 'Normal child'}{child.source.kind !== 'absent' && ` · ${child.selected_profile.work_mode === 'read_only' ? 'Read-only source' : 'Private working copy'}`} · {child.state}</div>
+        <div className="text-xs text-muted-foreground">{child.source.kind === 'absent' ? 'No file source' : child.source.kind === 'pending' ? 'Preparing a stable source' : `Source ready · ${child.source.provenance.consistency}`}</div>
         {child.source.kind === 'ready' && child.source.provenance.consistency !== 'fixed-root' && <div className="text-xs text-muted-foreground">{child.source.provenance.contentMode === 'saved-files' ? 'Saved files' : 'Fixed draft baseline'}{child.source.provenance.omittedDraftPaths.length > 0 ? ` · ${child.source.provenance.omittedDraftPaths.length} unsaved overlays omitted` : ''}</div>}
         <div className="text-xs text-muted-foreground">{child.code_result.kind === 'published'
           ? `File result fixed · revision ${child.code_result.result.result_revision} · effect: ${child.code_result.effect} · parent integration requires a separate action`
+          : child.code_result.kind === 'not_applicable' ? 'File result not applicable'
           : child.code_result.kind === 'no_changes' ? 'No file changes'
           : child.code_result.kind === 'unavailable' ? `File result unavailable · ${child.code_result.code} · effect: ${child.code_result.effect}`
           : child.code_result.kind === 'candidate' ? 'File result fixed; publication pending'
@@ -323,7 +324,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     }}>
       {delegated && !active && <p role="status" className="text-sm text-muted-foreground">{preparingDelegation
         ? 'A delegated execution is preparing. Its original input remains accepted.'
-        : 'Continue in a new Run using this child’s exact previous configuration and fixed source. Previous reports and file results remain separate.'}</p>}
+        : 'Continue in a new Run using this child’s exact previous configuration and source selection. Previous reports and file results remain separate.'}</p>}
       {sourceCannotBeApplied && <p role="status" className="text-sm text-muted-foreground">The prepared workspace needs a new run. Keep the current workspace to queue this message, or wait for this run to finish.</p>}
       {pause && <p role="status" aria-label="Policy pause" className="text-sm text-muted-foreground">Paused: {pause.reason || 'Waiting for your explicit resume.'} Messages can be queued while paused.</p>}
       {policy && <p className="text-xs text-muted-foreground">Strategy: {policy.active.target.kind === 'extension' ? policy.active.target.artifact.declaredIdentity.name : 'Default'} · generation {policy.active.generation}</p>}

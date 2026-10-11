@@ -105,6 +105,9 @@ pub enum ChildModelSource {
     Inherit,
     Selected,
 }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChildPresetToolsSource { Default, Explicit }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildPreset {
@@ -112,6 +115,7 @@ pub struct ChildPreset {
     pub name: String,
     pub instructions: String,
     pub tools: Vec<String>,
+    pub tools_source: ChildPresetToolsSource,
     pub work_mode: ChildWorkMode,
     pub model_source: ChildModelSource,
     pub inherit_base: Option<ChildModelBinding>,
@@ -225,6 +229,7 @@ pub struct ChildSelectedProfile {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FrozenChildDispatch {
+    pub source: Option<super::launches::SourceSelection>,
     pub catalog_ref: Value,
     pub parent_model: ChildModelBinding,
     pub allowed_delegation: Vec<ToolSchema>,
@@ -306,19 +311,6 @@ impl ResolvedChildSelection {
         }
     }
 }
-fn physical_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "file_write"
-            | "file_edit"
-            | "process_spawn"
-            | "process_inspect"
-            | "process_read"
-            | "process_write"
-            | "process_resize"
-            | "wait_process"
-    )
-}
 impl ChildDispatchSelection {
     pub fn host_tool(&self, name: &str) -> Option<&ToolSchema> {
         self.extension_bindings
@@ -327,8 +319,34 @@ impl ChildDispatchSelection {
             .chain(self.mcp_binding.iter().flat_map(|binding| &binding.tools))
             .find(|tool| tool.name == name && self.frozen.allowed_delegation.contains(tool))
     }
+    pub fn source_requirement(&self, name: &str) -> Option<ChildSourceRequirement> {
+        if let Some(tool) = self.host_tool(name) {
+            if self.extension_bindings.iter().any(|binding| &binding.tool == tool) {
+                return Some(ChildSourceRequirement::None);
+            }
+            return self.mcp_binding.as_ref().map(|binding| match binding.provenance.execution_scope {
+                super::launches::McpExecutionScope::Global => ChildSourceRequirement::None,
+                super::launches::McpExecutionScope::Workspace => ChildSourceRequirement::Source,
+            });
+        }
+        self.catalog.native_capabilities.iter()
+            .find(|capability| capability.name == name)
+            .map(|capability| capability.source_requirement)
+    }
+    pub fn preset_tools(&self, preset: &ChildPreset) -> Vec<String> {
+        if preset.tools_source == ChildPresetToolsSource::Default && self.frozen.source.is_none() {
+            preset.tools.iter().filter(|name| !matches!(self.source_requirement(name), Some(ChildSourceRequirement::Source | ChildSourceRequirement::Physical))).cloned().collect()
+        } else {
+            preset.tools.clone()
+        }
+    }
+    pub fn unavailable_source_tools(&self, tools: &[String]) -> Vec<String> {
+        if self.frozen.source.is_some() { return Vec::new(); }
+        tools.iter().filter(|name| matches!(self.source_requirement(name),
+            Some(ChildSourceRequirement::Source | ChildSourceRequirement::Physical))).cloned().collect()
+    }
     fn physical_tool(&self, name: &str) -> bool {
-        self.host_tool(name).is_none() && physical_tool(name)
+        self.source_requirement(name) == Some(ChildSourceRequirement::Physical)
     }
     /// Resolve only an already authenticated configuration snapshot. Executable declarations
     /// are still assembled and checked by their owning tool directory in the kernel.
@@ -361,7 +379,7 @@ impl ChildDispatchSelection {
                 ));
             }
             (
-                preset.tools.clone(),
+                if input.tools.is_none() { self.preset_tools(preset) } else { preset.tools.clone() },
                 input.work_mode.unwrap_or(preset.work_mode),
                 preset.instructions.clone(),
                 preset
@@ -382,10 +400,10 @@ impl ChildDispatchSelection {
                 .iter()
                 .map(|tool| tool.name.clone())
                 .collect();
-            if input.work_mode == Some(ChildWorkMode::ReadOnly) {
+            if input.work_mode == Some(ChildWorkMode::ReadOnly) && input.tools.is_none() {
                 tools.retain(|name| !self.physical_tool(name));
             }
-            if input.work_mode == Some(ChildWorkMode::IsolatedWrite) {
+            if input.work_mode == Some(ChildWorkMode::IsolatedWrite) && self.frozen.source.is_some() {
                 for name in ["file_write", "file_edit"] {
                     if !tools.iter().any(|tool| tool == name) {
                         tools.push(name.into());
@@ -418,6 +436,15 @@ impl ChildDispatchSelection {
         } else {
             mode
         };
+        if self.frozen.source.is_none() {
+            let unavailable = self.unavailable_source_tools(&tools);
+            if !unavailable.is_empty() {
+                return Err(RuntimeError::Invalid(format!(
+                    "child tools require a file source: {}; select a source or select only source-independent tools",
+                    unavailable.join(", ")
+                )));
+            }
+        }
         if mode == ChildWorkMode::ReadOnly && tools.iter().any(|name| self.physical_tool(name)) {
             return Err(RuntimeError::Invalid(
                 "selected child effects require a private physical source".into(),
@@ -459,6 +486,7 @@ impl ChildDispatchRead {
             serde_json::from_value(self.content.load(&frozen.catalog_ref)?)?;
         catalog.validate()?;
         frozen.parent_model.connection_identity()?;
+        if let Some(source) = &frozen.source { source.validate()?; }
         let tools: Vec<ToolSchema> = serde_json::from_value(self.content.load(&frozen.tools_ref)?)?;
         if frozen
             .allowed_delegation
@@ -583,6 +611,7 @@ impl ChildDispatchPreparation {
                 catalog.validate()?;
                 self.content
                     .save(&serde_json::to_value(FrozenChildDispatch {
+                        source: self.selection.source.clone(),
                         catalog_ref,
                         parent_model: self.model.clone(),
                         allowed_delegation: self.allowed_delegation,

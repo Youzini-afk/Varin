@@ -4,6 +4,9 @@ Date: 2026-10-11. Baseline: `2316308c3e3a5a6645bf6593b1254f7799bcf79f`.
 Status: finite slice accepted after independent lifecycle and actual-consumer review. Complete IPC,
 source-less child and platform acceptance are outside this result.
 
+The later [source-free child slice](runtime-source-free-children-2026-10-11.md) addresses the admission
+gap below; the evidence in this record remains scoped to its own baseline.
+
 This slice connects **existing real source-bearing child tasks** to the original Computer request,
 assignment and input owner. It includes ModelStep and PolicyAction calls, root Environment delivery,
 idle-root user decisions, durable request observations and child lifetime cleanup. The existing public

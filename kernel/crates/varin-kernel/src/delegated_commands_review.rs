@@ -17,7 +17,7 @@ fn public_continuation_source_prepare_and_exact_run_assembly_share_one_execution
         false,
         None,
         selected,
-        crate::collaboration::schemas(vec![], false)
+        crate::collaboration::schemas(vec![])
             .into_iter()
             .filter(|tool| matches!(tool.name.as_str(), "child_status" | "child_report"))
             .collect(),

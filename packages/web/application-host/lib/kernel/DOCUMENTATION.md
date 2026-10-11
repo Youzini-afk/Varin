@@ -865,6 +865,12 @@ The collaboration consumer also releases terminal child holders and old-epoch un
 real Catalog facts. A current-epoch missing ChildTask can still be between ACK and accept and is not
 prematurely reclaimed. Host shutdown releases its holders; exact unavailable artifacts fail on restart.
 
+A child whose frozen invocation has no file source carries explicit `source.kind: absent` and
+`code_result.kind: not_applicable`. The original context preparer/`forSource` accepts null while keeping
+role, resources and credential/configuration identity. Initial dispatch and User/message/follow-up/calendar
+continuations start the same original Run lifecycle without calling file capture, branch, grant or pin
+owners. Null unprepared source and failed source-bearing preparation never take this path.
+
 A durable accepted child precedes slow source capture and context preparation. A fixed source reuses
 its original pin. A physical source uses the shared Documents capture window, complete inventory and
 state verification, and a bounded original Storage handoff grant. Saved-files capture retains saved
@@ -876,8 +882,8 @@ reads the original fixed source receipt before attempting any current directory 
 Initial and continued executions use the same `ThreadCollaboration` lifecycle, keyed by exact
 `DelegatedExecution.execution_id`. Only initial dispatch retains/releases the original parent ToolBridge
 handoff. Explicit User continuation is durably accepted with the previous Run and head before cold
-work. Startup discovery includes accepted executions that do not yet have a Run. The Host pins the
-predecessor's exact WorkingResult or immutable source, verifies its root, and creates a new branch,
+work. Startup discovery includes accepted executions that do not yet have a Run. For a file-source
+predecessor, the Host pins its exact WorkingResult or immutable source, verifies its root, and creates a new branch,
 retained pin and materialized source under the execution identity. It does not recapture the parent
 directory or reclaim its retired handoff. Unused cancelled preparation is cleaned through the same
 Storage owner after local preparation has drained.

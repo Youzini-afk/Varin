@@ -66,7 +66,7 @@ function gate() {
 type RecordedRequest = { body: Record<string, unknown>; response: ServerResponse };
 const model = { providerId: 'child-review-provider', modelId: 'child-review-model' };
 function originalSourcePin(child: import('./protocol.generated.js').ChildTask) {
-  if (!child.source.handoff || child.source.handoff.root.kind !== 'fixed') throw new Error('Fixture expects its original fixed source');
+  if (child.source.kind === 'absent' || !child.source.handoff || child.source.handoff.root.kind !== 'fixed') throw new Error('Fixture expects its original fixed source');
   return child.source.handoff.root.pin;
 }
 function complete(response: ServerResponse, output: unknown[]) {

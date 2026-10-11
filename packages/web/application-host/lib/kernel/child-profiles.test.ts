@@ -124,7 +124,7 @@ it('distinguishes runtime-unconfigured, explicit empty tools, invalid settings a
   }
   const prepared = await compiler({ harness: { agents: { absent: agent({ tools: { pi: ['read'] } }), empty: agent({ tools: { agent: [] } }) } } })({ parent: f.parent });
   expect(prepared.presets.find(p => p.id === 'custom:absent')?.unavailable?.code).toBe('child-profile-runtime_unconfigured');
-  expect(prepared.presets.find(p => p.id === 'custom:empty')).toMatchObject({ tools: [], unavailable: null });
+  expect(prepared.presets.find(p => p.id === 'custom:empty')).toMatchObject({ tools: [], tools_source: 'explicit', unavailable: null });
 });
 
 it('edits and removes original retained legacy profiles through the existing normalized owner', async () => {
@@ -161,4 +161,22 @@ it('edits and removes original retained legacy profiles through the existing nor
     await profiles.remove({ runtime: 'agent', expectedRevision: reloaded.revision, id: retained.id });
     expect((await profiles.read({ runtime: 'agent' })).profiles.some(profile => profile.id === retained.id)).toBe(false);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it('retains shipped-default provenance and explicit preset/custom arrays for exact Run-source resolution', async () => {
+  const f = await fixture();
+  let settings: unknown = {};
+  const prepare = createChildProfilePreparer({ models: f.models, capabilities: async () => f.capabilities, settings: async () => settings });
+  const absent = await prepare({ parent: f.parent });
+  expect(absent.presets.find(preset => preset.id === 'worker')).toMatchObject({ tools: ['file_read', 'file_write', 'process_spawn', 'ask_user'], tools_source: 'default', work_mode: 'isolated_write', unavailable: null });
+  expect(absent.presets.find(preset => preset.id === 'retrieval')).toMatchObject({ tools: ['file_read'], tools_source: 'default' });
+  expect(absent.native_capabilities).toEqual(f.capabilities);
+  settings = { harness: { models: { worker: { agent: { tools: { agent: ['file_read', 'process_spawn'] } } } },
+    agents: { explicit: agent({ tools: { agent: ['file_read'] } }) } } };
+  const explicit = await prepare({ parent: f.parent });
+  expect(explicit.presets.find(preset => preset.id === 'worker')?.tools).toEqual(['file_read', 'process_spawn']);
+  expect(explicit.presets.find(preset => preset.id === 'custom:explicit')?.tools).toEqual(['file_read']);
+  expect(absent.presets.find(preset => preset.id === 'worker')?.tools_source).toBe('default');
+  expect(explicit.presets.find(preset => preset.id === 'worker')?.tools_source).toBe('explicit');
+  expect(explicit.presets.find(preset => preset.id === 'custom:explicit')?.tools_source).toBe('explicit');
 });

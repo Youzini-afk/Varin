@@ -264,7 +264,7 @@ impl InputAdmission for Catalog {
             self.attach_child_source(prepared)?;
         }
         let prepared = self
-            .capture_child_preparation(operation, source, proposal, basis)?
+            .capture_child_preparation(operation, Some(source), proposal, basis)?
             .load()?;
         self.admit_child(prepared)
     }

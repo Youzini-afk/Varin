@@ -9,8 +9,8 @@ ComputerService retains desktop assignment, physical control and action receipts
 distribution does not bypass capability review, selected tool configuration or actual Computer settings.
 The saved execution binding fixes its default desktop and is restored unchanged after reconnect.
 The same declaration exposes request/access/grant/deny and durable request Wait for existing
-source-bearing child tasks. Resource assignment does not expand their frozen callable tools.
-Source-less child admission, trusted handback continuation and persistent Computer scripts remain pending. See the [Computer owner](../web/application-host/lib/computer/DOCUMENTATION.md).
+child tasks with or without a file source. Resource assignment does not expand their frozen callable
+tools. Trusted handback continuation and persistent Computer scripts remain pending. See the [Computer owner](../web/application-host/lib/computer/DOCUMENTATION.md).
 
 The lazy brokered `varin.builtin.retrieval-structured`, `varin.builtin.retrieval-keyword`, and
 `varin.builtin.retrieval-semantic` packages

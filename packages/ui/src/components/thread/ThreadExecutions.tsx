@@ -14,9 +14,11 @@ export function ThreadExecutions({ api, identity, executions }: { api: ThreadsAP
       {execution.trigger.kind !== 'dispatch' && <div className="break-all text-xs text-muted-foreground">Previous Run: {execution.trigger.previous_run_id}</div>}
       {execution.trigger.kind === 'followup' && <div className="break-all text-xs text-muted-foreground">Follow-up: {execution.trigger.followup_id} · occurrence {execution.trigger.occurrence_id}</div>}
       {execution.trigger.kind === 'message_request' && <div className="break-all text-xs text-muted-foreground">Request message: {execution.trigger.message_id}</div>}
+      {execution.source?.kind === 'absent' && <div className="text-xs text-muted-foreground">No file source</div>}
       <div className="text-xs text-muted-foreground">{execution.code_result.kind === 'published'
         ? `Fixed file result: ${execution.code_result.result.publication_id} · revision ${execution.code_result.result.result_revision} · effect ${execution.code_result.effect}`
         : execution.code_result.kind === 'unavailable' ? `File result unavailable: ${execution.code_result.code} · effect ${execution.code_result.effect}`
+          : execution.code_result.kind === 'not_applicable' ? 'File result not applicable'
           : execution.code_result.kind === 'no_changes' ? 'No file changes'
             : `File result: ${execution.code_result.kind}`}</div>
       {execution.report && <p>Report: {execution.report.outcome}{execution.report.detail ? ` · ${execution.report.detail}` : ''}</p>}

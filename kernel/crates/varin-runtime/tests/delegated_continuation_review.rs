@@ -142,7 +142,7 @@ fn prepare(db: &mut Catalog, next: &DelegatedExecution, source: SourceSelection)
     let child = db.child_task(&next.child_operation_id).unwrap();
     let (proposal, basis) = context(&child, &format!("context:{}", next.execution_id));
     let prepared = db
-        .capture_child_preparation(&next.execution_id, source, proposal, basis)
+        .capture_child_preparation(&next.execution_id, Some(source), proposal, basis)
         .unwrap()
         .load()
         .unwrap();
@@ -508,7 +508,7 @@ fn continuation_resource_cas_preserves_summary_memory_and_binds_explicit_skill_t
     let stale =
         f.db.capture_child_preparation(
             &next.execution_id,
-            source.clone(),
+            Some(source.clone()),
             proposal.clone(),
             basis.clone(),
         )
@@ -521,7 +521,7 @@ fn continuation_resource_cas_preserves_summary_memory_and_binds_explicit_skill_t
     let prepared =
         f.db.capture_child_preparation(
             &next.execution_id,
-            source.clone(),
+            Some(source.clone()),
             proposal.clone(),
             basis.clone(),
         )
@@ -537,7 +537,7 @@ fn continuation_resource_cas_preserves_summary_memory_and_binds_explicit_skill_t
             .unwrap()
             .unwrap();
     let replay =
-        f.db.capture_child_preparation(&next.execution_id, source, proposal, basis)
+        f.db.capture_child_preparation(&next.execution_id, Some(source), proposal, basis)
             .unwrap()
             .with_resources(Some(resources))
             .with_input_preparation(Some(skill))
@@ -1318,7 +1318,7 @@ fn calendar_child_hold_reopen_and_resume_preserve_original_execution_source_and_
     let source = ready_source(&mut f.db, &execution);
     let (proposal, basis) = context(&initial, "held-calendar-context");
     let prepared =
-        f.db.capture_child_preparation(&execution.execution_id, source.clone(), proposal, basis)
+        f.db.capture_child_preparation(&execution.execution_id, Some(source.clone()), proposal, basis)
             .unwrap()
             .load()
             .unwrap();
@@ -1397,7 +1397,7 @@ fn cancelled_calendar_trigger_releases_other_ingress_without_cancelling_thread_o
     let source = ready_source(&mut f.db, &old);
     let (proposal, basis) = context(&initial, "cancel-late-context");
     let late =
-        f.db.capture_child_preparation(&old.execution_id, source, proposal, basis)
+        f.db.capture_child_preparation(&old.execution_id, Some(source), proposal, basis)
             .unwrap()
             .load()
             .unwrap();

@@ -19,6 +19,14 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-11 增量：无文件来源的真实子任务
+
+- 原真实 dispatch 现在可从无文件来源 Run 受理 ChildTask，两调用 origin 经过原冻结目录、权限、context 与 child RunAssembly/Engine。显式 `Absent` 与文件结果 `NotApplicable` 区分准备中/缺失/成功/停止，不造目录、grant、pin 或文件分支；Catalog **44**、collaboration **8**直接拒旧。
+- 发行默认由原配置 owner 的 default/explicit 事实及同一 frozen source/descriptor 编译，显式保存数组与自定义空选择原样保留并给可操作来源诊断。删重复 physical 工具名单与校验，MCP 按真实 execution_scope，普通 extension effects 保各自权限，read_only 不再误当所有领域只读。
+- 原报告/Wait 与 User/message/followup/calendar 后继都消费同一 absence 合同。真实嵌套 Thread Job 不因上层终态/无文件结果而被伪结算，后继可按原 Run/report 规则继续；重开、树取消、原有源读写结果与 release 保各自权威。共享 UI 明示无文件来源/文件结果不适用，不隐藏效果、报告或 Stop。
+- 独审真实 settings/context 输出进入原 Catalog 和 context compiler；真实 stdio MCP 两 origin/拒绝/恢复及 scope 反例通过。Runtime 受影响组合301、kernel148/11 ignored 后准确 fresh binary 原有源 guardian/树停止/固定结果1项、Host28、UI71、类型/协议/实际bundle 分层通过，源身份与准确 fresh binary/未验边界见[本片验收](../reviews/runtime-source-free-children-2026-10-11.md)。这不是完整 IPC、真实桌面、全平台或两设计最终验收。
+- 原 child 无源受理缺口已闭合；下一步可信 Computer 人工交还的原环境输入/接续，然后持久 Computer scripts 与其余环境、Web/材料/Bot、MCP/script、来源/检索/上下文/provider 能力。用户最后默认切换/Pi 与资产迁移分工保持。
+
 ## 2026-10-11 增量：Native child Computer 请求与持久观察
 
 - 本片贯穿**原真实有文件来源的 ChildTask**，两调用 origin 的 request/access/grant/deny/Wait 共用发行工具与原执行权限。请求受理不是授权；原 Catalog 短请求/决定/Operation/Wait 与原 Computer 物理 assignment、input/release 仍各有唯一权威，reason/history 先锁外持久化。Catalog **43**、desktop runtime **3**直接拒旧，外部资产保留。

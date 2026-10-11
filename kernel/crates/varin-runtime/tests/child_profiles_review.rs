@@ -64,6 +64,7 @@ fn install(
 }
 fn preset(id: &str, model: Option<ChildModelBinding>) -> ChildPreset {
     ChildPreset {
+        tools_source: varin_runtime::catalog::dispatch::ChildPresetToolsSource::Explicit,
         id: id.into(),
         name: format!("Configured {id}"),
         instructions: "Original selected instructions".into(),

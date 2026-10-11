@@ -138,7 +138,7 @@ fn replay_scenario(tail_phase: Option<&str>) {
         let prepared =
             f.db.capture_child_preparation(
                 &next.execution_id,
-                source,
+                Some(source),
                 proposal,
                 context.personalization.unwrap(),
             )

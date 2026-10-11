@@ -28,7 +28,7 @@ An invalid captured Computer default makes that service candidate unavailable th
 tool-preparation projection. Unrelated tools can still prepare, even when the Computer provider was
 already active. Required saved Computer bindings remain exact; errors do not become a null default.
 
-Native source-bearing child tasks request a desktop through their real ModelStep or PolicyAction
+Native child tasks, with or without a file source, request a desktop through their real ModelStep or PolicyAction
 Operation. Catalog owns the request, original decision and durable Wait; reasons and notification
 bodies use ContentStore. Acceptance queues one typed Environment input for the root in the same
 commit. A root parked on the requesting child's actual dependency chain can end that observation
@@ -51,10 +51,11 @@ physical projection, not a rewrite of the decision. Each Native child assignment
 Run, so a root's natural completion does not terminate independent child work. Native actors carry
 per-tool invocation policy; Pi keeps its own read-only role rules. Neither adds a second grant list.
 
-This slice uses the existing real file-source-bearing ChildTask admission. General source-less
-pure-capability child admission remains unfinished, as do trusted handback continuation and persistent
-Computer scripts. Source-less root Computer is already supported. These limits are independent of
-the existing Pi capabilities below; selected tools alone never grant a desktop assignment.
+Source-less pure-capability children use the original ChildTask admission with explicit absent file
+authority and no applicable file result. They retain their own Run, selected capabilities and original
+Computer permissions. Trusted handback continuation and persistent Computer scripts remain unfinished.
+These limits are independent of the existing Pi capabilities below; selected tools alone never grant
+a desktop assignment.
 
 Pi workers and retrieval threads have the `computer` tool when Computer Use is enabled. A child calls
 `computer` with `action:"request"`, desktopId, access (`observe` or `control`) and reason. The Host wakes

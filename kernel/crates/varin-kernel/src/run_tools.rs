@@ -159,18 +159,16 @@ impl BuiltinSchema {
 /// Live executors bind these same owning schemas during assembly.
 pub(crate) fn builtin_schemas(
     enabled: &std::collections::BTreeSet<crate::tools::ToolKind>,
-    has_source: bool,
     plan_eligible: bool,
     include_goal: bool,
 ) -> Vec<ToolSchema> {
-    builtin_definitions(enabled, has_source, plan_eligible, include_goal)
+    builtin_definitions(enabled, plan_eligible, include_goal)
         .into_iter()
         .map(|definition| definition.schema)
         .collect()
 }
 pub(crate) fn builtin_definitions(
     enabled: &std::collections::BTreeSet<crate::tools::ToolKind>,
-    has_source: bool,
     plan_eligible: bool,
     include_goal: bool,
 ) -> Vec<BuiltinSchema> {
@@ -178,7 +176,7 @@ pub(crate) fn builtin_definitions(
         crate::tools::KernelToolExecutor::selected_builtin_schemas(enabled),
     );
     tools = crate::questions::builtin_schemas(tools);
-    tools.extend(crate::collaboration::builtin_schemas(has_source));
+    tools.extend(crate::collaboration::builtin_schemas());
     tools.extend(crate::family_tools::builtin_schemas());
     tools.extend([
         crate::message_tools::builtin_schema(),

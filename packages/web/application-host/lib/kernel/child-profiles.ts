@@ -1,7 +1,7 @@
 /** Existing user-owned execution presets -> immutable native dispatch choices.
  * This reads no secrets, prepares no child and owns no configuration or execution state. */
 import { createHash } from 'node:crypto';
-import { HarnessSettingsValidationError, agentPresetTools, mergeHarnessSettings, observePresets, type HarnessSettingsInput, type WorkFocusId } from '@varin/protocol';
+import { HarnessSettingsValidationError, agentPresetTools, resolveAgentTools, mergeHarnessSettings, observePresets, type HarnessSettingsInput, type WorkFocusId } from '@varin/protocol';
 import type { ThreadModelAuthority } from './thread-adapter.js';
 import type { ThreadThinkingLevel } from '@varin/application-client';
 import type { ChildCapabilityDescriptor, ChildCapabilityFailure, ChildDispatchCatalog, ChildModelBinding, ChildPreset } from './protocol.generated.js';
@@ -42,8 +42,11 @@ export function createChildProfilePreparer(owners: {
     const observations = observePresets(settings.models, main, settings.agents, input.workFocus, 'agent', agentPresetTools(descriptors));
     const presets = await Promise.all(observations.map(async (entry): Promise<ChildPreset> => {
       const definition = entry.definition;
+      const toolsSource = definition.slot
+        ? resolveAgentTools(settings.models[definition.slot]?.agent?.tools, 'agent', definition.tools).source
+        : 'explicit';
       const profile: ChildPreset = { id: entry.id, name: definition.name ?? entry.id, instructions: definition.systemPromptFragment,
-        tools: [...definition.tools], work_mode: definition.worktree === 'isolated' ? 'isolated_write' : 'read_only',
+        tools: [...definition.tools], tools_source: toolsSource === 'default' ? 'default' : 'explicit', work_mode: definition.worktree === 'isolated' ? 'isolated_write' : 'read_only',
         model_source: entry.modelSource, model: null, inherit_base: null, unavailable: null };
       if (!input.workFocus && definition.workFocus?.length) { profile.unavailable = unavailable('child-profile-scope_unavailable'); return profile; }
       if (entry.availability !== 'available') { profile.unavailable = unavailable(`child-profile-${entry.availability}`); return profile; }

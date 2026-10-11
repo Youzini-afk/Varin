@@ -811,3 +811,28 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[test]
+fn source_free_delegation_preserves_actual_global_or_workspace_mcp_scope() {
+    for scope in [McpExecutionScope::Global, McpExecutionScope::Workspace] {
+        let mut binding = mcp(); binding.provenance.execution_scope = scope;
+        let first = binding.tools[0].clone();
+        let f = Fixture::new_parent_custom(0, first, ToolSchema { name: "dispatch".into(), version: "1".into(),
+            description: String::new(), schema: json!({"type":"object"}), metadata: None, output_schema: None }, false, false, false,
+            move |input, launch| {
+                input.tools = Some(vec!["first".into()]);
+                launch.tools.retain(|tool| tool.name != "first");
+                launch.tools.extend(binding.tools.iter().cloned()); launch.mcp_binding = Some(binding); launch.source = None;
+            });
+        let selected = f.db.capture_child_dispatch_invocation(&f.context).unwrap().load().unwrap();
+        let result = selected.resolve(&f.input);
+        if scope == McpExecutionScope::Global {
+            let resolved = result.unwrap();
+            assert_eq!(resolved.mcp_binding.unwrap().provenance.execution_scope, McpExecutionScope::Global);
+        } else {
+            let failure = result.unwrap_err().to_string();
+            assert!(failure.contains("first") && failure.contains("select a source"));
+        }
+        let root = f.root.clone(); drop(selected); drop(f); std::fs::remove_dir_all(root).unwrap();
+    }
+}

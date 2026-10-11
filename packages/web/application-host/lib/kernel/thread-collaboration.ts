@@ -172,7 +172,8 @@ export class ThreadCollaboration {
       }
     } while (events.length === 256);
   }
-  private childSource(child: DelegatedExecution): ThreadSource {
+  private childSource(child: DelegatedExecution): ThreadSource | null {
+    if (child.source?.kind === 'absent') return null;
     if (child.source?.kind !== 'ready') throw new Error('Child source is not ready');
     const fixed = child.source.selection;
     if ((fixed.mode !== 'fixed_branch' && fixed.mode !== 'materialized') || !fixed.branch_id || fixed.revision === null) throw new Error('Child source is not fixed');
@@ -182,7 +183,7 @@ export class ThreadCollaboration {
       ...(fixed.environment_run_id ? { environmentRunId: fixed.environment_run_id } : {}) };
   }
   private async prepareSource(child: DelegatedExecution, signal: AbortSignal): Promise<DelegatedExecution> {
-    if (child.source?.kind === 'ready') return child;
+    if (child.source?.kind === 'ready' || child.source?.kind === 'absent') return child;
     if (child.trigger.kind !== 'dispatch') return this.prepareContinuationSource(child, signal);
     if (!child.source || !child.source.handoff) throw new Error('Dispatch source handoff is unavailable');
     const { kernel, storageAdapter, runtime, sourceCaptureOwners } = this.owners;
@@ -258,7 +259,7 @@ export class ThreadCollaboration {
     if (!child.receipt || child.source?.kind !== 'ready' || child.source.selection.mode !== 'materialized') return child;
     const { kernel, runtime, storageAdapter, resolveLiveSource } = this.owners;
     const source = this.childSource(child);
-    if (source.mode !== 'materialized') throw new Error('Writable child lost its private source');
+    if (source?.mode !== 'materialized') throw new Error('Writable child lost its private source');
     const runId = child.receipt.run_id;
     const publicationId = `child-result:${child.execution_id}`;
     const phases = child.code_result.kind === 'pending' ? ['source'] as const : ['result', 'source'] as const;
@@ -297,8 +298,13 @@ export class ThreadCollaboration {
     return child;
   }
   private async releaseHandoff(child: DelegatedExecution, signal: AbortSignal): Promise<void> {
-    if (child.resources_released || (!child.receipt && !child.report) || (child.source?.kind !== 'ready' && !child.report)) return;
+    if (child.resources_released || (!child.receipt && !child.report) || (child.source?.kind !== 'ready' && child.source?.kind !== 'absent' && !child.report)) return;
     const { kernel, runtime } = this.owners;
+    if (child.source?.kind === 'absent') {
+      signal.throwIfAborted();
+      await runtime.releaseChildResources(child.execution_id, signal);
+      return;
+    }
     if (child.trigger.kind !== 'dispatch') {
       if (!child.receipt && child.source_basis) {
         await this.owners.workingStates.withBranchStore(child.source_basis.source.workspace_id, 'child-unused-continuation-source', async store => {
@@ -360,9 +366,9 @@ export class ThreadCollaboration {
           }
         }
         signal.throwIfAborted();
-        if (source.mode === 'live_root') throw new Error('Child source is not isolated');
-        child = await runtime.prepareChild({ executionId: child.execution_id, source: { mode: source.mode, liveRoot: null,
-          workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, branchId: source.branchId, revision: source.revision },
+        if (source?.mode === 'live_root') throw new Error('Child source is not isolated');
+        child = await runtime.prepareChild({ executionId: child.execution_id, source: source ? { mode: source.mode, liveRoot: null,
+          workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, branchId: source.branchId, revision: source.revision } : null,
           context, expectedContextCheckpoint: checkpoint?.id ?? null, ...(inputPreparation ? { inputPreparation } : {}) }, signal);
       }
       if (child.receipt && child.state === 'ready') await this.owners.continueRun(child.receipt.run_id, signal);
