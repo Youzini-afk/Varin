@@ -8,6 +8,7 @@ Last updated: 2026-10-11
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [原 Computer 紧急输入停止（2026-10-11）](runtime-computer-stop-2026-10-11.md) | 原 cancel/takeover/控制条在慢目录与持久操作前释放输入；Native 接入的有限前置片 |
 | [原机器指标与自动采样续接（2026-10-11）](runtime-metric-followups-2026-10-11.md) | 原 ResourceService 自动采样、阈值边沿、取消与 epoch、公开消费和实际 root/child 接续；分层验收 |
 | [原研究日志条件（2026-10-11）](runtime-log-followups-2026-10-11.md) | 原日志字节/EOF、持久匹配、公开 route 与原 Wait/input 消费；分层验收 |
 | [真实运行时预设（2026-10-11）](runtime-agent-profiles-2026-10-11.md) | 原配置 CAS、真实目录默认与显式自定义、设置及 child 冻结派发 |

@@ -19,6 +19,13 @@ Windows 路径、策略隐式选择及工作区结果对象转交；已结束接
 用户完成本轮验收并推送 `3dcd65ac` 后，已明确恢复后续实现；下文 reader 阶段的暂停是历史状态。
 本轮先处理验收指出的执行预设与设置入口，以下增量记录该片结果；随后继续日志与其余能力。
 
+## 2026-10-11 增量：原 Computer 紧急停止前置边界
+
+- 接 Native Computer 前先闭合原 owner 的确认缺口：已有本地输入执行时，public cancel、takeover 和实际控制条 automation.cancelDesktop 会等目录、脚本撤销或控制写入才请求物理 release。四条独立交错均复现，不把 cancel flag 当按键已释放。
+- 原 ComputerService 的已解析本地 lane 先做原准入/fence并启动既有 driver interrupt，再等实际 ack、旧回调排空与持久/通知结果。原 assignment release 共用该路径；observer 不停他人 controller，未知/remote 仍走实际 owner。释放失败保 unconfirmed；物理已释放但控制持久失败明确报告，不假称成功或恢复旧输入。无新权限、队列、数据库或格式。
+- 原 owner 组合 **80 passed / 1 socket case excluded**、Host生产/测试types、lint、真实bundle及文档检查通过。独审原四反例修后与七组边界全部通过，无剩余确认阻断；具体范围和5,231输入同源见[Computer停止前置验收](../reviews/runtime-computer-stop-2026-10-11.md)。真实桌面/平台/远端/完整IPC均未执行。
+- 本小片没有新增 Native Computer 工具或身份，不能算该领域完成。接着贯穿真实 Native actor、普通单调用回执与公开projection/Stop，再闭合原请求/Wait、可信环境input与人工交回；两设计余项与用户最后迁移边界不变。
+
 ## 2026-10-11 增量：原机器指标与自动采样续接
 
 - 普通 follow_up **版本8** 与 User/API/UI 接入 `metric`：原 machineId、CPU/内存或稳定 GPU UUID、严格 above/below 及有限阈值，独立或 flat Any/All。内存用 MiB，百分比用 %；真实 research/source 身份逐叶核验，Any 另一叶已满足不绕过。Catalog **42** 直接拒旧，原 ResourceService/Storage 保唯一机器与样本事实，无复制历史库或采样 Job。

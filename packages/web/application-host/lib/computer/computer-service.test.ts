@@ -98,6 +98,11 @@ const makeDriver = (handler: FakeDriver["handler"]): FakeDriver => {
 };
 
 const okResponse = (extra: Record<string, unknown> = {}): DriverResponse => ({ id: "x", ok: true, ...extra });
+const deferred = <T = void>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+};
 
 const appSnapshot = () => ({
   app: { name: "notepad", pid: 42, windowTitle: "Untitled - Notepad" },
@@ -442,6 +447,131 @@ describe("computer service (BC4)", () => {
     // the cancel cleanup is the release that follows the in-flight type_text.)
     expect(order).toContain("release_input");
     expect(order.lastIndexOf("release_input")).toBeGreaterThan(order.indexOf("type_text"));
+  });
+
+  it.each(['cancel-read', 'takeover-revoke', 'takeover-write', 'automation-cancel-read'] as const)(
+    'physically stops the bound desktop before a blocked %s dependency', async mode => {
+      const gate = deferred(), gateEntered = deferred(), actionStarted = deferred();
+      const actionResult = deferred<DriverResponse>();
+      let armed = false, held = false;
+      const blocked = async () => { gateEntered.resolve(); await gate.promise; };
+      const actor: ComputerActor = { sessionId: 'main', runId: 'run', threadId: 'thread', scopeId: 'scope',
+        rootSessionId: 'main', rootRunId: 'run', label: 'Main', readOnly: false };
+      const driver = makeDriver(async op => {
+        if (op.tool === 'type_text') { held = true; actionStarted.resolve(); return actionResult.promise; }
+        return op.tool === 'get_app_state' ? okResponse({ snapshot: appSnapshot() }) : okResponse();
+      });
+      driver.interrupt = vi.fn(async () => {
+        held = false; actionResult.resolve(okResponse({ cancelled: true })); return { released: true };
+      });
+      const { service, kernel } = makeService(driver, {
+        resolveActor: async () => actor, notifyActor: async () => {},
+        revokeSession: async () => { if (armed && mode === 'takeover-revoke') await blocked(); },
+      });
+      const storage = kernel.client.scoped();
+      const getRecord = storage.getRecord.bind(storage), putRecord = storage.putRecord.bind(storage);
+      storage.getRecord = async (workspace, id) => {
+        if (armed && mode.endsWith('cancel-read') && id === 'computer.desktop:local-console') await blocked();
+        return getRecord(workspace, id);
+      };
+      storage.putRecord = async params => {
+        if (armed && mode === 'takeover-write' && params.recordId === 'computer.desktop:local-console') await blocked();
+        return putRecord(params);
+      };
+      try {
+        await service.automation.authorize('main', 'observe', 'local-console', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
+        const action = service.automation.authorize('main', 'control', 'local-console', () => service.act({
+          desktopId: 'local-console', action: { kind: 'type', app: 'notepad', text: 'sample' },
+        }));
+        await actionStarted.promise;
+        armed = true;
+        const stopping = mode === 'automation-cancel-read' ? service.automation.cancelDesktop('local-console')
+          : mode === 'cancel-read' ? service.cancel('local-console')
+            : service.takeover({ desktopId: 'local-console', holderId: 'viewer' });
+        await gateEntered.promise;
+        expect(held).toBe(false);
+        expect(driver.interrupt).toHaveBeenCalledOnce();
+        armed = false; gate.resolve();
+        const stopped = await stopping;
+        if (stopped) expect(stopped.released).toBe(true);
+        expect((await action).cancelled).toBe(true);
+        if (mode === 'automation-cancel-read') expect(await service.automation.snapshot('main')).toMatchObject({ active: false, status: 'enabled' });
+      } finally {
+        armed = false; gate.resolve(); actionResult.resolve(okResponse()); await service.dispose();
+      }
+    },
+  );
+
+  it('keeps takeover fenced until physical release and the original action both settle', async () => {
+    const released = deferred<{ released: boolean }>(), interrupted = deferred(), started = deferred();
+    const actionResult = deferred<DriverResponse>();
+    const driver = makeDriver(async op => {
+      if (op.tool === 'type_text') { started.resolve(); return actionResult.promise; }
+      return okResponse();
+    });
+    driver.interrupt = vi.fn(() => { interrupted.resolve(); return released.promise; });
+    const { service } = makeService(driver);
+    try {
+      const action = service.act({ desktopId: 'local-console', action: { kind: 'type', app: 'notepad', text: 'sample' } });
+      await started.promise;
+      let settled = false;
+      const takeover = service.takeover({ desktopId: 'local-console', holderId: 'viewer' }).then(value => { settled = true; return value; });
+      await interrupted.promise;
+      expect(settled).toBe(false);
+      await expect(service.takeover({ desktopId: 'local-console', holderId: 'other' })).rejects.toMatchObject({ harnessCode: 'forbidden' });
+      released.resolve({ released: true });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      actionResult.resolve(okResponse({ cancelled: true }));
+      expect(await takeover).toMatchObject({ released: true, control: { owner: 'human', transitioning: false } });
+      expect((await action).cancelled).toBe(true);
+    } finally { released.resolve({ released: true }); actionResult.resolve(okResponse()); await service.dispose(); }
+  });
+
+  it('does not interrupt a bound local driver for a missing holder or unknown target', async () => {
+    const driver = makeDriver(async () => okResponse());
+    driver.interrupt = vi.fn(async () => ({ released: true }));
+    const { service } = makeService(driver);
+    try {
+      await service.act({ desktopId: 'local-console', action: { kind: 'key', app: 'notepad', key: 'enter' } });
+      await expect(service.takeover({ desktopId: 'local-console' })).rejects.toMatchObject({ harnessCode: 'invalid-params' });
+      await expect(service.takeover({ desktopId: 'missing', holderId: 'viewer' })).rejects.toMatchObject({ harnessCode: 'not-found' });
+      await expect(service.cancel('missing')).rejects.toMatchObject({ harnessCode: 'not-found' });
+      expect(driver.interrupt).not.toHaveBeenCalled();
+    } finally { await service.dispose(); }
+  });
+
+  it.each(['release', 'control-write'] as const)('reports a %s failure separately from the physical stop', async failure => {
+    const started = deferred(), actionResult = deferred<DriverResponse>();
+    let armed = false;
+    const driver = makeDriver(async op => {
+      if (op.tool === 'type_text') { started.resolve(); return actionResult.promise; }
+      return okResponse();
+    });
+    driver.interrupt = vi.fn(async () => {
+      actionResult.resolve(okResponse({ cancelled: true }));
+      return { released: failure !== 'release' };
+    });
+    const { service, kernel } = makeService(driver);
+    const storage = kernel.client.scoped(), putRecord = storage.putRecord.bind(storage);
+    storage.putRecord = async params => {
+      if (armed && failure === 'control-write' && params.recordId === 'computer.desktop:local-console') throw new Error('storage unavailable');
+      return putRecord(params);
+    };
+    try {
+      const action = service.act({ desktopId: 'local-console', action: { kind: 'type', app: 'notepad', text: 'sample' } });
+      await started.promise;
+      armed = true;
+      await expect(service.takeover({ desktopId: 'local-console', holderId: 'viewer' })).rejects.toThrow(
+        failure === 'release' ? 'Input release was not confirmed' : 'Input was released, but human control could not be saved',
+      );
+      expect(driver.interrupt).toHaveBeenCalledOnce();
+      expect((await action).cancelled).toBe(true);
+      expect(await service.control('local-console')).toMatchObject({ owner: 'human', reachable: false });
+      armed = false;
+      if (failure === 'control-write') expect(await service.takeover({ desktopId: 'local-console', holderId: 'viewer' })).toMatchObject({ released: true });
+      else await expect(service.handback({ desktopId: 'local-console', holderId: 'viewer' })).rejects.toThrow('Input release was not confirmed');
+    } finally { armed = false; actionResult.resolve(okResponse()); await service.dispose(); }
   });
 
   it("a driver-side mid-operation cancel reports a partial outcome, not failure", async () => {

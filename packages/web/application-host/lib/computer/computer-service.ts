@@ -383,6 +383,8 @@ interface DesktopViewers {
 }
 
 interface DesktopLane {
+  /** Placement already resolved by this owner; never infer locality from a caller's id. */
+  local?: boolean;
   lastController?: ComputerActor;
   interrupted?: { id: string; actor: ComputerActor; holderId?: string };
   inputReleaseUnconfirmed: boolean;
@@ -800,8 +802,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
    */
   const journaledOp = async <P extends { desktopId?: string | undefined }, R>(params: P, sessionId: string | undefined,
     summary: Pick<ComputerEvidenceEntry, "lane" | "tool"> & { op?: string | undefined; target?: string | undefined },
-    run: (p: P) => Promise<R>): Promise<R> => {
-    const id = await resolveDesktopId(params.desktopId);
+    run: (p: P) => Promise<R>, boundDesktopId?: string): Promise<R> => {
+    const id = boundDesktopId ?? await resolveDesktopId(params.desktopId);
     const entry = {
       lane: summary.lane, tool: summary.tool,
       ...(summary.op !== undefined ? { op: evidenceOps[summary.tool]?.includes(summary.op) ? summary.op : 'invalid' } : {}),
@@ -851,8 +853,12 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           ...(asString(stored.control.holderId) ? { holderId: stored.control.holderId as string } : {}) };
       }
     }
+    laneFor(desktopId).local = !desktop.remote;
     return { record, desktop };
   };
+
+  const boundLocalDesktop = (desktopId?: string): string | undefined =>
+    desktopId && lanes.get(desktopId)?.local === true ? desktopId : undefined;
 
   const machineFor = async (desktop: ComputerDesktop): Promise<ComputerMachine | null> => {
     const client = await scoped();
@@ -1133,7 +1139,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   const releaseDesktop = async (lease: ComputerLease): Promise<{ released: boolean }> => {
     assignmentStreams.get(lease.id)?.(); assignmentStreams.delete(lease.id);
     const claim = remoteClaims.get(claimKey(lease));
-    const target = claim?.target ?? await remoteTargetFor(lease.desktopId);
+    const target = claim?.target ?? (boundLocalDesktop(lease.desktopId) ? null : await remoteTargetFor(lease.desktopId));
     if (!target) {
       const lane = laneFor(lease.desktopId);
       if (lane.control.owner === 'human' && !lane.transitioning && !lane.inputReleaseUnconfirmed) return { released: true };
@@ -2022,18 +2028,44 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     }
   };
 
+  /** Starts the existing physical stop channel before any catalog or script-revocation work.
+   * The lane barrier still proves the old callback drained, including non-driver operations. */
+  const stopLocalInput = async (id: string, restoreFocus = true): Promise<boolean> => {
+    const driver = drivers.get(id);
+    driver?.cancel();
+    if (driver?.interrupt) {
+      const released = (await driver.interrupt({ restoreFocus })).released;
+      if (released && drivers.get(id) === driver) drivers.delete(id);
+      await enqueue(id, 'observe', async () => undefined);
+      return released;
+    }
+    return enqueue(id, 'observe', async () => {
+      // An acquire already in flight can publish its helper before this barrier.
+      const current = drivers.get(id);
+      if (!current) return driver === undefined;
+      if (!current.alive()) return false;
+      const response = await current.request({ tool: 'release_input' });
+      if (!response.ok) throw new HarnessServiceError('unavailable', response.error ?? 'Input release failed');
+      return true;
+    });
+  };
+
   const cancelImpl: ComputerService["cancel"] = async (desktopId) => {
-    const id = await resolveDesktopId(desktopId);
-    const remote = await remoteTargetFor(id);
+    const bound = boundLocalDesktop(desktopId);
+    const id = bound ?? await resolveDesktopId(desktopId);
+    const remote = bound ? null : await remoteTargetFor(id);
     if (remote) {
       return remoteJson<{ cancelled: number; released: boolean }>(
         remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/cancel`,
       );
     }
     const lane = laneFor(id);
+    automation.context.getStore()?.assert();
     if (lane.control.owner === "human" && !lane.transitioning) return { cancelled: 0, released: false };
+    const previousReleaseUnconfirmed = lane.inputReleaseUnconfirmed;
     lane.inputReleaseUnconfirmed = true;
     lane.generation += 1;
+    const generation = lane.generation;
     lane.needsObservation = true;
     lane.externalAbort?.abort();
     clearFeedback(id);
@@ -2042,28 +2074,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const dropped = lane.queue.filter((entry) => entry.kind === "action");
     lane.queue = lane.queue.filter((entry) => entry.kind !== "action");
     for (const entry of dropped) entry.cancel();
-    const driver = drivers.get(id);
-    let released = driver === undefined;
-    if (driver?.interrupt) {
-      released = (await driver.interrupt()).released;
-      if (released && drivers.get(id) === driver) drivers.delete(id);
-      await enqueue(id, 'observe', async () => undefined);
-    } else if (driver?.alive()) {
-      // Signal the in-flight native operation through the driver's cancel
-      // side-channel first — a long type/drag aborts at its next checkpoint
-      // instead of running to completion before the release (BC4.A).
-      driver.cancel();
-      const response = await enqueue(id, "observe", () => driver.request({ tool: "release_input" }));
-      if (!response.ok) throw new HarnessServiceError("failed", response.error ?? "Input release failed");
-      released = true;
-    } else {
-      // Non-driver writes/installations still have to finish stopping before
-      // cancellation reports a completed transfer of control.
-      await enqueue(id, "observe", async () => undefined);
-    }
+    const hadDriver = drivers.has(id);
+    const released = await stopLocalInput(id) && (hadDriver || !previousReleaseUnconfirmed);
     clearObservations(id);
+    if (lane.generation === generation) lane.inputReleaseUnconfirmed = !released;
     broadcastControl(id);
-    lane.inputReleaseUnconfirmed = !released;
     return { cancelled: dropped.length, released };
   };
 
@@ -2433,8 +2448,9 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   };
 
   const takeoverImpl: ComputerService["takeover"] = async (params) => {
-    const id = await resolveDesktopId(params.desktopId);
-    const remote = await remoteTargetFor(id);
+    const bound = boundLocalDesktop(params.desktopId);
+    const id = bound ?? await resolveDesktopId(params.desktopId);
+    const remote = bound ? null : await remoteTargetFor(id);
     const operator = automation.controller(id);
     if (remote) {
       const result = await remoteJson<{ control?: ComputerControlState; cancelled: number; released: boolean }>(
@@ -2449,18 +2465,22 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         released: result.released ?? false,
       };
     }
-    await desktopRecord(id);
+    if (!bound) await desktopRecord(id);
     const lane = laneFor(id);
+    automation.context.getStore()?.assert();
     if (!params.holderId?.trim()) throw new HarnessServiceError("invalid-params", "A viewer identity is required for takeover");
     if (lane.transitioning) throw new HarnessServiceError("forbidden", "Desktop control is already changing");
     // Fence input before the first await. The previous implementation left
     // owner=agent while draining, admitting fresh automation into the handoff.
     lane.transitioning = true;
+    const previousReleaseUnconfirmed = lane.inputReleaseUnconfirmed;
+    const hadDriver = drivers.has(id);
     if (operator) lane.interrupted ??= { id: randomUUID(), actor: operator };
     if (lane.interrupted) lane.interrupted.holderId = params.holderId;
     clearFeedback(id);
     lane.inputReleaseUnconfirmed = true;
     lane.generation += 1;
+    const generation = lane.generation;
     lane.externalAbort?.abort();
     lane.needsObservation = true;
     const dropped = lane.queue.filter((entry) => entry.kind !== "observe");
@@ -2475,23 +2495,19 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     automation.setHumanControl(id, true);
     clearObservations(id);
     broadcastControl(id);
-    drivers.get(id)?.cancel();
+    const stopping = stopLocalInput(id, false).then(released => {
+      if (!released || !hadDriver && previousReleaseUnconfirmed) throw new HarnessServiceError('unavailable', 'Input release was not confirmed; desktop remains reserved for human recovery');
+      if (lane.generation === generation) lane.inputReleaseUnconfirmed = false;
+    });
     try {
-      const interrupted = await automation.interruptDesktop(id);
-      await persistControl(id);
-      const interruptedDriver = drivers.get(id);
-      if (interruptedDriver?.interrupt) {
-        if (!(await interruptedDriver.interrupt({ restoreFocus: false })).released) throw new HarnessServiceError('unavailable', 'Input release was not confirmed');
-        if (drivers.get(id) === interruptedDriver) drivers.delete(id);
-      }
-      await enqueue(id, "observe", async () => {
-        const driver = drivers.get(id);
-        if (driver && !driver.interrupt && (!driver.alive() || !(await driver.request({ tool: "release_input" })).ok)) {
-          throw new HarnessServiceError("unavailable", "Input release was not confirmed; desktop remains reserved for human recovery");
-        }
-      });
+      const [physical, revoked, persisted] = await Promise.allSettled([
+        stopping, automation.interruptDesktop(id), persistControl(id),
+      ]);
+      if (physical.status === 'rejected') throw physical.reason;
+      if (revoked.status === 'rejected') throw new HarnessServiceError('unavailable', 'Input was released, but the previous computer script could not be revoked');
+      if (persisted.status === 'rejected') throw new HarnessServiceError('unavailable', 'Input was released, but human control could not be saved; keep this Host open and retry takeover');
+      const interrupted = revoked.value;
       lane.control.reachable = params.holderId === options.localControlHolder || (viewers.get(id)?.viewers.has(params.holderId) ?? false);
-      lane.inputReleaseUnconfirmed = false;
       if (operator && lane.interrupted) await automation.notifyHandoff(operator, 'The user took control of the desktop. Automatic input is paused until control is returned.', `takeover:${lane.interrupted.id}`, interrupted);
       return { control: { ...controlState(id), transitioning: false }, cancelled: dropped.filter((entry) => entry.kind === "action").length, released: true };
     } finally {
@@ -3398,11 +3414,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       tool: "office", op: params.op,
       target: params.act?.doc ?? params.path ?? params.act?.range ?? params.url }, officeImpl);
   const takeover: ComputerService["takeover"] = (params) =>
-    journaledOp(params, undefined, { lane: "action", tool: "control", op: "takeover", target: params.holderId }, takeoverImpl);
+    journaledOp(params, undefined, { lane: "action", tool: "control", op: "takeover", target: params.holderId }, takeoverImpl, boundLocalDesktop(params.desktopId));
   const handback: ComputerService["handback"] = (params) =>
     journaledOp(params, undefined, { lane: "action", tool: "control", op: "handback", target: params.holderId }, handbackImpl);
   const cancel: ComputerService["cancel"] = (desktopId) =>
-    journaledOp({ desktopId }, undefined, { lane: "action", tool: "control", op: "cancel" }, (params) => cancelImpl(params.desktopId));
+    journaledOp({ desktopId }, undefined, { lane: "action", tool: "control", op: "cancel" }, (params) => cancelImpl(params.desktopId), boundLocalDesktop(desktopId));
   const release: ComputerService["release"] = (desktopId) =>
     journaledOp({ desktopId }, undefined, { lane: "action", tool: "control", op: "release" }, (params) => releaseImpl(params.desktopId));
 
