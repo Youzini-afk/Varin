@@ -5,10 +5,11 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 8;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 9;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
+    "runtime.mcp.interaction.inspect",
     "runtime.mcp.interaction.pending",
     "runtime.mcp.interaction.response.begin",
     "runtime.mcp.interaction.response.settle",
@@ -60,6 +61,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.calendar.calculation.retry",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "runtime.mcp.interaction.inspect",
     "runtime.mcp.interaction.pending",
     "runtime.mcp.interaction.response.begin",
     "runtime.mcp.interaction.response.settle",
@@ -114,6 +116,9 @@ pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
     ("runtime.input.edit", "inputId"),
 ];
 pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
+    "runtime.mcp.sampling.review_output",
+    "runtime.mcp.sampling.review_request",
+    "runtime.mcp.sampling.generate",
     "runtime.mcp.interaction.open",
     "runtime.mcp.interaction.error.open",
     "runtime.mcp.interaction.list",
@@ -127,6 +132,43 @@ pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpInteractionReadParams {
+    pub(crate) operation_id: String,
+    pub(crate) interaction_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpSamplingOutputReviewParams {
+    pub(crate) operation_id: String,
+    pub(crate) interaction_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) action: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpSamplingRequestReviewParams {
+    pub(crate) operation_id: String,
+    pub(crate) interaction_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) action: String,
+    pub(crate) edited_request: Option<std::collections::BTreeMap<String, Value>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpSamplingGenerateParams {
+    pub(crate) operation_id: String,
+    pub(crate) interaction_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) edited_request: std::collections::BTreeMap<String, Value>,
+    pub(crate) configuration: ModelSessionConfiguration,
+    pub(crate) credential_scope: Option<CredentialScope>,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -152,13 +194,6 @@ pub(crate) struct McpInteractionListParams {
     pub(crate) branch_id: String,
     pub(crate) cursor: Option<String>,
     pub(crate) limit: Option<i64>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct McpInteractionReadParams {
-    pub(crate) operation_id: String,
-    pub(crate) interaction_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2299,6 +2334,40 @@ pub(crate) struct HostToolErrorMarker {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelSessionConfiguration {
+    pub(crate) provider_id: Option<String>,
+    pub(crate) provider_family: String,
+    pub(crate) model: String,
+    pub(crate) endpoint: String,
+    pub(crate) credential_environment: RequiredNullable<String>,
+    pub(crate) allow_anonymous: bool,
+    pub(crate) accepts_images: Option<bool>,
+    pub(crate) configuration_generation: i64,
+    pub(crate) max_output_tokens: RequiredNullable<i64>,
+    pub(crate) azure_deployment: Option<RequiredNullable<String>>,
+    pub(crate) azure_api_version: Option<RequiredNullable<String>>,
+    pub(crate) legacy_max_tokens: Option<bool>,
+    pub(crate) include_stream_usage: Option<bool>,
+    pub(crate) reasoning_effort: Option<RequiredNullable<String>>,
+    pub(crate) anthropic_oauth: Option<bool>,
+    pub(crate) adapter_id: Option<String>,
+    pub(crate) adapter_version: Option<String>,
+    pub(crate) context_window_tokens: Option<i64>,
+    pub(crate) thinking_level: Option<String>,
+    pub(crate) model_options: Option<Value>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CredentialScope {
+    pub(crate) reference: String,
+    pub(crate) authority: String,
+    pub(crate) account: String,
+    pub(crate) generation: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct McpInteractionErrorItem {
     pub(crate) id: String,
     pub(crate) binding: varin_runtime::catalog::mcp_interactions::McpInteractionBinding,
@@ -2355,15 +2424,6 @@ pub(crate) struct ContextPersonalization {
     pub(crate) project_id: RequiredNullable<String>,
     pub(crate) original_sections: Vec<SystemSection>,
     pub(crate) instruction_sources: Vec<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct CredentialScope {
-    pub(crate) reference: String,
-    pub(crate) authority: String,
-    pub(crate) account: String,
-    pub(crate) generation: i64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2765,6 +2825,26 @@ pub(crate) struct KernelVerificationInputIdentity {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.mcp.interaction.inspect" => {
+            serde_json::from_value::<McpInteractionReadParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.mcp.sampling.review_output" => {
+            serde_json::from_value::<McpSamplingOutputReviewParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.mcp.sampling.review_request" => {
+            serde_json::from_value::<McpSamplingRequestReviewParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.mcp.sampling.generate" => {
+            serde_json::from_value::<McpSamplingGenerateParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.mcp.interaction.open" => {
             serde_json::from_value::<McpInteractionOpenParams>(params.clone())
                 .map(|_| ())

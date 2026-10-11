@@ -129,13 +129,21 @@ export class InteractionPeer {
   }
   private ask(request: Message, send: Send, scenario: string, task?: Task) {
     const id = this.sequence++ === 0 ? 1.5 : `elicitation:${this.sequence}`, mode = scenario.includes('url') ? 'url' : 'form';
-    const params: Record<string, unknown> = mode === 'form' ? structuredClone(form) : {
+    const sampling = scenario.startsWith('sampling-');
+    const params: Record<string, unknown> = sampling ? {
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'Server original sampling input' }] },
+        { role: 'assistant', content: { type: 'text', text: 'Server supplied assistant context' } },
+        { role: 'user', content: { type: 'text', text: 'Respond using this isolated conversation' } }],
+      systemPrompt: 'Server proposed isolated sampling instruction', maxTokens: 64, temperature: 0.25,
+      modelPreferences: { hints: [{ name: 'unavailable-server-hint' }], costPriority: 0.9 },
+      _meta: { original: 'server-sampling', scenario },
+    } : mode === 'form' ? structuredClone(form) : {
       mode, message: 'Review this exact external URL before consenting.', url: `https://receiver.invalid/continue?interaction=${id}`, elicitationId: `external:${id}`,
     };
     if (task) params._meta = { ...(params._meta as Record<string, unknown> ?? {}), 'io.modelcontextprotocol/related-task': { taskId: task.id } };
     this.questions.set(id, { request, send, ...(task ? { task } : {}), mode });
     this.trace({ kind: 'asking', id, originalRequest: request.id, taskId: task?.id, params });
-    send({ id, method: 'elicitation/create', params });
+    send({ id, method: sampling ? 'sampling/createMessage' : 'elicitation/create', params });
   }
 }
 

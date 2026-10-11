@@ -2941,6 +2941,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const mcpAgentDir = mcpHostAgentDir(process.env.VARIN_AGENT_DIR);
   const mcpAuthority = new McpAuthority({
     interactions: input => mcpInteractionRuntime.receiver(input),
+    sampling: input => mcpInteractionRuntime.samplingReceiver(input),
     interactionErrors: input => mcpInteractionRuntime.errorReceiver(input),
     providerToken: async (_scope, provider) => (await hostCredentialAuthority.getAuth(provider))?.auth.apiKey,
     credentialScope: async (_scope, provider) => hostCredentialAuthority.currentScope(provider),

@@ -58,6 +58,7 @@ function fixture(active = false) {
   const api: ThreadsAPI = { computer: { state: vi.fn<ThreadsAPI['computer']['state']>(async target => ({ state: { work: target, rootWork: target, currentExecution: null, currentRootExecution: null, active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] })), stop: vi.fn(unused), decide: vi.fn(unused) }, goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     mediaRead: vi.fn(async input => ({ media: storedImage, partIndex: input.partIndex, chunkIndex: 0, chunkCount: 1, totalBytes: Buffer.from(imageData, 'base64').length, bytesBase64: imageData })),
     listMcpInteractions: vi.fn(async () => ({ items: [], nextCursor: null })), readMcpInteraction: unused, respondMcpInteraction: unused,
+    reviewMcpSamplingRequest: unused, reviewMcpSamplingOutput: unused,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, retryPreparation: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
@@ -2282,4 +2283,64 @@ it('keeps original RPC-error choices available after natural Run failure without
   expect(f.view.thread.branches[0]!.latest_run?.state).toBe('failed');
   expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled(); expect(f.cancelRun).not.toHaveBeenCalled();
   expect(f.api.cancelOperation).not.toHaveBeenCalled(); expect(f.api.resume).not.toHaveBeenCalled(); expect(f.api.retryPreparation).not.toHaveBeenCalled();
+});
+
+it('uses the actual Thread model and sampling lifecycle in the conversation, requiring separate output acceptance without a Run input', async () => {
+  const f = fixture(true);
+  f.view.activeRun!.configuration = { providerId: 'fixture-provider', model: 'fixture-model', thinkingLevel: 'off', modelOptions: { temperature: 0 } };
+  const modelCatalog = [{ providerId: 'other-provider', modelId: 'other-model' }, { providerId: 'fixture-provider', modelId: 'fixture-model' }];
+  f.api.listModels = vi.fn(async () => modelCatalog);
+  f.view.modelSelection.desired = { id: 'selection:pending', run_id: 'ui-run', revision: 1, binding_id: 'binding:pending', status: 'ready', failure: null, credential_scope: null,
+    configuration: { providerId: 'other-provider', providerFamily: 'openai', model: 'other-model', endpoint: 'https://model.example.test/v1',
+      allowAnonymous: true, credentialEnvironment: null, configurationGeneration: 3, maxOutputTokens: 100 } };
+  let request: McpInteractionView = { record: { id: 'sampling:original', revision: 1, runId: 'ui-run', threadId: identity.threadId, branchId: identity.branchId,
+    mode: 'sampling', availability: 'live', choice: null, delivery: 'not_started', completionReported: false, problem: null,
+    sampling: { generationOperationId: null, review: 'request' }, binding: { operationId: 'operation:original-tool',
+      executionOwner: { kind: 'external', identity: 'original-owner', epoch: 'original-epoch' }, connectionId: 'original-connection',
+      source: { kind: 'server_request', requestId: 9, relation: { kind: 'rpc_response_stream', outgoingRequestId: 3 } },
+      endpoint: { server: 'Original sampling server', resourceKey: 'original-resource', configurationVersion: 'original-configuration', credentialVersion: 'original-credential' } } },
+    presentation: { mode: 'sampling', message: 'Review isolated generation' }, response: null,
+    request: { messages: [{ role: 'user', content: { type: 'text', text: 'Original private request body' } }], maxTokens: 80, modelPreferences: { hints: [{ name: 'other-model' }] } },
+    sampling: { editedRequest: null, output: null, providerOutput: null, receipt: null, snapshot: null } };
+  f.api.listMcpInteractions = vi.fn(async () => ({ items: [structuredClone({ record: request.record, presentation: request.presentation, response: request.response,
+    ...(request.generation ? { generation: request.generation } : {}) })], nextCursor: null }));
+  f.api.readMcpInteraction = vi.fn(async () => structuredClone(request));
+  f.api.respondMcpInteraction = vi.fn();
+  f.api.reviewMcpSamplingRequest = vi.fn(async input => {
+    request = { ...request, record: { ...request.record, revision: 2, sampling: { generationOperationId: 'operation:sample', review: 'request' } },
+      generation: { operationId: 'operation:sample', phase: 'running', outcome: null, cancelRequested: false, dispatch: 'started',
+        model: { providerId: 'fixture-provider', providerFamily: 'openai', model: 'fixture-model', maxTokens: 80 },
+        usage: { measurement: 'missing', inputTokens: null, outputTokens: null, cachedInputTokens: null, cacheWriteTokens: null, reasoningTokens: null, pricingVersion: null }, problem: null },
+      sampling: { ...request.sampling!, editedRequest: input.editedRequest ?? null } };
+    return structuredClone(request);
+  });
+  f.api.reviewMcpSamplingOutput = vi.fn(async input => {
+    request = { ...request, record: { ...request.record, revision: 4, choice: input.action, delivery: 'sending', sampling: { generationOperationId: 'operation:sample', review: 'closed' } } };
+    return structuredClone(request);
+  });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(f.api.readMcpInteraction).not.toHaveBeenCalled(); expect(f.api.reviewMcpSamplingRequest).not.toHaveBeenCalled();
+  expect(container.textContent).not.toContain('Original private request body');
+  await act(async () => button('Review sampling request').click());
+  expect(container.querySelector<HTMLSelectElement>('[aria-label="Sampling model"]')!.value).toBe(JSON.stringify(['fixture-provider', 'fixture-model']));
+  expect(container.textContent).toContain('Selected model: fixture-provider / fixture-model · Thinking: off · Temperature: 0');
+  await submitForm(container.querySelector('[aria-label="Review sampling generation"]')!);
+  expect(f.api.reviewMcpSamplingRequest).toHaveBeenCalledExactlyOnceWith({ ...identity, operationId: 'operation:original-tool', interactionId: 'sampling:original', expectedRevision: 1,
+    action: 'generate', model: { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off', temperature: 0 }, editedRequest: request.request });
+  expect(container.textContent).toContain('Actual model: fixture-provider / fixture-model · maxTokens: 80');
+  expect(container.textContent).toContain('Usage: missing'); expect(button('Stop generation')).toBeDefined();
+  request = { ...request, record: { ...request.record, revision: 3, sampling: { generationOperationId: 'operation:sample', review: 'output' } },
+    generation: { ...request.generation!, phase: 'terminal', outcome: 'succeeded', dispatch: 'completed' },
+    sampling: { ...request.sampling!, output: { role: 'assistant', model: 'fixture-model', content: { type: 'text', text: 'Reviewed generated response' } } } };
+  f.view.eventCursor = 1;
+  await act(async () => f.emit({ cursor: 1, subject: request.record.id, revision: 3, kind: 'mcp.sampling', data: {} }));
+  expect(container.textContent).toContain('terminal · succeeded'); expect(button('Stop generation')).toBeUndefined();
+  expect(f.api.reviewMcpSamplingOutput).not.toHaveBeenCalled();
+  await act(async () => button('Refresh sampling review').click());
+  expect(container.textContent).toContain('Reviewed generated response');
+  expect(container.textContent).toContain('Accepting sends this exact result to MCP server: Original sampling server.');
+  await act(async () => button('Accept and send to server').click());
+  expect(f.api.reviewMcpSamplingOutput).toHaveBeenCalledExactlyOnceWith({ ...identity, operationId: 'operation:original-tool', interactionId: 'sampling:original', expectedRevision: 3, action: 'accept' });
+  expect(container.textContent).toContain('Response delivery started'); expect(container.textContent).not.toContain('Response transport confirmed');
+  expect(f.api.respondMcpInteraction).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
 });

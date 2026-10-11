@@ -1,16 +1,17 @@
 import React from 'react';
-import type { ThreadIdentity, ThreadsAPI } from '@varin/application-client';
+import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadsAPI } from '@varin/application-client';
 import { ThreadRequestError } from '@varin/application-client';
 import type { McpElicitationField, McpElicitationResponse, McpInteractionItem } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { openExternalUrl } from '@/lib/url';
+import { ThreadMcpSampling } from './ThreadMcpSampling';
 
-type InteractionAPI = Pick<ThreadsAPI, 'listMcpInteractions' | 'readMcpInteraction' | 'respondMcpInteraction'>;
+type InteractionAPI = Pick<ThreadsAPI, 'listMcpInteractions' | 'readMcpInteraction' | 'respondMcpInteraction' | 'reviewMcpSamplingRequest' | 'reviewMcpSamplingOutput' | 'cancelOperation'>;
 type Value = string | number | boolean | string[];
 type Draft = Record<string, { included: boolean; value: Value | undefined }>;
 const sameInteraction = (left: McpInteractionItem, right: McpInteractionItem) => left.record.id === right.record.id && left.record.binding.operationId === right.record.binding.operationId;
 const newerInteraction = (retained: McpInteractionItem | undefined, incoming: McpInteractionItem) => retained && retained.record.revision >= incoming.record.revision ? retained : incoming;
-const compactInteraction = ({ record, presentation, response }: McpInteractionItem): McpInteractionItem => ({ record, presentation, response });
+const compactInteraction = ({ record, presentation, response, generation }: McpInteractionItem): McpInteractionItem => ({ record, presentation, response, ...(generation ? { generation } : {}) });
 const canRespond = ({ record }: McpInteractionItem) => record.choice === null && (record.binding.source.kind === 'rpc_error'
   ? record.delivery === null : record.availability === 'live' && record.delivery === 'not_started');
 const errorText = (error: unknown, localChoice: boolean): string => {
@@ -66,7 +67,7 @@ function Field({ field, draft, disabled, change }: { field: McpElicitationField;
   </div>;
 }
 
-export function ThreadMcpInteraction({ api, identity, view, update }: {
+function ThreadMcpElicitation({ api, identity, view, update }: {
   api: InteractionAPI; identity: ThreadIdentity; view: McpInteractionItem; update(view: McpInteractionItem): void;
 }) {
   const [draft, setDraft] = React.useState(() => initialDraft(view));
@@ -115,7 +116,7 @@ export function ThreadMcpInteraction({ api, identity, view, update }: {
   };
   const accept = (event: React.FormEvent) => {
     event.preventDefault();
-    if (presentation.mode === 'url') { void send({ action: 'accept' }); return; }
+    if (presentation.mode !== 'form') { if (presentation.mode === 'url') void send({ action: 'accept' }); return; }
     const content: Record<string, Value> = Object.create(null);
     for (const field of presentation.fields) {
       const entry = draft[field.name];
@@ -160,7 +161,7 @@ export function ThreadMcpInteraction({ api, identity, view, update }: {
     <form noValidate aria-label={`${errorSource ? 'Record choice for MCP interaction' : 'Respond to MCP request'} ${record.id}`} onSubmit={accept} className="space-y-3">
       {presentation.mode === 'form' ? presentation.fields.map(field => <Field key={field.name} field={field} draft={draft[field.name]!} disabled={!ready}
         change={entry => setDraft(current => ({ ...current, [field.name]: entry }))} />)
-        : <div className="space-y-2">
+        : presentation.mode === 'url' && <div className="space-y-2">
           <p className="text-xs">Website host: {new URL(presentation.url).host}</p>
           <p className="break-all whitespace-pre-wrap">{presentation.url}</p>
           <Button type="button" variant="outline" size="sm" disabled={opening || !(errorSource || record.choice === 'accept' || record.choice === null && record.availability === 'live')} onClick={() => void open()}>Open website</Button>
@@ -187,8 +188,19 @@ export function ThreadMcpInteraction({ api, identity, view, update }: {
   </article>;
 }
 
+export function ThreadMcpInteraction({ api, identity, view, update, models = [], selectedModel, modelError }: {
+  api: InteractionAPI; identity: ThreadIdentity; view: McpInteractionItem; update(view: McpInteractionItem): void;
+  models?: ThreadModelInfo[]; selectedModel?: ThreadModel; modelError?: string;
+}) {
+  return view.record.mode === 'sampling' || view.presentation.mode === 'sampling'
+    ? <ThreadMcpSampling api={api} identity={identity} view={view} update={update} models={models} selectedModel={selectedModel} modelError={modelError} />
+    : <ThreadMcpElicitation api={api} identity={identity} view={view} update={update} />;
+}
+
 /** A bounded page independent of active Operations. Opening or closing this view never cancels a server request. */
-export function ThreadMcpInteractions({ api, identity, eventCursor }: { api: InteractionAPI; identity: ThreadIdentity; eventCursor: number }) {
+export function ThreadMcpInteractions({ api, identity, eventCursor, models, selectedModel, modelError }: {
+  api: InteractionAPI; identity: ThreadIdentity; eventCursor: number; models?: ThreadModelInfo[]; selectedModel?: ThreadModel; modelError?: string;
+}) {
   const [items, setItems] = React.useState<McpInteractionItem[]>([]);
   const [cursor, setCursor] = React.useState<string>();
   const [nextCursor, setNextCursor] = React.useState<string | null>(null);
@@ -218,9 +230,9 @@ export function ThreadMcpInteractions({ api, identity, eventCursor }: { api: Int
     {error && <p role="alert">{error}</p>}
     {!loading && !error && items.length === 0 && <p className="text-xs text-muted-foreground">No MCP requests on this page.</p>}
     {waiting.length > 0 && <p className="text-xs font-medium">Awaiting your choice</p>}
-    {waiting.map(view => <ThreadMcpInteraction key={`${view.record.binding.operationId}:${view.record.id}`} api={api} identity={identity} view={view} update={update} />)}
+    {waiting.map(view => <ThreadMcpInteraction key={`${view.record.binding.operationId}:${view.record.id}`} api={api} identity={identity} view={view} update={update} models={models} selectedModel={selectedModel} modelError={modelError} />)}
     {history.length > 0 && <p className="text-xs font-medium">Answered or closed requests</p>}
-    {history.map(view => <ThreadMcpInteraction key={`${view.record.binding.operationId}:${view.record.id}`} api={api} identity={identity} view={view} update={update} />)}
+    {history.map(view => <ThreadMcpInteraction key={`${view.record.binding.operationId}:${view.record.id}`} api={api} identity={identity} view={view} update={update} models={models} selectedModel={selectedModel} modelError={modelError} />)}
     <div className="flex gap-2">
       {cursor && <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => { setItems([]); setCursor(undefined); }}>Latest requests</Button>}
       {nextCursor && <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => { setItems([]); setCursor(nextCursor); }}>More requests</Button>}

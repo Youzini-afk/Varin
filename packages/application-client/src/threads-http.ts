@@ -4,7 +4,7 @@ import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange } from './transport/runtime-switch.js';
 
 export class ThreadRequestError extends Error {
-  constructor(readonly status: number, readonly code: string) {
+  constructor(readonly status: number, readonly code: string, readonly admission?: 'not_started') {
     super(`Thread request failed (${status})`);
     this.name = 'ThreadRequestError';
   }
@@ -20,11 +20,12 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     signal?.throwIfAborted();
     if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during thread request');
     if (!response.ok) {
-      const failure = await response.json().catch(() => ({})) as { code?: unknown };
+      const failure = await response.json().catch(() => ({})) as { code?: unknown; admission?: unknown };
       signal?.throwIfAborted();
       if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during thread request');
       throw new ThreadRequestError(response.status, typeof failure.code === 'string' ? failure.code
-        : response.status === 413 ? 'http-body-too-large' : 'thread-request-failed');
+        : response.status === 413 ? 'http-body-too-large' : 'thread-request-failed',
+      failure.admission === 'not_started' ? 'not_started' : undefined);
     }
     const result = await response.json() as T;
     signal?.throwIfAborted();
@@ -120,6 +121,8 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     listMcpInteractions: (input, signal) => post('mcp/interactions/list', input, signal),
     readMcpInteraction: (input, signal) => post('mcp/interactions/read', input, signal),
     respondMcpInteraction: (input, signal) => post('mcp/interactions/respond', input, signal),
+    reviewMcpSamplingRequest: (input, signal) => post('mcp/interactions/sampling/request', input, signal),
+    reviewMcpSamplingOutput: (input, signal) => post('mcp/interactions/sampling/output', input, signal),
     resume: (runId, waitId) => post('run/resume', { runId, waitId }),
     async retryPreparation(runId) { await post('run/retry-preparation', { runId }); }, events: cursor => post('events', { cursor }),
     async observe(cursor, listener, { signal }) {

@@ -57,6 +57,7 @@ pub fn adapters() -> Vec<Arc<dyn ModelAdapter>> {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Options {
     temperature: Option<f64>,
+    stop_sequences: Option<Vec<String>>,
     sampling_params: Option<BTreeMap<String, Value>>,
     #[serde(default = "empty_object")]
     protocol: Value,
@@ -303,6 +304,15 @@ fn bind(
             _ => fields["temperature"] = json!(t),
         }
     }
+    if let Some(stops) = options.stop_sequences {
+        match c.provider_family.as_str() {
+            chat::FAMILY | mistral::FAMILY => fields["stop"] = json!(stops),
+            anthropic::FAMILY => fields["stop_sequences"] = json!(stops),
+            google::FAMILY | google::VERTEX_FAMILY => fields["generationConfig"]["stopSequences"] = json!(stops),
+            bedrock::FAMILY => fields["inferenceConfig"]["stopSequences"] = json!(stops),
+            _ => return Err(ExecutionError::new("mcp_sampling_stop_sequences_unsupported", "Selected adapter cannot apply stop sequences; remove stopSequences or select another model")),
+        }
+    }
     if let Some(parameters) = options.sampling_params {
         if !matches!(
             c.provider_family.as_str(),
@@ -341,6 +351,15 @@ impl ModelProvider for ConfiguredProvider {
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         let mut value = self.inner.serialize(view)?;
         merge(&mut value, &self.fields);
+        if view.binding.provider_family == bedrock::FAMILY {
+            // Bedrock applies the same resolved Anthropic manual-thinking fields after
+            // Converse serialization. Check their final cap with the original shared rule.
+            anthropic::validate_thinking_capacity(
+                view,
+                value.get("additionalModelRequestFields").and_then(|fields| fields.get("thinking")),
+                value["inferenceConfig"]["maxTokens"].as_u64(),
+            )?;
+        }
         Ok(value)
     }
     fn generate(

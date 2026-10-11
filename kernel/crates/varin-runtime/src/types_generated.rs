@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum McpInteractionMode {
     Form,
     Url,
+    Sampling,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

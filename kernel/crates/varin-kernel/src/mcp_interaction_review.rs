@@ -964,6 +964,9 @@ struct InteractionExecution {
 }
 impl InteractionExecution {
     fn new(mode: &str, tool: &str, scenario: &str) -> Self {
+        Self::with_sampling(mode, tool, scenario, false)
+    }
+    fn with_sampling(mode: &str, tool: &str, scenario: &str, sampling: bool) -> Self {
         let root = std::env::temp_dir().join(format!("varin-mcp-error-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         let mut db = Catalog::open(root.join("catalog")).unwrap();
@@ -983,7 +986,7 @@ impl InteractionExecution {
         let mut host = Host::new();
         host.send(
             json!({"kind":"fixture-initialize","interactions":mode,"epoch":EPOCH,"root":root,
-            "runId":receipt.run_id,"threadId":"thread:interaction"}),
+            "runId":receipt.run_id,"threadId":"thread:interaction","sampling":sampling}),
         );
         let prepared = receive(&mut host, &runtime, &bridge, &outgoing, "fixture-prepared");
         let live =
@@ -1427,3 +1430,6 @@ fn accepted_task_url_keeps_exact_completion_after_natural_task_retirement() {
     assert_eq!(after.external_receipt, original.external_receipt);
     fixture.finish();
 }
+
+#[path = "mcp_sampling_review.rs"]
+mod sampling;

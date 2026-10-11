@@ -102,7 +102,7 @@ records typed dependencies in its manifests. Original publication protection spa
 the short identity/epoch/revision-checked commit. GC follows those dependencies from the existing
 history, input, operation, event, policy and request roots. Catalog retains only original metadata;
 byte reads, hash/base64 work and provider serialization stay outside its control lock. Catalog
-format **53**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **8** reject older internal
+format **54**, input domain **7**, content domain **4**, manifest **2** and Kernel wire **9** reject older internal
 formats directly. These are distinct from policy service **4** and private script worker protocol **2**.
 
 `runtime.output.media.read` uses the original caller Thread/branch plus an actual history, queued
@@ -149,7 +149,7 @@ Catalog does not create another client, inbox, scheduler or remote task owner.
 `catalog_mcp_interactions` links short request/choice/delivery facts to the original real Operation.
 The original request, normalized presentation and reviewed answer are immutable ContentStore bodies,
 protected by publication and existing GC roots. Capture/load and stage/publish keep body work outside
-Catalog. No additional execution Operation, question tool, Wait or user-input history is created.
+Catalog. Form/URL review creates no additional execution Operation, question tool, Wait or user-input history.
 
 The Host routes only the original HTTP response stream or a known accepted Task on its actual client.
 A related Task takes precedence over the response stream; missing or ambiguous association is explicit.
@@ -164,9 +164,20 @@ natural Run termination or watcher closure. One original error body is shared by
 all short records publish atomically, paged items omit the full error, and exact reads retain it.
 Source/Goal/cancel/reopen fence automatic completion, not historical user review. Original execution
 errors and accepted Task results remain independent and are never replayed by a card.
+Basic sampling reuses the interaction but links a separate real generation Operation, supervised by
+the existing RunSupervisor. Explicit request/model review precedes isolated provider execution;
+output review precedes the exact response send. Original/edited requests, snapshot, output and usage
+stay under ContentStore/publication/GC, including earlier failed attempts. Sampling provenance keeps
+approved roles local to that request without importing main history, tools or continuation. Its
+frozen Goal identity still uses the original inference budget and receipt accounting; isolation does
+not detach execution from its user's Goal. Short control projections do not hydrate bodies.
+Task-owned generation can outlive natural parent Run
+retirement; its private credential lifetime is explicit and original cancellation/revocation still
+fences dispatch. Recovery never replays dispatched generation or an uncertain response.
 See [MCP](../../../packages/web/application-host/lib/kernel/MCP.md), the
 [server-request record](../../../docs/reviews/runtime-mcp-interactions-2026-10-11.md), and the
-[error-source record](../../../docs/reviews/runtime-mcp-error-interactions-2026-10-11.md).
+[error-source record](../../../docs/reviews/runtime-mcp-error-interactions-2026-10-11.md), plus
+[sampling verification](../../../docs/reviews/runtime-mcp-sampling-2026-10-11.md).
 
 ## Instruction and skill checkpoint binding
 

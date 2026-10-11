@@ -1,4 +1,4 @@
-import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpInteractionPage, McpInteractionView } from '@varin/protocol';
+import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpInteractionPage, McpInteractionView, McpSamplingRequestReviewParams, McpSamplingOutputReviewParams } from '@varin/protocol';
 import type { MediaReadParams, MediaReadChunk } from '@varin/protocol';
 import type { ComputerAutomationProjection, ComputerAutomationState } from '@varin/protocol';
 import type { MessageSendParams, MessageListParams, MessageReceipt, MessagePage, MessageView } from '@varin/protocol';
@@ -17,6 +17,11 @@ export interface ThreadIdentity { runtime: 'agent'; threadId: string; branchId: 
 export type ThreadThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export interface ThreadModel { providerId: string; modelId: string; thinkingLevel?: ThreadThinkingLevel; temperature?: number }
 export interface ThreadModelInfo extends ThreadModel { name?: string; acceptsImages?: boolean; contextWindowTokens?: number; thinkingLevels?: ThreadThinkingLevel[] }
+/** A public model selection resolves only through the Host's existing model/credential authority. */
+export type ThreadMcpSamplingRequestReview = ThreadIdentity & Omit<McpSamplingRequestReviewParams, 'action' | 'editedRequest'> & (
+  | { action: 'generate'; model: ThreadModel; editedRequest: Record<string, unknown> }
+  | { action: Exclude<McpSamplingRequestReviewParams['action'], 'generate'>; model?: never; editedRequest?: never }
+);
 interface ThreadSourceBase {
   workspaceId: string;
   executionWorkspaceId: string;
@@ -259,6 +264,10 @@ export interface ThreadsAPI {
   listMcpInteractions(input: ThreadIdentity & Omit<McpInteractionListParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<McpInteractionPage>;
   readMcpInteraction(input: ThreadIdentity & McpInteractionReadParams, signal?: AbortSignal): Promise<McpInteractionView>;
   respondMcpInteraction(input: ThreadIdentity & McpInteractionRespondParams, signal?: AbortSignal): Promise<McpInteractionView>;
+  /** Generate only the reviewed request with an explicitly selected registered model; no response is sent yet. */
+  reviewMcpSamplingRequest(input: ThreadMcpSamplingRequestReview, signal?: AbortSignal): Promise<McpInteractionView>;
+  /** Separately review the original generation before returning its output to the requesting MCP server. */
+  reviewMcpSamplingOutput(input: ThreadIdentity & McpSamplingOutputReviewParams, signal?: AbortSignal): Promise<McpInteractionView>;
   answerQuestion(input: ThreadIdentity & { operationId: string; answer: string }): Promise<Operation>;
   resume(runId: string, waitId: string): Promise<PolicyResumeReceipt>;
   retryPreparation(runId: string): Promise<void>;

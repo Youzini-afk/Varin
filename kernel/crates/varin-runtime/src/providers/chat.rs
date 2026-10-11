@@ -86,8 +86,8 @@ impl ModelProvider for ChatProvider {
                 continue;
             }
             let role = match item.provenance {
-                Provenance::SystemInstruction { .. } => "system",
-                Provenance::Assistant | Provenance::PolicyOutput { .. } => "assistant",
+                ref p if p.is_system() => "system",
+                ref p if p.is_assistant() => "assistant",
                 _ => "user",
             };
             match item.content {
@@ -110,7 +110,7 @@ impl ModelProvider for ChatProvider {
                     }else{messages.push(json!({"role":"tool","tool_call_id":result.call_id,"content":parts.into_iter().map(|part|match part{crate::output::OutputPart::Text{text}=>text,_=>unreachable!()}).collect::<Vec<_>>().join("\n")}));}
                 },
                 Content::Media{media}=>messages.push(json!({"role":"user","content":chat_parts(vec![crate::output::OutputPart::Media{media}])?})),
-                Content::Output{output}=>messages.push(json!({"role":"user","content":chat_parts(evidence_parts(&output,&item.provenance))?})),
+                Content::Output{output}=>messages.push(json!({"role":evidence_role(&item.provenance,role),"content":chat_parts(evidence_parts(&output,&item.provenance))?})),
                 Content::ProviderOnly=>return Err(ExecutionError::new("missing_opaque","provider-only item lacks its original")),
             }
         }

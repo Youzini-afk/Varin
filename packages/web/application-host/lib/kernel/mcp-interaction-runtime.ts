@@ -1,17 +1,22 @@
 /** Live responders for Catalog-owned MCP input records. No durable state or connection authority here. */
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { decodeElicitationRequest, validateElicitationResponse, decodeUrlElicitationError, type McpInteractionRequest, type McpInteractionReceiver, type McpErrorInteractionItem, type McpErrorInteractionReceiver } from '@varin/pi-host/mcp-authority';
+import { McpSamplingRejectedError, decodeElicitationRequest, validateElicitationResponse, decodeUrlElicitationError, type McpInteractionRequest, type McpInteractionReceiver, type McpErrorInteractionItem, type McpErrorInteractionReceiver } from '@varin/pi-host/mcp-authority';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { KernelClient } from './kernel-client.js';
 import type { McpInteractionRecord, McpInteractionView, McpInteractionRespondParams, McpElicitationResponse, McpInteractionAvailability, McpInteractionDelivery } from './protocol.generated.js';
+import type { McpInteractionPending, McpSamplingResult, McpSamplingRequestReviewParams, McpSamplingOutputReviewParams, ModelSessionConfiguration, Operation } from './protocol.generated.js';
+import type { CredentialScope, ExistingHostCredentialOwner } from './credential-owner.js';
+type ReviewedAnswer = McpElicitationResponse | McpSamplingResult;
+export interface SamplingModelSelection { configuration: ModelSessionConfiguration; credentialOwner: ExistingHostCredentialOwner }
 const failure = (code: string): Error => Object.assign(new Error(code), {code});
 interface Entry {
   id: string;
   input: McpInteractionRequest | McpErrorInteractionItem;
   record?: McpInteractionRecord;
   controller: AbortController;
-  resolve(response: McpElicitationResponse): void;
+  resolve(response: ReviewedAnswer): void;
+  credential?: { operationId: string; scope: CredentialScope; release(): void };
   reject(error: Error): void;
   opened: Promise<McpInteractionRecord>;
   completion?: () => void;
@@ -19,6 +24,7 @@ interface Entry {
   finished: boolean;
   answerReleased?: boolean;
   proposedResponse?: McpElicitationResponse;
+  proposedSamplingChoice?: { review: 'request' | 'output'; action: 'accept' | 'decline' | 'cancel'; expectedRevision: number; generationOperationId: string | null };
   choiceLane: Promise<unknown>;
   closeFact?: McpInteractionAvailability;
   settlementFact?: McpInteractionDelivery;
@@ -40,7 +46,7 @@ export function createMcpInteractionRuntime(options: { kernel: KernelClient; run
     && (entry.input.binding.source.kind === 'rpc_error' ? entry.record.choice === null || entry.record.choice === 'accept' : entry.record.choice === 'accept')
     && entry.record.delivery !== 'not_sent' && ['live', 'rpc_closed'].includes(entry.record.availability) && !entry.record.completionReported;
   const retire = (entry: Entry) => {
-    if (!entry.finished || hasFacts(entry) || !entry.record) return;
+    if (!entry.finished || hasFacts(entry) || !entry.record || entry.credential) return;
     if (keepCompletion(entry) && entry.completion) return;
     entry.unobserve?.(); delete entry.unobserve;
     entry.completion?.(); delete entry.completion;
@@ -92,17 +98,24 @@ export function createMcpInteractionRuntime(options: { kernel: KernelClient; run
     poll = (async () => {
       while (dirty && !disposed) {
         dirty = false;
-        const records = await options.kernel.agentRuntimeRequest<McpInteractionRecord[], 'runtime.mcp.interaction.pending'>('runtime.mcp.interaction.pending', {});
+        const records = await options.kernel.agentRuntimeRequest<McpInteractionPending[], 'runtime.mcp.interaction.pending'>('runtime.mcp.interaction.pending', {});
         const current = new Map(records.map(r => [r.id, r]));
         for (const entry of entries.values()) {
           if (!entry.record) continue;
           const record = current.get(entry.id);
           if (record) adopt(entry, record);
+          if (record?.mode === 'sampling') {
+            if (record.generation?.phase === 'terminal' && record.generation.operationId === entry.credential?.operationId) { entry.credential.release(); delete entry.credential; }
+            if (record.sampling?.review === 'closed' && !entry.answerReleased && record.choice === null && record.generation?.phase === 'terminal') {
+              entry.reject(failure(record.generation.problem ?? 'mcp_sampling_unavailable'));
+            }
+            retire(entry);
+          }
           if (record && record.availability !== 'live') close(entry, record.availability);
-          else if (!record && (entry.record.availability === 'live' || entry.completion)) {
+          else if (!record && (entry.record.availability === 'live' || entry.completion || entry.credential)) {
             // A closed row is omitted from pending. Read only this known exact identity.
-            void options.kernel.agentRuntimeRequest<McpInteractionView, 'runtime.mcp.interaction.read'>('runtime.mcp.interaction.read', {operationId: entry.input.binding.operationId, interactionId: entry.id})
-              .then(view => { adopt(entry, view.record); if (view.record.availability !== 'live') close(entry, view.record.availability); }).catch(report);
+            void options.kernel.agentRuntimeRequest<McpInteractionPending, 'runtime.mcp.interaction.inspect'>('runtime.mcp.interaction.inspect', {operationId: entry.input.binding.operationId, interactionId: entry.id})
+              .then(record => { adopt(entry, record); if(record.generation?.phase === 'terminal' && record.generation.operationId === entry.credential?.operationId){entry.credential.release();delete entry.credential;} if (record.availability !== 'live') close(entry, record.availability); retire(entry); }).catch(report);
           }
         }
       }
@@ -110,14 +123,14 @@ export function createMcpInteractionRuntime(options: { kernel: KernelClient; run
     return poll;
   };
   const wake = () => { void reconcile().catch(report); };
-  const receiver: McpInteractionReceiver = async input => {
+  const receive = async (input: McpInteractionRequest, sampling = false): Promise<ReviewedAnswer> => {
     if (disposed) throw failure('mcp_interaction_owner_unavailable');
-    const decoded = decodeElicitationRequest(input.request);
+    const decoded = sampling ? { request: input.request, presentation: { mode: 'sampling' as const, message: 'Review this server’s isolated model request' } } : decodeElicitationRequest(input.request);
     const id = `mcp-interaction:${createHash('sha256').update(JSON.stringify([input.binding.connectionId, input.binding.source])).digest('hex')}`;
     if (entries.has(id)) throw failure('mcp_interaction_conflict');
     const controller = new AbortController();
     let resolve!: Entry['resolve'], reject!: Entry['reject'];
-    const answer = new Promise<McpElicitationResponse>((yes, no) => { resolve = yes; reject = no; });
+    const answer = new Promise<ReviewedAnswer>((yes, no) => { resolve = yes; reject = no; });
     void answer.catch(() => {});
     let openRejected = false;
     const opened = options.kernel.agentRuntimeRequest<McpInteractionRecord, 'runtime.mcp.interaction.open'>('runtime.mcp.interaction.open', {
@@ -173,6 +186,7 @@ export function createMcpInteractionRuntime(options: { kernel: KernelClient; run
       }, () => close(entry, 'connection_lost'));
       return await answer;
     } catch (error) {
+      if (error instanceof McpSamplingRejectedError) throw error;
       if (!openRejected) close(entry, input.signal.reason === 'rpc_closed' ? 'rpc_closed' : input.signal.aborted ? 'cancelled' : 'owner_unavailable');
       throw error;
     }
@@ -226,8 +240,125 @@ export function createMcpInteractionRuntime(options: { kernel: KernelClient; run
       report(error);
     });});
   };
+  const receiver: McpInteractionReceiver = input => receive(input) as Promise<McpElicitationResponse>;
+  const samplingReceiver = (input: McpInteractionRequest) => receive(input, true) as Promise<McpSamplingResult>;
+  const readSampling = (input: {operationId:string;interactionId:string}) => options.kernel.agentRuntimeRequest<McpInteractionView, 'runtime.mcp.interaction.read'>('runtime.mcp.interaction.read', {operationId:input.operationId,interactionId:input.interactionId});
+  const reviewLane = <T>(entry: Entry, run: () => Promise<T>): Promise<T> => { const result=entry.choiceLane.then(run,run);entry.choiceLane=result.catch(()=>undefined);return result; };
+  const liveSampling = async (input: {operationId:string;interactionId:string}, signal?: AbortSignal) => {
+    signal?.throwIfAborted();
+    const view=await readSampling(input);
+    const entry=entries.get(input.interactionId);
+    if(view.record.mode !== 'sampling' || !entry || entry.finished || entry.controller.signal.aborted || entry.input.signal.aborted) throw failure('mcp_interaction_not_live');
+    await entry.input.assertLive();
+    if(view.generation?.phase === 'terminal' && view.generation.operationId === entry.credential?.operationId){entry.credential.release();delete entry.credential;}
+    return {view,entry};
+  };
+  const reviewSamplingChoice = async (input: McpSamplingOutputReviewParams, review: 'request' | 'output', signal?: AbortSignal): Promise<McpInteractionView> => {
+    const run = async () => {
+      signal?.throwIfAborted();
+      let view = await readSampling(input);
+      if (view.record.mode !== 'sampling') throw failure('mcp_sampling_review_required');
+      const entry = entries.get(input.interactionId);
+      const release = () => {
+        const proposed = entry?.proposedSamplingChoice;
+        if (!entry || entry.answerReleased || entry.finished || entry.controller.signal.aborted || entry.input.signal.aborted
+          || !proposed || proposed.review !== review || proposed.action !== input.action || proposed.expectedRevision !== input.expectedRevision
+          || proposed.generationOperationId !== (view.record.sampling?.generationOperationId ?? null)) return;
+        if (input.action === 'accept' && !view.sampling?.output) throw failure('mcp_sampling_output_unavailable');
+        adopt(entry, view.record); entry.answerReleased = true;
+        if (input.action === 'accept') entry.resolve(view.sampling!.output!);
+        else entry.reject(new McpSamplingRejectedError());
+      };
+      if (view.record.choice !== null) {
+        if (view.record.choice !== input.action) throw failure('mcp_interaction_conflict');
+        // A lost private acknowledgement can only release this exact receiver's first
+        // durably reviewed answer. Reading historical choices never replays a wire reply.
+        release(); return view;
+      }
+      const live = await liveSampling(input, signal);
+      signal?.throwIfAborted();
+      const proposal = {review, action: input.action, expectedRevision: input.expectedRevision, generationOperationId: live.view.record.sampling?.generationOperationId ?? null};
+      live.entry.proposedSamplingChoice = proposal;
+      const method = review === 'request' ? 'runtime.mcp.sampling.review_request' : 'runtime.mcp.sampling.review_output';
+      try {
+        const record = await options.kernel.agentRuntimeRequest<McpInteractionRecord, typeof method>(method, input as never);
+        adopt(live.entry, record);
+        view = {...live.view, record};
+      } catch (error) {
+        view = await readSampling(input);
+        if (view.record.choice !== input.action || view.record.sampling?.review !== 'closed'
+          || (view.record.sampling?.generationOperationId ?? null) !== proposal.generationOperationId) throw error;
+      }
+      release(); wake(); return readSampling(input);
+    };
+    const entry = entries.get(input.interactionId);
+    return entry ? reviewLane(entry, run) : run();
+  };
   return {
     receiver,
+    samplingReceiver,
+    async reviewRequest(input: McpSamplingRequestReviewParams, model?: SamplingModelSelection, signal?: AbortSignal): Promise<McpInteractionView> {
+      if(input.action !== 'generate') return reviewSamplingChoice(input as McpSamplingOutputReviewParams, 'request', signal);
+      const previous=await readSampling(input);
+      if(previous.record.mode === 'sampling' && previous.record.choice !== null){
+        if(input.action === 'generate' || previous.record.choice!==input.action)throw failure('mcp_interaction_conflict');
+        return previous;
+      }
+      const {entry}=await liveSampling(input,signal);
+      return reviewLane(entry,async()=>{
+        const {view}=await liveSampling(input,signal);
+        if(input.action === 'generate') {
+          if(!model || !input.editedRequest)throw failure('mcp_sampling_model_required');
+          const bindingId=`${input.interactionId}:generation:${input.expectedRevision}`;
+          if(entry.credential && entry.credential.operationId !== bindingId) throw failure('mcp_interaction_conflict');
+          let scope;
+          let registered = false;
+          if(!entry.credential){
+            scope=await options.kernel.registerCredentialOwner(view.record.runId,model.credentialOwner,signal,bindingId,{kind:'operation',operationId:bindingId,assertLive:entry.input.assertLive});
+            registered = true;
+            const epoch=options.kernel.kernelEpoch;
+            entry.credential={operationId:bindingId,scope,release:()=>{if(options.kernel.kernelEpoch === epoch)options.kernel.unregisterCredentialOwner(view.record.runId,bindingId);}};
+          } else {
+            scope=entry.credential.scope;
+            if(!isDeepStrictEqual(await model.credentialOwner.scope(),scope))throw failure('mcp_interaction_conflict');
+          }
+          try {
+            const record=await options.kernel.agentRuntimeRequest<McpInteractionRecord,'runtime.mcp.sampling.generate'>('runtime.mcp.sampling.generate',{
+              operationId:input.operationId,interactionId:input.interactionId,expectedRevision:input.expectedRevision,editedRequest:input.editedRequest,configuration:model.configuration,credentialScope:scope,
+            });adopt(entry,record);
+          } catch(error) {
+            const releaseRegistration = () => { if(registered && entry.credential?.operationId === bindingId){entry.credential.release();delete entry.credential;} };
+            const code=error && typeof error==='object' && 'code' in error ? error.code : undefined;
+            // A definite native rejection is not an ambiguous acknowledgement. In particular,
+            // a same revision with a different explicit model must remain a visible conflict.
+            if(['operation-error','protocol-error','unauthorized','cancelled'].includes(String(code))){releaseRegistration();throw error;}
+            const accepted=await readSampling(input);
+            if(accepted.record.sampling?.generationOperationId !== bindingId){releaseRegistration();throw error;}
+            // On transport uncertainty, prove the entire original admission through its existing
+            // body-reading Operation API. This never retries generation or adds a second ledger.
+            const operation=await options.kernel.agentRuntimeRequest<Operation,'runtime.operation.inspect'>('runtime.operation.inspect',{operationId:bindingId});
+            const intent=operation.intent as {kind?:unknown;parent_operation_id?:unknown;interaction_id?:unknown;request?:unknown;configuration?:unknown;credential_scope?:unknown} | null;
+            const configuration=(value:unknown)=>value && typeof value==='object' && !Array.isArray(value)
+              ? Object.fromEntries(Object.entries(value).filter(([,v])=>v!==null && v!==undefined)) : value;
+            // Rust serializes absent top-level Option configuration fields as null; nested
+            // provider options retain their exact structure and values for this comparison.
+            if(operation.id!==bindingId || operation.run_id!==view.record.runId || intent?.kind!=='mcp_sampling_generation_v1'
+              || intent.parent_operation_id!==input.operationId || intent.interaction_id!==input.interactionId
+              || !isDeepStrictEqual(intent.request,input.editedRequest)
+              || !isDeepStrictEqual(configuration(intent.configuration),configuration(model.configuration))
+              || !isDeepStrictEqual(intent.credential_scope,scope)){
+              releaseRegistration();throw failure('mcp_interaction_conflict');
+            }
+            adopt(entry,accepted.record);
+          }
+          wake();return readSampling(input);
+        }
+        throw failure('mcp_interaction_conflict');
+      });
+    },
+    async reviewOutput(input:McpSamplingOutputReviewParams,signal?:AbortSignal):Promise<McpInteractionView>{
+      return reviewSamplingChoice(input, 'output', signal);
+    },
     errorReceiver,
     start() { if (started || disposed) return; started = true; removers.push(options.runtime.onReady(wake), options.runtime.onEvent(wake)); wake(); },
     async respond(input: McpInteractionRespondParams, signal?: AbortSignal): Promise<McpInteractionView> {
@@ -235,6 +366,7 @@ export function createMcpInteractionRuntime(options: { kernel: KernelClient; run
       const run = async () => {
         signal?.throwIfAborted();
         const view = await read();
+        if (view.record.mode === 'sampling') throw failure('mcp_sampling_review_required');
         const isError = view.record.binding.source.kind === 'rpc_error';
         const request = isError
           ? decodeUrlElicitationError(view.request).find(p => p.elicitationId === (view.record.binding.source as {elicitationId:string}).elicitationId)
@@ -293,7 +425,7 @@ export function createMcpInteractionRuntime(options: { kernel: KernelClient; run
         void short('runtime.mcp.interaction.close', entry, {availability:'connection_lost'}).catch(() => undefined);
       }
       disposed = true; lifetime.abort();
-      for (const entry of entries.values()) { entry.unobserve?.(); entry.completion?.(); }
+      for (const entry of entries.values()) { entry.credential?.release(); entry.unobserve?.(); entry.completion?.(); }
       entries.clear();
     },
   };

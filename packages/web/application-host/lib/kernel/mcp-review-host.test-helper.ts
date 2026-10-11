@@ -13,6 +13,7 @@ import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { createMcpTaskRuntime } from './mcp-task-runtime.js';
 import { createMcpTaskRecovery } from './mcp-task-recovery.js';
 import type { KernelClient } from './kernel-client.js';
+import { CredentialBridge } from './credential-bridge.js';
 
 const write = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`);
 const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
@@ -22,7 +23,15 @@ let sequence = 0, epoch = '', root = '';
 let scope: McpCompositionScope | undefined;
 const authority = new McpAuthority();
 const compositions = new McpCompositions(authority, code => write({ kind: 'fixture-failed', code }));
+const credentials = new CredentialBridge(() => epoch || null, async frame => { write(frame); },
+  () => write({ kind: 'fixture-failed', code: 'original-credential-bridge-send-failed' }));
 const kernel = {
+  get kernelEpoch() { return epoch || null; },
+  registerCredentialOwner(...args: Parameters<CredentialBridge['register']>) { return credentials.register(...args); },
+  unregisterCredentialOwner(...args: Parameters<CredentialBridge['unregister']>) { return credentials.unregister(...args); },
+  cancelRunPreparation() {}, // This fixture admits no deferred Thread source preparation.
+  unregisterToolOwners(runId: string) { bridge.unregister(runId); },
+  releaseRunPolicyOwners() {}, // Its main policy is the original builtin policy, not a Host policy lease.
   subscribeExit() { return () => {}; },
   subscribeReady(listener: () => void) { readyListeners.add(listener); return () => readyListeners.delete(listener); },
   onToolReleased() {},
@@ -51,7 +60,7 @@ async function initialize(frame: Record<string, unknown>) {
   epoch = String(frame.epoch); root = String(frame.root);
   if (frame.interactions === 'http' || frame.interactions === 'stdio') {
     const { createInteractionFixture } = await import('./mcp-interaction-host.test-helper.js');
-    interaction = await createInteractionFixture({ root, mode: frame.interactions, kernel, runtime, bridge,
+    interaction = await createInteractionFixture({ root, mode: frame.interactions, kernel, runtime, bridge, sampling: frame.sampling === true,
       onError: error => write({ kind: 'fixture-failed', code: error.message }) });
     write({ kind: 'fixture-prepared', ...await interaction.prepare(frame) }); return;
   }
@@ -134,6 +143,7 @@ createInterface({input:process.stdin}).on('line',line=>{const q=JSON.parse(line)
   write({ kind: 'fixture-prepared', live, names });
 }
 async function receive(frame: Record<string, unknown>) {
+  if (credentials.consume(frame)) return;
   if (frame.kind === 'fixture-initialize') return initialize(frame);
   if (frame.kind === 'fixture-interaction-consumer') {
     assert(interaction);
@@ -164,6 +174,7 @@ async function receive(frame: Record<string, unknown>) {
   if (frame.kind === 'fixture-event') { for (const listener of eventListeners) listener(frame.event); return; }
   if (frame.kind === 'fixture-ready') { for (const listener of readyListeners) listener(); return; }
   if (frame.kind === 'fixture-finish') {
+    credentials.close();
     if (interaction) { const result = await interaction.finish(); bridge.close(); compositions.close(); await authority.close(); write({ kind: 'fixture-finished', ...result }); return; }
     if (resource) {
       const result = await resource.finish(); bridge.close(); compositions.close(); await authority.close();
@@ -179,4 +190,4 @@ const lines = createInterface({ input: process.stdin });
 lines.on('line', line => { void receive(JSON.parse(line) as Record<string, unknown>).catch(error => {
   write({ kind: 'fixture-failed', code: error instanceof Error ? error.stack : String(error) });
 }); });
-lines.on('close', () => { void tasks.dispose(); void interaction?.finish(); void resource?.finish(); bridge.close(); void consumer?.close(); scope?.release(); compositions.close(); void authority.close(); });
+lines.on('close', () => { credentials.close(); void tasks.dispose(); void interaction?.finish(); void resource?.finish(); bridge.close(); void consumer?.close(); scope?.release(); compositions.close(); void authority.close(); });

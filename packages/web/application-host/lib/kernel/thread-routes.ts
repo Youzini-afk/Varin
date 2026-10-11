@@ -1,4 +1,4 @@
-import type { McpElicitationResponse } from '@varin/protocol';
+import type { McpElicitationResponse, McpSamplingRequestAction, McpSamplingOutputAction } from '@varin/protocol';
 import type { OutputMediaHolder } from '@varin/protocol';
 import { parseComputerWorkRef, parseComputerExecutionRef } from '@varin/protocol';
 import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams, FollowupRegistrationTrigger } from '@varin/protocol';
@@ -9,7 +9,7 @@ import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel, Th
 import { ComputerError } from '../computer/computer-error.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 import { KernelClientError } from './kernel-client.js';
-import { ThreadAdapter } from './thread-adapter.js';
+import { ThreadAdapter, ThreadPreAdmissionError } from './thread-adapter.js';
 import { listThreadFollowupJobs, pendingThreadFollowupRegistrations, cancelThreadFollowupRegistration, controlThreadFollowup, getThreadFollowup, getThreadFollowupOccurrence, listThreadFollowupOccurrences, listThreadFollowups, registerThreadFollowup } from './thread-followups.js';
 import { controlThreadGoal, listThreadGoals, startThreadGoal, updateThreadGoal } from './thread-goals.js';
 
@@ -88,6 +88,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'mcp/interactions/list': ['runtime', 'threadId', 'branchId', 'cursor', 'limit'],
     'mcp/interactions/read': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId'],
     'mcp/interactions/respond': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'response'],
+    'mcp/interactions/sampling/request': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'action', 'model', 'editedRequest'],
+    'mcp/interactions/sampling/output': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'action'],
     'source/prepare': ['runtime', 'threadId', 'branchId', 'key', 'path', 'mode'],
     'context/compact': ['runtime', 'threadId', 'branchId', 'key', 'throughId', 'expectedRevision', 'model'],
     'context/publish': ['runtime', 'threadId', 'branchId', 'runId'], 'context/cancel': ['runtime', 'threadId', 'branchId', 'runId'], 'context/resume': ['runtime', 'threadId', 'branchId', 'runId'],
@@ -164,7 +166,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
           : error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'thread-request-failed';
         const status = code.includes('conflict') ? 409 : code === 'denied' || code === 'forbidden' ? 403
           : code === 'not-found' ? 404 : code === 'unavailable' || code === 'timeout' ? 503 : 400;
-        response.status(status).json({ code, error: 'Thread request could not be completed' });
+        response.status(status).json({ code, error: 'Thread request could not be completed',
+          ...(error instanceof ThreadPreAdmissionError ? { admission: 'not_started' as const } : {}) });
       } finally { response.removeListener('close', closed); }
     });
   };
@@ -213,6 +216,18 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('mcp/interactions/respond', (body, signal) => adapter.respondMcpInteraction({ ...identity(body),
     operationId: text(body.operationId), interactionId: text(body.interactionId), expectedRevision: revision(body.expectedRevision),
     response: body.response as McpElicitationResponse }, signal));
+  // The owner validates the complete request. The route only admits public identity/selection shapes.
+  post('mcp/interactions/sampling/request', (body, signal) => {
+    const target = { ...identity(body), operationId: text(body.operationId), interactionId: text(body.interactionId),
+      expectedRevision: revision(body.expectedRevision) };
+    if (body.action === 'generate') return adapter.reviewMcpSamplingRequest({ ...target, action: 'generate',
+      model: modelSelection(body.model), editedRequest: object(body.editedRequest) }, signal);
+    if (body.model !== undefined || body.editedRequest !== undefined) throw new Error('Only generation accepts a model and reviewed request');
+    return adapter.reviewMcpSamplingRequest({ ...target, action: text(body.action) as Exclude<McpSamplingRequestAction, 'generate'> }, signal);
+  });
+  post('mcp/interactions/sampling/output', (body, signal) => adapter.reviewMcpSamplingOutput({ ...identity(body),
+    operationId: text(body.operationId), interactionId: text(body.interactionId), expectedRevision: revision(body.expectedRevision),
+    action: text(body.action) as McpSamplingOutputAction }, signal));
   post('permission/decide', body => {
     if (body.decision !== 'allow_once' && body.decision !== 'deny') throw new Error('Invalid permission decision');
     return adapter.decidePermission({ ...identity(body), operationId: text(body.operationId), permissionId: text(body.permissionId), decision: body.decision });

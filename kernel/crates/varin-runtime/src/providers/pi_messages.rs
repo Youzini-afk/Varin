@@ -79,17 +79,14 @@ impl ModelProvider for PiMessagesProvider {
                     }
                 }
             }
-            let role = if matches!(
-                item.provenance,
-                Provenance::Assistant | Provenance::PolicyOutput { .. }
-            ) {
+            let role = if item.provenance.is_assistant() {
                 "assistant"
             } else {
                 "user"
             };
             match item.content {
                 Content::Text { text } | Content::ReasoningSummary { text } => {
-                    if matches!(item.provenance, Provenance::SystemInstruction { .. }) {
+                    if item.provenance.is_system() {
                         messages.push(json!({"role":"system","content":[{"type":"text","text":text}],"timestamp":0}));
                     } else {
                         push(
@@ -131,8 +128,9 @@ impl ModelProvider for PiMessagesProvider {
                     }
                 }
                 Content::Output { output } => {
+                    let role = evidence_role(&item.provenance, role);
                     for block in pi_parts(evidence_parts(&output, &item.provenance))? {
-                        push(&mut messages, "user", block, &view.binding.model);
+                        push(&mut messages, role, block, &view.binding.model);
                     }
                 }
                 Content::ProviderOnly => {}
@@ -150,7 +148,11 @@ impl ModelProvider for PiMessagesProvider {
                 json!({"role":"system","content":"","toolsAdded":tools,"timestamp":0}),
             );
         }
-        let mut options = json!({"sessionId":view.binding.history_range.branch_id});
+        let session_id = match &view.origin {
+            RequestOrigin::McpSampling { operation_id, .. } => operation_id,
+            _ => &view.binding.history_range.branch_id,
+        };
+        let mut options = json!({"sessionId":session_id});
         if let Some(max) = self.max_output_tokens {
             options["maxTokens"] = json!(max);
         }

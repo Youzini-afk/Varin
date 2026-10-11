@@ -5,6 +5,8 @@ use crate::{
     McpInteractionDelivery as Delivery, McpInteractionMode as Mode,
 };
 use serde::Deserialize;
+#[path = "catalog_mcp_sampling.rs"]
+pub mod sampling;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
@@ -72,6 +74,8 @@ pub struct McpInteractionRecord {
     pub delivery: Option<Delivery>,
     pub completion_reported: bool,
     pub problem: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sampling: Option<crate::mcp_sampling::McpSamplingState>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -90,6 +94,8 @@ pub struct McpInteractionItem {
     pub record: McpInteractionRecord,
     pub presentation: Value,
     pub response: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generation: Option<crate::mcp_sampling::McpSamplingGeneration>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -97,6 +103,8 @@ pub struct McpInteractionView {
     #[serde(flatten)]
     pub item: McpInteractionItem,
     pub request: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sampling: Option<crate::mcp_sampling::McpSamplingBodies>,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -106,6 +114,7 @@ pub struct McpInteractionPage {
 }
 pub struct McpInteractionRead {
     metadata: Metadata,
+    generation: Option<Operation>,
     content: crate::content::ContentStore,
     _publication: crate::content::ContentPublication,
 }
@@ -119,6 +128,7 @@ impl McpInteractionRead {
             None => body["presentation"].clone(),
         };
         Ok(McpInteractionItem {
+            generation: self.generation.as_ref().map(sampling::projection).transpose()?,
             record: self.metadata.record,
             presentation,
             response: self
@@ -131,7 +141,9 @@ impl McpInteractionRead {
     pub fn load(self) -> Result<McpInteractionView> {
         let body = self.content.load(&self.metadata.request_ref)?;
         let request = body["request"].clone();
+        let sampling = self.generation.as_ref().map(|op| sampling::bodies(&self.content, op)).transpose()?;
         Ok(McpInteractionView {
+            sampling,
             item: self.item(&body)?,
             request,
         })
@@ -295,6 +307,15 @@ fn original_live(db: &Connection, m: &Metadata, epoch: u64) -> Result<()> {
     Ok(())
 }
 impl Catalog {
+    pub fn inspect_mcp_interaction(&self, operation_id: &str, id: &str) -> Result<Value> {
+        let m: Metadata = record(&self.db, "mcp_interactions", id)?;
+        if m.record.binding.operation_id != operation_id { return Err(conflict()); }
+        let generation=m.record.sampling.as_ref().and_then(|s|s.generation_operation_id.as_ref())
+            .map(|id|self.operation(id).and_then(|op|sampling::projection(&op))).transpose()?;
+        let mut value=serde_json::to_value(m.record)?;
+        if let Some(generation)=generation { value["generation"]=serde_json::to_value(generation)?; }
+        Ok(value)
+    }
     fn prepare_mcp_interaction(
         &self,
         id: String,
@@ -377,6 +398,7 @@ impl Catalog {
                 },
                 completion_reported: false,
                 problem: None,
+                sampling: (mode == Mode::Sampling).then(|| crate::mcp_sampling::McpSamplingState { generation_operation_id: None, review: "request".into() }),
             },
             epoch: self.epoch,
             source_scope: frozen.provenance.execution_scope,
@@ -474,6 +496,7 @@ impl Catalog {
             return Err(conflict());
         }
         Ok(McpInteractionRead {
+            generation: metadata.record.sampling.as_ref().and_then(|s|s.generation_operation_id.as_ref()).map(|id| self.operation(id)).transpose()?,
             metadata,
             content: self.content.clone(),
             _publication: self.content.begin_publication(),
@@ -537,6 +560,7 @@ impl Catalog {
             let metadata: Metadata = serde_json::from_str(&body)?;
             next_cursor = Some(format!("{bucket}:{rowid}"));
             items.push(McpInteractionRead {
+                generation: metadata.record.sampling.as_ref().and_then(|s|s.generation_operation_id.as_ref()).map(|id| self.operation(id)).transpose()?,
                 metadata,
                 content: self.content.clone(),
                 _publication: self.content.begin_publication(),
@@ -556,7 +580,7 @@ impl Catalog {
         body: result_content::PreparedOperationResult,
     ) -> Result<McpInteractionRecord> {
         let mut m: Metadata = record(&self.db, "mcp_interactions", id)?;
-        if m.record.binding.operation_id != operation_id {
+        if m.record.mode == Mode::Sampling || m.record.binding.operation_id != operation_id {
             return Err(conflict());
         }
         if m.record.choice.is_some() {
@@ -594,7 +618,8 @@ impl Catalog {
         original_live(&self.db, &m, self.epoch)?;
         if m.record.binding.source.is_error()
             || m.record.choice.is_none()
-            || m.response_ref.is_none()
+            || (m.record.mode != Mode::Sampling && m.response_ref.is_none())
+            || (m.record.mode == Mode::Sampling && m.record.sampling.as_ref().is_none_or(|s|s.review != "closed"))
             || m.record.delivery != Some(Delivery::NotStarted)
         {
             return Err(conflict());
@@ -789,6 +814,8 @@ fn close(
     availability: Availability,
     problem: Option<String>,
 ) -> Result<()> {
+    sampling::cancel_generation(tx, m)?;
+    if let Some(sampling) = &mut m.record.sampling { sampling.review = "closed".into(); }
     m.record.availability = availability;
     m.record.problem = problem;
     if m.record.delivery == Some(Delivery::Sending) {
@@ -798,7 +825,7 @@ fn close(
 }
 pub(super) fn cancel_operation(tx: &Transaction<'_>, operation: &str) -> Result<()> {
     let ids = {
-        let mut q=tx.prepare("SELECT id FROM mcp_interactions WHERE operation_id=?1 AND ((json_extract(body,'$.availability')='live' AND (json_extract(body,'$.binding.source.kind')!='rpc_error' OR (json_extract(body,'$.completionReported')=0 AND (json_extract(body,'$.choice') IS NULL OR json_extract(body,'$.choice')='accept')))) OR (json_extract(body,'$.availability')='rpc_closed' AND json_extract(body,'$.mode')='url' AND json_extract(body,'$.choice')='accept' AND json_extract(body,'$.completionReported')=0 AND json_extract(body,'$.delivery')!='not_sent'))")?;
+        let mut q=tx.prepare("SELECT id FROM mcp_interactions WHERE (operation_id=?1 OR json_extract(body,'$.sampling.generationOperationId')=?1) AND ((json_extract(body,'$.availability')='live' AND (json_extract(body,'$.binding.source.kind')!='rpc_error' OR (json_extract(body,'$.completionReported')=0 AND (json_extract(body,'$.choice') IS NULL OR json_extract(body,'$.choice')='accept')))) OR (json_extract(body,'$.availability')='rpc_closed' AND json_extract(body,'$.mode')='url' AND json_extract(body,'$.choice')='accept' AND json_extract(body,'$.completionReported')=0 AND json_extract(body,'$.delivery')!='not_sent'))")?;
         let rows = q
             .query_map([operation], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;

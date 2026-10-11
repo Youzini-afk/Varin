@@ -48,6 +48,8 @@ export interface McpInteractionRequest {
   onComplete(callback: () => void, unavailable?: () => void): () => void;
 }
 export type McpInteractionReceiver = (request: McpInteractionRequest) => Promise<McpElicitationResponse>;
+export class McpSamplingRejectedError extends McpError { constructor() { super(-1, 'User rejected sampling request'); } }
+export type McpSamplingReceiver = (request: McpInteractionRequest) => Promise<import("@varin/protocol").McpSamplingResult>;
 export interface McpErrorInteractionItem {
   binding: McpInteractionBinding;
   presentation: Extract<McpElicitationPresentation, {mode: 'url'}>;
@@ -64,6 +66,7 @@ export type McpErrorInteractionReceiver = (error: McpErrorInteraction) => void;
 
 export interface McpAuthorityOptions {
   interactions?: McpInteractionReceiver;
+  sampling?: McpSamplingReceiver;
   interactionErrors?: McpErrorInteractionReceiver;
   providerToken?: (scope: McpAuthorityScope, provider: string) => Promise<string | undefined>;
   credentialScope?: (scope: McpAuthorityScope, provider: string) => Promise<{
@@ -612,7 +615,7 @@ export class McpAuthority {
       record = this.#pool.get(key);
       if (!record || record.revoked) {
         const connection = new runtime.McpServerConnection({ entry, cwd: scope.scope.executionCwd,
-          ...(this.#options.interactions ? { clientCapabilities: { elicitation: { form: {}, url: {} } } } : {}),
+          ...((this.#options.interactions || this.#options.sampling) ? { clientCapabilities: { ...(this.#options.interactions ? { elicitation: { form: {}, url: {} } } : {}), ...(this.#options.sampling ? { sampling: {} } : {}) } } : {}),
           onClientCreated: client => { const current = this.#pool.get(key); if (current?.connection === connection) this.#observeNativeClient(current, client); },
           createTransport: this.#options.createTransport ?? runtime.createDefaultTransport,
           credentials: this.#store(scope.scope.agentDir),
@@ -749,13 +752,7 @@ export class McpAuthority {
       for (const listener of record.taskListeners) listener(params.taskId);
     });
     client.setRequestHandler('elicitation/create', (params, context) => this.#receiveInteraction(record, client, params, context));
-    client.setRequestHandler('sampling/createMessage', params => {
-      const meta = taskObject(params) && taskObject(params._meta) ? params._meta : undefined;
-      const related = meta && taskObject(meta['io.modelcontextprotocol/related-task']) ? meta['io.modelcontextprotocol/related-task'] : undefined;
-      if (record.nativeClient === client && related && typeof related.taskId === 'string')
-        for (const listener of record.taskListeners) listener(related.taskId, true);
-      throw new McpError(-32601, 'Client capability is not supported');
-    });
+    client.setRequestHandler('sampling/createMessage', (params, context) => this.#receiveSampling(record, client, params, context));
     record.nativeDisposers.push(client.onNotification('notifications/elicitation/complete', params => {
       if (record.nativeClient !== client || record.revoked || !taskObject(params) || typeof params.elicitationId !== 'string') return;
       const watch = record.elicitationComplete.get(params.elicitationId);
@@ -775,7 +772,7 @@ export class McpAuthority {
     const client = record.nativeClient;
     return {
       onRequestId: id => {
-        if (!origin || !this.#options.interactions) return;
+        if (!origin || (!this.#options.interactions && !this.#options.sampling)) return;
         if (client !== record.nativeClient || record.rpcInteractions.has(id)) throw new McpAuthorityError('mcp_interaction_owner_unavailable');
         record.rpcInteractions.set(id, { scope, origin, controller: new AbortController() });
       },
@@ -868,6 +865,24 @@ export class McpAuthority {
     if (!this.#options.interactions || !client.options.capabilities?.elicitation)
       throw new McpError(-32601, 'Client capability is not supported');
     let decoded; try { decoded = decodeElicitationRequest(params); } catch { throw new McpError(-32602, 'Elicitation request is invalid'); }
+    const { binding, signal, assertLive, scope } = await this.#associateRequest(record, client, params, context);
+    return this.#options.interactions({ binding, request: decoded.request, signal, assertLive,
+      beforeResponse: context.beforeResponse, onResponseSettled: context.onResponseSettled,
+      onComplete: (callback, unavailable) => {
+        if (decoded.presentation.mode !== 'url') return () => {};
+        const id = decoded.presentation.elicitationId;
+        return this.#completionWatch(scope, record, client, id).observe(callback, unavailable);
+      },
+    });
+  }
+  async #receiveSampling(record: ConnectionRecord, client: McpClient, params: unknown, context: McpRequestHandlerContext): Promise<import('@varin/protocol').McpSamplingResult> {
+    if (!this.#options.sampling || !client.options.capabilities?.sampling) throw new McpError(-32601, 'Client capability is not supported');
+    if (!taskObject(params)) throw new McpError(-32602, 'Sampling params must be an object');
+    const { binding, signal, assertLive } = await this.#associateRequest(record, client, params, context);
+    return this.#options.sampling({ binding, request: structuredClone(params), signal, assertLive,
+      beforeResponse: context.beforeResponse, onResponseSettled: context.onResponseSettled, onComplete: () => () => {} });
+  }
+  async #associateRequest(record: ConnectionRecord, client: McpClient, params: unknown, context: McpRequestHandlerContext) {
     const meta = taskObject(params) && taskObject(params._meta) ? params._meta : undefined;
     const related = meta?.['io.modelcontextprotocol/related-task'];
     let holder: InteractionHolder | undefined, relation: Extract<McpInteractionBinding['source'], {kind:'server_request'}>['relation'];
@@ -897,14 +912,7 @@ export class McpAuthority {
     await assertLive();
     // This last check runs in the original SDK, directly before its one response send.
     context.beforeResponse(assertLive);
-    return this.#options.interactions({ binding, request: decoded.request, signal, assertLive,
-      beforeResponse: context.beforeResponse, onResponseSettled: context.onResponseSettled,
-      onComplete: (callback, unavailable) => {
-        if (decoded.presentation.mode !== 'url') return () => {};
-        const id = decoded.presentation.elicitationId;
-        return this.#completionWatch(selected.scope, record, client, id).observe(callback, unavailable);
-      },
-    });
+    return { binding, signal, assertLive, scope: selected.scope };
   }
   #endpoint(scope: ScopeRecord, record: ConnectionRecord): McpEndpoint {
     this.#assertConnection(scope, record);
@@ -962,7 +970,7 @@ export class McpAuthority {
     return {
       endpoint,
       bindInteraction: (taskId, origin) => {
-        if (released || !this.#options.interactions) return () => {};
+        if (released || (!this.#options.interactions && !this.#options.sampling)) return () => {};
         const holder: InteractionHolder = { scope, origin, controller: new AbortController() };
         let holders = record.taskInteractions.get(taskId); if (!holders) { holders = new Set(); record.taskInteractions.set(taskId, holders); }
         holders.add(holder);

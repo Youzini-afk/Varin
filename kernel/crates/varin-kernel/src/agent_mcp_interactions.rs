@@ -1,5 +1,7 @@
 //! Original MCP server/user exchange facts. Bodies are read and written outside the Catalog lock.
 use super::*;
+#[path = "agent_mcp_sampling.rs"]
+mod sampling;
 fn invocation(
     catalog: &Catalog,
     id: &str,
@@ -20,6 +22,7 @@ fn invocation(
 }
 pub(super) fn execute(
     runtime: Arc<RunSupervisor>,
+    credentials: &crate::credential_bridge::CredentialBridge,
     method: &str,
     params: Value,
     cancelled: &AtomicBool,
@@ -36,6 +39,19 @@ pub(super) fn execute(
         };
     }
     match method {
+        "runtime.mcp.sampling.generate" => sampling::generate(runtime, credentials.clone(), params, cancelled),
+        "runtime.mcp.sampling.review_request" | "runtime.mcp.sampling.review_output" => {
+            let (operation,id,revision,action) = if method.ends_with("review_request") {
+                let p: McpSamplingRequestReviewParams=serde_json::from_value(params)?;
+                (p.operation_id,p.interaction_id,p.expected_revision,p.action)
+            } else {
+                let p: McpSamplingOutputReviewParams=serde_json::from_value(params)?;
+                (p.operation_id,p.interaction_id,p.expected_revision,p.action)
+            };
+            let record=db!().review_mcp_sampling(&operation,&id,revision.try_into().map_err(|_|KernelError::Protocol("Invalid revision".into()))?,&action,method.ends_with("review_output")).map_err(domain)?;
+            if action != "accept" { if let Some(id)=record.sampling.as_ref().and_then(|s|s.generation_operation_id.as_deref()) { runtime.cancel_operation_control(id); } }
+            Ok(serde_json::to_value(record)?)
+        },
         "runtime.mcp.interaction.open" => {
             let p: McpInteractionOpenParams = serde_json::from_value(params)?;
             let (read, prep) = {
@@ -137,9 +153,16 @@ pub(super) fn execute(
                     .map_err(domain)?,
             )?)
         }
-        "runtime.mcp.interaction.pending" => Ok(serde_json::to_value(
-            db!().pending_mcp_interactions().map_err(domain)?,
-        )?),
+        "runtime.mcp.interaction.inspect" => {
+            let p:McpInteractionReadParams=serde_json::from_value(params)?;
+            db!().inspect_mcp_interaction(&p.operation_id,&p.interaction_id).map_err(domain)
+        },
+        "runtime.mcp.interaction.pending" => {
+            let mut db=db!();
+            let records=db.pending_mcp_interactions().map_err(domain)?;
+            let values=records.iter().map(|r|db.inspect_mcp_interaction(&r.binding.operation_id,&r.id)).collect::<Result<Vec<_>,varin_runtime::RuntimeError>>();
+            Ok(serde_json::to_value(values.map_err(domain)?)?)
+        },
         "runtime.mcp.interaction.response.begin" => {
             let p: McpInteractionControlParams = serde_json::from_value(params)?;
             Ok(serde_json::to_value(
@@ -158,11 +181,9 @@ pub(super) fn execute(
         }
         "runtime.mcp.interaction.close" => {
             let p: McpInteractionCloseParams = serde_json::from_value(params)?;
-            Ok(serde_json::to_value(
-                db!()
-                    .close_mcp_interaction(&p.binding, &p.interaction_id, p.availability, p.problem)
-                    .map_err(domain)?,
-            )?)
+            let record=db!().close_mcp_interaction(&p.binding, &p.interaction_id, p.availability, p.problem).map_err(domain)?;
+            if let Some(id)=record.sampling.as_ref().and_then(|s|s.generation_operation_id.as_deref()) { runtime.cancel_operation_control(id); }
+            Ok(serde_json::to_value(record)?)
         }
         "runtime.mcp.interaction.complete" => {
             let p: McpInteractionControlParams = serde_json::from_value(params)?;
@@ -177,6 +198,7 @@ pub(super) fn execute(
             db!()
                 .release_mcp_interaction_source(&p.run_id)
                 .map_err(domain)?;
+            runtime.reconcile_operation_controls().map_err(|e|KernelError::Operation(e.to_string()))?;
             Ok(json!({}))
         }
         _ => Err(KernelError::Protocol(

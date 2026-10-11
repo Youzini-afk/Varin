@@ -22,7 +22,7 @@ import { fileToImageAttachment } from '@/components/chat/composer/imageAttachmen
 import { useI18n } from '@/lib/i18n';
 import React from 'react';
 import { ThreadRequestError, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
-import type { ThreadIdentity, ThreadModelInfo, ThreadThinkingLevel, ThreadSnapshot, ThreadsAPI, ThreadHistoryPage, ThreadPreparedSource } from '@varin/application-client';
+import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadThinkingLevel, ThreadSnapshot, ThreadsAPI, ThreadHistoryPage, ThreadPreparedSource } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
@@ -138,7 +138,14 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const [modelId, setModelId] = React.useState('');
   const [thinkingLevel, setThinkingLevel] = React.useState<ThreadThinkingLevel>('off');
   const [models, setModels] = React.useState<ThreadModelInfo[]>([]);
-  React.useEffect(() => { let active = true; void api.listModels().then(value => { if (active) setModels(value); }, value => { if (active) setError(value instanceof Error ? value.message : 'Model catalog unavailable'); }); return () => { active = false; }; }, [api, host]);
+  const [modelError, setModelError] = React.useState<string>();
+  React.useEffect(() => {
+    let active = true; setModels([]); setModelError(undefined);
+    void api.listModels().then(value => { if (active) setModels(value); }, () => {
+      if (active) { setModelError('Model catalog unavailable. Check the model connection and reopen this conversation.'); setError('Model catalog unavailable'); }
+    });
+    return () => { active = false; };
+  }, [api, host]);
   const [error, setError] = React.useState<string>();
   const [inputMode, setInputMode] = React.useState<'boundary' | 'interrupt' | 'next_run'>('boundary');
   const [pending, setPending] = React.useState(false);
@@ -158,6 +165,13 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const snapshot = snapshotState?.identity.threadId === identity.threadId && snapshotState?.identity.branchId === identity.branchId ? snapshotState : undefined;
   const branch = snapshot?.thread.branches.find(value => value.branch_id === identity.branchId);
   const run = snapshot?.activeRun ?? branch?.latest_run;
+  const samplingConfiguration = (snapshot?.modelSelection.active?.configuration ?? run?.configuration) as
+    { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel; modelOptions?: { temperature?: number } } | undefined;
+  const samplingModel: ThreadModel | undefined = samplingConfiguration?.providerId && samplingConfiguration.model ? {
+    providerId: samplingConfiguration.providerId, modelId: samplingConfiguration.model,
+    ...(samplingConfiguration.thinkingLevel === undefined ? {} : { thinkingLevel: samplingConfiguration.thinkingLevel }),
+    ...(samplingConfiguration.modelOptions?.temperature === undefined ? {} : { temperature: samplingConfiguration.modelOptions.temperature }),
+  } : undefined;
   const active = Boolean(branch?.active_run_id);
   const computer = useComputerAutomation(identity, api.computer, branch?.active_run_id);
   const hasComputer = Boolean(computer.error || computer.state?.active || computer.state && computer.state.status !== 'enabled' || computer.state?.cleanups.length || computer.state?.leases.length || computer.state?.requests.length || computer.activities.length);
@@ -316,7 +330,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {snapshot && <ThreadFollowups key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.followups} family={api.family} mediaRead={api.mediaRead} research={api.research} identity={identity}
         run={run ?? undefined} operations={snapshot.operations} followups={snapshot.followups} pending={pending} act={act}
         cancelObservation={operationId => act(() => api.cancelOperation(operationId))} />}
-      {snapshot && <ThreadMcpInteractions key={`mcp:${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} eventCursor={snapshot.eventCursor} />}
+      {snapshot && <ThreadMcpInteractions key={`mcp:${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} eventCursor={snapshot.eventCursor}
+        models={models} selectedModel={samplingModel} modelError={modelError} />}
       {snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
         <ThreadPermission operation={operation} enabled={!pending && operation.run_id === run?.id && !run?.cancel_requested} onDecide={(permissionId, decision) => act(() => api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }))} />
         {operation.executor === 'ask_user' && <ThreadQuestion operation={operation} enabled={!pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on} onAnswer={answer => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}

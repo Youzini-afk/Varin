@@ -203,6 +203,7 @@ pub(super) fn hydrate_operation(
         intent.remove("request_ref");
         intent.insert("request".into(), body);
     }
+    super::mcp_interactions::sampling::hydrate_operation(&mut operation, content)?;
     let result = match operation.result {
         Some(OperationResultMetadata::Control { mut value }) => {
             if let Some(permission) = value.get_mut("permission") {
