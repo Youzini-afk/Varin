@@ -14,6 +14,7 @@ pub(super) fn hold(
         }
         InputOrigin::Calendar { .. } => calendar::ingress_hold(db, row, run),
         InputOrigin::ComputerRequest { .. } => computer_requests::ingress_hold(db, row),
+        InputOrigin::ComputerEvent { .. } => computer_events::ingress_hold(db, row),
         _ => Ok(None),
     }
 }
@@ -40,6 +41,7 @@ pub(super) fn insert_occurrence(
         InputOrigin::Followup { .. } => "followup",
         InputOrigin::Calendar { .. } => "calendar",
         InputOrigin::ComputerRequest { .. } => "computer_request",
+        InputOrigin::ComputerEvent { .. } => "computer_event",
         _ => {
             return Err(RuntimeError::Invalid(
                 "occurrence input requires its actual domain origin".into(),
@@ -47,11 +49,12 @@ pub(super) fn insert_occurrence(
         }
     };
     let run_id = match &origin {
-        InputOrigin::Followup { activation, .. } | InputOrigin::Calendar { activation, .. } | InputOrigin::ComputerRequest { activation, .. } => {
+        InputOrigin::Followup { activation, .. } | InputOrigin::Calendar { activation, .. } | InputOrigin::ComputerRequest { activation, .. } | InputOrigin::ComputerEvent { activation, .. } => {
             activation.run_id().map(str::to_owned)
         }
         _ => unreachable!(),
     };
+    let passive = matches!(&origin, InputOrigin::ComputerEvent { activation: activation::IngressActivationFact::Passive, .. });
     let row = QueuedInputMetadata {
         id,
         thread_id: thread,
@@ -62,10 +65,10 @@ pub(super) fn insert_occurrence(
         revision: 1,
         cursor,
         origin,
-        activation: InputActivation::Activating,
+        activation: if passive { InputActivation::Passive } else { InputActivation::Activating },
         delivered_cursor: None,
     };
-    tx.execute("INSERT INTO input_queue(id,branch_id,run_id,mode,state,cursor,origin,activation,sender_thread_id,sender_branch_id,body) VALUES(?1,?2,?3,'boundary','queued',?4,?5,'activating',NULL,NULL,?6)",params![row.id,row.branch_id,row.run_id,sql_number(cursor)?,origin_name,encode(&row)?])?;
+    tx.execute("INSERT INTO input_queue(id,branch_id,run_id,mode,state,cursor,origin,activation,sender_thread_id,sender_branch_id,body) VALUES(?1,?2,?3,'boundary','queued',?4,?5,?6,NULL,NULL,?7)",params![row.id,row.branch_id,row.run_id,sql_number(cursor)?,origin_name,if passive { "passive" } else { "activating" },encode(&row)?])?;
     tx.execute(
         "INSERT INTO input_history_content(input_id,body) VALUES(?1,?2)",
         params![row.id, encode(history)?],

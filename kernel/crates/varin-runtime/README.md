@@ -304,8 +304,24 @@ Metadata reconciliation and cancellation never need request reason bodies. Child
 explicit absent file source for pure-capability work; this does not grant desktop assignment or bypass
 the ordinary selected tool and per-call permission boundaries.
 
+Trusted Computer takeover/cancel/handback facts use that same input and history owner. The original
+Computer service retains a stable fact in its desktop outbox until Catalog accepts it; actor and
+optional root inputs commit together after body staging. Catalog derives root lineage and activation.
+Takeover/cancel and root fanout are passive. Eligible handback enters the original active Run at a
+legal boundary, or creates a real root/delegated successor after natural completion. It retains
+Environment provenance and frozen launch/context rather than becoming User input or a new grant.
+
+Original Goal/pause/question and cancellation boundaries still apply. A first fact arriving after a
+replacement Run is passive; accepted activation follows normal pending-input binding. Tree Stop
+records its captured original Runs even when already terminal, fencing a later outbox transfer without
+rewriting their outcome. Computer Stop cancels exact pending handbacks through stable short command
+receipts, including a body still preparing. Retrying an old Stop cannot sweep a future handback in the
+same Run, remove delivered history or cancel an already-started successor. Neither handback nor a
+passive fact interrupts an unrelated observation Wait. Physical release remains exclusively the
+Computer owner's evidence, independent of input acceptance and body failure.
+
 Unsupported catalog/content formats fail without converting or rebuilding stored assets.
-Catalog version 44, input domain 6 and collaboration domain 8 store input intents/queue bodies and context-job ownership,
+Catalog version 45, input domain 6 and collaboration domain 8 store input intents/queue bodies and context-job ownership,
 source-part and immutable recipe references separately from model
 configuration; content format 3 retains typed request origins. Older internal formats are rejected before owner-epoch or recovery writes. Missing or corrupt referenced
 objects fail explicitly. The owned content collection worker marks requests, provider originals,

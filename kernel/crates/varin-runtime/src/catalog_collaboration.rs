@@ -629,7 +629,8 @@ impl Catalog {
         let execution = self.delegated_execution(operation_id)?;
         let ingress_id = match &execution.trigger {
             delegated::DelegatedTrigger::MessageRequest { message_id, .. } => Some(message_id),
-            delegated::DelegatedTrigger::Followup { input_id, .. }
+            delegated::DelegatedTrigger::ComputerEvent { input_id, .. }
+            | delegated::DelegatedTrigger::Followup { input_id, .. }
             | delegated::DelegatedTrigger::Calendar { input_id, .. } => Some(input_id),
             _ => None,
         };
@@ -866,6 +867,7 @@ impl ChildPreparation {
                 expected_head: match &execution.trigger {
                     delegated::DelegatedTrigger::UserContinuation { expected_head, .. }
                     | delegated::DelegatedTrigger::MessageRequest { expected_head, .. }
+                    | delegated::DelegatedTrigger::ComputerEvent { expected_head, .. }
                     | delegated::DelegatedTrigger::Followup { expected_head, .. }
                     | delegated::DelegatedTrigger::Calendar { expected_head, .. } => {
                         expected_head.clone()

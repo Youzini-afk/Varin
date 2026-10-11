@@ -1,6 +1,6 @@
 import { ComputerError } from './computer-error.js';
 import { sameComputerWork, sameComputerExecution, type ComputerWorkRef, type ComputerExecutionRef, type ComputerWorkScope } from '@varin/protocol';
-import { decodeComputerRuntime, type ComputerPhysicalControl, type PendingComputerHandback } from './computer-records.js';
+import { decodeComputerRuntime, type ComputerPhysicalControl, type PendingComputerControlEvent, type PendingComputerControlCancellation, type ComputerInterrupted } from './computer-records.js';
 /**
  * BC4 Computer Use service.
  *
@@ -386,7 +386,9 @@ interface DesktopLane {
   local?: boolean;
   hydrated?: boolean;
   lastController?: ComputerActor;
-  interrupted?: { id: string; actor: ComputerActor; holderId?: string };
+  interrupted?: ComputerInterrupted;
+  /** Read-through projection of the original durable outbox, used only to capture Stop scope. */
+  controlEvents?: PendingControlEvent[];
   inputReleaseUnconfirmed: boolean;
   physicalControl?: ComputerPhysicalControl;
   runtimeError?: Error;
@@ -404,7 +406,7 @@ interface DesktopLane {
   externalAbort?: AbortController;
 }
 
-type PendingHandback = PendingComputerHandback;
+type PendingControlEvent = PendingComputerControlEvent;
 
 /** A configured remote Host a `remote` desktop's calls route to (BC6). */
 export interface ComputerRemoteHost {
@@ -461,7 +463,8 @@ export interface ComputerServiceOptions {
   /** Resolve the real durable work owning a Pi session. */
   resolveWork?: (sessionId: string) => Promise<{ scopeId: string; threadId: string } | null>;
   /** Deliver an idempotent work continuation through the existing Thread ledger. */
-  onHandback?: (event: PendingHandback) => Promise<void>;
+  onControlEvent?: (event: PendingControlEvent) => Promise<void>;
+  onControlEventCancel?: (command: PendingComputerControlCancellation) => Promise<void>;
   /** Ephemeral app-operation metadata for the existing UI event stream; never carries typed content. */
   onActivityChange?: (entry: ComputerActivityEntry) => void;
   onGesture?: (gesture: ComputerGesture, localConsole: boolean) => void;
@@ -484,7 +487,7 @@ export interface ComputerService {
   mediaTarget(desktopId: string): Promise<{ socketPath: string } | { url: string; headers: Record<string, string> }>;
   list(options?: { localOnly?: boolean }): Promise<ComputerListResult>;
   workDesktops(scopeId: string): Promise<ComputerDesktop[]>;
-  reconcileHandbacks(): Promise<void>;
+  reconcileControlEvents(): Promise<void>;
   inspectArtifact(desktopId: string, relativePath: string): Promise<DesktopArtifactVersion>;
   registerArtifact(sessionId: string, desktopId: string | undefined, relativePath: string): Promise<ComputerArtifact>;
   listArtifacts(scopeId: string): Promise<ComputerArtifact[]>;
@@ -597,6 +600,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     resolveScope: async work => { await restoreRuntimeRecords(); return await options.resolveScope?.(work) ?? null; },
     pendingReleases: () => [...lanes].flatMap(([desktopId, lane]) => lane.inputReleaseUnconfirmed && lane.physicalControl?.holder.kind === 'assignment'
       && !lane.physicalControl.holder.origin ? [{ actor: lane.physicalControl.holder.actor, desktopId }] : []),
+    pendingControlFacts: () => [...lanes].flatMap(([desktopId, lane]) => [
+      ...(lane.interrupted ? [{ actor: lane.interrupted.actor, desktopId }] : []),
+      ...(lane.controlEvents ?? []).filter(event => event.kind === 'handback').map(event => ({ actor: event.actor, desktopId })),
+    ]),
     notify: options.notifyActor ?? (async () => { throw new HarnessServiceError('unavailable', 'Computer Use message delivery is unavailable'); }),
     revokeSession: options.revokeSession ?? (async () => {}),
     bindDesktop: options.bindDesktop ?? (async () => {}),
@@ -608,21 +615,41 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     reserve: (lease, signal) => reserveDesktop(lease, signal),
     describeDesktop: async (id) => (await desktopRecord(id)).desktop.label,
     release: (lease) => releaseDesktop(lease),
-    cancelWork: async (actor, desktopId) => {
-      for (const [id, lane] of lanes) {
-        if (desktopId && id !== desktopId) continue;
-        if (lane.inputReleaseUnconfirmed && lane.physicalControl?.holder.kind === 'assignment' && !lane.physicalControl.holder.origin
-          && sameComputerExecution(lane.physicalControl.holder.actor.execution, actor.execution)) {
-          if (!(await cancelImpl(id)).released) throw new ComputerError('computer-input-release-unconfirmed', 'The original desktop input owner has not confirmed release; retry Stop on that owner or stop the managed desktop session');
-        }
-        const interrupted = lane.interrupted;
-        if (!interrupted || !sameComputerWork(interrupted.actor.rootWork, actor.rootWork) || !sameComputerExecution(interrupted.actor.execution, actor.execution)) continue;
-        delete lane.interrupted;
+    notifyCancelled: async (actor, desktopIds, cancellationId) => {
+      for (const desktopId of desktopIds) {
+        const { desktop } = await desktopRecord(desktopId);
+        const lane = laneFor(desktopId);
+        const releaseConfirmed = automation.physicalReleaseConfirmed(actor, desktopId) && !lane.inputReleaseUnconfirmed && !lane.physicalControl;
+        const event: PendingControlEvent = { id: JSON.stringify([cancellationId, desktopId, actor.execution.runId]), kind: 'cancel', desktopId,
+          label: desktop.label, at: new Date().toISOString(), actor, releaseConfirmed };
+        await updateControlRecord(desktopId, body => { body.runtimeVersion = 4; appendControlEvent(body, event); });
+        void deliverControlEvents(desktopId).catch(() => undefined);
+      }
+    },
+    cancelWork: async (actor, desktopIds, cancellationId) => {
+      await Promise.all(desktopIds.map(async id => {
+        const lane = laneFor(id);
+        const captured = lane.interrupted;
+        const interrupted = captured && sameComputerWork(captured.actor.rootWork, actor.rootWork)
+          && sameComputerExecution(captured.actor.execution, actor.execution) ? captured : undefined;
+        // Fence the exact pending handback synchronously. Its ID remains in the durable Stop command.
+        if (interrupted) delete lane.interrupted;
+        const physical = interrupted && !interrupted.returned && interrupted.holderId && lane.control.owner === 'human'
+          ? handbackImpl({ desktopId: id, holderId: interrupted.holderId }).then(() => undefined)
+          : lane.inputReleaseUnconfirmed && lane.physicalControl?.holder.kind === 'assignment' && !lane.physicalControl.holder.origin
+          && sameComputerExecution(lane.physicalControl.holder.actor.execution, actor.execution)
+          ? cancelImpl(id).then(result => { if (!result.released) throw new ComputerError('computer-input-release-unconfirmed', 'The original desktop input owner has not confirmed release; retry Stop on that owner or stop the managed desktop session'); })
+          : Promise.resolve();
+        const cancellation = cancelControlEvents(actor, id, cancellationId, interrupted?.id);
         try {
+          const results = await Promise.allSettled([physical, cancellation]);
+          const failure = results.find(result => result.status === 'rejected');
+          if (failure?.status === 'rejected') throw failure.reason;
+          if (!interrupted) return;
           if (interrupted.holderId && (await control(id)).owner === 'human') await handbackImpl({ desktopId: id, holderId: interrupted.holderId });
           await persistControl(id, false, !(await remoteTargetFor(id)));
-        } catch (error) { lane.interrupted = interrupted; throw error; }
-      }
+        } catch (error) { if (!lane.interrupted && interrupted) lane.interrupted = interrupted; throw error; }
+      }));
     },
     controlAvailable: (id) => laneFor(id).control.owner === 'agent' && !laneFor(id).transitioning && !laneFor(id).inputReleaseUnconfirmed,
   });
@@ -695,7 +722,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       if (payload.control === undefined && prior.control !== undefined) payload = { ...payload, control: prior.control };
       if (payload.usage === undefined && prior.usage !== undefined) payload = { ...payload, usage: prior.usage };
       if (payload.work === undefined && prior.work !== undefined) payload = { ...payload, work: prior.work };
-      if (payload.handbackEvents === undefined && prior.handbackEvents !== undefined) payload = { ...payload, handbackEvents: prior.handbackEvents };
+      if (prior.controlEvents !== undefined) payload = { ...payload, controlEvents: prior.controlEvents };
+      if (prior.controlCancellations !== undefined) payload = { ...payload, controlCancellations: prior.controlCancellations };
       if (payload.interrupted === undefined && prior.interrupted !== undefined) payload = { ...payload, interrupted: prior.interrupted };
       if (payload.software === undefined && prior.software !== undefined) payload = { ...payload, software: prior.software };
     }
@@ -731,7 +759,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       const body = JSON.parse(record.payloadJson) as Record<string, unknown>;
       const runtime = decodeComputerRuntime(body);
       const at = new Date().toISOString();
-      body.runtimeVersion = 3;
+      body.runtimeVersion = 4;
       body.usage = { execution: actor.execution, at };
       body.work = [...(runtime.work ?? []).filter(item => actor.registry && item.registry ? item.registry.scopeId !== actor.registry.scopeId || item.registry.threadId !== actor.registry.threadId : !sameComputerWork(item.work, actor.execution.work)),
         { work: actor.execution.work, registry: actor.registry, at }];
@@ -841,6 +869,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       }
       try {
         const runtime = decodeComputerRuntime(stored);
+        lane.controlEvents = runtime.controlEvents;
         if (runtime.interrupted) lane.interrupted = runtime.interrupted; else delete lane.interrupted;
         if (runtime.physicalControl) lane.physicalControl = runtime.physicalControl; else delete lane.physicalControl;
         if (runtime.physicalControl) lane.inputReleaseUnconfirmed = true;
@@ -900,7 +929,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     if (controller) lane.lastController = controller;
     const last = controller ?? lane.interrupted?.actor ?? lane.lastController ?? (lane.physicalControl?.holder.kind === 'assignment' ? lane.physicalControl.holder.actor : undefined);
     const cancellation = last ? automation.cancellationStatus(last, desktopId) : undefined;
-    const operator = controller ?? lane.interrupted?.actor ?? (cancellation || lane.inputReleaseUnconfirmed ? last : undefined);
+    const operator = controller ?? (!lane.interrupted?.returned ? lane.interrupted?.actor : undefined) ?? (cancellation || lane.inputReleaseUnconfirmed ? last : undefined);
     return {
       desktopId,
       owner: control.owner,
@@ -926,60 +955,111 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     if (id === 'local-console') options.onGesture?.(gesture, true);
   };
 
+  // Compare-and-swap only the original desktop metadata. Body transfer is never inside this mutation.
+  const updateControlRecord = async (desktopId: string, update: (body: Record<string, unknown>) => void): Promise<void> => {
+    const client = await scoped();
+    const recordId = `computer.desktop:${desktopId}`;
+    for (;;) {
+      const record = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, recordId);
+      if (!record) throw new ComputerError('computer-work-not-found', 'The original desktop record is unavailable');
+      const body = JSON.parse(record.payloadJson) as Record<string, unknown>;
+      decodeComputerRuntime(body);
+      update(body);
+      try {
+        await client.putRecord({ operationId: `computer.desktop:control:${randomUUID()}`, workspaceId: COMPUTER_CATALOG_WORKSPACE_ID,
+          recordId, recordType: 'computer.desktop', state: record.state, payloadJson: JSON.stringify(body), ownerIds: [], references: [], expectedRecordRevision: record.recordRevision });
+        laneFor(desktopId).controlEvents = decodeComputerRuntime(body).controlEvents;
+        return;
+      } catch (error) {
+        // Retry a proven revision race, not a storage failure or an uncertain immutable change.
+        const current = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, recordId);
+        if (!current || current.recordRevision === record.recordRevision) throw error;
+      }
+    }
+  };
+  const appendControlEvent = (body: Record<string, unknown>, event: PendingControlEvent) => {
+    const events = decodeComputerRuntime(body).controlEvents;
+    if (!events.some(old => old.id === event.id && old.kind === event.kind)) events.push(event);
+    body.controlEvents = events;
+  };
   const persistControl = async (desktopId: string, handback = false, localControl = true): Promise<void> => {
-    const { record, desktop } = await desktopRecord(desktopId);
-    const body = JSON.parse(record.payloadJson) as Record<string, unknown>;
+    const { desktop } = await desktopRecord(desktopId);
     const interrupted = laneFor(desktopId).interrupted;
-    const event = handback && interrupted
-      ? { id: interrupted.id, actor: interrupted.actor,
-        desktopId, label: desktop.label, at: new Date().toISOString() } satisfies PendingHandback : null;
-    await putRecord(record.recordId, "computer.desktop", record.state, {
-      ...body, runtimeVersion: 3,
-      ...(localControl ? { control: { ...laneFor(desktopId).control } } : {}),
-      interrupted: handback ? null : interrupted ?? null,
-      ...(event ? { handbackEvents: [...decodeComputerRuntime(body).handbackEvents, event] } : {}),
+    if (interrupted && !interrupted.returned && !handback) interrupted.notice ??= { label: desktop.label, releaseConfirmed: !laneFor(desktopId).inputReleaseUnconfirmed };
+    const event: PendingControlEvent | undefined = interrupted && !interrupted.returned && (handback || interrupted.actor.execution.work.runtime === 'agent')
+      ? { id: interrupted.id, kind: handback ? 'handback' : 'takeover', actor: interrupted.actor,
+        desktopId, label: handback ? desktop.label : interrupted.notice!.label, at: handback ? laneFor(desktopId).control.since : interrupted.at,
+        releaseConfirmed: handback || interrupted.notice!.releaseConfirmed } : undefined;
+    await updateControlRecord(desktopId, body => {
+      body.runtimeVersion = 4;
+      if (localControl) body.control = { ...laneFor(desktopId).control };
+      body.interrupted = handback ? interrupted?.actor.execution.work.runtime === 'agent' ? { ...interrupted, returned: true } : null : interrupted ?? null;
+      if (event) appendControlEvent(body, event);
     });
   };
+  const deliverControlCancellation = async (command: PendingComputerControlCancellation): Promise<void> => {
+    if (!options.onControlEventCancel) throw new ComputerError('computer-owner-unavailable', 'Computer input was stopped, but the original handback cancellation owner is unavailable');
+    await options.onControlEventCancel(command);
+    await updateControlRecord(command.desktopId, body => {
+      body.controlCancellations = decodeComputerRuntime(body).controlCancellations.filter(entry => entry.id !== command.id);
+    });
+  };
+  const cancelControlEvents = async (actor: ComputerActor, desktopId: string, cancellationId: string, interruptedId?: string): Promise<void> => {
+    if (actor.execution.work.runtime !== 'agent') return;
+    let command: PendingComputerControlCancellation;
+    await updateControlRecord(desktopId, body => {
+      const runtime = decodeComputerRuntime(body);
+      const id = JSON.stringify([cancellationId, desktopId, actor.execution.runId]);
+      command = runtime.controlCancellations.find(entry => entry.id === id) ?? { id, actor, desktopId,
+        pendingEventIds: [...new Set([...(interruptedId ? [interruptedId] : []), ...runtime.controlEvents.filter(event => event.kind === 'handback' && sameComputerExecution(event.actor.execution, actor.execution)).map(event => event.id)])] };
+      body.controlEvents = runtime.controlEvents.map(event => command.pendingEventIds.includes(event.id) && event.kind === 'handback' ? { ...event, cancelPending: true } : event);
+      body.controlCancellations = [...runtime.controlCancellations.filter(entry => entry.id !== id), command];
+    });
+    await deliverControlCancellation(command!);
+  };
 
-  const handbackDeliveries = new Map<string, Promise<void>>();
-  const deliverHandbacks = (desktopId: string): Promise<void> => {
-    const ongoing = handbackDeliveries.get(desktopId);
+  const controlDeliveries = new Map<string, Promise<void>>();
+  const deliverControlEvents = (desktopId: string): Promise<void> => {
+    const ongoing = controlDeliveries.get(desktopId);
     if (ongoing) return ongoing;
     const task = (async () => {
-      if (!options.onHandback) return;
+      if (!options.onControlEvent) return;
       const client = await scoped();
       for (;;) {
-        const recordId = `computer.desktop:${desktopId}`;
-        const record = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, recordId);
+        const record = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, `computer.desktop:${desktopId}`);
         if (!record) return;
-        const body = JSON.parse(record.payloadJson) as Record<string, unknown>;
-        const event = decodeComputerRuntime(body).handbackEvents[0];
+        const runtime = decodeComputerRuntime(JSON.parse(record.payloadJson) as Record<string, unknown>);
+        // Exact revocations bypass every fact body, including an earlier failed transfer.
+        for (const command of runtime.controlCancellations) await deliverControlCancellation(command);
+        const pending = runtime.controlEvents;
+        const event = pending[0];
         if (!event) return;
-        if (event.actor.execution.work.runtime === 'agent') throw new ComputerError('computer-owner-unavailable', 'Computer control was returned, but Agent handback input is not connected; the original delivery remains pending');
-        if (await automation.isCurrent(event.actor)) await options.onHandback(event);
-        // A successful Thread-ledger receipt is idempotent by event.id. If this
-        // catalog write conflicts or the Host stops, replay is harmless.
-        const updated = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, recordId);
+        if (event.actor.execution.work.runtime === 'agent' || await automation.isCurrent(event.actor)) await options.onControlEvent(event);
+        // A confirmed native receipt is independent of execution startup. Lost ACKs retain this ID.
+        // An in-flight Stop may have marked this event after its body transfer started.
+        const updated = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, `computer.desktop:${desktopId}`);
         if (!updated) return;
-        const next = JSON.parse(updated.payloadJson) as Record<string, unknown>;
-        next.handbackEvents = decodeComputerRuntime(next).handbackEvents.filter((item) => item.id !== event.id);
-        try {
-          await client.putRecord({ operationId: `computer.desktop:handback:${randomUUID()}`,
-            workspaceId: COMPUTER_CATALOG_WORKSPACE_ID, recordId, recordType: "computer.desktop",
-            state: updated.state, payloadJson: JSON.stringify(next), ownerIds: [], references: [],
-            expectedRecordRevision: updated.recordRevision });
-        } catch { /* re-read and retry the idempotent delivery */ }
+        const current = decodeComputerRuntime(JSON.parse(updated.payloadJson) as Record<string, unknown>).controlEvents.find(item => item.id === event.id && item.kind === event.kind);
+        const cancellations = decodeComputerRuntime(JSON.parse(updated.payloadJson) as Record<string, unknown>).controlCancellations;
+        for (const command of cancellations) await deliverControlCancellation(command);
+        await updateControlRecord(desktopId, body => {
+          const entries = decodeComputerRuntime(body).controlEvents;
+          const latest = entries.find(item => item.id === event.id && item.kind === event.kind);
+          // Do not erase a cancellation that raced the acknowledged snapshot; replay its short command.
+          if (latest?.cancelPending && !current?.cancelPending) return;
+          body.controlEvents = entries.filter(item => item.id !== event.id || item.kind !== event.kind);
+        });
       }
     })();
-    handbackDeliveries.set(desktopId, task);
-    void task.finally(() => { if (handbackDeliveries.get(desktopId) === task) handbackDeliveries.delete(desktopId); }).catch(() => {});
+    controlDeliveries.set(desktopId, task);
+    void task.finally(() => { if (controlDeliveries.get(desktopId) === task) controlDeliveries.delete(desktopId); }).catch(() => {});
     return task;
   };
 
-  const reconcileHandbacks: ComputerService["reconcileHandbacks"] = async () => {
-    if (!options.onHandback) return;
-    const desktops = (await listRecords("computer.desktop")).map(parseDesktop).filter((item): item is ComputerDesktop => item !== null);
-    await Promise.all(desktops.map((desktop) => deliverHandbacks(desktop.id)));
+  const reconcileControlEvents: ComputerService['reconcileControlEvents'] = async () => {
+    if (!options.onControlEvent) return;
+    const desktops = (await listRecords('computer.desktop')).map(parseDesktop).filter((item): item is ComputerDesktop => item !== null);
+    await Promise.all(desktops.map(desktop => deliverControlEvents(desktop.id)));
   };
 
   /** Broadcast the control record to every subscribed viewer (BC5.B). */
@@ -1108,6 +1188,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     lease.desktopLabel = target?.desktop.label ?? (await desktopRecord(lease.desktopId)).desktop.label;
     if (!target) {
       if (lease.access === 'control' && (laneFor(lease.desktopId).inputReleaseUnconfirmed || laneFor(lease.desktopId).control.owner === 'human' || laneFor(lease.desktopId).transitioning)) throw new ComputerError('computer-input-release-unconfirmed', 'The previous physical input owner is unresolved; new assignments remain blocked');
+      if (lease.access === 'control' && laneFor(lease.desktopId).interrupted?.returned) {
+        laneFor(lease.desktopId).generation += 1;
+        delete laneFor(lease.desktopId).interrupted;
+        await persistControl(lease.desktopId);
+      }
       return;
     }
     const key = claimKey(lease);
@@ -1121,6 +1206,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     });
     await entry.ready;
     if (lease.access === 'control') {
+      if (laneFor(lease.desktopId).interrupted?.returned) {
+        laneFor(lease.desktopId).generation += 1;
+        delete laneFor(lease.desktopId).interrupted;
+        await persistControl(lease.desktopId, false, false);
+      }
       let updates = Promise.resolve();
       let closed = false, retry = 0;
       const lifetime = new AbortController();
@@ -1409,7 +1499,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     if (JSON.stringify(stored) !== JSON.stringify(previous)) throw new ComputerError('computer-input-release-unconfirmed', 'The desktop physical owner changed while saving its release; refresh and retry Stop');
     try {
       await client.putRecord({ operationId: `computer.desktop:physical:${randomUUID()}`, workspaceId: COMPUTER_CATALOG_WORKSPACE_ID,
-        recordId, recordType: 'computer.desktop', state: record.state, payloadJson: JSON.stringify({ ...body, runtimeVersion: 3, physicalControl: next ?? null }),
+        recordId, recordType: 'computer.desktop', state: record.state, payloadJson: JSON.stringify({ ...body, runtimeVersion: 4, physicalControl: next ?? null }),
         ownerIds: [], references: [], expectedRecordRevision: record.recordRevision });
     } catch { throw new ComputerError('computer-input-release-unconfirmed', next
       ? 'The physical input owner could not be saved; no new input was sent. Retry the operation'
@@ -1468,14 +1558,14 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       listRecords("computer.machine"),
       listRecords("computer.desktop"),
     ]);
-    if (options.onHandback) for (const record of desktops) {
+    if (options.onControlEvent) for (const record of desktops) {
       const body = JSON.parse(record.payloadJson) as Record<string, unknown>;
       let runtime;
       try { runtime = decodeComputerRuntime(body); }
       catch (error) { if (isRuntimeRecordError(error)) continue; throw error; }
-      if (runtime.handbackEvents.length > 0) {
+      if (runtime.controlEvents.length > 0 || runtime.controlCancellations.length > 0) {
         const id = recordIdSuffix(record);
-        if (id) void deliverHandbacks(id).catch(() => undefined);
+        if (id) void deliverControlEvents(id).catch(() => undefined);
       }
     }
     return {
@@ -2491,21 +2581,23 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const update = (remoteControlUpdates.get(id) ?? Promise.resolve()).catch(() => {}).then(async () => {
       const lane = laneFor(id);
       const operator = automation.controller(id);
-      if (!operator || control.transitioning) return;
-      if (control.owner === 'human' && !lane.interrupted) {
-        const work = { id: randomUUID(), actor: operator, ...(control.holderId ? { holderId: control.holderId } : {}) };
+      if (control.transitioning) return;
+      if (control.owner === 'human' && operator && (!lane.interrupted || lane.interrupted.returned)) {
+        const work = { id: randomUUID(), actor: operator, at: control.since, notice: { label: (await desktopRecord(id)).desktop.label, releaseConfirmed: control.workStatus !== 'cancel-unconfirmed' }, ...(control.holderId ? { holderId: control.holderId } : {}) };
         lane.interrupted = work;
         lane.control = { owner: 'human', since: control.since, reachable: control.reachable, ...(control.holderId ? { holderId: control.holderId } : {}) };
         automation.setHumanControl(id, true);
         const interrupted = await automation.interruptDesktop(id);
         await persistControl(id, false, false);
+        if (operator.execution.work.runtime === 'agent') void deliverControlEvents(id).catch(() => undefined);
         if (lane.interrupted === work) await automation.notifyHandoff(operator, 'The user took control of the desktop. Automatic input is paused until control is returned.', `takeover:${work.id}`, interrupted);
-      } else if (control.owner === 'agent' && lane.interrupted) {
+      } else if (control.owner === 'agent' && lane.interrupted && !lane.interrupted.returned) {
+        if (control.workStatus === 'cancel-unconfirmed') return;
         lane.control = { owner: 'agent', since: control.since, reachable: true };
         await persistControl(id, true, false);
-        delete lane.interrupted;
+        if (lane.interrupted.actor.execution.work.runtime === 'agent') lane.interrupted.returned = true; else delete lane.interrupted;
         automation.setHumanControl(id, false);
-        void deliverHandbacks(id).catch(() => undefined);
+        void deliverControlEvents(id).catch(() => undefined);
       }
     });
     remoteControlUpdates.set(id, update);
@@ -2558,7 +2650,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     lane.transitioning = true;
     const previousReleaseUnconfirmed = lane.inputReleaseUnconfirmed;
     const hadDriver = drivers.has(id);
-    if (operator) lane.interrupted ??= { id: randomUUID(), actor: operator };
+    if (lane.interrupted?.returned) delete lane.interrupted;
+    if (operator) lane.interrupted ??= { id: randomUUID(), actor: operator, at: new Date().toISOString() };
     if (lane.interrupted) lane.interrupted.holderId = params.holderId;
     clearFeedback(id);
     lane.inputReleaseUnconfirmed = true;
@@ -2591,6 +2684,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       if (persisted.status === 'rejected') throw new HarnessServiceError('unavailable', 'Input was released, but human control could not be saved; keep this Host open and retry takeover');
       const interrupted = revoked.value;
       lane.control.reachable = params.holderId === options.localControlHolder || (viewers.get(id)?.viewers.has(params.holderId) ?? false);
+      if (operator?.execution.work.runtime === 'agent') void deliverControlEvents(id).catch(() => undefined);
       if (operator && lane.interrupted) await automation.notifyHandoff(operator, 'The user took control of the desktop. Automatic input is paused until control is returned.', `takeover:${lane.interrupted.id}`, interrupted);
       return { control: { ...controlState(id), transitioning: false }, cancelled: dropped.filter((entry) => entry.kind === "action").length, released: true };
     } finally {
@@ -2600,8 +2694,9 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   };
 
   const handbackImpl: ComputerService["handback"] = async (params) => {
-    const id = await resolveDesktopId(params.desktopId);
-    const remote = await remoteTargetFor(id);
+    const bound = boundLocalDesktop(params.desktopId);
+    const id = bound ?? await resolveDesktopId(params.desktopId);
+    const remote = bound ? null : await remoteTargetFor(id);
     if (remote) {
       const result = await remoteJson<{ control?: ComputerControlState; requiresObservation?: boolean }>(
         remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/handback`,
@@ -2639,15 +2734,15 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         try { await persistControl(id, true); }
         catch (error) { lane.control = previous; throw error; }
       });
-      result = { control: { ...controlState(id), transitioning: false }, requiresObservation: true };
       lane.inputReleaseUnconfirmed = false;
-      delete lane.interrupted;
+      if (lane.interrupted?.actor.execution.work.runtime === 'agent') lane.interrupted.returned = true; else delete lane.interrupted;
+      result = { control: { ...controlState(id), transitioning: false }, requiresObservation: true };
       automation.setHumanControl(id, false);
     } finally {
       lane.transitioning = false;
       broadcastControl(id);
     }
-    void deliverHandbacks(id).catch(() => undefined);
+    void deliverControlEvents(id).catch(() => undefined);
     return result;
   };
 
@@ -3558,8 +3653,9 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       if (!bound) await desktopRecord(desktopId);
       if (controlState(desktopId).automationEpoch !== automationEpoch) throw new ComputerError('computer-execution-stale', 'Desktop control changed; refresh the view before stopping its new controller');
       // No identity lookup or catalog await between captured-generation validation and original-owner stop.
-      const controller = automation.controller(desktopId);
-      const stopped = controller ? automation.cancelDesktop(desktopId).then(() => ({ released: !laneFor(desktopId).inputReleaseUnconfirmed && !laneFor(desktopId).physicalControl })) : cancelImpl(desktopId);
+      const controller = automation.controller(desktopId) ?? laneFor(desktopId).interrupted?.actor
+        ?? laneFor(desktopId).controlEvents?.find(event => event.kind === 'handback')?.actor;
+      const stopped = controller ? automation.cancelDesktop(desktopId, controller).then(() => ({ released: !laneFor(desktopId).inputReleaseUnconfirmed && !laneFor(desktopId).physicalControl })) : cancelImpl(desktopId);
       const receipt = await stopped;
       const lane = laneFor(desktopId);
       return { control: controlState(desktopId), released: receipt.released && !lane.inputReleaseUnconfirmed && !lane.physicalControl };
@@ -3568,7 +3664,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       await automation.finishRun(execution);
       const matches = (actor: ComputerActor | undefined) => actor && (sameComputerExecution(actor.execution, execution) || Boolean(actor.execution.work.runtime === 'pi' && actor.rootExecution && sameComputerExecution(actor.rootExecution, execution)));
       for (const [id, lane] of lanes) {
-        if (matches(lane.interrupted?.actor)) {
+        if (lane.interrupted?.actor.execution.work.runtime === 'pi' && matches(lane.interrupted.actor)) {
           delete lane.interrupted;
           await persistControl(id);
         }
@@ -3598,7 +3694,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     activities: (sessionId) => [...lanes.entries()].flatMap(([desktopId, lane]) => lane.activity && (!sessionId || lane.activity.sessionId === sessionId) ? [{ desktopId, activity: { ...lane.activity } }] : []),
     prepareDesktop, desktopLifecycle, mediaTarget,
     inspectArtifact, registerArtifact, listArtifacts, openDesktopArtifact, openArtifact,
-    list, workDesktops, reconcileHandbacks,
+    list, workDesktops, reconcileControlEvents,
     ensureLocal,
     probe,
     listApps,
@@ -3646,7 +3742,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       await driverPool.dispose();
       await linuxDesktop.dispose();
       await evidenceJournal.drain();
-      await Promise.allSettled([...handbackDeliveries.values()]);
+      await Promise.allSettled([...controlDeliveries.values()]);
       await Promise.allSettled([...vmGuestReconciling.values()]);
       lanes.clear();
       observations.clear();

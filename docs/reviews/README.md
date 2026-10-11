@@ -8,6 +8,7 @@ Last updated: 2026-10-11
 
 | 记录 | 负责什么 |
 | --- | --- |
+| [可信 Computer 控制事实与真实接续（2026-10-11）](runtime-computer-control-facts-2026-10-11.md) | 原 physical owner/outbox/input/Run，真实 root/child handback、精确 Stop 与跨层独审 |
 | [无文件来源的 Native 子任务（2026-10-11）](runtime-source-free-children-2026-10-11.md) | 原真实 dispatch/配置/上下文/Run/report/Wait 与无源后继；默认及显式工具、原文件来源语义与分层验收 |
 | [Native child Computer 请求与持久观察（2026-10-11）](runtime-computer-requests-2026-10-11.md) | 原请求/环境输入/决定/Wait/独立 child 生命周期与真实消费者；此记录基线限有文件来源 |
 | [Native Root Computer 与原物理 owner（2026-10-11）](runtime-computer-root-2026-10-11.md) | 普通发行工具、真实身份/回执、物理 marker、精确 Stop/自然收尾及产品消费者；完整 IPC 未验 |

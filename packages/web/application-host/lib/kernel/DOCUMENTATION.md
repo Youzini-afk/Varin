@@ -816,7 +816,7 @@ file, resource, question, recursive collaboration and managed process capabiliti
 source projection and private text-write projection remain explicit; process capability additionally
 requires real configured/delegated authority and existing permission gates. A private cwd is not an
 OS sandbox. Ordinary extensions and MCP use the exact original frozen Host declarations. LSP,
-Goal, Computer and remote child bindings remain unavailable until
+Goal and remote child bindings remain unavailable until
 their complete owner contracts are connected; no unsupported list is silently trimmed. The UI displays
 the frozen native descriptors together with actual Launch Host bindings and selected profile facts.
 
@@ -921,6 +921,15 @@ The authenticated child routes verify native Thread ownership. Snapshot/UI disti
 preparation, profile, report outcome, file settlement, fixed publication and uncertain effect. Resource
 release follows actual evidence; a parent completing does not terminate its independently admitted
 child. The original common context preparer still owns role/project and personalization selection.
+
+Trusted Computer control events follow the original desktop outbox through
+`runtime.computer.event.accept`: the native request worker stages Environment content off Catalog,
+then commits exact actor/root inputs and returns their acceptance receipt. `runtime.computer.event.cancel`
+is a short control request for the original Stop command and exact handback IDs; it does not wait on
+fact body work. The existing Computer runtime adapter carries original execution identity, while
+Catalog derives family and eligible activation. Naturally completed root/child handback uses the same
+launch/continuation preparer; no Pi session, synthetic User message or second grant is created.
+The shared execution view displays Computer event/input identity rather than labelling it User input.
 
 Child and tree cancellation use the same original Catalog lineage transaction and return short
 TreeCancellationReceipt acknowledgements. They include preparing descendants, completed reports with

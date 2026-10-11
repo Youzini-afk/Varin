@@ -53,7 +53,8 @@ per-tool invocation policy; Pi keeps its own read-only role rules. Neither adds 
 
 Source-less pure-capability children use the original ChildTask admission with explicit absent file
 authority and no applicable file result. They retain their own Run, selected capabilities and original
-Computer permissions. Trusted handback continuation and persistent Computer scripts remain unfinished.
+Computer permissions. Trusted handback uses the original execution/input path described below;
+persistent Native Computer scripts remain unfinished.
 These limits are independent of the existing Pi capabilities below; selected tools alone never grant
 a desktop assignment.
 
@@ -102,17 +103,39 @@ the original Catalog must confirm completed/failed/cancelled before `finishExecu
 binding update or kernel channel reset alone is not terminal evidence. Reconciliation has no timer or
 second execution ledger; original physical release rules still apply.
 
-Pi receives its existing passive user-cancellation notification; native trusted notification delivery
-is a remaining integration. The operation reports any known partial
-effects. `cancelling` lasts through release; success returns to `enabled` and removes the work banner.
+Pi receives its existing passive user-cancellation notification. Native cancellation and takeover
+are typed Environment facts, transferred from the original desktop outbox to Catalog. They retain
+original actor/desktop/control identity and distinguish confirmed release from unknown cleanup.
+The operation reports any known partial effects. `cancelling` lasts through release; success returns to `enabled` and removes the work banner.
 `cancel-unconfirmed` preserves a real release failure for recovery. There is no stopped-round state.
 
 Human takeover requires an explicit action. It suspends the assignment, interrupts its active Pi script,
 invalidates queued input and releases managed keys/buttons; physical mouse motion does not transfer
 ownership. Target/focus changes interrupt the affected action and retain Agent ownership. Handback
-keeps the assignment, invalidates old observations and retains a durable continuation for the actor
-captured at takeover, with its root informed. Ended or replaced Runs do not receive that continuation.
-Pi consumes this continuation today; an undelivered native event is not falsely acknowledged.
+keeps an otherwise live assignment, invalidates old observations and retains a durable continuation for the actor
+captured at takeover, with its root informed. Pi retains its existing current-Run behavior. Native
+handback enters an eligible active Run at its legal input boundary, or uses the original root/child
+continuation owner after natural completion. The successor is a real Run with the original frozen
+launch and typed Environment history, including source-free children. Catalog derives root lineage;
+root fanout is passive, and a notice grants no assignment or permission. Natural completion still
+releases the old assignment: retaining the original handoff fact does not authorize the ended Run. A replaced execution is
+passive; explicit Run/tree Stop and ended Goal cannot be revived. Existing Goal/pause/question holds
+and unrelated observation Waits remain authoritative.
+
+The original interrupted-control record survives Native natural completion as provenance only.
+After return it is marked returned, is not presented as a human operator and cannot restore an ended
+Run or lease. It retains the exact actor/event for Stop even after the input-acceptance ACK. A new
+actual control assignment or takeover replaces it; an observer does not. On restart it is read from
+the original desktop record, separately from physical-release markers.
+
+The desktop outbox keeps each immutable kind/ID until a definite Catalog input-acceptance receipt.
+A lost response retries that identity without creating a second input or execution. Computer Stop
+captures exact pending handback IDs and persists its original short cancellation command until ACK,
+including when body transfer is slow or has not committed. These revocations bypass failed fact
+bodies. Replaying an old Stop does not cancel a later handback in the same Run, erase already-delivered
+history or stop a whole successor Run. Physical release starts independently of these metadata
+transfers. A new action still requires fresh observation and the current per-call binding; old queued
+actions cannot resume. No polling scheduler or second desktop/execution ledger is introduced.
 The latest observer/usage record never selects the recipient. Remote control assignments subscribe
 to the owning Host's control stream without frames, even when no viewer is open.
 
@@ -137,7 +160,7 @@ readback confirms `set_value`. Tool text contains the short result and relevant 
 internal trace. Explicit `app_post` text requires a native Edit/RichEdit handle in the selected window;
 it cannot silently route browser input through unsupported Win32 edit messages.
 
-The original desktop record's `runtimeVersion:3` stores discriminated work/usage and a short
+The original desktop record's `runtimeVersion:4` stores discriminated work/usage and a short
 `physicalControl` marker before input. It identifies the Host control generation, original input
 helper and actual assignment or human holder. Malformed or obsolete nonempty runtime metadata remains
 an actionable fenced state; desktop configuration and external assets are not migrated or erased.

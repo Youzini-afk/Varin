@@ -205,7 +205,7 @@ describe('Catalog-backed Native assignments', () => {
     c.attachRequests({ snapshot: async () => [], cancel: async () => catalog });
     const stopping = c.stop(child.execution, 'desktop');
     await physical;
-    expect(cleanup).toHaveBeenCalledWith(child, 'desktop');
+    expect(cleanup).toHaveBeenCalledWith(child, ['desktop'], expect.any(String));
     acknowledge(); await stopping;
   });
 

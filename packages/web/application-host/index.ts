@@ -1917,11 +1917,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     updateSettings: (mutator) => updateSettingsOnDisk((current) => mutator(current as Record<string, unknown>) as typeof current),
   });
   const desktopControlHolder = `desktop:${hostId}`;
-  let computerRuntime: ReturnType<typeof createComputerRuntime> | undefined;
+  const computerRuntimeOwner: { current?: ReturnType<typeof createComputerRuntime> } = {};
   const resolveComputerWork = async (work: import('@varin/protocol').ComputerWorkRef) => {
     if (work.runtime === 'pi') return resolvePiComputerWork(threadRegistry, work.sessionId);
-    if (!computerRuntime) throw new ComputerError('computer-owner-unavailable', 'The Agent Computer identity owner is unavailable');
-    return computerRuntime.resolve(work);
+    if (!computerRuntimeOwner.current) throw new ComputerError('computer-owner-unavailable', 'The Agent Computer identity owner is unavailable');
+    return computerRuntimeOwner.current.resolve(work);
   };
   const computerService = createComputerService({
     localControlHolder: options.onComputerControlsReady ? desktopControlHolder : undefined,
@@ -1962,7 +1962,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const owner = await threadRegistry.resolveSessionOwner(sessionId);
       return owner ? { scopeId: owner.owningScopeId, threadId: owner.threadId } : null;
     },
-    onHandback: async (event) => {
+    onControlEventCancel: async (command) => {
+      if (!computerRuntimeOwner.current) throw new ComputerError('computer-owner-unavailable', 'The Agent Computer input owner is unavailable');
+      await computerRuntimeOwner.current.cancelControlEvents(command);
+    },
+    onControlEvent: async (event) => {
+      if (event.actor.execution.work.runtime === 'agent') {
+        if (!computerRuntimeOwner.current) throw new ComputerError('computer-owner-unavailable', 'The Agent Computer input owner is unavailable; the original fact remains pending');
+        await computerRuntimeOwner.current.acceptControlEvent(event);
+        return;
+      }
       if (event.actor.execution.work.runtime !== 'pi' || !event.actor.registry) throw new ComputerError('computer-owner-unavailable', 'Agent Computer handback delivery is not connected; its original event remains pending');
       await createFollowUpThreadSender({
         registry: threadRegistry,
@@ -2782,7 +2791,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       });
     }
   })().catch((error) => console.error('[VarinFollowUp] Reconcile failed:', errorMessage(error)));
-  void computerService.reconcileHandbacks().catch((error) => {
+  void computerService.reconcileControlEvents().catch((error) => {
     console.error('[Computer] Handback delivery will retry:', errorMessage(error));
   });
   observeThreadIntegrationParentChange = (workspaceId, resourceIds) => {
@@ -2995,8 +3004,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // This is a user-scoped role. Native Threads do not impersonate Pi sessions.
     settings: async () => ({ global: await hostCredentialAuthority.readGlobalInferenceSettings() }),
   }), liveSources.validate, createExtensionTools({runtime:extensionRuntime,kernel:kernelClient,prepareConfiguration: (run, required) => {
-    if (!computerRuntime) throw new ComputerError('computer-owner-unavailable', 'Computer tool preparation is unavailable');
-    return computerRuntime.prepareConfiguration(run, required);
+    if (!computerRuntimeOwner.current) throw new ComputerError('computer-owner-unavailable', 'Computer tool preparation is unavailable');
+    return computerRuntimeOwner.current.prepareConfiguration(run, required);
   },currentPolicy:async runId=>{
     const launch=await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent|null,'runtime.launch.inspect'>('runtime.launch.inspect',{runId});
     const workspace=launch?.selection.source?await documentsAuthority.inspectWorkspace(launch.selection.source.workspace_id):undefined;
@@ -3076,7 +3085,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: () => console.warn('[Calendar] preparation or asset synchronization requires attention'),
   });
   scheduledTasksRuntime.setCalendarOwner(calendarOwner);
-  computerRuntime = createComputerRuntime({ kernel: kernelClient, runtime: agentRuntime, computers: computerService, enabled: async runId => {
+  computerRuntimeOwner.current = createComputerRuntime({ kernel: kernelClient, runtime: agentRuntime, computers: computerService, enabled: async runId => {
     const launch = await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent | null, 'runtime.launch.inspect'>('runtime.launch.inspect', { runId });
     const workspace = launch?.selection.source ? await documentsAuthority.inspectWorkspace(launch.selection.source.workspace_id) : undefined;
     const cwd = workspace?.root ?? mcpAgentDir;
@@ -3086,8 +3095,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     experiments: experimentService, resources: resourceService, sources: sourceService,
     onError: (_error: Error) => console.error('[Research] Original job reconciliation requires attention'),
   });
-  computerRuntime.start(error => console.error('[Computer] Native execution cleanup is unconfirmed:', error instanceof Error ? error.message : String(error)));
-  registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), researchRuntime.user, computerRuntime.user);
+  computerRuntimeOwner.current.start(error => console.error('[Computer] Native execution cleanup is unconfirmed:', error instanceof Error ? error.message : String(error)));
+  registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), researchRuntime.user, computerRuntimeOwner.current.user);
   registerAgentProfileRoutes(app, createAgentProfilesAPI({ settings: hostCredentialAuthority.globalSettingsAuthority,
     capabilities: signal => agentRuntime.childCapabilities(signal),
     onChanged: () => {
@@ -4205,7 +4214,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   const unregisterMaterialToolCapability=extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY,createMaterialToolOwner(webMaterials));
-  const unregisterComputerCapability = extensionRuntime.capabilities.register(COMPUTER_CAPABILITY, computerRuntime.capability);
+  const unregisterComputerCapability = extensionRuntime.capabilities.register(COMPUTER_CAPABILITY, computerRuntimeOwner.current.capability);
   const unregisterResearchCapability = extensionRuntime.capabilities.register(RESEARCH_CAPABILITY, researchRuntime.capability);
   researchRuntime.start();
   const unregisterScheduleCapability = extensionRuntime.capabilities.register(SCHEDULE_CAPABILITY,
@@ -4731,7 +4740,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     stop: async (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => {
       // Stop timer/watcher producers before their runtime and storage
       // dependencies begin shutting down.
-      computerRuntime?.stop();
+      computerRuntimeOwner.current?.stop();
       runObservers.stop();
       collaboration.stop();
       await fileObservations.stop();

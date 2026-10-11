@@ -23,12 +23,24 @@ pub(super) fn execute(
     if cancelled.load(Ordering::Acquire)
         && !matches!(
             method,
-            "runtime.computer.decision.settle" | "runtime.computer.request.cancel"
+            "runtime.computer.decision.settle" | "runtime.computer.request.cancel" | "runtime.computer.event.cancel"
         )
     {
         return Err(KernelError::Cancelled);
     }
     match method {
+        "runtime.computer.event.accept" => {
+            let command: varin_runtime::catalog::computer_events::ComputerEventCommand = serde_json::from_value(params)?;
+            let preparation = lock()?.prepare_computer_event(command).map_err(domain)?;
+            let prepared = preparation.load().map_err(domain)?;
+            if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+            Ok(serde_json::to_value(lock()?.admit_computer_event(prepared).map_err(domain)?)?)
+        }
+        "runtime.computer.event.cancel" => {
+            let command: varin_runtime::catalog::computer_events::ComputerEventCancellation = serde_json::from_value(params)?;
+            lock()?.cancel_computer_events(command).map_err(domain)?;
+            Ok(Value::Null)
+        }
         "runtime.computer.scope" => {
             let p: ComputerScopeParams = serde_json::from_value(params)?;
             Ok(serde_json::to_value(
