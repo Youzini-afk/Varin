@@ -1,7 +1,7 @@
 //! Original ordinary-tool and Wait consumers, with explicit domain log receipts.
 use super::*;
-use varin_runtime::catalog::followups::*;
 use varin_runtime::OperationPhase;
+use varin_runtime::catalog::followups::*;
 #[test]
 fn real_child_log_waits_settle_matches_or_exhaustion_once_from_both_origins() {
     for model in [true, false] {
@@ -49,8 +49,8 @@ fn real_child_log_waits_settle_matches_or_exhaustion_once_from_both_origins() {
             }
             if matched {
                 let expected = work.log.clone().unwrap();
-                assert!(db
-                    .apply_log_observation(FollowupLogObservation {
+                assert!(
+                    db.apply_log_observation(FollowupLogObservation {
                         key: work.key.clone(),
                         binding: job.clone(),
                         expected,
@@ -69,13 +69,14 @@ fn real_child_log_waits_settle_matches_or_exhaustion_once_from_both_origins() {
                             job_revision: 2
                         })
                     })
-                    .unwrap());
+                    .unwrap()
+                );
                 // Deliberately do not reconcile the original Wait between match and EOF.
                 work = db.followup_research_works(None).unwrap().0.remove(0);
             }
             let expected = work.log.unwrap();
-            assert!(db
-                .apply_log_observation(FollowupLogObservation {
+            assert!(
+                db.apply_log_observation(FollowupLogObservation {
                     key: work.key,
                     binding: job.clone(),
                     next: FollowupLogState {
@@ -85,7 +86,8 @@ fn real_child_log_waits_settle_matches_or_exhaustion_once_from_both_origins() {
                     expected,
                     evidence: None
                 })
-                .unwrap());
+                .unwrap()
+            );
             let projection = db.followup(&id).unwrap();
             let observation = projection.observation.unwrap();
             assert_eq!(observation.delivery_pending, !failed_original_run);

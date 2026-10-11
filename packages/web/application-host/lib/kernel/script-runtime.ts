@@ -7,12 +7,12 @@ import { SCRIPT_CAPABILITY, SCRIPT_TOOL_DECLARATIONS } from '@varin/extension-bu
 import { resolveVarinBuiltinPackageRoot } from '@varin/extension-builtins/host';
 import { parseVarinToolJson, type JsonValue, type NestedToolInput, type NestedToolReceipt } from '@varin/extension-contract';
 import type { HostCapabilityCallContext, HostCapabilityHandler } from '@varin/extension-host';
-import { ScriptFrameDecoder, encodeScriptFrame, parseScriptWorkerFrame, type ScriptHostFrame, type ScriptWorkerFrame } from '@varin/script-runtime';
+import { SCRIPT_PROTOCOL_VERSION, ScriptFrameDecoder, encodeScriptFrame, parseScriptWorkerFrame, type ScriptHostFrame, type ScriptWorkerFrame } from '@varin/script-runtime';
 import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { KernelClient } from './kernel-client.js';
 import type { ExtensionToolOwnerOptions } from './extension-tool-owner.js';
-import type { KernelMethod, KernelMethodParams, NodeBinding, Operation } from './protocol.generated.js';
+import type { KernelMethod, KernelMethodParams, NodeBinding, Operation, OutputPart, IncomingMedia } from './protocol.generated.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
 import { scheduleAtDeadline } from '../harness/shell-supervisor.js';
 import { KernelManagedProcess } from './process-service.js';
@@ -25,8 +25,8 @@ const declarations = new Map(SCRIPT_TOOL_DECLARATIONS.map(declaration => [declar
   { declaration, validate: compileToolJsonSchema(declaration.tool!.inputSchema) }]));
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
-const result = (content: unknown, effect: 'none' | 'confirmed' | 'partial' | 'unknown', stopped: boolean, outcome: 'succeeded' | 'failed' | 'cancelled' | 'indeterminate' = 'succeeded'): ToolExecutionReceipt => ({
-  completion: { kind: 'result', content, effect, outcome }, executor_stopped: stopped,
+const result = (content: unknown, effect: 'none' | 'confirmed' | 'partial' | 'unknown', stopped: boolean, outcome: 'succeeded' | 'failed' | 'cancelled' | 'indeterminate' = 'succeeded', parts: OutputPart<IncomingMedia>[] = []): ToolExecutionReceipt => ({
+  completion: { kind: 'result', content: { data: content, parts }, effect, outcome }, executor_stopped: stopped,
 });
 function deferred<T>() {
   let resolve!: (value: T) => void, reject!: (error: unknown) => void;
@@ -37,7 +37,7 @@ function deferred<T>() {
 type CellResult = Extract<ScriptWorkerFrame, { type: 'completed' }>;
 interface Cell {
   id: string; context: HostCapabilityCallContext; accepting: boolean; sent: boolean;
-  callbacks: Set<Promise<unknown>>; computerCancellations: Set<(reason: unknown) => void>; desktops: Set<string>; output: string[];
+  callbacks: Set<Promise<unknown>>; computerCancellations: Set<(reason: unknown) => void>; desktops: Set<string>; output: OutputPart<IncomingMedia>[];
   completed: ReturnType<typeof deferred<CellResult>>;
 }
 type SourceAuthority = Awaited<ReturnType<typeof admitRunSourceAuthority>>;
@@ -76,7 +76,7 @@ export function createScriptRuntime(options: {
   const environments = new Map<string, Environment>();
   const rpc = <T, M extends Extract<KernelMethod, `runtime.${string}`>>(method: M, params: KernelMethodParams[M], signal?: AbortSignal) => kernel.agentRuntimeRequest<T, M>(method, params, signal);
   const send = (environment: Environment, frame: Omit<ScriptHostFrame, 'v' | 'environmentId'>): Promise<void> =>
-    new Promise((resolve, reject) => environment.process.stdin.write(encodeScriptFrame({ ...frame, v: 1, environmentId: environment.id } as ScriptHostFrame), error => error ? reject(error) : resolve()));
+    new Promise((resolve, reject) => environment.process.stdin.write(encodeScriptFrame({ ...frame, v: SCRIPT_PROTOCOL_VERSION, environmentId: environment.id } as ScriptHostFrame), error => error ? reject(error) : resolve()));
   const sourceFor = async (operation: Operation): Promise<SourceAuthority> => {
     const launch = await runtime.launch(operation.run_id);
     if (!launch?.selection.source || launch.selection.source.mode === 'fixed_branch') throw new Error('Original physical script source is unavailable');
@@ -113,7 +113,7 @@ export function createScriptRuntime(options: {
         });
         // The terminal may precede original Job acceptance. Preserve it on the same
         // Operation now; the caller's later handoff applies that already retained fact.
-        const body = original.external_receipt?.result ?? original.result;
+        const body = original.external_receipt ? original.external_receipt.result.data : original.result?.kind === 'output' ? original.result.output.data : undefined;
         const stopped = record(body) && record(body.process) && body.process.writerActive === false && body.callbacksStopped === true;
         receipt = result(body, stopped ? 'confirmed' : 'unknown', stopped,
           stopped ? environment.accepted ? 'succeeded' : original.external_receipt?.outcome ?? 'cancelled' : 'indeterminate');
@@ -138,7 +138,7 @@ export function createScriptRuntime(options: {
   const recoverEnvironment = async (operation: Operation): Promise<ToolExecutionReceipt> => {
     if (operation.managed_process?.purpose.kind !== 'script_environment' || operation.execution_owner?.kind !== 'external') throw new Error('Original script environment is unavailable');
     const retained = operation.external_receipt;
-    const body = retained?.result;
+    const body = retained?.result.data;
     // Original terminal evidence outlives the released source grant and live heap.
     // A repeated close reads that fact; it must not try to spawn new authority to kill it again.
     if (retained?.effect === 'confirmed' && record(body) && record(body.process)
@@ -155,7 +155,7 @@ export function createScriptRuntime(options: {
         callbacksStopped: !operation.handed_off && operation.call_completion?.kind === 'result'
           && kernel.toolCallbackEnded(operation.run_id, operation.execution_owner, operation.id) === true,
       });
-      const body = original.external_receipt?.result ?? original.result;
+      const body = original.external_receipt ? original.external_receipt.result.data : original.result?.kind === 'output' ? original.result.output.data : undefined;
       const stopped = record(body) && record(body.process) && body.process.writerActive === false && body.callbacksStopped === true;
       return result(body, stopped ? 'confirmed' : 'unknown', stopped, stopped ? 'succeeded' : 'indeterminate');
     } catch (error) { return result({ environmentId: operation.id, error: errorText(error) }, 'unknown', false, 'indeterminate'); }
@@ -172,7 +172,7 @@ export function createScriptRuntime(options: {
       if (frame.type === 'invoke') void send(environment, { type: 'rejected', cellId: frame.cellId, requestId: frame.requestId, error: { message: 'Script cell has ended' } } as Omit<ScriptHostFrame, 'v' | 'environmentId'>).catch(options.onError);
       return;
     }
-    if (frame.type === 'output') { cell.output.push(frame.text); return; }
+    if (frame.type === 'output') { cell.output.push(frame.part); return; }
     if (frame.type === 'completed') { cell.accepting = false; cell.completed.resolve(frame); return; }
     const work = runNestedToolCall(cell.context, async authority => {
       const receipt = await rpc<NestedToolReceipt, 'runtime.tools.invoke'>('runtime.tools.invoke', {
@@ -228,7 +228,7 @@ export function createScriptRuntime(options: {
         const accepted = await rpc<Operation, 'runtime.managed_process.accept'>('runtime.managed_process.accept', { operationId: authority.operationId, executionOwner: authority.executorOwner, toolBinding: source.toolBinding });
         current.accepted = true;
         current.opening.resolve();
-        return { completion: accepted.call_completion!, executor_stopped: false };
+        return { completion: await runtime.inlineCompletion(accepted), executor_stopped: false };
       } finally { signal.removeEventListener('abort', abort); }
     } catch (error) {
       if (environment) {
@@ -239,7 +239,7 @@ export function createScriptRuntime(options: {
         environment.opening.resolve();
         const stopped = await close(environment, error);
         return original?.call_completion?.kind === 'job_accepted'
-          ? { completion: original.call_completion, executor_stopped: false } : stopped;
+          ? { completion: await runtime.inlineCompletion(original), executor_stopped: false } : stopped;
       }
       if (enteredProcess) {
         // Lost acceptance can follow a real spawn. Retain the original caller grant and
@@ -270,10 +270,10 @@ export function createScriptRuntime(options: {
           await send(environment, { type: 'eval', cellId: cell.id, script: params.script as string } as Omit<ScriptHostFrame, 'v' | 'environmentId'>);
           const evaluated = await cell.completed.promise;
           await Promise.allSettled(cell.callbacks);
-          return result({ environmentId: environment.id, cellId: cell.id, output: cell.output, ...(evaluated.valueText === undefined ? {} : { valueText: evaluated.valueText }), ...(evaluated.error ? { error: evaluated.error } : {}) }, evaluated.error ? 'partial' : 'confirmed', true, evaluated.error ? 'failed' : 'succeeded');
+          return result({ environmentId: environment.id, cellId: cell.id, ...(evaluated.valueText === undefined ? {} : { valueText: evaluated.valueText }), ...(evaluated.error ? { error: evaluated.error } : {}) }, evaluated.error ? 'partial' : 'confirmed', true, evaluated.error ? 'failed' : 'succeeded', cell.output);
         } catch (error) {
           const stopped = await close(environment, error);
-          return result({ environmentId: environment.id, cellId: cell.id, output: cell.output, error: errorText(error) }, stopped.executor_stopped ? cell.sent ? 'partial' : 'none' : 'unknown', stopped.executor_stopped, stopped.executor_stopped ? context.signal.aborted ? 'cancelled' : 'failed' : 'indeterminate');
+          return result({ environmentId: environment.id, cellId: cell.id, error: errorText(error) }, stopped.executor_stopped ? cell.sent ? 'partial' : 'none' : 'unknown', stopped.executor_stopped, stopped.executor_stopped ? context.signal.aborted ? 'cancelled' : 'failed' : 'indeterminate', cell.output);
         } finally {
           cell.accepting = false; cancelTimer?.();
           context.signal.removeEventListener('abort', abort);

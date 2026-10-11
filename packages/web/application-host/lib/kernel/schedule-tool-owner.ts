@@ -38,13 +38,13 @@ export function createScheduleToolOwner(options: {
           case 'retry_calculation': { const id = taskId(); enteredMutation = true; result = await options.service.retryCalculation(projectId, id, params.definitionRevision); break; }
           default: throw new Error('Unknown scheduled task action');
         }
-        return { executor_stopped: true, completion: { kind: 'result', outcome: 'succeeded', effect: enteredMutation ? 'confirmed' : 'none', content: parseVarinToolJson(result as JsonValue) } };
+        return { executor_stopped: true, completion: { kind: 'result', outcome: 'succeeded', effect: enteredMutation ? 'confirmed' : 'none', content: { data: parseVarinToolJson(result as JsonValue), parts: [] } } };
       } catch (error) {
         // The asset owner is awaited to its actual return. An uncertain write is neither
         // silently replayed nor called no-effect because its reader/callback was cancelled.
         const uncertain = enteredMutation && !(error instanceof ScheduledTaskError && [400, 404, 409].includes(error.statusCode));
         return { executor_stopped: true, completion: { kind: 'result', outcome: uncertain ? 'indeterminate' : 'failed', effect: uncertain ? 'unknown' : 'none',
-          content: { status: uncertain ? 'needs_attention' : 'rejected', error: error instanceof Error ? error.message : 'Scheduled task request failed' } } };
+          content: { data: { status: uncertain ? 'needs_attention' : 'rejected', error: error instanceof Error ? error.message : 'Scheduled task request failed' }, parts: [] } } };
       }
     });
   };

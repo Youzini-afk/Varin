@@ -3,7 +3,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { parseVarinToolJson, type JsonValue } from '@varin/extension-contract';
+import { parseVarinToolJson, parseIncomingOutputPart, type JsonValue, type OutputPart, type IncomingMedia } from '@varin/extension-contract';
 import { unknownToolReceipt, type ToolExecutionReceipt } from './tool-bridge.js';
 import type { HostCapabilityCallContext, HostInvocationScope, HostServiceOwnerIdentity } from '@varin/extension-host';
 import { toolOperationId, validToolOrigin, type ExecutorOwner, type LaunchSource, type ToolOrigin } from './protocol.generated.js';
@@ -19,6 +19,7 @@ export interface ToolInvocationAuthority {
   readonly source: Readonly<LaunchSource> | null;
   readonly toolName: string;
   readonly operation: 'read' | 'effect';
+  readonly completion: 'result' | 'job';
   readonly configurationIdentity?: string | null;
   readonly arguments: unknown;
 }
@@ -28,6 +29,7 @@ interface Registration {
   signal: AbortSignal;
   accepting: boolean;
   nested: Set<Promise<unknown>>;
+  parts: OutputPart<IncomingMedia>[];
   parent?: Registration;
   cell?: { environmentId: string; computerUsed(desktopId: string): void; usesComputer(desktopId: string): boolean; computerCancellation?(cancel: (reason: unknown) => void): () => void };
   effect?: { domain: string; work: Promise<ToolExecutionReceipt> };
@@ -47,6 +49,7 @@ export async function withToolInvocation<T>(options: {
   owner: HostServiceOwnerIdentity;
   signal: AbortSignal;
   /** Only trusted Host domain handlers can supply original executor evidence. */
+  onOutput?: (parts: OutputPart<IncomingMedia>[]) => void;
   onEffectReceipt?: (receipt: ToolExecutionReceipt) => void;
 }, work: (scope: HostInvocationScope) => Promise<T>): Promise<T> {
   options.signal.throwIfAborted();
@@ -65,7 +68,7 @@ export async function withToolInvocation<T>(options: {
   }
   Object.freeze(authority);
   const scope: HostInvocationScope = Object.freeze({ id: randomUUID(), value: null });
-  const registration: Registration = { authority, owner: Object.freeze({ ...options.owner }), signal: options.signal, accepting: true, nested: new Set() };
+  const registration: Registration = { authority, owner: Object.freeze({ ...options.owner }), signal: options.signal, accepting: true, nested: new Set(), parts: [] };
   if (liveOperations.has(authority.operationId)) throw new Error('tool_invocation_already_active');
   if (origin.kind === 'nested_call') {
     const parent = liveOperations.get(origin.parent_operation_id);
@@ -85,7 +88,7 @@ export async function withToolInvocation<T>(options: {
         const receipt = await registration.effect.work.catch(unknownToolReceipt);
         options.onEffectReceipt?.(receipt);
       }
-    } finally { registrations.delete(scope); liveOperations.delete(authority.operationId); }
+    } finally { options.onOutput?.(registration.parts); registrations.delete(scope); liveOperations.delete(authority.operationId); }
   }
 }
 
@@ -169,7 +172,7 @@ export function runToolDomainCall(
     if (receipt.completion.kind !== 'result' && receipt.completion.kind !== 'job_accepted') throw new Error('tool_domain_result_unavailable');
     return parseVarinToolJson(receipt.completion.kind === 'job_accepted' && receipt.completion.content === undefined
       ? { operationId: authority.operationId, phase: receipt.completion.phase }
-      : receipt.completion.content);
+      : receipt.completion.content?.data);
   });
 }
 
@@ -181,4 +184,12 @@ export function runNestedToolCall<T>(context: HostCapabilityCallContext, execute
   registration.nested.add(work);
   void work.then(() => registration.nested.delete(work), () => registration.nested.delete(work));
   return work;
+}
+
+/** Explicit publication belongs to this exact live callback, including its failure path. */
+export function emitToolOutput(context: HostCapabilityCallContext, value: unknown): void {
+  const authority = requireToolInvocation(context);
+  if (authority.completion !== 'result') throw new Error('Job output belongs to its owning domain: supply OutputBody parts at acceptance or terminal receipt; call.output cannot rewrite a Job acceptance');
+  const part = parseIncomingOutputPart(value);
+  registrations.get(context.invocation!)!.parts.push(part);
 }

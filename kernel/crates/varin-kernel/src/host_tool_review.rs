@@ -1,7 +1,7 @@
 //! Portable real bridge + Catalog tests. No socket/Host process success is claimed here.
 use crate::host_tools::{LateReceipt, ToolBridge};
-use serde_json::{json, Value};
-use std::sync::{mpsc, Arc, Mutex};
+use serde_json::{Value, json};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 use varin_runtime::execution::*;
 use varin_runtime::{Catalog, Effect, ExecutorOwner, Outcome, RunState, SubmitInput};
@@ -15,8 +15,8 @@ fn recv(frames: &mpsc::Receiver<Value>, kind: &str) -> Value {
     }
 }
 #[test]
-fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_and_late_owner_recovery(
-) {
+fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_and_late_owner_recovery()
+ {
     for policy in [false, true] {
         let root =
             std::env::temp_dir().join(format!("varin-host-tools-review-{}", uuid::Uuid::new_v4()));
@@ -75,7 +75,8 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
         );
         let binding = RequestBinding {
             child_dispatch: None,
-            goal: None, resource_activations: Vec::new(),
+            goal: None,
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "fixture".into(),
             provider_family: "fixture".into(),
@@ -324,7 +325,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
         let cancellation = recv(&frames, "host-tool-cancel");
         assert_eq!(cancellation["id"], executed["id"]);
         bridge.receive(json!({"v":1,"kind":"host-tool-response","id":executed["id"],"kernelEpoch":"transport-before","ok":true,"executor_stopped":false,
-            "completion":{"kind":"result","outcome":"indeterminate","effect":"unknown","content":{"error":"observer_cancelled"}}}));
+            "completion":{"kind":"result","outcome":"indeterminate","effect":"unknown","content":{"data":{"error":"observer_cancelled"},"parts":[]}}}));
         let original = result.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(!original.executor_stopped);
         if let ToolOrigin::PolicyAction { action_id, node_id } = &origin {
@@ -383,16 +384,27 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
             "executionOwner":{"kind":"external","identity":"installed:host:read@1","epoch":"original-host-owner"},"call":host_call,
             "receipt":{"completion":original.completion,"executor_stopped":true}});
         for _ in 0..2 {
-            serde_json::from_value::<LateReceipt>(stopped_unknown.clone()).unwrap().apply(&db).unwrap();
+            serde_json::from_value::<LateReceipt>(stopped_unknown.clone())
+                .unwrap()
+                .apply(&db)
+                .unwrap();
         }
         {
-            let catalog=db.lock().unwrap();
-            let op=catalog.operation(&context.operation_id).unwrap();
-            let op=catalog.capture_operation_read(op).load().unwrap();
-            assert_eq!(op.effect,Effect::Unknown);
-            assert_eq!(op.result,Some(json!({"error":"observer_cancelled"})));
-            assert!(catalog.resource_admission().inspect(&context.operation_id).is_none());
-            assert_eq!(catalog.run(run).unwrap(),before);
+            let catalog = db.lock().unwrap();
+            let op = catalog.operation(&context.operation_id).unwrap();
+            let op = catalog.capture_operation_read(op).load().unwrap();
+            assert_eq!(op.effect, Effect::Unknown);
+            assert_eq!(
+                op.result.as_ref().unwrap().output().unwrap().data,
+                json!({"error":"observer_cancelled"})
+            );
+            assert!(
+                catalog
+                    .resource_admission()
+                    .inspect(&context.operation_id)
+                    .is_none()
+            );
+            assert_eq!(catalog.run(run).unwrap(), before);
         }
         let original_text = if policy {
             "large-original-".repeat(1_400_000)
@@ -401,13 +413,15 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
         };
         let late = json!({"v":1,"kind":"host-tool-receipt","id":"original-receipt","kernelEpoch":"replacement-transport",
             "executionOwner":{"kind":"external","identity":"installed:host:read@1","epoch":"original-host-owner"},"call":host_call,
-            "receipt":{"completion":{"kind":"result","outcome":"succeeded","effect":"confirmed","content":{"text":original_text}},"executor_stopped":true}});
+            "receipt":{"completion":{"kind":"result","outcome":"succeeded","effect":"confirmed","content":{"data":{"text":original_text},"parts":[{"kind":"text","text":"before"},{"kind":"media","media":{"media_type":"image/png","data_base64":"not base64"}},{"kind":"media","media":{"media_type":"image/png","data_base64":"AQID"}},{"kind":"text","text":"after"}]}},"executor_stopped":true}});
         let mut forged = late.clone();
         forged["executionOwner"]["epoch"] = json!("replacement-owner");
-        assert!(serde_json::from_value::<LateReceipt>(forged)
-            .unwrap()
-            .apply(&db)
-            .is_err());
+        assert!(
+            serde_json::from_value::<LateReceipt>(forged)
+                .unwrap()
+                .apply(&db)
+                .is_err()
+        );
         for _ in 0..2 {
             serde_json::from_value::<LateReceipt>(late.clone())
                 .unwrap()
@@ -417,20 +431,49 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
         let catalog = db.lock().unwrap();
         let op = catalog.operation(&context.operation_id).unwrap();
         let op = catalog.capture_operation_read(op).load().unwrap();
-        assert_eq!(op.call_completion, Some(original.completion));
         assert_eq!(
-            op.result,
-            Some(json!({"text":original_text})),
+            serde_json::to_value(&op.call_completion).unwrap(),
+            serde_json::to_value(Some(&original.completion)).unwrap()
+        );
+        assert_eq!(
+            op.result.as_ref().unwrap().output().unwrap().data,
+            json!({"text":original_text}),
             "full external result must roundtrip through the existing ContentStore"
         );
         assert_eq!(
             (op.outcome, op.effect),
             (Some(Outcome::Succeeded), Effect::Confirmed)
         );
-        assert!(catalog
-            .resource_admission()
-            .inspect(&context.operation_id)
-            .is_none());
+        let parts = &op.result.as_ref().unwrap().output().unwrap().parts;
+        assert_eq!(parts.len(), 4);
+        assert!(
+            matches!(&parts[0], varin_runtime::output::OutputPart::Text { text } if text == "before")
+        );
+        assert!(
+            matches!(&parts[1], varin_runtime::output::OutputPart::Text { text } if text.contains("output_media_rejected") && text.contains("part 1") && !text.contains("not base64"))
+        );
+        let varin_runtime::output::OutputPart::Media { media } = &parts[2] else {
+            panic!("valid original part remains typed media")
+        };
+        assert_eq!(
+            media.source,
+            varin_runtime::output::OutputSource::Tool {
+                context: context.clone()
+            }
+        );
+        assert!(
+            matches!(&parts[3], varin_runtime::output::OutputPart::Text { text } if text == "after")
+        );
+        assert_eq!(
+            op.external_receipt.as_ref().unwrap().result,
+            *op.result.as_ref().unwrap().output().unwrap()
+        );
+        assert!(
+            catalog
+                .resource_admission()
+                .inspect(&context.operation_id)
+                .is_none()
+        );
         assert_eq!(
             catalog.run(run).unwrap(),
             before,
@@ -467,7 +510,8 @@ fn rejected_newer_candidate_can_restore_the_prior_ready_directory_before_next_re
     let run = submitted.run_id.clone();
     let binding = RequestBinding {
         child_dispatch: None,
-        goal: None, resource_activations: Vec::new(),
+        goal: None,
+        resource_activations: Vec::new(),
         resource_checkpoint_id: None,
         connection_identity: "fixture".into(),
         provider_family: "fixture".into(),
@@ -518,9 +562,11 @@ fn rejected_newer_candidate_can_restore_the_prior_ready_directory_before_next_re
     let a = extension("A");
     let b = extension("B");
     tools.desire(&run, "A-ready").unwrap();
-    assert!(tools
-        .ready(&run, "A-ready", None, vec![a.clone()], || false)
-        .unwrap());
+    assert!(
+        tools
+            .ready(&run, "A-ready", None, vec![a.clone()], || false)
+            .unwrap()
+    );
     assert!(
         db.lock()
             .unwrap()
@@ -533,14 +579,18 @@ fn rejected_newer_candidate_can_restore_the_prior_ready_directory_before_next_re
         "ready ACK is not activation"
     );
     tools.desire(&run, "B-invalid").unwrap();
-    assert!(tools
-        .ready(&run, "B-invalid", None, vec![a.clone(), b], || false)
-        .is_err());
+    assert!(
+        tools
+            .ready(&run, "B-invalid", None, vec![a.clone(), b], || false)
+            .is_err()
+    );
     // The publication owner restores its valid snapshot immediately after the rejected selection.
     tools.desire(&run, "A-restored").unwrap();
-    assert!(tools
-        .ready(&run, "A-restored", None, vec![a], || false)
-        .unwrap());
+    assert!(
+        tools
+            .ready(&run, "A-restored", None, vec![a], || false)
+            .unwrap()
+    );
     let selected = executor
         .select_for_request(&run, epoch, &CancellationToken::default())
         .unwrap()

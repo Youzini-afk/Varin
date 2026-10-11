@@ -5,7 +5,7 @@ import { start, type REPLServer } from "node:repl";
 import { PassThrough, Writable } from "node:stream";
 import { formatWithOptions, inspect } from "node:util";
 import type { Context } from "node:vm";
-import type { NestedToolInput, NestedToolReceipt } from "@varin/protocol";
+import type { NestedToolInput, NestedToolReceipt, IncomingMedia, OutputPart } from "@varin/protocol";
 
 export interface ScriptError {
   message: string;
@@ -33,6 +33,7 @@ export interface NodeReplOptions<Input = NestedToolInput, Receipt = NestedToolRe
   environmentId: string;
   invoke(cellId: string, input: Input): Promise<Receipt>;
   output(cellId: string, text: string): void;
+  outputPart?(cellId: string, part: OutputPart<IncomingMedia>): void;
   /** Replaces the default tools namespace. print and console remain available. */
   install?(installation: ReplInstallation<Input, Receipt>): void;
   /** Adapter-owned error projection; Native defaults to message/code only. */
@@ -142,7 +143,20 @@ export function createNodeReplSession<Input = NestedToolInput, Receipt = NestedT
     return pending;
   };
   if (options.install) options.install({ context: server.context, invoke, output: print });
-  else server.context.tools = { invoke };
+  else {
+    server.context.tools = { invoke };
+    server.context.emitImage = (image: IncomingMedia): void => {
+      const scope = scopes.getStore();
+      if (!scope || scope.closed || admissionClosed) throw closedError();
+      if (!options.outputPart) throw new Error("Typed output is unavailable in this evaluator");
+      if (!image || typeof image !== "object" || typeof image.media_type !== "string" || !image.media_type.startsWith("image/")
+        || typeof image.data_base64 !== "string" || !image.data_base64.length || Buffer.from(image.data_base64, "base64").toString("base64") !== image.data_base64) {
+        throw new Error("emitImage requires inline image media_type and canonical data_base64");
+      }
+      // Hydrated nested media can be reused, but its producer cannot grant a CAS read or author this output's source.
+      options.outputPart(scope.cellId, { kind: "media", media: { media_type: image.media_type, data_base64: image.data_base64 } });
+    };
+  }
 
   // The default evaluator reports thrown/rejected runtime errors to its domain,
   // while parser errors use the eval callback. Never attribute a late domain

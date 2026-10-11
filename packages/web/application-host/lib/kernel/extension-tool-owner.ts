@@ -1,3 +1,4 @@
+import type { OutputPart, IncomingMedia } from './protocol.generated.js';
 /** Ordinary installed services, selected and prepared by the existing routing/supervisor owner. */
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -236,6 +237,7 @@ export async function retainExtensionTool(
         origin: call.origin,
         toolName: call.name,
         operation: descriptor.tool!.operation,
+        completion: descriptor.tool!.completion,
         arguments: structuredClone(call.arguments),
         source: launch.selection.source,
         configurationIdentity: binding.configurationIdentity,
@@ -314,6 +316,13 @@ export async function retainExtensionTool(
           return undispatchedToolReceipt('extension_tool_dispatch_rejected');
         }
         let domainReceipt: ToolExecutionReceipt | undefined;
+        let parts: OutputPart<IncomingMedia>[] = [];
+        const completeDomain = (receipt: ToolExecutionReceipt): ToolExecutionReceipt => {
+          if (!parts.length) return receipt;
+          const completion = receipt.completion;
+          if (completion.kind === 'not_dispatched') throw new Error('Undispatched invocation cannot publish output');
+          return { ...receipt, completion: { ...completion, content: { data: completion.content?.data ?? null, parts: [...(completion.content?.parts ?? []), ...parts] } } };
+        };
         // Scope lifetime follows the actual pin callback, including cancellation/worker exit.
         try {
           const output = await withToolInvocation(
@@ -321,6 +330,7 @@ export async function retainExtensionTool(
               authority: context,
               owner: provider,
               signal: combined,
+              onOutput: value => { parts = value; },
               onEffectReceipt: (receipt) => {
                 domainReceipt = receipt;
               },
@@ -333,17 +343,14 @@ export async function retainExtensionTool(
                 scope,
               ),
           );
-          if (domainReceipt) return domainReceipt;
+          if (domainReceipt) return completeDomain(domainReceipt);
           if (!validateOutput(output))
             return {
               completion: {
                 kind: 'result',
                 outcome: 'indeterminate',
                 effect: 'unknown',
-                content: {
-                  error: 'extension_tool_output_schema_invalid',
-                  output,
-                },
+                content: { data: { error: 'extension_tool_output_schema_invalid', output }, parts },
               },
               executor_stopped: true,
             };
@@ -352,19 +359,19 @@ export async function retainExtensionTool(
               kind: 'result',
               outcome: 'succeeded',
               effect: 'confirmed',
-              content: output,
+              content: { data: output, parts },
             },
             executor_stopped: true,
           };
         } catch {
-          if (domainReceipt) return domainReceipt;
+          if (domainReceipt) return completeDomain(domainReceipt);
           // Broker transport keeps dispatched promises pending until actual response or process exit.
           return {
             completion: {
               kind: 'result',
               outcome: 'indeterminate',
               effect: 'unknown',
-              content: { error: 'extension_tool_callback_failed' },
+              content: { data: { error: 'extension_tool_callback_failed' }, parts },
             },
             executor_stopped: true,
           };

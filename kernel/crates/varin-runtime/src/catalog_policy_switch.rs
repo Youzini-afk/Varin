@@ -50,7 +50,7 @@ impl PolicyTarget {
             .iter()
             .any(|v| v.is_empty())
                 || a.service_id != "varin.agent.policy"
-                || a.service_version != 3
+                || a.service_version != 4
                 || a.configuration_identity.is_empty()
                 || a.model_roles.iter().any(|s| s != "agentPlanning")
                 || a.model_roles.len() > 1
@@ -244,7 +244,7 @@ impl PolicyActivationPreparation {
     }
     pub fn load(self, state: &Value, event: &PolicyEvent) -> Result<PreparedPolicyActivation> {
         let state_ref = self.content.save(state)?;
-        let continuation_ref = self.content.save(&serde_json::to_value(event)?)?;
+        let continuation_ref = self.content.save_policy_event(event)?;
         Ok(PreparedPolicyActivation {
             captured: self,
             state_ref,

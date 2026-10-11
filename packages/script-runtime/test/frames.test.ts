@@ -4,7 +4,7 @@ import { encodeScriptFrame, parseScriptHostFrame, parseScriptWorkerFrame, Script
 
 test("incremental JSONL preserves split UTF-8 and complete nested input", () => {
   const rawInput = { callId: "语义", name: "example", arguments: { text: "文字🙂", list: [1, null] }, unknownFieldForRust: true };
-  const frame = parseScriptWorkerFrame({ v: 1, type: "invoke", environmentId: "e", cellId: "c", requestId: "transport", input: rawInput });
+  const frame = parseScriptWorkerFrame({ v: 2, type: "invoke", environmentId: "e", cellId: "c", requestId: "transport", input: rawInput });
   assert.equal(frame.type, "invoke");
   const bytes = Buffer.from(encodeScriptFrame(frame));
   const decoder = new ScriptFrameDecoder(parseScriptWorkerFrame);
@@ -22,7 +22,7 @@ test("invalid envelopes and truncated frames fail without copying sensitive payl
     assert.equal(error.message.includes(secretLookingMarker), false);
     return true;
   });
-  assert.throws(() => parseScriptWorkerFrame({ v: 2, type: "ready", environmentId: "e", bindingIdentity: "b" }), ScriptProtocolError);
+  assert.throws(() => parseScriptWorkerFrame({ v: 1, type: "ready", environmentId: "e", bindingIdentity: "b" }), ScriptProtocolError);
   const truncated = new ScriptFrameDecoder(parseScriptHostFrame);
   truncated.push('{"v":1');
   assert.throws(() => truncated.end(), ScriptProtocolError);

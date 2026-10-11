@@ -84,7 +84,8 @@ impl ModelProvider for SummaryProvider {
                 match &item.content {
                     Content::ToolCall { .. }
                     | Content::ToolResult { .. }
-                    | Content::Attachment { .. } => invalid = true,
+                    | Content::Media { .. }
+                    | Content::Output { .. } => invalid = true,
                     Content::Text { text } => has_text |= !text.trim().is_empty(),
                     _ => (),
                 }

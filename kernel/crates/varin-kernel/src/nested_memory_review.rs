@@ -187,7 +187,7 @@ fn nested_memory_uses_original_host_owner_and_delivers_once_without_outer_echo()
                 // Neither outer success nor echoed content owns memory commit/delivery.
                 let outcome = if model_origin { "succeeded" } else { "failed" };
                 f.assembly.tools.bridge().receive(json!({"v":1,"kind":"host-tool-response","id":frame["id"],"kernelEpoch":EPOCH,"ok":true,
-                    "completion":{"kind":"result","outcome":outcome,"effect":"confirmed","content":{"message":"Callback finished"}},"executor_stopped":true}));
+                    "completion":{"kind":"result","outcome":outcome,"effect":"confirmed","content":{"data":{"message":"Callback finished"},"parts":[]}},"executor_stopped":true}));
             }
             if let Ok(report) = done.try_recv() {
                 break report.unwrap();
@@ -281,7 +281,7 @@ fn nested_memory_uses_original_host_owner_and_delivers_once_without_outer_echo()
         let before = read.load().unwrap();
         assert_eq!(before.intent["origin"]["kind"], "nested_call");
         assert_eq!(
-            before.result.as_ref().unwrap()["memoryReceipt"],
+            before.result.as_ref().unwrap().output().unwrap().data["memoryReceipt"],
             saved["result"]["memoryReceipt"]
         );
         let f = f.reopen();

@@ -5,7 +5,7 @@ import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ThreadRequestError } from '@varin/application-client';
 import type { ContextCheckpoint, ThreadIdentity, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
-import type { ChildTask, DelegatedExecution } from '@varin/protocol';
+import type { ChildTask, DelegatedExecution, StoredMedia } from '@varin/protocol';
 import { ThreadConversation } from './ThreadConversation';
 import { AgentWorkspaceShell } from '@/workbenches/agent/AgentWorkspaceShell';
 
@@ -31,6 +31,8 @@ vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ cont
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} onInput={onChange as React.FormEventHandler<HTMLInputElement>} /> }));
 vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea {...props} onInput={onChange as React.FormEventHandler<HTMLTextAreaElement>} /> }));
 
+const imageData = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhC0AAAAASUVORK5CYII=';
+const storedImage: StoredMedia = { media_type: 'image/png', content_ref: { content_object: 'sha256-original-image' }, source: { kind: 'operation', operation_id: 'capture' } };
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:ui-fixture', branchId: 'branch:ui-fixture' };
 function initialSnapshot(active = false): ThreadSnapshot {
   const run = { id: 'ui-run', thread_id: identity.threadId, branch_id: identity.branchId, state: 'generating' as const, revision: 1, epoch: 1, configuration: { providerId: 'fixture-provider', model: 'fixture-model' }, cancel_requested: false, waiting_on: null };
@@ -54,6 +56,7 @@ function fixture(active = false) {
   let listener: Parameters<ThreadsAPI['observe']>[1] | undefined;
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
   const api: ThreadsAPI = { computer: { state: vi.fn<ThreadsAPI['computer']['state']>(async target => ({ state: { work: target, rootWork: target, currentExecution: null, currentRootExecution: null, active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] })), stop: vi.fn(unused), decide: vi.fn(unused) }, goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
+    mediaRead: vi.fn(async input => ({ media: storedImage, partIndex: input.partIndex, chunkIndex: 0, chunkCount: 1, totalBytes: Buffer.from(imageData, 'base64').length, bytesBase64: imageData })),
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, resume: unused, retryPreparation: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
@@ -63,6 +66,8 @@ function fixture(active = false) {
 let root: Root;
 let container: HTMLDivElement;
 beforeEach(() => {
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test-image');
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
   endpoint.generation = 1;
   runtimeState.api = undefined; vi.mocked(attachProcessTerminal).mockClear();
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
@@ -76,7 +81,7 @@ beforeEach(() => {
   vi.stubGlobal('FormData', class { constructor(private form: HTMLFormElement) {} get(name: string) { return this.form.querySelector<HTMLTextAreaElement>(`[name="${name}"]`)?.value ?? null; } });
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const edit = async (selector: string, value: string, event = 'input') => {
   const element = container.querySelector<HTMLInputElement>(selector)!;
   await act(async () => { Object.defineProperty(element, 'value', { configurable: true, writable: true, value }); element.dispatchEvent(new window.Event(event, { bubbles: true })); });
@@ -190,7 +195,7 @@ it.each(['file-backed', 'source-free'] as const)('keeps the original report, wai
   const cancelOperation = vi.fn<ThreadsAPI['cancelOperation']>(async () => observation);
   f.api.cancelOperation = cancelOperation;
   const readReport = vi.fn<NonNullable<ThreadsAPI['collaboration']>['readReport']>(async () => ({
-    operation_id: child.operation_id, execution_id: 'original-execution', item_id: 'original-report', offset: 0, next_offset: null, total_bytes: 14, text: 'Original bytes',
+    format: 'text', operation_id: child.operation_id, execution_id: 'original-execution', item_id: 'original-report', offset: 0, next_offset: null, total_bytes: 14, text: 'Original bytes',
   }));
   const cancelChild = vi.fn(async (_identity: ThreadIdentity, operationId: string) => ({ target: { kind: 'child' as const, operation_id: operationId }, cursor: 4, run_count: 1, child_count: 1, process_count: 1 }));
   const cancelTree = vi.fn(async () => ({ target: { kind: 'thread' as const, thread_id: identity.threadId }, cursor: 5, run_count: 2, child_count: 1, process_count: 1 }));
@@ -206,7 +211,7 @@ it.each(['file-backed', 'source-free'] as const)('keeps the original report, wai
   }
   expect(container.textContent).toContain('Background operation · running · In progress · effect: unknown');
   await act(async () => { button('Read report').click(); });
-  expect(readReport).toHaveBeenCalledExactlyOnceWith(identity, child.operation_id, 'original-report', 0);
+  expect(readReport).toHaveBeenCalledExactlyOnceWith(identity, child.operation_id, 'original-report', 0, undefined, expect.any(AbortSignal));
   expect(container.textContent).toContain('Original bytes');
   await act(async () => { button('Cancel observation wait').click(); });
   expect(cancelOperation).toHaveBeenCalledExactlyOnceWith(observation.id);
@@ -374,7 +379,7 @@ it('shared file picker previews image-only input, retains bytes/key on failure, 
   const f = fixture();
   f.submit.mockRejectedValueOnce(new ThreadRequestError(400, 'kernel-frame-too-large'));
   f.submit.mockImplementationOnce(async input => {
-    f.view.history.push({ id: 'accepted-image', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', provider: null, content: { text: input.text, attachments: input.images?.map(image => ({ media_type: image.mimeType, content_ref: `data:${image.mimeType};base64,${image.data}`, source: 'user-upload' })) } });
+    f.view.history.push({ id: 'accepted-image', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', provider: null, content: { text: input.text, attachments: input.images?.map(() => storedImage) } });
     return { thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'ui-run', input_id: 'sent', cursor: 1 };
   });
   const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhC0AAAAASUVORK5CYII=';
@@ -399,7 +404,9 @@ it('shared file picker previews image-only input, retains bytes/key on failure, 
   expect(f.submit.mock.calls[1]![0]).toEqual(f.submit.mock.calls[0]![0]);
   expect(f.submit.mock.calls[0]![0]).toMatchObject({ text: '', images: [{ mimeType: 'image/png', data }] });
   expect(container.querySelector('form img')).toBeNull();
-  expect(container.querySelector('article img')?.getAttribute('src')).toBe(`data:image/png;base64,${data}`);
+  expect(container.querySelector('article img')).toBeNull();
+  await act(async () => button('View image').click());
+  expect(container.querySelector('article img')?.getAttribute('src')).toBe('blob:test-image');
   await choose();
   await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="chat.fileAttachment.actions.removeImage"]')!.click(); });
   expect(container.querySelector('form img')).toBeNull();
@@ -409,19 +416,19 @@ it('shared file picker previews image-only input, retains bytes/key on failure, 
 
 it('loads earlier images under a pinned head while live controls continue, then returns to latest messages', async () => {
   const f = fixture(true);
-  const item = (id: string, text: string) => ({ id, thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'assistant' as const, content: { text }, provider: null });
+  const item = (id: string, text: string) => ({ id, thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'assistant' as const, content: { id, provenance: { kind: 'assistant' }, content: { kind: 'text', text }, opaque: null }, provider: null });
   f.view.history = [item('message-2', 'middle message'), item('message-3', 'pinned newest message')];
   f.view.historyPage = { head: 'message-3', previous: 'message-2' };
   f.view.thread.branches[0]!.head = 'message-3';
-  const imageData = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhC0AAAAASUVORK5CYII=';
-  const earlier = { ...item('message-1', 'oldest image message'), content: { text: 'oldest image message', attachments: [{ media_type: 'image/png', content_ref: `data:image/png;base64,${imageData}`, source: 'user-upload' }] } };
+  const earlier = { ...item('message-1', 'oldest image message'), source: 'user' as const, content: { text: 'oldest image message', attachments: [storedImage] } };
   const historyPage = vi.fn(async () => ({ head: 'message-3', previous: null, items: [earlier] }));
   f.api.historyPage = historyPage;
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
   await act(async () => { button('Load earlier history').click(); });
   expect(historyPage).toHaveBeenCalledWith(identity, { headId: 'message-3', beforeId: 'message-2' });
   expect(container.textContent).toContain('oldest image message');
-  expect(container.querySelector('article img')?.getAttribute('src')).toBe(`data:image/png;base64,${imageData}`);
+  await act(async () => button('View image').click());
+  expect(container.querySelector('article img')?.getAttribute('src')).toBe('blob:test-image');
   f.view.history = [item('message-3', 'pinned newest message'), item('message-4', 'new live arrival')];
   f.view.historyPage = { head: 'message-4', previous: 'message-3' };
   f.view.thread.branches[0]!.head = 'message-4';
@@ -588,8 +595,7 @@ it('projects frozen skill metadata separately from original history and editable
   const invocation = { ordinal: 0, contentRevision: 1, resourceCheckpointId: checkpoint.id,
     snapshotId: checkpoint.resources!.snapshot.id, resourceId: skill.id, reference: { ...skill.reference },
     name: skill.name, arguments: 'Keep the original\nuser text.', body: 'Private admitted skill body' };
-  const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhC0AAAAASUVORK5CYII=';
-  const attachments = [{ media_type: 'image/png', content_ref: `data:image/png;base64,${data}`, source: 'user-upload' }];
+  const attachments = [storedImage];
   const content = { text, attachments, skillInvocations: [invocation] };
   f.view.history = [{ id: 'skill-history', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', provider: null, content }];
   f.view.inputs = [{ id: 'skill-queued', thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'ui-run',
@@ -613,7 +619,8 @@ it('projects frozen skill metadata separately from original history and editable
   expect(container.querySelectorAll('[aria-label="Skill materials"]')).toHaveLength(2);
   expect(history.textContent).toContain(text);
   expect(queued().defaultValue).toBe(text);
-  expect(history.querySelector('img')?.getAttribute('src')).toBe(`data:image/png;base64,${data}`);
+  await act(async () => [...history.querySelectorAll('button')].find(value => value.textContent === 'View image')!.click());
+  expect(history.querySelector('img')?.getAttribute('src')).toBe('blob:test-image');
   expect(container.textContent).not.toContain(invocation.body);
   expect(container.textContent).not.toContain('Private skill body');
 
@@ -623,7 +630,9 @@ it('projects frozen skill metadata separately from original history and editable
   expect(f.editInput).toHaveBeenCalledExactlyOnceWith('skill-queued', 1, edited);
   expect(queued().defaultValue).toBe(edited);
   expect(queued().closest('form')?.querySelector('[aria-label="Skill materials"]')).toBeNull();
-  expect(queued().closest('form')?.querySelector('img')?.getAttribute('src')).toBe(`data:image/png;base64,${data}`);
+  await act(async () => [...queued().closest('form')!.querySelectorAll('button')].find(value => value.textContent === 'View image')!.click());
+  expect(queued().closest('form')?.querySelector('img')?.getAttribute('src')).toBe('blob:test-image');
+  expect(f.api.mediaRead).toHaveBeenLastCalledWith(expect.objectContaining({ holder: { kind: 'input', inputId: 'skill-queued', expectedRevision: 2 }, expectedContentRef: storedImage.content_ref.content_object }), expect.any(AbortSignal));
   expect(history.querySelector('[aria-label="Skill materials"]')).not.toBeNull();
   expect(history.textContent).toContain(text);
 });
@@ -780,7 +789,7 @@ it('answers a policy-node question explicitly, keeps the draft on failure and di
   f.view.activeRun!.state = 'waiting'; f.view.activeRun!.waiting_on = operation.waiting_on;
   f.view.operations = [operation];
   const answer = vi.fn<ThreadsAPI['answerQuestion']>().mockRejectedValueOnce(new Error('uncertain answer acceptance')).mockImplementation(async () => {
-    f.view.operations[0] = { ...operation, phase: 'terminal', outcome: 'succeeded', result: { answer: 'Option B with detail' } };
+    f.view.operations[0] = { ...operation, phase: 'terminal', outcome: 'succeeded', result: { kind: 'control', value: { answer: 'Option B with detail' } } };
     f.view.activeRun!.waiting_on = 'question:another-operation';
     return f.view.operations[0]!;
   });
@@ -824,11 +833,11 @@ it('permission UI sends only an explicit one-action decision and cannot approve 
   const f = fixture(true);
   f.view.activeRun!.state = 'executing';
   const permission = { id: 'permission-1', call: { runId: 'ui-run', origin: { kind: 'model_step', request_id: 'request-1' }, operationId: 'request-1:tool:call-1', callId: 'call-1', name: 'mcp_send', schemaVersion: 'schema-1', arguments: { recipient: 'chosen-target', body: 'exact content' } }, scope: { ownerReference: 'mcp-owner', ownerGeneration: 4, toolSchemaVersion: 'schema-1', policyGeneration: 'policy-generation', reason: 'External effect' }, actor: { account: 'selected-account', authority: 'fixture-authority' }, decision: null, consumed: false };
-  const operation: ThreadSnapshot['operations'][number] = { id: permission.call.operationId, run_id: 'ui-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'run', handed_off: false, executor: 'mcp_send', waiting_on: 'permission:permission-1', intent: {}, result: { permission }, external_receipt: null, call_completion: null, execution_owner: null };
+  const operation: ThreadSnapshot['operations'][number] = { id: permission.call.operationId, run_id: 'ui-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'run', handed_off: false, executor: 'mcp_send', waiting_on: 'permission:permission-1', intent: {}, result: { kind: 'control', value: { permission } }, external_receipt: null, call_completion: null, execution_owner: null };
   f.view.operations = [operation];
   const answer = vi.fn<ThreadsAPI['answerQuestion']>(); f.api.answerQuestion = answer;
   const decide = vi.fn<ThreadsAPI['decidePermission']>().mockRejectedValueOnce(new Error('decision transport unavailable')).mockImplementation(async () => {
-    f.view.operations = [{ ...operation, phase: 'accepted', waiting_on: null, result: { permission: { ...permission, decision: 'allow_once', consumed: true } } }]; return f.view.operations[0]!;
+    f.view.operations = [{ ...operation, phase: 'accepted', waiting_on: null, result: { kind: 'control', value: { permission: { ...permission, decision: 'allow_once', consumed: true } } } }]; return f.view.operations[0]!;
   });
   f.api.decidePermission = decide;
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
@@ -1089,8 +1098,10 @@ it.each(['file-backed', 'source-free'] as const)('continues a completed %s child
   const continueChild = vi.fn<NonNullable<ThreadsAPI['collaboration']>['continueChild']>(async () => {
     f.view.delegatedExecutions = [original, continued]; return continued;
   }).mockRejectedValueOnce(new Error('uncertain continuation reply'));
+  const reportBody = JSON.stringify({ data: { original: true }, parts: [{ kind: 'text', text: 'old evidence' }, { kind: 'media', media: storedImage }] });
   const readExecutionReport = vi.fn<NonNullable<ThreadsAPI['collaboration']>['readExecutionReport']>(async (_identity, executionId, itemId) => ({
-    operation_id: original.child_operation_id, execution_id: executionId, item_id: itemId, offset: 0, next_offset: null, total_bytes: 12, text: 'old evidence' }));
+    format: 'output_body', operation_id: original.child_operation_id, execution_id: executionId, item_id: itemId, offset: 0, next_offset: null,
+    total_bytes: new TextEncoder().encode(reportBody).length, text: reportBody }));
   const cancelTree = vi.fn<NonNullable<ThreadsAPI['collaboration']>['cancelTree']>(async target => ({ target: { kind: 'thread', thread_id: target.threadId }, cursor: 15, run_count: 0, child_count: 1, process_count: 0 }));
   const unused = async (): Promise<never> => { throw new Error('unused collaboration control'); };
   f.api.collaboration = { continueChild, readExecutionReport, executions: async () => f.view.delegatedExecutions!, children: async () => [],
@@ -1121,6 +1132,9 @@ it.each(['file-backed', 'source-free'] as const)('continues a completed %s child
   await act(async () => { button('Read execution report').click(); });
   expect(readExecutionReport).toHaveBeenCalledWith(identity, 'old-execution', 'old-report', 0, undefined, expect.any(AbortSignal));
   expect(container.textContent).toContain('old evidence');
+  await act(async () => button('View image').click());
+  expect(f.api.mediaRead).toHaveBeenCalledWith(expect.objectContaining({ holder: { kind: 'child_report', operationId: 'original-dispatch', executionId: 'old-execution', itemId: 'old-report' }, partIndex: 1 }), expect.any(AbortSignal));
+  expect(container.querySelector('[aria-label="Child report"] img')?.getAttribute('src')).toBe('blob:test-image');
   expect(f.view.activeRun).toBeNull();
   await act(async () => { button('Stop task and children').click(); });
   expect(cancelTree).toHaveBeenCalledExactlyOnceWith(identity);
@@ -1310,7 +1324,7 @@ it('keeps repeating controls after delivery and reads each historical occurrence
     return structuredClone(followup);
   }); f.api.followups.control = control;
   const read = vi.fn<NonNullable<ThreadsAPI['family']>['read']>(async (_identity, request) => ({ ...request, runId: request.runId ?? null, headId: 'head:original', anchor: 'anchor:original',
-    items: [{ id: 'record:first', parentId: null, sequence: 10, runId: request.runId!, source: 'assistant', kind: 'text', body: { text: 'Original first occurrence result' }, preview: '', bodyBytes: 32, bodyTruncated: false, tool: null }],
+    items: [{ id: 'record:first', parentId: null, sequence: 10, runId: request.runId!, source: 'assistant', kind: 'text', body: { id: 'record:first', provenance: { kind: 'assistant' }, content: { kind: 'text', text: 'Original first occurrence result' }, opaque: null }, preview: '', bodyBytes: 32, bodyTruncated: false, tool: null }],
     nextCursor: null, scanned: 1, scanComplete: true, hasEarlier: false, hasLater: false }));
   f.api.family = { read, list: vi.fn(), runs: vi.fn(), item: vi.fn() };
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
@@ -1990,4 +2004,51 @@ it('shows Native Computer owner state and stops the exact displayed execution wi
   await act(async () => button('computer.automation.stop').click());
   expect(f.api.computer.stop).toHaveBeenCalledWith(identity, { runId: 'computer-run', desktopId: undefined });
   expect(container.textContent).toContain('computer.automation.cancel-unconfirmed');
+});
+
+it('keeps stored images for a text edit, explicitly removes them with [], and replaces only with new inline upload bytes', async () => {
+  const f = fixture(true);
+  f.view.inputs = [{ id: 'image-queue', thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'ui-run',
+    mode: 'boundary', state: 'queued', revision: 1, content: { text: 'original text', attachments: [storedImage] }, cursor: 1 }];
+  const editInput = vi.fn<ThreadsAPI['editInput']>(async (_id, _revision, _text, _images) => { throw new Error('Uncertain edit reply'); });
+  f.api.editInput = editInput;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  const form = () => container.querySelector('[aria-label="Edit queued input"]')!.closest('form')!;
+  await edit('[aria-label="Edit queued input"]', 'changed text');
+  await submitForm(form());
+  expect(editInput).toHaveBeenLastCalledWith('image-queue', 1, 'changed text');
+  await act(async () => button('Remove queued images').click());
+  await submitForm(form());
+  expect(editInput).toHaveBeenLastCalledWith('image-queue', 1, 'changed text', []);
+  const file = new File([Uint8Array.of(1, 2, 3)], 'new.png', { type: 'image/png' });
+  const picker = container.querySelector<HTMLInputElement>('[aria-label="Replace queued images"]')!;
+  await act(async () => {
+    Object.defineProperty(picker, 'files', { configurable: true, value: [file] });
+    picker.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  expect(form().querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AQID');
+  await submitForm(form());
+  expect(editInput).toHaveBeenLastCalledWith('image-queue', 1, 'changed text', [{ mimeType: 'image/png', data: 'AQID' }]);
+  expect(JSON.stringify(editInput.mock.calls)).not.toContain(storedImage.content_ref.content_object);
+  await act(async () => button('Keep original images').click());
+  await submitForm(form());
+  expect(editInput).toHaveBeenLastCalledWith('image-queue', 1, 'changed text');
+});
+
+it('reads actual operation completion, result and external receipt images through their distinct original holders', async () => {
+  const f = fixture(true);
+  const output = { data: { screenshot: { width: 1, height: 1 } }, parts: [{ kind: 'text' as const, text: 'Screenshot' }, { kind: 'media' as const, media: storedImage }] };
+  f.view.operations = [{ id: 'media-operation', run_id: 'ui-run', epoch: 1, revision: 2, phase: 'terminal', outcome: 'failed', effect: 'partial',
+    cancel_requested: false, lifetime: 'run', handed_off: true, executor: 'script', waiting_on: null, intent: {}, execution_owner: null,
+    call_completion: { kind: 'result', outcome: 'failed', effect: 'partial', content: output }, result: { kind: 'output', output },
+    external_receipt: { executor: 'script', identity: 'receipt', epoch: 'epoch', outcome: 'failed', effect: 'partial', result: output } }];
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(f.api.mediaRead).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('failed'); expect(container.textContent).toContain('partial');
+  for (const view of [...container.querySelectorAll<HTMLButtonElement>('button')].filter(value => value.textContent === 'View image')) {
+    await act(async () => view.click());
+  }
+  expect(vi.mocked(f.api.mediaRead).mock.calls.map(([input]) => input.holder)).toEqual(['completion', 'result', 'external_receipt'].map(output => ({ kind: 'operation', operationId: 'media-operation', output })));
+  expect(container.querySelectorAll('img')).toHaveLength(3);
 });

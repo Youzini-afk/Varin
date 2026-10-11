@@ -605,14 +605,15 @@ non-zero exit codes on failure.
 
 ## Native Agent policy decisions
 
-A brokered Host extension can provide `varin.agent.policy@1` with the SDK's `provideAgentPolicy`.
+A brokered Host extension can provide `varin.agent.policy@4` with the SDK's `provideAgentPolicy`.
 Select it through ordinary project/session service routing. The native Run pins the selected
 artifact, immutable configuration and private-state version; updates use the existing installer
 and candidate lifecycle. No separate policy registry, credentials or filesystem capability is needed.
 
-Policies can request the selected model, settle its registered tool exchange, submit a fixed-source
-read graph before/between model requests, inspect committed own-Run result chunks, and request a
-model with core-resolved evidence references. Graph eligibility belongs to the trusted executor;
+Policies can request the selected model, settle its registered tool exchange, submit an ordinary
+`tool_graph` before/between model requests, inspect committed own-Run result chunks, and request a
+model with core-resolved evidence references. Each node keeps its original source, permission and
+Result/Job execution boundary. Graph eligibility belongs to the trusted executor;
 MCP metadata cannot make a tool eligible. Large evidence stays in the core content store and enters
 the request as external data. See the [installed evidence-policy example](../../examples/extensions/evidence-policy/README.md)
 for the build/install route, complete content-dependent sequence, API fields and recovery boundary.
@@ -629,8 +630,13 @@ Return `request_model_job` with the admitted `capability_id`, nonempty `instruct
 owned `evidence` references. Core freezes task context and runs an independent tool-free operation;
 `decide()` must not perform direct model/network work. `model_job_completed` delivers an `action_id`
 and typed `receipt` with `dispatch`, `outcome`, scoped `output`, `usage`, `finish_reason`, `failure`
-and `usable`. Read a successful committed result using the same scoped `read_result` chunks, then
-validate the model-derived data against the policy's declared format before choosing another action.
+and `usable`. Read a successful committed result using the same scoped `read_result` chunks.
+Their explicit `format` distinguishes `model_evidence` from an ordinary tool `output_body`;
+assemble all original chunks before parsing. Tool output is `{ data, parts }`, with ordered text
+or resolved media parts. Validate model-derived data against the policy's declared format before
+choosing another action. `deliver` accepts `output: { data, parts }` using incoming inline media;
+the original policy action supplies provenance. It does not create model/tool pairing, change the
+private checkpoint owner or implicitly resume a Pause.
 Neither model output nor a parsed plan grants permissions. Auxiliary tool calls are never executed.
 See the [installed planning-policy example](../../examples/extensions/planning-policy/README.md) for
 explicit model configuration, normal installation/routing, budgets and the complete content-dependent

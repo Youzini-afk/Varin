@@ -1,3 +1,4 @@
+import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createServer, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
@@ -35,7 +36,7 @@ it('real file journal settles a lost receipt after kernel restart without repeat
     request.on('end', () => {
       const body = JSON.parse(Buffer.concat(chunks).toString()) as { input: Array<Record<string, unknown>> };
       const last = body.input.findLast(item => item.type === 'function_call_output');
-      if (last) observed.push(JSON.parse(String(last.output)));
+      if (last) observed.push(JSON.parse(responsesMetadataText(last.output)));
       turn++;
       if (turn === 1) tool(response, 'file_read', { path: 'source.txt' }, turn);
       else if (turn === 2) {

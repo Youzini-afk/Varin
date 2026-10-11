@@ -27,6 +27,29 @@ fn push(messages: &mut Vec<Value>, role: &str, block: Value, model: &str) {
         messages.push(json!({"role":role,"content":[block],"timestamp":0}));
     }
 }
+fn pi_parts(parts: Vec<crate::output::OutputPart>) -> Result<Vec<Value>, ExecutionError> {
+    let mut blocks = Vec::new();
+    for part in parts {
+        match part {
+            crate::output::OutputPart::Text { text } => {
+                blocks.push(json!({"type":"text","text":text}))
+            }
+            crate::output::OutputPart::Media { media } => {
+                require_media_type(
+                    &media,
+                    &["image/png", "image/jpeg", "image/webp", "image/gif"],
+                    FAMILY,
+                )?;
+                inline_image(&media)?;
+                blocks.push(json!({"type":"text","text":media_label(&media)}));
+                blocks.push(
+                    json!({"type":"image","mimeType":media.media_type,"data":media.data_base64}),
+                );
+            }
+        }
+    }
+    Ok(blocks)
+}
 impl ModelProvider for PiMessagesProvider {
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         validate_view(view, FAMILY)?;
@@ -100,33 +123,17 @@ impl ModelProvider for PiMessagesProvider {
                             ..
                         } | ToolCompletion::JobAccepted { .. }
                     );
-                    messages.push(json!({"role":"toolResult","toolCallId":result.call_id,"toolName":name,"isError":error,"content":[{"type":"text","text":serde_json::to_string(&result.completion).map_err(|_|ExecutionError::new("serialize","invalid tool result"))?}],"timestamp":0}));
+                    messages.push(json!({"role":"toolResult","toolCallId":result.call_id,"toolName":name,"isError":error,"content":pi_parts(completion_parts(&result.completion))?,"timestamp":0}));
                 }
-                Content::Attachment {
-                    media_type,
-                    content_ref,
-                    ..
-                } => {
-                    let data = content_ref
-                        .strip_prefix(&format!("data:{media_type};base64,"))
-                        .ok_or_else(|| {
-                            ExecutionError::new(
-                                "unsupported_attachment",
-                                "pi-messages requires admitted inline images",
-                            )
-                        })?;
-                    if !media_type.starts_with("image/") {
-                        return Err(ExecutionError::new(
-                            "unsupported_attachment",
-                            "pi-messages supports image attachments",
-                        ));
+                Content::Media { media } => {
+                    for block in pi_parts(vec![crate::output::OutputPart::Media { media }])? {
+                        push(&mut messages, "user", block, &view.binding.model);
                     }
-                    push(
-                        &mut messages,
-                        "user",
-                        json!({"type":"image","mimeType":media_type,"data":data}),
-                        &view.binding.model,
-                    );
+                }
+                Content::Output { output } => {
+                    for block in pi_parts(evidence_parts(&output, &item.provenance))? {
+                        push(&mut messages, "user", block, &view.binding.model);
+                    }
                 }
                 Content::ProviderOnly => {}
             }

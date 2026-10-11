@@ -23,7 +23,7 @@ export interface LiveHostToolBinding {
   binding: HostToolBinding;
 }
 export type { HostToolCall } from './protocol.generated.js';
-export type HostToolCompletion = import('./protocol.generated.js').OperationCallCompletion;
+export type HostToolCompletion = import('./protocol.generated.js').OperationCallCompletion<import('./protocol.generated.js').IncomingMedia>;
 /** Trusted adapter evidence; never accepted from the extension's ToolCompletion JSON. */
 export interface ToolExecutionReceipt {
   completion: HostToolCompletion;
@@ -128,7 +128,7 @@ export const unknownToolReceipt = (): ToolExecutionReceipt => ({
     kind: 'result',
     outcome: 'indeterminate',
     effect: 'unknown',
-    content: { error: 'host_tool_effect_unknown' },
+    content: { data: { error: 'host_tool_effect_unknown' }, parts: [] },
   },
   executor_stopped: false,
 });

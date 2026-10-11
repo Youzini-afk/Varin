@@ -1,6 +1,6 @@
 //! Live retention for an executing invocation, never an independent operation/receipt store.
-use crate::execution::*;
 use crate::ExecutorOwner;
+use crate::execution::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex, Weak};
@@ -357,7 +357,7 @@ mod tests {
                     completion: ToolCompletion::Result {
                         outcome: Outcome::Indeterminate,
                         effect: Effect::Unknown,
-                        content: json!("original"),
+                        content: json!("original").into(),
                     },
                 })
             }),
@@ -378,9 +378,11 @@ mod tests {
             std::thread::yield_now();
         }
         assert!(closing.try_recv().is_err());
-        assert!(registry
-            .invoke("request:tool:outer", &ExecutorOwner::Kernel, input("late"))
-            .is_err());
+        assert!(
+            registry
+                .invoke("request:tool:outer", &ExecutorOwner::Kernel, input("late"))
+                .is_err()
+        );
         release.send(()).unwrap();
         closing.recv_timeout(Duration::from_secs(3)).unwrap();
         worker.join().unwrap();
@@ -392,9 +394,11 @@ mod tests {
                 ..
             }
         ));
-        assert!(registry
-            .invoke("request:tool:outer", &ExecutorOwner::Kernel, input("one"))
-            .is_err());
+        assert!(
+            registry
+                .invoke("request:tool:outer", &ExecutorOwner::Kernel, input("one"))
+                .is_err()
+        );
     }
     #[test]
     fn original_owner_selection_and_short_input_identity_are_required() {
@@ -419,18 +423,22 @@ mod tests {
         for (call_id, name) in [("", "selected"), ("invalid", " ")] {
             let mut invalid = input(call_id);
             invalid.name = name.into();
-            assert!(registry
-                .invoke("request:tool:outer", &ExecutorOwner::Kernel, invalid)
-                .is_err());
+            assert!(
+                registry
+                    .invoke("request:tool:outer", &ExecutorOwner::Kernel, invalid)
+                    .is_err()
+            );
         }
         assert_eq!(count.load(Ordering::SeqCst), 0);
         let owner = ExecutorOwner::External {
             identity: "other".into(),
             epoch: "other".into(),
         };
-        assert!(registry
-            .invoke("request:tool:outer", &owner, input("one"))
-            .is_err());
+        assert!(
+            registry
+                .invoke("request:tool:outer", &owner, input("one"))
+                .is_err()
+        );
         let first = registry
             .invoke("request:tool:outer", &ExecutorOwner::Kernel, input("one"))
             .unwrap();
@@ -442,14 +450,18 @@ mod tests {
         );
         let mut changed = input("one");
         changed.arguments = json!({"value":2});
-        assert!(registry
-            .invoke("request:tool:outer", &ExecutorOwner::Kernel, changed)
-            .is_err());
+        assert!(
+            registry
+                .invoke("request:tool:outer", &ExecutorOwner::Kernel, changed)
+                .is_err()
+        );
         let mut absent = input("two");
         absent.name = "not-selected".into();
-        assert!(registry
-            .invoke("request:tool:outer", &ExecutorOwner::Kernel, absent)
-            .is_err());
+        assert!(
+            registry
+                .invoke("request:tool:outer", &ExecutorOwner::Kernel, absent)
+                .is_err()
+        );
         assert_eq!(count.load(Ordering::SeqCst), 1);
     }
     #[test]

@@ -1,3 +1,4 @@
+import type { MediaReadParams, MediaReadChunk } from './protocol.generated.js';
 import type { MessageSendParams, MessageListParams } from '@varin/protocol';
 import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
 import type { ChildProfilePreparer } from './child-profiles.js';
@@ -219,11 +220,11 @@ export class ThreadAdapter {
       && execution.parent_thread_id !== identity.threadId) throw new Error('Report belongs to another Thread branch');
     return this.runtime.readChildExecutionReport(executionId, itemId, offset, maxBytes, signal);
   }
-  async readChildReport(identity: ThreadIdentity, operationId: string, itemId: string, offset = 0, maxBytes = 65536) {
-    await this.requireIdentity(identity);
-    const child = await this.runtime.child(operationId);
+  async readChildReport(identity: ThreadIdentity, operationId: string, itemId: string, offset = 0, maxBytes = 65536, signal?: AbortSignal) {
+    await this.requireIdentity(identity, signal);
+    const child = await this.runtime.child(operationId, signal);
     if (child.parent_thread_id !== identity.threadId) throw new Error('Child belongs to another Thread');
-    return this.runtime.readChildReport(operationId, itemId, offset, maxBytes);
+    return this.runtime.readChildReport(operationId, itemId, offset, maxBytes, signal);
   }
   async children(identity: ThreadIdentity) {
     await this.requireIdentity(identity);
@@ -494,6 +495,10 @@ export class ThreadAdapter {
     return receipt;
   }
 
+  async mediaRead(identity: ThreadIdentity, request: Omit<MediaReadParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MediaReadChunk> {
+    await this.requireIdentity(identity, signal);
+    return this.runtime.mediaRead({ ...request, threadId: identity.threadId, branchId: identity.branchId }, signal);
+  }
   async editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[], signal?: AbortSignal) {
     const queued = await this.requireInput(inputId);
     if (queued.state !== 'queued' || queued.revision !== expectedRevision) {
@@ -504,9 +509,9 @@ export class ThreadAdapter {
       : queued.content as { text?: string; attachments?: unknown[] };
     // Text-only edits preserve accepted media; an explicit images array replaces/removes it.
     const content = images === undefined
-      ? { ...(text.length || !existing.attachments?.length ? { text } : {}), ...(existing.attachments ? { attachments: existing.attachments } : {}) }
+      ? { text }
       : threadInput(text, images);
-    if (!text.length && !('attachments' in content && content.attachments?.length)) throw new Error('Text or images are required');
+    if (!text.length && !(images === undefined ? existing.attachments?.length : images.length)) throw new Error('Text or images are required');
     let inputPreparation: InputResourcePreparation | undefined;
     if (text !== (existing.text ?? '') && parseExplicitSkillCommand(text)) {
       const checkpoint = await this.runtime.context(queued.branch_id, signal);

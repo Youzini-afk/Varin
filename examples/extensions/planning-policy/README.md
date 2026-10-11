@@ -1,6 +1,6 @@
 # Bounded planning policy
 
-An ordinary installed `varin.agent.policy@3` extension that requests one auxiliary planning model
+An ordinary installed `varin.agent.policy@4` extension that requests one auxiliary planning model
 job, reads its committed plan, and chooses a real evidence graph from the plan's content. The main
 model answers using core-validated evidence. The existing evidence-policy v2 remains independent.
 
@@ -24,8 +24,8 @@ Select the provider through existing service routing, with the routing document'
 ```json
 {
   "serviceId": "varin.agent.policy",
-  "version": 3,
-  "providerKey": "example.planning-policy:host:varin.agent.policy@3",
+  "version": 4,
+  "providerKey": "example.planning-policy:host:varin.agent.policy@4",
   "scope": { "projectId": "YOUR_PROJECT_ID" },
   "allowFallback": false
 }
@@ -86,8 +86,10 @@ The sequence is:
    instructions and the owned evidence reference. Core freezes the current task context itself.
 3. Receive `model_job_completed` with `action_id` and a typed `receipt`: dispatch state, outcome,
    scoped output reference, usage measurement/token metadata, finish reason, failure and usability.
-4. Retrieve the successful output via ordinary `read_result`/`result_chunk`. Its complete JSON
-   envelope is `{ "kind": "model_derived_evidence", "text": "..." }`.
+4. Retrieve the successful output via ordinary `read_result`/`result_chunk`, requiring
+   `format: "model_evidence"`. Its complete JSON envelope remains
+   `{ "kind": "model_derived_evidence", "text": "..." }`; it is distinct from ordinary tool chunks
+   tagged `format: "output_body"`, whose envelope is `{ data, parts }`.
 5. Parse the text strictly as `{ "version": 1, "reads": [{ "path": "research/latency.md" }] }`.
    It permits one to three distinct project-relative paths, no extra fields or traversal. Core
    still independently validates source, schema, permissions and trusted read eligibility.

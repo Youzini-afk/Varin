@@ -1,3 +1,4 @@
+import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createMemoryOwner, type MemoryQuery } from './memory-owner.js';
 import { DatabaseSync } from 'node:sqlite';
@@ -83,7 +84,7 @@ function result(body: Record<string, unknown>, name?: string) {
   const items = body.input as Array<Record<string, unknown>>;
   const call = name ? items.findLast(item => item.type === 'function_call' && item.name === name) : undefined;
   const output = items.findLast(item => item.type === 'function_call_output' && (!call || item.call_id === call.call_id));
-  return output ? JSON.parse(String(output.output)) as Record<string, unknown> : undefined;
+  return output ? JSON.parse(responsesMetadataText(output.output)) as Record<string, unknown> : undefined;
 }
 function assertPairing(body: Record<string, unknown>) {
   const pending = new Set<string>();
@@ -178,7 +179,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
     const selectParentPolicy = async (threadId: string) => {
       if (!extensions) throw new Error('Policy example is not installed');
       await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
-        rule: { serviceId: 'varin.agent.policy', version: 3, providerKey: 'example.collaboration-policy:host:varin.agent.policy@3',
+        rule: { serviceId: 'varin.agent.policy', version: 4, providerKey: 'example.collaboration-policy:host:varin.agent.policy@4',
           scope: { sessionId: threadId }, allowFallback: false } });
     };
     const policyDecisions: VarinAgentPolicyInput[] = [];
@@ -335,7 +336,7 @@ it('two real send observations retain their original requests across Host restar
       expect(childSteps).toBe(3);
       const outputs = (body.input as Array<Record<string, unknown>>).filter(item => item.type === 'function_call_output' && ['reply-send-one', 'reply-send-two'].includes(String(item.call_id)));
       expect(outputs).toHaveLength(2);
-      for (const output of outputs) expect(JSON.parse(String(output.output))).toMatchObject({ kind: 'job_accepted', effect: 'confirmed' });
+      for (const output of outputs) expect(JSON.parse(responsesMetadataText(output.output))).toMatchObject({ kind: 'job_accepted', effect: 'confirmed' });
       expect(JSON.stringify(body.input)).toContain('FIRST_LINKED_REPLY_BODY');
       expect(JSON.stringify(body.input)).toContain('SECOND_LINKED_REPLY_BODY');
       complete(response, [answer('Both original reply observations completed once', 'reply-child-done')]);
@@ -842,7 +843,7 @@ it('model-supplied parent, source, project and grant fields cannot manufacture c
       const outputs = (body.input as Array<Record<string, unknown>>).filter(item => item.type === 'function_call_output');
       expect(outputs).toHaveLength(4);
       for (const output of outputs) {
-        const failure = JSON.parse(String(output.output)) as { kind: string; outcome?: string };
+        const failure = JSON.parse(responsesMetadataText(output.output)) as { kind: string; outcome?: string };
         expect(failure.kind === 'not_dispatched' || failure.outcome === 'failed').toBe(true);
       }
       complete(response, [answer('Invalid dispatch rejected', 'rejection-final')]);
@@ -864,9 +865,9 @@ it('another Thread cannot read or wait on a child merely by knowing its operatio
       if (++foreignSteps === 1) complete(response, [tool('child_status', { operationId }, 'foreign-status'), tool('wait_child', { operationId }, 'foreign-wait'), tool('child_report', { operationId, itemId: 'private-report-item' }, 'foreign-report')]);
       else {
         for (const output of (body.input as Array<Record<string, unknown>>).filter(item => item.type === 'function_call_output')) {
-          const failure = JSON.parse(String(output.output)) as { kind: string; outcome?: string };
+          const failure = JSON.parse(responsesMetadataText(output.output)) as { kind: string; outcome?: string };
           expect(failure.kind === 'not_dispatched' || failure.outcome === 'failed').toBe(true);
-          expect(String(output.output)).not.toContain('CHILD_TASK');
+          expect(responsesMetadataText(output.output)).not.toContain('CHILD_TASK');
         }
         complete(response, [answer('Foreign access rejected', 'foreign-final')]);
       }

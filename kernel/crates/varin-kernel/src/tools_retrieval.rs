@@ -46,7 +46,10 @@ impl RetrievalQueryArgs {
                 .as_ref()
                 .is_some_and(|paths| paths.is_empty() || paths.iter().any(|path| !valid_path(path)))
         {
-            return Err(ExecutionError::new("invalid_tool_arguments", "Code retrieval requires a question, normalized relative paths, and a positive safe-integer limit"));
+            return Err(ExecutionError::new(
+                "invalid_tool_arguments",
+                "Code retrieval requires a question, normalized relative paths, and a positive safe-integer limit",
+            ));
         }
         Ok(args)
     }
@@ -383,7 +386,7 @@ impl KernelToolExecutor {
                     _ => Outcome::Succeeded,
                 },
                 effect: Effect::None,
-                content,
+                content: content.into(),
             },
             Err(error) => ToolCompletion::Result {
                 outcome: if cancel.is_cancelled() {
@@ -393,7 +396,7 @@ impl KernelToolExecutor {
                 },
                 effect: Effect::None,
                 content: json!({"status":if cancel.is_cancelled() {"cancelled"} else {"unavailable"},
-                    "error":error.code,"message":"Code retrieval could not provide a verified result"}),
+                    "error":error.code,"message":"Code retrieval could not provide a verified result"}).into(),
             },
         }
     }

@@ -5,8 +5,8 @@ use crate::test_submission::InputAdmission;
 use crate::{Catalog, SubmitInput};
 use serde_json::json;
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Mutex,
+    atomic::{AtomicUsize, Ordering},
 };
 
 struct Fixture {
@@ -131,7 +131,7 @@ impl ToolExecutor for Tools {
         ToolCompletion::Result {
             outcome: Outcome::Succeeded,
             effect: Effect::None,
-            content: json!("actual bytes"),
+            content: json!("actual bytes").into(),
         }
     }
 }
@@ -219,10 +219,11 @@ impl ModelProvider for Provider {
             Ok(FinishReason::ToolCalls)
         } else {
             assert!(request.view.history.iter().any(|item|matches!(&item.content,Content::ToolResult{result} if result.call_id=="call-1")));
-            assert!(request.view.history.iter().any(|item| item
-                .opaque
-                .as_ref()
-                .is_some_and(|o| o.value == json!({"signature":[null,42,"unaltered"]}))));
+            assert!(request.view.history.iter().any(|item| {
+                item.opaque
+                    .as_ref()
+                    .is_some_and(|o| o.value == json!({"signature":[null,42,"unaltered"]}))
+            }));
             send(
                 emit,
                 ProviderEvent::ItemCompleted {
@@ -280,10 +281,11 @@ fn actual_catalog_two_model_tool_exchange_survives_reopen_with_opaque_original()
     let db = f.catalog();
     let history = db.lock().unwrap().execution_history("main").unwrap();
     assert_eq!(history.len(), 5);
-    assert!(history.iter().any(|i| i
-        .opaque
-        .as_ref()
-        .is_some_and(|o| o.value == json!({"signature":[null,42,"unaltered"]}))));
+    assert!(history.iter().any(|i| {
+        i.opaque
+            .as_ref()
+            .is_some_and(|o| o.value == json!({"signature":[null,42,"unaltered"]}))
+    }));
     assert!(matches!(&history.last().unwrap().content,Content::Text{text} if text=="done"));
 }
 #[test]
@@ -588,13 +590,14 @@ fn worker_commit_conflict_cannot_leave_a_workerless_run_generating() {
         .unwrap();
     assert_eq!(retained["status"], "rejected");
     assert_eq!(retained["record"]["items"][0]["id"], "obsolete-answer");
-    assert!(!db
-        .lock()
-        .unwrap()
-        .history("main")
-        .unwrap()
-        .iter()
-        .any(|item| item.id == "obsolete-answer"));
+    assert!(
+        !db.lock()
+            .unwrap()
+            .history("main")
+            .unwrap()
+            .iter()
+            .any(|item| item.id == "obsolete-answer")
+    );
     drop(db);
     drop(supervisor);
     let reopened = f.catalog();
@@ -725,7 +728,7 @@ fn independent_fast_tool_finishes_while_another_tool_is_still_running() {
             ToolCompletion::Result {
                 outcome: Outcome::Succeeded,
                 effect: Effect::None,
-                content: json!(call.name),
+                content: json!(call.name).into(),
             }
         }
     }
@@ -878,7 +881,7 @@ fn cancelling_one_queued_operation_does_not_fail_its_run_or_execute_it() {
             ToolCompletion::Result {
                 outcome: Outcome::Succeeded,
                 effect: Effect::Confirmed,
-                content: json!(call.name),
+                content: json!(call.name).into(),
             }
         }
     }
@@ -1025,8 +1028,8 @@ fn cancelling_an_admitted_unstarted_run_releases_its_branch() {
     let db = supervisor.catalog();
     let mut db = db.lock().unwrap();
     let head = db.head("main").unwrap();
-    assert!(db
-        .submit(&SubmitInput {
+    assert!(
+        db.submit(&SubmitInput {
             key: "next".into(),
             thread_id: "thread".into(),
             branch_id: "main".into(),
@@ -1034,7 +1037,8 @@ fn cancelling_an_admitted_unstarted_run_releases_its_branch() {
             input: json!({"text":"next work"}),
             configuration: json!({"provider":"test"})
         })
-        .is_ok());
+        .is_ok()
+    );
 }
 
 #[test]
@@ -1376,7 +1380,7 @@ fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts(
                     completion: ToolCompletion::Result {
                         outcome: Outcome::Succeeded,
                         effect: Effect::Confirmed,
-                        content: json!("cached first result"),
+                        content: json!("cached first result").into(),
                     },
                 };
                 ExecutionRecord::ToolSettled {
@@ -1439,7 +1443,7 @@ fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts(
             assert_eq!(history.iter().filter(|item|matches!(&item.content,Content::ToolResult{result} if result.call_id==call.call_id)).count(),1);
         }
         if cut == 1 {
-            assert!(history.iter().any(|item|matches!(&item.content,Content::ToolResult{result} if matches!(&result.completion,ToolCompletion::Result{content,..} if content==&json!("cached first result")))));
+            assert!(history.iter().any(|item|matches!(&item.content,Content::ToolResult{result} if matches!(&result.completion,ToolCompletion::Result{content,..} if content.data==json!("cached first result")))));
         }
     }
 }
@@ -1494,7 +1498,7 @@ fn active_context_compiles_summary_and_tail_without_destroying_original_history(
     let db = fixture.catalog();
     let mut prepared = input(&db);
     let ancestor = prepared.binding.history_range.leaf_id.clone().unwrap();
-    let tail = ConversationItem {
+    let tail: ConversationItem = ConversationItem {
         resource_activation: None,
         id: "context-tail".into(),
         provenance: Provenance::Assistant,
@@ -1565,9 +1569,11 @@ fn active_context_compiles_summary_and_tail_without_destroying_original_history(
         proposal
     );
     let history = catalog.execution_history("main").unwrap();
-    assert!(history
-        .iter()
-        .any(|item| matches!(&item.content,Content::Text{text} if text=="read then answer")));
+    assert!(
+        history
+            .iter()
+            .any(|item| matches!(&item.content,Content::Text{text} if text=="read then answer"))
+    );
     assert_eq!(
         history
             .iter()

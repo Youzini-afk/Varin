@@ -56,7 +56,7 @@ impl ComputerWaitPreparation {
         } else {
             "Computer request decision from the original owner. Granted records that an assignment was ready then; it is not physical input release or permission to replay an action. Check the current assignment and observe the scene before acting."
         };
-        let item = ConversationItem {
+        let item: ConversationItem = ConversationItem {
             id: format!("computer-request-result:{}", self.wait.id),
             resource_activation: None,
             provenance: Provenance::EnvironmentFact {

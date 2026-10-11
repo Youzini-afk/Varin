@@ -3,9 +3,9 @@ use crate::{
     error::KernelError,
     tools::{KernelResourceClient, ToolBinding},
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use varin_runtime::execution::ToolInvocation;
-use varin_runtime::{supervisor::RunSupervisor, Effect, ExecutorOwner, ExternalReceipt, Outcome};
+use varin_runtime::{Effect, ExecutorOwner, ExternalReceipt, Outcome, supervisor::RunSupervisor};
 fn error(value: impl std::fmt::Display) -> KernelError {
     KernelError::Operation(value.to_string())
 }
@@ -51,7 +51,7 @@ pub(crate) fn reconcile(
         }
         (catalog.capture_operation_read(operation), run, source)
     };
-    let operation = read.load().map_err(error)?;
+    let (operation, original_receipt) = read.load_with_external_receipt().map_err(error)?;
     let invocation: ToolInvocation = serde_json::from_value(operation.intent.clone())?;
     if invocation.call.name != "integrate_child"
         || invocation.call.schema_version != "2"
@@ -258,7 +258,7 @@ pub(crate) fn reconcile(
         "needsAttentionPaths":attention,"diffStats":data["diffStats"],"changedFiles":changed,"text":format!("Recorded integration {id}: {state}"),
         "receipt":{"kind":"integration","workspaceId":source.workspace_id,"operationId":id,"revision":journal["revision"],"state":state},
         "effect":effect,"executorStopped":true,"recoveryCoverage":"files-only"});
-    let preserved = if let Some(previous) = &operation.external_receipt {
+    let preserved = if let Some(previous) = &original_receipt {
         if previous.effect != Effect::Unknown {
             if previous.effect != effect || previous.outcome != outcome {
                 return Err(error("confirmed Integration receipt changed"));
@@ -284,7 +284,7 @@ pub(crate) fn reconcile(
             epoch: epoch.clone(),
             outcome,
             effect,
-            result: projection,
+            result: projection.into(),
         }))
         .map_err(error)?;
     owner

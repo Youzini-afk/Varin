@@ -2,7 +2,7 @@
 mod input_admission;
 use input_admission::InputAdmission;
 use serde_json::json;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 use varin_runtime::execution::*;
 use varin_runtime::resource_admission::*;
@@ -203,7 +203,7 @@ fn terminal_receipt_with_unknown_effect_should_release_executor_occupancy() {
             epoch: "process-epoch".into(),
             outcome: Outcome::Indeterminate,
             effect: Effect::Unknown,
-            result: json!({"status":"exited","exitCode":null}),
+            result: json!({"status":"exited","exitCode":null}).into(),
         },
         true,
     )
@@ -420,7 +420,7 @@ mod actual_engines {
                 } else {
                     Effect::Confirmed
                 },
-                content: json!({}),
+                content: json!({}).into(),
             }
         }
     }
@@ -612,7 +612,7 @@ fn live_job_survives_run_cancel_and_restart_until_explicit_stop() {
         epoch: "process-epoch".into(),
         outcome: Outcome::Indeterminate,
         effect: Effect::Unknown,
-        result: json!({"status":"unknown"}),
+        result: json!({"status":"unknown"}).into(),
     };
     db.lock()
         .unwrap()
@@ -639,7 +639,7 @@ fn early_stop_before_job_accepted_never_reacquires_occupancy() {
             epoch: "process-epoch".into(),
             outcome: Outcome::Indeterminate,
             effect: Effect::Unknown,
-            result: json!({"status":"exited"}),
+            result: json!({"status":"exited"}).into(),
         },
         true,
     )

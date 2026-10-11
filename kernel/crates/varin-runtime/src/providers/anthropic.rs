@@ -67,6 +67,42 @@ fn push_block(messages: &mut Vec<Value>, role: &str, block: Value) {
         messages.push(json!({"role":role,"content":[block]}));
     }
 }
+fn anthropic_parts(parts: Vec<crate::output::OutputPart>) -> Result<Vec<Value>, ExecutionError> {
+    let mut blocks = Vec::new();
+    for part in parts {
+        match part {
+            crate::output::OutputPart::Text { text } => {
+                blocks.push(json!({"type":"text","text":text}))
+            }
+            crate::output::OutputPart::Media { media } => {
+                require_media_type(
+                    &media,
+                    &[
+                        "image/png",
+                        "image/jpeg",
+                        "image/webp",
+                        "image/gif",
+                        "application/pdf",
+                    ],
+                    FAMILY,
+                )?;
+                let kind = if media.media_type.starts_with("image/") {
+                    "image"
+                } else if media.media_type == "application/pdf" {
+                    "document"
+                } else {
+                    return Err(ExecutionError::new(
+                        "unsupported_media",
+                        "Anthropic media type is unsupported",
+                    ));
+                };
+                blocks.push(json!({"type":"text","text":media_label(&media)}));
+                blocks.push(json!({"type":kind,"source":{"type":"base64","media_type":media.media_type,"data":media.data_base64}}));
+            }
+        }
+    }
+    Ok(blocks)
+}
 impl ModelProvider for AnthropicProvider {
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         validate_view(view, FAMILY)?;
@@ -114,42 +150,26 @@ impl ModelProvider for AnthropicProvider {
                     json!({"type":"tool_use","id":call.call_id,"name":if self.oauth { oauth_tool_name(&call.name) } else { &call.name },"input":call.arguments})
                 }
                 Content::ToolResult { result } => {
-                    json!({"type":"tool_result","tool_use_id":result.call_id,"content":serde_json::to_string(&result.completion).map_err(|_|ExecutionError::new("serialize","invalid tool result"))?,"is_error":matches!(result.completion,ToolCompletion::Result{outcome:crate::types::Outcome::Failed|crate::types::Outcome::Cancelled|crate::types::Outcome::Indeterminate,..})})
+                    json!({"type":"tool_result","tool_use_id":result.call_id,"content":anthropic_parts(completion_parts(&result.completion))?,"is_error":matches!(result.completion,ToolCompletion::Result{outcome:crate::types::Outcome::Failed|crate::types::Outcome::Cancelled|crate::types::Outcome::Indeterminate,..})})
                 }
-                Content::Attachment {
-                    media_type,
-                    content_ref,
-                    ..
-                } => {
-                    let kind = if media_type.starts_with("image/") {
-                        "image"
-                    } else if media_type == "application/pdf" {
-                        "document"
-                    } else {
-                        return Err(ExecutionError::new(
-                            "unsupported_attachment",
-                            "Anthropic attachment type is unsupported",
-                        ));
-                    };
-                    let source = if content_ref.starts_with("https://") {
-                        json!({"type":"url","url":content_ref})
-                    } else if let Some(data) =
-                        content_ref.strip_prefix(&format!("data:{media_type};base64,"))
+                Content::Media { media } => {
+                    for block in anthropic_parts(vec![crate::output::OutputPart::Media { media }])?
                     {
-                        json!({"type":"base64","media_type":media_type,"data":data})
-                    } else {
-                        return Err(ExecutionError::new(
-                            "unsupported_attachment",
-                            "resolve local attachment references before request compilation",
-                        ));
-                    };
-                    json!({"type":kind,"source":source})
+                        push_block(&mut messages, "user", block);
+                    }
+                    continue;
+                }
+                Content::Output { output } => {
+                    for block in anthropic_parts(evidence_parts(&output, &item.provenance))? {
+                        push_block(&mut messages, "user", block);
+                    }
+                    continue;
                 }
                 Content::ProviderOnly => {
                     return Err(ExecutionError::new(
                         "missing_opaque",
                         "provider-only item has no original",
-                    ))
+                    ));
                 }
             };
             push_block(&mut messages, role, block);
@@ -360,7 +380,7 @@ impl StreamState {
                         return Err(failure(
                             "unsupported_content_delta",
                             "cannot losslessly preserve this new content delta",
-                        ))
+                        ));
                     }
                 }
             }
@@ -431,7 +451,7 @@ impl StreamState {
                             return Err(failure(
                                 "unsupported_stop_reason",
                                 "provider continuation requires explicit orchestration support",
-                            ))
+                            ));
                         }
                     });
                 }

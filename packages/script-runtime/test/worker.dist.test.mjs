@@ -46,7 +46,7 @@ function worker(t, environmentId = "test-environment") {
   return {
     child, frames, exit, closed,
     stderr: () => stderr,
-    send(frame) { child.stdin.write(encodeScriptFrame({ v: 1, environmentId, ...frame })); },
+    send(frame) { child.stdin.write(encodeScriptFrame({ v: 2, environmentId, ...frame })); },
     next() {
       if (failure) return Promise.reject(failure);
       if (frames.length) return Promise.resolve(frames.shift());
@@ -59,14 +59,14 @@ function worker(t, environmentId = "test-environment") {
 async function initialized(t) {
   const runtime = worker(t);
   runtime.send({ type: "initialize", bindingIdentity: "frozen-binding" });
-  assert.deepEqual(await runtime.next(), { v: 1, type: "ready", environmentId: "test-environment", bindingIdentity: "frozen-binding" });
+  assert.deepEqual(await runtime.next(), { v: 2, type: "ready", environmentId: "test-environment", bindingIdentity: "frozen-binding" });
   return runtime;
 }
 
 test("compiled stdio worker preserves lexical cells, output and recovery", { timeout: 10000 }, async (t) => {
   const runtime = await initialized(t);
   runtime.send({ type: "eval", cellId: "one", script: "let total = await Promise.resolve(5); const item = { total }; function add(){ item.total += 1; return item; } console.log('ready'); item" });
-  assert.equal((await runtime.next()).text, "ready");
+  assert.equal((await runtime.next()).part.text, "ready");
   assert.equal((await runtime.next()).valueText, "{ total: 5 }");
   runtime.send({ type: "eval", cellId: "syntax", script: "let bad = ;" });
   assert.match((await runtime.next()).error.message, /Unexpected token/);
@@ -96,8 +96,8 @@ test("same semantic callId has independent transport requests and original full 
   assert.notEqual(first.requestId, second.requestId);
   assert.deepEqual(first.input, second.input);
   assert.equal(first.input.originalDecoderMustSeeThis, "present");
-  runtime.send({ type: "receipt", cellId: "calls", requestId: second.requestId, receipt: { operationId: "second-original", completion: { kind: "result", outcome: "succeeded", effect: "none", content: { original: true } } } });
-  runtime.send({ type: "receipt", cellId: "calls", requestId: first.requestId, receipt: { operationId: "first-original", completion: { kind: "result", outcome: "succeeded", effect: "none", content: { original: true } } } });
+  runtime.send({ type: "receipt", cellId: "calls", requestId: second.requestId, receipt: { operationId: "second-original", completion: { kind: "result", outcome: "succeeded", effect: "none", content: { data: { original: true }, parts: [] } } } });
+  runtime.send({ type: "receipt", cellId: "calls", requestId: first.requestId, receipt: { operationId: "first-original", completion: { kind: "result", outcome: "succeeded", effect: "none", content: { data: { original: true }, parts: [] } } } });
   assert.equal((await runtime.next()).valueText, "first-original,second-original");
   runtime.child.stdin.end();
   assert.deepEqual(await runtime.exit, [0, null]);
@@ -120,7 +120,7 @@ test("worker drains unawaited calls, closes old scope, and keeps Host rejection 
   const busy = await runtime.next();
   assert.equal(busy.cellId, "busy");
   assert.equal(busy.error.code, "SCRIPT_ENVIRONMENT_BUSY");
-  runtime.send({ type: "receipt", cellId: "unawaited", requestId: request.requestId, receipt: { operationId: "original", completion: { kind: "result", outcome: "succeeded", effect: "none", content: {} } } });
+  runtime.send({ type: "receipt", cellId: "unawaited", requestId: request.requestId, receipt: { operationId: "original", completion: { kind: "result", outcome: "succeeded", effect: "none", content: { data: {}, parts: [] } } } });
   const completed = await runtime.next();
   assert.equal(completed.type, "completed");
   assert.equal(completed.cellId, "unawaited");
@@ -155,4 +155,26 @@ test("wrong environment and malformed protocol fail without echoing payload", { 
   await runtime.closed;
   assert.equal(runtime.stderr(), "Script worker protocol failed\n");
   assert.deepEqual(runtime.frames, []);
+});
+
+
+test("compiled worker publishes only explicit ordered media and keeps earlier image on failure", { timeout: 10000 }, async t => {
+  const runtime = await initialized(t);
+  runtime.send({ type: "eval", cellId: "images", script: `
+    const receipt = await tools.invoke({callId:'observe',name:'computer_observe',arguments:{}});
+    print('before'); emitImage(receipt.completion.content.parts[0].media);
+    console.log('after'); throw new Error('outer failed');
+  ` });
+  const invoke = await runtime.next();
+  const media = {media_type:'image/png',data_base64:'aW1hZ2U=',source:{kind:'operation',operation_id:'original-operation'}};
+  runtime.send({type:'receipt',cellId:'images',requestId:invoke.requestId,receipt:{operationId:'original-operation',completion:{kind:'result',outcome:'succeeded',effect:'none',content:{data:{metadata:true},parts:[{kind:'media',media}]}}}});
+  assert.deepEqual((await runtime.next()).part, {kind:'text',text:'before'});
+  assert.deepEqual((await runtime.next()).part, {kind:'media',media:{media_type:'image/png',data_base64:'aW1hZ2U='}});
+  assert.deepEqual((await runtime.next()).part, {kind:'text',text:'after'});
+  assert.equal((await runtime.next()).error.message, 'outer failed');
+  runtime.send({type:'eval',cellId:'no-forward',script:"await tools.invoke({callId:'hidden',name:'computer_observe',arguments:{}}); undefined"});
+  const hidden=await runtime.next();
+  runtime.send({type:'receipt',cellId:'no-forward',requestId:hidden.requestId,receipt:{operationId:'hidden-operation',completion:{kind:'result',outcome:'succeeded',effect:'none',content:{data:null,parts:[{kind:'media',media}]}}}});
+  assert.equal((await runtime.next()).type,'completed');
+  runtime.child.stdin.end(); await runtime.exit;
 });

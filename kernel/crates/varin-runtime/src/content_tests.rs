@@ -55,13 +55,21 @@ fn collection_db(fixture: &Fixture) -> Connection {
 fn collect(store: &ContentStore, db: &Connection) -> Result<u64> {
     // These primitive fixtures hold no live Catalog; acquire its real owner lock for the pass.
     let database = PathBuf::from(db.path().unwrap());
-    let owner = OpenOptions::new().read(true).write(true)
+    let owner = OpenOptions::new()
+        .read(true)
+        .write(true)
         .open(database.parent().unwrap().join("runtime.owner"))?;
     fs2::FileExt::try_lock_exclusive(&owner)?;
-    let report = store.prepare_collection(database, Arc::new(owner), Arc::new(AtomicBool::new(false))).run();
+    let report = store
+        .prepare_collection(database, Arc::new(owner), Arc::new(AtomicBool::new(false)))
+        .run();
     match report.status {
         crate::ContentCollectionStatus::Completed => Ok(report.removed_objects),
-        _ => Err(RuntimeError::Invalid(report.reason.unwrap_or_else(|| "collection interrupted".into()))),
+        _ => Err(RuntimeError::Invalid(
+            report
+                .reason
+                .unwrap_or_else(|| "collection interrupted".into()),
+        )),
     }
 }
 fn chunks(store: &ContentStore, reference: &Value) -> Vec<String> {
@@ -292,4 +300,88 @@ fn current_format_gc_preserves_request_original_history_output_and_input_referen
     }
     initialize(&mut db, &store).unwrap();
     assert_eq!(collect(&store, &db).unwrap(), 0);
+}
+
+#[test]
+fn typed_output_preserves_opaque_json_order_source_and_only_explicit_media_dependencies() {
+    use crate::output::*;
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    let bytes = vec![17u8; 700_000];
+    use base64::Engine;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    let source = OutputSource::Operation {
+        operation_id: "original-receipt".into(),
+    };
+    let media = IncomingMedia {
+        media_type: "image/png".into(),
+        data_base64: encoded.clone(),
+    }
+    .admit(source.clone())
+    .unwrap();
+    let opaque = json!({"image":encoded,"type":"image","media_type":"image/png","content_ref":"arbitrary caller string"});
+    let output = OutputBody {
+        data: opaque.clone(),
+        parts: vec![
+            OutputPart::Text {
+                text: "before".into(),
+            },
+            OutputPart::Media { media },
+            OutputPart::Text {
+                text: "after".into(),
+            },
+        ],
+    };
+    let reference = store.save_output(&output).unwrap();
+    assert_eq!(ContentStore::output_reference(&output).unwrap(), reference);
+    let stored = store.load_stored_output(&reference).unwrap();
+    assert_eq!(stored.data, opaque);
+    let OutputPart::Media { media } = &stored.parts[1] else {
+        panic!("ordered typed image")
+    };
+    assert_eq!(media.source, source);
+    let manifest: Manifest = serde_json::from_slice(
+        &store
+            .read_bytes(reference["content_object"].as_str().unwrap())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        manifest.dependencies,
+        vec![media.content_ref.content_object.clone()]
+    );
+    assert_eq!(store.load_output(&reference).unwrap(), output);
+    let mut all = Vec::new();
+    let first = store
+        .load_chunk(&serde_json::to_value(&media.content_ref).unwrap(), 0)
+        .unwrap();
+    assert!(first.chunk_count > 1);
+    for index in 0..first.chunk_count {
+        all.extend(
+            store
+                .load_chunk(&serde_json::to_value(&media.content_ref).unwrap(), index)
+                .unwrap()
+                .bytes,
+        );
+    }
+    assert_eq!(all, bytes);
+    assert!(matches!(
+        store.load_output_cancellable(&reference, &|| true),
+        Err(RuntimeError::DispatchCancelled)
+    ));
+    assert!(
+        serde_json::from_value::<IncomingMedia>(serde_json::to_value(media).unwrap()).is_err(),
+        "stored references are never ingress authority"
+    );
+    let item = crate::execution::ConversationItem {
+        id: "item".into(),
+        resource_activation: None,
+        provenance: crate::execution::Provenance::Assistant,
+        content: crate::execution::Content::Output { output },
+        opaque: None,
+    };
+    assert!(
+        crate::context_capacity::estimate_item(&item) > 200_000,
+        "opaque image-shaped JSON remains ordinary text material"
+    );
 }

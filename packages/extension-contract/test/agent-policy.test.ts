@@ -45,7 +45,7 @@ test('policy graph boundary distinguishes non-dispatch, committed results and ac
   }
 });
 
-test('policy v3 rejects obsolete graphs and receipts without losing JSON-null tool arguments', () => {
+test('policy v4 rejects obsolete graphs and receipts without losing JSON-null tool arguments', () => {
   const decision = { action: { kind: 'tool_graph', nodes: [{ id: 'save', depends_on: [], call: { call_id: 'save', name: 'memory', schema_version: '1', arguments: null } }] }, state: null };
   assert.equal(validateDecision(decision), true, JSON.stringify(validateDecision.errors));
   assert.deepEqual(parseVarinAgentPolicyDecision(decision), decision);
@@ -64,7 +64,7 @@ test('policy v3 rejects obsolete graphs and receipts without losing JSON-null to
 
 test('policy delivery and pause preserve text while validating their distinct receipts', () => {
   for (const value of ['', '  ', '正文\n\u0000🙂']) {
-    for (const action of [{ kind: 'deliver', text: value }, { kind: 'pause', reason: value }]) {
+    for (const action of [{ kind: 'deliver', output: { data: null, parts: [{ kind: 'text', text: value }] } }, { kind: 'pause', reason: value }]) {
       const raw = { action, state: null };
       assert.equal(validateDecision(raw), true, JSON.stringify(validateDecision.errors));
       assert.deepEqual(parseVarinAgentPolicyDecision(raw), raw);
@@ -85,7 +85,7 @@ test('policy delivery and pause preserve text while validating their distinct re
   }
 });
 
-test('v3 transition schemas carry only private state and reject actions or inferred compatibility', async () => {
+test('v4 transition schemas carry only private state and reject actions or inferred compatibility', async () => {
   const { parseVarinAgentPolicyTransitionInput, parseVarinAgentPolicyTransition, parseVarinAgentPolicyDescription } = await import('../src/index.js');
   const raw = { ...input({ kind: 'not_dispatched', reason: 'Denied' }), from: { identity: { name: 'old', version: '1' }, declaredIdentity: null } };
   const validateTransitionInput = ajv.compile(VARIN_AGENT_POLICY_CONTRACT.transitionState.inputSchema);
@@ -102,4 +102,18 @@ test('v3 transition schemas carry only private state and reject actions or infer
   }
   assert.throws(() => parseVarinAgentPolicyDescription({ identity: { name: 'v2', version: '1' }, configuration: null }));
   assert.throws(() => parseVarinAgentPolicyTransitionInput({ ...raw, from: { ...raw.from, checkpoint: 'plugin-claim' } }));
+});
+
+test('typed media admission validates canonical bytes before accepting policy or SDK output', async () => {
+  const { parseIncomingOutputPart } = await import('../src/index.js');
+  for (const data_base64 of ['aW1hZ2U=', 'AA==', 'AAA=', 'AAAA']) {
+    const part = { kind: 'media', media: { media_type: 'image/png', data_base64 } };
+    assert.deepEqual(parseIncomingOutputPart(part), part);
+    assert.deepEqual(parseVarinAgentPolicyDecision({ action: { kind: 'deliver', output: { data: null, parts: [part] } }, state: null }).action, { kind: 'deliver', output: { data: null, parts: [part] } });
+  }
+  for (const data_base64 of ['', 'not base64!', 'AB==', 'AAB=', 'aW1hZ2U', 'aW1hZ2U=\n', '====']) {
+    const part = { kind: 'media', media: { media_type: 'image/png', data_base64 } };
+    assert.throws(() => parseIncomingOutputPart(part), /Invalid output part/);
+    assert.throws(() => parseVarinAgentPolicyDecision({ action: { kind: 'deliver', output: { data: { unchanged: true }, parts: [part] } }, state: null }), /Invalid output part/);
+  }
 });

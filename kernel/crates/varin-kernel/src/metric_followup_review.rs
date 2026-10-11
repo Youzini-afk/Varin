@@ -32,8 +32,8 @@ fn real_child_metric_waits_use_both_origins_and_deliver_the_first_edge_once() {
                 }
             ) == model
         );
-        assert!(db
-            .apply_metric_observation(FollowupMetricObservation {
+        assert!(
+            db.apply_metric_observation(FollowupMetricObservation {
                 key: w.key,
                 expected: w.metric,
                 gap: false,
@@ -53,7 +53,8 @@ fn real_child_metric_waits_use_both_origins_and_deliver_the_first_edge_once() {
                     value: Some(99.into())
                 }
             })
-            .unwrap());
+            .unwrap()
+        );
         drop(db);
         drop(owner);
         f.assembly.runtime.reconcile_observations().unwrap();

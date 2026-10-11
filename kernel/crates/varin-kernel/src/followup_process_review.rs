@@ -189,7 +189,7 @@ fn text(completion: &ToolCompletion) -> String {
     else {
         panic!("successful real process output: {completion:?}")
     };
-    let bytes = content["chunks"]
+    let bytes = content.data["chunks"]
         .as_array()
         .unwrap()
         .iter()
@@ -486,7 +486,7 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
         let ToolCompletion::Result { content, .. } = &checked else {
             unreachable!()
         };
-        assert_eq!(content["process"]["writerActive"], true);
+        assert_eq!(content.data["process"]["writerActive"], true);
     }
     close_call(&owner, &check_context, &read, checked, true);
     // The actual successor tool registers against the original accepted Thread process owner.
@@ -607,7 +607,7 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
     let completion = loop {
         let result = bound.execute(&context, &contract, &token).completion;
         if let ToolCompletion::Result { content, .. } = &result {
-            if content["process"]["outputComplete"] == true {
+            if content.data["process"]["outputComplete"] == true {
                 break result;
             }
         }
@@ -775,7 +775,7 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
     let ToolCompletion::Result { content, .. } = &output else {
         unreachable!()
     };
-    assert_eq!(content["process"]["kernelEpoch"], EPOCH);
+    assert_eq!(content.data["process"]["kernelEpoch"], EPOCH);
     drop(second_call);
     drop(second);
     drop(rebound_call);
@@ -995,7 +995,7 @@ fn native_input_uses_original_model_intent_and_guardian_receipt_then_reads_same_
     );
     let completion = prepared.execute(&context, &contract, &token).completion;
     assert!(
-        matches!(&completion,ToolCompletion::Result{outcome:varin_runtime::Outcome::Succeeded,effect:varin_runtime::Effect::Confirmed,content} if content["confirmedBytes"]==14&&content["eofApplied"]==true),
+        matches!(&completion,ToolCompletion::Result{outcome:varin_runtime::Outcome::Succeeded,effect:varin_runtime::Effect::Confirmed,content} if content.data["confirmedBytes"]==14&&content.data["eofApplied"]==true),
         "{completion:?}"
     );
     // Exact endpoint retry obtains the original process-domain receipt, never more bytes.
@@ -1141,7 +1141,7 @@ fn native_input_uses_original_model_intent_and_guardian_receipt_then_reads_same_
         ToolCompletion::Result {
             outcome: varin_runtime::Outcome::Indeterminate,
             effect: varin_runtime::Effect::Unknown,
-            content: json!({"error":"executor response was lost"}),
+            content: json!({"error":"executor response was lost"}).into(),
         },
         false,
     );

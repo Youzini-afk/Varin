@@ -1,3 +1,4 @@
+import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -276,7 +277,7 @@ it('tool loop reads a grant-scoped fixed file revision and returns its receipt t
   const continuation = provider.requests[1]!.input as Array<Record<string, unknown>>;
   const result = continuation.find(item => item.type === 'function_call_output');
   expect(result?.call_id).toBe('file-read-1');
-  expect(String(result?.output)).toContain('fixed file content');
+  expect(responsesMetadataText(result?.output)).toContain('fixed file content');
   expect((await f.runtimeClient.history('tool-branch')).some(item => item.source === 'tool')).toBe(true);
 }, 30_000);
 
@@ -302,7 +303,7 @@ it.each([false, true])('tool process settles OS and durable operation evidence (
   expect(provider.requests).toHaveLength(2);
   const continuation = provider.requests[1]!.input as Array<Record<string, unknown>>;
   const result = continuation.find(item => item.type === 'function_call_output');
-  const accepted = JSON.parse(String(result?.output)) as { operation_id: string };
+  const accepted = JSON.parse(responsesMetadataText(result?.output)) as { operation_id: string };
   expect(typeof accepted.operation_id).toBe('string');
   const processIdentity = { workspaceId: 'process-workspace', processId: accepted.operation_id };
   try {
@@ -504,7 +505,7 @@ it('model interrupt preserves an accepted background process job until explicit 
   await f.runtimeClient.startRun(run.run_id, undefined, { grantId: grant.grantId, runId: run.run_id, threadId: 'interrupt-job-thread', workspaceId: 'interrupt-job-workspace', executionWorkspaceId: 'interrupt-job-workspace', rootId: root.rootId, sourceMode: 'live_root', liveRoot: { hostId: 'client-review', canonicalRoot: root.canonicalRoot, rootId: root.rootId }, enabledTools: ['process_spawn'] });
   await expect.poll(() => provider.requests.length).toBe(2);
   const secondInput = provider.requests[1]!.input as Array<Record<string, unknown>>;
-  const receipt = JSON.parse(String(secondInput.find(item => item.type === 'function_call_output')?.output)) as { operation_id: string };
+  const receipt = JSON.parse(responsesMetadataText(secondInput.find(item => item.type === 'function_call_output')?.output)) as { operation_id: string };
   const identity = { workspaceId: 'interrupt-job-workspace', processId: receipt.operation_id };
   try {
     expect((await actor.processInspect(identity)).writerActive).toBe(true);
@@ -607,7 +608,7 @@ it('source launch reads shell changes from materialized disk while fixed-branch 
   const provider = await localProvider((body, response) => {
     const fixed = body.model === 'fixed-source-model';
     const output = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
-    const result = output ? JSON.parse(String(output.output)) as { operation_id?: string; content?: { writerActive?: boolean } } : undefined;
+    const result = output ? JSON.parse(responsesMetadataText(output.output)) as { operation_id?: string; content?: { writerActive?: boolean } } : undefined;
     if (!output) {
       if (fixed) toolResponse(response, 'file_read', { path: 'source.txt' }, ++serial);
       else toolResponse(response, 'process_spawn', { cwd: '', command: process.execPath, args: ['-e', 'require("node:fs").writeFileSync("source.txt", "changed by actual shell")'], mode: 'pipe' }, ++serial);
@@ -618,7 +619,7 @@ it('source launch reads shell changes from materialized disk while fixed-branch 
       if (result!.content!.writerActive) toolResponse(response, 'process_inspect', { processId }, ++serial);
       else toolResponse(response, 'file_read', { path: 'source.txt' }, ++serial);
     } else {
-      if (fixed) fixedRead = String(output.output); else materializedRead = String(output.output);
+      if (fixed) fixedRead = responsesMetadataText(output.output); else materializedRead = responsesMetadataText(output.output);
       completeLocalResponse(response, `source-answer-${++serial}`, 'source read finished');
     }
   });
@@ -689,13 +690,13 @@ it('file write and edit return real applied receipts while a stale read version 
       if (!successorReadRequested) { successorReadRequested = true; toolResponse(response, 'file_read', { path: 'source.txt' }, 100); }
       else {
         const output = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
-        successorRead = String(output?.output);
+        successorRead = responsesMetadataText(output?.output);
         completeLocalResponse(response, 'mutation-successor-answer', 'successor read finished');
       }
       return;
     }
     const output = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
-    if (output) receipts.push(JSON.parse(String(output.output)) as (typeof receipts)[number]);
+    if (output) receipts.push(JSON.parse(responsesMetadataText(output.output)) as (typeof receipts)[number]);
     const last = receipts.at(-1);
     turn++;
     if (turn === 1) toolResponse(response, 'file_read', { path: 'source.txt' }, turn);

@@ -20,10 +20,15 @@ impl OperationResultMetadata {
             )),
         }
     }
-    pub(crate) fn load(self, content: &crate::content::ContentStore) -> Result<Value> {
+    pub(crate) fn load(
+        self,
+        content: &crate::content::ContentStore,
+    ) -> Result<crate::output::OperationResult> {
         match self {
-            Self::Control { value } => Ok(value),
-            Self::Content { reference } => content.load(&reference),
+            Self::Control { value } => Ok(crate::output::OperationResult::Control { value }),
+            Self::Content { reference } => Ok(crate::output::OperationResult::Output {
+                output: content.load_stored_output(&reference)?,
+            }),
         }
     }
 }
@@ -89,7 +94,7 @@ impl ToolCompletionMetadata {
             } => ToolCompletionMetadata::Result {
                 outcome: *outcome,
                 effect: *effect,
-                content_ref: content.save(body)?,
+                content_ref: content.save_output(body)?,
             },
             ToolCompletion::JobAccepted {
                 operation_id,
@@ -102,7 +107,7 @@ impl ToolCompletionMetadata {
                 phase: phase.clone(),
                 effect: *effect,
                 lifetime: *lifetime,
-                content_ref: body.as_ref().map(|v| content.save(v)).transpose()?,
+                content_ref: body.as_ref().map(|v| content.save_output(v)).transpose()?,
             },
         })
     }
@@ -118,7 +123,7 @@ impl ToolCompletionMetadata {
             } => ToolCompletion::Result {
                 outcome,
                 effect,
-                content: content.load(&content_ref)?,
+                content: content.load_output(&content_ref)?,
             },
             ToolCompletionMetadata::JobAccepted {
                 operation_id,
@@ -131,7 +136,41 @@ impl ToolCompletionMetadata {
                 phase,
                 effect,
                 lifetime,
-                content: content_ref.map(|v| content.load(&v)).transpose()?,
+                content: content_ref.map(|v| content.load_output(&v)).transpose()?,
+            },
+        })
+    }
+    pub(crate) fn load_stored(
+        self,
+        content: &crate::content::ContentStore,
+    ) -> Result<ToolCompletion<crate::output::StoredMedia>> {
+        Ok(match self {
+            ToolCompletionMetadata::NotDispatched { reason_ref } => ToolCompletion::NotDispatched {
+                reason: serde_json::from_value(content.load(&reason_ref)?)?,
+            },
+            ToolCompletionMetadata::Result {
+                outcome,
+                effect,
+                content_ref,
+            } => ToolCompletion::Result {
+                outcome,
+                effect,
+                content: content.load_stored_output(&content_ref)?,
+            },
+            ToolCompletionMetadata::JobAccepted {
+                operation_id,
+                phase,
+                effect,
+                lifetime,
+                content_ref,
+            } => ToolCompletion::JobAccepted {
+                operation_id,
+                phase,
+                effect,
+                lifetime,
+                content: content_ref
+                    .map(|v| content.load_stored_output(&v))
+                    .transpose()?,
             },
         })
     }
@@ -159,9 +198,25 @@ pub struct PreparedExternalReceipt {
     pub(super) _publication: crate::content::ContentPublication,
 }
 impl ResultContentPreparation {
+    /// Explicit non-output input/control material; never interpret opaque JSON as an output body.
+    pub fn write_data(self, data: &Value) -> Result<PreparedOperationResult> {
+        Ok(PreparedOperationResult {
+            reference: self.content.save(data)?,
+            _publication: self.publication,
+        })
+    }
+    pub fn write_output(
+        self,
+        output: &crate::output::OutputBody,
+    ) -> Result<PreparedOperationResult> {
+        Ok(PreparedOperationResult {
+            reference: self.content.save_output(output)?,
+            _publication: self.publication,
+        })
+    }
     pub fn write_result(self, result: &Value) -> Result<PreparedOperationResult> {
         Ok(PreparedOperationResult {
-            reference: self.content.save(result)?,
+            reference: self.content.save_output(&result.clone().into())?,
             _publication: self.publication,
         })
     }
@@ -177,13 +232,37 @@ impl ResultContentPreparation {
                 epoch: receipt.epoch,
                 outcome: receipt.outcome,
                 effect: receipt.effect,
-                result_ref: self.content.save(&receipt.result)?,
+                result_ref: self.content.save_output(&receipt.result)?,
             },
             _publication: self.publication,
         })
     }
 }
 impl Catalog {
+    /// Capture the acceptance owned by the actual Job domain. A HostJob may be
+    /// accepted after an Unknown invocation completion was already delivered;
+    /// its acceptance_ref, rather than that first completion, remains canonical.
+    pub fn capture_job_acceptance(&self, operation_id: &str) -> Result<ToolCompletionRead> {
+        let operation = self.operation(operation_id)?;
+        if operation.host_job.is_none() && operation.managed_process.is_some() {
+            self.capture_call_completion(operation_id)
+        } else {
+            self.host_job_acceptance(operation_id)
+        }
+    }
+    /// Read the exact invocation completion already committed by its owning domain.
+    /// Capturing is a short metadata operation; the existing reader resolves bytes off-lock.
+    pub fn capture_call_completion(&self, operation_id: &str) -> Result<ToolCompletionRead> {
+        let operation = self.operation(operation_id)?;
+        let completion = operation
+            .call_completion
+            .ok_or_else(|| RuntimeError::NotFound("canonical invocation completion".into()))?;
+        Ok(ToolCompletionRead {
+            completion,
+            content: self.content.clone(),
+            _publication: self.content.begin_publication(),
+        })
+    }
     pub fn prepare_result_content(&self) -> ResultContentPreparation {
         ResultContentPreparation {
             content: self.content.clone(),

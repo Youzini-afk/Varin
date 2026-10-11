@@ -175,7 +175,7 @@ impl AgentPolicy for Sequence {
                 {
                     return Ok(PolicyDecision {
                         action: PolicyAction::Deliver {
-                            text: "unexecuted premature proposal".into(),
+                            output: OutputBody::text("unexecuted premature proposal"),
                         },
                         state: json!({"stage":777}),
                     });
@@ -231,10 +231,16 @@ impl AgentPolicy for Sequence {
                 index: 0,
             },
             4 => {
-                let PolicyEvent::ResultChunk { bytes, .. } = event else {
+                let PolicyEvent::ResultChunk {
+                    format: varin_runtime::output::PolicyResultFormat::OutputBody,
+                    bytes,
+                    ..
+                } = event
+                else {
                     panic!("read original status result")
                 };
-                let value: Value = serde_json::from_slice(bytes).unwrap();
+                let body: OutputBody = serde_json::from_slice(bytes).unwrap();
+                let value = body.data;
                 assert_eq!(value["operationId"], state["question"]);
                 match value["status"].as_str().unwrap() {
                     "answered" => {
@@ -260,7 +266,10 @@ impl AgentPolicy for Sequence {
                 } else {
                     next["stage"] = json!(9);
                     PolicyAction::Deliver {
-                        text: format!("Question status: {}", value["status"].as_str().unwrap()),
+                        output: OutputBody::text(format!(
+                            "Question status: {}",
+                            value["status"].as_str().unwrap()
+                        )),
                     }
                 }
             }
@@ -293,10 +302,16 @@ impl AgentPolicy for Sequence {
                 }
             }
             51 => {
-                let PolicyEvent::ResultChunk { bytes, .. } = event else {
+                let PolicyEvent::ResultChunk {
+                    format: varin_runtime::output::PolicyResultFormat::OutputBody,
+                    bytes,
+                    ..
+                } = event
+                else {
                     panic!("read original input receipt")
                 };
-                let receipt: Value = serde_json::from_slice(bytes).unwrap();
+                let body: OutputBody = serde_json::from_slice(bytes).unwrap();
+                let receipt = body.data;
                 assert_eq!(receipt["processId"], state["processId"]);
                 assert_eq!(receipt["state"], "applied");
                 assert_eq!(receipt["confirmedBytes"], 22);
@@ -332,14 +347,20 @@ impl AgentPolicy for Sequence {
                 index: 0,
             },
             8 => {
-                let PolicyEvent::ResultChunk { bytes, .. } = event else {
+                let PolicyEvent::ResultChunk {
+                    format: varin_runtime::output::PolicyResultFormat::OutputBody,
+                    bytes,
+                    ..
+                } = event
+                else {
                     panic!("read process result")
                 };
-                let value: Value = serde_json::from_slice(bytes).unwrap();
+                let body: OutputBody = serde_json::from_slice(bytes).unwrap();
+                let value = body.data;
                 assert_eq!(value["processId"], state["processId"]);
                 next["processResult"] = value;
                 PolicyAction::Deliver {
-                    text: "Observed the original process terminal receipt".into(),
+                    output: OutputBody::text("Observed the original process terminal receipt"),
                 }
             }
             9 => {
@@ -1204,7 +1225,7 @@ impl ToolExecutor for FailureTool {
         ToolCompletion::Result {
             outcome: Outcome::Indeterminate,
             effect: Effect::Unknown,
-            content: json!({"status":"unknown"}),
+            content: json!({"status":"unknown"}).into(),
         }
     }
 }

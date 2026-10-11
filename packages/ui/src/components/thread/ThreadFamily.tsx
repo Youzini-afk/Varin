@@ -1,17 +1,17 @@
 import React from 'react';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
-import type { ThreadFamilyAPI, ThreadIdentity } from '@varin/application-client';
+import type { ThreadFamilyAPI, ThreadIdentity, ThreadsAPI } from '@varin/application-client';
 import type { FamilyList, FamilyMember, FamilyRuns, FamilyRead, FamilyReadQuery, FamilyItem } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
-import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
-import { historyText } from '@/lib/agent-runtime/thread-projection';
+import { historyParts } from '@/lib/agent-runtime/thread-content';
+import { ThreadContent } from './ThreadContent';
 
-type Props = { api: ThreadFamilyAPI; identity: ThreadIdentity };
+type Props = { api: ThreadFamilyAPI; mediaRead: ThreadsAPI['mediaRead']; identity: ThreadIdentity };
 /** A follow-up's actual bound Run uses the same read-only history and original-record reader. */
-export function ThreadRunHistory({ api, identity, runId }: Props & { runId: string }) {
+export function ThreadRunHistory({ api, mediaRead, identity, runId }: Props & { runId: string }) {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   return <FamilyHistory key={JSON.stringify([host, identity.threadId, identity.branchId, runId])}
-    api={api} identity={identity} host={host} threadId={identity.threadId} branchId={identity.branchId} fixedRunId={runId} />;
+    api={api} mediaRead={mediaRead} identity={identity} host={host} threadId={identity.threadId} branchId={identity.branchId} fixedRunId={runId} />;
 }
 /** Other agents' persisted conversation is data. This panel never activates or controls their Runs. */
 export function ThreadFamily(props: Props) {
@@ -19,14 +19,14 @@ export function ThreadFamily(props: Props) {
   const identity = React.useMemo(() => ({ runtime: 'agent' as const, threadId: props.identity.threadId, branchId: props.identity.branchId }), [props.identity.threadId, props.identity.branchId]);
   return <FamilyCard key={JSON.stringify([host, props.identity.threadId, props.identity.branchId])} {...props} identity={identity} host={host} />;
 }
-function FamilyCard({ api, identity, host }: Props & { host: number }) {
+function FamilyCard({ api, mediaRead, identity, host }: Props & { host: number }) {
   const [open, setOpen] = React.useState(false);
   return <section aria-label="Task family" className="mx-auto max-w-3xl space-y-2 rounded border p-3 text-sm">
     <Button variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpen(value => !value)}>{open ? 'Hide task family' : 'Browse task family'}</Button>
-    {open && <FamilyMembers api={api} identity={identity} host={host} />}
+    {open && <FamilyMembers api={api} mediaRead={mediaRead} identity={identity} host={host} />}
   </section>;
 }
-function FamilyMembers({ api, identity, host }: Props & { host: number }) {
+function FamilyMembers({ api, mediaRead, identity, host }: Props & { host: number }) {
   const [version, setVersion] = React.useState(0);
   const [family, setFamily] = React.useState<FamilyList>();
   const [error, setError] = React.useState(false);
@@ -50,20 +50,20 @@ function FamilyMembers({ api, identity, host }: Props & { host: number }) {
         <span className="ml-2">{member.state}</span>
         <p className="text-xs break-all">{member.threadId}{member.parentThreadId ? ` · parent: ${member.parentThreadId}` : ' · task root'}</p>
       </li>)}</ul>
-      {selected && <FamilyConversation key={selected.threadId} api={api} identity={identity} host={host} member={selected} />}
+      {selected && <FamilyConversation key={selected.threadId} api={api} mediaRead={mediaRead} identity={identity} host={host} member={selected} />}
     </>}
   </>;
 }
-function FamilyConversation({ api, identity, host, member }: Props & { host: number; member: FamilyMember }) {
+function FamilyConversation({ api, mediaRead, identity, host, member }: Props & { host: number; member: FamilyMember }) {
   const [branchId, setBranchId] = React.useState(member.branches[0]?.branchId ?? '');
   return <div className="space-y-2 border-t pt-2">
     <label>Conversation branch <select aria-label="Family branch" value={branchId} onChange={event => setBranchId(event.target.value)}>
       {member.branches.map(branch => <option key={branch.branchId} value={branch.branchId}>{branch.branchId}{branch.activeRunId ? ' · active' : ''}</option>)}
     </select></label>
-    {branchId ? <FamilyHistory key={branchId} api={api} identity={identity} host={host} threadId={member.threadId} branchId={branchId} /> : <p>No branches.</p>}
+    {branchId ? <FamilyHistory key={branchId} api={api} mediaRead={mediaRead} identity={identity} host={host} threadId={member.threadId} branchId={branchId} /> : <p>No branches.</p>}
   </div>;
 }
-function FamilyHistory({ api, identity, host, threadId, branchId, fixedRunId }: Props & { host: number; threadId: string; branchId: string; fixedRunId?: string }) {
+function FamilyHistory({ api, mediaRead, identity, host, threadId, branchId, fixedRunId }: Props & { host: number; threadId: string; branchId: string; fixedRunId?: string }) {
   const [runs, setRuns] = React.useState<FamilyRuns>();
   const [runCursor, setRunCursor] = React.useState<string>();
   const [runsRevision, setRunsRevision] = React.useState(0);
@@ -113,7 +113,7 @@ function FamilyHistory({ api, identity, host, threadId, branchId, fixedRunId }: 
         <p className="text-xs break-all">{item.source} · {item.kind} · {item.runId} · {item.id}</p>
         {item.tool && <p className="text-xs break-all">Tool {item.tool.role}: {item.tool.callId} · request {item.tool.requestId}</p>}
         {item.bodyTruncated ? <><p>Partial preview · {item.bodyBytes} bytes total</p><pre className="whitespace-pre-wrap break-all">{item.preview}</pre></>
-          : <MarkdownRenderer messageId={`family:${item.id}`} content={historyText(item.body) || JSON.stringify(item.body)} />}
+          : <ThreadContent api={{ mediaRead }} identity={identity} holder={{ kind: 'family', threadId, branchId, ...runScope, anchor: page.anchor, itemId: item.id }} parts={historyParts(item.body, item.source)} messageId={`family:${item.id}`} />}
         <Button size="sm" variant="ghost" onClick={() => setItemId(item.id)}>Read original record</Button>
       </article>)}
       <div className="flex gap-2">
@@ -121,7 +121,7 @@ function FamilyHistory({ api, identity, host, threadId, branchId, fixedRunId }: 
         {page.hasEarlier && page.items[0] && <Button size="sm" variant="ghost" onClick={() => setRead(value => ({ revision: value.revision + 1, anchor: page.anchor, query: { kind: 'range', beforeId: page.items[0]!.id, direction: 'older' } }))}>Earlier records</Button>}
         {page.hasLater && page.items.at(-1) && <Button size="sm" variant="ghost" onClick={() => setRead(value => ({ revision: value.revision + 1, anchor: page.anchor, query: { kind: 'range', afterId: page.items.at(-1)!.id, direction: 'newer' } }))}>Later records</Button>}
       </div>
-      {itemId && <FamilyOriginal key={`${page.anchor}:${itemId}`} api={api} identity={identity} host={host} request={{ threadId, branchId, ...runScope, anchor: page.anchor, itemId }} />}
+      {itemId && <FamilyOriginal key={`${page.anchor}:${itemId}`} api={api} mediaRead={mediaRead} identity={identity} host={host} request={{ threadId, branchId, ...runScope, anchor: page.anchor, itemId }} />}
     </>}
   </div>;
 }

@@ -1,7 +1,7 @@
 //! Frozen summary excerpts. Partitioning is preparation, not a token measurement or an input limit.
 use crate::{catalog::RuntimeError, context_capacity::estimate_item, context_job::*, execution::*};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 type Result<T> = std::result::Result<T, RuntimeError>;
 #[derive(Deserialize)]
@@ -35,7 +35,7 @@ fn excerpts(
     item.opaque = None;
     // Media stays media. Quoting an inline payload as text would inflate context and lose the
     // selected adapter's multimodal input. Its token cost is unknown, not assigned a fake price.
-    if matches!(item.content, Content::Attachment { .. }) {
+    if matches!(item.content, Content::Media { .. }) {
         return Ok(vec![ConversationItem {
             resource_activation: None,
             id: format!("context-job:{key}:source:{}", item.id),
@@ -45,6 +45,52 @@ fn excerpts(
             content: item.content,
             opaque: None,
         }]);
+    }
+    // Tool-free summary evidence preserves explicitly ordered parts without inventing calls.
+    let output = match &item.content {
+        Content::Output { output } => Some(output.clone()),
+        Content::ToolResult { result } => match &result.completion {
+            ToolCompletion::Result { content, .. } => Some(content.clone()),
+            ToolCompletion::JobAccepted { content, .. } => content.clone(),
+            _ => None,
+        },
+        _ => None,
+    };
+    if let Some(output) = output.filter(|output| !output.parts.is_empty()) {
+        let mut metadata = item.clone();
+        match &mut metadata.content {
+            Content::Output { output } => output.parts.clear(),
+            Content::ToolResult { result } => match &mut result.completion {
+                ToolCompletion::Result { content, .. } => content.parts.clear(),
+                ToolCompletion::JobAccepted {
+                    content: Some(content),
+                    ..
+                } => content.parts.clear(),
+                _ => (),
+            },
+            _ => (),
+        }
+        let mut result = excerpts(key, metadata, budget)?;
+        for (index, part) in output.parts.into_iter().enumerate() {
+            let content = match part {
+                OutputPart::Text { text } => Content::Text { text },
+                OutputPart::Media { media } => Content::Media { media },
+            };
+            result.extend(excerpts(
+                key,
+                ConversationItem {
+                    resource_activation: None,
+                    id: format!("{}:part:{index}", item.id),
+                    provenance: Provenance::ExternalData {
+                        source: format!("history:{}", item.id),
+                    },
+                    content,
+                    opaque: None,
+                },
+                budget,
+            )?);
+        }
+        return Ok(result);
     }
     let whole = data(key, &item, "whole", serde_json::to_string(&item)?);
     let Some(budget) = budget.filter(|budget| estimate_item(&whole) > *budget) else {
@@ -174,7 +220,7 @@ pub(crate) fn summary_text(
             _ => {
                 return Err(RuntimeError::Invalid(
                     "summary contains an action or attachment".into(),
-                ))
+                ));
             }
         }
     }
@@ -207,10 +253,16 @@ mod tests {
             provenance: Provenance::UserInstruction {
                 input_id: "original-input".into(),
             },
-            content: Content::Attachment {
-                media_type: "image/png".into(),
-                content_ref: "data:image/png;base64,iVBORw0KGgo=".into(),
-                source: "original evidence".into(),
+            content: Content::Media {
+                media: crate::output::ResolvedMedia {
+                    media_type: "image/png".into(),
+                    data_base64: "iVBORw0KGgo=".into(),
+                    source: crate::output::OutputSource::Conversation {
+                        provenance: Provenance::UserInstruction {
+                            input_id: "original-input".into(),
+                        },
+                    },
+                },
             },
             opaque: None,
         };
@@ -241,15 +293,17 @@ mod tests {
                     offset += excerpt.len();
                     assert_eq!(fragment["utf8_range"]["end"], offset);
                 }
-                Content::Attachment { .. } => assert_eq!(item.content, image.content),
+                Content::Media { .. } => assert_eq!(item.content, image.content),
                 _ => panic!("summary source acquired executable content"),
             }
             assert!(matches!(item.provenance, Provenance::ExternalData { .. }));
         }
         assert_eq!(reconstructed, body);
-        assert!(parts
-            .iter()
-            .flatten()
-            .any(|item| item.content == image.content));
+        assert!(
+            parts
+                .iter()
+                .flatten()
+                .any(|item| item.content == image.content)
+        );
     }
 }

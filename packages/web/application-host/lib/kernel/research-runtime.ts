@@ -23,7 +23,7 @@ export const RESEARCH_CAPABILITY = 'research.experiments';
 const DOMAIN = 'research.experiment';
 const DOMAIN_VERSION = 1;
 type Receipt = NonNullable<Awaited<ReturnType<ExperimentService['nativeReceipt']>>>;
-const result = (content: unknown, effect: 'none' | 'confirmed' = 'none'): ToolExecutionReceipt => ({ executor_stopped: true, completion: { kind: 'result', outcome: 'succeeded', effect, content } });
+const result = (content: unknown, effect: 'none' | 'confirmed' = 'none'): ToolExecutionReceipt => ({ executor_stopped: true, completion: { kind: 'result', outcome: 'succeeded', effect, content: { data: content, parts: [] } } });
 export function createResearchRuntime(options: {
   kernel: KernelClient;
   runtime: AgentRuntimeClient;
@@ -63,7 +63,7 @@ export function createResearchRuntime(options: {
   const binding = (receipt: Receipt): HostJobBinding => ({ operationId: receipt.owner.operationId, executionOwner: receipt.owner.executionOwner, domain: DOMAIN, domainVersion: DOMAIN_VERSION, workspaceId: receipt.caller.workspaceId, subjectId: receipt.attempt.attemptId });
   const inspect = (operationId: string) => request<Operation, 'runtime.operation.inspect'>('runtime.operation.inspect', { operationId });
   const handoff = async (receipt: Receipt, known?: HostJobPending): Promise<HostJobPending> => {
-    let op = known?.accepted ? known : await request<HostJobPending, 'runtime.host_job.accept'>('runtime.host_job.accept', { binding: binding(receipt), content: receipt.accepted });
+    let op = known?.accepted ? known : await request<HostJobPending, 'runtime.host_job.accept'>('runtime.host_job.accept', { binding: binding(receipt), content: { data: receipt.accepted, parts: [] } });
     if (receipt.attempt.cancelRequested && !op.cancelRequested) {
       await runtime.cancelOperation(op.binding.operationId);
       op = { ...op, cancelRequested: true };
@@ -72,7 +72,7 @@ export function createResearchRuntime(options: {
       await experiments.cancel(receipt.caller, receipt.attempt.attemptId);
     if (receipt.executorStopped && !op.executorStopped) {
       const state = receipt.attempt.state;
-      op = await request<HostJobPending, 'runtime.host_job.terminal'>('runtime.host_job.terminal', { binding: binding(receipt), outcome: state === 'completed' ? 'succeeded' : state === 'cancelled' ? 'cancelled' : 'failed', effect: 'confirmed', content: { attempt: receipt.attempt }, executorStopped: true });
+      op = await request<HostJobPending, 'runtime.host_job.terminal'>('runtime.host_job.terminal', { binding: binding(receipt), outcome: state === 'completed' ? 'succeeded' : state === 'cancelled' ? 'cancelled' : 'failed', effect: 'confirmed', content: { data: { attempt: receipt.attempt }, parts: [] }, executorStopped: true });
       await runtime.reconcileObservations();
     }
     return op;
@@ -105,7 +105,7 @@ export function createResearchRuntime(options: {
         else if (op.accepted)
           throw new Error('Accepted original experiment subject is unavailable');
         else if (!admitting.has(op.binding.operationId) && !userAdmissions.has(subjectKey(op.binding.workspaceId, op.binding.subjectId)) && await experiments.reconcileUnaccepted(await originalCaller(op), op.binding.subjectId)) {
-          await request<HostJobPending, 'runtime.host_job.terminal'>('runtime.host_job.terminal', { binding: op.binding, outcome: op.cancelRequested ? 'cancelled' : 'failed', effect: 'none', executorStopped: true, content: { status: 'not_accepted', sourceAdmissionDrained: true } });
+          await request<HostJobPending, 'runtime.host_job.terminal'>('runtime.host_job.terminal', { binding: op.binding, outcome: op.cancelRequested ? 'cancelled' : 'failed', effect: 'none', executorStopped: true, content: { data: { status: 'not_accepted', sourceAdmissionDrained: true }, parts: [] } });
         }
       }
       catch (error) {
@@ -259,7 +259,7 @@ export function createResearchRuntime(options: {
           const submitted = await submit(scope, owner, { ...params, requestId: typeof params.requestId === 'string' ? params.requestId : a.operationId }, context.signal);
           if (submitted.receipt.owner.operationId !== a.operationId)
             return result({ ...submitted.accepted, operationId: submitted.receipt.owner.operationId }, 'confirmed');
-          return { executor_stopped: false, completion: { kind: 'job_accepted', operation_id: a.operationId, phase: 'accepted', effect: 'confirmed', lifetime: 'thread', content: submitted.receipt.accepted } };
+          return { executor_stopped: false, completion: { kind: 'job_accepted', operation_id: a.operationId, phase: 'accepted', effect: 'confirmed', lifetime: 'thread', content: { data: submitted.receipt.accepted, parts: [] } } };
         }
         await experiments.get(caller(scope, owner), params.attemptId as string);
         const target = await experiments.nativeReceipt(scope.source.workspace_id, params.attemptId as string);

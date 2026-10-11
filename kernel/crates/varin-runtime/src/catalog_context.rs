@@ -244,7 +244,7 @@ pub(super) fn initialize(tx: &Transaction<'_>) -> Result<()> {
         Some(_) => {
             return Err(RuntimeError::Invalid(
                 "unsupported context checkpoint format; data preserved".into(),
-            ))
+            ));
         }
     }
     for (table, expected) in [
@@ -680,7 +680,7 @@ impl ContextRead {
                         opaque: None,
                     });
                 }
-                let material: Vec<ConversationItem> = serde_json::from_value(content.load(&part)?)?;
+                let material = content.load_items(&part, &|| false)?;
                 history.extend(material);
                 history.push(ConversationItem {
                     resource_activation: None,

@@ -44,7 +44,7 @@ const renderRequestUnion = () => {
 };
 const renderMethodParams = () => `export type KernelMethodParams = {\n${Object.entries(methodParams).map(([method, paramsType]) => `  ${JSON.stringify(method)}: ${paramsType};`).join('\n')}\n};`;
 const dtoEntries = Object.entries(schema.dto ?? {}).filter(([name]) => !(schema.requestUnion && name === 'KernelRequest'));
-const extensionToolNames = ['Outcome', 'Effect', 'Lifetime', 'OperationCallCompletion', 'NestedToolInput', 'NestedToolReceipt'];
+const extensionToolNames = ['Outcome', 'Effect', 'Lifetime', 'OperationCallCompletion', 'NestedToolInput', 'NestedToolReceipt', 'OutputEvidenceRef', 'ContentProvenance', 'OutputSource', 'ContentRef', 'IncomingMedia', 'StoredMedia', 'ResolvedMedia', 'OutputPart', 'OutputBody', 'ToolOrigin'];
 const extensionToolsGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\n\n'
   + extensionToolNames.map(name => renderDto(name, schema.dto[name])).join('\n\n') + '\n';
 const protocolGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\n\n' + dtoEntries.filter(([name]) => (schema.runtimeExports ?? []).includes(name)).map(([name, spec]) => renderDto(name, spec)).join('\n\n') + '\n';
@@ -78,6 +78,8 @@ const snakeCase = (value) => value
   .replace(/[-.]/g, '_')
   .toLowerCase();
 const rustType = (type) => {
+  const generic = /^(\w+)<(.+)>$/u.exec(type);
+  if (generic && schema.dto?.[generic[1]]?.rustType) return `${schema.dto[generic[1]].rustType}<${rustType(generic[2])}>`;
   if (schema.dto?.[type]?.rustType) return schema.dto[type].rustType;
   if (schema.runtimeEnums?.[type]) return `varin_runtime::${type}`;
   if (type.endsWith('[]')) return `Vec<${rustType(type.slice(0, -2))}>`;

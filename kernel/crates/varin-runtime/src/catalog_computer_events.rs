@@ -81,13 +81,23 @@ impl ComputerEventPreparation {
         let command = self.command;
         let fact = command.fact;
         let detail = match fact.kind {
-            ComputerEventKind::Takeover if fact.release_confirmed => "The human took control. Automatic input is paused until control is returned.",
-            ComputerEventKind::Takeover => "The human took control. Automatic input is paused and original input release is unconfirmed.",
-            ComputerEventKind::Handback => "The human returned control. Observe the current desktop and obtain a current binding before acting; old observations and queued actions cannot resume.",
-            ComputerEventKind::Cancel if fact.release_confirmed => "The human cancelled this computer work. The original managed input was released. Already dispatched actions may have left partial effects. Computer Use permissions are unchanged.",
-            ComputerEventKind::Cancel => "The human cancelled this computer work. Original input release is unconfirmed. Computer Use permissions are unchanged; resolve the original cleanup before taking control.",
+            ComputerEventKind::Takeover if fact.release_confirmed => {
+                "The human took control. Automatic input is paused until control is returned."
+            }
+            ComputerEventKind::Takeover => {
+                "The human took control. Automatic input is paused and original input release is unconfirmed."
+            }
+            ComputerEventKind::Handback => {
+                "The human returned control. Observe the current desktop and obtain a current binding before acting; old observations and queued actions cannot resume."
+            }
+            ComputerEventKind::Cancel if fact.release_confirmed => {
+                "The human cancelled this computer work. The original managed input was released. Already dispatched actions may have left partial effects. Computer Use permissions are unchanged."
+            }
+            ComputerEventKind::Cancel => {
+                "The human cancelled this computer work. Original input release is unconfirmed. Computer Use permissions are unchanged; resolve the original cleanup before taking control."
+            }
         };
-        let item = ConversationItem {
+        let item: ConversationItem = ConversationItem {
             id: event_key(&fact),
             resource_activation: None,
             provenance: Provenance::EnvironmentFact {

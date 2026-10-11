@@ -67,7 +67,10 @@ impl InputOrigin {
     }
     pub(super) fn history_source(&self) -> HistorySource {
         match self {
-            Self::Followup { .. } | Self::Calendar { .. } | Self::ComputerRequest { .. } | Self::ComputerEvent { .. } => HistorySource::Environment,
+            Self::Followup { .. }
+            | Self::Calendar { .. }
+            | Self::ComputerRequest { .. }
+            | Self::ComputerEvent { .. } => HistorySource::Environment,
             Self::Message { identity, .. }
                 if matches!(identity.actor, super::messages::MessageActor::Agent { .. }) =>
             {
@@ -172,7 +175,7 @@ pub(super) fn initialize(tx: &Transaction<'_>) -> Result<()> {
         Some(version) => {
             return Err(RuntimeError::Invalid(format!(
                 "unsupported input queue domain version {version}; data was preserved"
-            )))
+            )));
         }
     }
     Ok(())
@@ -467,7 +470,7 @@ impl Catalog {
             }
             owner.id.clone()
         };
-        let input_id = id();
+        let input_id = command.input_id.clone();
         let cursor = event(
             &tx,
             &run_id,

@@ -5,7 +5,7 @@ mod input_admission;
 use input_admission::InputAdmission;
 use serde_json::json;
 use varin_runtime::catalog::collaboration::{
-    ChildSourcePin, DispatchInput, DISPATCH_TOOL, WAIT_TOOL,
+    ChildSourcePin, DISPATCH_TOOL, DispatchInput, WAIT_TOOL,
 };
 use varin_runtime::catalog::launches::{LaunchSelection, SourceSelection};
 use varin_runtime::execution::*;

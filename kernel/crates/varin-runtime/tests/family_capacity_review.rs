@@ -4,7 +4,7 @@
 mod input_admission;
 use input_admission::InputAdmission;
 use std::num::NonZeroUsize;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use varin_runtime::execution::*;
 use varin_runtime::execution_capacity::*;
@@ -86,10 +86,16 @@ fn newcomer_advances_before_family_flood_and_family_turns_continue() {
     for n in 0..6 {
         let name = format!("A-{n}");
         jobs.push(queued(&a, &name, "A", vec![], tx.clone()));
-        wait_for(|| a.inspect(&name).is_some());
+        wait_for(|| {
+            a.inspect(&name)
+                .is_some_and(|state| state.reason == Some("capacity"))
+        });
     }
     let b = queued(&a, "B", "B", vec![], tx.clone());
-    wait_for(|| a.inspect("B").is_some());
+    wait_for(|| {
+        a.inspect("B")
+            .is_some_and(|state| state.reason == Some("capacity"))
+    });
     assert_eq!(a.summary().local_compute_active, 1);
     assert_eq!(a.inspect("B").unwrap().reason, Some("capacity"));
     drop(hold);
@@ -100,7 +106,10 @@ fn newcomer_advances_before_family_flood_and_family_turns_continue() {
     );
     // Add more A traffic while B really owns the only permit.
     jobs.push(queued(&a, "A-late", "A", vec![], tx.clone()));
-    wait_for(|| a.inspect("A-late").is_some());
+    wait_for(|| {
+        a.inspect("A-late")
+            .is_some_and(|state| state.reason == Some("capacity"))
+    });
     b.1.send(()).unwrap();
     assert!(b.2.join().unwrap());
     for (index, (_, release, worker)) in jobs.into_iter().enumerate() {
@@ -223,18 +232,18 @@ fn committed_child_lineage_owns_family_after_parent_completion_and_inspection_is
         // accept_child has already persisted the original dispatch receipt.
         "settled"
     );
-    assert!(f
-        .db
-        .inspect_admission(&child_run, epoch, &origin, "dispatch-call")
-        .is_err());
-    assert!(f
-        .db
-        .inspect_admission(&f.context.run_id, epoch + 1, &origin, "dispatch-call")
-        .is_err());
-    assert!(f
-        .db
-        .inspect_admission(&f.context.run_id, epoch, &origin, "unknown")
-        .is_err());
+    assert!(
+        f.db.inspect_admission(&child_run, epoch, &origin, "dispatch-call")
+            .is_err()
+    );
+    assert!(
+        f.db.inspect_admission(&f.context.run_id, epoch + 1, &origin, "dispatch-call")
+            .is_err()
+    );
+    assert!(
+        f.db.inspect_admission(&f.context.run_id, epoch, &origin, "unknown")
+            .is_err()
+    );
     f.settle_exchange();
     assert_eq!(
         f.db.inspect_admission(&f.context.run_id, epoch, &origin, "dispatch-call")
@@ -284,9 +293,9 @@ fn child_context(
 
 mod engines {
     use super::*;
-    use serde_json::{json, Value};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use serde_json::{Value, json};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use varin_runtime::*;
     fn input(db: &Arc<Mutex<Catalog>>, name: &str) -> ExecutionInput {
         let mut db = db.lock().unwrap();
@@ -468,7 +477,7 @@ mod engines {
                 } else {
                     Effect::Confirmed
                 },
-                content: json!({}),
+                content: json!({}).into(),
             }
         }
     }

@@ -235,7 +235,9 @@ fn sweep_yields_to_old_orphan_reuse_and_late_receipt_preserves_run_cancellation(
             .load()
             .unwrap()
             .result,
-        Some(body)
+        Some(crate::output::OperationResult::Output {
+            output: body.into()
+        })
     );
 }
 

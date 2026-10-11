@@ -495,7 +495,20 @@ pub struct PreparedReplyWait {
 }
 impl ReplyWaitPreparation {
     pub fn load(self) -> Result<PreparedReplyWait> {
-        let item=ConversationItem{resource_activation:None,id:format!("reply-observation:{}",self.wait.id),provenance:Provenance::EnvironmentFact{event_id:self.wait.id.clone()},content:Content::Text{text:format!("This message observation ended; this is lifecycle data, not a new instruction. The original message remains sent. Reuse the original message IDs if further work is needed; do not resend merely because observation expired or ended. A reply body is delivered only through the original incoming message history.\n{}",serde_json::to_string(&self.result)?)},opaque:None};
+        let item: ConversationItem = ConversationItem {
+            resource_activation: None,
+            id: format!("reply-observation:{}", self.wait.id),
+            provenance: Provenance::EnvironmentFact {
+                event_id: self.wait.id.clone(),
+            },
+            content: Content::Text {
+                text: format!(
+                    "This message observation ended; this is lifecycle data, not a new instruction. The original message remains sent. Reuse the original message IDs if further work is needed; do not resend merely because observation expired or ended. A reply body is delivered only through the original incoming message history.\n{}",
+                    serde_json::to_string(&self.result)?
+                ),
+            },
+            opaque: None,
+        };
         let history_ref = self
             .content
             .save_history(&serde_json::to_value(item)?, &None)?;

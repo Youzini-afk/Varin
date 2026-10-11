@@ -158,9 +158,14 @@ fn resources(text: &str) -> ContextResources {
 }
 #[test]
 fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_operations() {
-    for (policy_call, cancel_before_reply, explicit) in
-        [(false, false, false), (false, true, false), (true, false, false), (true, true, false), (false, false, true), (true, true, true)]
-    {
+    for (policy_call, cancel_before_reply, explicit) in [
+        (false, false, false),
+        (false, true, false),
+        (true, false, false),
+        (true, true, false),
+        (false, false, true),
+        (true, true, true),
+    ] {
         let root =
             std::env::temp_dir().join(format!("varin-resource-builtin-{}", uuid::Uuid::new_v4()));
         let mut catalog = Catalog::open(&root).unwrap();
@@ -172,7 +177,11 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
                     thread_id: "thread".into(),
                     branch_id: "branch".into(),
                     expected_head: None,
-                    input: json!(if explicit {"/skill:skill"} else {"read skill"}),
+                    input: json!(if explicit {
+                        "/skill:skill"
+                    } else {
+                        "read skill"
+                    }),
                     configuration: json!({}),
                 },
                 Some(ContextProposal {
@@ -190,23 +199,52 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
             .unwrap()
             .with_resources(Some(resources("old")))
             .with_input_preparation(explicit.then(|| {
-                let resources=resources("old"); let skill=&resources.snapshot.skills[0];
-                varin_runtime::catalog::resources::InputResourcePreparation { expected_context_checkpoint:None,
-                    skill:Some(varin_runtime::catalog::resources::PreparedExplicitSkill { snapshot_id:resources.snapshot.id.clone(), resource_id:skill.id.clone(),
-                        reference:skill.reference.clone(), name:skill.name.clone(), arguments:String::new(), body:"old".into() }) }
+                let resources = resources("old");
+                let skill = &resources.snapshot.skills[0];
+                varin_runtime::catalog::resources::InputResourcePreparation {
+                    expected_context_checkpoint: None,
+                    skill: Some(varin_runtime::catalog::resources::PreparedExplicitSkill {
+                        snapshot_id: resources.snapshot.id.clone(),
+                        resource_id: skill.id.clone(),
+                        reference: skill.reference.clone(),
+                        name: skill.name.clone(),
+                        arguments: String::new(),
+                        body: "old".into(),
+                    }),
+                }
             }))
             .load(None, false)
             .unwrap();
         let receipt = catalog.admit_submission(prepared).unwrap();
         if explicit {
-            let prepared=catalog.prepare_resource_refresh("branch",1,"new default".into(),vec![],None,basis("new default"),resources("new default")).unwrap().load().unwrap();
+            let prepared = catalog
+                .prepare_resource_refresh(
+                    "branch",
+                    1,
+                    "new default".into(),
+                    vec![],
+                    None,
+                    basis("new default"),
+                    resources("new default"),
+                )
+                .unwrap()
+                .load()
+                .unwrap();
             catalog.publish_resource_refresh(prepared).unwrap();
         }
-        let projected=catalog.prepare_context_read(&receipt.run_id,catalog.epoch(),Some(&receipt.input_id)).unwrap().unwrap().load().unwrap();
-        let activations=varin_runtime::catalog::resources::retained_activations(&projected.history);
-        let checkpoint_id=projected.resource_checkpoint_id.clone();
-        let mut arguments=json!({"kind":"skill","resourceId":"skill"});
-        if explicit { arguments["activationId"]=json!(activations[0].activation_id); }
+        let projected = catalog
+            .prepare_context_read(&receipt.run_id, catalog.epoch(), Some(&receipt.input_id))
+            .unwrap()
+            .unwrap()
+            .load()
+            .unwrap();
+        let activations =
+            varin_runtime::catalog::resources::retained_activations(&projected.history);
+        let checkpoint_id = projected.resource_checkpoint_id.clone();
+        let mut arguments = json!({"kind":"skill","resourceId":"skill"});
+        if explicit {
+            arguments["activationId"] = json!(activations[0].activation_id);
+        }
         let call = ToolCall {
             call_id: "read".into(),
             name: "resource_read".into(),
@@ -220,7 +258,8 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
         };
         let binding = RequestBinding {
             child_dispatch: None,
-            goal: None, resource_activations: activations.clone(),
+            goal: None,
+            resource_activations: activations.clone(),
             resource_checkpoint_id: checkpoint_id.clone(),
             connection_identity: "fixture".into(),
             provider_family: "fixture".into(),
@@ -343,7 +382,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
             .unwrap()
             .prepare_resource_refresh(
                 "branch",
-                if explicit {2} else {1},
+                if explicit { 2 } else { 1 },
                 "new".into(),
                 vec![],
                 None,
@@ -374,8 +413,10 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
                 assert_eq!(frame["query"]["callId"], "read");
                 assert_eq!(frame["query"]["resourceCheckpointId"], "old-context");
                 let mut query = frame["query"].clone();
-                let request=query.as_object_mut().unwrap().remove("request").unwrap();
-                if let Some(activation)=request.get("activationId") { query["activationId"]=activation.clone(); }
+                let request = query.as_object_mut().unwrap().remove("request").unwrap();
+                if let Some(activation) = request.get("activationId") {
+                    query["activationId"] = activation.clone();
+                }
                 let snapshot = execute_rpc(
                     db.clone(),
                     "runtime.resources.snapshot",
@@ -424,7 +465,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
             }
         );
         assert_eq!(
-            content["content"],
+            content.data["content"],
             if cancel_before_reply {
                 Value::Null
             } else {

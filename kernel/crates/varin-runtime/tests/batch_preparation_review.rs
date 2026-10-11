@@ -2,11 +2,12 @@
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::{
+    Arc, Condvar, Mutex,
     atomic::{AtomicUsize, Ordering},
-    mpsc, Arc, Condvar, Mutex,
+    mpsc,
 };
 use std::time::Duration;
 use varin_runtime::execution::*;
@@ -274,7 +275,7 @@ impl ToolExecutor for Tools {
             } else {
                 Effect::Confirmed
             },
-            content: json!(call.call_id),
+            content: json!(call.call_id).into(),
         }
     }
 }
@@ -404,12 +405,14 @@ fn stalled_preparation_does_not_delay_ready_execution_but_provider_pairing_waits
     );
     until(&rx, "execute:ready");
     assert_eq!(provider.generations.load(Ordering::SeqCst), 1);
-    assert!(!store
-        .records
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|r| matches!(r, ExecutionRecord::ToolBatchCommitted { .. })));
+    assert!(
+        !store
+            .records
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| matches!(r, ExecutionRecord::ToolBatchCommitted { .. }))
+    );
     cancel.cancel();
     assert_eq!(worker.join().unwrap().unwrap().state, RunState::Cancelled);
     assert!(!rx.try_iter().any(|event| event == "execute:slow"));
@@ -509,7 +512,7 @@ fn invalid_declared_intent_or_class_cannot_dispatch() {
         assert_eq!(worker.join().unwrap().unwrap().state, RunState::Completed);
         assert!(!rx.try_iter().any(|e| e == "execute:invalid"));
         assert!(store.records.lock().unwrap().iter().any(|r| matches!(r, ExecutionRecord::ToolBatchCommitted { results, .. }
-            if matches!(&results[0].completion, ToolCompletion::Result { effect: Effect::None, content, .. } if content["error"] == expected))));
+            if matches!(&results[0].completion, ToolCompletion::Result { effect: Effect::None, content, .. } if content.data["error"] == expected))));
         assert_eq!(store.admission.summary().queued, 0);
     }
 }
@@ -533,12 +536,14 @@ fn cancellation_during_final_authorization_cannot_dispatch() {
             !rx.try_iter().any(|e| e == "execute:cancelled"),
             "operation cancelled before ToolDispatched must not reach execute"
         );
-        assert!(!store
-            .records
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|r| matches!(r, ExecutionRecord::ToolDispatched { .. })));
+        assert!(
+            !store
+                .records
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|r| matches!(r, ExecutionRecord::ToolDispatched { .. }))
+        );
         assert_eq!(store.admission.summary().queued, 0);
     }
 }

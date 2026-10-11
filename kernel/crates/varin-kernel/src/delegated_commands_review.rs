@@ -79,7 +79,7 @@ fn public_continuation_source_prepare_and_exact_run_assembly_share_one_execution
         )
         .unwrap()
     };
-    let command = json!({"key":"continue-user","childOperationId":child.operation_id,"previousRunId":first,"expectedHead":expected_head,"input":{"text":"Continue explicitly","attachments":[{"media_type":"image/png","content_ref":"user-image"}]}});
+    let command = json!({"key":"continue-user","childOperationId":child.operation_id,"previousRunId":first,"expectedHead":expected_head,"input":{"text":"Continue explicitly","attachments":[{"media_type":"image/png","data_base64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7h8AAAAASUVORK5CYII="}]}});
     let accepted = call("runtime.child.continuation.accept", command.clone());
     let execution = accepted["execution_id"].as_str().unwrap();
     assert_eq!(accepted["source"], Value::Null);
@@ -108,14 +108,16 @@ fn public_continuation_source_prepare_and_exact_run_assembly_share_one_execution
         .len(),
         2
     );
-    assert!(execute(
-        runtime.clone(),
-        resources.clone(),
-        "runtime.child.prepare",
-        json!({"operationId":child.operation_id}),
-        &AtomicBool::new(false)
-    )
-    .is_err());
+    assert!(
+        execute(
+            runtime.clone(),
+            resources.clone(),
+            "runtime.child.prepare",
+            json!({"operationId":child.operation_id}),
+            &AtomicBool::new(false)
+        )
+        .is_err()
+    );
     let catalog = runtime.catalog();
     let run = catalog.lock().unwrap().run(run_id).unwrap();
     let launch = catalog
@@ -164,7 +166,13 @@ fn public_continuation_source_prepare_and_exact_run_assembly_share_one_execution
         panic!("start required")
     };
     assert_eq!(start.binding.tools, launch.selection.tools);
-    assert!(start.binding.tools.iter().all(|tool| tool.version == "2"));
+    assert!(
+        start
+            .binding
+            .tools
+            .iter()
+            .all(|tool| crate::child_capabilities::schemas().contains(tool))
+    );
     assert_eq!(
         catalog
             .lock()

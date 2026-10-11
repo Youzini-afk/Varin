@@ -70,6 +70,7 @@ struct OwnerReplies {
     queries: Vec<Value>,
     host_calls: Vec<Value>,
     deny_host: bool,
+    report_output: Option<Value>,
 }
 impl OwnerReplies {
     fn frame(&mut self, f: &Fixture, frame: &Value, uncertain: bool) -> bool {
@@ -79,10 +80,15 @@ impl OwnerReplies {
             self.host_calls.push(frame.clone());
             let mut reply = json!({"v":1,"kind":"host-tool-response","id":frame["id"],"kernelEpoch":EPOCH,
                 "ok":!self.deny_host});
-            if self.deny_host { reply["error"] = json!({"code":"fixture_permission_denied"}); }
+            if self.deny_host {
+                reply["error"] = json!({"code":"fixture_permission_denied"});
+            }
             if frame["phase"] == "execute" {
-                assert!(!self.deny_host, "denied permission must not dispatch an effect");
-                reply["completion"] = json!({"kind":"result","outcome":"succeeded","effect":"confirmed","content":{"performed":true}});
+                assert!(
+                    !self.deny_host,
+                    "denied permission must not dispatch an effect"
+                );
+                reply["completion"] = json!({"kind":"result","outcome":"succeeded","effect":"confirmed","content":{"data":{"performed":true},"parts":[]}});
                 reply["executor_stopped"] = json!(true);
             }
             f.assembly.tools.bridge().receive(reply);
@@ -256,7 +262,7 @@ fn execute(
         } else if uncertain {
             json!({"kind":"pause","reason":"Observe original owner receipts"})
         } else {
-            json!({"kind":"deliver","text":"Child notes and plan are settled"})
+            json!({"kind":"deliver","output":owner.report_output.clone().unwrap_or_else(|| json!({"data":null,"parts":[{"kind":"text","text":"Child notes and plan are settled"}]}))})
         };
         let next = if action["kind"] == "tool_graph" {
             stage + 1
@@ -289,13 +295,20 @@ fn execute(
 fn selected_child_memory_and_plan_execute_through_both_origins_and_keep_report_separate() {
     for model in [false, true] {
         let f = fixture(vec!["memory".into(), "todo".into()]);
-        let mut owner = OwnerReplies::default();
+        let image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7h8AAAAASUVORK5CYII=";
+        let mut owner = OwnerReplies {
+            report_output: Some(json!({"data":{"settled":true},"parts":[
+                {"kind":"text","text":"Child notes and plan are settled"},
+                {"kind":"media","media":{"media_type":"image/png","data_base64":image}}
+            ]})),
+            ..Default::default()
+        };
         execute(&f, model, calls(), &mut owner, false);
         assert_eq!(owner.queries.len(), 7);
         assert_eq!(owner.plan_reads, vec![None, Some("child-plan-1".into())]);
         assert_eq!(owner.plan_ref.as_deref(), Some("child-plan-2"));
-        let db = f.catalog();
-        let db = db.lock().unwrap();
+        let original_catalog = f.catalog();
+        let db = original_catalog.lock().unwrap();
         let state = db.memory_state(&f.run.branch_id).unwrap().unwrap();
         assert_eq!(state.memories[0]["scope"]["id"], f.run.thread_id);
         assert!(db.memory_state("branch:parent").unwrap().is_none());
@@ -328,11 +341,12 @@ fn selected_child_memory_and_plan_execute_through_both_origins_and_keep_report_s
         );
         for foreign in ["thread:parent", "thread:sibling"] {
             let receipt = json!({"revision":2,"changes":[{"id":2,"scope":{"kind":"session","id":foreign},"note":null}]});
-            assert!(db
-                .prepare_memory_receipt(&f.run.id, receipt)
-                .unwrap()
-                .load()
-                .is_err());
+            assert!(
+                db.prepare_memory_receipt(&f.run.id, receipt)
+                    .unwrap()
+                    .load()
+                    .is_err()
+            );
         }
         for query in owner.queries.iter().filter(|q| q["action"] == "mutate") {
             let op = db
@@ -383,7 +397,83 @@ fn selected_child_memory_and_plan_execute_through_both_origins_and_keep_report_s
         );
         // The original conflict stays Failed/None above; a later legal update and normal
         // textual completion are independent report facts for either tool origin.
-        assert_eq!(child.report.unwrap().outcome, Outcome::Succeeded);
+        let report = child.report.unwrap();
+        assert_eq!(report.outcome, Outcome::Succeeded);
+        let item_id = report.history_ids.last().unwrap();
+        let read = f
+            .catalog()
+            .lock()
+            .unwrap()
+            .capture_child_report(&f.child.operation_id, item_id, 0, 65536)
+            .unwrap();
+        let page = read.load().unwrap();
+        assert_eq!(serde_json::to_value(page.format).unwrap(), "output_body");
+        let body: varin_runtime::output::OutputBody<varin_runtime::output::StoredMedia> =
+            serde_json::from_str(&page.text).unwrap();
+        assert_eq!(body.data, json!({"settled":true}));
+        let varin_runtime::output::OutputPart::Media { media } = &body.parts[1] else {
+            panic!("original typed report media required")
+        };
+        let catalog = f.catalog();
+        let fork = {
+            let db = catalog.lock().unwrap();
+            db.prepare_branch_fork(
+                "branch:parent",
+                "parent-report-fork",
+                db.head("branch:parent").unwrap().as_deref(),
+                None,
+            )
+            .unwrap()
+        }
+        .load()
+        .unwrap();
+        catalog.lock().unwrap().admit_branch_fork(fork).unwrap();
+        let mut reads = Vec::new();
+        for branch in ["branch:parent", "parent-report-fork"] {
+            let request: varin_runtime::output::MediaReadParams = serde_json::from_value(json!({
+                "threadId":"thread:parent","branchId":branch,
+                "holder":{"kind":"child_report","operationId":f.child.operation_id,"itemId":item_id},
+                "partIndex":1,"chunkIndex":0,"expectedContentRef":media.content_ref.content_object
+            })).unwrap();
+            let read = catalog
+                .lock()
+                .unwrap()
+                .capture_media_read(&request)
+                .unwrap();
+            let chunk = read.chunk(&|| false).unwrap();
+            assert_eq!(chunk.bytes_base64, image);
+            assert_eq!(chunk.media, *media);
+            let read = catalog
+                .lock()
+                .unwrap()
+                .capture_media_read(&request)
+                .unwrap();
+            assert!(matches!(
+                read.chunk(&|| true),
+                Err(varin_runtime::RuntimeError::DispatchCancelled)
+            ));
+            reads.push(request);
+        }
+        let collection = catalog
+            .lock()
+            .unwrap()
+            .prepare_content_collection(Default::default());
+        assert_eq!(
+            collection.run().status,
+            varin_runtime::ContentCollectionStatus::Completed
+        );
+        drop(catalog);
+        drop(original_catalog);
+        let f = f.reopen();
+        for request in reads {
+            let read = f
+                .catalog()
+                .lock()
+                .unwrap()
+                .capture_media_read(&request)
+                .unwrap();
+            assert_eq!(read.chunk(&|| false).unwrap().bytes_base64, image);
+        }
         f.finish();
     }
 }
@@ -405,10 +495,12 @@ fn available_but_unselected_child_helpers_do_not_enter_assembly() {
         resource_activations: vec![],
     };
     for call in calls().into_iter().take(4) {
-        assert!(start
-            .tools
-            .prepare(&call, &frozen, &CancellationToken::default())
-            .is_err());
+        assert!(
+            start
+                .tools
+                .prepare(&call, &frozen, &CancellationToken::default())
+                .is_err()
+        );
     }
     assert!(
         crate::plan::eligible(&f.catalog().lock().unwrap(), &f.run.id).unwrap(),
@@ -448,12 +540,13 @@ fn cancelled_child_reopen_reconciles_original_note_and_plan_receipts_without_rep
             .unwrap()
             .load()
             .unwrap();
-        assert!(f
-            .catalog()
-            .lock()
-            .unwrap()
-            .publish_memory_state(prepared)
-            .unwrap());
+        assert!(
+            f.catalog()
+                .lock()
+                .unwrap()
+                .publish_memory_state(prepared)
+                .unwrap()
+        );
         f.assembly.runtime.cancel(&f.run.id).unwrap();
         let f = f.reopen();
         let (tx, done) = mpsc::sync_channel(2);
@@ -529,7 +622,7 @@ fn cancelled_child_reopen_reconciles_original_note_and_plan_receipts_without_rep
 
 #[test]
 fn plan_scope_rejects_role_only_bot_foreign_and_missing_admissions() {
-    use varin_runtime::{catalog::context::ContextProposal, SubmitInput};
+    use varin_runtime::{SubmitInput, catalog::context::ContextProposal};
     let root = std::env::temp_dir().join(format!("varin-plan-scope-{}", uuid::Uuid::new_v4()));
     let mut db = Catalog::open(&root).unwrap();
     for (index, (mode, role, session, context, expected)) in [

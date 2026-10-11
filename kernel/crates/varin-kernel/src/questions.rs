@@ -1,6 +1,6 @@
 //! Built-in clarification capability. No filesystem/process grant is created or expanded.
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use varin_runtime::catalog::questions::{QUESTION_STATUS_TOOL, QUESTION_TOOL};
 use varin_runtime::execution::*;
@@ -220,7 +220,7 @@ impl ToolExecutor for Questions {
                 Ok(content) => ToolCompletion::Result {
                     outcome: Outcome::Succeeded,
                     effect: Effect::None,
-                    content,
+                    content: content.into(),
                 },
                 Err(e) => ToolCompletion::NotDispatched { reason: e.message },
             };
@@ -241,7 +241,7 @@ impl ToolExecutor for Questions {
             Err(e) => ToolCompletion::Result {
                 outcome: Outcome::Failed,
                 effect: Effect::None,
-                content: json!({"error":e.code}),
+                content: json!({"error":e.code}).into(),
             },
         }
     }

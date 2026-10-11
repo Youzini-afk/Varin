@@ -1,3 +1,4 @@
+import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import express from 'express';
 import request from 'supertest';
@@ -452,9 +453,9 @@ it('a real todo CAS conflict settles with its structured no-effect receipt and p
   const query = f.queries.find(item => item.action === 'mutate')!; expect(query).toBeDefined();
   const operation = await f.runtime.operation(query.origin.operationId);
   expect(operation).toMatchObject({ run_id: run.run_id, phase: 'terminal', outcome: 'failed', effect: 'none',
-    result: { status: 'ready', mutation: { receipt: { status: 'conflict', ref: current.receipt.ref, origin: query.origin } } } });
+    result: { kind: 'output', output: { data: { status: 'ready', mutation: { receipt: { status: 'conflict', ref: current.receipt.ref, origin: query.origin } } }, parts: [] } } });
   expect((await f.read(identity).expect(200)).body.plan).toEqual(current.plan);
   const wire = (f.requests[1]!.input as Array<Record<string, unknown>>).find(item => item.type === 'function_call_output' && item.call_id === 'tool-conflict');
-  expect(JSON.parse(String(wire?.output))).toMatchObject({ kind: 'result', outcome: 'failed', effect: 'none',
+  expect(JSON.parse(responsesMetadataText(wire?.output))).toMatchObject({ kind: 'result', outcome: 'failed', effect: 'none',
     content: { mutation: { receipt: { status: 'conflict', ref: current.receipt.ref } } } });
 });

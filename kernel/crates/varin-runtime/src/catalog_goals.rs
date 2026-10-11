@@ -806,12 +806,12 @@ impl Catalog {
                     } else {
                         RunState::Cancelled
                     },
-                })
+                });
             }
             GoalControl::Cancelled => {
                 return Ok(GoalBoundary::Finish {
                     state: RunState::Cancelled,
-                })
+                });
             }
             GoalControl::Active
                 if d.blocked.is_some()
@@ -828,7 +828,7 @@ impl Catalog {
                 }
             }
             GoalControl::Active if !budget_limited(&d, &usage) && !usage_unknown(&d, &usage) => {
-                return Ok(GoalBoundary::Continue)
+                return Ok(GoalBoundary::Continue);
             }
             _ => (),
         }
@@ -1062,7 +1062,7 @@ impl GoalReportPreparation {
         let completion = crate::execution::ToolCompletion::Result {
             outcome: Outcome::Succeeded,
             effect: Effect::Confirmed,
-            content: json!({"goal_id":self.definition.id,"state":input.state,"revision":self.definition.revision+1,"generation":self.definition.generation+1}),
+            content: json!({"goal_id":self.definition.id,"state":input.state,"revision":self.definition.revision+1,"generation":self.definition.generation+1}).into(),
         };
         let completion_metadata =
             result_content::ToolCompletionMetadata::write(&self.content, &completion)?;

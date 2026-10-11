@@ -56,7 +56,7 @@ fn load_intent(
     content: &crate::content::ContentStore,
     metadata: &PolicyActionMetadata,
 ) -> Result<PolicyControlIntent> {
-    let intent: PolicyControlIntent = serde_json::from_value(content.load(metadata.body_ref())?)?;
+    let intent: PolicyControlIntent = content.load_policy_control(metadata.body_ref())?;
     if intent.action_id != metadata.action_id()
         || &intent.boundary != metadata.boundary()
         || &intent.identity != metadata.identity()
@@ -107,22 +107,29 @@ pub struct PreparedPolicyControl {
 }
 impl PolicyControlPreparation {
     pub fn load(self, intent: &PolicyControlIntent) -> Result<PreparedPolicyControl> {
-        let body_ref = self.content.save(&serde_json::to_value(intent)?)?;
+        let body_ref = self.content.save_policy_control(intent)?;
         let (metadata, item) = match &intent.action {
-            PolicyAction::Deliver { text } => {
-                let item = ConversationItem {
+            PolicyAction::Deliver { output } => {
+                let item: ConversationItem = ConversationItem {
                     resource_activation: None,
                     id: format!("{}:output", intent.action_id),
                     provenance: Provenance::PolicyOutput {
                         action_id: intent.action_id.clone(),
                         identity: intent.identity.clone(),
                     },
-                    content: Content::Text { text: text.clone() },
+                    content: Content::Output {
+                        output: output.clone().map_media(|media| {
+                            media.admit(crate::output::OutputSource::Conversation {
+                                provenance: Provenance::PolicyOutput {
+                                    action_id: intent.action_id.clone(),
+                                    identity: intent.identity.clone(),
+                                },
+                            })
+                        })?,
+                    },
                     opaque: None,
                 };
-                let reference = self
-                    .content
-                    .save_history(&serde_json::to_value(&item)?, &None)?;
+                let reference = self.content.save_conversation(&item, &None)?;
                 (
                     PolicyActionMetadata::PolicyDeliverV1 {
                         action_id: intent.action_id.clone(),
@@ -145,7 +152,7 @@ impl PolicyControlPreparation {
             _ => {
                 return Err(RuntimeError::Invalid(
                     "control action requires delivery or pause".into(),
-                ))
+                ));
             }
         };
         Ok(PreparedPolicyControl {
@@ -224,7 +231,7 @@ impl PolicyControlRead {
             _ => {
                 return Err(RuntimeError::Conflict(
                     "policy pause has not been explicitly resumed".into(),
-                ))
+                ));
             }
         };
         let mut state = intent.state;

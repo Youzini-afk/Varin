@@ -614,20 +614,35 @@ impl MessagePreparation {
                 Ok(snapshot)
             })
             .transpose()?;
-        let envelope = format!("Task message {}\nSender: {} / {}\nTarget: {} / {}\nActor: {}\nKind: {}\nReply to: {}\n\n{}",
-            self.identity.message_id, self.identity.sender_thread_id, self.identity.sender_branch_id, self.identity.target_thread_id, self.identity.target_branch_id,
-            serde_json::to_string(&self.identity.actor)?, if self.identity.kind == MessageKind::Request {"request"} else {"inform"}, self.identity.reply_to.as_deref().unwrap_or("none"), self.input.text);
+        let envelope = format!(
+            "Task message {}\nSender: {} / {}\nTarget: {} / {}\nActor: {}\nKind: {}\nReply to: {}\n\n{}",
+            self.identity.message_id,
+            self.identity.sender_thread_id,
+            self.identity.sender_branch_id,
+            self.identity.target_thread_id,
+            self.identity.target_branch_id,
+            serde_json::to_string(&self.identity.actor)?,
+            if self.identity.kind == MessageKind::Request {
+                "request"
+            } else {
+                "inform"
+            },
+            self.identity.reply_to.as_deref().unwrap_or("none"),
+            self.input.text
+        );
         let body = match &self.identity.actor {
             MessageActor::User => json!(envelope),
-            MessageActor::Agent { .. } => serde_json::to_value(ConversationItem {
-                resource_activation: None,
-                id: self.identity.message_id.clone(),
-                provenance: Provenance::AgentMessage {
-                    thread_id: self.identity.sender_thread_id.clone(),
-                },
-                content: Content::Text { text: envelope },
-                opaque: None,
-            })?,
+            MessageActor::Agent { .. } => {
+                serde_json::to_value(ConversationItem::<crate::output::ResolvedMedia> {
+                    resource_activation: None,
+                    id: self.identity.message_id.clone(),
+                    provenance: Provenance::AgentMessage {
+                        thread_id: self.identity.sender_thread_id.clone(),
+                    },
+                    content: Content::Text { text: envelope },
+                    opaque: None,
+                })?
+            }
         };
         let history = self.content.save_history(&body, &None)?;
         let completion = if invocation.is_some() {
@@ -638,12 +653,14 @@ impl MessagePreparation {
                     operation_id: self.operation.as_ref().expect("send Operation").id.clone(),
                     phase: "awaiting_reply".into(),
                     effect: Effect::Confirmed,
-                    lifetime: Lifetime::Thread, content: None,}
+                    lifetime: Lifetime::Thread,
+                    content: None,
+                }
             } else {
                 ToolCompletion::Result {
                     outcome: Outcome::Succeeded,
                     effect: Effect::Confirmed,
-                    content: json!({"accepted":true,"message":self.identity}),
+                    content: json!({"accepted":true,"message":self.identity}).into(),
                 }
             };
             let metadata =
@@ -861,7 +878,9 @@ impl MessageListRead {
             MessageDirection::Incoming => "branch_id=?1",
             MessageDirection::Outgoing => "sender_branch_id=?1 AND sender_thread_id=?5",
         };
-        let sql=format!("SELECT body FROM input_queue WHERE origin='message' AND {predicate} AND cursor>?2 AND cursor<=?3 ORDER BY cursor LIMIT ?4");
+        let sql = format!(
+            "SELECT body FROM input_queue WHERE origin='message' AND {predicate} AND cursor>?2 AND cursor<=?3 ORDER BY cursor LIMIT ?4"
+        );
         let mut statement = db.prepare(&sql)?;
         let mut rows = if self.direction == MessageDirection::Incoming {
             statement.query(params![

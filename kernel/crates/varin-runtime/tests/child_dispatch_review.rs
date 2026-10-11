@@ -22,10 +22,10 @@ fn same_committed_origin_is_one_child_before_and_after_reopen_and_changed_task_c
     assert_eq!(f.db.child_tasks().unwrap().len(), 1);
     let mut changed = f.input.clone();
     changed.task.push_str(" changed");
-    assert!(f
-        .db
-        .accept_child(&f.context, changed, f.pin.clone(), f.launch.clone())
-        .is_err());
+    assert!(
+        f.db.accept_child(&f.context, changed, f.pin.clone(), f.launch.clone())
+            .is_err()
+    );
     let root = f.root.clone();
     drop(f.db);
     f.db = Catalog::open(&root).unwrap();
@@ -45,25 +45,25 @@ fn authority_cannot_be_forged_by_another_run_policy_origin_or_expanded_child_too
     let mut f = Fixture::new();
     let mut wrong = f.context.clone();
     wrong.run_id = "other-run".into();
-    assert!(f
-        .db
-        .accept_child(&wrong, f.input.clone(), f.pin.clone(), f.launch.clone())
-        .is_err());
+    assert!(
+        f.db.accept_child(&wrong, f.input.clone(), f.pin.clone(), f.launch.clone())
+            .is_err()
+    );
     let mut wrong = f.context.clone();
     wrong.origin = ToolOrigin::PolicyAction {
         action_id: "pretend-model".into(),
         node_id: "node".into(),
     };
-    assert!(f
-        .db
-        .accept_child(&wrong, f.input.clone(), f.pin.clone(), f.launch.clone())
-        .is_err());
+    assert!(
+        f.db.accept_child(&wrong, f.input.clone(), f.pin.clone(), f.launch.clone())
+            .is_err()
+    );
     let mut wrong = f.pin.clone();
     wrong.source.workspace_id = "workspace-B".into();
-    assert!(f
-        .db
-        .accept_child(&f.context, f.input.clone(), wrong, f.launch.clone())
-        .is_err());
+    assert!(
+        f.db.accept_child(&f.context, f.input.clone(), wrong, f.launch.clone())
+            .is_err()
+    );
     for name in ["file_write", "file_list", "process_spawn"] {
         let mut expanded = f.launch.clone();
         expanded.tools.push(ToolSchema {
@@ -103,14 +103,14 @@ fn child_body_roots_survive_collection_and_broken_task_text_does_not_block_contr
             .extension_bindings_ref
     );
     content_collection::collect(|| f.db.prepare_content_collection(Default::default())).unwrap();
-    assert!(f
-        .db
-        .capture_child_read(child.clone())
-        .load()
-        .unwrap()
-        .launch
-        .extension_bindings
-        .is_empty());
+    assert!(
+        f.db.capture_child_read(child.clone())
+            .load()
+            .unwrap()
+            .launch
+            .extension_bindings
+            .is_empty()
+    );
     let (source, proposal, basis) = child_context(&child);
     let child =
         f.db.prepare_child(&child.operation_id, source, proposal, basis)
@@ -283,18 +283,20 @@ fn report_and_wait_registration_in_either_order_deliver_once_with_real_child_pro
                 thread_id: child.child_thread_id
             }
         );
-        assert!(serde_json::to_string(&item)
-            .unwrap()
-            .contains("distinct preparation failure"));
+        assert!(
+            serde_json::to_string(&item)
+                .unwrap()
+                .contains("distinct preparation failure")
+        );
         assert_eq!(
             f.db.run(&f.context.run_id).unwrap().state,
             RunState::Runnable
         );
-        assert!(f
-            .db
-            .pending_child_wait(&f.context.run_id)
-            .unwrap()
-            .is_none());
+        assert!(
+            f.db.pending_child_wait(&f.context.run_id)
+                .unwrap()
+                .is_none()
+        );
         let root = f.root.clone();
         drop(f.db);
         f.db = Catalog::open(&root).unwrap();
@@ -350,9 +352,11 @@ fn cancelling_observation_then_waiting_again_never_cancels_child_or_consumes_its
         1,
         "cancelled observation is a Host fact, not a message sent by the child"
     );
-    assert!(serde_json::to_string(&reports[0].content)
-        .unwrap()
-        .contains("REPORT_AFTER_CANCELLED_OBSERVATION"));
+    assert!(
+        serde_json::to_string(&reports[0].content)
+            .unwrap()
+            .contains("REPORT_AFTER_CANCELLED_OBSERVATION")
+    );
     assert!(
         f.db.deliver_child_waits()
             .unwrap()
@@ -387,12 +391,12 @@ fn cancelled_wait_rejects_a_prepared_report_append_and_a_new_observer_can_receiv
     );
     f.db.request_cancel_child_wait(&wait.id).unwrap();
     assert!(f.db.admit_child_wait(prepared).unwrap().is_none());
-    assert!(f
-        .db
-        .history("branch:parent")
-        .unwrap()
-        .iter()
-        .all(|item| item.source != HistorySource::Agent));
+    assert!(
+        f.db.history("branch:parent")
+            .unwrap()
+            .iter()
+            .all(|item| item.source != HistorySource::Agent)
+    );
     f.db.deliver_child_waits().unwrap();
     assert_eq!(
         f.db.run(&f.context.run_id).unwrap().state,
@@ -406,9 +410,11 @@ fn cancelled_wait_rejects_a_prepared_report_append_and_a_new_observer_can_receiv
         .filter(|item| item.source == HistorySource::Agent)
         .collect();
     assert_eq!(reports.len(), 1);
-    assert!(serde_json::to_string(&reports[0].content)
-        .unwrap()
-        .contains("RETAINED_REPORT"));
+    assert!(
+        serde_json::to_string(&reports[0].content)
+            .unwrap()
+            .contains("RETAINED_REPORT")
+    );
     let root = f.root.clone();
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
@@ -464,12 +470,12 @@ fn child_prepare_rejects_late_cancelled_work_and_untrusted_parent_scope_without_
             .is_err(),
             "reject forged {field}"
         );
-        assert!(f
-            .db
-            .child_task(&child.operation_id)
-            .unwrap()
-            .receipt
-            .is_none());
+        assert!(
+            f.db.child_task(&child.operation_id)
+                .unwrap()
+                .receipt
+                .is_none()
+        );
         let prepared =
             f.db.prepare_child(&child.operation_id, source, proposal, basis)
                 .unwrap();
@@ -579,9 +585,11 @@ fn report_delivery_respects_fork_ancestry_instead_of_global_or_current_branch_on
             1,
             "fork_after_report={fork_after_report}: a visible report is never duplicated, but an earlier fork may receive it"
         );
-        assert!(serde_json::to_string(&reports[0])
-            .unwrap()
-            .contains("ONE_REPORT_PER_VISIBLE_ANCESTRY"));
+        assert!(
+            serde_json::to_string(&reports[0])
+                .unwrap()
+                .contains("ONE_REPORT_PER_VISIBLE_ANCESTRY")
+        );
         let root = f.root.clone();
         drop(f);
         std::fs::remove_dir_all(root).unwrap();
@@ -719,12 +727,12 @@ fn fixed_parent_can_admit_private_writable_child_and_cancelled_empty_report_keep
         .is_err(),
         "a proposed materialized identity cannot replace the original Pending source fact"
     );
-    assert!(f
-        .db
-        .execution_task(&child.execution_id)
-        .unwrap()
-        .receipt
-        .is_none());
+    assert!(
+        f.db.execution_task(&child.execution_id)
+            .unwrap()
+            .receipt
+            .is_none()
+    );
     let child =
         f.db.prepare_child(&child.operation_id, source, proposal, basis)
             .unwrap();
@@ -749,7 +757,7 @@ fn fixed_parent_can_admit_private_writable_child_and_cancelled_empty_report_keep
         ToolCompletion::Result {
             outcome: Outcome::Succeeded,
             effect: Effect::Confirmed,
-            content: json!({"written":true}),
+            content: json!({"written":true}).into(),
         },
         true,
     );
@@ -938,7 +946,7 @@ fn completed_report_does_not_stop_process_tree_cancel_is_scoped_and_waits_for_or
         ToolCompletion::Result {
             outcome: Outcome::Indeterminate,
             effect: Effect::Unknown,
-            content: json!({"status":"unknown"}),
+            content: json!({"status":"unknown"}).into(),
         },
         false,
     );
@@ -966,23 +974,24 @@ fn completed_report_does_not_stop_process_tree_cancel_is_scoped_and_waits_for_or
             .unwrap()
             .report
             .unwrap();
-    assert!(!f
-        .db
-        .child_writers_stopped_sync(&child.operation_id)
-        .unwrap());
+    assert!(
+        !f.db
+            .child_writers_stopped_sync(&child.operation_id)
+            .unwrap()
+    );
     assert!(f.db.begin_child_settlement(&child.operation_id).is_err());
-    assert!(f
-        .db
-        .pending_managed_processes()
-        .unwrap()
-        .contains(&"child-process-request:tool:process_spawn".into()));
+    assert!(
+        f.db.pending_managed_processes()
+            .unwrap()
+            .contains(&"child-process-request:tool:process_spawn".into())
+    );
     let target = TreeCancelTarget::Child {
         operation_id: child.operation_id.clone(),
     };
-    assert!(f
-        .db
-        .cancel_tree_checked(target.clone(), Some("unrelated-parent"))
-        .is_err());
+    assert!(
+        f.db.cancel_tree_checked(target.clone(), Some("unrelated-parent"))
+            .is_err()
+    );
     assert!(
         !f.db
             .operation("child-process-request:tool:process_spawn")
@@ -1039,15 +1048,15 @@ fn completed_report_does_not_stop_process_tree_cancel_is_scoped_and_waits_for_or
             epoch: "original-process".into(),
             outcome: Outcome::Indeterminate,
             effect: Effect::Unknown,
-            result: json!({"treeConfirmed":true,"writerActive":false}),
+            result: json!({"treeConfirmed":true,"writerActive":false}).into(),
         },
         true,
     )
     .unwrap();
-    assert!(f
-        .db
-        .child_writers_stopped_sync(&child.operation_id)
-        .unwrap());
+    assert!(
+        f.db.child_writers_stopped_sync(&child.operation_id)
+            .unwrap()
+    );
     f.db.begin_child_settlement(&child.operation_id).unwrap();
     assert_eq!(
         f.db.child_file_effect(&child.operation_id).unwrap(),
@@ -1256,12 +1265,12 @@ fn original_no_send_receipt_does_not_wait_for_a_nonexistent_native_process() {
         },
         true,
     );
-    assert!(f
-        .db
-        .operation(&context.operation_id)
-        .unwrap()
-        .external_receipt
-        .is_none());
+    assert!(
+        f.db.operation(&context.operation_id)
+            .unwrap()
+            .external_receipt
+            .is_none()
+    );
     f.db.commit_execution(
         &run,
         f.db.epoch(),
@@ -1327,7 +1336,7 @@ fn independent_child_report_body_failure_keeps_healthy_report_and_receipt_admiss
                 epoch,
                 f.db.head(&child.child_branch_id).unwrap().as_deref(),
                 HistorySource::Assistant,
-                serde_json::to_value(ConversationItem {
+                serde_json::to_value(ConversationItem::<varin_runtime::output::ResolvedMedia> {
                     id: format!("report:{}", child.execution_id),
                     resource_activation: None,
                     provenance: Provenance::Assistant,
@@ -1378,31 +1387,36 @@ fn independent_child_report_body_failure_keeps_healthy_report_and_receipt_admiss
     assert!(runtime.reconcile_observations().is_err());
     let owner = runtime.catalog();
     let db = owner.lock().unwrap();
-    assert!(db
-        .child_task(&broken.operation_id)
-        .unwrap()
-        .report
-        .is_none());
-    assert!(db
-        .child_task(&healthy.operation_id)
-        .unwrap()
-        .report
-        .is_some());
-    assert!(db
-        .operation(&healthy.operation_id)
-        .unwrap()
-        .external_receipt
-        .is_some());
+    assert!(
+        db.child_task(&broken.operation_id)
+            .unwrap()
+            .report
+            .is_none()
+    );
+    assert!(
+        db.child_task(&healthy.operation_id)
+            .unwrap()
+            .report
+            .is_some()
+    );
+    assert!(
+        db.operation(&healthy.operation_id)
+            .unwrap()
+            .external_receipt
+            .is_some()
+    );
     drop(db);
     std::fs::rename(held, path).unwrap();
     runtime.reconcile_observations().unwrap();
-    assert!(owner
-        .lock()
-        .unwrap()
-        .child_task(&broken.operation_id)
-        .unwrap()
-        .report
-        .is_some());
+    assert!(
+        owner
+            .lock()
+            .unwrap()
+            .child_task(&broken.operation_id)
+            .unwrap()
+            .report
+            .is_some()
+    );
     drop(owner);
     drop(runtime);
     drop(fault);
@@ -1431,12 +1445,12 @@ fn missing_file_handoff_and_pending_file_preparation_cannot_become_absent() {
     assert!(f.db.child_tasks().unwrap().is_empty());
     let child = f.accept();
     let (_, proposal, basis) = child_context(&child);
-    assert!(f
-        .db
-        .capture_child_preparation(&child.execution_id, None, proposal, basis)
-        .unwrap()
-        .load()
-        .is_err());
+    assert!(
+        f.db.capture_child_preparation(&child.execution_id, None, proposal, basis)
+            .unwrap()
+            .load()
+            .is_err()
+    );
     assert_eq!(f.db.child_task(&child.operation_id).unwrap(), child);
     let root = f.root.clone();
     drop(f);

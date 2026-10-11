@@ -1,9 +1,9 @@
 //! Tool executor over the existing Application Host MCP authority.
 //! Frames are private, epoch-bound, and name concrete retained tools, never arbitrary Host methods.
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use varin_runtime::execution::*;
 use varin_runtime::{Effect, ExecutorOwner, Lifetime, Outcome};
 
@@ -185,7 +185,7 @@ impl ToolBridge {
                 match rx.try_recv() {
                     Ok(reply) => return Ok(reply),
                     Err(mpsc::TryRecvError::Disconnected) => {
-                        return Err(failed("host_tool_channel_closed"))
+                        return Err(failed("host_tool_channel_closed"));
                     }
                     Err(mpsc::TryRecvError::Empty) => {}
                 }
@@ -255,14 +255,14 @@ impl ToolBridge {
                 // streams can otherwise deliver a short release before its larger retain body.
                 match rx.try_recv() {
                     Ok(_) if cancel.is_cancelled() => {
-                        return Err(failed("child_retention_cancelled"))
+                        return Err(failed("child_retention_cancelled"));
                     }
                     Ok(reply)
                         if reply.ok
                             && reply.completion.is_none()
                             && reply.executor_stopped.is_none() =>
                     {
-                        return Ok(())
+                        return Ok(());
                     }
                     Ok(reply) => {
                         return Err(failed(
@@ -271,10 +271,10 @@ impl ToolBridge {
                                 .as_ref()
                                 .map(|error| error._code.as_str())
                                 .unwrap_or("child_retention_rejected"),
-                        ))
+                        ));
                     }
                     Err(mpsc::TryRecvError::Disconnected) => {
-                        return Err(failed("host_tool_channel_closed"))
+                        return Err(failed("host_tool_channel_closed"));
                     }
                     Err(mpsc::TryRecvError::Empty) => (),
                 }
@@ -391,7 +391,7 @@ struct Reply {
     id: String,
     kernel_epoch: String,
     ok: bool,
-    completion: Option<ToolCompletion>,
+    completion: Option<ToolCompletion<varin_runtime::output::IncomingMedia>>,
     #[serde(rename = "executor_stopped")]
     executor_stopped: Option<bool>,
     error: Option<ErrorMarker>,
@@ -409,9 +409,46 @@ fn unknown() -> ToolCompletion {
     ToolCompletion::Result {
         outcome: Outcome::Indeterminate,
         effect: Effect::Unknown,
-        content: json!({"error":"host_tool_effect_unknown"}),
+        content: json!({"error":"host_tool_effect_unknown"}).into(),
     }
 }
+/// Validate producer media independently of the receipt's already established effect facts.
+/// A rejected media payload never enters storage; its original ordered position gets an
+/// explicit diagnostic. Job admission remains byte-for-byte domain-owned and cannot be repaired.
+fn admit_host_completion(
+    completion: ToolCompletion<varin_runtime::output::IncomingMedia>,
+    context: &ToolExecutionContext,
+) -> Result<ToolCompletion, varin_runtime::RuntimeError> {
+    use varin_runtime::output::{OutputBody, OutputPart, OutputSource};
+    let source = OutputSource::Tool {
+        context: context.clone(),
+    };
+    Ok(match completion {
+        ToolCompletion::Result {
+            outcome,
+            effect,
+            content,
+        } => {
+            let parts=content.parts.into_iter().enumerate().map(|(index,part)|match part {
+                OutputPart::Text{text}=>OutputPart::Text{text},
+                OutputPart::Media{media}=>match media.admit(source.clone()) {
+                    Ok(media)=>OutputPart::Media{media},
+                    Err(error)=>OutputPart::Text{text:format!("[output_media_rejected] Output part {index} was not admitted: {error}. Supply a valid MIME type and non-empty canonical base64 bytes. The original outcome and effect are unchanged.")},
+                },
+            }).collect();
+            ToolCompletion::Result {
+                outcome,
+                effect,
+                content: OutputBody {
+                    data: content.data,
+                    parts,
+                },
+            }
+        }
+        other => other.map_media(|media| media.admit(source.clone()))?,
+    })
+}
+
 enum GenerationBinding {
     Mcp(McpBinding),
     Extension {
@@ -701,7 +738,8 @@ impl ToolExecutor for HostTools {
                     ),
                     Some(executor_stopped),
                 ) => ToolExecutionReceipt {
-                    completion,
+                    completion: admit_host_completion(completion, context)
+                        .unwrap_or_else(|_| unknown()),
                     executor_stopped,
                 },
                 _ => ToolExecutionReceipt {
@@ -737,7 +775,7 @@ pub(crate) struct LateReceipt {
     pub kernel_epoch: String,
     pub execution_owner: ExecutorOwner,
     pub call: crate::protocol_generated::HostToolCall,
-    pub receipt: ToolExecutionReceipt,
+    pub receipt: ToolExecutionReceipt<varin_runtime::output::IncomingMedia>,
 }
 impl LateReceipt {
     pub(crate) fn apply(
@@ -780,7 +818,14 @@ impl LateReceipt {
         let ExecutorOwner::External { epoch, .. } = &self.execution_owner else {
             return Err(KernelError::Authorization("external owner required".into()));
         };
-        let (outcome, effect, result) = match self.receipt.completion {
+        let context = ToolExecutionContext {
+            run_id: operation.run_id.clone(),
+            operation_id: operation.id.clone(),
+            origin: self.call.origin.clone(),
+        };
+        let completion =
+            admit_host_completion(self.receipt.completion, &context).map_err(domain)?;
+        let (outcome, effect, result) = match completion {
             ToolCompletion::Result {
                 outcome,
                 effect,
@@ -793,17 +838,17 @@ impl LateReceipt {
                     Outcome::Failed
                 },
                 Effect::None,
-                json!({"not_dispatched":reason}),
+                json!({"not_dispatched":reason}).into(),
             ),
             completion @ ToolCompletion::JobAccepted { .. } => {
                 let saved = catalog
                     .lock()
                     .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                    .host_job_acceptance(&operation.id)
+                    .capture_job_acceptance(&operation.id)
                     .map_err(domain)?;
                 if self.receipt.executor_stopped || saved.load().map_err(domain)? != completion {
                     return Err(KernelError::Authorization(
-                        "Host job acceptance differs from its trusted domain receipt".into(),
+                        "Job acceptance differs from its canonical domain acceptance".into(),
                     ));
                 }
                 return Ok(());
@@ -902,13 +947,13 @@ mod tests {
         assert_eq!(cancelled["kind"], "host-tool-cancel");
         assert_eq!(cancelled["id"], request["id"]);
         bridge.receive(json!({"v":1,"kind":"host-tool-response","id":request["id"],"kernelEpoch":"epoch","ok":true,
-            "completion":{"kind":"result","outcome":"succeeded","effect":"confirmed","content":"real receipt"}}));
+            "completion":{"kind":"result","outcome":"succeeded","effect":"confirmed","content":{"data":"real receipt","parts":[]}}}));
         let reply = result
             .recv_timeout(Duration::from_secs(2))
             .unwrap()
             .unwrap();
         assert!(
-            matches!(reply.completion,Some(ToolCompletion::Result {outcome:Outcome::Succeeded,effect:Effect::Confirmed,content}) if content=="real receipt")
+            matches!(reply.completion,Some(ToolCompletion::Result {outcome:Outcome::Succeeded,effect:Effect::Confirmed,content}) if content.data=="real receipt" && content.parts.is_empty())
         );
         bridge.close();
     }
@@ -1048,5 +1093,122 @@ mod tests {
                 .is_none(),
             "native dispatch needs no Host channel"
         );
+    }
+    #[test]
+    fn actual_host_response_rejects_only_bad_media_without_erasing_confirmed_receipt() {
+        use varin_runtime::output::{IncomingMedia, OutputBody, OutputPart};
+        let (bridge, frames) = fixture();
+        let context = ToolExecutionContext {
+            run_id: "media-run".into(),
+            operation_id: "request:tool:media".into(),
+            origin: ToolOrigin::ModelStep {
+                request_id: "request".into(),
+            },
+        };
+        let call = ToolCall {
+            call_id: "media".into(),
+            name: "query".into(),
+            schema_version: "1".into(),
+            arguments: json!({}),
+        };
+        let schema = ToolSchema {
+            requirements: None,
+            name: "query".into(),
+            version: "1".into(),
+            description: String::new(),
+            schema: json!({"type":"object"}),
+            output_schema: None,
+            metadata: None,
+        };
+        let binding = McpBinding {
+            reference: "owner".into(),
+            generation: 1,
+            tools: vec![schema.clone()],
+            resources: [("query".into(), "bound-resource".into())].into(),
+            provenance: varin_runtime::catalog::launches::McpProvenance {
+                execution_scope: varin_runtime::catalog::launches::McpExecutionScope::Global,
+                configuration: varin_runtime::catalog::launches::McpConfiguration {
+                    agent_dir: "/fixture/agent".into(),
+                    config_cwd: "/fixture/project".into(),
+                    project_trusted: true,
+                },
+                servers: Default::default(),
+            },
+        };
+        let executor = HostTools {
+            schema,
+            generation: Arc::new(ToolGeneration {
+                run_id: context.run_id.clone(),
+                binding: GenerationBinding::Mcp(binding),
+                bridge: bridge.clone(),
+                epoch: "epoch".into(),
+                holder: "holder".into(),
+                owner_id: "owner-id".into(),
+            }),
+        };
+        let original = ToolCompletion::Result {
+            outcome: Outcome::Succeeded,
+            effect: Effect::Confirmed,
+            content: OutputBody {
+                data: json!({"receipt":"original confirmed effect","opaque":{"image":"ordinary JSON"}}),
+                parts: vec![
+                    OutputPart::Text {
+                        text: "before".into(),
+                    },
+                    OutputPart::Media {
+                        media: IncomingMedia {
+                            media_type: "image/png".into(),
+                            data_base64: "bad-payload-never-echo".into(),
+                        },
+                    },
+                    OutputPart::Media {
+                        media: IncomingMedia {
+                            media_type: "image/png".into(),
+                            data_base64: "aW1hZ2U=".into(),
+                        },
+                    },
+                    OutputPart::Text {
+                        text: "after".into(),
+                    },
+                ],
+            },
+        };
+        let expected = admit_host_completion(original.clone(), &context).unwrap();
+        let contract = executor.contract(&call).unwrap();
+        let (send, done) = mpsc::channel();
+        std::thread::spawn(move || {
+            send.send(executor.execute_receipt(
+                &context,
+                &call,
+                &contract,
+                &CancellationToken::default(),
+            ))
+            .unwrap();
+        });
+        let request = frames.recv_timeout(Duration::from_secs(2)).unwrap();
+        bridge.receive(json!({"v":1,"kind":"host-tool-response","id":request["id"],"kernelEpoch":"epoch","ok":true,"completion":original,"executor_stopped":true}));
+        let receipt = done.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(receipt.executor_stopped);
+        assert_eq!(receipt.completion, expected);
+        let ToolCompletion::Result {
+            outcome,
+            effect,
+            content,
+        } = receipt.completion
+        else {
+            panic!("original Result")
+        };
+        assert_eq!((outcome, effect), (Outcome::Succeeded, Effect::Confirmed));
+        assert_eq!(content.data["receipt"], "original confirmed effect");
+        assert_eq!(content.parts.len(), 4);
+        let OutputPart::Text { text } = &content.parts[1] else {
+            panic!("explicit rejected-media diagnostic")
+        };
+        assert!(text.contains("output_media_rejected") && text.contains("part 1"));
+        assert!(!text.contains("bad-payload-never-echo"));
+        assert!(
+            matches!(&content.parts[2],OutputPart::Media{media} if media.data_base64=="aW1hZ2U=")
+        );
+        bridge.close();
     }
 }

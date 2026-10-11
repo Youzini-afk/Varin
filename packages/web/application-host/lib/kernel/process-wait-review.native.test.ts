@@ -1,3 +1,4 @@
+import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
 import { createThreadContext } from './thread-context.js';
@@ -152,7 +153,7 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
     const output = outputs.at(-1);
     if (foreign) {
       if (!output) tool(response, 'wait_process', { processId }, 90);
-      else { foreignResult = String(output.output); done(response); }
+      else { foreignResult = responsesMetadataText(output.output); done(response); }
       return;
     }
     serial++;
@@ -160,12 +161,12 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
       tool(response, 'process_spawn', { cwd: '', command: process.execPath,
         args: ['-e', `const fs=require('node:fs');const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(path.join(f.root, 'release-process'))})){clearInterval(timer);process.stdout.write('process-wait-real-output');}},10);`], mode: 'pipe' }, 1);
     } else if (serial === 2) {
-      processId = (JSON.parse(String(output?.output)) as { operation_id: string }).operation_id;
+      processId = (JSON.parse(responsesMetadataText(output?.output)) as { operation_id: string }).operation_id;
       batch(response, [{ name: 'wait_process', args: { processId }, id: 'wait-2' },
         { name: 'file_read', args: { path: 'source.txt' }, id: 'read-peer-2' }]);
     } else if (serial === 3) {
-      expect(String(outputs.find(item => item.call_id === 'read-peer-2')?.output)).toContain('parallel read completed');
-      expect(JSON.stringify(body.input)).toContain('Process lifecycle data');
+      expect(responsesMetadataText(outputs.find(item => item.call_id === 'read-peer-2')?.output)).toContain('parallel read completed');
+      expect(JSON.stringify(body.input)).toContain('Job lifecycle data');
       expect(f.context.queries.filter(query => query.action === 'synchronize').length).toBeGreaterThanOrEqual(3);
       const processGrants = f.grants.filter(grant => grant.grantId.startsWith('source:'));
       expect(processGrants).toHaveLength(2);
@@ -182,13 +183,13 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
       } else await f.kernel.revokeGrant(processGrants[revoked === 'original' ? 0 : 1]!.grantId);
       tool(response, 'process_read', { processId, cursor: 0 }, 3);
     } else if (serial === 4) {
-      readResult = String(output?.output);
+      readResult = responsesMetadataText(output?.output);
       // New observation registration must obey the same explicit revoke as reads.
       if (revoked !== 'none') tool(response, 'wait_process', { processId }, 4);
       else done(response);
     } else {
-      expect(String(output?.output)).toContain('failed');
-      expect(String(output?.output)).toMatch(/revoked|authority/);
+      expect(responsesMetadataText(output?.output)).toContain('failed');
+      expect(responsesMetadataText(output?.output)).toMatch(/revoked|authority/);
       done(response);
     }
   })().catch(error => { failures.push(error); response.writeHead(500); response.end('fixture assertion failed'); }); });
@@ -212,7 +213,7 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
       expect(readResult).toContain('succeeded');
       expect(readResult).toContain(Buffer.from('process-wait-real-output').toString('base64'));
       const history = await f.runtime.history(identity.branchId);
-      expect(history.filter(item => JSON.stringify(item.content).includes('Process lifecycle data'))).toHaveLength(1);
+      expect(history.filter(item => JSON.stringify(item.content).includes('Job lifecycle data'))).toHaveLength(1);
       foreign = true;
       const other = await f.api.create('foreign-process-observer');
       const foreignRun = await f.api.submit({ ...other, key: 'foreign', expectedHead: null, text: 'observe foreign process', model, source: prepared.source });
@@ -362,7 +363,7 @@ it('reopens a parked wait after kernel shutdown and delivers the original stoppe
       args: ['-e', `const fs=require('node:fs');fs.appendFileSync(${JSON.stringify(path.join(f.root, 'spawn-count'))},'1');const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(path.join(f.root, 'release-process'))})){clearInterval(timer);process.stdout.write('reopened-process-output');}},10);`], mode: 'pipe' }, 1);
     else if (turn === 2) {
       const last = (_body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
-      processId = (JSON.parse(String(last?.output)) as { operation_id: string }).operation_id;
+      processId = (JSON.parse(responsesMetadataText(last?.output)) as { operation_id: string }).operation_id;
       tool(response, 'wait_process', { processId }, 2);
     } else if (turn === 3) tool(response, 'process_read', { processId, cursor: 0 }, 3);
     else {
@@ -408,18 +409,19 @@ it('reopens a parked wait after kernel shutdown and delivers the original stoppe
     expect(errors).toEqual([]); expect(turn).toBe(4);
     expect(context.queries.some(query => query.action === 'synchronize' && query.runId === receipt.run_id)).toBe(true);
     const items = JSON.parse(output) as Array<Record<string, unknown>>;
-    const factText = String(items.find(item => typeof item.content === 'string' && item.content.startsWith('Process lifecycle data'))?.content);
-    const fact = JSON.parse(factText.split('\n').at(-1)!) as { outcome: string; signal: string | null; treeConfirmed: boolean; stopApplied: boolean };
+    const factMessage = items.find(item => item.role === 'user' && JSON.stringify(item.content).includes('Job lifecycle data'))!;
+    const factEnvelope = JSON.parse(responsesMetadataText(factMessage.content).split('\n').slice(1).join('\n')) as { data: { outcome: string; signal: string | null; treeConfirmed: boolean; stopApplied: boolean } };
+    const fact = factEnvelope.data;
     // Windows TerminateProcess has an exit code, rather than a POSIX signal name.
     const signal = process.platform === 'win32' ? null : 'Killed';
     expect(fact).toMatchObject({ outcome: 'failed', signal, treeConfirmed: true, stopApplied: true });
-    const read = JSON.parse(String(items.find(item => item.call_id === 'process_read-3' && item.type === 'function_call_output')?.output)) as { content: { outputComplete: boolean; outputError: string; process: { signal: string | null; writerActive: boolean; stopApplied: boolean } } };
+    const read = JSON.parse(responsesMetadataText(items.find(item => item.call_id === 'process_read-3' && item.type === 'function_call_output')?.output)) as { content: { outputComplete: boolean; outputError: string; process: { signal: string | null; writerActive: boolean; stopApplied: boolean } } };
     expect(read.content.outputComplete).toBe(false);
     expect(read.content.outputError).toContain('without a durable completion marker');
     expect(read.content.process).toMatchObject({ signal, writerActive: false, stopApplied: true });
     expect(await fs.readFile(path.join(f.root, 'spawn-count'), 'utf8')).toBe('1');
     expect((await runtime.operation(processId)).outcome).toBe('failed');
-    expect((await runtime.history(identity.branchId)).filter(item => JSON.stringify(item.content).includes('Process lifecycle data'))).toHaveLength(1);
+    expect((await runtime.history(identity.branchId)).filter(item => JSON.stringify(item.content).includes('Job lifecycle data'))).toHaveLength(1);
   } finally {
     await fs.writeFile(path.join(f.root, 'release-process'), 'release');
     if (processId) {
@@ -437,9 +439,9 @@ it('rebuilds only Host continuation service while its kernel keeps the original 
     const last = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
     if (turn === 1) tool(response, 'process_spawn', { cwd: '', command: process.execPath,
       args: ['-e', `const fs=require('node:fs');fs.appendFileSync(${JSON.stringify(path.join(f.root, 'spawn-count'))},'1');const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(path.join(f.root, 'release-process'))})){clearInterval(timer);process.stdout.write('host-service-recovered-output');}},10);`], mode: 'pipe' }, 1);
-    else if (turn === 2) { processId = (JSON.parse(String(last?.output)) as { operation_id: string }).operation_id; tool(response, 'wait_process', { processId }, 2); }
+    else if (turn === 2) { processId = (JSON.parse(responsesMetadataText(last?.output)) as { operation_id: string }).operation_id; tool(response, 'wait_process', { processId }, 2); }
     else if (turn === 3) tool(response, 'process_read', { processId, cursor: 0 }, 3);
-    else { readResult = String(last?.output); done(response); }
+    else { readResult = responsesMetadataText(last?.output); done(response); }
   });
   const identity = await f.api.create('host-service-process-wait');
   const prepared = await f.api.prepareSource({ ...identity, key: 'capture', path: f.workspace, mode: 'materialized' });
@@ -464,7 +466,7 @@ it('rebuilds only Host continuation service while its kernel keeps the original 
     expect(readResult).toContain(Buffer.from('host-service-recovered-output').toString('base64'));
     expect(readResult).toContain('succeeded'); expect((await f.runtime.operation(processId)).outcome).toBe('succeeded');
     expect(await fs.readFile(path.join(f.root, 'spawn-count'), 'utf8')).toBe('1');
-    expect((await f.runtime.history(identity.branchId)).filter(item => JSON.stringify(item.content).includes('Process lifecycle data'))).toHaveLength(1);
+    expect((await f.runtime.history(identity.branchId)).filter(item => JSON.stringify(item.content).includes('Job lifecycle data'))).toHaveLength(1);
   } finally {
     await fs.writeFile(path.join(f.root, 'release-process'), 'release');
     if (processId) await f.runtime.cancelOperation(processId).catch(() => undefined);
@@ -483,7 +485,7 @@ it.each(['process_stopped', 'at', 'any', 'all'] as const)('admits one %s follow-
       if (turn === 1) tool(response, 'process_spawn', { cwd: '', command: process.execPath,
         args: ['-e', `const fs=require('node:fs');const root=${JSON.stringify(f.root)};const release=${JSON.stringify(path.join(f.root, 'release-process'))};fs.appendFileSync(${JSON.stringify(path.join(f.root, 'spawn-count'))},'1');process.stdout.write('original-live-process-output');let released=false;const watcher=fs.watch(root,(_event,name)=>{if(String(name)==='release-process')finish();});function finish(){if(released||!fs.existsSync(release))return;released=true;watcher.close();process.stdout.write('one-shot-process-output');}finish();`], mode: 'pipe' }, 1);
       else if (turn === 2) {
-        const accepted = JSON.parse(String(last?.output)) as { kind: string; operation_id: string };
+        const accepted = JSON.parse(responsesMetadataText(last?.output)) as { kind: string; operation_id: string };
         expect(accepted.kind).toBe('job_accepted');
         processId = accepted.operation_id;
         // Keep the source Run active until the real management API has recorded authorization.
@@ -494,7 +496,7 @@ it.each(['process_stopped', 'at', 'any', 'all'] as const)('admits one %s follow-
         tool(response, 'process_read', { processId, cursor: 0 }, 3);
       } else {
         expect(turn).toBe(4);
-        readResult = String(last?.output); done(response);
+        readResult = responsesMetadataText(last?.output); done(response);
       }
     } catch (error) { failures.push(error); response.writeHead(500); response.end('fixture assertion failed'); }
   });

@@ -2,10 +2,11 @@
 import { parseVarinToolJson, VARIN_RUNTIME_TOOLS_CAPABILITY, type NestedToolInput, type NestedToolReceipt } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import type { KernelClient } from './kernel-client.js';
-import { runNestedToolCall } from './tool-invocation.js';
+import { runNestedToolCall, emitToolOutput } from './tool-invocation.js';
 export { VARIN_RUNTIME_TOOLS_CAPABILITY };
 export function createNestedToolOwner(kernel: KernelClient): HostCapabilityHandler {
   return async (method, params, context) => {
+    if (method === 'output') { emitToolOutput(context, params); return null; }
     if (method !== 'invoke') throw new Error('nested_tool_method_invalid');
     return runNestedToolCall(context, async authority => {
       // Do not race this execution receipt with the broker observer's AbortSignal. Runtime

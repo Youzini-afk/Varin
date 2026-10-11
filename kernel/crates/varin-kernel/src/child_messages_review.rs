@@ -77,12 +77,15 @@ fn selected_send_is_a_durable_effect_from_model_and_policy_with_real_agent_actor
         let replay = db.admit_message(one).unwrap();
         assert!(!replay.accepted);
         assert_eq!(&replay.receipt, receipt);
-        assert_eq!(replay.completion, public.call_completion);
+        assert_eq!(
+            serde_json::to_value(&replay.completion).unwrap(),
+            serde_json::to_value(&public.call_completion).unwrap()
+        );
         assert_eq!(db.admit_message(two).unwrap().completion, replay.completion);
         let mut changed = invocation.call.clone();
         changed.arguments["text"] = json!("conflicting retry");
-        assert!(db
-            .prepare_tool_message(
+        assert!(
+            db.prepare_tool_message(
                 &context,
                 changed.clone(),
                 crate::message_tools::schema(),
@@ -90,7 +93,8 @@ fn selected_send_is_a_durable_effect_from_model_and_policy_with_real_agent_actor
             )
             .unwrap()
             .load()
-            .is_err());
+            .is_err()
+        );
         assert_eq!(operation.effect, Effect::Confirmed);
         assert!(operation.call_completion.is_some());
         assert!(page.messages[0].delivered_run_id.is_none());
@@ -137,7 +141,10 @@ fn selected_send_is_a_durable_effect_from_model_and_policy_with_real_agent_actor
             .unwrap();
         let replay = db.admit_message(prepared).unwrap();
         assert_eq!(replay.receipt, receipt);
-        assert_eq!(replay.completion, completion);
+        assert_eq!(
+            serde_json::to_value(&replay.completion).unwrap(),
+            serde_json::to_value(&completion).unwrap()
+        );
         assert_eq!(
             db.capture_message(
                 "thread:parent",
@@ -182,10 +189,12 @@ fn send_rejects_unselected_and_model_supplied_sender_before_any_message_is_accep
         schema_version: "3".into(),
         arguments: json!({"targetThreadId":"thread:parent","targetBranchId":"branch:parent","kind":"inform","text":"not selected"}),
     };
-    assert!(start
-        .tools
-        .prepare(&call, &context, &CancellationToken::default())
-        .is_err());
+    assert!(
+        start
+            .tools
+            .prepare(&call, &context, &CancellationToken::default())
+            .is_err()
+    );
     assert!(!start.binding.tools.iter().any(|tool| tool.name == "send"));
     drop(start);
     let f = f.reopen();
@@ -210,22 +219,23 @@ fn send_rejects_unselected_and_model_supplied_sender_before_any_message_is_accep
         &mut OwnerReplies::default(),
         false,
     );
-    assert!(f
-        .catalog()
-        .lock()
-        .unwrap()
-        .capture_message_list(
-            "thread:parent".into(),
-            "branch:parent".into(),
-            MessageDirection::Incoming,
-            None,
-            None
-        )
-        .unwrap()
-        .load(&|| false)
-        .unwrap()
-        .messages
-        .is_empty());
+    assert!(
+        f.catalog()
+            .lock()
+            .unwrap()
+            .capture_message_list(
+                "thread:parent".into(),
+                "branch:parent".into(),
+                MessageDirection::Incoming,
+                None,
+                None
+            )
+            .unwrap()
+            .load(&|| false)
+            .unwrap()
+            .messages
+            .is_empty()
+    );
     f.finish();
 }
 
@@ -333,7 +343,7 @@ fn stop_family_job(f: &Fixture, binding: &varin_runtime::catalog::host_jobs::Hos
             epoch: epoch.clone(),
             outcome: Outcome::Succeeded,
             effect: Effect::Confirmed,
-            result: json!({"attemptId":binding.subject_id,"collectionState":"pending"}),
+            result: json!({"attemptId":binding.subject_id,"collectionState":"pending"}).into(),
         })
         .unwrap();
     db.record_host_job_terminal(binding, receipt, true).unwrap();
@@ -342,7 +352,7 @@ fn stop_family_job(f: &Fixture, binding: &varin_runtime::catalog::host_jobs::Hos
 #[test]
 fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait() {
     use varin_runtime::catalog::followups::{
-        observation::FollowupObservationState, FollowupActor, NextRunWaitState,
+        FollowupActor, NextRunWaitState, observation::FollowupObservationState,
     };
     for (trigger_kind, model) in [
         "at",
@@ -496,7 +506,7 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
 fn native_followup_all_instants_deliver_original_wait_and_one_active_ingress_without_host_polling()
 {
     use varin_runtime::catalog::followups::{
-        observation::FollowupObservationState, NextRunWaitState,
+        NextRunWaitState, observation::FollowupObservationState,
     };
     let f = Fixture::with_tools(
         false,
@@ -617,7 +627,7 @@ fn followup_get_list_and_control_consume_real_retained_user_instruction_from_bot
                         else {
                             panic!("actual ModelStep management result failed")
                         };
-                        values.push((result.call_id, content));
+                        values.push((result.call_id, content.data));
                     }
                 }
             }
@@ -670,7 +680,8 @@ fn followup_get_list_and_control_consume_real_retained_user_instruction_from_bot
                         .bytes,
                     );
                 }
-                values.push((node_id, serde_json::from_slice(&bytes).unwrap()));
+                let body: OutputBody = serde_json::from_slice(&bytes).unwrap();
+                values.push((node_id, body.data));
             }
         }
         assert_eq!(values.len(), 5);
@@ -914,13 +925,15 @@ fn repeating_family_job_then_time_uses_real_idle_and_active_child_occurrences() 
         for report in reports {
             owner.lock().unwrap().admit_child_report(report).unwrap();
         }
-        assert!(owner
-            .lock()
-            .unwrap()
-            .run(&f.run.id)
-            .unwrap()
-            .state
-            .terminal());
+        assert!(
+            owner
+                .lock()
+                .unwrap()
+                .run(&f.run.id)
+                .unwrap()
+                .state
+                .terminal()
+        );
         if event_kind == "job_stopped" {
             stop_family_job(&f, &job);
         } else {
@@ -1009,7 +1022,7 @@ fn repeating_family_job_then_time_uses_real_idle_and_active_child_occurrences() 
             "result available"
         };
         assert!(history.iter().any(
-            |item| matches!(&item.content, Content::Text { text } if text.contains(original_fact))
+            |item| matches!(&item.content, Content::Output { output } if output.data.to_string().contains(original_fact))
         ));
         // A later accepted edge keeps the same definition and enters the actual new
         // child Run; it cannot borrow the earlier occurrence's input or execution ID.
@@ -1176,9 +1189,10 @@ fn repeating_tool_wait_returns_first_occurrence_even_when_later_edges_precede_wa
         assert_eq!(d.occurrence.unwrap().id, history[1].id);
         let waits = db.capture_followup_waits().unwrap();
         assert_eq!(waits.len(), 1);
-        assert!(db
-            .admit_followup_wait(waits.into_iter().next().unwrap().load().unwrap())
-            .unwrap());
+        assert!(
+            db.admit_followup_wait(waits.into_iter().next().unwrap().load().unwrap())
+                .unwrap()
+        );
         let item = db
             .execution_history(&f.run.branch_id)
             .unwrap()
@@ -1306,9 +1320,11 @@ fn original_artifact_and_collection_facts_reach_real_child_observations_from_bot
                 .unwrap();
             let delivery = db.admit_input_delivery(p).unwrap().unwrap();
             assert_eq!(delivery.items.len(), 1);
-            assert!(serde_json::to_string(&delivery.items)
-                .unwrap()
-                .contains("originalArtifactMetadata"));
+            assert!(
+                serde_json::to_string(&delivery.items)
+                    .unwrap()
+                    .contains("originalArtifactMetadata")
+            );
             assert!(!db.operation(&job.operation_id).unwrap().cancel_requested);
             assert_eq!(
                 db.followup(&definition.id).unwrap().wait.state,

@@ -340,9 +340,11 @@ fn request_ends_original_child_observation_only_then_resumes_same_run_after_reop
                 );
             } else {
                 assert!(was_cancelled);
-                assert!(history
-                    .iter()
-                    .any(|item| item.id == format!("child-wait-cancel:{}", wait.id)));
+                assert!(
+                    history
+                        .iter()
+                        .any(|item| item.id == format!("child-wait-cancel:{}", wait.id))
+                );
             }
         }
         let head = db.head("branch:parent").unwrap();
@@ -452,9 +454,11 @@ fn request_preserves_real_manual_pause_and_unanswered_question_across_reopen() {
         );
         assert_eq!(view(&db, &message).summary.state, InputState::Queued);
         drop(db);
-        assert!(owner
-            .prepare_start(&run, |_| panic!("request cannot bypass blocker"))
-            .is_err());
+        assert!(
+            owner
+                .prepare_start(&run, |_| panic!("request cannot bypass blocker"))
+                .is_err()
+        );
         drop(catalog);
         drop(owner);
         std::fs::remove_dir_all(root).unwrap();
@@ -547,7 +551,7 @@ fn unreadable_unobserved_child_report_does_not_suppress_independent_request_acti
             epoch,
             f.db.head(&child.child_branch_id).unwrap().as_deref(),
             HistorySource::Assistant,
-            serde_json::to_value(ConversationItem {
+            serde_json::to_value(ConversationItem::<varin_runtime::output::ResolvedMedia> {
                 id: "unobserved-child-report".into(),
                 resource_activation: None,
                 provenance: Provenance::Assistant,

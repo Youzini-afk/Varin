@@ -1,6 +1,6 @@
 import React from 'react';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
-import type { ThreadFamilyAPI, ThreadFollowupsAPI, ThreadIdentity, ThreadResearchAPI } from '@varin/application-client';
+import type { ThreadsAPI, ThreadFamilyAPI, ThreadFollowupsAPI, ThreadIdentity, ThreadResearchAPI } from '@varin/application-client';
 import type { HostJobSource, FollowupPendingRegistration, Followup, FollowupOccurrence, FollowupOccurrencesResult, FollowupLeafEvidence, FollowupRegisterParams, FollowupRegistrationSource, FollowupSource, FollowupSourceState, FollowupView, MetricKind, ResourceMachineView, Operation, Run } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -264,7 +264,7 @@ function evidenceLabel(evidence: FollowupLeafEvidence): string {
   if (evidence.kind === 'job_stopped') return `${evidence.binding.domain} · ${evidence.binding.subjectId} · ${evidence.outcome} · effect ${evidence.effect} · receipt ${evidence.receipt_identity}`;
   return `Process stop · receipt ${evidence.receipt_identity} · epoch ${evidence.receipt_epoch}`;
 }
-function OccurrenceView({ occurrence, family, identity, api, followupId }: { api: ThreadFollowupsAPI; followupId: string; occurrence: FollowupOccurrence; family?: ThreadFamilyAPI; identity: ThreadIdentity }) {
+function OccurrenceView({ occurrence, family, mediaRead, identity, api, followupId }: { api: ThreadFollowupsAPI; followupId: string; occurrence: FollowupOccurrence; family?: ThreadFamilyAPI; mediaRead: ThreadsAPI['mediaRead']; identity: ThreadIdentity }) {
   const [readingRun, setReadingRun] = React.useState(false);
   const delivery = occurrence.delivery;
   const evidence = occurrence.evidence;
@@ -283,11 +283,11 @@ function OccurrenceView({ occurrence, family, identity, api, followupId }: { api
     <ThreadFollowupOccurrenceDetails api={api} identity={identity} followupId={followupId} occurrence={occurrence} />
     {family && delivery?.run_id && <>
       <Button size="sm" variant="ghost" aria-expanded={readingRun} onClick={() => setReadingRun(value => !value)}>{readingRun ? 'Hide occurrence Run' : 'Read occurrence Run'}</Button>
-      {readingRun && <ThreadRunHistory api={family} identity={identity} runId={delivery.run_id} />}
+      {readingRun && <ThreadRunHistory api={family} mediaRead={mediaRead} identity={identity} runId={delivery.run_id} />}
     </>}
   </div>;
 }
-function FollowupOccurrences({ api, family, identity, item }: { api: ThreadFollowupsAPI; family?: ThreadFamilyAPI; identity: ThreadIdentity; item: Followup }) {
+function FollowupOccurrences({ api, family, mediaRead, identity, item }: { api: ThreadFollowupsAPI; family?: ThreadFamilyAPI; mediaRead: ThreadsAPI['mediaRead']; identity: ThreadIdentity; item: Followup }) {
   const [open, setOpen] = React.useState(false);
   const [request, setRequest] = React.useState<{ after?: number; previous: (number | undefined)[]; revision: number }>({ previous: [], revision: 0 });
   const [page, setPage] = React.useState<FollowupOccurrencesResult>();
@@ -312,7 +312,7 @@ function FollowupOccurrences({ api, family, identity, item }: { api: ThreadFollo
       {page && <>
         <p className="text-xs text-muted-foreground">This is a saved page. Refresh to read current delivery states.</p>
         {page.occurrences.length === 0 && <p>No occurrences in this page.</p>}
-        {page.occurrences.map(occurrence => <div key={occurrence.id} className="rounded border p-2"><OccurrenceView occurrence={occurrence} identity={identity} family={family} api={api} followupId={item.id} /></div>)}
+        {page.occurrences.map(occurrence => <div key={occurrence.id} className="rounded border p-2"><OccurrenceView occurrence={occurrence} identity={identity} family={family} mediaRead={mediaRead} api={api} followupId={item.id} /></div>)}
         {page.nextCursor !== null && <Button size="sm" variant="outline" disabled={loading} onClick={() => setRequest(value => ({ after: page.nextCursor!, previous: [...value.previous, value.after], revision: value.revision + 1 }))}>Next occurrence page</Button>}
       </>}
       {request.previous.length > 0 && <Button size="sm" variant="ghost" disabled={loading} onClick={() => setRequest(value => ({ after: value.previous.at(-1), previous: value.previous.slice(0, -1), revision: value.revision + 1 }))}>Previous occurrence page</Button>}
@@ -322,8 +322,8 @@ function FollowupOccurrences({ api, family, identity, item }: { api: ThreadFollo
 }
 
 /** Original definitions and delivery facts; no client timer or execution queue. */
-export function ThreadFollowups({ api, family, research, identity, run, operations, followups, pending, act, cancelObservation }: {
-  api: ThreadFollowupsAPI; family?: ThreadFamilyAPI; research?: ThreadResearchAPI; identity: ThreadIdentity; run?: Run; operations: Operation[]; followups: Followup[];
+export function ThreadFollowups({ api, family, mediaRead, research, identity, run, operations, followups, pending, act, cancelObservation }: {
+  api: ThreadFollowupsAPI; family?: ThreadFamilyAPI; mediaRead: ThreadsAPI['mediaRead']; research?: ThreadResearchAPI; identity: ThreadIdentity; run?: Run; operations: Operation[]; followups: Followup[];
   pending: boolean; act(work: () => Promise<unknown>): Promise<void>; cancelObservation(operationId: string): Promise<void>;
 }) {
   const [editing, setEditing] = React.useState(false);
@@ -484,7 +484,7 @@ export function ThreadFollowups({ api, family, research, identity, run, operatio
       return <div key={item.id} className="space-y-1 rounded border p-3" aria-label={ended ? 'Past follow-up' : 'Pending follow-up'}>
         <p>{triggerLabel(item)}</p>
         <p>{item.repeat === 'each' ? item.state === 'cancelled' ? 'Repeating authorization cancelled' : item.state === 'paused' ? 'Repeating authorization paused' : item.exhausted ? 'Log observation ended' : 'Continuing to observe changes' : 'One-time instruction'} · {item.pending_occurrences} undelivered {item.pending_occurrences === 1 ? 'occurrence' : 'occurrences'}</p>
-        {item.occurrence ? <div aria-label="Latest follow-up occurrence"><p className="text-xs text-muted-foreground">Latest occurrence</p><OccurrenceView key={item.occurrence.id} occurrence={item.occurrence} identity={identity} family={family} api={api} followupId={item.id} /></div> : <p>{item.exhausted ? 'Log ended without satisfying the condition' : 'Waiting for the original trigger'}</p>}
+        {item.occurrence ? <div aria-label="Latest follow-up occurrence"><p className="text-xs text-muted-foreground">Latest occurrence</p><OccurrenceView key={item.occurrence.id} occurrence={item.occurrence} identity={identity} family={family} mediaRead={mediaRead} api={api} followupId={item.id} /></div> : <p>{item.exhausted ? 'Log ended without satisfying the condition' : 'Waiting for the original trigger'}</p>}
         <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">Condition details</summary>
         {(item.trigger.kind === 'any' || item.trigger.kind === 'all') && <ul className="space-y-1 text-xs text-muted-foreground">
           {item.trigger.sources.map((source, index) => {
@@ -513,7 +513,7 @@ export function ThreadFollowups({ api, family, research, identity, run, operatio
           </div>;
         })}
         <FollowupInstruction api={api} identity={identity} item={item} />
-        <FollowupOccurrences api={api} family={family} identity={identity} item={item} />
+        <FollowupOccurrences api={api} family={family} mediaRead={mediaRead} identity={identity} item={item} />
         {!ended && <>
           {item.repeat === 'each' && <p className="text-xs text-muted-foreground">Cancel stops future and pending deliveries. Existing results and observed work remain available.</p>}
           {item.state === 'active' && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void control(item, 'pause')}>Pause follow-up</Button>}

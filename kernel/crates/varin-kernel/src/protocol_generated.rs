@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 2;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 3;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -101,8 +101,11 @@ pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
     ("runtime.input.enqueue", "branchId"),
     ("runtime.input.edit", "inputId"),
 ];
-pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] =
-    &["runtime.tools.invoke", "runtime.history.body"];
+pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
+    "runtime.tools.invoke",
+    "runtime.history.body",
+    "runtime.output.media.read",
+];
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
@@ -267,7 +270,7 @@ pub(crate) struct HostJobUserParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct HostJobAcceptParams {
     pub(crate) binding: varin_runtime::catalog::host_jobs::HostJobBinding,
-    pub(crate) content: Value,
+    pub(crate) content: varin_runtime::output::OutputBody<varin_runtime::output::IncomingMedia>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -282,7 +285,7 @@ pub(crate) struct HostJobTerminalParams {
     pub(crate) binding: varin_runtime::catalog::host_jobs::HostJobBinding,
     pub(crate) outcome: varin_runtime::Outcome,
     pub(crate) effect: varin_runtime::Effect,
-    pub(crate) content: Value,
+    pub(crate) content: varin_runtime::output::OutputBody<varin_runtime::output::IncomingMedia>,
     pub(crate) executor_stopped: bool,
 }
 
@@ -619,6 +622,10 @@ pub(crate) struct HistoryBodyParams {
     pub(crate) item_id: String,
     pub(crate) chunk_index: i64,
 }
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct MediaReadParams {}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -2867,6 +2874,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.history.body" => serde_json::from_value::<HistoryBodyParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.output.media.read" => serde_json::from_value::<MediaReadParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.thread.operations.active" => {

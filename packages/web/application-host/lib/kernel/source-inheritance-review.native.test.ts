@@ -1,3 +1,4 @@
+import { responsesMetadataText } from './responses-wire.test-helper.js';
 import express from 'express';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
@@ -81,7 +82,7 @@ it('public completed-turn continuation preserves edited disk while explicit sour
   const outputs: string[] = [];
   const f = await fixture((body, response) => {
     const last = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
-    const output = last ? String(last.output) : '';
+    const output = last ? responsesMetadataText(last.output) : '';
     outputs.push(output); step++;
     let call: { name: string; arguments: Record<string, unknown> } | undefined;
     if ([1, 4, 6].includes(step)) call = { name: 'file_read', arguments: { path: 'source.txt' } };

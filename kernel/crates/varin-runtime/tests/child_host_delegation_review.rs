@@ -135,10 +135,10 @@ fn model_and_policy_dispatch_admit_exact_host_selections_before_any_child_owner_
         gateway.validate().unwrap();
         let mut wrong = f.launch.clone();
         wrong.extension_bindings[0].artifact_integrity = "latest-artifact".into();
-        assert!(f
-            .db
-            .accept_child(&f.context, f.input.clone(), f.pin.clone(), wrong)
-            .is_err());
+        assert!(
+            f.db.accept_child(&f.context, f.input.clone(), f.pin.clone(), wrong)
+                .is_err()
+        );
         let child = f.accept();
         assert!(child.receipt.is_none());
         assert_eq!(child.state, "preparing");
@@ -185,12 +185,14 @@ fn host_tool_with_native_process_name_does_not_gain_a_native_process_source_gran
     assert_eq!(resolved.profile.tools, vec!["process_spawn"]);
     let mut normal = f.input.clone();
     normal.tools = None;
-    assert!(selected
-        .resolve(&normal)
-        .unwrap()
-        .profile
-        .tools
-        .contains(&"process_spawn".into()));
+    assert!(
+        selected
+            .resolve(&normal)
+            .unwrap()
+            .profile
+            .tools
+            .contains(&"process_spawn".into())
+    );
     f.accept();
     let root = f.root.clone();
     drop(selected);
@@ -250,12 +252,12 @@ fn child_derives_mcp_once_preserving_original_definitions_then_reopens_only_its_
     assert!(f.db.prepare_mcp_launch(&run, another).is_err());
     let mut extensions = f.launch.extension_bindings.clone();
     extensions[0].configuration_identity = Some("updated-config".into());
-    assert!(f
-        .db
-        .prepare_extensions_change(&run, extensions)
-        .unwrap()
-        .load()
-        .is_err());
+    assert!(
+        f.db.prepare_extensions_change(&run, extensions)
+            .unwrap()
+            .load()
+            .is_err()
+    );
     let root = f.root.clone();
     drop(f.db);
     f.db = Catalog::open(&root).unwrap();
@@ -295,12 +297,12 @@ fn child_without_host_selection_cannot_append_capabilities_and_cancellation_fenc
         .unwrap()
         .selection
         .extension_bindings;
-    assert!(f
-        .db
-        .prepare_extensions_change(&run, bindings)
-        .unwrap()
-        .load()
-        .is_err());
+    assert!(
+        f.db.prepare_extensions_change(&run, bindings)
+            .unwrap()
+            .load()
+            .is_err()
+    );
     let donor_root = donor.root.clone();
     drop(donor);
     std::fs::remove_dir_all(donor_root).unwrap();
@@ -333,8 +335,8 @@ fn child_without_host_selection_cannot_append_capabilities_and_cancellation_fenc
 }
 
 #[test]
-fn original_host_refs_survive_new_composition_collection_and_reopen_without_freezing_mixed_generations(
-) {
+fn original_host_refs_survive_new_composition_collection_and_reopen_without_freezing_mixed_generations()
+ {
     let mut f = Fixture::new_parent_extension();
     f.accept();
     f.settle_exchange();
@@ -345,15 +347,15 @@ fn original_host_refs_survive_new_composition_collection_and_reopen_without_free
         configuration: serde_json::from_value(f.db.run(&run).unwrap().configuration).unwrap(),
         credential_scope: launch.credential_scope.clone(),
     };
-    assert!(f
-        .db
-        .prepare_child_dispatch_binding(
+    assert!(
+        f.db.prepare_child_dispatch_binding(
             &run,
             model.clone(),
             launch.tool_schema_generation + 1,
             launch.tools.clone()
         )
-        .is_err());
+        .is_err()
+    );
     let old =
         f.db.prepare_child_dispatch_binding(
             &run,
@@ -534,7 +536,7 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
         let unknown = ToolCompletion::Result {
             outcome: Outcome::Indeterminate,
             effect: Effect::Unknown,
-            content: json!({"observer":"returned; callback still running"}),
+            content: json!({"observer":"returned; callback still running"}).into(),
         };
         for call in &calls {
             let identity = if call.name == extension.tool.name {
@@ -650,10 +652,10 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
                 f.db.pending_managed_processes().unwrap().is_empty(),
                 "native recovery cannot replay a Host callback"
             );
-            assert!(f
-                .db
-                .require_process_observation(&run, &contexts[0].operation_id)
-                .is_err());
+            assert!(
+                f.db.require_process_observation(&run, &contexts[0].operation_id)
+                    .is_err()
+            );
             assert!(f.db.cancel_process_wait(&contexts[2].operation_id).is_err());
         }
         f.db.commit_execution(
@@ -685,10 +687,10 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
             !f.db.child_writers_stopped(&writers).unwrap(),
             "terminal Run is not callback stop evidence"
         );
-        assert!(f
-            .db
-            .begin_child_settlement_bound(&child.operation_id, &writers)
-            .is_err());
+        assert!(
+            f.db.begin_child_settlement_bound(&child.operation_id, &writers)
+                .is_err()
+        );
         assert_eq!(
             f.db.child_file_effect_bound(&writers).unwrap(),
             Effect::Unknown
@@ -720,7 +722,7 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
                 Outcome::Succeeded
             },
             effect,
-            result: json!({"originalCallbackStopped":true}),
+            result: json!({"originalCallbackStopped":true}).into(),
         };
         f.db.record_external_receipt_with_stop(
             &contexts[1].operation_id,

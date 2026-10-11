@@ -1,3 +1,4 @@
+import type { OutputMediaHolder } from '@varin/protocol';
 import { parseComputerWorkRef, parseComputerExecutionRef } from '@varin/protocol';
 import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams, FollowupRegistrationTrigger } from '@varin/protocol';
 import { PlanConflict } from './plan-service.js';
@@ -65,6 +66,7 @@ const modelSelection = (value: unknown): ThreadModel => {
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
 export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler, research?: ThreadResearchAPI, computer?: ThreadComputerAPI): void {
   const fields: Record<string, readonly string[]> = {
+    'media/read': ['runtime', 'threadId', 'branchId', 'holder', 'partIndex', 'chunkIndex', 'expectedContentRef'],
     'computer/decide': ['runtime', 'threadId', 'branchId', 'requestId', 'expectedRevision', 'decision', 'key', 'reason'],
     'computer/state': ['runtime', 'threadId', 'branchId'],
     'computer/stop': ['runtime', 'threadId', 'branchId', 'runId', 'desktopId'],
@@ -239,7 +241,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('child/executions', (body, signal) => adapter.childExecutions(identity(body), body.operationId === undefined ? undefined : text(body.operationId), signal));
   post('child/execution/report', (body, signal) => adapter.readChildExecutionReport(identity(body), text(body.executionId), text(body.itemId),
     body.offset === undefined ? 0 : revision(body.offset), body.maxBytes === undefined ? 65536 : revision(body.maxBytes), signal));
-  post('child/report', body => adapter.readChildReport(identity(body), text(body.operationId), text(body.itemId), body.offset === undefined ? 0 : revision(body.offset), body.maxBytes === undefined ? 65536 : revision(body.maxBytes)));
+  post('child/report', (body, signal) => adapter.readChildReport(identity(body), text(body.operationId), text(body.itemId), body.offset === undefined ? 0 : revision(body.offset), body.maxBytes === undefined ? 65536 : revision(body.maxBytes), signal));
   post('child/list', body => adapter.children(identity(body)));
   post('child/cancel', body => adapter.cancelChild(identity(body), text(body.operationId)));
   post('child/wait/cancel', body => adapter.cancelChildWait(identity(body), text(body.waitId)));
@@ -348,6 +350,10 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     if (typeof body.text !== 'string' || (!body.text.length && !images?.length)) throw new Error('Text or images are required');
     return adapter.enqueue({ ...selected, key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), mode: body.mode as 'boundary' | 'interrupt' | 'next_run' });
   });
+  post('media/read', (body, signal) => adapter.mediaRead(identity(body), {
+    holder: object(body.holder) as unknown as OutputMediaHolder,
+    partIndex: revision(body.partIndex), chunkIndex: revision(body.chunkIndex), expectedContentRef: text(body.expectedContentRef),
+  }, signal));
   post('input/edit', (body, signal) => {
     if (typeof body.text !== 'string') throw new Error('Input text must be a string');
     return adapter.editInput(text(body.inputId), revision(body.expectedRevision), body.text, parseThreadImages(body.images), signal);

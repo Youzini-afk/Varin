@@ -1,14 +1,14 @@
 //! Selected tools reuse the existing Storage owner through typed in-process messages.
 //! No second catalog, file writer, process manager, or management-authority fallback exists here.
-use crate::error::{error_code, KernelError};
+use crate::error::{KernelError, error_code};
 use crate::model::Grant;
-use crate::storage::file_mutations::{FileEditArgs, FileWriteArgs, TextMutation};
 use crate::storage::Storage;
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use crate::storage::file_mutations::{FileEditArgs, FileWriteArgs, TextMutation};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeSet;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use varin_runtime::execution::{
     Access, CancellationToken, CompletionKind, ExecutionError, FrozenToolContext, PreparedToolCall,
     ResourceClaim, ResourceIntent, ToolCall, ToolCompletion, ToolContract, ToolExecutionContext,
@@ -89,20 +89,44 @@ impl ToolKind {
     }
     fn description(self) -> &'static str {
         match self {
-            Self::FileRead=>"Read a bounded UTF-8 range from the admitted source and return its read version.",
-            Self::FileList=>"List paths in the admitted source with bounded pagination.",
-            Self::FileSearch=>"Search text in the admitted source and return bounded matches.",
-            Self::FileWrite=>"Write a file against its exact read version in the admitted writable workspace.",
-            Self::FileEdit=>"Apply exact text edits against a file read version in the admitted writable workspace.",
-            Self::ProcessInspect=>"Inspect a retained process owned by the admitted execution environment.",
-            Self::ProcessRead=>"Read bounded output from a retained process in the admitted execution environment.",
-            Self::ProcessSpawn=>"Start a process in the admitted execution environment and return its durable operation handle.",
-            Self::ProcessWrite=>"Write UTF-8 input to the original process and report actual written-byte evidence. Pipe EOF is explicit; a PTY accepts control characters rather than a universal EOF operation.",
-            Self::ProcessResize=>"Resize the original PTY and wait for its actual size-change receipt.",
-            Self::LanguageDefinition=>"Find symbol definitions using the admitted source's language provider.",
-            Self::LanguageReferences=>"Find symbol references using the admitted source's language provider.",
-            Self::LanguageDiagnostics=>"Read diagnostics from the admitted source's language provider.",
-            Self::CodeRetrieval=>"Retrieve code context from the admitted source using the selected retrieval service.",
+            Self::FileRead => {
+                "Read a bounded UTF-8 range from the admitted source and return its read version."
+            }
+            Self::FileList => "List paths in the admitted source with bounded pagination.",
+            Self::FileSearch => "Search text in the admitted source and return bounded matches.",
+            Self::FileWrite => {
+                "Write a file against its exact read version in the admitted writable workspace."
+            }
+            Self::FileEdit => {
+                "Apply exact text edits against a file read version in the admitted writable workspace."
+            }
+            Self::ProcessInspect => {
+                "Inspect a retained process owned by the admitted execution environment."
+            }
+            Self::ProcessRead => {
+                "Read bounded output from a retained process in the admitted execution environment."
+            }
+            Self::ProcessSpawn => {
+                "Start a process in the admitted execution environment and return its durable operation handle."
+            }
+            Self::ProcessWrite => {
+                "Write UTF-8 input to the original process and report actual written-byte evidence. Pipe EOF is explicit; a PTY accepts control characters rather than a universal EOF operation."
+            }
+            Self::ProcessResize => {
+                "Resize the original PTY and wait for its actual size-change receipt."
+            }
+            Self::LanguageDefinition => {
+                "Find symbol definitions using the admitted source's language provider."
+            }
+            Self::LanguageReferences => {
+                "Find symbol references using the admitted source's language provider."
+            }
+            Self::LanguageDiagnostics => {
+                "Read diagnostics from the admitted source's language provider."
+            }
+            Self::CodeRetrieval => {
+                "Retrieve code context from the admitted source using the selected retrieval service."
+            }
         }
     }
     pub(crate) fn all() -> impl Iterator<Item = Self> {
@@ -303,7 +327,7 @@ impl ResourceOperation {
         }
         let parsed = match kind {
             ToolKind::CodeRetrieval => {
-                return RetrievalQueryArgs::parse(args).map(Self::RetrievalQuery)
+                return RetrievalQueryArgs::parse(args).map(Self::RetrievalQuery);
             }
             ToolKind::LanguageDefinition
             | ToolKind::LanguageReferences
@@ -388,19 +412,19 @@ impl ResourceOperation {
                 return Err(ExecutionError::new(
                     "invalid_tool_arguments",
                     "processId is empty",
-                ))
+                ));
             }
             Self::ProcessRead(args) if args.process_id.is_empty() || args.max_bytes == Some(0) => {
                 return Err(ExecutionError::new(
                     "invalid_tool_arguments",
                     "invalid process output identity or range",
-                ))
+                ));
             }
             Self::ProcessWrite(args) if args.process_id.is_empty() => {
                 return Err(ExecutionError::new(
                     "invalid_tool_arguments",
                     "processId required",
-                ))
+                ));
             }
             Self::ProcessResize(args)
                 if args.process_id.is_empty() || args.cols == 0 || args.rows == 0 =>
@@ -408,7 +432,7 @@ impl ResourceOperation {
                 return Err(ExecutionError::new(
                     "invalid_tool_arguments",
                     "invalid PTY dimensions or process identity",
-                ))
+                ));
             }
             _ => {}
         }
@@ -695,13 +719,14 @@ impl KernelResourceClient {
     pub(crate) fn with_admission_control(
         mut self,
         watch: impl Fn(
-                &ToolBinding,
-                &CancellationToken,
-            )
-                -> Result<varin_runtime::execution_capacity::AdmissionControlGuard, ExecutionError>
-            + Send
-            + Sync
-            + 'static,
+            &ToolBinding,
+            &CancellationToken,
+        ) -> Result<
+            varin_runtime::execution_capacity::AdmissionControlGuard,
+            ExecutionError,
+        > + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.admission_control = Some(Arc::new(watch));
         self
@@ -947,7 +972,7 @@ impl KernelResourceClient {
                                 "resource owner disconnected before receipt".into(),
                             ),
                             dispatched: false,
-                        })
+                        });
                     }
                     Err(mpsc::TryRecvError::Empty) => {}
                 }
@@ -1681,14 +1706,16 @@ impl KernelToolExecutor {
                     ToolCompletion::Result {
                         outcome: Outcome::Indeterminate,
                         effect: Effect::Unknown,
-                        content: result,
+                        content: result.into(),
                     }
                 } else {
                     ToolCompletion::JobAccepted {
                         operation_id: context.operation_id.clone(),
                         phase: phase.expect("checked process receipt").into(),
                         effect: Effect::Dispatched,
-                        lifetime: Lifetime::Thread, content: None,}
+                        lifetime: Lifetime::Thread,
+                        content: None,
+                    }
                 }
             }
             // The conditional resource owner proved the target was untouched.
@@ -1696,7 +1723,9 @@ impl KernelToolExecutor {
             // is deliberately normalized to unknown by the runtime.
             Ok(result) if mutation && result["status"] == "conflict" => {
                 ToolCompletion::NotDispatched {
-                    reason: format!("File version conflict; no file was changed. Read the current file before retrying. {result}"),
+                    reason: format!(
+                        "File version conflict; no file was changed. Read the current file before retrying. {result}"
+                    ),
                 }
             }
             Ok(result) if mutation => ToolCompletion::Result {
@@ -1710,12 +1739,12 @@ impl KernelToolExecutor {
                 } else {
                     Effect::None
                 },
-                content: result,
+                content: result.into(),
             },
             Ok(result) => ToolCompletion::Result {
                 outcome: Outcome::Succeeded,
                 effect: Effect::None,
-                content: result,
+                content: result.into(),
             },
             Err(failure) if !failure.dispatched => ToolCompletion::NotDispatched {
                 reason: failure.error.to_string(),
@@ -1731,7 +1760,9 @@ impl KernelToolExecutor {
                 } else {
                     Effect::None
                 },
-                content: json!({"error":error_code(&failure.error),"message":failure.error.to_string()}),
+                content:
+                    json!({"error":error_code(&failure.error),"message":failure.error.to_string()})
+                        .into(),
             },
         }
     }
@@ -1823,7 +1854,7 @@ fn tool_schema(kind: ToolKind) -> Value {
         | ToolKind::LanguageReferences
         | ToolKind::LanguageDiagnostics => return language::schema(kind),
         ToolKind::FileList | ToolKind::FileSearch => {
-            return discovery::schema(kind == ToolKind::FileSearch)
+            return discovery::schema(kind == ToolKind::FileSearch);
         }
         ToolKind::FileWrite => (
             json!({"path":{"type":"string"},"readVersion":{"type":"string","minLength":1},"content":{"type":"string"}}),
@@ -2065,13 +2096,13 @@ fn serve_resource_immediate(
                     &grant,
                     host_id,
                     request.authorize_only,
-                )
+                );
             }
             ResourceOperation::ChildStorageReceipt { operation_id, kind } => {
-                return storage.child_storage_receipt(&request.binding, operation_id, kind, &grant)
+                return storage.child_storage_receipt(&request.binding, operation_id, kind, &grant);
             }
             ResourceOperation::ChildRootIdle => {
-                return storage.require_child_root_idle(&request.binding, &grant)
+                return storage.require_child_root_idle(&request.binding, &grant);
             }
             _ => (),
         }

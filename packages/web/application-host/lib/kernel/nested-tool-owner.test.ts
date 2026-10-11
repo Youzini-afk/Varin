@@ -9,7 +9,7 @@ const owner = { extensionId: 'example.compose', extensionVersion: '1.0.0', entry
 const authority: ToolInvocationAuthority = {
   invocationId: 'invocation', runId: 'run', threadId: 'thread', operationId: 'request:tool:outer', callId: 'outer',
   executorOwner: { kind: 'external', identity: 'retained-host-tool', epoch: 'original-epoch' },
-  origin: { kind: 'model_step', request_id: 'request' }, source: null, toolName: 'compose', operation: 'effect', arguments: {},
+  origin: { kind: 'model_step', request_id: 'request' }, source: null, completion: 'result', toolName: 'compose', operation: 'effect', arguments: {},
 };
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; };
 
@@ -36,7 +36,7 @@ test('nested capability uses only original verified caller authority and drains 
   await assert.rejects(async () => await handler('invoke', { callId: 'late', name: 'memory', arguments: {} }, context), /tool_invocation_unavailable/);
   assert.equal(settled, false);
   result.resolve({ operationId: toolOperationId({ kind: 'nested_call', parent_operation_id: authority.operationId }, 'inner'),
-    completion: { kind: 'result', outcome: 'indeterminate', effect: 'unknown', content: null } });
+    completion: { kind: 'result', outcome: 'indeterminate', effect: 'unknown', content: { data: null, parts: [] } } });
   assert.equal(await work, 'callback returned');
 });
 

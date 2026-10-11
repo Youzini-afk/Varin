@@ -154,13 +154,35 @@ pub(in crate::catalog) fn pending_cancelled(db: &Connection, r: &Run, w: &Wait) 
         && matches!(&o.call_completion,Some(result_content::ToolCompletionMetadata::JobAccepted{operation_id,phase,effect:Effect::Confirmed,lifetime:Lifetime::Thread, ..}) if operation_id==id && phase=="awaiting_followup"))
 }
 fn result(db: &Connection, w: &Wait) -> Result<ObservationResult> {
-    let state = state(db,w)?;
+    let state = state(db, w)?;
     let occurrence_id = if state == FollowupObservationState::Triggered {
-        let raw: String = db.query_row("SELECT data FROM events WHERE cursor=?1 AND subject=?2 AND kind=?3",params![sql_number(w.trigger_cursor.expect("triggered"))?,w.subject,EVENT],|r|r.get(0))?;
+        let raw: String = db.query_row(
+            "SELECT data FROM events WHERE cursor=?1 AND subject=?2 AND kind=?3",
+            params![
+                sql_number(w.trigger_cursor.expect("triggered"))?,
+                w.subject,
+                EVENT
+            ],
+            |r| r.get(0),
+        )?;
         let data: Value = serde_json::from_str(&raw)?;
-        Some(data["occurrence_id"].as_str().ok_or_else(||RuntimeError::Invalid("Follow-up observation occurrence missing".into()))?.to_owned())
-    } else { None };
-    Ok(ObservationResult { followup_id:w.subject.clone(), occurrence_id, wait_id:w.id.clone(), state })
+        Some(
+            data["occurrence_id"]
+                .as_str()
+                .ok_or_else(|| {
+                    RuntimeError::Invalid("Follow-up observation occurrence missing".into())
+                })?
+                .to_owned(),
+        )
+    } else {
+        None
+    };
+    Ok(ObservationResult {
+        followup_id: w.subject.clone(),
+        occurrence_id,
+        wait_id: w.id.clone(),
+        state,
+    })
 }
 pub struct FollowupWaitPreparation {
     run: Run,
@@ -178,7 +200,20 @@ pub struct PreparedFollowupWait {
 }
 impl FollowupWaitPreparation {
     pub fn load(self) -> Result<PreparedFollowupWait> {
-        let item=ConversationItem{resource_activation:None,id:format!("followup-observation-result:{}",self.wait.id),provenance:Provenance::EnvironmentFact{event_id:self.wait.id.clone()},content:Content::Text{text:format!("This follow-up observation ended. A triggered instruction is delivered through its occurrence. Exhausted means the original condition can no longer match and no occurrence was created. Ending observation does not cancel the definition or stop its process. Do not register the same intent again merely because observation ended.\n{}",serde_json::to_string(&self.result)?)},opaque:None};
+        let item: ConversationItem = ConversationItem {
+            resource_activation: None,
+            id: format!("followup-observation-result:{}", self.wait.id),
+            provenance: Provenance::EnvironmentFact {
+                event_id: self.wait.id.clone(),
+            },
+            content: Content::Text {
+                text: format!(
+                    "This follow-up observation ended. A triggered instruction is delivered through its occurrence. Exhausted means the original condition can no longer match and no occurrence was created. Ending observation does not cancel the definition or stop its process. Do not register the same intent again merely because observation ended.\n{}",
+                    serde_json::to_string(&self.result)?
+                ),
+            },
+            opaque: None,
+        };
         let history = self
             .content
             .save_history(&serde_json::to_value(item)?, &None)?;

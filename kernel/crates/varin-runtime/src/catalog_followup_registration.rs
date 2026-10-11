@@ -61,14 +61,38 @@ pub enum FollowupRegistrationSource {
 impl FollowupRegistrationSource {
     fn source(&self) -> FollowupSource {
         match self {
-            Self::Metric { machine_id, metric, gpu_uuid, predicate, threshold } => FollowupSource::Metric {
-                machine_id: machine_id.clone(), metric: *metric, gpu_uuid: gpu_uuid.clone(), predicate: *predicate, threshold: threshold.clone(),
+            Self::Metric {
+                machine_id,
+                metric,
+                gpu_uuid,
+                predicate,
+                threshold,
+            } => FollowupSource::Metric {
+                machine_id: machine_id.clone(),
+                metric: *metric,
+                gpu_uuid: gpu_uuid.clone(),
+                predicate: *predicate,
+                threshold: threshold.clone(),
             },
 
-            Self::LogLiteral { operation_id, stream, literal, from_offset } => FollowupSource::LogLiteral {
-                operation_id: operation_id.clone(), stream: *stream, from_offset: from_offset.unwrap_or(0), literal_bytes: literal.len() as u64,
+            Self::LogLiteral {
+                operation_id,
+                stream,
+                literal,
+                from_offset,
+            } => FollowupSource::LogLiteral {
+                operation_id: operation_id.clone(),
+                stream: *stream,
+                from_offset: from_offset.unwrap_or(0),
+                literal_bytes: literal.len() as u64,
             },
-            Self::LogEnd { operation_id, stream } => FollowupSource::LogEnd { operation_id: operation_id.clone(), stream: *stream },
+            Self::LogEnd {
+                operation_id,
+                stream,
+            } => FollowupSource::LogEnd {
+                operation_id: operation_id.clone(),
+                stream: *stream,
+            },
             Self::Artifact {
                 operation_id,
                 artifact_id,
@@ -171,14 +195,38 @@ impl FollowupRegistrationTrigger {
     }
     fn trigger(&self) -> FollowupTrigger {
         match self {
-            Self::Metric { machine_id, metric, gpu_uuid, predicate, threshold } => FollowupTrigger::Metric {
-                machine_id: machine_id.clone(), metric: *metric, gpu_uuid: gpu_uuid.clone(), predicate: *predicate, threshold: threshold.clone(),
+            Self::Metric {
+                machine_id,
+                metric,
+                gpu_uuid,
+                predicate,
+                threshold,
+            } => FollowupTrigger::Metric {
+                machine_id: machine_id.clone(),
+                metric: *metric,
+                gpu_uuid: gpu_uuid.clone(),
+                predicate: *predicate,
+                threshold: threshold.clone(),
             },
 
-            Self::LogLiteral { operation_id, stream, literal, from_offset } => FollowupTrigger::LogLiteral {
-                operation_id: operation_id.clone(), stream: *stream, from_offset: from_offset.unwrap_or(0), literal_bytes: literal.len() as u64,
+            Self::LogLiteral {
+                operation_id,
+                stream,
+                literal,
+                from_offset,
+            } => FollowupTrigger::LogLiteral {
+                operation_id: operation_id.clone(),
+                stream: *stream,
+                from_offset: from_offset.unwrap_or(0),
+                literal_bytes: literal.len() as u64,
             },
-            Self::LogEnd { operation_id, stream } => FollowupTrigger::LogEnd { operation_id: operation_id.clone(), stream: *stream },
+            Self::LogEnd {
+                operation_id,
+                stream,
+            } => FollowupTrigger::LogEnd {
+                operation_id: operation_id.clone(),
+                stream: *stream,
+            },
             Self::Artifact {
                 operation_id,
                 artifact_id,
@@ -275,13 +323,36 @@ impl FollowupRegistration {
         }
         for source in sources {
             match source {
-                FollowupSource::Metric { machine_id, metric, gpu_uuid, threshold, .. } => metrics::validate_source(&machine_id, metric, gpu_uuid.as_deref(), &threshold)?,
-                FollowupSource::LogLiteral { operation_id, literal_bytes, from_offset, .. } => {
-                    artifacts::validate_source(&operation_id, None, None)?;
-                    if from_offset > 9_007_199_254_740_991 { return Err(RuntimeError::Invalid("Log byte offset exceeds the exact JSON integer representation".into())); }
-                    if literal_bytes == 0 { return Err(RuntimeError::Invalid("log_literal requires a nonempty UTF-8 literal".into())); }
+                FollowupSource::Metric {
+                    machine_id,
+                    metric,
+                    gpu_uuid,
+                    threshold,
+                    ..
+                } => {
+                    metrics::validate_source(&machine_id, metric, gpu_uuid.as_deref(), &threshold)?
                 }
-                FollowupSource::LogEnd { operation_id, .. } => artifacts::validate_source(&operation_id, None, None)?,
+                FollowupSource::LogLiteral {
+                    operation_id,
+                    literal_bytes,
+                    from_offset,
+                    ..
+                } => {
+                    artifacts::validate_source(&operation_id, None, None)?;
+                    if from_offset > 9_007_199_254_740_991 {
+                        return Err(RuntimeError::Invalid(
+                            "Log byte offset exceeds the exact JSON integer representation".into(),
+                        ));
+                    }
+                    if literal_bytes == 0 {
+                        return Err(RuntimeError::Invalid(
+                            "log_literal requires a nonempty UTF-8 literal".into(),
+                        ));
+                    }
+                }
+                FollowupSource::LogEnd { operation_id, .. } => {
+                    artifacts::validate_source(&operation_id, None, None)?
+                }
                 FollowupSource::Artifact {
                     operation_id,
                     artifact_id,
@@ -510,7 +581,9 @@ impl Catalog {
         }
         for source in p.input.trigger.trigger().sources() {
             match source {
-                FollowupSource::Metric { .. } => { metrics::scope(&self.db, &p.run, p.source.as_ref())?; }
+                FollowupSource::Metric { .. } => {
+                    metrics::scope(&self.db, &p.run, p.source.as_ref())?;
+                }
                 FollowupSource::ProcessStopped { operation_id } => {
                     require_process(&self.db, &p.run, &operation_id)?
                 }
@@ -563,7 +636,9 @@ impl Catalog {
         let run: Run = record(&tx, "runs", &p.run.id)?;
         for source in p.input.trigger.trigger().sources() {
             match source {
-                FollowupSource::Metric { .. } => { metrics::scope(&tx, &run, p.source.as_ref())?; }
+                FollowupSource::Metric { .. } => {
+                    metrics::scope(&tx, &run, p.source.as_ref())?;
+                }
                 FollowupSource::ProcessStopped { operation_id } => {
                     require_process(&tx, &run, &operation_id)?
                 }
@@ -680,7 +755,7 @@ impl FollowupRegistrationPreparation {
         self.input.trigger.normalize_paths()?;
         let instruction = self.content.save(&json!(self.input.instruction))?;
         let completion=invocation.as_ref().map(|_|->Result<_>{
-            let completion=if self.input.wait.is_some(){ToolCompletion::JobAccepted{operation_id:self.operation.as_ref().expect("operation").id.clone(),phase:"awaiting_followup".into(),effect:Effect::Confirmed,lifetime:Lifetime::Thread, content: None,}}else{ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::Confirmed,content:json!({"accepted":true,"followupId":self.id,"threadId":self.run.thread_id,"branchId":self.run.branch_id,"trigger":self.input.trigger.trigger()})}};
+            let completion=if self.input.wait.is_some(){ToolCompletion::JobAccepted{operation_id:self.operation.as_ref().expect("operation").id.clone(),phase:"awaiting_followup".into(),effect:Effect::Confirmed,lifetime:Lifetime::Thread, content: None,}}else{ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::Confirmed,content:json!({"accepted":true,"followupId":self.id,"threadId":self.run.thread_id,"branchId":self.run.branch_id,"trigger":self.input.trigger.trigger()}).into()}};
             let metadata=result_content::ToolCompletionMetadata::write(&self.content,&completion)?;Ok((completion,metadata))
         }).transpose()?;
         Ok(PreparedFollowupRegistration {
@@ -1016,7 +1091,7 @@ impl FollowupControlPreparation {
         let completion = ToolCompletion::Result {
             outcome: Outcome::Succeeded,
             effect: Effect::Confirmed,
-            content: json!({"accepted":true,"followupId":self.id,"control":self.action}),
+            content: json!({"accepted":true,"followupId":self.id,"control":self.action}).into(),
         };
         let metadata = result_content::ToolCompletionMetadata::write(&self.content, &completion)?;
         // The invocation read has been consumed; retain only the actual short captured owner.

@@ -122,6 +122,18 @@ Host/caller/target changes must discard old views. Anchors survive append/fork/r
 the runtime owner epoch. An empty scan page can still have a continuation cursor. Partial JSON is not
 a complete tool exchange. This API contains no target launch, source preparation or control method.
 
+`ThreadsAPI.mediaRead` reads typed bytes through an original history/input/Operation/event,
+policy-evidence, family or child-report holder. The expected content reference is an equality check,
+not permission to read any content hash. `readThreadMedia` assembles the original chunks, validates
+identity/ranges, and aborts on Host change without keeping a persistent byte cache. Semantic history
+and family pages contain StoredMedia descriptors; ordinary output `data` is never scanned for images.
+
+`collaboration.readReport` and `readExecutionReport` return the exact operation/execution/history
+identity plus `format: text | output_body`. An output-body page is a UTF-8 JSON fragment; assemble
+its original complete range before parsing `OutputBody<StoredMedia>`. Media uses that same child
+report holder and exact execution ID, including later Runs. Both report readers accept AbortSignal;
+cancelling a read does not cancel the child or alter its report.
+
 `ThreadsAPI.research` projects the original experiment, source and resource owners for an actual
 Agent `ThreadIdentity`. `scopes` lists retained source Runs, including earlier branches; callers
 select an explicit `sourceRunId` for every domain request. `canSubmit` is separate from historical
@@ -225,3 +237,25 @@ only the selected runtime. Creation requires a custom config with an empty key a
 the Host allocates its identity. Removing a custom profile removes its shared definition for both
 runtimes. The HTTP client preserves the Host's safe failure code and message and rejects late
 responses after Host changes or cancellation. No operation changes the conversation runtime.
+
+## Typed output media
+
+`ThreadsAPI.mediaRead` reads one byte chunk through its original history item, queued-input revision,
+Operation completion/result/external receipt, policy evidence, or fixed family-view holder. The caller's
+Thread identity stays separate from a family target. `expectedContentRef` checks the image displayed by
+that holder; it never authorizes a bare content-object read. Requests use the existing authenticated Host
+transport and AbortSignal/endpoint-generation checks.
+
+`readThreadMedia` captures that exact selection, reads its chunks, verifies the media/source identity,
+ordinal, chunk sequence/count, byte total and base64, and returns ephemeral bytes. It owns no cache,
+content service or permissions. It rejects cancellation and Host replacement before publishing bytes.
+Stored `OutputBody.parts` retain text/media order; `data` remains opaque, including media-looking JSON.
+Operation results have explicit `control.value` and `output.output` variants. For input edits, omitted
+images preserve original accepted media, `[]` removes it, and newly uploaded inline images replace it;
+public StoredMedia hashes cannot be submitted as replacement-image authority.
+
+Child report reads return `ChildReportPage` with an original-owner `format` of `text` or `output_body`.
+`text` contains the requested UTF-8 byte page, including when its content is the Stored OutputBody JSON;
+callers cannot choose or reinterpret that format. Both original-dispatch and explicit-execution readers
+accept AbortSignal. Report media uses the `child_report` holder with its original dispatch, returned
+execution identity and report item; it never borrows a latest Run or a family-view anchor.

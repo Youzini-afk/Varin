@@ -19,7 +19,8 @@ import { createNodeReplSession } from '@varin/script-runtime';
 const session = createNodeReplSession({
   environmentId,
   invoke: (cellId, input) => invokeOriginalTool(cellId, input),
-  output: (cellId, text) => publishOutput(cellId, text),
+  output: (cellId, text) => publishOutput(cellId, { kind: 'text', text }),
+  outputPart: (cellId, part) => publishOutput(cellId, part),
 });
 const result = await session.evaluate({ cellId, script });
 // { valueText?: string, error?: { message: string, code?: string } }
@@ -32,14 +33,26 @@ Launch the containing Node process or Pi worker with `--experimental-repl-await`
 so the embedding process's flags cannot silently disable that contract. The package retains the existing Node >=22.19.0 product minimum; this change was
 verified on Node 24.19.0, without a separate Node 22 run.
 
-The default context supplies `tools.invoke(input)`, `print(...values)` and a Node
-`console` whose output is associated with the calling cell. Values are ordinary
-text previews (`inspect` depth 6 for non-strings), not a structured media channel.
-There is no `emitImage` shim or inferred media receipt.
+The default context supplies `tools.invoke(input)`, `print(...values)`, `emitImage(image)`
+and a Node `console` whose output is associated with the calling cell. Print/console
+values remain ordinary text previews (`inspect` depth 6 for non-strings). Only explicit
+`emitImage({ media_type, data_base64 })` publishes an image part; its base64 must be
+canonical and non-empty. A resolved image from an original nested tool receipt can
+be passed directly. The evaluator takes only those byte fields; the runtime assigns
+the outer invocation's original source when it accepts the output. Storage hashes,
+paths and URLs cannot authorize an image read.
+
+Text and image parts retain emission order, including parts accepted before a failed
+cell. The JSON result data and optional `valueText` remain separate from these parts.
+Nested tool images stay in their original receipts until the caller explicitly emits
+a selected image. Neither printing a lookalike object nor returning one infers media,
+and forwarding an image does not manufacture a nested model tool/result exchange.
+The Host supplies `outputPart` for typed output; a custom embedding without it gets
+an explicit error from `emitImage`, rather than silently losing an image.
 
 A transport adapter can use `createNodeReplSession<Input, Receipt>` and the optional
 `install({ context, invoke, output })` hook to install its existing SDK. Supplying
-`install` replaces the default `tools` installation; it does not add Native tool
+`install` replaces the default `tools` and `emitImage` installation; it does not add Native tool
 permissions to a Pi adapter. `print` and `console` remain available. The Pi adapter
 owns its method/argument and error mapping and imports this evaluator rather than
 maintaining another lexical engine. A third optional `ErrorInfo extends ScriptError`
@@ -84,14 +97,18 @@ managed-process launch. Run that entry point with Node and
 `--experimental-repl-await`. Evaluation occurs directly in this already-managed
 process; it does not spawn an extra worker or supervisor.
 
-All frames are UTF-8 JSON objects followed by `\n`, with `v: 1` and `environmentId`.
+All frames are UTF-8 JSON objects followed by `\n`, with `v: 2` and `environmentId`.
 The package root exports the shared frame types, encoder and incremental decoder:
 
 - Host → `initialize { bindingIdentity }`, `eval { cellId, script }`,
   `receipt { cellId, requestId, receipt }`,
   `rejected { cellId, requestId, error: { message, code? } }`
 - Worker → `ready { bindingIdentity }`, `invoke { cellId, requestId, input }`,
-  `output { cellId, text }`, `completed { cellId, valueText?, error? }`
+  `output { cellId, part }`, `completed { cellId, valueText?, error? }`
+
+Output parts use the generated `OutputPart<IncomingMedia>` union. The frame parser
+checks the private envelope and inline bytes; Rust owns persistence, source attribution
+and the original invocation receipt. Older private protocol versions fail explicitly.
 
 Initialization fixes one environment and echoes the Host's string binding identity.
 Wrong-environment frames, repeated initialization, malformed envelopes and responses

@@ -725,18 +725,21 @@ impl Catalog {
         index: usize,
     ) -> Result<crate::content::ContentChunk> {
         let _synchronous = self.content.begin_synchronous()?;
-        self.content.load_chunk(
-            &self.owned_policy_reference(
-                run_id,
-                &PolicyEvidenceRef {
-                    action_id: action_id.into(),
-                    node_id: node_id.into(),
-                    content_ref: content_ref.into(),
-                },
-            )?,
-            index,
-        )
+        let reference = PolicyEvidenceRef {
+            action_id: action_id.into(),
+            node_id: node_id.into(),
+            content_ref: content_ref.into(),
+        };
+        let owned = self.owned_policy_reference(run_id, &reference)?;
+        let format = if self.is_policy_model_reference(&reference)? {
+            crate::output::PolicyResultFormat::ModelEvidence
+        } else {
+            crate::output::PolicyResultFormat::OutputBody
+        };
+        self.content
+            .policy_result_chunk(&owned, index, format, &|| false)
     }
+
     pub(crate) fn is_policy_model_reference(&self, reference: &PolicyEvidenceRef) -> Result<bool> {
         let op: Operation = record(&self.db, "operations", &reference.action_id)?;
         Ok(super::policy_model::model_metadata(&op)?.is_some())
@@ -750,13 +753,11 @@ impl Catalog {
     ) -> Result<ConversationItem> {
         let _synchronous = self.content.begin_synchronous()?;
         fence(&self.run(run_id)?, epoch)?;
-        let content = self
-            .content
-            .load(&self.owned_policy_reference(run_id, reference)?)?;
+        let owned = self.owned_policy_reference(run_id, reference)?;
         Ok(if self.is_policy_model_reference(reference)? {
-            policy_model_evidence_item(reference, content)
+            policy_model_evidence_item(reference, self.content.load(&owned)?)
         } else {
-            policy_evidence_item(reference, content)
+            policy_evidence_item(reference, self.content.load_output(&owned)?)
         })
     }
 }

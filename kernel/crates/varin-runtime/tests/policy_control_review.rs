@@ -4,7 +4,7 @@ mod content_collection;
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use varin_runtime::catalog::inputs::EnqueueInput;
 use varin_runtime::catalog::launches::LaunchSelection;
@@ -53,7 +53,8 @@ impl Fixture {
             .unwrap();
         let binding = RequestBinding {
             child_dispatch: None,
-            goal: None, resource_activations: Vec::new(),
+            goal: None,
+            resource_activations: Vec::new(),
             resource_checkpoint_id: None,
             connection_identity: "fixture".into(),
             provider_family: "fixture".into(),
@@ -313,7 +314,7 @@ fn delivery_lost_reply_reopens_once_with_honest_assistant_history() {
                 assert!(state.is_null());
                 decision(
                     PolicyAction::Deliver {
-                        text: String::new(),
+                        output: varin_runtime::output::OutputBody::text(String::new()),
                     },
                     json!({"delivered":true}),
                 )
@@ -329,7 +330,12 @@ fn delivery_lost_reply_reopens_once_with_honest_assistant_history() {
         "lost_response"
     );
     drop(engine);
-    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+    content_collection::collect(|| {
+        f.db.lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
     f.reopen();
     let history = f.db.lock().unwrap().history("main").unwrap();
     assert_eq!(history.len(), 2);
@@ -339,8 +345,8 @@ fn delivery_lost_reply_reopens_once_with_honest_assistant_history() {
     );
     assert_eq!(
         item.content,
-        Content::Text {
-            text: String::new()
+        Content::Output {
+            output: varin_runtime::output::OutputBody::text("")
         }
     );
     assert!(history[1].provider.is_none());
@@ -402,9 +408,11 @@ fn pause_reopen_blocks_worker_admission_and_old_resume_cannot_release_new_pause(
     f.enqueue("new input while paused");
     f.reopen();
     let supervisor = f.supervisor.as_ref().unwrap();
-    assert!(supervisor
-        .prepare_start(&f.input.run_id, |_| panic!("paused Run must not assemble"))
-        .is_err());
+    assert!(
+        supervisor
+            .prepare_start(&f.input.run_id, |_| panic!("paused Run must not assemble"))
+            .is_err()
+    );
     f.db.lock()
         .unwrap()
         .pause_failed_execution(
@@ -464,7 +472,12 @@ fn pause_reopen_blocks_worker_admission_and_old_resume_cannot_release_new_pause(
             .waiting_on,
         Some(second.clone())
     );
-    content_collection::collect(|| f.db.lock().unwrap().prepare_content_collection(Default::default())).unwrap();
+    content_collection::collect(|| {
+        f.db.lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
     f.reopen();
     let db = f.db.lock().unwrap();
     assert_eq!(
@@ -517,8 +530,8 @@ fn obsolete_generic_wait_cannot_overwrite_policy_pause_and_cancel_does_not_hydra
     let op = db.operation(&wait.subject).unwrap();
     assert!(db.request_cancel_operation(&op.id).is_err());
     assert!(!db.operation(&op.id).unwrap().cancel_requested);
-    assert!(db
-        .commit_execution(
+    assert!(
+        db.commit_execution(
             &f.input.run_id,
             epoch,
             &ExecutionRecord::StateChanged {
@@ -526,11 +539,13 @@ fn obsolete_generic_wait_cannot_overwrite_policy_pause_and_cancel_does_not_hydra
                 waiting_on: None
             }
         )
-        .is_err());
+        .is_err()
+    );
     let revision = db.run(&f.input.run_id).unwrap().revision;
-    assert!(db
-        .transition_run(&f.input.run_id, epoch, revision, RunState::Runnable)
-        .is_err());
+    assert!(
+        db.transition_run(&f.input.run_id, epoch, revision, RunState::Runnable)
+            .is_err()
+    );
     let hash = op.intent["body_ref"]["content_object"]
         .as_str()
         .unwrap()
@@ -703,7 +718,7 @@ fn input_winning_delivery_or_model_admission_does_not_advance_unexecuted_private
                     decision(
                         if matches!(at, RaceAt::ControlAdmission) {
                             PolicyAction::Deliver {
-                                text: "stale decision".into(),
+                                output: varin_runtime::output::OutputBody::text("stale decision"),
                             }
                         } else {
                             PolicyAction::RequestModel
@@ -733,7 +748,9 @@ fn input_winning_delivery_or_model_admission_does_not_advance_unexecuted_private
                         assert!(view.history.iter().any(|item| matches!(&item.content, Content::Text { text } if text == "new history before next action")));
                         decision(
                             PolicyAction::Deliver {
-                                text: "revised after input".into(),
+                                output: varin_runtime::output::OutputBody::text(
+                                    "revised after input",
+                                ),
                             },
                             json!({"committed":"delivery"}),
                         )
@@ -749,9 +766,11 @@ fn input_winning_delivery_or_model_admission_does_not_advance_unexecuted_private
         assert_eq!(report.state, RunState::Completed);
         let history = f.db.lock().unwrap().history("main").unwrap();
         assert_eq!(history.len(), 3);
-        assert!(!serde_json::to_string(&history)
-            .unwrap()
-            .contains("stale decision"));
+        assert!(
+            !serde_json::to_string(&history)
+                .unwrap()
+                .contains("stale decision")
+        );
     }
 }
 #[test]

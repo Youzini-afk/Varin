@@ -1,5 +1,6 @@
 //! Immutable content primitives shared with the system kernel. Conversation objects have a
 //! separate lifetime: the replaceable kernel catalog must never collect user assets.
+pub(crate) const CONTENT_FORMAT: i64 = 4;
 use crate::catalog::RuntimeError;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -68,6 +69,7 @@ struct Manifest {
     version: u32,
     bytes: u64,
     chunks: Vec<String>,
+    dependencies: Vec<String>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -164,6 +166,31 @@ impl ContentStore {
             cancel.store(true, Ordering::Release);
         }
     }
+    pub(crate) fn projected_chunk(
+        reference: &Value,
+        bytes: &[u8],
+        index: usize,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<ContentChunk> {
+        if cancelled() {
+            return Err(RuntimeError::DispatchCancelled);
+        }
+        let reference: Reference = serde_json::from_value(reference.clone())?;
+        let chunks = content_chunks(bytes);
+        let chunk = chunks
+            .get(index)
+            .ok_or_else(|| RuntimeError::Invalid("content chunk index out of range".into()))?;
+        if cancelled() {
+            return Err(RuntimeError::DispatchCancelled);
+        }
+        Ok(ContentChunk {
+            content_ref: reference.content_object,
+            chunk_index: index,
+            chunk_count: chunks.len(),
+            total_bytes: bytes.len() as u64,
+            bytes: chunk.to_vec(),
+        })
+    }
     pub(crate) fn load_chunk(&self, reference: &Value, index: usize) -> Result<ContentChunk> {
         let _publication = self.begin_publication();
         let _io = self
@@ -174,7 +201,7 @@ impl ContentStore {
         let reference: Reference = serde_json::from_value(reference.clone())?;
         let manifest: Manifest =
             serde_json::from_slice(&self.read_bytes(&reference.content_object)?)?;
-        if manifest.version != 1 {
+        if manifest.version != 2 {
             return Err(RuntimeError::Invalid("unsupported content manifest".into()));
         }
         let hash = manifest
@@ -264,44 +291,82 @@ impl ContentStore {
     /// Content-defined chunks preserve unchanged history across newly appended request snapshots.
     /// Serialization still visits the full provider request; only changed chunks need durable writes.
     pub(crate) fn save(&self, value: &Value) -> Result<Value> {
+        self.save_with_dependencies(value, Vec::new())
+    }
+    pub(crate) fn save_with_dependencies(
+        &self,
+        value: &Value,
+        dependencies: Vec<String>,
+    ) -> Result<Value> {
+        self.save_payload(&serde_json::to_vec(value)?, dependencies)
+    }
+    pub(crate) fn save_bytes(&self, bytes: &[u8]) -> Result<Value> {
+        self.save_payload(bytes, Vec::new())
+    }
+    fn save_payload(&self, bytes: &[u8], mut dependencies: Vec<String>) -> Result<Value> {
         let _publication = self.begin_publication();
         let _io = self
             .coordination
             .io
             .read()
             .unwrap_or_else(|error| error.into_inner());
-        let bytes = serde_json::to_vec(value)?;
-        let chunks = content_chunks(&bytes)
+        dependencies.sort();
+        dependencies.dedup();
+        // Dependency identities originate only in typed owning writers, never arbitrary JSON.
+        for dependency in &dependencies {
+            object_path(&self.root, dependency)?;
+        }
+        let chunks = content_chunks(bytes)
             .into_iter()
             .map(|chunk| self.put_bytes(chunk))
             .collect::<Result<Vec<_>>>()?;
         let manifest = Manifest {
-            version: 1,
+            version: 2,
             bytes: bytes.len() as u64,
             chunks,
+            dependencies,
         };
         let hash = self.put_bytes(&serde_json::to_vec(&manifest)?)?;
         Ok(serde_json::to_value(Reference {
             content_object: hash,
         })?)
     }
-    /// Derive the same identity without filesystem I/O. Large values are fingerprinted on workers.
     pub(crate) fn reference(value: &Value) -> Result<Value> {
-        let bytes = serde_json::to_vec(value)?;
+        Self::payload_reference(&serde_json::to_vec(value)?, Vec::new())
+    }
+    pub(crate) fn payload_reference(bytes: &[u8], mut dependencies: Vec<String>) -> Result<Value> {
+        dependencies.sort();
+        dependencies.dedup();
         let manifest = Manifest {
-            version: 1,
+            version: 2,
             bytes: bytes.len() as u64,
-            chunks: content_chunks(&bytes).into_iter().map(identity).collect(),
+            chunks: content_chunks(bytes).into_iter().map(identity).collect(),
+            dependencies,
         };
         Ok(serde_json::to_value(Reference {
             content_object: identity(&serde_json::to_vec(&manifest)?),
         })?)
     }
     pub(crate) fn load(&self, reference: &Value) -> Result<Value> {
-        self.load_cancellable(reference, &||false)
+        self.load_cancellable(reference, &|| false)
     }
-    pub(crate) fn load_cancellable(&self, reference: &Value, cancelled: &dyn Fn()->bool) -> Result<Value> {
-        if cancelled() { return Err(RuntimeError::DispatchCancelled); }
+    pub(crate) fn load_cancellable(
+        &self,
+        reference: &Value,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<Value> {
+        Ok(serde_json::from_slice(
+            &self.load_bytes(reference, cancelled)?,
+        )?)
+    }
+    pub(crate) fn load_bytes(
+        &self,
+        reference: &Value,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<Vec<u8>> {
+        if cancelled() {
+            return Err(RuntimeError::DispatchCancelled);
+        }
         let _publication = self.begin_publication();
         let _io = self
             .coordination
@@ -311,12 +376,14 @@ impl ContentStore {
         let reference: Reference = serde_json::from_value(reference.clone())?;
         let manifest: Manifest =
             serde_json::from_slice(&self.read_bytes(&reference.content_object)?)?;
-        if manifest.version != 1 {
+        if manifest.version != 2 {
             return Err(RuntimeError::Invalid("unsupported content manifest".into()));
         }
         let mut bytes = Vec::new();
         for hash in manifest.chunks {
-            if cancelled() { return Err(RuntimeError::DispatchCancelled); }
+            if cancelled() {
+                return Err(RuntimeError::DispatchCancelled);
+            }
             bytes.extend(self.read_bytes(&hash)?);
         }
         if bytes.len() as u64 != manifest.bytes {
@@ -324,17 +391,60 @@ impl ContentStore {
                 "content manifest length mismatch".into(),
             ));
         }
-        if cancelled() { return Err(RuntimeError::DispatchCancelled); }
-        let value = serde_json::from_slice(&bytes)?;
-        if cancelled() { return Err(RuntimeError::DispatchCancelled); }
-        Ok(value)
+        if cancelled() {
+            return Err(RuntimeError::DispatchCancelled);
+        }
+        Ok(bytes)
     }
     pub(crate) fn save_history(
         &self,
         content: &Value,
         provider: &Option<crate::types::ProviderOriginal>,
     ) -> Result<Value> {
-        self.save(&serde_json::json!({"content": content, "provider": provider}))
+        self.save(&serde_json::json!({"format":"data", "content": content, "provider": provider}))
+    }
+    pub(crate) fn save_conversation(
+        &self,
+        item: &crate::execution::ConversationItem,
+        provider: &Option<crate::types::ProviderOriginal>,
+    ) -> Result<Value> {
+        let mut dependencies = Vec::new();
+        let stored = item.clone().map_media(|media| {
+            let stored = self.store_media(media)?;
+            dependencies.push(stored.content_ref.content_object.clone());
+            Ok::<_, RuntimeError>(stored)
+        })?;
+        self.save_with_dependencies(
+            &serde_json::json!({"format":"conversation", "content":stored,"provider":provider}),
+            dependencies,
+        )
+    }
+    pub(crate) fn save_user_history(&self, input_id: &str, input: &Value) -> Result<Value> {
+        self.save_stored_user_history(&self.store_user_input(input_id, input)?)
+    }
+    pub(crate) fn load_stored_history_payload(
+        &self,
+        reference: &Value,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(Value, Option<crate::types::ProviderOriginal>)> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Payload {
+            format: String,
+            content: Value,
+            provider: Option<crate::types::ProviderOriginal>,
+        }
+        let payload: Payload =
+            serde_json::from_value(self.load_cancellable(reference, cancelled)?)?;
+        if !matches!(
+            payload.format.as_str(),
+            "data" | "conversation" | "user_input"
+        ) {
+            return Err(RuntimeError::Invalid(
+                "unsupported history body format".into(),
+            ));
+        }
+        Ok((payload.content, payload.provider))
     }
     pub(crate) fn hydrate_history(
         &self,
@@ -345,14 +455,53 @@ impl ContentStore {
         item.provider = provider;
         Ok(item)
     }
-    pub(crate) fn load_history_payload(&self, reference: &Value) -> Result<(Value, Option<crate::types::ProviderOriginal>)> {
-        self.load_history_payload_cancellable(reference, &||false)
+    pub(crate) fn load_history_payload(
+        &self,
+        reference: &Value,
+    ) -> Result<(Value, Option<crate::types::ProviderOriginal>)> {
+        self.load_history_payload_cancellable(reference, &|| false)
     }
-    pub(crate) fn load_history_payload_cancellable(&self, reference: &Value, cancelled: &dyn Fn()->bool) -> Result<(Value, Option<crate::types::ProviderOriginal>)> {
+    pub(crate) fn load_history_payload_cancellable(
+        &self,
+        reference: &Value,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(Value, Option<crate::types::ProviderOriginal>)> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
-        struct Payload { content: Value, provider: Option<crate::types::ProviderOriginal> }
-        let payload: Payload = serde_json::from_value(self.load_cancellable(reference, cancelled)?)?;
+        struct Payload {
+            format: String,
+            content: Value,
+            provider: Option<crate::types::ProviderOriginal>,
+        }
+        let mut payload: Payload =
+            serde_json::from_value(self.load_cancellable(reference, cancelled)?)?;
+        match payload.format.as_str() {
+            "data" => (),
+            "conversation" => {
+                let item: crate::execution::ConversationItem<crate::output::StoredMedia> =
+                    serde_json::from_value(payload.content)?;
+                payload.content = serde_json::to_value(
+                    item.map_media(|media| self.resolve_media_cancellable(media, cancelled))?,
+                )?;
+            }
+            "user_input" => {
+                if let Some(attachments) = payload.content.get_mut("attachments") {
+                    let stored: Vec<crate::output::StoredMedia> =
+                        serde_json::from_value(attachments.take())?;
+                    *attachments = serde_json::to_value(
+                        stored
+                            .into_iter()
+                            .map(|media| self.resolve_media_cancellable(media, cancelled))
+                            .collect::<Result<Vec<_>>>()?,
+                    )?;
+                }
+            }
+            _ => {
+                return Err(RuntimeError::Invalid(
+                    "unsupported history body format".into(),
+                ));
+            }
+        }
         Ok((payload.content, payload.provider))
     }
     pub(crate) fn save_originals(
@@ -387,7 +536,7 @@ pub(crate) fn initialize(db: &Connection, _content: &ContentStore) -> Result<()>
         [],
         |r| r.get(0),
     )?;
-    if version != crate::catalog::FORMAT || format != 3 {
+    if version != crate::catalog::FORMAT || format != CONTENT_FORMAT {
         return Err(RuntimeError::Invalid(
             "unsupported content format; data was preserved".into(),
         ));

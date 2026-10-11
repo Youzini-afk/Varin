@@ -25,6 +25,26 @@ impl ResponsesProvider {
         provider
     }
 }
+fn response_parts(parts: Vec<crate::output::OutputPart>) -> Result<Vec<Value>, ExecutionError> {
+    let mut blocks = Vec::new();
+    for part in parts {
+        match part {
+            crate::output::OutputPart::Text { text } => {
+                blocks.push(json!({"type":"input_text","text":text}))
+            }
+            crate::output::OutputPart::Media { media } => {
+                require_media_type(
+                    &media,
+                    &["image/png", "image/jpeg", "image/webp", "image/gif"],
+                    FAMILY,
+                )?;
+                blocks.push(json!({"type":"input_text","text":media_label(&media)}));
+                blocks.push(json!({"type":"input_image","image_url":inline_image(&media)?}));
+            }
+        }
+    }
+    Ok(blocks)
+}
 impl ModelProvider for ResponsesProvider {
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         validate_view(view, self.family)?;
@@ -53,15 +73,9 @@ impl ModelProvider for ResponsesProvider {
             match item.content {
                 Content::Text{text} | Content::ReasoningSummary{text} => input.push(json!({"role":role,"content":text})),
                 Content::ToolCall{call}=>input.push(json!({"type":"function_call","call_id":call.call_id,"name":call.name,"arguments":call.arguments.to_string()})),
-                Content::ToolResult{result}=>input.push(json!({"type":"function_call_output","call_id":result.call_id,"output":serde_json::to_string(&result.completion).map_err(|_|ExecutionError::new("serialize","invalid tool result"))?})),
-                Content::Attachment{media_type,content_ref,..}=> {
-                    let block = if media_type.starts_with("image/") && (content_ref.starts_with("https://") || content_ref.starts_with("data:image/")) {
-                        json!({"type":"input_image","image_url":content_ref})
-                    } else if media_type=="application/pdf" && content_ref.starts_with("https://") {
-                        json!({"type":"input_file","file_url":content_ref})
-                    } else { return Err(ExecutionError::new("unsupported_attachment", "Responses requires a supported image/PDF URL; resolve local references before compilation")); };
-                    input.push(json!({"role":"user","content":[block]}));
-                }
+                Content::ToolResult{result}=>input.push(json!({"type":"function_call_output","call_id":result.call_id,"output":response_parts(completion_parts(&result.completion))?})),
+                Content::Media{media}=>input.push(json!({"role":"user","content":response_parts(vec![crate::output::OutputPart::Media{media}])?})),
+                Content::Output{output}=>input.push(json!({"role":"user","content":response_parts(evidence_parts(&output,&item.provenance))?})),
                 Content::ProviderOnly=>return Err(ExecutionError::new("missing_opaque", "provider-only content requires continuation data")),
             }
         }
@@ -264,9 +278,8 @@ impl StreamState {
                                 cached_input_tokens: usage["input_tokens_details"]["cached_tokens"]
                                     .as_u64(),
                                 cache_write_tokens: None,
-                                reasoning_tokens: usage["output_tokens_details"]
-                                    ["reasoning_tokens"]
-                                    .as_u64(),
+                                reasoning_tokens:
+                                    usage["output_tokens_details"]["reasoning_tokens"].as_u64(),
                                 raw: Some(usage.clone()),
                                 pricing_version: None,
                             },
@@ -286,7 +299,7 @@ impl StreamState {
                             return Err(failure(
                                 "incomplete_response",
                                 "unrecognized incomplete response reason",
-                            ))
+                            ));
                         }
                     }
                 } else if self.tool_calls {
@@ -300,7 +313,7 @@ impl StreamState {
                 return Err(provider_failure(
                     &event["response"]["error"],
                     "provider_error",
-                ))
+                ));
             }
             "error" => return Err(provider_failure(&event, "provider_error")),
             // Protocol adds events over time. Only explicit terminal events establish completion.

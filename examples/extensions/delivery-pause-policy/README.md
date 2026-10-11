@@ -1,8 +1,11 @@
 # Delivery and explicit pause policy
 
 This ordinary SDK extension demonstrates `deliver` → `pause` → explicit Run resume → `deliver` →
-`complete` through `varin.agent.policy@3`. It requests no provider inference and owns no conversation
+`complete` through `varin.agent.policy@4`. It requests no provider inference and owns no conversation
 history, Wait database, timer or resume transport.
+
+Each delivery supplies an output body with `data: null` and one ordered text part. Core commits
+that typed output under the original delivery provenance before the policy advances to Pause or completion.
 
 ## Build, install and select
 
@@ -20,8 +23,8 @@ Select the provider through existing service routing, using the document's curre
 ```json
 {
   "serviceId": "varin.agent.policy",
-  "version": 3,
-  "providerKey": "example.delivery-pause-policy:host:varin.agent.policy@3",
+  "version": 4,
+  "providerKey": "example.delivery-pause-policy:host:varin.agent.policy@4",
   "scope": { "sessionId": "YOUR_NATIVE_THREAD_ID" },
   "allowFallback": false
 }

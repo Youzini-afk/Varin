@@ -1,3 +1,4 @@
+import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { resolvePiSdkSpecifier } from '@varin/pi-host/sdk';
 import { createMcpLease } from './mcp-owner.js';
@@ -167,7 +168,7 @@ it('the shared MCP authority invokes a real selected stdio server only after all
   expect(await fs.readFile(f.effectsPath, 'utf8').catch(() => '')).toBe('');
   expect(await fs.stat(f.unusedPath).then(() => true, () => false)).toBe(false);
   const op = (await f.api.snapshot(identity)).operations.find(op => op.waiting_on?.startsWith('permission:'))!;
-  const permission = (op.result as { permission: { id: string } }).permission;
+  const permission = (controlResult(op.result) as { permission: { id: string } }).permission;
   await f.api.decidePermission({ ...identity, operationId: op.id, permissionId: permission.id, decision: 'allow_once' });
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed').catch(async error => {
     throw new Error(`${String(error)} ${JSON.stringify({ trace: f.transportTrace, operations: (await f.api.snapshot(identity)).operations, requests: f.requests.length })}`);
@@ -188,7 +189,7 @@ it('lazy discovery starts only its selected real server, then validates and gate
     let output: Record<string, unknown>;
     if (turns === 2) {
       const previous = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output')!;
-      const result = JSON.parse(String(previous.output)) as { content: { tools: Array<{ server: string; tool: string; schemaVersion: string }> } };
+      const result = JSON.parse(responsesMetadataText(previous.output)) as { content: { tools: Array<{ server: string; tool: string; schemaVersion: string }> } };
       const discovered = result.content.tools.find(tool => tool.server === 'fixture' && tool.tool === 'send')!;
       expect(discovered).toBeDefined();
       output = { id: 'lazy-concrete-call', type: 'function_call', call_id: 'lazy-concrete-id', name: 'mcp_call', arguments: JSON.stringify({ server: discovered.server, tool: discovered.tool, schemaVersion: discovered.schemaVersion, arguments: { text: 'lazy approved content' } }) };
@@ -210,7 +211,7 @@ it('lazy discovery starts only its selected real server, then validates and gate
   await expect.poll(async () => (await f.api.snapshot(identity)).operations.some(op => op.waiting_on?.startsWith('permission:')), { timeout: 15_000 }).toBe(true).catch(async error => { throw new Error(`${String(error)} ${JSON.stringify({ requests: f.requests.length, run: await f.runtime.run(receipt.run_id), events: (await f.runtime.events(0, 256)).slice(-8) })}`); });
   expect(await fs.readFile(f.effectsPath, 'utf8').catch(() => '')).toBe('');
   const op = (await f.api.snapshot(identity)).operations.find(op => op.waiting_on?.startsWith('permission:'))!;
-  const permission = (op.result as { permission: { id: string; call: { arguments: unknown } } }).permission;
+  const permission = (controlResult(op.result) as { permission: { id: string; call: { arguments: unknown } } }).permission;
   expect(permission.call.arguments).toMatchObject({ server: 'fixture', tool: 'send', arguments: { text: 'lazy approved content' } });
   await f.api.decidePermission({ ...identity, operationId: op.id, permissionId: permission.id, decision: 'allow_once' });
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed').catch(async error => {
@@ -264,10 +265,10 @@ it('a real configuration watch prepares a new MCP directory while the frozen req
   held.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'old-call', type: 'function_call', call_id: 'old-call-id', name: originalTool.name, arguments: JSON.stringify({ text: 'old schema call' }) }] } })}\n\n`);
   for (const callId of ['old-call-id', 'new-call-id']) {
     await expect.poll(async () => (await f.api.snapshot(identity)).operations.some(op => op.waiting_on?.startsWith('permission:')
-      && (op.result as { permission?: { call?: { callId?: string } } })?.permission?.call?.callId === callId), { timeout: 15_000 }).toBe(true);
+      && (controlResult(op.result) as { permission?: { call?: { callId?: string } } })?.permission?.call?.callId === callId), { timeout: 15_000 }).toBe(true);
     const operation = (await f.api.snapshot(identity)).operations.find(op => op.waiting_on?.startsWith('permission:')
-      && (op.result as { permission?: { call?: { callId?: string } } })?.permission?.call?.callId === callId)!;
-    await f.api.decidePermission({ ...identity, operationId: operation.id, permissionId: (operation.result as { permission: { id: string } }).permission.id, decision: 'allow_once' });
+      && (controlResult(op.result) as { permission?: { call?: { callId?: string } } })?.permission?.call?.callId === callId)!;
+    await f.api.decidePermission({ ...identity, operationId: operation.id, permissionId: (controlResult(operation.result) as { permission: { id: string } }).permission.id, decision: 'allow_once' });
   }
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');
   expect((await fs.readFile(f.effectsPath, 'utf8')).trim().split('\n').map(line => JSON.parse(line))).toEqual([{ name: 'send', arguments: { text: 'old schema call' } }]);
@@ -298,8 +299,8 @@ it('disabling a real selected MCP dependency ends its outstanding permission wai
   await expect.poll(async()=>(await f.api.run(receipt.run_id)).state,{timeout:15_000}).toBe('completed');
   expect(await fs.readFile(f.effectsPath,'utf8').catch(()=>'' )).toBe('');
   expect((await f.api.snapshot(identity)).operations.some(op=>op.waiting_on?.startsWith('permission:'))).toBe(false);
-  const result=(f.requests[1]!.body.input as Array<{type:string;output?:string}>).find(item=>item.type==='function_call_output')!;
-  expect(JSON.parse(result.output!)).toMatchObject({kind:'result',outcome:'failed',effect:'none',content:{error:'mcp_authorization_failed'}});
+  const result=(f.requests[1]!.body.input as Array<{type:string;output?:unknown}>).find(item=>item.type==='function_call_output')!;
+  expect(JSON.parse(responsesMetadataText(result.output))).toMatchObject({kind:'result',outcome:'failed',effect:'none',content:{error:'mcp_authorization_failed'}});
 },30_000);
 it('cold MCP preparation starts the model and publishes a fast dependency while another real server is still preparing',async()=>{
   let held!:ServerResponse;let turns=0;
@@ -336,7 +337,7 @@ it('cold MCP preparation starts the model and publishes a fast dependency while 
   await expect.poll(async()=>(await f.api.snapshot(identity)).operations.some(op=>op.waiting_on?.startsWith('permission:')),{timeout:15_000}).toBe(true);
   expect(gateRequests[0]!.writableEnded).toBe(false);
   const operation=(await f.api.snapshot(identity)).operations.find(op=>op.waiting_on?.startsWith('permission:'))!;
-  await f.api.decidePermission({...identity,operationId:operation.id,permissionId:(operation.result as {permission:{id:string}}).permission.id,decision:'allow_once'});
+  await f.api.decidePermission({...identity,operationId:operation.id,permissionId:(controlResult(operation.result) as {permission:{id:string}}).permission.id,decision:'allow_once'});
   await expect.poll(async()=>(await f.api.run(receipt.run_id)).state,{timeout:15_000}).toBe('completed');
   expect((await fs.readFile(f.effectsPath,'utf8')).trim().split('\n').map(line=>JSON.parse(line))).toEqual([{name:'send',arguments:{text:'fast dependency worked'}}]);
   expect(await fs.stat(f.unusedPath).then(()=>true,()=>false)).toBe(false);
@@ -413,7 +414,7 @@ it('reenabling an identically described dependency gives new work a fresh owner 
   held[1]!.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[{id:'old-revoked-call',type:'function_call',call_id:'old-revoked-id',name:tool.name,arguments:JSON.stringify({text:'old revoked call'})}]}})}\n\n`);
   await expect.poll(async()=>(await f.api.snapshot(identity)).operations.some(op=>op.waiting_on?.startsWith('permission:')),{timeout:15_000}).toBe(true);
   const operation=(await f.api.snapshot(identity)).operations.find(op=>op.waiting_on?.startsWith('permission:'))!;
-  const permission=(operation.result as {permission:{id:string;call:{callId:string}}}).permission;
+  const permission=(controlResult(operation.result) as {permission:{id:string;call:{callId:string}}}).permission;
   expect(permission.call.callId).toBe('reenabled-id');
   expect(f.kernel.mcpBinding(receipt.run_id)).toEqual(original);
   expect(f.kernel.mcpLiveBinding(receipt.run_id)!.ownerId).not.toBe(originalLive.ownerId);
@@ -439,7 +440,7 @@ it('a real oversized UTF-8 MCP result keeps its remote-effect receipt, preserves
   const receipt = await f.api.submit({ ...identity, key: 'large-mcp-input', expectedHead: null, text: 'receive large output safely', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
   await expect.poll(async () => (await f.api.snapshot(identity)).operations.some(op => op.waiting_on?.startsWith('permission:'))).toBe(true);
   const op = (await f.api.snapshot(identity)).operations.find(op => op.waiting_on?.startsWith('permission:'))!;
-  const permissionId = (op.result as { permission: { id: string } }).permission.id;
+  const permissionId = (controlResult(op.result) as { permission: { id: string } }).permission.id;
   const other = await f.api.create('independent-mcp-run');
   const otherReceipt = await f.api.submit({ ...other, key: 'independent-mcp-input', expectedHead: null, text: 'independent small run', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
   await f.api.decidePermission({ ...identity, operationId: op.id, permissionId, decision: 'allow_once' });
@@ -451,7 +452,7 @@ it('a real oversized UTF-8 MCP result keeps its remote-effect receipt, preserves
   expect((await f.api.run(receipt.run_id)).state).toBe('completed');
   const settled = await f.api.operation(op.id);
   expect(settled).toMatchObject({ phase: 'terminal', outcome: 'succeeded', effect: 'confirmed' });
-  expect((settled.result as {content:Array<{text:string}>}).content[0]!.text).toBe('界'.repeat(6*1024*1024));
+  expect((outputResult(settled.result) as {content:Array<{text:string}>}).content[0]!.text).toBe('界'.repeat(6*1024*1024));
   const records = (await fs.readFile(f.effectsPath, 'utf8')).trim().split('\n').map(value => JSON.parse(value));
   expect(records.filter(value => value.name === 'send')).toHaveLength(1);
   const sizes = records.find(value => value.outputBytes);
@@ -473,7 +474,7 @@ it('the default MCP framing limit cannot invent a receipt or break the kernel wh
   const receipt = await f.api.submit({ ...identity, key: 'default-framing-input', expectedHead: null, text: 'receive the large result', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
   await expect.poll(async () => (await f.api.snapshot(identity)).operations.some(op => op.waiting_on?.startsWith('permission:'))).toBe(true);
   const op = (await f.api.snapshot(identity)).operations.find(op => op.waiting_on?.startsWith('permission:'))!;
-  await f.api.decidePermission({ ...identity, operationId: op.id, permissionId: (op.result as {permission:{id:string}}).permission.id, decision: 'allow_once' });
+  await f.api.decidePermission({ ...identity, operationId: op.id, permissionId: (controlResult(op.result) as {permission:{id:string}}).permission.id, decision: 'allow_once' });
   // The current SDK's declared request timeout is 60s. A framing failure may reject earlier.
   await expect.poll(() => f.kernel.mcpBinding(receipt.run_id), { timeout: 75_000 }).toBeUndefined();
   const settled = await f.api.operation(op.id);
@@ -481,3 +482,13 @@ it('the default MCP framing limit cannot invent a receipt or break the kernel wh
   expect((await f.runtime.status()).epoch).toBe(epoch);
   expect((await fs.readFile(f.effectsPath, 'utf8')).trim().split('\n').map(value => JSON.parse(value)).filter(value => value.name === 'send')).toHaveLength(1);
 }, 90_000);
+
+function controlResult(result: import('./protocol.generated.js').OperationResult | null): unknown {
+  if (result?.kind !== 'control') throw new Error('Expected original control result');
+  return result.value;
+}
+
+function outputResult(result: import('./protocol.generated.js').OperationResult | null): unknown {
+  if (result?.kind !== 'output') throw new Error('Expected original output result');
+  return result.output.data;
+}

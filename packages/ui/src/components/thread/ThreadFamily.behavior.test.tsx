@@ -2,7 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { ThreadIdentity, ThreadFamilyAPI } from '@varin/application-client';
+import type { ThreadIdentity, ThreadFamilyAPI, ThreadsAPI } from '@varin/application-client';
 import type { FamilyList, FamilyRead } from '@varin/protocol';
 import { ThreadFamily } from './ThreadFamily';
 const endpoint = vi.hoisted(() => ({ generation: 1, listeners: new Set<() => void>() }));
@@ -15,7 +15,7 @@ const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:caller', 
 const family: FamilyList = { rootThreadId: 'thread:root', members: ['first', 'second'].map(name => ({ threadId: `thread:${name}`, parentThreadId: 'thread:root', task: `${name} task`, state: 'reported',
   branches: [{ branchId: `branch:${name}`, headId: 'head', activeRunId: null, latestRun: { runId: 'run:original', state: 'completed' } }] })) };
 const page = (text = 'original answer'): FamilyRead => ({ threadId: 'thread:first', branchId: 'branch:first', runId: null, headId: 'fixed-head', anchor: 'signed-fixed-anchor', nextCursor: null, scanned: 1, scanComplete: true, hasEarlier: false, hasLater: false,
-  items: [{ id: 'original-record', parentId: null, sequence: 8, runId: 'run:original', source: 'assistant', kind: 'text', body: { text }, preview: '', bodyBytes: 100, bodyTruncated: false, tool: null }] });
+  items: [{ id: 'original-record', parentId: null, sequence: 8, runId: 'run:original', source: 'assistant', kind: 'text', body: { id: 'original-record', provenance: { kind: 'assistant' }, content: { kind: 'text', text }, opaque: null }, preview: '', bodyBytes: 100, bodyTruncated: false, tool: null }] });
 function fixture() {
   return {
     list: vi.fn<ThreadFamilyAPI['list']>(async () => family),
@@ -33,7 +33,8 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
-const render = async (api: ThreadFamilyAPI, selected = identity) => { await act(async () => root.render(<ThreadFamily api={api} identity={selected} />)); };
+const mediaRead = vi.fn<ThreadsAPI['mediaRead']>(async () => { throw new Error('unexpected media read'); });
+const render = async (api: ThreadFamilyAPI, selected = identity) => { await act(async () => root.render(<ThreadFamily api={api} mediaRead={mediaRead} identity={selected} />)); };
 const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === label)!;
 const click = async (label: string) => { await act(async () => button(label).click()); };
 
@@ -94,4 +95,27 @@ it('uses the selected historical Run and fixed range boundaries without starting
   expect(api.read.mock.calls.at(-1)![1]).toMatchObject({ runId: 'run:original', anchor: 'signed-fixed-anchor', query: { kind: 'range', beforeId: 'original-record', direction: 'older' } });
   await click('Later records');
   expect(api.read.mock.calls.at(-1)![1]).toMatchObject({ query: { kind: 'range', afterId: 'original-record', direction: 'newer' } });
+});
+
+it('reads family media with the caller separate from the exact anchored target', async () => {
+  const api = fixture();
+  const media = { media_type: 'image/png', content_ref: { content_object: 'sha256-family-image' }, source: { kind: 'operation' as const, operation_id: 'child-capture' } };
+  const saved = page();
+  saved.items[0] = { ...saved.items[0]!, body: { id: 'original-record', provenance: { kind: 'assistant' }, content: { kind: 'output', output: {
+    data: null, parts: [{ kind: 'text', text: 'Original child image' }, { kind: 'media', media }],
+  } }, opaque: null } };
+  api.read.mockResolvedValue(saved);
+  mediaRead.mockImplementation(async input => ({ media, partIndex: input.partIndex, chunkIndex: 0, chunkCount: 1, totalBytes: 3, bytesBase64: 'AQID' }));
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:family');
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  try {
+    await render(api); await click('Browse task family'); await click('first task');
+    expect(mediaRead).not.toHaveBeenCalled();
+    await click('View image');
+    expect(mediaRead).toHaveBeenCalledExactlyOnceWith({ ...identity, holder: { kind: 'family', threadId: 'thread:first', branchId: 'branch:first', anchor: 'signed-fixed-anchor', itemId: 'original-record' }, partIndex: 1, chunkIndex: 0, expectedContentRef: 'sha256-family-image' }, expect.any(AbortSignal));
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:family');
+    await click('second task');
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:family');
+    expect(container.querySelector('img')).toBeNull();
+  } finally { vi.restoreAllMocks(); }
 });

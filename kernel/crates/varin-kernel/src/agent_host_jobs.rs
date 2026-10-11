@@ -33,7 +33,7 @@ pub(super) fn execute(
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                 .prepare_result_content();
-            let body = preparation.write_result(&p.request).map_err(domain)?;
+            let body = preparation.write_data(&p.request).map_err(domain)?;
             if cancelled.load(Ordering::Acquire) {
                 return Err(KernelError::Cancelled);
             }
@@ -70,11 +70,21 @@ pub(super) fn execute(
         }
         "runtime.host_job.accept" => {
             let p: HostJobAcceptParams = serde_json::from_value(params)?;
-            let preparation = owner
-                .lock()
-                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                .prepare_result_content();
-            let body = preparation.write_result(&p.content).map_err(domain)?;
+            let (preparation, source) = {
+                let db = owner
+                    .lock()
+                    .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+                let operation = db.operation(&p.binding.operation_id).map_err(domain)?;
+                (
+                    db.prepare_result_content(),
+                    output_source(&operation).map_err(domain)?,
+                )
+            };
+            let output = p
+                .content
+                .map_media(|media| media.admit(source.clone()))
+                .map_err(domain)?;
+            let body = preparation.write_output(&output).map_err(domain)?;
             // A domain accepted work before this call. Caller cancellation cannot erase that receipt.
             let mut db = owner
                 .lock()
@@ -120,16 +130,18 @@ pub(super) fn execute(
         }
         "runtime.host_job.terminal" => {
             let p: HostJobTerminalParams = serde_json::from_value(params)?;
-            let (preparation, executor) = {
+            let (preparation, executor, source) = {
                 let db = owner
                     .lock()
                     .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+                let operation = db.operation(&p.binding.operation_id).map_err(domain)?;
+                let source = output_source(&operation).map_err(domain)?;
                 (
                     db.prepare_result_content(),
-                    db.operation(&p.binding.operation_id)
-                        .map_err(domain)?
+                    operation
                         .executor
                         .ok_or_else(|| KernelError::Protocol("job executor missing".into()))?,
+                    source,
                 )
             };
             let ExecutorOwner::External { epoch, .. } = &p.binding.execution_owner else {
@@ -144,7 +156,10 @@ pub(super) fn execute(
                     epoch: epoch.clone(),
                     outcome: p.outcome,
                     effect: p.effect,
-                    result: p.content,
+                    result: p
+                        .content
+                        .map_media(|media| media.admit(source.clone()))
+                        .map_err(domain)?,
                 })
                 .map_err(domain)?;
             let mut db = owner
@@ -159,4 +174,23 @@ pub(super) fn execute(
         }
         _ => Err(KernelError::Protocol("unknown Host job command".into())),
     }
+}
+
+fn output_source(
+    operation: &varin_runtime::OperationMetadata,
+) -> Result<varin_runtime::output::OutputSource, varin_runtime::catalog::RuntimeError> {
+    Ok(if operation.intent["kind"] == "tool" {
+        let intent = varin_runtime::catalog::tool_content::ToolIntent::from_operation(operation)?;
+        varin_runtime::output::OutputSource::Tool {
+            context: varin_runtime::execution::ToolExecutionContext {
+                run_id: operation.run_id.clone(),
+                origin: intent.origin().clone(),
+                operation_id: operation.id.clone(),
+            },
+        }
+    } else {
+        varin_runtime::output::OutputSource::Operation {
+            operation_id: operation.id.clone(),
+        }
+    })
 }

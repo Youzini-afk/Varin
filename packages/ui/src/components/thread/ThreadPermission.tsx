@@ -8,7 +8,7 @@ export function ThreadPermission({ operation, enabled, onDecide }: {
   enabled: boolean;
   onDecide: (permissionId: string, decision: 'allow_once' | 'deny') => Promise<unknown>;
 }) {
-  const permission = record(record(operation.result)?.permission);
+  const permission = record(record(operation.result?.kind === 'control' ? operation.result.value : undefined)?.permission);
   const call = record(permission?.call);
   const scope = record(permission?.scope);
   const actor = record(permission?.actor);

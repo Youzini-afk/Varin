@@ -3,7 +3,7 @@ mod content_collection;
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use varin_runtime::catalog::launches::LaunchSelection;
 use varin_runtime::execution::{AdmittedTool, CompletionKind, ToolCall, ToolContract};
 use varin_runtime::{Catalog, Effect, Lifetime, Outcome, SubmitInput};
@@ -91,10 +91,10 @@ fn permission_is_exact_one_use_and_denial_or_cancellation_never_authorizes_dispa
     ] {
         let mut changed = f.call.clone();
         changed[field] = value;
-        assert!(f
-            .db
-            .open_permission(&f.op, "bad", changed, f.scope.clone())
-            .is_err());
+        assert!(
+            f.db.open_permission(&f.op, "bad", changed, f.scope.clone())
+                .is_err()
+        );
     }
     let opened =
         f.db.open_permission(&f.op, "permission-1", f.call.clone(), f.scope.clone())
@@ -105,6 +105,8 @@ fn permission_is_exact_one_use_and_denial_or_cancellation_never_authorizes_dispa
             .unwrap()
             .result
             .as_ref()
+            .unwrap()
+            .control()
             .unwrap()["permission"]["actor"]["account"],
         "selected-account"
     );
@@ -112,32 +114,32 @@ fn permission_is_exact_one_use_and_denial_or_cancellation_never_authorizes_dispa
         .unwrap();
     let mut changed = f.scope.clone();
     changed["ownerGeneration"] = json!(4);
-    assert!(f
-        .db
-        .consume_permission(&f.op, "permission-1", f.call.clone(), changed)
-        .is_err());
+    assert!(
+        f.db.consume_permission(&f.op, "permission-1", f.call.clone(), changed)
+            .is_err()
+    );
     let mut changed = f.scope.clone();
     changed["policyGeneration"] = json!("policy-2");
-    assert!(f
-        .db
-        .consume_permission(&f.op, "permission-1", f.call.clone(), changed)
-        .is_err());
+    assert!(
+        f.db.consume_permission(&f.op, "permission-1", f.call.clone(), changed)
+            .is_err()
+    );
     let mut changed = f.call.clone();
     changed["arguments"]["text"] = json!("changed after approval");
-    assert!(f
-        .db
-        .consume_permission(&f.op, "permission-1", changed, f.scope.clone())
-        .is_err());
+    assert!(
+        f.db.consume_permission(&f.op, "permission-1", changed, f.scope.clone())
+            .is_err()
+    );
     f.db.consume_permission(&f.op, "permission-1", f.call.clone(), f.scope.clone())
         .unwrap();
-    assert!(f
-        .db
-        .consume_permission(&f.op, "permission-1", f.call.clone(), f.scope.clone())
-        .is_err());
-    assert!(f
-        .db
-        .decide_permission(&f.op, "permission-1", "allow_once")
-        .is_err());
+    assert!(
+        f.db.consume_permission(&f.op, "permission-1", f.call.clone(), f.scope.clone())
+            .is_err()
+    );
+    assert!(
+        f.db.decide_permission(&f.op, "permission-1", "allow_once")
+            .is_err()
+    );
     // A terminal receipt replaces the active permission. Its audit event must still retain
     // the exact approved bodies, and the Operation must retain its original tool arguments.
     f.db.settle_operation(
@@ -153,7 +155,7 @@ fn permission_is_exact_one_use_and_denial_or_cancellation_never_authorizes_dispa
     let tool: varin_runtime::execution::ToolInvocation =
         serde_json::from_value(view.intent).unwrap();
     assert_eq!(tool.call.arguments, f.call["arguments"]);
-    let permission = &view.result.as_ref().unwrap()["permission"];
+    let permission = &view.result.as_ref().unwrap().control().unwrap()["permission"];
     assert_eq!(permission["call"], f.call);
     assert_eq!(permission["scope"], f.scope);
     let root = f.root.clone();
@@ -165,18 +167,18 @@ fn permission_is_exact_one_use_and_denial_or_cancellation_never_authorizes_dispa
             .unwrap();
         if cancelled {
             f.db.request_cancel_run(&f.run).unwrap();
-            assert!(f
-                .db
-                .decide_permission(&f.op, "permission-1", "allow_once")
-                .is_err());
+            assert!(
+                f.db.decide_permission(&f.op, "permission-1", "allow_once")
+                    .is_err()
+            );
         } else {
             f.db.decide_permission(&f.op, "permission-1", "deny")
                 .unwrap();
         }
-        assert!(f
-            .db
-            .consume_permission(&f.op, "permission-1", f.call.clone(), f.scope.clone())
-            .is_err());
+        assert!(
+            f.db.consume_permission(&f.op, "permission-1", f.call.clone(), f.scope.clone())
+                .is_err()
+        );
         let root = f.root.clone();
         drop(f);
         std::fs::remove_dir_all(root).unwrap();
@@ -199,12 +201,14 @@ fn an_unconsumed_permission_cannot_be_revived_after_kernel_reopen() {
     } = f;
     drop(db);
     let mut db = Catalog::open(&root).unwrap();
-    assert!(db
-        .consume_permission(&op, "permission-1", call, scope)
-        .is_err());
-    assert!(db
-        .decide_permission(&op, "permission-1", "allow_once")
-        .is_err());
+    assert!(
+        db.consume_permission(&op, "permission-1", call, scope)
+            .is_err()
+    );
+    assert!(
+        db.decide_permission(&op, "permission-1", "allow_once")
+            .is_err()
+    );
     drop(db);
     std::fs::remove_dir_all(root).unwrap();
 }

@@ -3,15 +3,15 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 2 as const;
+export const KERNEL_PROTOCOL_VERSION = 3 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
 export const KERNEL_CONTROL_METHODS = ["runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
 export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
-export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.tools.invoke","runtime.history.body"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v2" as const;
+export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v3" as const;
 
 export type KernelMethod =
   | "runtime.managed_process.pending"
@@ -73,6 +73,7 @@ export type KernelMethod =
   | "runtime.plan.reconcile"
   | "runtime.history.page"
   | "runtime.history.body"
+  | "runtime.output.media.read"
   | "runtime.thread.operations.active"
   | "runtime.run.reconcile"
   | "runtime.launch.fail"
@@ -274,6 +275,32 @@ export type KernelMethod =
   | "runtime.messages.send"
   | "runtime.messages.list"
   | "runtime.messages.get";
+
+export interface MediaReadChunk { media:StoredMedia;partIndex:number;chunkIndex:number;chunkCount:number;totalBytes:number;bytesBase64:string }
+
+export interface MediaReadParams { threadId:string;branchId:string;holder:OutputMediaHolder;partIndex:number;chunkIndex:number;expectedContentRef:string }
+
+export type OutputMediaHolder = {kind:'history';itemId:string} | {kind:'input';inputId:string;expectedRevision:number} | {kind:'operation';operationId:string;output:'completion'|'result'|'external_receipt'} | {kind:'event';cursor:number;output:'completion'|'result'|'external_receipt'} | {kind:'policy_evidence';reference:OutputEvidenceRef} | {kind:'child_report';operationId:string;executionId?:string;itemId:string} | {kind:'family';threadId:string;branchId:string;runId?:string;anchor:string;itemId:string};
+
+export type OperationResult = {kind:'control';value:unknown} | {kind:'output';output:OutputBody};
+
+export interface OutputBody<M = StoredMedia> { data: unknown; parts: OutputPart<M>[] }
+
+export type OutputPart<M = StoredMedia> = {kind:'text';text:string} | {kind:'media';media:M};
+
+export interface ResolvedMedia { media_type: string; source: OutputSource; data_base64: string }
+
+export interface StoredMedia { media_type: string; source: OutputSource; content_ref: ContentRef }
+
+export interface IncomingMedia { media_type: string; data_base64: string }
+
+export interface ContentRef { content_object: string }
+
+export type OutputSource = {kind:'conversation';provenance:ContentProvenance} | {kind:'tool';context:{run_id:string;origin:ToolOrigin;operation_id:string}} | {kind:'operation';operation_id:string};
+
+export type ContentProvenance = {kind:'system_instruction';source:string} | {kind:'goal_instruction';goal_id:string;generation:number} | {kind:'user_instruction';input_id:string} | {kind:'assistant'} | {kind:'policy_output';action_id:string;identity:{name:string;version:string}} | {kind:'tool_data';call_id:string} | {kind:'policy_tool_data';reference:OutputEvidenceRef} | {kind:'external_data';source:string} | {kind:'agent_message';thread_id:string} | {kind:'environment_fact';event_id:string};
+
+export interface OutputEvidenceRef { action_id: string; node_id: string; content_ref: string }
 
 export interface ManagedProcessTerminalParams {
   operationId: string;
@@ -516,14 +543,14 @@ export interface HostJobBeginParams {
 
 export interface HostJobAcceptParams {
   binding: HostJobBinding;
-  content: unknown;
+  content: OutputBody<IncomingMedia>;
 }
 
 export interface HostJobTerminalParams {
   binding: HostJobBinding;
   outcome: Outcome;
   effect: Effect;
-  content: unknown;
+  content: OutputBody<IncomingMedia>;
   executorStopped: boolean;
 }
 
@@ -1586,7 +1613,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 2; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 3; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1634,7 +1661,7 @@ export interface NestedToolInput {
 
 export interface NestedToolReceipt {
   operationId: string;
-  completion: OperationCallCompletion;
+  completion: OperationCallCompletion<ResolvedMedia>;
 }
 
 export interface NestedToolInvokeParams {
@@ -1696,7 +1723,7 @@ export interface AgentPolicyArtifactBinding {
   extensionId: string;
   extensionVersion: string;
   serviceId: 'varin.agent.policy';
-  serviceVersion: 3;
+  serviceVersion: 4;
   artifactIntegrity: string;
   configurationIdentity: string;
   declaredIdentity: LaunchPolicy;
@@ -1983,7 +2010,7 @@ export interface ExternalReceipt {
   epoch: string;
   outcome: Outcome;
   effect: Effect;
-  result: unknown;
+  result: OutputBody;
 }
 
 export interface BranchForkParams {
@@ -2457,10 +2484,10 @@ export interface Run {
   cancel_requested: boolean;
 }
 
-export type OperationCallCompletion =
+export type OperationCallCompletion<M = StoredMedia> =
   | { kind: 'not_dispatched'; reason: string }
-  | { kind: 'result'; outcome: Outcome; effect: Effect; content: unknown }
-  | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime; content?: unknown };
+  | { kind: 'result'; outcome: Outcome; effect: Effect; content: OutputBody<M> }
+  | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime; content?: OutputBody<M> };
 
 export interface Operation {
   host_job?: HostJobLink;
@@ -2480,7 +2507,7 @@ export interface Operation {
   executor: string | null;
   waiting_on: string | null;
   intent: unknown;
-  result: unknown;
+  result: OperationResult | null;
   managed_process?: ManagedProcess;
 }
 
@@ -3905,7 +3932,8 @@ export interface ChildReportReadParams {
   maxBytes?: number;
 }
 
-export interface ChildTextPage {
+export interface ChildReportPage {
+  format: 'text' | 'output_body';
   operation_id: string;
   item_id: string;
   offset: number;
@@ -4197,6 +4225,7 @@ export type KernelMethodParams = {
   "runtime.plan.reconcile": RunParams;
   "runtime.history.page": HistoryPageParams;
   "runtime.history.body": HistoryBodyParams;
+  "runtime.output.media.read": MediaReadParams;
   "runtime.thread.operations.active": ThreadOperationsParams;
   "runtime.host_tool.reconcile": HostToolReconcileParams;
   "runtime.run.reconcile": RunReconcileParams;
@@ -5033,6 +5062,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.history.body";
       params: HistoryBodyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.output.media.read";
+      params: MediaReadParams;
       epoch?: string;
       grantId?: string;
     }

@@ -5,7 +5,7 @@ mod child_dispatch;
 mod input_admission;
 pub(crate) use child_dispatch::Fixture as ChildFixture;
 use input_admission::InputAdmission;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use varin_runtime::{
     catalog::{computer_requests::*, launches::*},
     execution::*,
@@ -142,7 +142,7 @@ impl Fixture {
             ToolCompletion::Result {
                 outcome: Outcome::Succeeded,
                 effect: Effect::Confirmed,
-                content: json!({"requestId":request.id,"status":"pending"}),
+                content: json!({"requestId":request.id,"status":"pending"}).into(),
             },
         );
         request

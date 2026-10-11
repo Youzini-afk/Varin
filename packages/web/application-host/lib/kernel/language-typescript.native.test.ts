@@ -1,3 +1,4 @@
+import { responsesMetadataText } from './responses-wire.test-helper.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createServer } from 'node:http';
@@ -100,7 +101,7 @@ it('executes all three live tools end to end through the bundled TypeScript serv
           const body = JSON.parse(Buffer.concat(bytes).toString()) as Record<string, unknown>;
           requests.push(body);
           const previous = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
-          if (previous) outputs.push(JSON.parse(String(previous.output)) as Record<string, unknown>);
+          if (previous) outputs.push(JSON.parse(responsesMetadataText(previous.output)) as Record<string, unknown>);
           const next = calls[requests.length - 1];
           const output = next ? [{ id: `item-${requests.length}`, type: 'function_call', call_id: `call-${requests.length}`,
             name: next.name, arguments: JSON.stringify(next.arguments) }]

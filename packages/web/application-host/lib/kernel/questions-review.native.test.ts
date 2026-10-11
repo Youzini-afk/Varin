@@ -1,3 +1,4 @@
+import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createThreadContext } from './thread-context.js';
 import { createMemoryOwner } from './memory-owner.js';
@@ -169,7 +170,7 @@ it('pending question survives Host/kernel reopen and answer resumes its original
       response.writeHead(200, { 'content-type': 'text/event-stream' });
       response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'read-item', type: 'function_call', call_id: 'read-call', name: 'file_read', arguments: JSON.stringify({ path: 'source.txt' }) }] } })}\n\n`); return;
     }
-    read = String((body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output')?.output);
+    read = responsesMetadataText((body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output')?.output);
     done(response);
   };
   const f = await fixture(reply);

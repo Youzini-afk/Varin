@@ -4,7 +4,7 @@ mod content_collection;
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use varin_runtime::execution::*;
@@ -416,14 +416,14 @@ fn body_publication_rechecks_model_admission_after_input_or_head_changes() {
             }
         );
         assert!(f.db.lock().unwrap().operation(&action).is_err());
-        assert!(f
-            .db
-            .lock()
-            .unwrap()
-            .events_after(0, 1000)
-            .unwrap()
-            .iter()
-            .all(|event| event.kind != "policy.model_admitted"));
+        assert!(
+            f.db.lock()
+                .unwrap()
+                .events_after(0, 1000)
+                .unwrap()
+                .iter()
+                .all(|event| event.kind != "policy.model_admitted")
+        );
         assert!(
             content_collection::collect(|| f
                 .db
@@ -551,9 +551,11 @@ fn body_publication_preserves_model_output_usage_and_evidence_through_gc() {
     let Content::Text { text } = &output.items[0].content else {
         unreachable!()
     };
-    assert!(serde_json::to_string(&evidence.item.content)
-        .unwrap()
-        .contains(text));
+    assert!(
+        serde_json::to_string(&evidence.item.content)
+            .unwrap()
+            .contains(text)
+    );
     assert!(
         f.db.dispatch_policy_model(&run, epoch, &action).is_err(),
         "settled paid work cannot redispatch"
@@ -594,7 +596,7 @@ fn quoted_history_catalog_wait_diagnostic() {
     for mib in [1, 32, 64] {
         let f = Fixture::new();
         let (intent, mut snapshot) = frozen_job(&f, json!({"request":true}));
-        let quoted = vec![ConversationItem {
+        let quoted: Vec<ConversationItem> = vec![ConversationItem {
             resource_activation: None,
             id: "source".into(),
             provenance: Provenance::UserInstruction {
@@ -611,11 +613,11 @@ fn quoted_history_catalog_wait_diagnostic() {
             provenance: Provenance::ExternalData {
                 source: "committed-conversation-context".into(),
             },
-            content: Content::Text {
-                text: format!(
-                    "Frozen source context\n{}",
-                    serde_json::to_string(&quoted).unwrap()
-                ),
+            content: Content::Output {
+                output: varin_runtime::output::OutputBody {
+                    data: json!({"history":quoted}),
+                    parts: vec![],
+                },
             },
             opaque: None,
         });
@@ -656,7 +658,9 @@ fn quoted_history_catalog_wait_diagnostic() {
         let total = t.elapsed();
         stop.store(true, Ordering::Release);
         let (max, count) = reader.join().unwrap();
-        eprintln!("quoted_history={mib} MiB dispatch={total:?} longest_independent_catalog_query={max:?} queries={count}");
+        eprintln!(
+            "quoted_history={mib} MiB dispatch={total:?} longest_independent_catalog_query={max:?} queries={count}"
+        );
     }
 }
 
@@ -727,28 +731,29 @@ fn committed_plan_bytes_determine_main_request_without_fabricated_steps() {
             Some("planning-credential")
         );
         assert!(request.view.history.iter().all(|i| i.opaque.is_none()));
-        assert!(request.view.history.iter().any(|i| matches!(
-            &i.provenance,
-            Provenance::ExternalData { .. }
-        ) && serde_json::to_string(&i.content)
-            .unwrap()
-            .contains("USER_SOURCE_SENTINEL")));
-        assert!(request.view.history.iter().any(|i| matches!(
-            &i.provenance,
-            Provenance::SystemInstruction { .. }
-        ) && serde_json::to_string(&i.content)
-            .unwrap()
-            .contains("PLANNER_POLICY_SENTINEL")));
+        assert!(request.view.history.iter().any(|i| {
+            matches!(&i.provenance, Provenance::ExternalData { .. })
+                && serde_json::to_string(&i.content)
+                    .unwrap()
+                    .contains("USER_SOURCE_SENTINEL")
+        }));
+        assert!(request.view.history.iter().any(|i| {
+            matches!(&i.provenance, Provenance::SystemInstruction { .. })
+                && serde_json::to_string(&i.content)
+                    .unwrap()
+                    .contains("PLANNER_POLICY_SENTINEL")
+        }));
         for r in main.requests.lock().unwrap().iter() {
             assert!(r.view.history.iter().any(|i| matches!(
                 &i.provenance,
                 Provenance::ExternalData { .. }
-            ) && serde_json::to_string(&i.content)
-                .unwrap()
-                .contains(plan)));
-            assert!(!serde_json::to_string(&r.view)
-                .unwrap()
-                .contains("signed_original"));
+            )
+                && serde_json::to_string(&i.content).unwrap().contains(plan)));
+            assert!(
+                !serde_json::to_string(&r.view)
+                    .unwrap()
+                    .contains("signed_original")
+            );
         }
     }
 }
@@ -990,7 +995,13 @@ impl Persistence for BoundaryPersistence {
         e: u64,
         p: &PolicyEvidenceRef,
         i: usize,
-    ) -> Result<varin_runtime::content::ContentChunk, ExecutionError> {
+    ) -> Result<
+        (
+            varin_runtime::content::ContentChunk,
+            varin_runtime::output::PolicyResultFormat,
+        ),
+        ExecutionError,
+    > {
         self.db.policy_chunk(r, e, p, i)
     }
 }
@@ -1024,10 +1035,12 @@ fn crashes_redeliver_completed_results_and_never_replay_ambiguous_dispatch() {
             policy: ordinary.policy.clone(),
             progress: ProgressSink::default(),
         };
-        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-            || e.run(f.input.clone(), CancellationToken::default())
-        ))
-        .is_err());
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                || e.run(f.input.clone(), CancellationToken::default())
+            ))
+            .is_err()
+        );
         let before = planner.requests.lock().unwrap().len();
         drop(e);
         drop(ordinary);
@@ -1132,22 +1145,22 @@ fn owned_result_chunks_reject_forged_references_and_survive_gc() {
             "accepted forged {field}"
         );
     }
-    assert!(f
-        .db
-        .lock()
-        .unwrap()
-        .policy_output_chunk(
-            "foreign-run",
-            &reference.action_id,
-            &reference.node_id,
-            &reference.content_ref,
-            0
-        )
-        .is_err());
-    assert!(f
-        .db
-        .policy_chunk(&f.input.run_id, f.input.owner_generation + 1, &reference, 0)
-        .is_err());
+    assert!(
+        f.db.lock()
+            .unwrap()
+            .policy_output_chunk(
+                "foreign-run",
+                &reference.action_id,
+                &reference.node_id,
+                &reference.content_ref,
+                0
+            )
+            .is_err()
+    );
+    assert!(
+        f.db.policy_chunk(&f.input.run_id, f.input.owner_generation + 1, &reference, 0)
+            .is_err()
+    );
 }
 struct InputPolicy;
 impl AgentPolicy for InputPolicy {
@@ -1260,7 +1273,7 @@ impl ToolExecutor for Reads {
         ToolCompletion::Result {
             outcome: Outcome::Succeeded,
             effect: Effect::None,
-            content: json!({"source":c.arguments["path"]}),
+            content: json!({"source":c.arguments["path"]}).into(),
         }
     }
 }
@@ -1338,9 +1351,11 @@ fn graph_model_graph_uses_committed_plan_and_distinct_action_boundaries() {
         assert!(main.requests.lock().unwrap().is_empty());
         assert_eq!(f.counts(), (1, 0));
         let requests = planner.requests.lock().unwrap();
-        assert!(serde_json::to_string(&requests[0].view.history)
-            .unwrap()
-            .contains("initial"));
+        assert!(
+            serde_json::to_string(&requests[0].view.history)
+                .unwrap()
+                .contains("initial")
+        );
         let events = f.db.lock().unwrap().events_after(0, 1000).unwrap();
         let ids: Vec<_> = events
             .iter()
@@ -1418,10 +1433,12 @@ fn partial_failed_provider_is_indeterminate_retains_usage_and_never_replays() {
         policy: ordinary.policy.clone(),
         progress: ProgressSink::default(),
     };
-    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-        || e.run(f.input.clone(), CancellationToken::default())
-    ))
-    .is_err());
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+            || e.run(f.input.clone(), CancellationToken::default())
+        ))
+        .is_err()
+    );
     drop(e);
     drop(ordinary);
     reopen(&mut f);
@@ -1446,9 +1463,11 @@ fn partial_failed_provider_is_indeterminate_retains_usage_and_never_replays() {
         Some("provider-partial-id")
     );
     assert_eq!(saved.output.usage.input_tokens, Some(31));
-    assert!(serde_json::to_string(&saved.output)
-        .unwrap()
-        .contains("PARTIAL_PLAN"));
+    assert!(
+        serde_json::to_string(&saved.output)
+            .unwrap()
+            .contains("PARTIAL_PLAN")
+    );
     let (input, recovery) =
         f.db.lock()
             .unwrap()
@@ -1482,10 +1501,12 @@ fn durable_cancel_between_job_load_and_control_registration_is_not_lost() {
         policy: base.policy.clone(),
         progress: ProgressSink::default(),
     };
-    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-        || paused.run(f.input.clone(), CancellationToken::default())
-    ))
-    .is_err());
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+            || paused.run(f.input.clone(), CancellationToken::default())
+        ))
+        .is_err()
+    );
     drop(paused);
     let (input, recovery) =
         f.db.lock()
@@ -1576,14 +1597,14 @@ fn new_input_winning_job_admission_does_not_publish_proposed_checkpoint() {
     assert_eq!(report.policy_state, json!({"new_input":true}));
     assert!(planner.requests.lock().unwrap().is_empty());
     assert!(main.requests.lock().unwrap().is_empty());
-    assert!(f
-        .db
-        .lock()
-        .unwrap()
-        .events_after(0, 1000)
-        .unwrap()
-        .iter()
-        .all(|e| e.kind != "policy.model_admitted"));
+    assert!(
+        f.db.lock()
+            .unwrap()
+            .events_after(0, 1000)
+            .unwrap()
+            .iter()
+            .all(|e| e.kind != "policy.model_admitted")
+    );
     assert_eq!(f.counts(), (2, 0));
 }
 #[test]
@@ -1718,7 +1739,12 @@ fn main_and_auxiliary_real_receipts_share_goal_without_counting_result_reads() {
         let seen = provider.requests.lock().unwrap();
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].view.binding.goal.as_ref().unwrap().id, "goal");
-        assert!(seen[0].view.history.iter().any(|item|matches!(&item.provenance,Provenance::GoalInstruction{goal_id,..} if goal_id=="goal")&&serde_json::to_string(&item.content).unwrap().contains("GOAL_CONTEXT_SENTINEL")));
+        assert!(seen[0].view.history.iter().any(|item| {
+            matches!(&item.provenance,Provenance::GoalInstruction{goal_id,..} if goal_id=="goal")
+                && serde_json::to_string(&item.content)
+                    .unwrap()
+                    .contains("GOAL_CONTEXT_SENTINEL")
+        }));
     }
     let db = f.db.lock().unwrap();
     let goal = db.capture_goal("goal").unwrap().load().unwrap();

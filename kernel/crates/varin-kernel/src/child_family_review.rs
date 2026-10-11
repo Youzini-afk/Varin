@@ -7,7 +7,7 @@ fn family_calls() -> Vec<ToolCall> {
     [("threads",json!({})),
   ("read_thread",json!({"threadId":"thread:parent","branchId":"branch:parent","query":{"kind":"recent","limit":2}})),
   ("read_thread",json!({"threadId":"thread:parent","branchId":"branch:parent","query":{"kind":"runs","limit":1}})),
- ].into_iter().enumerate().map(|(n,(name,arguments))|ToolCall{call_id:format!("family-{n}"),name:name.into(),schema_version:"1".into(),arguments}).collect()
+ ].into_iter().enumerate().map(|(n,(name,arguments))|ToolCall{call_id:format!("family-{n}"),name:name.into(),schema_version:crate::family_tools::schemas().into_iter().find(|schema|schema.name==name).unwrap().version,arguments}).collect()
 }
 #[test]
 fn selected_family_tools_execute_from_real_model_and_policy_origins() {
@@ -42,20 +42,28 @@ fn selected_family_tools_execute_from_real_model_and_policy_origins() {
                 else {
                     panic!("expected result")
                 };
-                assert_eq!(*outcome, Outcome::Succeeded, "{content}");
+                assert_eq!(*outcome, Outcome::Succeeded, "{content:?}");
                 assert_eq!(*effect, Effect::None);
-                assert!(content["trust"].as_str().unwrap().contains("other-agent"));
+                assert!(
+                    content.data["trust"]
+                        .as_str()
+                        .unwrap()
+                        .contains("other-agent")
+                );
             }
             let ToolCompletion::Result { content, .. } = &results[0].completion else {
                 unreachable!()
             };
-            assert_eq!(content["page"]["members"].as_array().unwrap().len(), 1);
-            assert_eq!(content["page"]["members"][0]["threadId"], "thread:parent");
+            assert_eq!(content.data["page"]["members"].as_array().unwrap().len(), 1);
+            assert_eq!(
+                content.data["page"]["members"][0]["threadId"],
+                "thread:parent"
+            );
             let ToolCompletion::Result { content, .. } = &results[1].completion else {
                 unreachable!()
             };
-            assert!(content["page"]["items"].as_array().unwrap().len() > 0);
-            assert_eq!(content["page"]["threadId"], "thread:parent");
+            assert!(content.data["page"]["items"].as_array().unwrap().len() > 0);
+            assert_eq!(content.data["page"]["threadId"], "thread:parent");
         } else {
             let raw = rusqlite::Connection::open_with_flags(
                 f.root.join("conversation.sqlite"),

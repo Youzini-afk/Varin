@@ -1,7 +1,7 @@
 //! Resource selection stays in the Host. This builtin carries the original request checkpoint
 //! through the ordinary tool directory. New dependencies use the Host's original resource view authorization.
 use crate::host_query::OwnerChannel;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use varin_runtime::catalog::resources::ResourceRequest;
 use varin_runtime::execution::*;
@@ -361,7 +361,7 @@ impl PreparedToolCall for ResourceCall {
                     Outcome::Failed
                 },
                 effect: Effect::None,
-                content,
+                content: content.into(),
             },
             Err(error) => ToolCompletion::Result {
                 outcome: if cancel.is_cancelled() || error.code == "resource_cancelled" {
@@ -370,7 +370,7 @@ impl PreparedToolCall for ResourceCall {
                     Outcome::Failed
                 },
                 effect: Effect::None,
-                content: json!({"status":if cancel.is_cancelled() || error.code == "resource_cancelled" {"cancelled"}else{"unavailable"},"reason":"The selected resource read could not complete"}),
+                content: json!({"status":if cancel.is_cancelled() || error.code == "resource_cancelled" {"cancelled"}else{"unavailable"},"reason":"The selected resource read could not complete"}).into(),
             },
         };
         ToolExecutionReceipt::local(completion, contract)
